@@ -1,0 +1,202 @@
+# IndustryFlow v2 - Docker Compose
+# Version: 4.0 - NEW ARCHITECTURE
+# Date: November 7, 2025
+
+services:
+  # ==========================================================================
+  # PHASE 1: CORE INFRASTRUCTURE
+  # ==========================================================================
+
+  # Zookeeper - Kafka coordination
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: industryflow-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # Kafka - Message streaming
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: industryflow-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: ${KAFKA_ZOOKEEPER_CONNECT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # TimescaleDB - Time-series database
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: industryflow-timescaledb
+    ports:
+      - "${DB_PORT}:5432"
+    environment:
+      # Postgres superuser credentials
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+      
+      # Application role passwords (for init scripts)
+      API_GATEWAY_DB_PASSWORD: ${API_GATEWAY_DB_PASSWORD}
+      SPARK_STREAMING_DB_PASSWORD: ${SPARK_STREAMING_DB_PASSWORD}
+      ALERT_SERVICE_DB_PASSWORD: ${ALERT_SERVICE_DB_PASSWORD}
+      ML_SERVICE_DB_PASSWORD: ${ML_SERVICE_DB_PASSWORD}
+      MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD}
+      
+      # Postgres configuration - HIGH THROUGHPUT
+      POSTGRES_SHARED_BUFFERS: 512MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 2GB
+      POSTGRES_MAX_CONNECTIONS: 400
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+      - ./infrastructure/timescaledb/init-scripts:/docker-entrypoint-initdb.d
+      - ./infrastructure/timescaledb/config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./infrastructure/timescaledb/config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # Redis - Caching layer
+  redis:
+    image: redis:7-alpine
+    container_name: industryflow-redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # MinIO - S3-compatible storage
+  minio:
+    image: minio/minio:latest
+    container_name: industryflow-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # MLflow - Experiment tracking
+  mlflow:
+    build:
+      context: ./infrastructure/mlflow
+      dockerfile: Dockerfile
+    container_name: industryflow-mlflow
+    ports:
+      - "5000:5000"
+    environment:
+      BACKEND_STORE_URI: postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow
+      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow
+      --default-artifact-root s3://mlflow
+      --host 0.0.0.0
+      --port 5000
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+# ==========================================================================
+# VOLUMES
+# ==========================================================================
+
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  timescaledb-data:
+  redis-data:
+  minio-data:
+
+# ==========================================================================
+# NETWORKS
+# ==========================================================================
+
+networks:
+  industryflow-network:
+    name: industryflow-network
+    driver: bridge
