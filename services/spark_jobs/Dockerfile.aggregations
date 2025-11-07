@@ -1,0 +1,41 @@
+FROM apache/spark:3.5.0
+
+USER root
+
+# Install Python and pip
+RUN apt-get update && apt-get install -y python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir \
+    psycopg2-binary
+
+# Create directories with proper permissions
+RUN mkdir -p /app/spark_streaming && \
+    mkdir -p /opt/spark/checkpoints && \
+    mkdir -p /home/spark/.ivy2 && \
+    chown -R spark:spark /opt/spark/checkpoints && \
+    chown -R spark:spark /home/spark/.ivy2 && \
+    chown -R spark:spark /app
+
+# Copy the spark aggregations script
+COPY kafka_aggregations.py /app/spark_streaming/
+RUN chown -R spark:spark /app/spark_streaming
+
+# Switch to spark user to pre-download dependencies
+USER spark
+
+# Pre-download Spark packages to avoid runtime issues
+RUN /opt/spark/bin/spark-submit \
+    --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.postgresql:postgresql:42.6.0 \
+    --class org.apache.spark.sql.kafka010.KafkaSourceProvider \
+    --help > /dev/null 2>&1 || true
+
+WORKDIR /app
+
+# Run the aggregations job
+CMD ["/opt/spark/bin/spark-submit", \
+     "--master", "local[*]", \
+     "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.postgresql:postgresql:42.6.0", \
+     "--conf", "spark.sql.streaming.checkpointLocation=/opt/spark/checkpoints", \
+     "/app/spark_streaming/kafka_aggregations.py"]

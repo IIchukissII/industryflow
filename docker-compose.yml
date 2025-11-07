@@ -180,6 +180,106 @@ services:
       - industryflow-network
     restart: unless-stopped
 
+  # ==========================================================================
+  # PHASE 2: SPARK STREAMING SERVICES
+  # ==========================================================================
+
+  # Spark Master
+  spark-master:
+    image: apache/spark:3.5.0
+    container_name: industryflow-spark-master
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    environment:
+      SPARK_MODE: master
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: 7077
+      SPARK_MASTER_WEBUI_PORT: 8080
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # Spark Worker
+  spark-worker:
+    image: apache/spark:3.5.0
+    container_name: industryflow-spark-worker
+    depends_on:
+      - spark-master
+    ports:
+      - "8081:8081"
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: 4
+      SPARK_WORKER_MEMORY: 4g
+      SPARK_WORKER_WEBUI_PORT: 8081
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # Spark Streaming - Raw sensor data to TimescaleDB
+  spark-streaming:
+    build:
+      context: ./services/spark_jobs
+      dockerfile: Dockerfile.streaming
+    container_name: industryflow-spark-streaming
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      # Spark configuration
+      SPARK_MASTER: local[*]
+      CHECKPOINT_LOCATION: /opt/spark/checkpoints
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+
+      # TimescaleDB configuration - USE SPARK STREAMING ROLE
+      TIMESCALEDB_HOST: ${DB_HOST}
+      TIMESCALEDB_PORT: ${DB_PORT}
+      TIMESCALEDB_DB: ${DB_NAME}
+      SPARK_STREAMING_DB_USER: ${SPARK_STREAMING_DB_USER}
+      SPARK_STREAMING_DB_PASSWORD: ${SPARK_STREAMING_DB_PASSWORD}
+    volumes:
+      - spark-checkpoints-streaming:/opt/spark/checkpoints
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # Spark Aggregations - Create 1min, 5min, 1hour aggregations
+  spark-aggregations:
+    build:
+      context: ./services/spark_jobs
+      dockerfile: Dockerfile.aggregations
+    container_name: industryflow-spark-aggregations
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      # Spark configuration
+      SPARK_MASTER: local[*]
+      CHECKPOINT_LOCATION: /opt/spark/checkpoints
+
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+
+      # TimescaleDB configuration - USE SPARK STREAMING ROLE
+      TIMESCALEDB_HOST: ${DB_HOST}
+      TIMESCALEDB_PORT: ${DB_PORT}
+      TIMESCALEDB_DB: ${DB_NAME}
+      SPARK_STREAMING_DB_USER: ${SPARK_STREAMING_DB_USER}
+      SPARK_STREAMING_DB_PASSWORD: ${SPARK_STREAMING_DB_PASSWORD}
+    volumes:
+      - spark-checkpoints-aggregations:/opt/spark/checkpoints
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
 # ==========================================================================
 # VOLUMES
 # ==========================================================================
@@ -191,6 +291,8 @@ volumes:
   timescaledb-data:
   redis-data:
   minio-data:
+  spark-checkpoints-streaming:
+  spark-checkpoints-aggregations:
 
 # ==========================================================================
 # NETWORKS
@@ -200,3 +302,6 @@ networks:
   industryflow-network:
     name: industryflow-network
     driver: bridge
+
+
+
