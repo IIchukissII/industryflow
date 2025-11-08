@@ -77,6 +77,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
     -- Other roles only need USAGE on public
     GRANT USAGE ON SCHEMA public TO spark_streaming_user;
     GRANT USAGE ON SCHEMA public TO alert_service_user;
+    GRANT SELECT ON public."user" TO alert_service_user;
     GRANT USAGE ON SCHEMA public TO ml_service_user;
 EOSQL
 

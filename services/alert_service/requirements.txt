@@ -1,0 +1,9 @@
+# Async Kafka client
+aiokafka==0.10.0
+python-snappy==0.7.2
+
+# Database
+asyncpg>=0.29.0
+
+# Utilities
+python-dateutil>=2.8.2
