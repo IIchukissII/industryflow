@@ -280,6 +280,49 @@ services:
       - industryflow-network
     restart: unless-stopped
 
+  # ==========================================================================
+  # API Gateway - REST API with schema-per-tenant routing
+  # ==========================================================================
+
+  api-gateway:
+    container_name: industryflow-api-gateway
+    build:
+      context: ./services/api_gateway
+      dockerfile: Dockerfile
+    ports:
+      - "${API_GATEWAY_PORT:-8000}:8000"
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      API_GATEWAY_DB_USER: ${API_GATEWAY_DB_USER}
+      API_GATEWAY_DB_PASSWORD: ${API_GATEWAY_DB_PASSWORD}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_DB: ${REDIS_DB}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_TOPIC_SENSOR_DATA: ${KAFKA_TOPIC_SENSOR_DATA}
+      jwt_secret_key: ${JWT_SECRET_KEY}
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - industryflow-network
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 8
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+
+
 # ==========================================================================
 # VOLUMES
 # ==========================================================================
@@ -302,6 +345,7 @@ networks:
   industryflow-network:
     name: industryflow-network
     driver: bridge
+
 
 
 

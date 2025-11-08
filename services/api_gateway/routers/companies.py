@@ -1,0 +1,208 @@
+"""
+Companies management endpoints for admin panel
+"""
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime
+from uuid import UUID
+import logging
+
+from dependencies import get_db_with_tenant, get_current_user_with_company, require_role
+from models.user import User
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/companies", tags=["companies"])
+
+
+class CompanyCreate(BaseModel):
+    company_name: str
+    is_active: bool = True
+
+
+class CompanyUpdate(BaseModel):
+    company_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class CompanyResponse(BaseModel):
+    company_id: UUID
+    company_name: str
+    is_active: bool
+    created_at: datetime
+
+
+@router.get("", response_model=List[CompanyResponse])
+async def list_companies(
+    db: AsyncSession = Depends(get_db_with_tenant),
+    current_user: User = Depends(get_current_user_with_company)
+):
+    """Get companies (queries public.companies table)"""
+    result = await db.execute(text("""
+        SELECT company_id, company_name, is_active, created_at
+        FROM companies
+        ORDER BY company_name
+    """))
+    
+    rows = result.fetchall()
+    return [
+        {
+            "company_id": row.company_id,
+            "company_name": row.company_name,
+            "is_active": row.is_active,
+            "created_at": row.created_at
+        }
+        for row in rows
+    ]
+
+
+@router.get("/{company_id}", response_model=CompanyResponse)
+async def get_company(
+    company_id: UUID,
+    db: AsyncSession = Depends(get_db_with_tenant),
+    current_user: User = Depends(get_current_user_with_company)
+):
+    """Get single company by ID"""
+    result = await db.execute(
+        text("""
+            SELECT company_id, company_name, is_active, created_at
+            FROM companies
+            WHERE company_id = :company_id
+        """),
+        {"company_id": company_id}
+    )
+    
+    row = result.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    return {
+        "company_id": row.company_id,
+        "company_name": row.company_name,
+        "is_active": row.is_active,
+        "created_at": row.created_at
+    }
+
+
+@router.post("", response_model=CompanyResponse)
+async def create_company(
+    company: CompanyCreate,
+    db: AsyncSession = Depends(get_db_with_tenant),
+    current_user: User = Depends(require_role("admin"))
+):
+    """Create a new company (admin only)"""
+    # Check if company name already exists
+    result = await db.execute(
+        text("SELECT company_id FROM companies WHERE company_name = :name"),
+        {"name": company.company_name}
+    )
+    
+    if result.fetchone():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Company '{company.company_name}' already exists"
+        )
+    
+    # Create company
+    result = await db.execute(
+        text("""
+            INSERT INTO companies (company_name, is_active)
+            VALUES (:name, :is_active)
+            RETURNING company_id, company_name, is_active, created_at
+        """),
+        {"name": company.company_name, "is_active": company.is_active}
+    )
+    
+    row = result.fetchone()
+    await db.commit()
+    
+    logger.info(f"Created company: {company.company_name}")
+    return {
+        "company_id": row.company_id,
+        "company_name": row.company_name,
+        "is_active": row.is_active,
+        "created_at": row.created_at
+    }
+
+
+@router.put("/{company_id}", response_model=CompanyResponse)
+async def update_company(
+    company_id: UUID,
+    company: CompanyUpdate,
+    db: AsyncSession = Depends(get_db_with_tenant),
+    current_user: User = Depends(require_role("admin"))
+):
+    """Update a company (admin only)"""
+    # Build update query
+    updates = []
+    params = {"company_id": company_id}
+    
+    if company.company_name is not None:
+        updates.append("company_name = :company_name")
+        params["company_name"] = company.company_name
+    
+    if company.is_active is not None:
+        updates.append("is_active = :is_active")
+        params["is_active"] = company.is_active
+    
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    query = f"""
+        UPDATE companies
+        SET {', '.join(updates)}
+        WHERE company_id = :company_id
+        RETURNING company_id, company_name, is_active, created_at
+    """
+    
+    result = await db.execute(text(query), params)
+    row = result.fetchone()
+    
+    if not row:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    await db.commit()
+    logger.info(f"Updated company: {company_id}")
+    
+    return {
+        "company_id": row.company_id,
+        "company_name": row.company_name,
+        "is_active": row.is_active,
+        "created_at": row.created_at
+    }
+
+
+@router.delete("/{company_id}")
+async def delete_company(
+    company_id: UUID,
+    db: AsyncSession = Depends(get_db_with_tenant),
+    current_user: User = Depends(require_role("admin"))
+):
+    """Delete a company (admin only)"""
+    # Check if company has users
+    result = await db.execute(
+        text('SELECT COUNT(*) FROM "user" WHERE company_id = :company_id'),
+        {"company_id": company_id}
+    )
+    user_count = result.scalar()
+    
+    if user_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete company with {user_count} users. Delete users first."
+        )
+    
+    # Delete company
+    result = await db.execute(
+        text("DELETE FROM companies WHERE company_id = :company_id"),
+        {"company_id": company_id}
+    )
+    
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    await db.commit()
+    logger.info(f"Deleted company: {company_id}")
+    return {"message": "Company deleted successfully"}

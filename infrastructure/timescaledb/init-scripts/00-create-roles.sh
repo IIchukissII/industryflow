@@ -1,8 +1,8 @@
 #!/bin/bash
 # Database Roles and Permissions
-# Version: 4.0 - NEW ARCHITECTURE
+# Version: 5.0 - Schema-per-tenant Architecture
 # Date: November 7, 2025
-# Purpose: Create application roles with RLS support
+# Purpose: Create application roles for schema-per-tenant architecture
 
 set -e
 
@@ -49,10 +49,10 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
     -- =============================================================================
     
     -- Connection limits
-    ALTER ROLE api_gateway_user CONNECTION LIMIT 50;
-    ALTER ROLE spark_streaming_user CONNECTION LIMIT 100;
-    ALTER ROLE alert_service_user CONNECTION LIMIT 30;
-    ALTER ROLE ml_service_user CONNECTION LIMIT 30;
+    ALTER ROLE api_gateway_user CONNECTION LIMIT 150;
+    ALTER ROLE spark_streaming_user CONNECTION LIMIT 50;
+    ALTER ROLE alert_service_user CONNECTION LIMIT 10;
+    ALTER ROLE ml_service_user CONNECTION LIMIT 10;
     ALTER ROLE mlflow_user CONNECTION LIMIT 20;
     
     -- Statement timeouts
@@ -62,16 +62,23 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
     ALTER ROLE ml_service_user SET statement_timeout = '60s';
     ALTER ROLE mlflow_user SET statement_timeout = '30s';
     
-    -- Allow RLS context setting
-    ALTER ROLE api_gateway_user SET app.current_company_id = '';
-    ALTER ROLE spark_streaming_user SET app.current_company_id = '';
-    ALTER ROLE alert_service_user SET app.current_company_id = '';
-    ALTER ROLE ml_service_user SET app.current_company_id = '';
+    -- =============================================================================
+    -- PUBLIC SCHEMA PERMISSIONS
+    -- =============================================================================
+    
+    -- API Gateway needs CREATE on public for user table
+    GRANT CREATE ON SCHEMA public TO api_gateway_user;
+    GRANT USAGE ON SCHEMA public TO api_gateway_user;
+    
+    -- Other roles only need USAGE on public
+    GRANT USAGE ON SCHEMA public TO spark_streaming_user;
+    GRANT USAGE ON SCHEMA public TO alert_service_user;
+    GRANT USAGE ON SCHEMA public TO ml_service_user;
 EOSQL
 
-echo "✓ api_gateway_user"
-echo "✓ spark_streaming_user"
-echo "✓ alert_service_user"
-echo "✓ ml_service_user"
-echo "✓ mlflow_user"
+echo "✓ api_gateway_user (150 connections)"
+echo "✓ spark_streaming_user (50 connections)"
+echo "✓ alert_service_user (10 connections)"
+echo "✓ ml_service_user (10 connections)"
+echo "✓ mlflow_user (20 connections)"
 echo "=========================================="
