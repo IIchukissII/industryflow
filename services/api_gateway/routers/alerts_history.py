@@ -73,7 +73,6 @@ async def list_alerts(
             rule_id::text,
             sensor_id::text,
             equipment_id::text,
-            company_id::text,
             severity,
             message,
             actual_value,
@@ -110,7 +109,14 @@ async def list_alerts(
     result = await db.execute(text(query), params)
     rows = result.fetchall()
     
-    return [dict(row._mapping) for row in rows]
+    # Add company_id from current_user to each response
+    alerts = []
+    for row in rows:
+        alert_dict = dict(row._mapping)
+        alert_dict['company_id'] = str(current_user.company_id)
+        alerts.append(alert_dict)
+    
+    return alerts
 
 
 @router.get("/unacknowledged", response_model=List[AlertResponse])
@@ -126,7 +132,6 @@ async def list_unacknowledged_alerts(
             rule_id::text,
             sensor_id::text,
             equipment_id::text,
-            company_id::text,
             severity,
             message,
             actual_value,
@@ -145,7 +150,14 @@ async def list_unacknowledged_alerts(
     result = await db.execute(text(query), {"limit": limit})
     rows = result.fetchall()
     
-    return [dict(row._mapping) for row in rows]
+    # Add company_id from current_user to each response
+    alerts = []
+    for row in rows:
+        alert_dict = dict(row._mapping)
+        alert_dict['company_id'] = str(current_user.company_id)
+        alerts.append(alert_dict)
+    
+    return alerts
 
 
 @router.get("/critical", response_model=List[AlertResponse])
@@ -161,7 +173,6 @@ async def list_critical_alerts(
             rule_id::text,
             sensor_id::text,
             equipment_id::text,
-            company_id::text,
             severity,
             message,
             actual_value,
@@ -180,7 +191,14 @@ async def list_critical_alerts(
     result = await db.execute(text(query), {"limit": limit})
     rows = result.fetchall()
     
-    return [dict(row._mapping) for row in rows]
+    # Add company_id from current_user to each response
+    alerts = []
+    for row in rows:
+        alert_dict = dict(row._mapping)
+        alert_dict['company_id'] = str(current_user.company_id)
+        alerts.append(alert_dict)
+    
+    return alerts
 
 
 @router.patch("/{alert_id}/acknowledge")

@@ -68,9 +68,8 @@ async def create_alert_rule(
     if not rule_data.get('name'):
         raise HTTPException(status_code=400, detail="name is required")
     
-    # Insert with user's company_id
+    # Insert into tenant schema (company_id not needed)
     params = {
-        "company_id": str(current_user.company_id),
         "name": rule_data.get('name'),
         "description": rule_data.get('description'),
         "sensor_pattern": rule_data.get('sensor_pattern'),
@@ -91,11 +90,11 @@ async def create_alert_rule(
     
     result = await db.execute(text("""
         INSERT INTO alert_rules (
-            company_id, name, description, sensor_pattern, sensor_id, equipment_id,
+            name, description, sensor_pattern, sensor_id, equipment_id,
             site_id, detection_type, condition, threshold, threshold_min, threshold_max,
             model_id, anomaly_threshold, severity, priority, enabled
         ) VALUES (
-            :company_id, :name, :description, :sensor_pattern, :sensor_id, :equipment_id,
+            :name, :description, :sensor_pattern, :sensor_id, :equipment_id,
             :site_id, :detection_type, :condition, :threshold, :threshold_min, :threshold_max,
             :model_id, :anomaly_threshold, :severity, :priority, :enabled
         )

@@ -44,24 +44,34 @@ async def get_aggregations(
     # Map window to table name
     table_name = f"sensor_aggregations_{window}"
 
-    # Build query - no company_id filter needed (automatic schema routing)
+    # Build query - JOIN with sensors and equipment to get unit and site_id
     query = f"""
-        SELECT time, sensor_id, equipment_id, site_id, company_id,
-               avg_value, min_value, max_value, count_values, unit
-        FROM {table_name}
+        SELECT 
+            a.time, 
+            a.sensor_id, 
+            a.equipment_id, 
+            COALESCE(e.site_id, '') as site_id,
+            a.avg_value, 
+            a.min_value, 
+            a.max_value, 
+            a.count_values, 
+            s.unit
+        FROM {table_name} a
+        LEFT JOIN sensors s ON a.sensor_id = s.sensor_id
+        LEFT JOIN equipment e ON a.equipment_id = e.equipment_id
         WHERE 1=1
     """
     params = {"limit": limit}
 
     if sensor_id:
-        query += " AND sensor_id = :sensor_id"
+        query += " AND a.sensor_id = :sensor_id"
         params["sensor_id"] = sensor_id
 
     if equipment_id:
-        query += " AND equipment_id = :equipment_id"
+        query += " AND a.equipment_id = :equipment_id"
         params["equipment_id"] = equipment_id
 
-    query += " ORDER BY time DESC LIMIT :limit"
+    query += " ORDER BY a.time DESC LIMIT :limit"
 
     # Execute query
     result = await db.execute(text(query), params)
@@ -74,12 +84,12 @@ async def get_aggregations(
             sensor_id=row[1],
             equipment_id=row[2],
             site_id=row[3],
-            company_id=str(row[4]),
-            avg_value=row[5],
-            min_value=row[6],
-            max_value=row[7],
-            count_values=row[8],
-            unit=row[9]
+            company_id=current_user.company_id,
+            avg_value=row[4],
+            min_value=row[5],
+            max_value=row[6],
+            count_values=row[7],
+            unit=row[8]
         )
         for row in rows
     ]
@@ -108,11 +118,20 @@ async def get_latest_aggregations(
     table_name = f"sensor_aggregations_{window}"
 
     query = f"""
-        SELECT DISTINCT ON (sensor_id)
-            time, sensor_id, equipment_id, site_id, company_id,
-            avg_value, min_value, max_value, count_values, unit
-        FROM {table_name}
-        ORDER BY sensor_id, time DESC
+        SELECT DISTINCT ON (a.sensor_id)
+            a.time, 
+            a.sensor_id, 
+            a.equipment_id, 
+            COALESCE(e.site_id, '') as site_id,
+            a.avg_value, 
+            a.min_value, 
+            a.max_value, 
+            a.count_values, 
+            s.unit
+        FROM {table_name} a
+        LEFT JOIN sensors s ON a.sensor_id = s.sensor_id
+        LEFT JOIN equipment e ON a.equipment_id = e.equipment_id
+        ORDER BY a.sensor_id, a.time DESC
     """
 
     result = await db.execute(text(query))
@@ -124,12 +143,12 @@ async def get_latest_aggregations(
             sensor_id=row[1],
             equipment_id=row[2],
             site_id=row[3],
-            company_id=str(row[4]),
-            avg_value=row[5],
-            min_value=row[6],
-            max_value=row[7],
-            count_values=row[8],
-            unit=row[9]
+            company_id=current_user.company_id,
+            avg_value=row[4],
+            min_value=row[5],
+            max_value=row[6],
+            count_values=row[7],
+            unit=row[8]
         )
         for row in rows
     ]
@@ -161,11 +180,19 @@ async def get_combined_aggregations(
         table_name = f"sensor_aggregations_{window}"
 
         query = f"""
-            SELECT time, sensor_id, equipment_id, site_id, company_id,
-                   avg_value, min_value, max_value, count_values, unit
-            FROM {table_name}
-            WHERE sensor_id = :sensor_id
-            ORDER BY time DESC
+            SELECT 
+                a.time, 
+                a.sensor_id, 
+                a.equipment_id, 
+                a.avg_value, 
+                a.min_value, 
+                a.max_value, 
+                a.count_values, 
+                s.unit
+            FROM {table_name} a
+            LEFT JOIN sensors s ON a.sensor_id = s.sensor_id
+            WHERE a.sensor_id = :sensor_id
+            ORDER BY a.time DESC
             LIMIT :limit
         """
 
@@ -178,11 +205,11 @@ async def get_combined_aggregations(
         aggregations = [
             {
                 "time": row[0].isoformat(),
-                "avg_value": float(row[5]),
-                "min_value": float(row[6]),
-                "max_value": float(row[7]),
-                "count_values": int(row[8]),
-                "unit": row[9]
+                "avg_value": float(row[3]),
+                "min_value": float(row[4]),
+                "max_value": float(row[5]),
+                "count_values": int(row[6]),
+                "unit": row[7]
             }
             for row in rows
         ]

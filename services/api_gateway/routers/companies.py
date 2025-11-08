@@ -37,12 +37,12 @@ class CompanyResponse(BaseModel):
 @router.get("", response_model=List[CompanyResponse])
 async def list_companies(
     db: AsyncSession = Depends(get_db_with_tenant),
-    current_user: User = Depends(get_current_user_with_company)
+    current_user: User = Depends(require_role("admin"))
 ):
-    """Get companies (queries public.companies table)"""
+    """Get companies (admin only, queries public.companies table)"""
     result = await db.execute(text("""
         SELECT company_id, company_name, is_active, created_at
-        FROM companies
+        FROM public.companies
         ORDER BY company_name
     """))
     
@@ -62,13 +62,13 @@ async def list_companies(
 async def get_company(
     company_id: UUID,
     db: AsyncSession = Depends(get_db_with_tenant),
-    current_user: User = Depends(get_current_user_with_company)
+    current_user: User = Depends(require_role("admin"))
 ):
-    """Get single company by ID"""
+    """Get single company by ID (admin only)"""
     result = await db.execute(
         text("""
             SELECT company_id, company_name, is_active, created_at
-            FROM companies
+            FROM public.companies
             WHERE company_id = :company_id
         """),
         {"company_id": company_id}
@@ -95,7 +95,7 @@ async def create_company(
     """Create a new company (admin only)"""
     # Check if company name already exists
     result = await db.execute(
-        text("SELECT company_id FROM companies WHERE company_name = :name"),
+        text("SELECT company_id FROM public.companies WHERE company_name = :name"),
         {"name": company.company_name}
     )
     
@@ -108,7 +108,7 @@ async def create_company(
     # Create company
     result = await db.execute(
         text("""
-            INSERT INTO companies (company_name, is_active)
+            INSERT INTO public.companies (company_name, is_active)
             VALUES (:name, :is_active)
             RETURNING company_id, company_name, is_active, created_at
         """),
@@ -151,7 +151,7 @@ async def update_company(
         raise HTTPException(status_code=400, detail="No fields to update")
     
     query = f"""
-        UPDATE companies
+        UPDATE public.companies
         SET {', '.join(updates)}
         WHERE company_id = :company_id
         RETURNING company_id, company_name, is_active, created_at
@@ -183,7 +183,7 @@ async def delete_company(
     """Delete a company (admin only)"""
     # Check if company has users
     result = await db.execute(
-        text('SELECT COUNT(*) FROM "user" WHERE company_id = :company_id'),
+        text('SELECT COUNT(*) FROM public."user" WHERE company_id = :company_id'),
         {"company_id": company_id}
     )
     user_count = result.scalar()
@@ -196,7 +196,7 @@ async def delete_company(
     
     # Delete company
     result = await db.execute(
-        text("DELETE FROM companies WHERE company_id = :company_id"),
+        text("DELETE FROM public.companies WHERE company_id = :company_id"),
         {"company_id": company_id}
     )
     

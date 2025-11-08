@@ -85,6 +85,7 @@ BEGIN
             site_id VARCHAR(100),
             location VARCHAR(255),
             sensor_count INTEGER NOT NULL CHECK (sensor_count > 0),
+            expected_sensors UUID[] NOT NULL DEFAULT '{}',
             batch_timeout_seconds INTEGER NOT NULL DEFAULT 5,
             require_complete_batch BOOLEAN NOT NULL DEFAULT true,
             min_sensors_for_partial INTEGER,

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Database Roles and Permissions
 # Version: 5.0 - Schema-per-tenant Architecture
-# Date: November 7, 2025
+# Date: November 8, 2025
 # Purpose: Create application roles for schema-per-tenant architecture
 
 set -e
@@ -69,6 +69,10 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
     -- API Gateway needs CREATE on public for user table
     GRANT CREATE ON SCHEMA public TO api_gateway_user;
     GRANT USAGE ON SCHEMA public TO api_gateway_user;
+    
+    -- Grant SELECT on public tables (companies, user) for API Gateway
+    GRANT SELECT ON public.companies TO api_gateway_user;
+    GRANT SELECT ON public."user" TO api_gateway_user;
     
     -- Other roles only need USAGE on public
     GRANT USAGE ON SCHEMA public TO spark_streaming_user;

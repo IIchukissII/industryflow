@@ -40,9 +40,11 @@ class EquipmentUpdate(BaseModel):
 
 class SensorCreate(BaseModel):
     sensor_id: str
+    sensor_name: str
     sensor_type: str
     unit: Optional[str] = None
     description: Optional[str] = None
+    position: int = 0
     is_active: bool = True
 
 class BulkSensorCreate(BaseModel):
@@ -86,18 +88,17 @@ async def create_equipment(
     try:
         result = await db.execute(text("""
             INSERT INTO equipment (
-                equipment_id, company_id, equipment_type, name, description,
+                equipment_id, equipment_type, name, description,
                 site_id, location, sensor_count, expected_sensors,
                 batch_timeout_seconds, require_complete_batch, min_sensors_for_partial
             ) VALUES (
-                :equipment_id, :company_id, :equipment_type, :name, :description,
+                :equipment_id, :equipment_type, :name, :description,
                 :site_id, :location, :sensor_count, :expected_sensors,
                 :batch_timeout_seconds, :require_complete_batch, :min_sensors_for_partial
             )
             RETURNING *
         """), {
             "equipment_id": equipment.equipment_id,
-            "company_id": str(current_user.company_id),
             "equipment_type": equipment.equipment_type,
             "name": equipment.name,
             "description": equipment.description,
@@ -212,17 +213,19 @@ async def add_sensor(
     try:
         result = await db.execute(text("""
             INSERT INTO sensors (
-                sensor_id, equipment_id, sensor_type, unit, description, is_active
+                sensor_id, equipment_id, sensor_name, sensor_type, unit, description, position, is_active
             ) VALUES (
-                :sensor_id, :equipment_id, :sensor_type, :unit, :description, :is_active
+                :sensor_id, :equipment_id, :sensor_name, :sensor_type, :unit, :description, :position, :is_active
             )
             RETURNING *
         """), {
             "sensor_id": sensor.sensor_id,
             "equipment_id": equipment_id,
+            "sensor_name": sensor.sensor_name,
             "sensor_type": sensor.sensor_type,
             "unit": sensor.unit,
             "description": sensor.description,
+            "position": sensor.position if hasattr(sensor, 'position') else 0,
             "is_active": sensor.is_active
         })
         row = result.fetchone()
@@ -298,17 +301,19 @@ async def add_sensors_bulk(
         for sensor in bulk_data.sensors:
             result = await db.execute(text("""
                 INSERT INTO sensors (
-                    sensor_id, equipment_id, sensor_type, unit, description, is_active
+                    sensor_id, equipment_id, sensor_name, sensor_type, unit, description, position, is_active
                 ) VALUES (
-                    :sensor_id, :equipment_id, :sensor_type, :unit, :description, :is_active
+                    :sensor_id, :equipment_id, :sensor_name, :sensor_type, :unit, :description, :position, :is_active
                 )
                 RETURNING *
             """), {
                 "sensor_id": sensor.sensor_id,
                 "equipment_id": equipment_id,
+                "sensor_name": sensor.sensor_name,
                 "sensor_type": sensor.sensor_type,
                 "unit": sensor.unit,
                 "description": sensor.description,
+                "position": sensor.position if hasattr(sensor, 'position') else 0,
                 "is_active": sensor.is_active
             })
             row = result.fetchone()

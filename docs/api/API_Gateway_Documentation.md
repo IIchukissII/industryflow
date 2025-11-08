@@ -3,7 +3,8 @@
 **Project:** IndustryFlow v2 - Multi-Tenant IoT Platform  
 **Component:** API Gateway Service  
 **Architecture:** Schema-per-tenant (v5.0)  
-**Author:** Konstantin (Neoversity Master's Thesis)
+**Author:** Konstantin (Neoversity Master's Thesis)  
+**Last Updated:** November 8, 2025
 
 ---
 
@@ -14,7 +15,7 @@ REST API service providing multi-tenant access to industrial IoT sensor data, eq
 **Technical Specifications:**
 - Workers: 8 uvicorn processes
 - Database Connections: 150 max (18 per worker + 2 overflow)
-- Authentication: JWT tokens (30-minute expiration)
+- Authentication: JWT tokens (7-day expiration)
 - Port: 8000
 - Protocol: HTTP/REST + WebSocket
 
@@ -110,6 +111,8 @@ ALTER ROLE api_gateway_user CONNECTION LIMIT 150;
 ALTER ROLE api_gateway_user SET statement_timeout = '30s';
 GRANT CREATE ON SCHEMA public TO api_gateway_user;
 GRANT USAGE ON SCHEMA public TO api_gateway_user;
+GRANT SELECT ON public.companies TO api_gateway_user;
+GRANT SELECT ON public."user" TO api_gateway_user;
 ```
 
 ---
@@ -118,33 +121,86 @@ GRANT USAGE ON SCHEMA public TO api_gateway_user;
 
 ### Authentication Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/auth/jwt/login` | JWT token authentication |
-| POST | `/auth/register` | User registration |
-| POST | `/auth/jwt/logout` | Token invalidation |
-| GET | `/users/me` | Get current user info |
-| GET | `/api/users` | List all users (admin) |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| POST | `/auth/jwt/login` | JWT token authentication | None |
+| POST | `/auth/register` | User registration | None |
+| POST | `/auth/jwt/logout` | Token invalidation | Bearer Token |
+| GET | `/users/me` | Get current user info | Bearer Token |
+| GET | `/api/users` | List all users | Admin only |
 
-**Authentication Flow:**
-1. POST credentials to `/auth/jwt/login`
-2. Receive JWT token with `company_id` claim
-3. Include token in `Authorization: Bearer {token}` header
-4. API Gateway extracts `company_id` and sets schema routing
+**Login Request:**
+```bash
+curl -X POST http://localhost:8000/auth/jwt/login \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=test@acme.com&password=SecurePass123!"
+```
+
+**Login Response:**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+**Register Request:**
+```bash
+curl -X POST http://localhost:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test@acme.com",
+    "password": "SecurePass123!",
+    "company_id": "550e8400-e29b-41d4-a716-446655440000",
+    "role": "engineer"
+  }'
+```
+
+**Register Response:**
+```json
+{
+  "id": "bd6a8a44-e018-4042-8539-c84cf6715921",
+  "email": "test@acme.com",
+  "is_active": true,
+  "is_superuser": false,
+  "is_verified": false,
+  "company_id": "550e8400-e29b-41d4-a716-446655440000",
+  "role": "engineer"
+}
+```
+
+**Get Current User:**
+```bash
+curl -X GET http://localhost:8000/users/me \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response:**
+```json
+{
+  "id": "bd6a8a44-e018-4042-8539-c84cf6715921",
+  "email": "test@acme.com",
+  "is_active": true,
+  "is_superuser": false,
+  "is_verified": false,
+  "company_id": "550e8400-e29b-41d4-a716-446655440000",
+  "role": "engineer"
+}
+```
 
 ### Data Ingestion Endpoints
 
-| Method | Endpoint | Description | Schema Dependency |
-|--------|----------|-------------|-------------------|
-| POST | `/api/ingest/sensor-data` | Ingest sensor measurements | None (Kafka) |
-| GET | `/api/ingest/stats` | Ingestion statistics | None |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| POST | `/api/ingest/sensor-data` | Ingest sensor measurements | Bearer Token |
+| GET | `/api/ingest/stats` | Ingestion statistics | Bearer Token |
 
-**Request Body Example:**
+**Ingestion Request:**
 ```json
 {
   "timestamp": "2025-11-08T00:00:00Z",
-  "sensor_id": "sensor-001",
-  "equipment_id": "pump-001",
+  "sensor_id": "550e8400-e29b-41d4-a716-446655440020",
+  "equipment_id": "550e8400-e29b-41d4-a716-446655440010",
   "site_id": "factory-1",
   "value": 45.67,
   "unit": "°C",
@@ -156,98 +212,375 @@ GRANT USAGE ON SCHEMA public TO api_gateway_user;
 
 ### Measurement Endpoints
 
-| Method | Endpoint | Description | Schema Dependency |
-|--------|----------|-------------|-------------------|
-| GET | `/api/measurements` | Get raw measurements | `tenant_{uuid}.sensor_measurements` |
-| GET | `/api/measurements/latest` | Latest value per sensor | `tenant_{uuid}.sensor_measurements` |
-| GET | `/api/measurements/{sensor_id}` | Sensor-specific measurements | `tenant_{uuid}.sensor_measurements` |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| GET | `/api/measurements` | Get raw measurements | Bearer Token |
+| GET | `/api/measurements/latest` | Latest value per sensor | Bearer Token |
+| GET | `/api/measurements/{sensor_id}` | Sensor-specific measurements | Bearer Token |
+
+**Query Measurements:**
+```bash
+curl -X GET "http://localhost:8000/api/measurements?limit=5" \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response:**
+```json
+[]
+```
+*Empty array when no streaming data available*
 
 **Query Parameters:**
 - `sensor_id` (UUID): Filter by sensor
-- `equipment_id` (string): Filter by equipment
+- `equipment_id` (UUID): Filter by equipment
 - `limit` (int): Max results (1-1000, default 100)
 
-**Schema Routing:** All queries automatically filtered to authenticated user's tenant schema.
+**Response Structure (when data exists):**
+```json
+[
+  {
+    "time": "2025-11-08T00:00:00Z",
+    "sensor_id": "550e8400-e29b-41d4-a716-446655440020",
+    "equipment_id": "550e8400-e29b-41d4-a716-446655440010",
+    "site_id": "Building A - Floor 1",
+    "company_id": "550e8400-e29b-41d4-a716-446655440000",
+    "value": 45.67,
+    "unit": "°C",
+    "quality_code": 1
+  }
+]
+```
 
 ### Aggregation Endpoints
 
-| Method | Endpoint | Description | Schema Dependency |
-|--------|----------|-------------|-------------------|
-| GET | `/api/aggregations/{window}` | Get aggregated statistics | `tenant_{uuid}.sensor_aggregations_{window}` |
-| GET | `/api/aggregations/{window}/latest` | Latest aggregation per sensor | `tenant_{uuid}.sensor_aggregations_{window}` |
-| GET | `/api/aggregations/combined/{sensor_id}` | All timeframes for sensor | All aggregation tables |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| GET | `/api/aggregations/{window}` | Get aggregated statistics | Bearer Token |
+| GET | `/api/aggregations/{window}/latest` | Latest aggregation per sensor | Bearer Token |
+| GET | `/api/aggregations/combined/{sensor_id}` | All timeframes for sensor | Bearer Token |
 
 **Valid Windows:**
 - `1min`: 1-minute aggregations
 - `5min`: 5-minute aggregations
 - `1hour`: 1-hour aggregations
 
-**Response Fields:**
-- `time`: Timestamp
-- `sensor_id`: Sensor UUID
-- `avg_value`: Average
-- `min_value`: Minimum
-- `max_value`: Maximum
-- `count_values`: Sample count
+**Query Aggregations:**
+```bash
+curl -X GET "http://localhost:8000/api/aggregations/1min?limit=5" \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response:**
+```json
+[]
+```
+*Empty array when no aggregated data available*
+
+**Response Structure (when data exists):**
+```json
+[
+  {
+    "time": "2025-11-08T00:00:00Z",
+    "sensor_id": "550e8400-e29b-41d4-a716-446655440020",
+    "equipment_id": "550e8400-e29b-41d4-a716-446655440010",
+    "site_id": "Building A - Floor 1",
+    "company_id": "550e8400-e29b-41d4-a716-446655440000",
+    "avg_value": 45.67,
+    "min_value": 42.0,
+    "max_value": 48.5,
+    "count_values": 60,
+    "unit": "°C"
+  }
+]
+```
 
 ### Equipment Management Endpoints
 
-| Method | Endpoint | Description | Schema Dependency |
-|--------|----------|-------------|-------------------|
-| GET | `/api/equipment` | List all equipment | `tenant_{uuid}.equipment` |
-| GET | `/api/equipment/{equipment_id}` | Get specific equipment | `tenant_{uuid}.equipment` |
-| POST | `/api/equipment` | Create equipment | `tenant_{uuid}.equipment` |
-| PUT | `/api/equipment/{equipment_id}` | Update equipment | `tenant_{uuid}.equipment` |
-| DELETE | `/api/equipment/{equipment_id}` | Delete equipment | `tenant_{uuid}.equipment` |
-| GET | `/api/equipment/{equipment_id}/sensors` | Get equipment sensors | `tenant_{uuid}.sensors` |
-| POST | `/api/equipment/{equipment_id}/sensors` | Add sensor | `tenant_{uuid}.sensors` |
-| DELETE | `/api/equipment/{equipment_id}/sensors/{sensor_id}` | Remove sensor | `tenant_{uuid}.sensors` |
-| POST | `/api/equipment/{equipment_id}/sensors/bulk` | Bulk add sensors | `tenant_{uuid}.sensors` |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| GET | `/api/equipment` | List all equipment | Bearer Token |
+| GET | `/api/equipment/{equipment_id}` | Get specific equipment | Bearer Token |
+| POST | `/api/equipment` | Create equipment | Bearer Token |
+| PUT | `/api/equipment/{equipment_id}` | Update equipment | Bearer Token |
+| DELETE | `/api/equipment/{equipment_id}` | Delete equipment | Bearer Token |
+| GET | `/api/equipment/{equipment_id}/sensors` | Get equipment sensors | Bearer Token |
+| POST | `/api/equipment/{equipment_id}/sensors` | Add sensor | Bearer Token |
+| DELETE | `/api/equipment/{equipment_id}/sensors/{sensor_id}` | Remove sensor | Bearer Token |
+| POST | `/api/equipment/{equipment_id}/sensors/bulk` | Bulk add sensors | Bearer Token |
 
-**Equipment Schema Changes:**
-- **Removed:** `equipment_sensors` junction table
-- **New:** Direct `sensors.equipment_id` foreign key
-- **Query Pattern:** `SELECT * FROM sensors WHERE equipment_id = ?`
+**List Equipment:**
+```bash
+curl -X GET http://localhost:8000/api/equipment \
+  -H "Authorization: Bearer {token}"
+```
 
-**Equipment Fields:**
+**Response:**
+```json
+[
+  {
+    "equipment_id": "550e8400-e29b-41d4-a716-446655440010",
+    "equipment_type": "centrifugal_pump",
+    "name": "Main Production Pump",
+    "description": null,
+    "site_id": null,
+    "location": "Building A - Floor 1",
+    "sensor_count": 52,
+    "batch_timeout_seconds": 5,
+    "require_complete_batch": true,
+    "min_sensors_for_partial": null,
+    "status": "active",
+    "commissioned_date": null,
+    "last_maintenance_date": null,
+    "next_maintenance_date": null,
+    "created_at": "2025-11-08T00:58:56.074954+00:00",
+    "updated_at": "2025-11-08T00:58:56.074954+00:00",
+    "created_by": null,
+    "expected_sensors": []
+  }
+]
+```
+
+**Create Equipment:**
+```bash
+curl -X POST http://localhost:8000/api/equipment \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "equipment_id": "123e4567-e89b-12d3-a456-426614174000",
+    "equipment_type": "motor",
+    "name": "Test Motor",
+    "location": "Test Lab",
+    "sensor_count": 3
+  }'
+```
+
+**Response:**
 ```json
 {
-  "equipment_id": "pump-001",
-  "equipment_type": "centrifugal_pump",
-  "name": "Main Production Pump",
-  "sensor_count": 52,
-  "expected_sensors": ["sensor-001", "sensor-002", ...],
+  "equipment_id": "123e4567-e89b-12d3-a456-426614174000",
+  "equipment_type": "motor",
+  "name": "Test Motor",
+  "description": null,
+  "site_id": null,
+  "location": "Test Lab",
+  "sensor_count": 3,
   "batch_timeout_seconds": 5,
-  "require_complete_batch": true
+  "require_complete_batch": true,
+  "min_sensors_for_partial": null,
+  "status": "active",
+  "commissioned_date": null,
+  "last_maintenance_date": null,
+  "next_maintenance_date": null,
+  "created_at": "2025-11-08T10:54:22.777597+00:00",
+  "updated_at": "2025-11-08T10:54:22.777597+00:00",
+  "created_by": null,
+  "expected_sensors": []
 }
+```
+
+**Delete Equipment:**
+```bash
+curl -X DELETE http://localhost:8000/api/equipment/123e4567-e89b-12d3-a456-426614174000 \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response:** No content (204)
+
+**Get Equipment Sensors:**
+```bash
+curl -X GET http://localhost:8000/api/equipment/550e8400-e29b-41d4-a716-446655440010/sensors \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response:**
+```json
+[
+  {
+    "sensor_id": "550e8400-e29b-41d4-a716-446655440020",
+    "equipment_id": "550e8400-e29b-41d4-a716-446655440010",
+    "sensor_name": "Temperature_Sensor_1",
+    "sensor_type": "temperature",
+    "description": null,
+    "unit": "°C",
+    "min_value": null,
+    "max_value": null,
+    "normal_min": null,
+    "normal_max": null,
+    "position": 0,
+    "is_critical": false,
+    "is_required_for_ml": true,
+    "status": "active",
+    "is_active": true,
+    "created_at": "2025-11-08T01:11:59.276005+00:00",
+    "updated_at": "2025-11-08T01:11:59.276005+00:00"
+  }
+]
 ```
 
 ### Alert Management Endpoints
 
-| Method | Endpoint | Description | Schema Dependency |
-|--------|----------|-------------|-------------------|
-| GET | `/api/alerts` | List alerts | `tenant_{uuid}.alerts` |
-| GET | `/api/alerts/unacknowledged` | Unacknowledged alerts | `tenant_{uuid}.alerts` |
-| GET | `/api/alerts/critical` | Critical severity alerts | `tenant_{uuid}.alerts` |
-| PATCH | `/api/alerts/{alert_id}/acknowledge` | Acknowledge alert | `tenant_{uuid}.alerts` |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| GET | `/api/alerts` | List alerts | Bearer Token |
+| GET | `/api/alerts/unacknowledged` | Unacknowledged alerts | Bearer Token |
+| GET | `/api/alerts/critical` | Critical severity alerts | Bearer Token |
+| PATCH | `/api/alerts/{alert_id}/acknowledge` | Acknowledge alert | Bearer Token |
+
+**List Alerts:**
+```bash
+curl -X GET "http://localhost:8000/api/alerts?limit=5" \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response:**
+```json
+[]
+```
+*Empty array when no alerts triggered*
 
 **Query Parameters:**
-- `sensor_id` (string): Filter by sensor
-- `equipment_id` (string): Filter by equipment
+- `sensor_id` (UUID): Filter by sensor
+- `equipment_id` (UUID): Filter by equipment
 - `severity` (enum): info, low, medium, high, critical
 - `acknowledged` (bool): Filter by acknowledgment status
 - `limit` (int): Max results (default 100, max 1000)
 
 ### Alert Rules Endpoints
 
-| Method | Endpoint | Description | Schema Dependency |
-|--------|----------|-------------|-------------------|
-| GET | `/api/alert-rules` | List alert rules | `tenant_{uuid}.alert_rules` |
-| GET | `/api/alert-rules/{rule_id}` | Get specific rule | `tenant_{uuid}.alert_rules` |
-| POST | `/api/alert-rules` | Create rule | `tenant_{uuid}.alert_rules` |
-| PUT | `/api/alert-rules/{rule_id}` | Update rule | `tenant_{uuid}.alert_rules` |
-| DELETE | `/api/alert-rules/{rule_id}` | Delete rule | `tenant_{uuid}.alert_rules` |
-| PATCH | `/api/alert-rules/{rule_id}/detection-mode` | Switch detection mode | `tenant_{uuid}.alert_rules` |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| GET | `/api/alert-rules` | List alert rules | Bearer Token |
+| GET | `/api/alert-rules/{rule_id}` | Get specific rule | Bearer Token |
+| POST | `/api/alert-rules` | Create rule | Bearer Token |
+| PUT | `/api/alert-rules/{rule_id}` | Update rule | Bearer Token |
+| DELETE | `/api/alert-rules/{rule_id}` | Delete rule | Bearer Token |
+| PATCH | `/api/alert-rules/{rule_id}/detection-mode` | Switch detection mode | Bearer Token |
+
+**List Alert Rules:**
+```bash
+curl -X GET http://localhost:8000/api/alert-rules \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response:**
+```json
+[
+  {
+    "rule_id": "7fd78efb-2587-4dc6-970d-fed95308663b",
+    "name": "High Temperature Alert",
+    "description": null,
+    "sensor_id": "550e8400-e29b-41d4-a716-446655440020",
+    "equipment_id": null,
+    "sensor_pattern": null,
+    "site_id": null,
+    "detection_type": "threshold",
+    "condition": null,
+    "threshold": 80.0,
+    "threshold_min": null,
+    "threshold_max": null,
+    "model_id": null,
+    "anomaly_threshold": 0.7,
+    "model_config": null,
+    "requires_complete_batch": false,
+    "min_batch_completeness": 1.0,
+    "severity": "high",
+    "priority": 3,
+    "enabled": true,
+    "created_at": "2025-11-08T01:22:42.721575+00:00",
+    "updated_at": "2025-11-08T01:22:42.721575+00:00",
+    "created_by": null
+  }
+]
+```
+
+**Create Alert Rule:**
+```bash
+curl -X POST http://localhost:8000/api/alert-rules \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Test Alert Rule",
+    "sensor_id": "550e8400-e29b-41d4-a716-446655440020",
+    "detection_type": "threshold",
+    "threshold": 90.0,
+    "severity": "critical",
+    "enabled": true
+  }'
+```
+
+**Response:**
+```json
+{
+  "message": "Alert rule created successfully",
+  "rule": {
+    "rule_id": "69c34497-46e8-4dbe-83bb-ce7a4da0a3a3",
+    "name": "Test Alert Rule",
+    "description": null,
+    "sensor_id": "550e8400-e29b-41d4-a716-446655440020",
+    "equipment_id": null,
+    "sensor_pattern": null,
+    "site_id": null,
+    "detection_type": "threshold",
+    "condition": null,
+    "threshold": 90.0,
+    "threshold_min": null,
+    "threshold_max": null,
+    "model_id": null,
+    "anomaly_threshold": 0.7,
+    "model_config": null,
+    "requires_complete_batch": false,
+    "min_batch_completeness": 1.0,
+    "severity": "critical",
+    "priority": 3,
+    "enabled": true,
+    "created_at": "2025-11-08T10:56:32.222367+00:00",
+    "updated_at": "2025-11-08T10:56:32.222367+00:00",
+    "created_by": null
+  }
+}
+```
+
+**Update Alert Rule:**
+```bash
+curl -X PUT http://localhost:8000/api/alert-rules/69c34497-46e8-4dbe-83bb-ce7a4da0a3a3 \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "threshold": 95.0,
+    "severity": "high"
+  }'
+```
+
+**Response:**
+```json
+{
+  "message": "Alert rule updated successfully",
+  "rule": {
+    "rule_id": "69c34497-46e8-4dbe-83bb-ce7a4da0a3a3",
+    "name": "Test Alert Rule",
+    "threshold": 95.0,
+    "severity": "high",
+    "updated_at": "2025-11-08T10:56:59.797577+00:00"
+  }
+}
+```
+
+**Delete Alert Rule:**
+```bash
+curl -X DELETE http://localhost:8000/api/alert-rules/69c34497-46e8-4dbe-83bb-ce7a4da0a3a3 \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response:**
+```json
+{
+  "message": "Alert rule deleted successfully",
+  "deleted_rule": {
+    "rule_id": "69c34497-46e8-4dbe-83bb-ce7a4da0a3a3",
+    "name": "Test Alert Rule"
+  }
+}
+```
 
 **Detection Types:**
 - `threshold`: Simple threshold comparison
@@ -256,42 +589,87 @@ GRANT USAGE ON SCHEMA public TO api_gateway_user;
 
 ### ML Models Endpoints
 
-| Method | Endpoint | Description | Schema Dependency |
-|--------|----------|-------------|-------------------|
-| GET | `/api/ml-models` | List ML models | `tenant_{uuid}.ml_models` |
-| GET | `/api/ml-models/{model_id}` | Get specific model | `tenant_{uuid}.ml_models` |
-| POST | `/api/ml-models` | Create model entry | `tenant_{uuid}.ml_models` |
-| PUT | `/api/ml-models/{model_id}` | Update model | `tenant_{uuid}.ml_models` |
-| DELETE | `/api/ml-models/{model_id}` | Delete model | `tenant_{uuid}.ml_models` |
-| POST | `/api/ml-models/train` | Initiate training | None (placeholder) |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| GET | `/api/ml-models` | List ML models | Bearer Token |
+| GET | `/api/ml-models/{model_id}` | Get specific model | Bearer Token |
+| POST | `/api/ml-models` | Create model entry | Bearer Token |
+| PUT | `/api/ml-models/{model_id}` | Update model | Bearer Token |
+| DELETE | `/api/ml-models/{model_id}` | Delete model | Bearer Token |
+| POST | `/api/ml-models/train` | Initiate training | Bearer Token |
+
+**List ML Models:**
+```bash
+curl -X GET http://localhost:8000/api/ml-models \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response:**
+```json
+[]
+```
+*Empty array when no models exist*
 
 ### Training Data Endpoints
 
-| Method | Endpoint | Description | Schema Dependency |
-|--------|----------|-------------|-------------------|
-| GET | `/api/training-data/equipment/{equipment_id}` | JSON training data | `tenant_{uuid}.sensor_measurements`, `tenant_{uuid}.sensors` |
-| GET | `/api/training-data/equipment/{equipment_id}/stream` | CSV streaming | `tenant_{uuid}.sensor_measurements`, `tenant_{uuid}.sensors` |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| GET | `/api/training-data/equipment/{equipment_id}` | JSON training data | Bearer Token |
+| GET | `/api/training-data/equipment/{equipment_id}/stream` | CSV streaming | Bearer Token |
 
 **Query Parameters:**
 - `lookback_days` (int): Historical days (1-365, default 30)
 - `min_quality` (float): Quality threshold (0.0-1.0, default 0.8)
 - `limit` (int): Max rows for JSON (1-100000, default 10000)
 
-**Key Change:**
-- **Old Query:** JOIN with `equipment_sensors` junction table
-- **New Query:** Direct JOIN on `sensors.equipment_id`
-
 ### Company Management Endpoints
 
-| Method | Endpoint | Description | Schema Dependency |
-|--------|----------|-------------|-------------------|
-| GET | `/api/companies` | List companies | `public.companies` |
-| GET | `/api/companies/{company_id}` | Get company | `public.companies` |
-| POST | `/api/companies` | Create company (admin) | `public.companies` |
-| PUT | `/api/companies/{company_id}` | Update company (admin) | `public.companies` |
-| DELETE | `/api/companies/{company_id}` | Delete company (admin) | `public.companies` |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| GET | `/api/companies` | List companies | Admin only |
+| GET | `/api/companies/{company_id}` | Get company | Admin only |
+| POST | `/api/companies` | Create company | Admin only |
+| PUT | `/api/companies/{company_id}` | Update company | Admin only |
+| DELETE | `/api/companies/{company_id}` | Delete company | Admin only |
 
-**Note:** Companies table in `public` schema, accessible to all tenants via `search_path`.
+**List Companies (Admin):**
+```bash
+curl -X GET http://localhost:8000/api/companies \
+  -H "Authorization: Bearer {admin-token}"
+```
+
+**Non-Admin Response:**
+```json
+{
+  "detail": "Required role: admin"
+}
+```
+
+**Admin Response:**
+```json
+[
+  {
+    "company_id": "550e8400-e29b-41d4-a716-446655440000",
+    "company_name": "ACME Manufacturing",
+    "is_active": true,
+    "created_at": "2025-11-07T00:00:00Z"
+  },
+  {
+    "company_id": "550e8400-e29b-41d4-a716-446655440001",
+    "company_name": "TechCorp Industries",
+    "is_active": true,
+    "created_at": "2025-11-07T00:00:00Z"
+  },
+  {
+    "company_id": "550e8400-e29b-41d4-a716-446655440002",
+    "company_name": "Global Systems Inc",
+    "is_active": true,
+    "created_at": "2025-11-07T00:00:00Z"
+  }
+]
+```
+
+**Note:** Companies table in `public` schema, accessible only to admin users.
 
 ### WebSocket Endpoints
 
@@ -313,11 +691,11 @@ GRANT USAGE ON SCHEMA public TO api_gateway_user;
   "type": "sensor_update",
   "timestamp": 1699401234.567,
   "sensors": {
-    "sensor-001": {
+    "550e8400-e29b-41d4-a716-446655440020": {
       "value": 45.67,
       "timestamp": "2025-11-08T00:00:00Z",
-      "equipment_id": "pump-001",
-      "site_id": "factory-1",
+      "equipment_id": "550e8400-e29b-41d4-a716-446655440010",
+      "site_id": "Building A - Floor 1",
       "company_id": "550e8400-e29b-41d4-a716-446655440000",
       "unit": "°C",
       "quality_code": 1
@@ -329,36 +707,82 @@ GRANT USAGE ON SCHEMA public TO api_gateway_user;
 
 ### Cache Endpoints
 
-| Method | Endpoint | Description | Schema Dependency |
-|--------|----------|-------------|-------------------|
-| GET | `/api/cache/sensors` | Get cached sensor values | Redis (filtered by company_id) |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| GET | `/api/cache/sensors` | Get cached sensor values | Bearer Token |
+
+**Get Cached Sensors:**
+```bash
+curl -X GET http://localhost:8000/api/cache/sensors \
+  -H "Authorization: Bearer {token}"
+```
 
 **Response:**
 ```json
 {
-  "cached_sensors": 52,
-  "company_id": "550e8400-e29b-41d4-a716-446655440000",
-  "sensors": {
-    "sensor-001": { "value": 45.67, ... }
-  }
+  "cached_sensors": 0,
+  "sensors": {},
+  "company_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
+*Empty when no streaming data active*
 
 ### Health & System Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | API root info |
-| GET | `/health` | Service health check |
-| GET | `/docs` | Swagger UI |
-| GET | `/redoc` | ReDoc documentation |
+| Method | Endpoint | Description | Authorization |
+|--------|----------|-------------|---------------|
+| GET | `/` | API root info | None |
+| GET | `/health` | Service health check | None |
+| GET | `/docs` | Swagger UI | None |
+| GET | `/redoc` | ReDoc documentation | None |
 
-**Health Response:**
+**Health Check:**
+```bash
+curl http://localhost:8000/health
+```
+
+**Response:**
 ```json
 {
   "status": "healthy",
   "database": "connected",
-  "timestamp": "2025-11-08T00:02:50.694557"
+  "timestamp": "2025-11-08T10:12:40.096464"
+}
+```
+
+**API Root:**
+```bash
+curl http://localhost:8000/
+```
+
+**Response:**
+```json
+{
+  "name": "IndustryFlow API",
+  "version": "1.0.0",
+  "description": "Real-time IoT Data Processing Platform",
+  "docs_url": "/docs",
+  "architecture": "Schema-per-tenant (v5.0)",
+  "endpoints": {
+    "health": "/health",
+    "auth_login": "/auth/jwt/login",
+    "auth_register": "/auth/register",
+    "users_me": "/users/me",
+    "ingest_sensor_data": "/api/ingest/sensor-data",
+    "measurements": "/api/measurements",
+    "measurements_latest": "/api/measurements/latest",
+    "aggregations_1min": "/api/aggregations/1min",
+    "aggregations_5min": "/api/aggregations/5min",
+    "aggregations_1hour": "/api/aggregations/1hour",
+    "websocket_sensors": "/ws/sensors",
+    "cache_sensors": "/api/cache/sensors",
+    "training_data": "/api/training-data/equipment/{equipment_id}",
+    "alerts": "/api/alerts",
+    "alert_rules": "/api/alert-rules",
+    "ml_models": "/api/ml-models",
+    "companies": "/api/companies",
+    "equipment": "/api/equipment"
+  }
 }
 ```
 
@@ -424,7 +848,7 @@ With `search_path TO tenant_{uuid}, public` set:
 **Tenant-specific tables** (automatic routing):
 ```sql
 SELECT * FROM sensors WHERE equipment_id = 'pump-001';
--- Resolves to: tenant_{uuid}.sensors
+-- Resolves to: tenant_550e8400_e29b_41d4_a716_446655440000.sensors
 ```
 
 **Shared tables** (fallback to public):
@@ -489,10 +913,10 @@ Direct ownership relationship without junction table:
 
 ```sql
 CREATE TABLE sensors (
-    sensor_id TEXT PRIMARY KEY,
-    equipment_id TEXT REFERENCES equipment(equipment_id),
-    sensor_type TEXT,
-    unit TEXT,
+    sensor_id UUID PRIMARY KEY,
+    equipment_id UUID REFERENCES equipment(equipment_id),
+    sensor_type VARCHAR(50),
+    unit VARCHAR(20),
     description TEXT,
     is_active BOOLEAN
 );
@@ -500,7 +924,7 @@ CREATE TABLE sensors (
 
 Query pattern:
 ```sql
-SELECT * FROM sensors WHERE equipment_id = 'pump-001';
+SELECT * FROM sensors WHERE equipment_id = '550e8400-e29b-41d4-a716-446655440010';
 ```
 
 ---
@@ -637,36 +1061,36 @@ Response format:
 {
   "status": "healthy",
   "database": "connected",
-  "timestamp": "2025-11-08T00:02:50.694557"
+  "timestamp": "2025-11-08T10:12:40.096464"
 }
 ```
 
-### Authentication
+### Authentication Test
 
-Register user:
 ```bash
+# Register user
 curl -X POST http://localhost:8000/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",
-    "password": "securepass123",
+    "password": "SecurePass123!",
     "company_id": "550e8400-e29b-41d4-a716-446655440000",
     "role": "engineer"
   }'
-```
 
-Login:
-```bash
+# Login
 curl -X POST http://localhost:8000/auth/jwt/login \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=test@example.com&password=securepass123"
+  -d "username=test@example.com&password=SecurePass123!"
 ```
 
-### Data Query
+### Data Query Test
 
 ```bash
+TOKEN="your-jwt-token-here"
+
 curl -X GET "http://localhost:8000/api/measurements?limit=10" \
-  -H "Authorization: Bearer {jwt-token}"
+  -H "Authorization: Bearer ${TOKEN}"
 ```
 
 ### Database Connections
@@ -683,14 +1107,14 @@ GROUP BY usename, application_name, state
 ORDER BY connections DESC;
 ```
 
-Connection distribution:
+Expected result:
 ```
     usename         | application_name | connections |  state
 --------------------+------------------+-------------+---------
  api_gateway_user   | uvicorn          |    144      | idle
 ```
 
-### Schema Routing
+### Schema Routing Verification
 
 ```sql
 -- Verify search_path configuration
@@ -796,7 +1220,7 @@ WHERE usename = 'api_gateway_user';
 **Symptom:** `401 Unauthorized` on authenticated endpoints.
 
 **Check:**
-1. Token not expired (30min lifetime)
+1. Token not expired (7-day lifetime)
 2. JWT secret matches between services
 3. Token format: `Authorization: Bearer {token}`
 
@@ -822,30 +1246,6 @@ SELECT * FROM sensors LIMIT 1;
 ```
 
 **Fix:** Verify `get_db_with_tenant` dependency is used, not `get_db`.
-
----
-
-## References
-
-### Internal Documentation
-
-- IndustryFlow Database Architecture specification
-- Spark Streaming Schema-Per-Tenant Architecture specification
-- IndustryFlow Setup Guide
-
-### External Resources
-
-- FastAPI Documentation: https://fastapi.tiangolo.com/
-- SQLAlchemy Async: https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html
-- fastapi-users: https://fastapi-users.github.io/fastapi-users/
-- TimescaleDB: https://docs.timescale.com/
-- PostgreSQL Search Path: https://www.postgresql.org/docs/current/ddl-schemas.html
-
-### Schema-Per-Tenant Resources
-
-- Salesforce Multi-Tenant Architecture
-- AWS RDS Schema-Based Multi-Tenancy
-- PostgreSQL Row-Level Security vs Schema Isolation
 
 ---
 
@@ -940,8 +1340,8 @@ GET    /api/training-data/equipment/{equipment_id}/stream   # CSV stream
 ### Company Management
 
 ```
-GET    /api/companies                     # List companies
-GET    /api/companies/{company_id}        # Get company
+GET    /api/companies                     # List companies (admin)
+GET    /api/companies/{company_id}        # Get company (admin)
 POST   /api/companies                     # Create (admin)
 PUT    /api/companies/{company_id}        # Update (admin)
 DELETE /api/companies/{company_id}        # Delete (admin)

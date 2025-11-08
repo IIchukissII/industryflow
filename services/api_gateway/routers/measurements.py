@@ -27,7 +27,7 @@ async def get_measurements(
     Returns the most recent measurements ordered by timestamp (newest first).
     """
     query = """
-        SELECT time, sensor_id, equipment_id, site_id, company_id, 
+        SELECT time, sensor_id, equipment_id, site_id, 
                value, unit, quality_code
         FROM sensor_measurements
         WHERE 1=1
@@ -55,10 +55,10 @@ async def get_measurements(
             sensor_id=row[1],
             equipment_id=str(row[2]) if row[2] else None,
             site_id=row[3],
-            company_id=str(row[4]),
-            value=row[5],
-            unit=row[6],
-            quality_code=row[7]
+            company_id=current_user.company_id,
+            value=row[4],
+            unit=row[5],
+            quality_code=row[6]
         )
         for row in rows
     ]
@@ -78,7 +78,7 @@ async def get_latest_measurements(
     """
     query = """
         SELECT DISTINCT ON (sensor_id)
-            time, sensor_id, equipment_id, site_id, company_id, 
+            time, sensor_id, equipment_id, site_id, 
             value, unit, quality_code
         FROM sensor_measurements
         ORDER BY sensor_id, time DESC
@@ -93,10 +93,10 @@ async def get_latest_measurements(
             sensor_id=row[1],
             equipment_id=str(row[2]) if row[2] else None,
             site_id=row[3],
-            company_id=str(row[4]),
-            value=row[5],
-            unit=row[6],
-            quality_code=row[7]
+            company_id=current_user.company_id,
+            value=row[4],
+            unit=row[5],
+            quality_code=row[6]
         )
         for row in rows
     ]
@@ -112,7 +112,7 @@ async def get_measurements_by_sensor(
 ):
     """Get measurements for a specific sensor"""
     query = """
-        SELECT time, sensor_id, equipment_id, site_id, company_id, 
+        SELECT time, sensor_id, equipment_id, site_id, 
                value, unit, quality_code
         FROM sensor_measurements
         WHERE sensor_id = :sensor_id
@@ -131,10 +131,10 @@ async def get_measurements_by_sensor(
             sensor_id=row[1],
             equipment_id=str(row[2]) if row[2] else None,
             site_id=row[3],
-            company_id=str(row[4]),
-            value=row[5],
-            unit=row[6],
-            quality_code=row[7]
+            company_id=current_user.company_id,
+            value=row[4],
+            unit=row[5],
+            quality_code=row[6]
         )
         for row in rows
     ]
