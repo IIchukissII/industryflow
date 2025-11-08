@@ -384,6 +384,77 @@ services:
       retries: 3
       start_period: 40s
 
+  # ============================================================================
+  # ML Service
+  # ============================================================================
+
+  ml-service-api:
+    build:
+      context: ./services/ml_service
+      dockerfile: api/Dockerfile
+    container_name: industryflow-ml-service-api
+    ports:
+      - "${ML_SERVICE_PORT}:8002"
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      ML_SERVICE_DB_USER: ${ML_SERVICE_DB_USER}
+      ML_SERVICE_DB_PASSWORD: ${ML_SERVICE_DB_PASSWORD}
+      MLFLOW_DB_NAME: ${MLFLOW_DB_NAME}
+      MLFLOW_DB_USER: ${MLFLOW_DB_USER}
+      MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      MODEL_DIR: /app/models
+    volumes:
+      - ml-models:/app/models
+    networks:
+      - industryflow-network
+    depends_on:
+      - timescaledb
+      - mlflow
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8002/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  jupyter:
+    build:
+      context: ./services/ml_service
+      dockerfile: Dockerfile.jupyter
+    container_name: industryflow-jupyter
+    ports:
+      - "${JUPYTER_PORT}:8888"
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      ML_SERVICE_DB_USER: ${ML_SERVICE_DB_USER}
+      ML_SERVICE_DB_PASSWORD: ${ML_SERVICE_DB_PASSWORD}
+      MLFLOW_DB_NAME: ${MLFLOW_DB_NAME}
+      MLFLOW_DB_USER: ${MLFLOW_DB_USER}
+      MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    volumes:
+      - ./services/ml_service/notebooks:/app/notebooks
+      - ml-models:/app/models
+      - jupyter-data:/root/.jupyter
+    networks:
+      - industryflow-network
+    depends_on:
+      - timescaledb
+      - mlflow
+      - minio
+    restart: unless-stopped
+
 
 # ==========================================================================
 # VOLUMES
@@ -398,6 +469,10 @@ volumes:
   minio-data:
   spark-checkpoints-streaming:
   spark-checkpoints-aggregations:
+  ml-models:
+    driver: local
+  jupyter-data:
+    driver: local
 
 # ==========================================================================
 # NETWORKS
