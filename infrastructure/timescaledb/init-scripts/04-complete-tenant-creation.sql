@@ -29,6 +29,7 @@ BEGIN
     
     -- Grant schema usage to application roles
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO api_gateway_user', v_schema_name);
+    EXECUTE format('GRANT USAGE ON SCHEMA %I TO ingestion_service_user', v_schema_name);
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO spark_streaming_user', v_schema_name);
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO alert_service_user', v_schema_name);
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO ml_service_user', v_schema_name);
@@ -42,6 +43,7 @@ BEGIN
     
     -- Grant table permissions
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO api_gateway_user', v_schema_name);
+    EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO ingestion_service_user', v_schema_name);
     EXECUTE format('GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA %I TO spark_streaming_user', v_schema_name);
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO alert_service_user', v_schema_name);
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO ml_service_user', v_schema_name);
