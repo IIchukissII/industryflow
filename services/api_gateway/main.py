@@ -5,13 +5,12 @@ from contextlib import asynccontextmanager
 from config import get_settings
 from routers import (
     health, measurements, aggregations, websocket, cache, 
-    ingestion, training_data, alerts_history, companies, 
+    training_data, alerts_history, companies, 
     equipment, alert_rules, ml_models
 )
 from database import init_db_pool, close_db_pool, create_user_table
 from messaging.redis_client import redis_client
 from messaging.cache_updater import update_redis_cache
-from messaging.kafka_producer import AsyncKafkaProducerSingleton
 
 # Authentication imports
 from users import auth_backend, fastapi_users
@@ -33,9 +32,6 @@ async def lifespan(_app: FastAPI):
     await create_user_table()
     print("✅ User authentication table initialized")
 
-    # Initialize Kafka producer
-    await AsyncKafkaProducerSingleton.get_producer()
-    print("✅ Async Kafka producer initialized for data ingestion")
 
     cache_task = asyncio.create_task(update_redis_cache())
 
@@ -48,8 +44,6 @@ async def lifespan(_app: FastAPI):
     except asyncio.CancelledError:
         pass
 
-    # Close Kafka producer
-    await AsyncKafkaProducerSingleton.close()
 
     await redis_client.disconnect()
     await close_db_pool()
@@ -89,8 +83,6 @@ app.include_router(
     tags=["users"],
 )
 
-# Data ingestion router (SECURE - requires authentication)
-app.include_router(ingestion.router)
 
 # API routers
 app.include_router(health.router)
@@ -122,7 +114,6 @@ async def root():
             "auth_login": "/auth/jwt/login",
             "auth_register": "/auth/register",
             "users_me": "/users/me",
-            "ingest_sensor_data": "/api/ingest/sensor-data",
             "measurements": "/api/measurements",
             "measurements_latest": "/api/measurements/latest",
             "aggregations_1min": "/api/aggregations/1min",

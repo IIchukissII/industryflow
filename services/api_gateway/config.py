@@ -26,10 +26,10 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_SENSOR_DATA: str
     
     # JWT Configuration
-    jwt_secret_key: str
+    JWT_SECRET_KEY: str
     
     # CORS Configuration
-    CORS_ORIGINS: list = ["http://localhost:3000", "http://localhost:8000"]
+    CORS_ORIGINS: str
     
     @property
     def database_url(self) -> str:

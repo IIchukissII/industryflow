@@ -21,7 +21,7 @@ from fastapi_users.authentication import (
 settings = get_settings()
 
 # Secret key for token generation (should be in your .env)
-SECRET = settings.jwt_secret_key if hasattr(settings, 'jwt_secret_key') else "CHANGE-THIS-TO-A-RANDOM-SECRET-KEY"
+SECRET = settings.JWT_SECRET_KEY
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):

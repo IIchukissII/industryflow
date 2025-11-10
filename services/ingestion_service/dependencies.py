@@ -1,7 +1,7 @@
 """
 Authentication dependencies for Ingestion Service.
 """
-import jwt
+from jose import JWTError, jwt
 import asyncpg
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -32,7 +32,8 @@ async def get_current_user_with_company(
         payload = jwt.decode(
             token,
             settings.JWT_SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM]
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"verify_aud": False}
         )
         
         user_id = payload.get("sub")
@@ -76,13 +77,8 @@ async def get_current_user_with_company(
             detail="User not found in any tenant"
         )
         
-    except jwt.ExpiredSignatureError:
+    except JWTError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expired"
-        )
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
+            detail=f"Invalid token: {str(e)}"
         )

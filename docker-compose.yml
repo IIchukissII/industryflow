@@ -302,7 +302,9 @@ services:
       REDIS_DB: ${REDIS_DB}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       KAFKA_TOPIC_SENSOR_DATA: ${KAFKA_TOPIC_SENSOR_DATA}
-      jwt_secret_key: ${JWT_SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      CORS_ORIGINS: ${CORS_ORIGINS}
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -340,7 +342,6 @@ services:
       KAFKA_TOPIC_RAW: ${KAFKA_TOPIC_SENSOR_DATA}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
-      CORS_ORIGINS: ${CORS_ORIGINS}
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -397,7 +398,6 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
       ALERT_SERVICE_PORT: ${ALERT_SERVICE_PORT}
-      CORS_ORIGINS: ${CORS_ORIGINS}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
     depends_on:
@@ -436,7 +436,6 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
-      CORS_ORIGINS: ${CORS_ORIGINS}
       MODEL_DIR: /app/models
     volumes:
       - ml-models:/app/models
