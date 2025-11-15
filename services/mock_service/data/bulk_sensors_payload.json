@@ -1,0 +1,420 @@
+{
+  "sensors": [
+    {
+      "sensor_id": "683a3ca4-1129-4e4f-8a3d-84ec94e5f471",
+      "sensor_name": "xmeas_1",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 0,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "0535f861-2b8c-415c-8ab8-87245843da88",
+      "sensor_name": "xmeas_2",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 1,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "cf521398-fa14-4cd9-bec9-90e1ed458412",
+      "sensor_name": "xmeas_3",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 2,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "200a6682-5d1d-4d3c-bac0-3280a4f21f01",
+      "sensor_name": "xmeas_4",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 3,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "6029e83e-c01b-4342-857b-6a835e1397a2",
+      "sensor_name": "xmeas_5",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 4,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "73273b39-5032-4807-b7a9-f03db7a6df29",
+      "sensor_name": "xmeas_6",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 5,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "b2336312-f557-4fed-959a-ef320072128d",
+      "sensor_name": "xmeas_7",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 6,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "145409f5-d65e-448b-b298-c7bbffe0d1f8",
+      "sensor_name": "xmeas_8",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 7,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "42e652af-c68d-48e8-83ca-bf35e295fdcc",
+      "sensor_name": "xmeas_9",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 8,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "5cac3f22-6778-4a15-93f7-39d32374157b",
+      "sensor_name": "xmeas_10",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 9,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "17c641a0-60e3-45ae-b38c-1b19aff726d1",
+      "sensor_name": "xmeas_11",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 10,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "15853ce8-72da-48fe-91f9-3d9008c656fa",
+      "sensor_name": "xmeas_12",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 11,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "33fb37ab-b8eb-48a3-be85-1605e4973736",
+      "sensor_name": "xmeas_13",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 12,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "8e3b356e-f6bc-44b8-9a32-1952e2ec5875",
+      "sensor_name": "xmeas_14",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 13,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "e75ffcbd-a254-49be-ad20-ebcf2aa0a402",
+      "sensor_name": "xmeas_15",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 14,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "0eeb3378-21f0-423c-9bbd-140aa29c8a3c",
+      "sensor_name": "xmeas_16",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 15,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "4f52e7f2-18ba-42c1-ad72-147d2c8a39ad",
+      "sensor_name": "xmeas_17",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 16,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "32d39021-e0c0-489e-ace0-61c5605b4d2e",
+      "sensor_name": "xmeas_18",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 17,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "55d0a0ea-f75d-4f80-af66-71f25f0421d6",
+      "sensor_name": "xmeas_19",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 18,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "0c0b4fdf-39b3-48a8-a64f-82166a5268b9",
+      "sensor_name": "xmeas_20",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 19,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "1a608762-888b-4a71-aa55-937369c4c04b",
+      "sensor_name": "xmeas_21",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 20,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "3302126f-6669-4c7d-a9ea-a291415b7620",
+      "sensor_name": "xmeas_22",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 21,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "69ca277c-f556-4ced-b369-7fe9c4f5d51c",
+      "sensor_name": "xmeas_23",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 22,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "b62ead0e-adfb-4ed4-a989-19ee608d58fc",
+      "sensor_name": "xmeas_24",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 23,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "95db2b4d-f9f8-4541-b58f-14146903e86a",
+      "sensor_name": "xmeas_25",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 24,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "325148ac-0a15-4936-ab82-05977fb65e38",
+      "sensor_name": "xmeas_26",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 25,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "6561e98d-95ff-4691-b5c3-999a30f50684",
+      "sensor_name": "xmeas_27",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 26,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "de9f3896-3b60-484f-b81a-0984872ad3cd",
+      "sensor_name": "xmeas_28",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 27,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "d6f99ff0-4ebb-4f99-a982-846f0e44994b",
+      "sensor_name": "xmeas_29",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 28,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "cfac3c25-cc5a-4ba3-8793-82a64a4d06db",
+      "sensor_name": "xmeas_30",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 29,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "3baa86e1-eb08-4c65-b5e4-6756f9827e39",
+      "sensor_name": "xmeas_31",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 30,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "1c3a418b-0ce5-4ed5-9dab-a2c9e87f675e",
+      "sensor_name": "xmeas_32",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 31,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "ea60bfa4-d720-4a43-9507-1151bdb40030",
+      "sensor_name": "xmeas_33",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 32,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "7bf6062f-9068-4e9a-8b9e-5122b739babf",
+      "sensor_name": "xmeas_34",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 33,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "43dee1d5-8c16-4a13-aba0-a36c194b377d",
+      "sensor_name": "xmeas_35",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 34,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "5e63b476-736c-4b65-af7c-76dd9ddb92db",
+      "sensor_name": "xmeas_36",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 35,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "3c15df19-9f39-4945-b47f-d58f24480b37",
+      "sensor_name": "xmeas_37",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 36,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "d0371f6d-6d10-4110-8b74-b27768281eac",
+      "sensor_name": "xmeas_38",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 37,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "47aebacb-95d1-410b-8620-b5af6c0fdb82",
+      "sensor_name": "xmeas_39",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 38,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "e97ee291-eb57-494a-bad3-e3bef055fca0",
+      "sensor_name": "xmeas_40",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 39,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "9d05a676-dda5-496c-b1ea-fbe6963901b2",
+      "sensor_name": "xmeas_41",
+      "sensor_type": "measured",
+      "unit": "varies",
+      "position": 40,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "9849e394-d9ad-4ad0-8c54-98ce21e01858",
+      "sensor_name": "xmv_1",
+      "sensor_type": "manipulated",
+      "unit": "varies",
+      "position": 41,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "82ee3ee1-51e0-41e5-8f4a-b6db0c7c00eb",
+      "sensor_name": "xmv_2",
+      "sensor_type": "manipulated",
+      "unit": "varies",
+      "position": 42,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "6023797f-bf03-45b0-b88c-2d81a6b8f17f",
+      "sensor_name": "xmv_3",
+      "sensor_type": "manipulated",
+      "unit": "varies",
+      "position": 43,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "4a4e484d-a067-4403-bb6f-0054a760feee",
+      "sensor_name": "xmv_4",
+      "sensor_type": "manipulated",
+      "unit": "varies",
+      "position": 44,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "dee5216c-4db2-4457-8545-08cd0fab4bf6",
+      "sensor_name": "xmv_5",
+      "sensor_type": "manipulated",
+      "unit": "varies",
+      "position": 45,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "eafbdd39-4e5c-4693-9d1c-510eb1cf9ea7",
+      "sensor_name": "xmv_6",
+      "sensor_type": "manipulated",
+      "unit": "varies",
+      "position": 46,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "b10ecf7e-b94f-4eac-9a71-33e671617ef3",
+      "sensor_name": "xmv_7",
+      "sensor_type": "manipulated",
+      "unit": "varies",
+      "position": 47,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "6ceab90c-e380-4bad-ba61-38d2e012b498",
+      "sensor_name": "xmv_8",
+      "sensor_type": "manipulated",
+      "unit": "varies",
+      "position": 48,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "a5f54bc4-b132-4fd1-ad9d-f13e16713671",
+      "sensor_name": "xmv_9",
+      "sensor_type": "manipulated",
+      "unit": "varies",
+      "position": 49,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "fe31c8df-e926-4cf4-9e82-2ea70b78b6c4",
+      "sensor_name": "xmv_10",
+      "sensor_type": "manipulated",
+      "unit": "varies",
+      "position": 50,
+      "is_required_for_ml": true
+    },
+    {
+      "sensor_id": "6452ef07-73e2-47f4-9f87-71d61de04f31",
+      "sensor_name": "xmv_11",
+      "sensor_type": "manipulated",
+      "unit": "varies",
+      "position": 51,
+      "is_required_for_ml": true
+    }
+  ]
+}

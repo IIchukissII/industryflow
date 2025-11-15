@@ -5,7 +5,8 @@ Schema-per-tenant architecture: Routes to tenant_<uuid>.sensor_aggregations_*
 """
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    from_json, col, window, avg, min as spark_min, max as spark_max, count, substring, to_timestamp
+    from_json, col, window, avg, min as spark_min, max as spark_max, 
+    stddev, count, to_timestamp, lit, expr
 )
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
 import os
@@ -77,8 +78,14 @@ def write_aggregations_to_db(batch_df, batch_id, aggregation_table):
             print(f"Batch {batch_id}: Writing {tenant_row_count} rows to {full_table_name}")
             
             try:
+                # Drop company_id column and cast UUIDs for PostgreSQL
+                tenant_data_clean = tenant_data \
+                    .withColumn("sensor_id", expr("CAST(sensor_id AS STRING)")) \
+                    .withColumn("equipment_id", expr("CAST(equipment_id AS STRING)")) \
+                    .drop("company_id")
+                
                 # Write to tenant-specific schema
-                tenant_data.write \
+                tenant_data_clean.write \
                     .format("jdbc") \
                     .option("url", jdbc_url) \
                     .option("dbtable", full_table_name) \
@@ -143,11 +150,8 @@ def create_aggregation_stream(spark, window_duration, table_name):
         from_json(col("value").cast("string"), schema).alias("data")
     ).select("data.*")
 
-    # Convert timestamp string to TimestampType (handle ISO format)
-    parsed_df = parsed_df.withColumn(
-        "time",
-        to_timestamp(substring(col("timestamp"), 1, 19), "yyyy-MM-dd'T'HH:mm:ss")
-    )
+    # Convert timestamp string to TimestampType (to_timestamp() handles ISO8601 with timezone)
+    parsed_df = parsed_df.withColumn("time", to_timestamp(col("timestamp")))
 
     # Perform windowed aggregation
     aggregated_df = parsed_df \
@@ -155,27 +159,27 @@ def create_aggregation_stream(spark, window_duration, table_name):
         window(col("time"), window_duration),
         col("sensor_id"),
         col("equipment_id"),
-        col("site_id"),
-        col("company_id"),
-        col("unit")
+        col("company_id")
     ) \
         .agg(
         avg("value").alias("avg_value"),
         spark_min("value").alias("min_value"),
         spark_max("value").alias("max_value"),
+        stddev("value").alias("stddev_value"),
         count("value").alias("count_values")
     ) \
         .select(
         col("window.end").alias("time"),
         col("sensor_id"),
         col("equipment_id"),
-        col("site_id"),
         col("company_id"),
         col("avg_value"),
         col("min_value"),
         col("max_value"),
+        col("stddev_value"),
         col("count_values").cast("int").alias("count_values"),
-        col("unit")
+        lit(0).alias("anomaly_count"),
+        lit(0.0).alias("anomaly_percentage")
     )
 
     # Get checkpoint location from environment

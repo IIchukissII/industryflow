@@ -24,7 +24,7 @@ class AsyncKafkaProducerSingleton:
             cls._instance = AIOKafkaProducer(
                 bootstrap_servers=settings.kafka_bootstrap_servers,
                 value_serializer=lambda v: json.dumps(v, default=str).encode('utf-8'),
-                acks='all',
+                acks="all",
                 compression_type='snappy',
                 linger_ms=10,
             )

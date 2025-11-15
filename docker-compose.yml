@@ -232,6 +232,8 @@ services:
     environment:
       # Spark configuration
       SPARK_MASTER: local[*]
+      SPARK_DRIVER_MEMORY: 2g
+      SPARK_EXECUTOR_MEMORY: 2g
       CHECKPOINT_LOCATION: /opt/spark/checkpoints
 
       # Kafka configuration
@@ -263,6 +265,8 @@ services:
     environment:
       # Spark configuration
       SPARK_MASTER: local[*]
+      SPARK_DRIVER_MEMORY: 2g
+      SPARK_EXECUTOR_MEMORY: 2g
       CHECKPOINT_LOCATION: /opt/spark/checkpoints
 
       # Kafka configuration
@@ -314,7 +318,7 @@ services:
         condition: service_healthy
     networks:
       - industryflow-network
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 8
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
@@ -347,6 +351,7 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+    command: uvicorn main:app --host 0.0.0.0 --port 8003 --workers 2
     networks:
       - industryflow-network
     restart: unless-stopped

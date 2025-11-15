@@ -4,7 +4,7 @@ Reads sensor data from Kafka and writes to TimescaleDB in real-time
 Schema-per-tenant architecture: Routes data to tenant_<uuid>.sensor_measurements
 """
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, substring, to_timestamp
+from pyspark.sql.functions import from_json, col, to_timestamp, expr
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
 import logging
 import os
@@ -73,7 +73,7 @@ def write_to_timescaledb(batch_df, batch_id):
             "user": db_user,
             "password": db_password,
             "driver": "org.postgresql.Driver",
-            "batchsize": "5000",
+            "batchsize": "10000",
             "reWriteBatchedInserts": "true",
             "numPartitions": "12",
             "stringtype": "unspecified"
@@ -99,8 +99,15 @@ def write_to_timescaledb(batch_df, batch_id):
             logger.info(f"Batch {batch_id}: Writing {row_count} rows to {table_name}")
             
             try:
+                # Drop company_id (schema-per-tenant: company identified by schema name)
+                # Cast sensor_id and equipment_id to STRING for PostgreSQL UUID compatibility
+                tenant_data_clean = tenant_data \
+                    .withColumn("sensor_id", expr("CAST(sensor_id AS STRING)")) \
+                    .withColumn("equipment_id", expr("CAST(equipment_id AS STRING)")) \
+                    .drop("company_id")
+                
                 # Write to tenant-specific schema
-                tenant_data.write \
+                tenant_data_clean.write \
                     .jdbc(
                         url=jdbc_url,
                         table=table_name,
@@ -140,7 +147,7 @@ def main():
         .format("kafka") \
         .option("kafka.bootstrap.servers", kafka_bootstrap) \
         .option("subscribe", "sensor-data-raw") \
-        .option("startingOffsets", "latest") \
+        .option("startingOffsets", "earliest") \
         .option("maxOffsetsPerTrigger", "10000") \
         .option("kafka.max.partition.fetch.bytes", "1048576") \
         .load()
@@ -148,13 +155,12 @@ def main():
     logger.info("Successfully connected to Kafka")
 
     # Parse JSON data and transform
+    # Note: to_timestamp() automatically parses ISO8601 format with timezone
     parsed_stream = raw_stream \
         .selectExpr("CAST(value AS STRING) as json_string") \
         .select(from_json(col("json_string"), sensor_schema).alias("data")) \
         .select("data.*") \
-        .withColumnRenamed("timestamp", "time_str") \
-        .withColumn("time",
-                   to_timestamp(substring(col("time_str"), 1, 19), "yyyy-MM-dd'T'HH:mm:ss")) \
+        .withColumn("time", to_timestamp(col("timestamp"))) \
         .select(
             col("time"),
             col("sensor_id"),

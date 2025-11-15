@@ -58,8 +58,8 @@ async def startup_event():
         database=settings.DB_NAME,
         user=settings.INGESTION_SERVICE_DB_USER,
         password=settings.INGESTION_SERVICE_DB_PASSWORD,
-        min_size=5,
-        max_size=20,
+        min_size=20,
+        max_size=50,
         command_timeout=60
     )
     logger.info("✅ Database pool created")
