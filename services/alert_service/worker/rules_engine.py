@@ -6,8 +6,12 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import uuid
+import aiohttp
+import os
 
 logger = logging.getLogger(__name__)
+
+ML_SERVICE_URL = os.getenv('ML_SERVICE_URL', 'http://ml-service:8002')
 
 
 class RulesEngine:
@@ -215,16 +219,78 @@ class RulesEngine:
         rule: Dict,
         company_id: str
     ) -> Optional[Dict]:
-        """Evaluate ML-based rule (placeholder for now)"""
+        """Evaluate ML-based rule by calling ML inference endpoint"""
         model_id = rule.get('model_id')
 
         if not model_id:
             logger.warning(f"ML rule {rule['rule_id']} has no model_id")
             return None
 
-        # TODO: Implement ML evaluation in later phase
-        logger.debug(f"ML evaluation not yet implemented for model {model_id}")
-        return None
+        try:
+            # Get anomaly threshold from rule config
+            anomaly_threshold = rule.get('anomaly_threshold', 0.85)
+
+            # Call ML inference endpoint
+            async with aiohttp.ClientSession() as session:
+                inference_url = f"{ML_SERVICE_URL}/api/inference/predict"
+
+                payload = {
+                    "model_id": str(model_id),
+                    "sensor_data": sensor_data,
+                    "threshold": anomaly_threshold
+                }
+
+                # Note: ML service inference endpoint is internal, no auth required
+                # If auth is needed, add headers with service token
+                async with session.post(inference_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 404:
+                        logger.warning(f"Model {model_id} not found for ML evaluation")
+                        return None
+                    elif response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"ML inference failed: {response.status} - {error_text}")
+                        return None
+
+                    result = await response.json()
+
+            # Check if anomaly detected
+            if not result.get('is_anomaly'):
+                return None
+
+            # Create alert
+            timestamp = sensor_data.get('time') or sensor_data.get('timestamp')
+            if isinstance(timestamp, str):
+                timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            elif not timestamp:
+                timestamp = datetime.utcnow()
+
+            anomaly_score = result.get('prediction')
+
+            alert = {
+                'company_id': company_id,
+                'rule_id': str(rule['rule_id']),
+                'sensor_id': str(sensor_data['sensor_id']),
+                'equipment_id': str(sensor_data.get('equipment_id')) if sensor_data.get('equipment_id') else None,
+                'site_id': sensor_data.get('site_id'),
+                'triggered_at': timestamp,
+                'detection_type': 'ml',
+                'actual_value': sensor_data.get('value'),
+                'predicted_value': anomaly_score,
+                'threshold_value': anomaly_threshold,
+                'condition': 'ml_anomaly',
+                'severity': rule.get('severity', 'medium'),
+                'message': f"ML anomaly detected: {rule['name']} - Anomaly score {anomaly_score:.4f} exceeds threshold {anomaly_threshold}"
+            }
+
+            logger.info(f"ML alert triggered: {alert['message']}")
+            return alert
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Failed to connect to ML service: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"ML evaluation failed: {e}", exc_info=True)
+            return None
 
     def _evaluate_statistical(
         self,

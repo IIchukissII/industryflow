@@ -62,7 +62,83 @@ class MLRepository:
                 {**dict(row), 'company_id': company_id}
                 for row in rows
             ]
-    
+
+    async def create_model(
+        self,
+        company_id: str,
+        model_data: Dict[str, Any]
+    ) -> Optional[str]:
+        """Create a new model entry"""
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            # Build INSERT query dynamically based on provided fields
+            # Note: company_id is NOT in table, it's implied by schema
+            fields = []
+            values = []
+            placeholders = []
+
+            field_mapping = {
+                'equipment_id': 'equipment_id',
+                'model_name': 'model_name',
+                'model_version': 'model_version',
+                'model_type': 'model_type',
+                'model_path': 'model_path',
+                'status': 'status',
+                'mlflow_run_id': 'mlflow_run_id',
+                'mlflow_experiment_id': 'mlflow_experiment_id',
+                'accuracy': 'accuracy',
+                'precision_score': 'precision_score',
+                'recall': 'recall',
+                'f1_score': 'f1_score',
+                'auc_roc': 'auc_roc',
+                'training_metrics': 'training_metrics',
+                'hyperparameters': 'hyperparameters',
+                'feature_names': 'feature_names',
+                'sensor_ids': 'sensor_ids',
+                'training_samples': 'training_samples',
+                'training_start_date': 'training_start_date',
+                'training_end_date': 'training_end_date',
+                'training_duration_seconds': 'training_duration_seconds'
+            }
+
+            for key, db_field in field_mapping.items():
+                if key in model_data and model_data[key] is not None:
+                    fields.append(db_field)
+                    value = model_data[key]
+
+                    # Convert to proper types for database
+                    if key == 'model_version' and isinstance(value, str):
+                        # model_version DB column is integer, extract major version
+                        try:
+                            value = int(value.split('.')[0])
+                        except (ValueError, AttributeError):
+                            value = 1  # Default to version 1
+
+                    values.append(value)
+                    placeholders.append(f'${len(values)}')
+
+            query = f"""
+                INSERT INTO ml_models ({', '.join(fields)})
+                VALUES ({', '.join(placeholders)})
+                RETURNING model_id
+            """
+
+            try:
+                logger.info(f"Inserting model with fields: {fields}")
+                logger.info(f"Values: {values}")
+                logger.info(f"Query: {query}")
+                model_id = await conn.fetchval(query, *values)
+                logger.info(f"Model created: {model_id} in schema {schema_name}")
+                return str(model_id)
+            except Exception as e:
+                logger.error(f"Failed to create model: {e}")
+                logger.error(f"Fields were: {fields}")
+                logger.error(f"Values were: {values}")
+                return None
+
     async def get_model_by_id(
         self,
         company_id: str,

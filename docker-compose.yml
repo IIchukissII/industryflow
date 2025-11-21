@@ -442,6 +442,10 @@ services:
       JWT_ALGORITHM: ${JWT_ALGORITHM}
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
       MODEL_DIR: /app/models
+      # MinIO/S3 credentials for loading models from MLflow
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      MLFLOW_S3_ENDPOINT_URL: ${MINIO_ENDPOINT}
     volumes:
       - ml-models:/app/models
     networks:

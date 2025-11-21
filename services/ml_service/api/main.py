@@ -11,7 +11,7 @@ from pathlib import Path
 
 import config
 from repository import MLRepository, MLflowRepository
-from routers import health_router, models_router, mlflow_router
+from routers import health_router, models_router, mlflow_router, inference_router
 
 # Configure logging
 logging.basicConfig(
@@ -50,6 +50,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(models_router)
 app.include_router(mlflow_router)
+app.include_router(inference_router)
 
 
 # ============================================================================

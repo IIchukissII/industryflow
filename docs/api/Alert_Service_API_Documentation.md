@@ -1111,10 +1111,14 @@ All three detection types have been tested and verified:
 - Supports legacy `threshold_min`/`threshold_max` format
 - Successfully triggers alerts when conditions are met
 
-✅ **ML Detection** - Framework ready
-- Model registration and management working
+✅ **ML Detection** - Fully functional
+- Model registration and management fully functional
+- MLflow integration complete with experiment tracking
+- Models registered and stored in database
 - Alert rule creation with `model_id` working
-- Actual ML evaluation to be implemented in Phase 2d
+- **ML inference endpoint implemented** (`POST /api/inference/predict`)
+- Rules engine calls ML service for real-time anomaly detection
+- Alerts triggered when anomaly score exceeds threshold
 
 ✅ **Statistical Detection** - Framework ready
 - Alert rule creation working
@@ -1166,17 +1170,42 @@ The following schema conflicts were resolved:
 ### 11.4 Known Limitations
 
 **Current Limitations:**
-- ML evaluation not yet implemented (planned for Phase 2d)
 - Statistical evaluation methods not yet implemented
 - Alert detector consumes only from Kafka (not database polling)
 - No alert aggregation or de-duplication yet
+- ML models must be trained and registered in MLflow before use
 
 **Workarounds:**
-- ML and statistical rules can be created but won't trigger alerts yet
-- Use threshold detection for production alerting
+- Statistical rules can be created but won't trigger alerts yet
+- Train models using notebooks in `services/ml_service/notebooks/experiments/`
 - Implement custom aggregation logic in consuming applications
 
-### 11.5 Ingestion Service Integration
+### 11.5 ML Inference Integration
+
+**ML Service Endpoint:** `POST http://localhost:8002/api/inference/predict`
+
+**Flow:**
+1. Alert detector receives sensor data from Kafka
+2. Rules engine identifies ML-based alert rules matching the sensor
+3. Rules engine calls ML service inference endpoint with sensor data
+4. ML service loads model from MLflow using `mlflow_run_id`
+5. ML service returns anomaly score (0-1)
+6. If score > threshold, alert is created and stored
+
+**Alert Fields for ML Detection:**
+- `detection_type`: "ml"
+- `predicted_value`: Anomaly score from ML model
+- `threshold_value`: Anomaly threshold from rule config
+- `condition`: "ml_anomaly"
+- `message`: Includes anomaly score and threshold
+
+**Requirements:**
+- Models must be trained and registered in MLflow
+- Models must have `mlflow_run_id` in database
+- Model status must be 'production' or 'active'
+- ML service must be accessible from alert detector
+
+### 11.6 Ingestion Service Integration
 
 **Endpoint:** `POST http://localhost:8003/ingest`
 

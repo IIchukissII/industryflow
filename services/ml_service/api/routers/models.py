@@ -55,6 +55,32 @@ class ModelListResponse(BaseModel):
     models: List[ModelMetadata]
 
 
+class ModelCreateRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    equipment_id: Optional[str] = None
+    model_name: str
+    model_version: str
+    model_type: str
+    model_path: Optional[str] = None
+    status: str = "training"
+    accuracy: Optional[float] = None
+    precision_score: Optional[float] = None
+    recall: Optional[float] = None
+    f1_score: Optional[float] = None
+    auc_roc: Optional[float] = None
+    training_metrics: Optional[Dict[str, Any]] = None
+    hyperparameters: Optional[Dict[str, Any]] = None
+    feature_names: Optional[List[str]] = None
+    sensor_ids: Optional[List[str]] = None
+    training_samples: Optional[int] = None
+    training_start_date: Optional[datetime] = None
+    training_end_date: Optional[datetime] = None
+    training_duration_seconds: Optional[int] = None
+    mlflow_run_id: Optional[str] = None
+    mlflow_experiment_id: Optional[str] = None
+
+
 class ModelDeployRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
@@ -110,6 +136,37 @@ async def get_company_id_dependency(
 # API Endpoints
 # ============================================================================
 
+@router.post("", status_code=201)
+async def create_model(
+    model_data: ModelCreateRequest,
+    request: Request,
+    company_id: str = Depends(get_company_id_dependency)
+):
+    """
+    Register a new trained model
+    Called after model training to register metadata
+    """
+    repository = request.app.state.ml_repository
+
+    # Create model in database
+    model_id = await repository.create_model(
+        company_id=company_id,
+        model_data=model_data.model_dump()
+    )
+
+    if not model_id:
+        raise HTTPException(status_code=500, detail="Failed to create model")
+
+    logger.info(f"Model registered: {model_id} - {model_data.model_name}")
+
+    return {
+        "status": "success",
+        "model_id": str(model_id),
+        "model_name": model_data.model_name,
+        "created_at": datetime.now().isoformat()
+    }
+
+
 @router.get("", response_model=ModelListResponse)
 async def list_models(
     request: Request,
@@ -122,13 +179,13 @@ async def list_models(
     Schema-per-tenant isolation
     """
     repository = request.app.state.ml_repository
-    
+
     models_data = await repository.get_all_models(
         company_id=company_id,
         status=status,
         limit=limit
     )
-    
+
     models = []
     for data in models_data:
         # Parse JSON fields if stored as strings
@@ -137,15 +194,15 @@ async def list_models(
                 data['training_metrics'] = json.loads(data['training_metrics'])
             except:
                 data['training_metrics'] = None
-        
+
         if isinstance(data.get('hyperparameters'), str):
             try:
                 data['hyperparameters'] = json.loads(data['hyperparameters'])
             except:
                 data['hyperparameters'] = None
-        
+
         models.append(ModelMetadata(**data))
-    
+
     return ModelListResponse(total=len(models), models=models)
 
 
