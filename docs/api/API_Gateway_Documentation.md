@@ -1,10 +1,10 @@
 # IndustryFlow API Gateway - Technical Documentation
 
-**Project:** IndustryFlow v2 - Multi-Tenant IoT Platform  
-**Component:** API Gateway Service  
-**Architecture:** Schema-per-tenant (v5.0)  
-**Author:** Konstantin (Neoversity Master's Thesis)  
-**Last Updated:** November 8, 2025
+**Service:** API Gateway
+**Version:** 1.0.0
+**Port:** 8000
+**Architecture:** Schema-per-tenant (v5.0)
+**Date:** November 2025
 
 ---
 
@@ -188,29 +188,9 @@ curl -X GET http://localhost:8000/users/me \
 }
 ```
 
-### Data Ingestion Endpoints
-
-| Method | Endpoint | Description | Authorization |
-|--------|----------|-------------|---------------|
-| POST | `/api/ingest/sensor-data` | Ingest sensor measurements | Bearer Token |
-| GET | `/api/ingest/stats` | Ingestion statistics | Bearer Token |
-
-**Ingestion Request:**
-```json
-{
-  "timestamp": "2025-11-08T00:00:00Z",
-  "sensor_id": "550e8400-e29b-41d4-a716-446655440020",
-  "equipment_id": "550e8400-e29b-41d4-a716-446655440010",
-  "site_id": "factory-1",
-  "value": 45.67,
-  "unit": "°C",
-  "quality_code": 1
-}
-```
-
-**Note:** `company_id` automatically assigned from authenticated user's token.
-
 ### Measurement Endpoints
+
+**Note:** Data ingestion is handled by the separate **Ingestion Service** on port 8003. See Ingestion Service documentation for data ingestion endpoints.
 
 | Method | Endpoint | Description | Authorization |
 |--------|----------|-------------|---------------|
@@ -768,7 +748,6 @@ curl http://localhost:8000/
     "auth_login": "/auth/jwt/login",
     "auth_register": "/auth/register",
     "users_me": "/users/me",
-    "ingest_sensor_data": "/api/ingest/sensor-data",
     "measurements": "/api/measurements",
     "measurements_latest": "/api/measurements/latest",
     "aggregations_1min": "/api/aggregations/1min",
@@ -1262,14 +1241,9 @@ PATCH  /users/me                          # Update current user
 GET    /api/users                         # List all users (admin)
 ```
 
-### Data Ingestion
-
-```
-POST   /api/ingest/sensor-data            # Ingest sensor data
-GET    /api/ingest/stats                  # Ingestion stats
-```
-
 ### Measurements
+
+**Note:** For sensor data ingestion, use the **Ingestion Service** (port 8003): `POST /ingest`
 
 ```
 GET    /api/measurements                  # List measurements

@@ -124,7 +124,7 @@ class AlertRuleRepository:
                 rule_data.threshold_max,
                 rule_data.model_id,
                 rule_data.anomaly_threshold,
-                json.dumps(rule_data.ml_config) if rule_data.ml_config else None,
+                json.dumps(rule_data.model_config) if rule_data.model_config else None,
                 rule_data.severity.value,
                 rule_data.priority,
                 rule_data.enabled,
@@ -281,7 +281,7 @@ class AlertRuleRepository:
         params = [mode_switch.detection_type.value]
         param_count = 2
 
-        if mode_switch.detection_type in [DetectionType.THRESHOLD, DetectionType.HYBRID]:
+        if mode_switch.detection_type == DetectionType.THRESHOLD:
             if mode_switch.condition is not None:
                 update_fields.append(f"condition = ${param_count}")
                 params.append(mode_switch.condition.value)
@@ -302,7 +302,7 @@ class AlertRuleRepository:
                 params.append(mode_switch.threshold_max)
                 param_count += 1
 
-        if mode_switch.detection_type in [DetectionType.ML_MODEL, DetectionType.HYBRID]:
+        if mode_switch.detection_type == DetectionType.ML:
             if mode_switch.model_id is not None:
                 update_fields.append(f"model_id = ${param_count}")
                 params.append(mode_switch.model_id)

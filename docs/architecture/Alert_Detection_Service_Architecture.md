@@ -1,9 +1,10 @@
 # Alert Detection Service - Technical Documentation
-## Schema-per-Tenant Architecture
 
-**Version:** 2.0  
-**Architecture Pattern:** Schema-per-Tenant Multi-Tenancy  
-**Processing Model:** Event-Driven Real-Time Detection
+**Service:** Alert Detection Service
+**Version:** 2.0.0
+**Port:** 8001 (API), Kafka Consumer (Worker)
+**Architecture:** Schema-per-tenant (v5.0)
+**Date:** November 2025
 
 ---
 

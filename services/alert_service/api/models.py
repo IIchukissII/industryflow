@@ -23,9 +23,8 @@ class SafeBaseModel(BaseModel):
 class DetectionType(str, Enum):
     """Alert detection method"""
     THRESHOLD = "threshold"
-    ML_MODEL = "ml_model"
-    HYBRID = "hybrid"
-    DISABLED = "disabled"
+    ML = "ml"
+    STATISTICAL = "statistical"
 
 
 class Condition(str, Enum):
@@ -107,7 +106,7 @@ class AlertRuleBase(SafeBaseModel):
     # ML fields
     model_id: Optional[UUID] = None
     anomaly_threshold: Optional[float] = Field(default=0.85, ge=0.0, le=1.0)
-    ml_config: Optional[Dict[str, Any]] = None
+    model_config: Optional[Dict[str, Any]] = None
 
     # Alert configuration
     severity: Severity
@@ -146,7 +145,7 @@ class AlertRuleUpdate(SafeBaseModel):
 
     model_id: Optional[UUID] = None
     anomaly_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    ml_config: Optional[Dict[str, Any]] = None
+    model_config: Optional[Dict[str, Any]] = None
 
     severity: Optional[Severity] = None
     priority: Optional[int] = Field(default=None, ge=0)
@@ -229,6 +228,7 @@ class AlertBase(SafeBaseModel):
     # ML details
     model_id: Optional[UUID] = None
     anomaly_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    affected_sensors: Optional[List[str]] = None
 
     severity: Severity
     message: str
@@ -291,4 +291,4 @@ class DetectionModeSwitch(SafeBaseModel):
     # Optional: new ML configuration
     model_id: Optional[UUID] = None
     anomaly_threshold: Optional[float] = Field(default=0.85, ge=0.0, le=1.0)
-    ml_config: Optional[Dict[str, Any]] = None
+    model_config: Optional[Dict[str, Any]] = None

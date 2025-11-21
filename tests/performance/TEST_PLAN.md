@@ -1,5 +1,11 @@
 # IndustryFlow Throughput Scalability Test Plan
 
+**Version:** 1.0.0
+**Architecture:** Schema-per-tenant (v5.0)
+**Date:** November 2025
+
+---
+
 ## Objective
 Demonstrate horizontal scalability by testing system throughput with incremental resource increases.
 
@@ -15,11 +21,11 @@ Demonstrate horizontal scalability by testing system throughput with incremental
 
 ### Phase 2: Ingestion Workers Scaling (Fixed Load: 500 msg/sec, 12 partitions)
 | Test ID | Kafka Partitions | Ingestion Workers | Duration | Expected Throughput |
-|---------|------------------|-------------------|----------|-------------------|
-| W1      | 3                | 1                 | 5 min    | Baseline (K4)     |
-| W2      | 3                | 2                 | 5 min    | ~2x improvement   |
-| W3      | 3                | 4                 | 5 min    | ~4x improvement   |
-| W4      | 3                | 8                 | 5 min    | ~8x improvement   |
+|---------|--------------|-------------------|----------|-------------------|
+| W1      | 3            | 1                 | 5 min    | Baseline (K4)     |
+| W2      | 3            | 2                 | 5 min    | ~2x improvement   |
+| W3      | 3            | 4                 | 5 min    | ~4x improvement   |
+| W4      | 3            | 8                 | 5 min    | ~8x improvement   |
 
 ### Phase 3: Saturation Tests (Push to limit)
 | Test ID | Kafka Partitions | Ingestion Workers | Target Load | Duration |

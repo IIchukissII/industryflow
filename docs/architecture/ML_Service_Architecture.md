@@ -1,8 +1,10 @@
 # ML Service Architecture Documentation
 
-**Version:** 2.0.0  
-**Architecture:** Schema-per-tenant Multi-Database  
-**Date:** November 8, 2025
+**Service:** ML Service
+**Version:** 2.0.0
+**Port:** 8002
+**Architecture:** Schema-per-tenant (v5.0)
+**Date:** November 2025
 
 ---
 

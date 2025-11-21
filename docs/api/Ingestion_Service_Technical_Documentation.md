@@ -1,10 +1,10 @@
 # Ingestion Service - Technical Documentation
 
-**Service:** Ingestion Service  
-**Version:** 1.0.0  
-**Port:** 8003  
-**Protocol:** HTTP/REST  
-**Authentication:** JWT Bearer Token
+**Service:** Ingestion Service
+**Version:** 1.0.0
+**Port:** 8003
+**Architecture:** Schema-per-tenant (v5.0)
+**Date:** November 2025
 
 ---
 

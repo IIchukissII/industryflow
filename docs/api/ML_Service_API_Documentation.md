@@ -1,8 +1,10 @@
 # ML Service API Documentation
 
-**Version:** 2.0.0  
-**Architecture:** Schema-per-tenant  
-**Date:** November 8, 2025
+**Service:** ML Service API
+**Version:** 2.0.0
+**Port:** 8002
+**Architecture:** Schema-per-tenant (v5.0)
+**Date:** November 2025
 
 ---
 

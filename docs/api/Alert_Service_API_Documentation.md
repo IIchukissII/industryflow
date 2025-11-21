@@ -1,10 +1,10 @@
 # Alert Service API - Usage Documentation
 
-**Version:** 2.0.0  
-**Base URL:** `http://localhost:8001`  
-**Authentication:** JWT Bearer Token  
-**Architecture:** Schema-per-tenant (multi-tenant isolation)  
-**Date:** November 8, 2025
+**Service:** Alert Service API
+**Version:** 2.0.0
+**Port:** 8001
+**Architecture:** Schema-per-tenant (v5.0)
+**Date:** November 2025
 
 ---
 
@@ -75,7 +75,7 @@ curl -X GET http://localhost:8001/api/alert-rules \
 **Query Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| detection_type | string | No | Filter by: threshold, ml_model, hybrid, disabled |
+| detection_type | string | No | Filter by: threshold, ml, statistical |
 
 **Response:** `200 OK`
 ```json
@@ -96,7 +96,7 @@ curl -X GET http://localhost:8001/api/alert-rules \
     "threshold_max": null,
     "model_id": null,
     "anomaly_threshold": 0.7,
-    "ml_config": null,
+    "model_config": null,
     "severity": "high",
     "priority": 3,
     "enabled": true,
@@ -156,7 +156,7 @@ curl -X POST http://localhost:8001/api/alert-rules \
 | Field | Type | Description |
 |-------|------|-------------|
 | name | string | Rule name (unique per company) |
-| detection_type | enum | threshold, ml_model, hybrid, disabled |
+| detection_type | enum | threshold, ml, statistical |
 | severity | enum | low, medium, high, critical |
 
 **Optional:**
@@ -171,9 +171,9 @@ curl -X POST http://localhost:8001/api/alert-rules \
 | threshold | float | Single threshold value |
 | threshold_min | float | Lower bound for range |
 | threshold_max | float | Upper bound for range |
-| model_id | UUID | ML model reference (for ml_model/hybrid types) |
+| model_id | UUID | ML model reference (for ml type) |
 | anomaly_threshold | float | ML anomaly score threshold (0.0-1.0, default: 0.85) |
-| ml_config | object | ML model configuration JSON |
+| model_config | object | ML model configuration JSON |
 | priority | integer | Rule priority (default: 0) |
 | enabled | boolean | Active status (default: true) |
 | created_by | string | Creator identifier |
@@ -262,7 +262,7 @@ curl -X PATCH http://localhost:8001/api/alert-rules/{rule_id}/detection-mode \
   -H "Authorization: Bearer {token}" \
   -H "Content-Type: application/json" \
   -d '{
-    "detection_type": "ml_model",
+    "detection_type": "ml",
     "model_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
     "anomaly_threshold": 0.9
   }'
@@ -498,7 +498,7 @@ curl -X GET "http://localhost:8001/api/alerts?severity=critical&limit=50" \
 | sensor_id | UUID | No | Filter by sensor |
 | equipment_id | UUID | No | Filter by equipment |
 | severity | enum | No | low, medium, high, critical |
-| detection_type | enum | No | threshold, ml_model, hybrid |
+| detection_type | enum | No | threshold, ml, statistical |
 | acknowledged | boolean | No | Filter by acknowledgment status |
 | limit | integer | No | Max results (1-1000, default: 100) |
 
@@ -619,8 +619,8 @@ curl -X GET http://localhost:8001/api/alerts/stats \
   },
   "by_detection_type": {
     "threshold": 1200,
-    "ml_model": 300,
-    "hybrid": 23
+    "ml": 300,
+    "statistical": 23
   },
   "by_acknowledgment": {
     "acknowledged": 1400,
@@ -649,18 +649,18 @@ curl -X GET http://localhost:8001/api/alerts/stats \
   site_id: string?,           // Site identifier
   
   // Detection Configuration
-  detection_type: enum,       // threshold | ml_model | hybrid | disabled
+  detection_type: enum,       // threshold | ml | statistical
   
-  // Threshold Fields (required for threshold/hybrid)
+  // Threshold Fields (required for threshold mode)
   condition: enum?,           // greater_than | less_than | equals | not_equals | between | outside_range
   threshold: float?,          // Single threshold
   threshold_min: float?,      // Range lower bound
   threshold_max: float?,      // Range upper bound
-  
-  // ML Fields (required for ml_model/hybrid)
+
+  // ML Fields (required for ml mode)
   model_id: UUID?,            // ML model reference
   anomaly_threshold: float?,  // 0.0-1.0, default: 0.85
-  ml_config: object?,         // ML configuration JSON
+  model_config: object?,      // ML configuration JSON
   
   // Metadata
   severity: enum,             // low | medium | high | critical
@@ -737,7 +737,7 @@ curl -X GET http://localhost:8001/api/alerts/stats \
   site_id: string?,              // Site identifier
   
   // Detection Details
-  detection_type: enum,          // threshold | ml_model | hybrid
+  detection_type: enum,          // threshold | ml | statistical
   
   // Threshold Detection (if applicable)
   threshold_value: float?,       // Expected threshold
@@ -925,7 +925,7 @@ curl -X POST http://localhost:8001/api/alert-rules \
     "name": "ML Anomaly Detection - Pump",
     "description": "Detects anomalies using trained ML model",
     "equipment_id": "550e8400-e29b-41d4-a716-446655440010",
-    "detection_type": "ml_model",
+    "detection_type": "ml",
     "model_id": "'$MODEL_ID'",
     "anomaly_threshold": 0.9,
     "severity": "critical",
@@ -934,17 +934,15 @@ curl -X POST http://localhost:8001/api/alert-rules \
   }'
 ```
 
-**Step 4:** Switch rule to hybrid mode (both threshold and ML)
+**Step 4:** Switch rule to statistical mode
 ```bash
 curl -X PATCH http://localhost:8001/api/alert-rules/{rule_id}/detection-mode \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "detection_type": "hybrid",
-    "condition": "greater_than",
-    "threshold": 100.0,
-    "model_id": "'$MODEL_ID'",
-    "anomaly_threshold": 0.85
+    "detection_type": "statistical",
+    "anomaly_threshold": 0.85,
+    "model_config": {"method": "zscore", "window": 100}
   }'
 ```
 

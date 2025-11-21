@@ -1,10 +1,9 @@
 # IndustryFlow Database Architecture Documentation
 
-**Version:** 5.0  
-**Architecture:** Schema-Per-Tenant Multi-Tenant Isolation  
-**Database System:** TimescaleDB (PostgreSQL 15 + TimescaleDB Extension)  
-**Date:** November 7, 2025  
-**Author:** System Architecture Team
+**Version:** 5.0.0
+**Architecture:** Schema-per-tenant (v5.0)
+**Database System:** TimescaleDB (PostgreSQL 15 + TimescaleDB Extension)
+**Date:** November 2025
 
 ---
 

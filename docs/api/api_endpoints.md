@@ -1,9 +1,10 @@
 # API Gateway - API Reference & Usage Guide
 
-**Component:** IndustryFlow API Gateway Service  
-**API Version:** 1.0  
-**Base URL:** `http://localhost:8000`  
-**Date:** November 10, 2025
+**Service:** API Gateway
+**Version:** 1.0.0
+**Port:** 8000
+**Architecture:** Schema-per-tenant (v5.0)
+**Date:** November 2025
 
 ---
 

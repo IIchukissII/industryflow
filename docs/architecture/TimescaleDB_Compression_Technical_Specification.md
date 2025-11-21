@@ -1,9 +1,9 @@
 # TimescaleDB Compression Technical Specification
 
-**Version:** 1.0  
-**System:** IndustryFlow IoT Platform  
-**Database:** TimescaleDB (PostgreSQL 15 + TimescaleDB Extension)  
-**Date:** November 15, 2025
+**Version:** 1.0.0
+**System:** IndustryFlow IoT Platform
+**Architecture:** Schema-per-tenant (v5.0)
+**Date:** November 2025
 
 ---
 
