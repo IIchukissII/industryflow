@@ -99,11 +99,19 @@ class AlertKafkaConsumer:
     async def _publish_alert(self, alert: dict):
         """Publish alert to Kafka"""
         try:
+            # Convert datetime objects to ISO format strings for JSON serialization
+            serializable_alert = {}
+            for key, value in alert.items():
+                if isinstance(value, datetime):
+                    serializable_alert[key] = value.isoformat()
+                else:
+                    serializable_alert[key] = value
+
             await self.producer.send_and_wait(
                 self.config.KAFKA_TOPIC_ALERTS,
-                value=alert
+                value=serializable_alert
             )
-            logger.debug(f"Published alert: {alert['alert_id']}")
+            logger.info(f"Published alert for rule {alert['rule_id']}")
         except Exception as e:
             logger.error(f"Failed to publish alert: {e}", exc_info=True)
     

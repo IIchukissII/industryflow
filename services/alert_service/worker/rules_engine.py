@@ -116,46 +116,71 @@ class RulesEngine:
         return applicable
     
     async def _evaluate_rule(
-        self, 
-        sensor_data: Dict[str, Any], 
-        rule: Dict, 
+        self,
+        sensor_data: Dict[str, Any],
+        rule: Dict,
         company_id: str
     ) -> Optional[Dict]:
         """Evaluate a single rule"""
         detection_type = rule.get('detection_type', 'threshold')
-        
+
         if detection_type == 'threshold':
             return self._evaluate_threshold(sensor_data, rule, company_id)
         elif detection_type == 'ml':
             return await self._evaluate_ml(sensor_data, rule, company_id)
+        elif detection_type == 'statistical':
+            return self._evaluate_statistical(sensor_data, rule, company_id)
         else:
             logger.warning(f"Unknown detection type: {detection_type}")
             return None
     
     def _evaluate_threshold(
-        self, 
-        sensor_data: Dict[str, Any], 
+        self,
+        sensor_data: Dict[str, Any],
         rule: Dict,
         company_id: str
     ) -> Optional[Dict]:
         """Evaluate threshold-based rule"""
         value = sensor_data['value']
+
+        # Support both old (threshold_min/max) and new (condition/threshold) formats
+        condition = rule.get('condition')
+        threshold = rule.get('threshold')
         threshold_min = rule.get('threshold_min')
         threshold_max = rule.get('threshold_max')
-        
+
         triggered = False
-        condition = None
+        condition_str = None
         threshold_value = None
-        
-        if threshold_min is not None and value < threshold_min:
+
+        # New format: condition + threshold
+        if condition and threshold is not None:
+            if condition == 'greater_than' and value > threshold:
+                triggered = True
+                condition_str = 'greater_than'
+                threshold_value = threshold
+            elif condition == 'less_than' and value < threshold:
+                triggered = True
+                condition_str = 'less_than'
+                threshold_value = threshold
+            elif condition == 'equals' and value == threshold:
+                triggered = True
+                condition_str = 'equals'
+                threshold_value = threshold
+            elif condition == 'not_equals' and value != threshold:
+                triggered = True
+                condition_str = 'not_equals'
+                threshold_value = threshold
+        # Old format: threshold_min/max
+        elif threshold_min is not None and value < threshold_min:
             triggered = True
-            condition = 'below_min'
+            condition_str = 'below_min'
             threshold_value = threshold_min
         elif threshold_max is not None and value > threshold_max:
             triggered = True
-            condition = 'above_max'
+            condition_str = 'above_max'
             threshold_value = threshold_max
-        
+
         if not triggered:
             return None
         
@@ -165,7 +190,7 @@ class RulesEngine:
             timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
         elif not timestamp:
             timestamp = datetime.utcnow()
-        
+
         alert = {
             'company_id': company_id,
             'rule_id': str(rule['rule_id']),
@@ -176,27 +201,38 @@ class RulesEngine:
             'detection_type': 'threshold',
             'actual_value': value,
             'threshold_value': threshold_value,
-            'condition': condition,
+            'condition': condition_str,
             'severity': rule.get('severity', 'medium'),
-            'message': f"Threshold alert: {rule['name']} - Value {value:.2f} is {condition.replace('_', ' ')}"
+            'message': f"Threshold alert: {rule['name']} - Value {value:.2f} is {condition_str.replace('_', ' ')}"
         }
-        
+
         logger.info(f"Threshold alert triggered: {alert['message']}")
         return alert
     
     async def _evaluate_ml(
-        self, 
-        sensor_data: Dict[str, Any], 
+        self,
+        sensor_data: Dict[str, Any],
         rule: Dict,
         company_id: str
     ) -> Optional[Dict]:
         """Evaluate ML-based rule (placeholder for now)"""
         model_id = rule.get('model_id')
-        
+
         if not model_id:
             logger.warning(f"ML rule {rule['rule_id']} has no model_id")
             return None
-        
+
         # TODO: Implement ML evaluation in later phase
         logger.debug(f"ML evaluation not yet implemented for model {model_id}")
+        return None
+
+    def _evaluate_statistical(
+        self,
+        sensor_data: Dict[str, Any],
+        rule: Dict,
+        company_id: str
+    ) -> Optional[Dict]:
+        """Evaluate statistical-based rule (placeholder for now)"""
+        # TODO: Implement statistical evaluation (z-score, moving average, etc.)
+        logger.debug(f"Statistical evaluation not yet implemented for rule {rule['rule_id']}")
         return None

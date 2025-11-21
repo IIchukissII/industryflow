@@ -1100,4 +1100,100 @@ Currently no rate limiting implemented. Consider implementing:
 
 ---
 
+## 11. Testing & Verification
+
+### 11.1 Detection Types Verified
+
+All three detection types have been tested and verified:
+
+✅ **Threshold Detection** - Fully functional
+- Supports `condition` field: `greater_than`, `less_than`, `equals`, `not_equals`
+- Supports legacy `threshold_min`/`threshold_max` format
+- Successfully triggers alerts when conditions are met
+
+✅ **ML Detection** - Framework ready
+- Model registration and management working
+- Alert rule creation with `model_id` working
+- Actual ML evaluation to be implemented in Phase 2d
+
+✅ **Statistical Detection** - Framework ready
+- Alert rule creation working
+- Statistical evaluation methods to be implemented
+
+### 11.2 End-to-End Alert Flow
+
+**Verified Flow:**
+1. Sensor data sent to Ingestion Service (`POST /ingest`)
+2. Ingestion Service publishes to Kafka topic `sensor-data-raw`
+3. Alert Detector consumes from Kafka
+4. Alert Detector evaluates rules against sensor data
+5. Matching alerts saved to database
+6. Alerts published to Kafka topic `sensor-alerts`
+7. Alerts retrievable via API (`GET /api/alerts`)
+
+**Verified Capabilities:**
+- Alerts successfully created when sensor values exceed thresholds
+- Alerts stored in tenant-specific schema tables
+- Alert data published to Kafka topic for downstream consumers
+- Alerts include full context: sensor_id, equipment_id, rule_id, severity
+
+### 11.3 Schema Fixes Applied (November 2025)
+
+The following schema conflicts were resolved:
+
+**DetectionType Enum:**
+- Database CHECK constraint: `('threshold', 'ml', 'statistical')`
+- API models aligned with database constraints
+- Rules engine supports all three types
+
+**Model Configuration Field:**
+- Field renamed: `ml_model_config` in Python code
+- Database column: `model_config` (unchanged)
+- Pydantic alias applied: `Field(alias="model_config")`
+- Resolves Pydantic v2 reserved keyword conflict
+
+**Company ID Handling:**
+- Not required in creation requests (injected from JWT)
+- Included in response models for client context
+- Automatically resolved via tenant schema lookup
+
+**Authentication Flow:**
+1. JWT token validated (contains user_id)
+2. User's company_id queried from tenant schemas
+3. Database search_path set to `tenant_{company_uuid}`
+4. All queries automatically scoped to correct tenant
+
+### 11.4 Known Limitations
+
+**Current Limitations:**
+- ML evaluation not yet implemented (planned for Phase 2d)
+- Statistical evaluation methods not yet implemented
+- Alert detector consumes only from Kafka (not database polling)
+- No alert aggregation or de-duplication yet
+
+**Workarounds:**
+- ML and statistical rules can be created but won't trigger alerts yet
+- Use threshold detection for production alerting
+- Implement custom aggregation logic in consuming applications
+
+### 11.5 Ingestion Service Integration
+
+**Endpoint:** `POST http://localhost:8003/ingest`
+
+**Required Fields:**
+```json
+{
+  "sensor_id": "UUID",
+  "equipment_id": "UUID",
+  "site_id": "string (min 1 char)",
+  "timestamp": "ISO 8601",
+  "value": "float",
+  "unit": "string"
+}
+```
+
+**Note:** All sensor data must flow through the Ingestion Service to trigger alerts. Direct database inserts will not trigger the alert detector.
+
+---
+
 **END OF DOCUMENTATION**

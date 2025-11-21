@@ -26,18 +26,22 @@ async def get_current_user(
     
     try:
         token = credentials.credentials
+        print(f"🔍 Token received: {token[:50]}... (length: {len(token)}, segments: {len(token.split('.'))})")
+        print(f"🔑 JWT_SECRET_KEY length: {len(Config.JWT_SECRET_KEY) if Config.JWT_SECRET_KEY else 'NOT SET'}")
+        print(f"🔒 JWT_ALGORITHM: {Config.JWT_ALGORITHM}")
+
         payload = jwt.decode(
             token,
             Config.JWT_SECRET_KEY,
             algorithms=[Config.JWT_ALGORITHM],
             options={"verify_aud": False}
         )
-        
+
         user_id: str = payload.get("sub")
-        
+
         if user_id is None:
             raise credentials_exception
-        
+
         return {
             "user_id": user_id,
             "payload": payload
@@ -58,35 +62,30 @@ async def get_company_id(
 ) -> str:
     """
     Extract company_id by querying all tenant schemas for the user.
-    Used as dependency in routes for schema routing.
+    Matches Ingestion Service implementation.
     """
     user_id = current_user["user_id"]
-    
+
     async with db_pool.acquire() as conn:
-        # Get all tenant schemas
+        # Search all tenant schemas for user
         schemas = await conn.fetch("""
-            SELECT schema_name 
-            FROM information_schema.schemata 
+            SELECT schema_name FROM information_schema.schemata
             WHERE schema_name LIKE 'tenant_%'
         """)
-        
-        # Search each schema for this user
+
         for schema_row in schemas:
             schema_name = schema_row['schema_name']
-            
-            # Set search path and check if user exists
             await conn.execute(f"SET search_path TO {schema_name}, public")
-            
-            company_id_from_user = await conn.fetchval(
+
+            company_id = await conn.fetchval(
                 'SELECT company_id FROM "user" WHERE id = $1',
                 user_id
             )
-            
-            if company_id_from_user:
-                return str(company_id_from_user)
-        
-        # User not found in any tenant
+
+            if company_id:
+                return str(company_id)
+
         raise HTTPException(
             status_code=403,
-            detail="User has no company association"
+            detail="User not found in any tenant"
         )

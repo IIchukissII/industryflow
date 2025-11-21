@@ -14,7 +14,7 @@ import uuid
 
 class SafeBaseModel(BaseModel):
     """Base class for all Pydantic models with safe namespaces."""
-    model_config = ConfigDict(protected_namespaces=())
+    model_config = ConfigDict(protected_namespaces=(), populate_by_name=True)
 
 # ============================================================================
 # Enums
@@ -65,18 +65,9 @@ class ModelStatus(str, Enum):
 # ============================================================================
 
 class AlertRuleBase(SafeBaseModel):
-    """Base alert rule fields"""
-    company_id: str
+    """Base alert rule fields (without company_id for creation)"""
     name: str
     description: Optional[str] = None
-
-    @field_validator('company_id', mode='before')
-    @classmethod
-    def convert_uuid_to_str(cls, v):
-        """Convert UUID objects to strings"""
-        if isinstance(v, uuid.UUID):
-            return str(v)
-        return v
 
     @field_validator('sensor_id', 'equipment_id', mode='before')
     @classmethod
@@ -106,7 +97,7 @@ class AlertRuleBase(SafeBaseModel):
     # ML fields
     model_id: Optional[UUID] = None
     anomaly_threshold: Optional[float] = Field(default=0.85, ge=0.0, le=1.0)
-    model_config: Optional[Dict[str, Any]] = None
+    ml_model_config: Optional[Dict[str, Any]] = Field(default=None, alias="model_config")
 
     # Alert configuration
     severity: Severity
@@ -145,7 +136,7 @@ class AlertRuleUpdate(SafeBaseModel):
 
     model_id: Optional[UUID] = None
     anomaly_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    model_config: Optional[Dict[str, Any]] = None
+    ml_model_config: Optional[Dict[str, Any]] = Field(default=None, alias="model_config")
 
     severity: Optional[Severity] = None
     priority: Optional[int] = Field(default=None, ge=0)
@@ -155,9 +146,18 @@ class AlertRuleUpdate(SafeBaseModel):
 class AlertRule(AlertRuleBase):
     """Complete alert rule with metadata"""
     rule_id: UUID
+    company_id: str  # Added for response model
     created_at: datetime
     updated_at: datetime
     created_by: Optional[str] = None
+
+    @field_validator('company_id', mode='before')
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        """Convert UUID objects to strings"""
+        if isinstance(v, uuid.UUID):
+            return str(v)
+        return v
 
     class Config:
         from_attributes = True
@@ -211,12 +211,11 @@ class MLModel(MLModelBase):
 # ============================================================================
 
 class AlertBase(SafeBaseModel):
-    """Base alert fields"""
+    """Base alert fields (without company_id for creation)"""
     rule_id: UUID
     sensor_id: Optional[str] = None
     equipment_id: Optional[str] = None
     site_id: Optional[str] = None
-    company_id: str
 
     detection_type: DetectionType
 
@@ -232,14 +231,6 @@ class AlertBase(SafeBaseModel):
 
     severity: Severity
     message: str
-
-    @field_validator('company_id', mode='before')
-    @classmethod
-    def convert_uuid_to_str(cls, v):
-        """Convert UUID objects to strings"""
-        if isinstance(v, uuid.UUID):
-            return str(v)
-        return v
 
     @field_validator('sensor_id', 'equipment_id', mode='before')
     @classmethod
@@ -260,11 +251,20 @@ class AlertCreate(AlertBase):
 class Alert(AlertBase):
     """Complete alert with metadata"""
     alert_id: UUID
+    company_id: str  # Added for response model
     triggered_at: datetime
     acknowledged: bool = False
     acknowledged_at: Optional[datetime] = None
     acknowledged_by: Optional[str] = None
     created_at: datetime
+
+    @field_validator('company_id', mode='before')
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        """Convert UUID objects to strings"""
+        if isinstance(v, uuid.UUID):
+            return str(v)
+        return v
 
     class Config:
         from_attributes = True
@@ -291,4 +291,4 @@ class DetectionModeSwitch(SafeBaseModel):
     # Optional: new ML configuration
     model_id: Optional[UUID] = None
     anomaly_threshold: Optional[float] = Field(default=0.85, ge=0.0, le=1.0)
-    model_config: Optional[Dict[str, Any]] = None
+    ml_model_config: Optional[Dict[str, Any]] = Field(default=None, alias="model_config")

@@ -124,7 +124,7 @@ class AlertRuleRepository:
                 rule_data.threshold_max,
                 rule_data.model_id,
                 rule_data.anomaly_threshold,
-                json.dumps(rule_data.model_config) if rule_data.model_config else None,
+                json.dumps(rule_data.ml_model_config) if rule_data.ml_model_config else None,
                 rule_data.severity.value,
                 rule_data.priority,
                 rule_data.enabled,
@@ -212,9 +212,9 @@ class AlertRuleRepository:
             params.append(rule_data.anomaly_threshold)
             param_count += 1
 
-        if rule_data.model_config is not None:
+        if rule_data.ml_model_config is not None:
             update_fields.append(f"model_config = ${param_count}")
-            params.append(json.dumps(rule_data.model_config) if rule_data.model_config else None)
+            params.append(json.dumps(rule_data.ml_model_config) if rule_data.ml_model_config else None)
             param_count += 1
 
         if rule_data.severity is not None:
@@ -313,9 +313,9 @@ class AlertRuleRepository:
                 params.append(mode_switch.anomaly_threshold)
                 param_count += 1
 
-            if mode_switch.model_config is not None:
+            if mode_switch.ml_model_config is not None:
                 update_fields.append(f"model_config = ${param_count}")
-                params.append(mode_switch.model_config)
+                params.append(mode_switch.ml_model_config)
                 param_count += 1
 
         query = f"""
