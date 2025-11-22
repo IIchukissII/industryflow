@@ -12,6 +12,7 @@ from config import config
 from repository import RuleRepository, AlertRepository
 from rules_engine import RulesEngine
 from kafka_consumer import AlertKafkaConsumer
+from feature_store import FeatureStore
 
 # Configure logging
 logging.basicConfig(
@@ -26,6 +27,7 @@ class AlertService:
     
     def __init__(self):
         self.db_pool = None
+        self.feature_store = None
         self.rules_engine = None
         self.kafka_consumer = None
         self.running = False
@@ -51,7 +53,17 @@ class AlertService:
             max_size=10,
             command_timeout=60
         )
-        
+
+        # Initialize Feature Store
+        logger.info("Initializing Feature Store...")
+        redis_url = getattr(config, 'REDIS_URL', 'redis://redis:6379/0')
+        self.feature_store = FeatureStore(
+            redis_url=redis_url,
+            max_window=100,
+            ttl_seconds=3600
+        )
+        logger.info(f"Feature Store initialized: {redis_url}")
+
         # Load rules from all tenant schemas
         await self._load_rules()
         
@@ -82,7 +94,8 @@ class AlertService:
         else:
             self.rules_engine = RulesEngine(
                 tenant_rules=tenant_rules,
-                alert_repo=alert_repo
+                alert_repo=alert_repo,
+                feature_store=self.feature_store
             )
     
     async def _periodic_reload(self):
@@ -133,11 +146,16 @@ class AlertService:
         # Stop Kafka consumer
         if self.kafka_consumer:
             await self.kafka_consumer.stop()
-        
+
+        # Close Feature Store
+        if self.feature_store:
+            await self.feature_store.close()
+            logger.info("Feature Store closed")
+
         # Close database pool
         if self.db_pool:
             await self.db_pool.close()
-        
+
         logger.info("Alert Detection Service stopped")
 
 

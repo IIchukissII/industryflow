@@ -26,6 +26,7 @@ class ModelMetadata(BaseModel):
     model_id: str
     company_id: str
     equipment_id: Optional[str] = None
+    equipment_type: Optional[str] = None
     model_name: str
     model_version: str
     model_type: str
@@ -39,6 +40,7 @@ class ModelMetadata(BaseModel):
     training_metrics: Optional[Dict[str, Any]] = None
     hyperparameters: Optional[Dict[str, Any]] = None
     feature_names: Optional[List[str]] = None
+    feature_config_id: Optional[str] = None
     sensor_ids: Optional[List[str]] = None
     training_samples: Optional[int] = None
     training_start_date: Optional[datetime] = None
@@ -59,6 +61,7 @@ class ModelCreateRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     equipment_id: Optional[str] = None
+    equipment_type: Optional[str] = None
     model_name: str
     model_version: str
     model_type: str
@@ -72,6 +75,7 @@ class ModelCreateRequest(BaseModel):
     training_metrics: Optional[Dict[str, Any]] = None
     hyperparameters: Optional[Dict[str, Any]] = None
     feature_names: Optional[List[str]] = None
+    feature_config_id: Optional[str] = None
     sensor_ids: Optional[List[str]] = None
     training_samples: Optional[int] = None
     training_start_date: Optional[datetime] = None

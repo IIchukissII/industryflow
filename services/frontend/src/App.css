@@ -1,0 +1,147 @@
+.App {
+  min-height: 100vh;
+  background-color: #0a0e27;
+  color: #ffffff;
+}
+
+.App-header {
+  background-color: #131722;
+  padding: 20px 40px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #2a2e39;
+}
+
+.App-header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: #2962ff;
+}
+
+.status {
+  font-size: 14px;
+  color: #787b86;
+}
+
+.status .connected {
+  color: #26a69a;
+  font-weight: 500;
+}
+
+.status .disconnected {
+  color: #ef5350;
+  font-weight: 500;
+}
+
+.App-main {
+  padding: 20px 40px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.card {
+  background-color: #131722;
+  border: 1px solid #2a2e39;
+  border-radius: 8px;
+  padding: 20px;
+  min-height: 200px;
+  transition: border-color 0.3s ease;
+}
+
+.card:hover {
+  border-color: #2962ff;
+}
+
+.card.wide {
+  grid-column: 1 / -1;
+  min-height: 400px;
+}
+
+.card h2 {
+  margin: 0 0 15px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #d1d4dc;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #2a2e39;
+}
+
+.card p {
+  color: #787b86;
+  margin: 0;
+}
+
+/* Sensor List Styling */
+.sensor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 15px;
+}
+
+.sensor-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background-color: #1e222d;
+  border-radius: 6px;
+  transition: background-color 0.2s ease;
+}
+
+.sensor-item:hover {
+  background-color: #2a2e39;
+}
+
+.sensor-name {
+  font-size: 13px;
+  color: #787b86;
+  text-transform: capitalize;
+  font-weight: 500;
+}
+
+.sensor-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #26a69a;
+  font-family: 'Courier New', monospace;
+}
+
+/* Loading animation */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.sensor-value {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Selected sensor highlighting */
+.sensor-item.selected {
+  background-color: #2a2e39;
+  border-left: 3px solid #2962ff;
+  padding-left: 9px;
+}
+
+.sensor-item.selected .sensor-name {
+  color: #2962ff;
+}
+
+.sensor-item.selected .sensor-value {
+  color: #2962ff;
+}

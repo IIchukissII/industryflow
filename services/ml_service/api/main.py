@@ -11,7 +11,8 @@ from pathlib import Path
 
 import config
 from repository import MLRepository, MLflowRepository
-from routers import health_router, models_router, mlflow_router, inference_router
+from routers import health_router, models_router, mlflow_router, inference_router, feature_configs_router
+from feature_engineering import init_feature_store, get_feature_store
 
 # Configure logging
 logging.basicConfig(
@@ -51,6 +52,7 @@ app.include_router(health_router)
 app.include_router(models_router)
 app.include_router(mlflow_router)
 app.include_router(inference_router)
+app.include_router(feature_configs_router)
 
 
 # ============================================================================
@@ -108,7 +110,20 @@ async def startup_event():
     app.state.ml_repository = MLRepository(app.state.db_pool)
     app.state.mlflow_repository = MLflowRepository(app.state.mlflow_pool)
     logger.info("Repositories initialized")
-    
+
+    # Initialize Feature Store
+    try:
+        redis_url = getattr(config.config, 'REDIS_URL', 'redis://redis:6379/0')
+        app.state.feature_store = await init_feature_store(
+            redis_url=redis_url,
+            max_window=100,
+            ttl_seconds=3600
+        )
+        logger.info(f"Feature Store initialized: {redis_url}")
+    except Exception as e:
+        logger.error(f"Failed to initialize Feature Store: {e}")
+        raise
+
     logger.info(f"Model directory: {MODEL_DIR}")
     logger.info(f"Existing models: {len(list(MODEL_DIR.glob('*.pkl')))}")
     logger.info(f"MLflow Tracking URI: {config.config.MLFLOW_TRACKING_URI}")
@@ -120,16 +135,21 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info("MLOps API shutting down...")
-    
+
+    # Close Feature Store
+    if hasattr(app.state, 'feature_store'):
+        await app.state.feature_store.close()
+        logger.info("Feature Store closed")
+
     # Close database pools
     if hasattr(app.state, 'db_pool'):
         await app.state.db_pool.close()
         logger.info("Database pool closed")
-    
+
     if hasattr(app.state, 'mlflow_pool'):
         await app.state.mlflow_pool.close()
         logger.info("MLflow pool closed")
-    
+
     logger.info("Shutdown complete")
 
 

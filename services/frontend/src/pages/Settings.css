@@ -1,0 +1,137 @@
+.settings-container {
+  padding: 30px;
+  max-width: 1200px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: #131722;
+}
+
+.settings-header {
+  margin-bottom: 40px;
+}
+
+.settings-header h1 {
+  color: #ffffff;
+  font-size: 32px;
+  margin: 0 0 10px 0;
+  font-weight: 600;
+}
+
+.settings-subtitle {
+  color: #787b86;
+  font-size: 16px;
+  margin: 0;
+}
+
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.settings-section {
+  background: #1e222d;
+  border: 1px solid #2a2e39;
+  border-radius: 8px;
+  padding: 30px;
+}
+
+.settings-section h2 {
+  color: #ffffff;
+  font-size: 20px;
+  margin: 0 0 20px 0;
+  font-weight: 600;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+}
+
+.settings-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-item label {
+  color: #787b86;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.settings-value {
+  color: #d1d4dc;
+  font-size: 14px;
+  padding: 10px 12px;
+  background: #131722;
+  border: 1px solid #2a2e39;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.status-badge.active {
+  background: rgba(34, 171, 148, 0.2);
+  color: #22ab94;
+}
+
+.status-badge.inactive {
+  background: rgba(242, 54, 69, 0.2);
+  color: #f23645;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.btn-secondary, .btn-danger {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary {
+  background: #2962ff;
+  color: #ffffff;
+}
+
+.btn-secondary:hover {
+  background: #1e4fd4;
+}
+
+.btn-danger {
+  background: rgba(242, 54, 69, 0.2);
+  color: #f23645;
+  border: 1px solid #f23645;
+}
+
+.btn-danger:hover {
+  background: rgba(242, 54, 69, 0.3);
+}
+
+.settings-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  color: #787b86;
+  font-size: 16px;
+}

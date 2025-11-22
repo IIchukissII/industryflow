@@ -4,9 +4,61 @@ Handles queries to both industryflow and mlflow databases
 """
 import asyncpg
 import logging
+import json
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _format_feature_config_row(row: dict, company_id: str) -> Dict[str, Any]:
+    """Convert database row to properly formatted feature config dict"""
+    return {
+        'id': str(row['id']),
+        'company_id': company_id,
+        'equipment_type': row['equipment_type'],
+        'name': row['name'],
+        'description': row['description'],
+        'base_sensors': json.loads(row['base_sensors']) if isinstance(row['base_sensors'], str) else row['base_sensors'],
+        'transformations': json.loads(row['transformations']) if isinstance(row['transformations'], str) else row['transformations'],
+        'created_at': row['created_at'],
+        'updated_at': row['updated_at'],
+        'created_by': row['created_by']
+    }
+
+
+def _format_model_row(row: dict, company_id: str) -> Dict[str, Any]:
+    """Convert database row to properly formatted model dict"""
+    return {
+        'model_id': str(row['model_id']),
+        'company_id': company_id,
+        'equipment_id': str(row['equipment_id']) if row.get('equipment_id') else None,
+        'equipment_type': row.get('equipment_type'),
+        'model_name': row['model_name'],
+        'description': row.get('description'),
+        'model_type': row['model_type'],
+        'model_version': str(row['model_version']) if row.get('model_version') is not None else None,
+        'mlflow_run_id': row.get('mlflow_run_id'),
+        'mlflow_experiment_id': row.get('mlflow_experiment_id'),
+        'model_path': row.get('model_path'),
+        'training_metrics': json.loads(row['training_metrics']) if isinstance(row.get('training_metrics'), str) else row.get('training_metrics'),
+        'hyperparameters': json.loads(row['hyperparameters']) if isinstance(row.get('hyperparameters'), str) else row.get('hyperparameters'),
+        'feature_names': row.get('feature_names'),
+        'feature_config_id': str(row['feature_config_id']) if row.get('feature_config_id') else None,
+        'sensor_ids': [str(sid) for sid in row['sensor_ids']] if row.get('sensor_ids') else None,
+        'accuracy': row.get('accuracy'),
+        'precision_score': row.get('precision_score'),
+        'recall': row.get('recall'),
+        'f1_score': row.get('f1_score'),
+        'auc_roc': row.get('auc_roc'),
+        'training_samples': row.get('training_samples'),
+        'training_start_date': row.get('training_start_date'),
+        'training_end_date': row.get('training_end_date'),
+        'status': row['status'],
+        'deployed_at': row.get('deployed_at'),
+        'deprecated_at': row.get('deprecated_at'),
+        'created_at': row['created_at'],
+        'updated_at': row['updated_at']
+    }
 
 
 def normalize_company_id_to_schema(company_id: str) -> str:
@@ -37,29 +89,29 @@ class MLRepository:
             await conn.execute(f"SET search_path TO {schema_name}, public")
             
             query = """
-                SELECT 
-                    model_id, equipment_id, model_name, description, model_type,
+                SELECT
+                    model_id, equipment_id, equipment_type, model_name, description, model_type,
                     model_version, mlflow_run_id, mlflow_experiment_id, model_path,
-                    training_metrics, hyperparameters, feature_names, sensor_ids,
+                    training_metrics, hyperparameters, feature_names, feature_config_id, sensor_ids,
                     accuracy, precision_score, recall, f1_score, auc_roc,
                     training_samples, training_start_date, training_end_date,
                     status, deployed_at, deprecated_at, created_at, updated_at
                 FROM ml_models
             """
-            
+
             params = []
             if status:
                 query += " WHERE status = $1"
                 params.append(status)
-            
+
             query += f" ORDER BY created_at DESC LIMIT ${len(params) + 1}"
             params.append(limit)
-            
+
             rows = await conn.fetch(query, *params)
-            
-            # Inject company_id into response
+
+            # Format rows with proper type conversions
             return [
-                {**dict(row), 'company_id': company_id}
+                _format_model_row(dict(row), company_id)
                 for row in rows
             ]
 
@@ -82,6 +134,7 @@ class MLRepository:
 
             field_mapping = {
                 'equipment_id': 'equipment_id',
+                'equipment_type': 'equipment_type',
                 'model_name': 'model_name',
                 'model_version': 'model_version',
                 'model_type': 'model_type',
@@ -97,12 +150,16 @@ class MLRepository:
                 'training_metrics': 'training_metrics',
                 'hyperparameters': 'hyperparameters',
                 'feature_names': 'feature_names',
+                'feature_config_id': 'feature_config_id',
                 'sensor_ids': 'sensor_ids',
                 'training_samples': 'training_samples',
                 'training_start_date': 'training_start_date',
                 'training_end_date': 'training_end_date',
                 'training_duration_seconds': 'training_duration_seconds'
             }
+
+            # JSONB fields that need serialization (note: feature_names and sensor_ids are arrays, not JSONB)
+            jsonb_fields = {'training_metrics', 'hyperparameters'}
 
             for key, db_field in field_mapping.items():
                 if key in model_data and model_data[key] is not None:
@@ -116,6 +173,10 @@ class MLRepository:
                             value = int(value.split('.')[0])
                         except (ValueError, AttributeError):
                             value = 1  # Default to version 1
+
+                    # Serialize JSONB fields
+                    elif key in jsonb_fields and isinstance(value, (dict, list)):
+                        value = json.dumps(value)
 
                     values.append(value)
                     placeholders.append(f'${len(values)}')
@@ -146,16 +207,16 @@ class MLRepository:
     ) -> Optional[Dict[str, Any]]:
         """Get single model by ID"""
         schema_name = normalize_company_id_to_schema(company_id)
-        
+
         async with self.pool.acquire() as conn:
             await conn.execute(f"SET search_path TO {schema_name}, public")
-            
+
             row = await conn.fetchrow(
                 """
-                SELECT 
-                    model_id, equipment_id, model_name, description, model_type,
+                SELECT
+                    model_id, equipment_id, equipment_type, model_name, description, model_type,
                     model_version, mlflow_run_id, mlflow_experiment_id, model_path,
-                    training_metrics, hyperparameters, feature_names, sensor_ids,
+                    training_metrics, hyperparameters, feature_names, feature_config_id, sensor_ids,
                     accuracy, precision_score, recall, f1_score, auc_roc,
                     training_samples, training_start_date, training_end_date,
                     status, deployed_at, deprecated_at, created_at, updated_at
@@ -164,11 +225,11 @@ class MLRepository:
                 """,
                 model_id
             )
-            
+
             if not row:
                 return None
-            
-            return {**dict(row), 'company_id': company_id}
+
+            return _format_model_row(dict(row), company_id)
     
     async def update_model_status(
         self,
@@ -266,6 +327,214 @@ class MLRepository:
                 {**dict(row), 'company_id': company_id}
                 for row in rows
             ]
+
+    # =========================================================================
+    # FEATURE ENGINEERING CONFIGURATION METHODS
+    # =========================================================================
+
+    async def create_feature_config(
+        self,
+        company_id: str,
+        equipment_type: str,
+        name: str,
+        base_sensors: List[str],
+        transformations: List[Dict[str, Any]],
+        description: Optional[str] = None,
+        created_by: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Create a new feature engineering configuration"""
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            row = await conn.fetchrow(
+                """
+                INSERT INTO feature_engineering_configs (
+                    equipment_type, name, description,
+                    base_sensors, transformations, created_by
+                )
+                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
+                RETURNING
+                    id, equipment_type, name, description,
+                    base_sensors, transformations,
+                    created_at, updated_at, created_by
+                """,
+                equipment_type, name, description,
+                json.dumps(base_sensors), json.dumps(transformations), created_by
+            )
+
+            return _format_feature_config_row(dict(row), company_id)
+
+    async def get_feature_config_by_id(
+        self,
+        company_id: str,
+        config_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get feature config by ID"""
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    id, equipment_type, name, description,
+                    base_sensors, transformations,
+                    created_at, updated_at, created_by
+                FROM feature_engineering_configs
+                WHERE id = $1
+                """,
+                config_id
+            )
+
+            if not row:
+                return None
+
+            return _format_feature_config_row(dict(row), company_id)
+
+    async def get_feature_configs_by_equipment_type(
+        self,
+        company_id: str,
+        equipment_type: str
+    ) -> List[Dict[str, Any]]:
+        """Get all feature configs for an equipment type"""
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id, equipment_type, name, description,
+                    base_sensors, transformations,
+                    created_at, updated_at, created_by
+                FROM feature_engineering_configs
+                WHERE equipment_type = $1
+                ORDER BY created_at DESC
+                """,
+                equipment_type
+            )
+
+            return [
+                _format_feature_config_row(dict(row), company_id)
+                for row in rows
+            ]
+
+    async def get_all_feature_configs(
+        self,
+        company_id: str,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """Get all feature configs for a company"""
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id, equipment_type, name, description,
+                    base_sensors, transformations,
+                    created_at, updated_at, created_by
+                FROM feature_engineering_configs
+                ORDER BY created_at DESC
+                LIMIT $1
+                """,
+                limit
+            )
+
+            return [
+                _format_feature_config_row(dict(row), company_id)
+                for row in rows
+            ]
+
+    async def update_feature_config(
+        self,
+        company_id: str,
+        config_id: str,
+        equipment_type: Optional[str] = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        base_sensors: Optional[List[str]] = None,
+        transformations: Optional[List[Dict[str, Any]]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Update feature config"""
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        # Build dynamic update query
+        updates = []
+        params = [config_id]
+        param_count = 2
+
+        if equipment_type is not None:
+            updates.append(f"equipment_type = ${param_count}")
+            params.append(equipment_type)
+            param_count += 1
+
+        if name is not None:
+            updates.append(f"name = ${param_count}")
+            params.append(name)
+            param_count += 1
+
+        if description is not None:
+            updates.append(f"description = ${param_count}")
+            params.append(description)
+            param_count += 1
+
+        if base_sensors is not None:
+            updates.append(f"base_sensors = ${param_count}::jsonb")
+            params.append(json.dumps(base_sensors))
+            param_count += 1
+
+        if transformations is not None:
+            updates.append(f"transformations = ${param_count}::jsonb")
+            params.append(json.dumps(transformations))
+            param_count += 1
+
+        if not updates:
+            return await self.get_feature_config_by_id(company_id, config_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            query = f"""
+                UPDATE feature_engineering_configs
+                SET {', '.join(updates)}
+                WHERE id = $1
+                RETURNING
+                    id, equipment_type, name, description,
+                    base_sensors, transformations,
+                    created_at, updated_at, created_by
+            """
+
+            row = await conn.fetchrow(query, *params)
+
+            if not row:
+                return None
+
+            return _format_feature_config_row(dict(row), company_id)
+
+    async def delete_feature_config(
+        self,
+        company_id: str,
+        config_id: str
+    ) -> bool:
+        """Delete feature config"""
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            result = await conn.execute(
+                "DELETE FROM feature_engineering_configs WHERE id = $1",
+                config_id
+            )
+
+            return result == "DELETE 1"
 
 
 class MLflowRepository:

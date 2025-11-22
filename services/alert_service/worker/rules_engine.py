@@ -4,7 +4,7 @@ Schema-per-tenant architecture - UUID-based matching only
 """
 import logging
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import aiohttp
 import os
@@ -16,19 +16,22 @@ ML_SERVICE_URL = os.getenv('ML_SERVICE_URL', 'http://ml-service:8002')
 
 class RulesEngine:
     """Evaluates sensor data against alert rules with schema-per-tenant"""
-    
-    def __init__(self, tenant_rules: Dict[str, List[Dict]], alert_repo):
+
+    def __init__(self, tenant_rules: Dict[str, List[Dict]], alert_repo, feature_store=None):
         """
         Initialize with rules organized by tenant
         tenant_rules: {company_id: [rules]}
         """
         self.tenant_rules = tenant_rules
         self.alert_repo = alert_repo
+        self.feature_store = feature_store
         self.ml_detectors = {}  # model_id -> detector (lazy loaded)
-        
+
         # Log loaded rules
         total = sum(len(rules) for rules in tenant_rules.values())
         logger.info(f"Rules engine initialized with {total} rules from {len(tenant_rules)} tenants")
+        if feature_store:
+            logger.info("Feature Store integration enabled")
     
     def update_rules(self, tenant_rules: Dict[str, List[Dict]]):
         """Update rules (called during periodic reload)"""
@@ -44,11 +47,27 @@ class RulesEngine:
         sensor_id = sensor_data.get('sensor_id')
         equipment_id = sensor_data.get('equipment_id')
         value = sensor_data.get('value')
-        
+        timestamp = sensor_data.get('timestamp')
+
         if not sensor_id or value is None:
             logger.warning(f"Invalid sensor data: {sensor_data}")
             return []
-        
+
+        # Store reading in Feature Store for ML inference
+        if self.feature_store and equipment_id:
+            try:
+                # Use sensor_id as sensor_name for now
+                # TODO: Add sensor name mapping later
+                await self.feature_store.store_reading(
+                    equipment_id=equipment_id,
+                    sensor_name=sensor_id,
+                    timestamp=timestamp or datetime.now().isoformat(),
+                    value=float(value)
+                )
+            except Exception as e:
+                logger.error(f"Failed to store reading in Feature Store: {e}")
+                # Continue with rule evaluation even if Feature Store fails
+
         # Get rules for this tenant
         rules = self.tenant_rules.get(company_id, [])
         if not rules:

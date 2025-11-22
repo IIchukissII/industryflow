@@ -1,0 +1,407 @@
+{
+  "equipment_type": "tep_reactor",
+  "name": "TEP Binary Anomaly Detection - Balanced 50/50",
+  "description": "Feature engineering configuration for Tennessee Eastman Process binary anomaly detection. Uses 65 selected features from original 52 sensors plus engineered features including interactions, polynomials, and statistical aggregations. Optimized through feature selection removing 46.3% of less important features.",
+  "base_sensors": [
+    "xmeas_1", "xmeas_2", "xmeas_3", "xmeas_4", "xmeas_5", "xmeas_6", "xmeas_7", "xmeas_8",
+    "xmeas_9", "xmeas_10", "xmeas_11", "xmeas_12", "xmeas_13", "xmeas_14", "xmeas_15",
+    "xmeas_16", "xmeas_17", "xmeas_18", "xmeas_19", "xmeas_20", "xmeas_21", "xmeas_22",
+    "xmeas_23", "xmeas_24", "xmeas_25", "xmeas_26", "xmeas_27", "xmeas_28", "xmeas_29",
+    "xmeas_30", "xmeas_31", "xmeas_32", "xmeas_33", "xmeas_34", "xmeas_35", "xmeas_36",
+    "xmeas_37", "xmeas_38", "xmeas_39", "xmeas_40", "xmeas_41",
+    "xmv_1", "xmv_2", "xmv_3", "xmv_4", "xmv_5", "xmv_6", "xmv_7", "xmv_8", "xmv_9",
+    "xmv_10", "xmv_11"
+  ],
+  "transformations": [
+    {
+      "name": "xmeas_1",
+      "type": "identity",
+      "sensor": "xmeas_1",
+      "params": {}
+    },
+    {
+      "name": "xmeas_3",
+      "type": "identity",
+      "sensor": "xmeas_3",
+      "params": {}
+    },
+    {
+      "name": "xmeas_4",
+      "type": "identity",
+      "sensor": "xmeas_4",
+      "params": {}
+    },
+    {
+      "name": "xmeas_6",
+      "type": "identity",
+      "sensor": "xmeas_6",
+      "params": {}
+    },
+    {
+      "name": "xmeas_7",
+      "type": "identity",
+      "sensor": "xmeas_7",
+      "params": {}
+    },
+    {
+      "name": "xmeas_8",
+      "type": "identity",
+      "sensor": "xmeas_8",
+      "params": {}
+    },
+    {
+      "name": "xmeas_10",
+      "type": "identity",
+      "sensor": "xmeas_10",
+      "params": {}
+    },
+    {
+      "name": "xmeas_11",
+      "type": "identity",
+      "sensor": "xmeas_11",
+      "params": {}
+    },
+    {
+      "name": "xmeas_13",
+      "type": "identity",
+      "sensor": "xmeas_13",
+      "params": {}
+    },
+    {
+      "name": "xmeas_16",
+      "type": "identity",
+      "sensor": "xmeas_16",
+      "params": {}
+    },
+    {
+      "name": "xmeas_18",
+      "type": "identity",
+      "sensor": "xmeas_18",
+      "params": {}
+    },
+    {
+      "name": "xmeas_19",
+      "type": "identity",
+      "sensor": "xmeas_19",
+      "params": {}
+    },
+    {
+      "name": "xmeas_20",
+      "type": "identity",
+      "sensor": "xmeas_20",
+      "params": {}
+    },
+    {
+      "name": "xmeas_21",
+      "type": "identity",
+      "sensor": "xmeas_21",
+      "params": {}
+    },
+    {
+      "name": "xmeas_22",
+      "type": "identity",
+      "sensor": "xmeas_22",
+      "params": {}
+    },
+    {
+      "name": "xmeas_23",
+      "type": "identity",
+      "sensor": "xmeas_23",
+      "params": {}
+    },
+    {
+      "name": "xmeas_24",
+      "type": "identity",
+      "sensor": "xmeas_24",
+      "params": {}
+    },
+    {
+      "name": "xmeas_25",
+      "type": "identity",
+      "sensor": "xmeas_25",
+      "params": {}
+    },
+    {
+      "name": "xmeas_27",
+      "type": "identity",
+      "sensor": "xmeas_27",
+      "params": {}
+    },
+    {
+      "name": "xmeas_28",
+      "type": "identity",
+      "sensor": "xmeas_28",
+      "params": {}
+    },
+    {
+      "name": "xmeas_29",
+      "type": "identity",
+      "sensor": "xmeas_29",
+      "params": {}
+    },
+    {
+      "name": "xmeas_30",
+      "type": "identity",
+      "sensor": "xmeas_30",
+      "params": {}
+    },
+    {
+      "name": "xmeas_31",
+      "type": "identity",
+      "sensor": "xmeas_31",
+      "params": {}
+    },
+    {
+      "name": "xmeas_33",
+      "type": "identity",
+      "sensor": "xmeas_33",
+      "params": {}
+    },
+    {
+      "name": "xmeas_34",
+      "type": "identity",
+      "sensor": "xmeas_34",
+      "params": {}
+    },
+    {
+      "name": "xmeas_35",
+      "type": "identity",
+      "sensor": "xmeas_35",
+      "params": {}
+    },
+    {
+      "name": "xmeas_36",
+      "type": "identity",
+      "sensor": "xmeas_36",
+      "params": {}
+    },
+    {
+      "name": "xmeas_38",
+      "type": "identity",
+      "sensor": "xmeas_38",
+      "params": {}
+    },
+    {
+      "name": "xmeas_41",
+      "type": "identity",
+      "sensor": "xmeas_41",
+      "params": {}
+    },
+    {
+      "name": "xmv_1",
+      "type": "identity",
+      "sensor": "xmv_1",
+      "params": {}
+    },
+    {
+      "name": "xmv_2",
+      "type": "identity",
+      "sensor": "xmv_2",
+      "params": {}
+    },
+    {
+      "name": "xmv_3",
+      "type": "identity",
+      "sensor": "xmv_3",
+      "params": {}
+    },
+    {
+      "name": "xmv_4",
+      "type": "identity",
+      "sensor": "xmv_4",
+      "params": {}
+    },
+    {
+      "name": "xmv_5",
+      "type": "identity",
+      "sensor": "xmv_5",
+      "params": {}
+    },
+    {
+      "name": "xmv_9",
+      "type": "identity",
+      "sensor": "xmv_9",
+      "params": {}
+    },
+    {
+      "name": "xmv_10",
+      "type": "identity",
+      "sensor": "xmv_10",
+      "params": {}
+    },
+    {
+      "name": "xmv_11",
+      "type": "identity",
+      "sensor": "xmv_11",
+      "params": {}
+    },
+    {
+      "name": "xmeas_1_xmeas_2_ratio",
+      "type": "interaction",
+      "sensors": ["xmeas_1", "xmeas_2"],
+      "params": {"operation": "ratio"}
+    },
+    {
+      "name": "xmeas_1_xmeas_2_product",
+      "type": "interaction",
+      "sensors": ["xmeas_1", "xmeas_2"],
+      "params": {"operation": "product"}
+    },
+    {
+      "name": "xmeas_7_xmeas_8_ratio",
+      "type": "interaction",
+      "sensors": ["xmeas_7", "xmeas_8"],
+      "params": {"operation": "ratio"}
+    },
+    {
+      "name": "xmeas_7_xmeas_8_diff",
+      "type": "interaction",
+      "sensors": ["xmeas_7", "xmeas_8"],
+      "params": {"operation": "difference"}
+    },
+    {
+      "name": "xmeas_7_xmeas_8_product",
+      "type": "interaction",
+      "sensors": ["xmeas_7", "xmeas_8"],
+      "params": {"operation": "product"}
+    },
+    {
+      "name": "xmeas_9_xmeas_10_ratio",
+      "type": "interaction",
+      "sensors": ["xmeas_9", "xmeas_10"],
+      "params": {"operation": "ratio"}
+    },
+    {
+      "name": "xmeas_9_xmeas_10_diff",
+      "type": "interaction",
+      "sensors": ["xmeas_9", "xmeas_10"],
+      "params": {"operation": "difference"}
+    },
+    {
+      "name": "xmeas_9_xmeas_10_product",
+      "type": "interaction",
+      "sensors": ["xmeas_9", "xmeas_10"],
+      "params": {"operation": "product"}
+    },
+    {
+      "name": "xmeas_13_xmeas_14_ratio",
+      "type": "interaction",
+      "sensors": ["xmeas_13", "xmeas_14"],
+      "params": {"operation": "ratio"}
+    },
+    {
+      "name": "xmeas_13_xmeas_14_diff",
+      "type": "interaction",
+      "sensors": ["xmeas_13", "xmeas_14"],
+      "params": {"operation": "difference"}
+    },
+    {
+      "name": "xmeas_13_xmeas_14_product",
+      "type": "interaction",
+      "sensors": ["xmeas_13", "xmeas_14"],
+      "params": {"operation": "product"}
+    },
+    {
+      "name": "xmeas_1_squared",
+      "type": "polynomial",
+      "sensor": "xmeas_1",
+      "params": {"power": 2}
+    },
+    {
+      "name": "xmeas_3_squared",
+      "type": "polynomial",
+      "sensor": "xmeas_3",
+      "params": {"power": 2}
+    },
+    {
+      "name": "xmeas_4_squared",
+      "type": "polynomial",
+      "sensor": "xmeas_4",
+      "params": {"power": 2}
+    },
+    {
+      "name": "xmeas_6_squared",
+      "type": "polynomial",
+      "sensor": "xmeas_6",
+      "params": {"power": 2}
+    },
+    {
+      "name": "xmeas_7_squared",
+      "type": "polynomial",
+      "sensor": "xmeas_7",
+      "params": {"power": 2}
+    },
+    {
+      "name": "xmeas_7_cubed",
+      "type": "polynomial",
+      "sensor": "xmeas_7",
+      "params": {"power": 3}
+    },
+    {
+      "name": "xmeas_8_squared",
+      "type": "polynomial",
+      "sensor": "xmeas_8",
+      "params": {"power": 2}
+    },
+    {
+      "name": "xmeas_10_squared",
+      "type": "polynomial",
+      "sensor": "xmeas_10",
+      "params": {"power": 2}
+    },
+    {
+      "name": "xmeas_1_deviation",
+      "type": "statistical",
+      "sensor": "xmeas_1",
+      "params": {"stat_type": "deviation_from_run_mean"}
+    },
+    {
+      "name": "xmeas_3_deviation",
+      "type": "statistical",
+      "sensor": "xmeas_3",
+      "params": {"stat_type": "deviation_from_run_mean"}
+    },
+    {
+      "name": "xmeas_4_deviation",
+      "type": "statistical",
+      "sensor": "xmeas_4",
+      "params": {"stat_type": "deviation_from_run_mean"}
+    },
+    {
+      "name": "xmeas_6_deviation",
+      "type": "statistical",
+      "sensor": "xmeas_6",
+      "params": {"stat_type": "deviation_from_run_mean"}
+    },
+    {
+      "name": "xmeas_7_deviation",
+      "type": "statistical",
+      "sensor": "xmeas_7",
+      "params": {"stat_type": "deviation_from_run_mean"}
+    },
+    {
+      "name": "xmeas_8_deviation",
+      "type": "statistical",
+      "sensor": "xmeas_8",
+      "params": {"stat_type": "deviation_from_run_mean"}
+    },
+    {
+      "name": "xmeas_10_deviation",
+      "type": "statistical",
+      "sensor": "xmeas_10",
+      "params": {"stat_type": "deviation_from_run_mean"}
+    },
+    {
+      "name": "xmeas_11_deviation",
+      "type": "statistical",
+      "sensor": "xmeas_11",
+      "params": {"stat_type": "deviation_from_run_mean"}
+    },
+    {
+      "name": "xmeas_13_deviation",
+      "type": "statistical",
+      "sensor": "xmeas_13",
+      "params": {"stat_type": "deviation_from_run_mean"}
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+.App-header {
+  background: linear-gradient(135deg, #1a1d2e 0%, #0a0e27 100%);
+  padding: 15px 30px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid #2a2e39;
+}
+
+.App-header h1 {
+  color: #2962ff;
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #d1d4dc;
+}
+
+.connected {
+  color: #4caf50;
+  font-weight: 500;
+}
+
+.disconnected {
+  color: #ef5350;
+  font-weight: 500;
+}

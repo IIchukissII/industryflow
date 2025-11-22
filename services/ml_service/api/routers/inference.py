@@ -12,6 +12,10 @@ import numpy as np
 import os
 
 import auth
+# TODO: Feature engineering will be implemented in Phase 2-3
+# This will use the flexible, configuration-driven feature engineering system
+# from ..feature_engineering import engineer_features
+# For now, feature engineering is not available
 
 logger = logging.getLogger(__name__)
 
@@ -98,31 +102,6 @@ def load_model_from_mlflow(mlflow_run_id: str):
         raise
 
 
-def prepare_input_features(sensor_data: Dict[str, Any], feature_names: List[str]) -> np.ndarray:
-    """
-    Prepare input features for model prediction
-    Extract features from sensor_data based on feature_names
-    """
-    try:
-        # If sensor_data has 'value', use it as single feature
-        if 'value' in sensor_data and len(feature_names) == 1:
-            features = [sensor_data['value']]
-        # If sensor_data has 'features' dict, extract by name
-        elif 'features' in sensor_data:
-            features = [sensor_data['features'].get(name, 0.0) for name in feature_names]
-        # Otherwise try to extract by feature names directly
-        else:
-            features = [sensor_data.get(name, 0.0) for name in feature_names]
-
-        # Convert to numpy array with shape (1, n_features)
-        input_array = np.array([features], dtype=np.float32)
-
-        logger.debug(f"Prepared input features: {input_array.shape}, values: {features}")
-        return input_array
-
-    except Exception as e:
-        logger.error(f"Failed to prepare input features: {e}")
-        raise
 
 
 # ============================================================================
@@ -168,15 +147,22 @@ async def predict(
         # Load model from MLflow
         model = load_model_from_mlflow(mlflow_run_id)
 
-        # Prepare input features
-        feature_names = model_data.get('feature_names', [])
-        if not feature_names:
-            # Default to single 'value' feature
-            feature_names = ['value']
+        # TODO: Phase 2-3 - Implement flexible feature engineering
+        # This will:
+        # 1. Get feature config from database for the equipment type
+        # 2. Read recent sensor readings from Feature Store
+        # 3. Apply configured transformations (interaction, polynomial, statistical, etc.)
+        # 4. Return engineered features in the order expected by the model
 
-        input_features = prepare_input_features(request_data.sensor_data, feature_names)
+        raise HTTPException(
+            status_code=501,
+            detail="Feature engineering not yet implemented. "
+                   "Phase 1 (Feature Store) is complete. "
+                   "Phase 2-3 will implement flexible, configuration-driven feature engineering. "
+                   "For now, ML inference requires manual feature engineering."
+        )
 
-        # Make prediction
+        # Run prediction
         prediction = model.predict(input_features)
 
         # Extract anomaly score
@@ -257,19 +243,14 @@ async def batch_predict(
         raise HTTPException(status_code=400, detail="Model has no MLflow run_id")
 
     try:
-        # Load model once
-        model = load_model_from_mlflow(mlflow_run_id)
-
-        feature_names = model_data.get('feature_names', ['value'])
-
-        # Prepare all inputs
-        input_features_list = [
-            prepare_input_features(sensor_data, feature_names)
-            for sensor_data in sensor_data_list
-        ]
-
-        # Stack into single batch
-        batch_input = np.vstack(input_features_list)
+        # TODO: Phase 2-3 - Implement flexible feature engineering for batch predictions
+        raise HTTPException(
+            status_code=501,
+            detail="Batch inference not yet implemented. "
+                   "Feature engineering system is being redesigned for flexibility. "
+                   "Phase 1 (Feature Store) is complete. "
+                   "Phase 2-3 will implement configuration-driven feature engineering."
+        )
 
         # Batch prediction
         predictions = model.predict(batch_input)
