@@ -339,6 +339,51 @@ function EditRuleModal({ rule, onClose, onSave }) {
     is_default: rule?.is_default || false,
   });
 
+  const [ruleLevel, setRuleLevel] = useState(
+    rule?.equipment_id ? 'equipment' : rule?.sensor_id ? 'sensor' : 'pattern'
+  );
+  const [sensors, setSensors] = useState([]);
+  const [equipment, setEquipment] = useState([]);
+  const [loadingData, setLoadingData] = useState(false);
+
+  useEffect(() => {
+    fetchSensorsAndEquipment();
+  }, []);
+
+  const fetchSensorsAndEquipment = async () => {
+    setLoadingData(true);
+    try {
+      const token = localStorage.getItem('access_token');
+
+      // Fetch sensors from cache
+      const sensorsResponse = await fetch('http://localhost:8000/api/cache/sensors', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (sensorsResponse.ok) {
+        const sensorsData = await sensorsResponse.json();
+        const sensorsList = Object.entries(sensorsData.sensors || {}).map(([id, data]) => ({
+          sensor_id: id,
+          sensor_name: data.sensor_name || id,
+          equipment_name: data.equipment_name
+        }));
+        setSensors(sensorsList);
+      }
+
+      // Fetch equipment
+      const equipmentResponse = await fetch('http://localhost:8000/api/equipment', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (equipmentResponse.ok) {
+        const equipmentData = await equipmentResponse.json();
+        setEquipment(equipmentData);
+      }
+    } catch (error) {
+      console.error('Error fetching sensors/equipment:', error);
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
 
@@ -351,12 +396,15 @@ function EditRuleModal({ rule, onClose, onSave }) {
       company_id: formData.company_id,
     };
 
-    if (formData.sensor_id) {
+    // Handle target based on rule level
+    if (ruleLevel === 'sensor' && formData.sensor_id) {
       payload.sensor_id = formData.sensor_id;
-    } else if (formData.sensor_pattern) {
+    } else if (ruleLevel === 'equipment' && formData.equipment_id) {
+      payload.equipment_id = formData.equipment_id;
+    } else if (ruleLevel === 'pattern' && formData.sensor_pattern) {
       payload.sensor_pattern = formData.sensor_pattern;
     } else if (!rule) {
-      alert('Please specify either Sensor ID or Sensor Pattern');
+      alert('Please select a target for the alert rule');
       return;
     }
 
@@ -375,6 +423,17 @@ function EditRuleModal({ rule, onClose, onSave }) {
     }
 
     onSave(payload);
+  };
+
+  const handleRuleLevelChange = (level) => {
+    setRuleLevel(level);
+    // Clear all target fields when switching levels
+    setFormData({
+      ...formData,
+      sensor_id: '',
+      equipment_id: '',
+      sensor_pattern: ''
+    });
   };
 
   return (
@@ -403,24 +462,87 @@ function EditRuleModal({ rule, onClose, onSave }) {
           </div>
 
           <div className="form-group">
-            <label>Sensor Pattern (e.g., temp_*, press_*)</label>
-            <input
-              type="text"
-              value={formData.sensor_pattern}
-              onChange={(e) => setFormData({ ...formData, sensor_pattern: e.target.value })}
-              placeholder="temp_*"
-            />
+            <label>Rule Target Level</label>
+            <select
+              value={ruleLevel}
+              onChange={(e) => handleRuleLevelChange(e.target.value)}
+            >
+              <option value="pattern">Pattern Matching (e.g., temp_*)</option>
+              <option value="sensor">Specific Sensor</option>
+              <option value="equipment">Equipment Level</option>
+            </select>
           </div>
 
-          <div className="form-group">
-            <label>OR Specific Sensor ID</label>
-            <input
-              type="text"
-              value={formData.sensor_id}
-              onChange={(e) => setFormData({ ...formData, sensor_id: e.target.value })}
-              placeholder="temp_motor_A1"
-            />
-          </div>
+          {ruleLevel === 'pattern' && (
+            <div className="form-group">
+              <label>Sensor Pattern</label>
+              <input
+                type="text"
+                value={formData.sensor_pattern}
+                onChange={(e) => setFormData({ ...formData, sensor_pattern: e.target.value })}
+                placeholder="temp_*, press_*, *_motor_*"
+                required
+              />
+              <small style={{ color: '#787b86', fontSize: '11px', marginTop: '4px', display: 'block' }}>
+                Use * as wildcard. Examples: temp_* (all temperature sensors), *_A1 (all sensors ending in _A1)
+              </small>
+            </div>
+          )}
+
+          {ruleLevel === 'sensor' && (
+            <div className="form-group">
+              <label>Select Sensor</label>
+              {loadingData ? (
+                <p style={{ color: '#787b86', fontSize: '12px' }}>Loading sensors...</p>
+              ) : (
+                <select
+                  value={formData.sensor_id}
+                  onChange={(e) => setFormData({ ...formData, sensor_id: e.target.value })}
+                  required
+                >
+                  <option value="">-- Select a sensor --</option>
+                  {sensors.map(sensor => (
+                    <option key={sensor.sensor_id} value={sensor.sensor_id}>
+                      {sensor.sensor_name} ({sensor.sensor_id})
+                      {sensor.equipment_name && ` - ${sensor.equipment_name}`}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {sensors.length === 0 && !loadingData && (
+                <small style={{ color: '#ffa726', fontSize: '11px', marginTop: '4px', display: 'block' }}>
+                  No sensors found. Make sure sensors are streaming data.
+                </small>
+              )}
+            </div>
+          )}
+
+          {ruleLevel === 'equipment' && (
+            <div className="form-group">
+              <label>Select Equipment</label>
+              {loadingData ? (
+                <p style={{ color: '#787b86', fontSize: '12px' }}>Loading equipment...</p>
+              ) : (
+                <select
+                  value={formData.equipment_id}
+                  onChange={(e) => setFormData({ ...formData, equipment_id: e.target.value })}
+                  required
+                >
+                  <option value="">-- Select equipment --</option>
+                  {equipment.map(eq => (
+                    <option key={eq.equipment_id} value={eq.equipment_id}>
+                      {eq.name} ({eq.equipment_id}) - {eq.equipment_type}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {equipment.length === 0 && !loadingData && (
+                <small style={{ color: '#ffa726', fontSize: '11px', marginTop: '4px', display: 'block' }}>
+                  No equipment found. Create equipment first.
+                </small>
+              )}
+            </div>
+          )}
 
           <div className="form-group">
             <label>Detection Type</label>

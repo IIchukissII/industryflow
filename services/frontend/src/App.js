@@ -24,6 +24,7 @@ function Dashboard({ user }) {
   const [connected, setConnected] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [selectedEquipment, setSelectedEquipment] = useState(null);
   const [selectedSensor, setSelectedSensor] = useState(null);
 
   useEffect(() => {
@@ -46,8 +47,16 @@ function Dashboard({ user }) {
         setSensors(data.sensors);
         setLastUpdate(new Date().toLocaleTimeString());
 
-        if (!selectedSensor && Object.keys(data.sensors).length > 0) {
-          setSelectedSensor(Object.keys(data.sensors)[0]);
+        // Auto-select first equipment and sensor
+        if (Object.keys(data.sensors).length > 0) {
+          const firstSensorData = Object.values(data.sensors)[0];
+          const firstEquipmentName = firstSensorData.equipment_name || firstSensorData.equipment_id;
+          if (!selectedEquipment) {
+            setSelectedEquipment(firstEquipmentName);
+          }
+          if (!selectedSensor) {
+            setSelectedSensor(Object.keys(data.sensors)[0]);
+          }
         }
       }
     };
@@ -77,10 +86,15 @@ function Dashboard({ user }) {
     const groups = {};
     Object.entries(sensors).forEach(([sensorId, data]) => {
       const equipmentId = data.equipment_id;
-      if (!groups[equipmentId]) {
-        groups[equipmentId] = [];
+      const equipmentKey = data.equipment_name || equipmentId; // Use name as key if available
+      if (!groups[equipmentKey]) {
+        groups[equipmentKey] = {
+          equipmentId: equipmentId,
+          equipmentName: data.equipment_name,
+          sensors: []
+        };
       }
-      groups[equipmentId].push({ id: sensorId, ...data });
+      groups[equipmentKey].sensors.push({ id: sensorId, ...data });
     });
     return groups;
   };
@@ -235,46 +249,118 @@ function Dashboard({ user }) {
       </header>
 
       <main className="App-main">
-        <div className="dashboard-grid">
-          {Object.entries(equipmentGroups).map(([equipmentId, sensorList]) => (
-            <div className="card" key={equipmentId}>
-              <h2>{equipmentId.replace(/_/g, ' ').toUpperCase()}</h2>
-              <div className="sensor-list">
-                {sensorList.map(sensor => (
-                  <div
-                    className={`sensor-item ${selectedSensor === sensor.id ? 'selected' : ''}`}
-                    key={sensor.id}
-                    onClick={() => setSelectedSensor(sensor.id)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <span className="sensor-name">
-                      {sensor.id.replace(sensor.equipment_id, '').replace(/_/g, ' ').trim()}
-                    </span>
-                    <span className="sensor-value">
-                      {sensor.value !== undefined ? sensor.value.toFixed(2) : 'N/A'} {sensor.unit || ''}
-                    </span>
-                  </div>
-                ))}
+        <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '20px' }}>
+          {/* Dropdowns Section */}
+          <div className="card" style={{ marginBottom: '20px' }}>
+            <h2>Sensor Selection</h2>
+            <div style={{ display: 'flex', gap: '20px', marginTop: '15px' }}>
+              {/* Equipment Dropdown */}
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', color: '#787b86', marginBottom: '8px', fontSize: '13px' }}>
+                  Equipment
+                </label>
+                <select
+                  value={selectedEquipment || ''}
+                  onChange={(e) => {
+                    setSelectedEquipment(e.target.value);
+                    // Auto-select first sensor of this equipment
+                    const equipmentSensors = equipmentGroups[e.target.value]?.sensors || [];
+                    if (equipmentSensors.length > 0) {
+                      setSelectedSensor(equipmentSensors[0].id);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    background: '#1a1e2e',
+                    border: '1px solid #2a2e39',
+                    borderRadius: '4px',
+                    color: '#d1d4dc',
+                    fontSize: '14px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="">Select Equipment</option>
+                  {Object.entries(equipmentGroups).map(([equipmentKey, equipmentData]) => (
+                    <option key={equipmentData.equipmentId || equipmentKey} value={equipmentKey}>
+                      {equipmentData.equipmentName || equipmentKey}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </div>
-          ))}
 
+              {/* Sensor Dropdown */}
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', color: '#787b86', marginBottom: '8px', fontSize: '13px' }}>
+                  Sensor
+                </label>
+                <select
+                  value={selectedSensor || ''}
+                  onChange={(e) => setSelectedSensor(e.target.value)}
+                  disabled={!selectedEquipment}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    background: '#1a1e2e',
+                    border: '1px solid #2a2e39',
+                    borderRadius: '4px',
+                    color: '#d1d4dc',
+                    fontSize: '14px',
+                    cursor: selectedEquipment ? 'pointer' : 'not-allowed',
+                    opacity: selectedEquipment ? 1 : 0.5
+                  }}
+                >
+                  <option value="">Select Sensor</option>
+                  {selectedEquipment && equipmentGroups[selectedEquipment]?.sensors.map(sensor => (
+                    <option key={sensor.id} value={sensor.id}>
+                      {sensor.sensor_name || sensor.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Current Value Display */}
+              {selectedSensor && sensors[selectedSensor] && (
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', color: '#787b86', marginBottom: '8px', fontSize: '13px' }}>
+                    Current Value
+                  </label>
+                  <div style={{
+                    padding: '10px',
+                    background: '#0a0e27',
+                    border: '1px solid #2962ff',
+                    borderRadius: '4px',
+                    color: '#2962ff',
+                    fontSize: '20px',
+                    fontWeight: 'bold',
+                    textAlign: 'center'
+                  }}>
+                    {sensors[selectedSensor].value !== undefined
+                      ? sensors[selectedSensor].value.toFixed(2)
+                      : 'N/A'} {sensors[selectedSensor].unit || ''}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Chart Section */}
           <div className="card wide">
             <h2>Real-time Chart</h2>
             {selectedSensor && sensors[selectedSensor] && (
               <div style={{ marginBottom: '10px', color: '#787b86', fontSize: '13px' }}>
                 Viewing: <span style={{ color: '#2962ff', fontWeight: 'bold' }}>
-                  {selectedSensor}
-                </span> ({sensors[selectedSensor].equipment_id})
+                  {sensors[selectedSensor].sensor_name || selectedSensor}
+                </span> ({sensors[selectedSensor].equipment_name || sensors[selectedSensor].equipment_id})
               </div>
             )}
             {selectedSensor ? (
               <SensorChart
                 sensorId={selectedSensor}
-                title={`${selectedSensor} - Historical Data`}
+                title={`${sensors[selectedSensor]?.sensor_name || selectedSensor} - Historical Data`}
               />
             ) : (
-              <p style={{ color: '#787b86' }}>Click on a sensor to view its chart</p>
+              <p style={{ color: '#787b86' }}>Select equipment and sensor to view chart</p>
             )}
           </div>
         </div>

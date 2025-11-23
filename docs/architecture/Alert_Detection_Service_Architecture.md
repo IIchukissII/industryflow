@@ -48,9 +48,11 @@ Real-time alert detection service that evaluates sensor data streams against con
 - Alert notifications to Kafka topic (downstream consumption)
 
 **External Dependencies:**
-- TimescaleDB (rule storage, alert persistence)
+- TimescaleDB (rule storage, alert persistence, feature configs)
 - Apache Kafka (message streaming)
-- ML model files (for ML-based rules)
+- ML Service (ML inference endpoint)
+- Redis (Feature Store for rolling statistics)
+- MLflow (model storage and versioning)
 
 ---
 
@@ -68,27 +70,48 @@ Real-time alert detection service that evaluates sensor data streams against con
         ▼                   ▼                   ▼
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
 │   Service    │    │  Repository  │    │    Rules     │
-│   Manager    │───▶│    Layer     │───▶│    Engine    │
-└──────┬───────┘    └──────────────┘    └──────┬───────┘
-       │                                         │
-       ▼                                         │
-┌──────────────┐                                │
-│    Kafka     │                                │
-│   Consumer   │────────────────────────────────┘
-└──────────────┘
-       │
-       ▼
-┌──────────────────────────────────────────────────────────┐
-│                    Message Queue (Kafka)                  │
-└──────────────────────────────────────────────────────────┘
-       │
-       ▼
+│   Manager    │───▶│    Layer     │───▶│    Engine    │────┐
+└──────┬───────┘    └──────────────┘    └──────┬───────┘    │
+       │                                         │            │
+       │         ┌───────────────────────────────┘            │
+       │         │                                            │
+       ▼         ▼                                            ▼
+┌──────────────────┐                           ┌──────────────────────┐
+│     Kafka        │                           │   Feature Store      │
+│    Consumer      │                           │   (Redis)            │
+└────────┬─────────┘                           │  - Rolling stats     │
+         │                                     │  - Sensor windows    │
+         │                                     └──────────────────────┘
+         │                                                  ▲
+         ▼                                                  │
+┌──────────────────────────────────────────┐              │
+│          Message Queue (Kafka)            │              │
+│          sensor-data topic                │              │
+└──────────────────────────────────────────┘              │
+         │                                                  │
+         │  ┌───────────────────────────────────────────────┘
+         │  │
+         ▼  ▼
 ┌──────────────────────────────────────────────────────────┐
 │           Database (Schema-per-Tenant)                    │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐        │
 │  │ Tenant A   │  │ Tenant B   │  │ Tenant C   │        │
-│  │ Schema     │  │ Schema     │  │ Schema     │        │
+│  │ - Rules    │  │ - Rules    │  │ - Rules    │        │
+│  │ - Alerts   │  │ - Alerts   │  │ - Alerts   │        │
+│  │ - Features │  │ - Features │  │ - Features │        │
 │  └────────────┘  └────────────┘  └────────────┘        │
+└──────────────────────────────────────────────────────────┘
+         │
+         │  External Service
+         ▼
+┌──────────────────────────────────────────────────────────┐
+│                    ML Service                             │
+│  ┌──────────────────────────────────────────┐            │
+│  │  /api/inference/predict                  │            │
+│  │  - Feature Engineering Engine            │            │
+│  │  - MLflow Model Loading                  │            │
+│  │  - Anomaly Score Calculation             │            │
+│  └──────────────────────────────────────────┘            │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -99,24 +122,37 @@ Real-time alert detection service that evaluates sensor data streams against con
 - Periodic rule reloading
 - Database connection pool management
 - Background task coordination
+- Feature Store initialization
+- Periodic ML evaluation task (every 10s)
 
 **Repository Layer:**
 - Tenant schema discovery
 - Rule loading from all tenant schemas
 - Alert persistence with schema routing
+- Feature config and model metadata retrieval
 - Transaction management
 
 **Rules Engine:**
 - Rule organization by tenant
-- Sensor-to-rule matching
+- Sensor-to-rule matching (per-sensor evaluation)
 - Threshold evaluation
-- ML model invocation
+- Equipment-level ML evaluation (batched)
+- ML inference service integration
+- Sensor name caching
 - Alert generation
+
+**Feature Store (Redis):**
+- Stores recent sensor readings per equipment
+- Provides rolling window statistics
+- Enables time-series feature engineering
+- TTL-based automatic cleanup
+- Key format: `equipment:{id}:sensor:{name}`
 
 **Kafka Consumer:**
 - Message consumption from sensor data topic
 - Deserialization and validation
 - Company-based routing to rules engine
+- Feature Store population
 - Alert publishing to output topic
 
 ### 2.3 Design Patterns
@@ -335,51 +371,194 @@ FUNCTION evaluate_threshold(sensor_data, rule, company_id):
     RETURN alert
 ```
 
-### 4.5 ML Evaluation (Framework)
+### 4.5 ML Evaluation (Equipment-Level)
 
-**Algorithm Structure:**
+**ML Evaluation Strategy:**
+ML models require multiple sensors from equipment as input (multi-variate anomaly detection). Unlike threshold rules (per-sensor), ML rules are evaluated at equipment level with complete sensor snapshots.
+
+**Equipment-Level Evaluation Algorithm:**
 ```
-FUNCTION evaluate_ml(sensor_data, rule, company_id):
+FUNCTION evaluate_equipment_ml_rules(equipment_id, company_id, timestamp):
+    INPUT:
+        equipment_id (UUID)
+        company_id (UUID)
+        timestamp (ISO8601, optional)
+
+    OUTPUT:
+        triggered_alerts (List of alert objects)
+
+    // Get all ML rules for this equipment
+    rules = tenant_rules[company_id]
+    ml_rules = FILTER rules WHERE:
+        rule.enabled == TRUE AND
+        rule.detection_type == 'ml' AND
+        rule.equipment_id == equipment_id
+
+    IF ml_rules is EMPTY:
+        RETURN empty_list
+
+    triggered_alerts = []
+
+    FOR EACH rule IN ml_rules:
+        // Get model and feature config
+        model_id = rule.model_id
+        feature_config = get_feature_config_for_model(model_id, company_id)
+        base_sensors = feature_config.base_sensors  // List of sensor names
+
+        // Query Feature Store for current snapshot of all sensors
+        snapshot = feature_store.get_current_snapshot(
+            equipment_id=equipment_id,
+            sensor_names=base_sensors
+        )
+
+        // Check if we have enough sensors (completeness)
+        IF len(snapshot) < len(base_sensors):
+            LOG "Incomplete sensor snapshot"
+            CONTINUE
+
+        // Build sensor_data dict for ML inference
+        sensor_data = {
+            'timestamp': timestamp OR NOW(),
+            'equipment_id': equipment_id,
+            **snapshot  // All sensor name-value pairs
+        }
+
+        // Call ML inference endpoint
+        alert = call_ml_inference_service(sensor_data, rule, company_id)
+
+        IF alert is NOT NULL:
+            save_alert_to_database(alert)
+            triggered_alerts.append(alert)
+
+    RETURN triggered_alerts
+
+TIMING: Called every 10 seconds by periodic task
+SCOPE: All equipment with active ML rules
+```
+
+**ML Inference Service Integration:**
+```
+FUNCTION call_ml_inference_service(sensor_data, rule, company_id):
+    INPUT:
+        sensor_data (dict with all sensor values + equipment_id)
+        rule (ML rule configuration)
+        company_id (UUID)
+
+    OUTPUT:
+        alert (object) OR NULL
+
     model_id = rule.model_id
-    
-    IF model_id is NULL:
+    anomaly_threshold = rule.anomaly_threshold  // Default: 0.85
+
+    // HTTP POST to ML Service
+    payload = {
+        "model_id": model_id,
+        "sensor_data": sensor_data,
+        "threshold": anomaly_threshold,
+        "company_id": company_id
+    }
+
+    response = HTTP_POST(
+        url="http://ml-service-api:8002/api/inference/predict",
+        json=payload,
+        timeout=10
+    )
+
+    IF response.status != 200:
+        LOG error
         RETURN NULL
-    
-    // Load model (lazy loading with caching)
-    IF model_id NOT IN ml_detectors:
-        model = load_model_from_file(model_id)
-        ml_detectors[model_id] = model
-    
-    detector = ml_detectors[model_id]
-    
-    // Prepare features (implementation-specific)
-    features = prepare_features(sensor_data)
-    
-    // Predict anomaly
-    prediction = detector.predict(features)
-    anomaly_score = prediction.anomaly_score
-    
-    // Check threshold
-    IF anomaly_score < rule.anomaly_threshold:
+
+    result = response.json()
+
+    // Check if anomaly detected
+    IF result.is_anomaly == FALSE:
         RETURN NULL
-    
-    // Generate alert
+
+    anomaly_score = result.prediction  // 0.0 to 1.0
+
+    // Generate alert (equipment-level, no specific sensor_id)
     alert = {
         company_id: company_id,
         rule_id: rule.rule_id,
-        sensor_id: sensor_data.sensor_id,
+        sensor_id: rule.sensor_id OR NULL,  // Optional
         equipment_id: sensor_data.equipment_id,
         triggered_at: sensor_data.timestamp,
         detection_type: 'ml',
-        actual_value: sensor_data.value,
+        actual_value: NULL,  // Multi-sensor, no single value
         anomaly_score: anomaly_score,
         model_id: model_id,
+        threshold_value: anomaly_threshold,
+        condition: 'ml_anomaly',
         severity: rule.severity,
-        message: format_ml_message(rule.name, anomaly_score)
+        message: format_ml_message(rule.name, anomaly_score, anomaly_threshold)
     }
-    
+
     RETURN alert
+
+ERROR HANDLING:
+- ML Service unavailable → Log error, skip evaluation
+- Model not found → Log warning, skip rule
+- Timeout → Log error, continue to next rule
 ```
+
+**Feature Store Integration:**
+```
+FUNCTION store_sensor_reading(equipment_id, sensor_name, timestamp, value):
+    // Called for every sensor reading from Kafka
+
+    // Convert sensor UUID to sensor name
+    sensor_name = get_sensor_name_from_cache(sensor_id, company_id)
+
+    // Store in Redis
+    feature_store.store_reading(
+        equipment_id=equipment_id,
+        sensor_name=sensor_name,
+        timestamp=timestamp,
+        value=value
+    )
+
+    // Redis key: equipment:{uuid}:sensor:{name}
+    // Redis value: Sorted set [(timestamp, value), ...]
+    // TTL: 3600 seconds (1 hour)
+    // Max window: 100 readings
+
+FUNCTION get_current_snapshot(equipment_id, sensor_names):
+    // Get latest value for each sensor
+
+    snapshot = {}
+    FOR EACH sensor_name IN sensor_names:
+        latest_value = feature_store.get_latest(
+            equipment_id=equipment_id,
+            sensor_name=sensor_name
+        )
+        IF latest_value is NOT NULL:
+            snapshot[sensor_name] = latest_value
+
+    RETURN snapshot
+```
+
+**ML Service Feature Engineering:**
+The ML Service receives the sensor snapshot and performs:
+1. **Load Feature Config**: Retrieve transformations from database
+2. **Apply Transformations**:
+   - Identity (pass-through)
+   - Polynomial (x^n)
+   - Interaction (ratio, product, sum, difference)
+   - Deviation (from baseline)
+   - Statistical (deviation from rolling mean using Feature Store)
+3. **Build Feature Vector**: Create numpy array matching training format
+4. **Model Prediction**:
+   - Unwrap MLflow PyFuncModel to get underlying XGBoost model
+   - Call `predict_proba()` to get anomaly probability [0.0-1.0]
+   - Return anomaly score and is_anomaly flag
+
+**Key Implementation Details:**
+- ML rules skip per-sensor evaluation (no single sensor triggers)
+- Equipment-level evaluation runs every 10 seconds
+- Feature Store populated during message processing
+- Sensor name cache prevents repeated database lookups
+- Incomplete sensor snapshots are skipped (data quality)
+- Anomaly scores stored with alerts for analysis
 
 ---
 

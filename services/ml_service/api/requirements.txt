@@ -23,3 +23,6 @@ xgboost==2.0.3
 
 # Feature Store
 redis[asyncio]==5.0.1
+
+# Prometheus metrics
+prometheus-fastapi-instrumentator==6.1.0

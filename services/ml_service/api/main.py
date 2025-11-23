@@ -5,6 +5,7 @@ Schema-per-tenant architecture with dual database connections
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 import asyncpg
 import logging
 from pathlib import Path
@@ -42,6 +43,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Prometheus metrics
+Instrumentator().instrument(app).expose(app)
 
 
 # ============================================================================

@@ -11,7 +11,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-ML_SERVICE_URL = os.getenv('ML_SERVICE_URL', 'http://ml-service:8002')
+ML_SERVICE_URL = os.getenv('ML_SERVICE_URL', 'http://ml-service-api:8002')
 
 
 class RulesEngine:
@@ -26,6 +26,7 @@ class RulesEngine:
         self.alert_repo = alert_repo
         self.feature_store = feature_store
         self.ml_detectors = {}  # model_id -> detector (lazy loaded)
+        self.sensor_name_cache = {}  # {company_id: {sensor_uuid: sensor_name}}
 
         # Log loaded rules
         total = sum(len(rules) for rules in tenant_rules.values())
@@ -38,6 +39,30 @@ class RulesEngine:
         self.tenant_rules = tenant_rules
         total = sum(len(rules) for rules in tenant_rules.values())
         logger.info(f"Rules updated: {total} rules from {len(tenant_rules)} tenants")
+
+    async def _get_sensor_name(self, sensor_id: str, company_id: str) -> str:
+        """
+        Get sensor name from sensor UUID
+        Uses cache to avoid repeated database queries
+        """
+        # Check cache first
+        if company_id in self.sensor_name_cache:
+            if sensor_id in self.sensor_name_cache[company_id]:
+                return self.sensor_name_cache[company_id][sensor_id]
+        else:
+            self.sensor_name_cache[company_id] = {}
+
+        # Query database
+        try:
+            sensor_name = await self.alert_repo.get_sensor_name(sensor_id, company_id)
+            if sensor_name:
+                self.sensor_name_cache[company_id][sensor_id] = sensor_name
+                return sensor_name
+        except Exception as e:
+            logger.warning(f"Failed to get sensor name for {sensor_id}: {e}")
+
+        # Fallback: use sensor_id if name not found
+        return sensor_id
     
     async def evaluate(self, sensor_data: Dict[str, Any], company_id: str) -> List[Dict]:
         """
@@ -56,14 +81,16 @@ class RulesEngine:
         # Store reading in Feature Store for ML inference
         if self.feature_store and equipment_id:
             try:
-                # Use sensor_id as sensor_name for now
-                # TODO: Add sensor name mapping later
+                # Get sensor name from UUID for Feature Store key
+                sensor_name = await self._get_sensor_name(sensor_id, company_id)
+
                 await self.feature_store.store_reading(
                     equipment_id=equipment_id,
-                    sensor_name=sensor_id,
+                    sensor_name=sensor_name,
                     timestamp=timestamp or datetime.now().isoformat(),
                     value=float(value)
                 )
+                logger.debug(f"Stored {sensor_name}={value} in Feature Store for equipment {equipment_id[:8]}...")
             except Exception as e:
                 logger.error(f"Failed to store reading in Feature Store: {e}")
                 # Continue with rule evaluation even if Feature Store fails
@@ -93,16 +120,143 @@ class RulesEngine:
                 await self.alert_repo.save_alert(alert)
         
         return triggered_alerts
-    
-    def _get_applicable_rules(
-        self, 
-        sensor_id: str, 
-        equipment_id: str, 
-        rules: List[Dict]
+
+    async def evaluate_equipment_ml_rules(
+        self,
+        equipment_id: str,
+        company_id: str,
+        timestamp: Optional[str] = None
     ) -> List[Dict]:
-        """Find rules that apply to this sensor (UUID matching only)"""
+        """
+        Evaluate ML rules for an equipment using complete sensor snapshot
+
+        Args:
+            equipment_id: Equipment UUID
+            company_id: Company ID
+            timestamp: Optional timestamp for the evaluation
+
+        Returns:
+            List of triggered ML alerts
+        """
+        if not self.feature_store:
+            logger.warning("Feature Store not available, skipping ML evaluation")
+            return []
+
+        # Get ML rules for this equipment
+        rules = self.tenant_rules.get(company_id, [])
+        logger.info(f"Company {company_id} has {len(rules)} total rules")
+
+        ml_rules = [
+            rule for rule in rules
+            if rule.get('enabled') and
+            rule.get('detection_type') == 'ml' and
+            str(rule.get('equipment_id')) == equipment_id
+        ]
+
+        logger.info(f"Found {len(ml_rules)} ML rules for equipment {equipment_id[:8]}...")
+
+        if not ml_rules:
+            logger.info(f"No ML rules for equipment {equipment_id}")
+            return []
+
+        triggered_alerts = []
+
+        for rule in ml_rules:
+            try:
+                # Get required sensors from feature config
+                model_id = rule.get('model_id')
+                if not model_id:
+                    logger.warning(f"ML rule {rule['rule_id']} has no model_id")
+                    continue
+
+                # Get feature config to know which sensors are needed
+                feature_config_id = await self._get_feature_config_for_model(model_id, company_id)
+                if not feature_config_id:
+                    logger.warning(f"No feature config found for model {model_id}")
+                    continue
+
+                # Get base sensors from feature config
+                feature_config = await self.alert_repo.get_feature_config(str(feature_config_id), str(company_id))
+                if not feature_config:
+                    logger.warning(f"Feature config {feature_config_id} not found")
+                    continue
+
+                base_sensors = feature_config.get('base_sensors', [])
+                logger.info(f"base_sensors type: {type(base_sensors)}, length: {len(base_sensors) if hasattr(base_sensors, '__len__') else 'N/A'}")
+                if isinstance(base_sensors, str):
+                    logger.info(f"base_sensors is a string! First 100 chars: {base_sensors[:100]}")
+                    import json
+                    base_sensors = json.loads(base_sensors)
+                    logger.info(f"Parsed base_sensors to list with {len(base_sensors)} items")
+
+                if not base_sensors:
+                    logger.warning(f"Feature config {feature_config_id} has no base_sensors")
+                    continue
+
+                # Query Feature Store for current snapshot of all required sensors
+                logger.info(f"Querying Feature Store for {len(base_sensors)} sensors...")
+                snapshot = await self.feature_store.get_current_snapshot(
+                    equipment_id=equipment_id,
+                    sensor_names=base_sensors
+                )
+                logger.info(f"Feature Store returned {len(snapshot)} sensors")
+
+                if len(snapshot) < len(base_sensors):
+                    logger.info(f"Incomplete sensor snapshot for equipment {equipment_id[:8]}...: {len(snapshot)}/{len(base_sensors)} sensors available")
+                    # Skip if we don't have enough sensors
+                    continue
+
+                # Add equipment_id to snapshot for ML inference
+                snapshot['equipment_id'] = equipment_id
+
+                # Create sensor_data dict for ML evaluation
+                sensor_data = {
+                    'timestamp': timestamp or datetime.now(timezone.utc).isoformat(),
+                    'equipment_id': equipment_id,
+                    **snapshot  # All sensor values
+                }
+                logger.info(f"Calling ML inference for rule {rule.get('rule_id')}")
+
+                # Evaluate ML rule
+                alert = await self._evaluate_ml(sensor_data, rule, company_id)
+                if alert:
+                    triggered_alerts.append(alert)
+                    # Save alert to database
+                    await self.alert_repo.save_alert(alert)
+                    logger.info(f"ML alert triggered for equipment {equipment_id[:8]}...")
+
+            except Exception as e:
+                logger.error(f"Failed to evaluate ML rule {rule.get('rule_id')}: {e}", exc_info=True)
+                continue
+
+        return triggered_alerts
+
+    async def _get_feature_config_for_model(self, model_id: str, company_id: str) -> Optional[str]:
+        """Get feature config ID for a model"""
+        try:
+            # Convert model_id to string in case it's a UUID object
+            model_data = await self.alert_repo.get_model_by_id(str(model_id), str(company_id))
+            if model_data:
+                return model_data.get('feature_config_id')
+        except Exception as e:
+            logger.warning(f"Failed to get feature config for model {model_id}: {e}", exc_info=True)
+        return None
+
+    def _get_applicable_rules(
+        self,
+        sensor_id: str,
+        equipment_id: str,
+        rules: List[Dict],
+        skip_ml_rules: bool = True
+    ) -> List[Dict]:
+        """
+        Find rules that apply to this sensor (UUID matching only)
+
+        Args:
+            skip_ml_rules: If True, skip ML rules (they're evaluated separately at equipment level)
+        """
         applicable = []
-        
+
         # Convert to UUID for comparison
         try:
             sensor_uuid = uuid.UUID(sensor_id) if isinstance(sensor_id, str) else sensor_id
@@ -110,10 +264,14 @@ class RulesEngine:
         except (ValueError, AttributeError):
             logger.warning(f"Invalid UUID format: sensor={sensor_id}, equipment={equipment_id}")
             return []
-        
+
         for rule in rules:
             # Check if rule is enabled
             if not rule.get('enabled', True):
+                continue
+
+            # Skip ML rules during per-sensor evaluation (they need all sensors)
+            if skip_ml_rules and rule.get('detection_type') == 'ml':
                 continue
             
             # Match by exact sensor_id (UUID)
@@ -256,11 +414,11 @@ class RulesEngine:
                 payload = {
                     "model_id": str(model_id),
                     "sensor_data": sensor_data,
-                    "threshold": anomaly_threshold
+                    "threshold": anomaly_threshold,
+                    "company_id": company_id  # For internal service-to-service calls
                 }
 
-                # Note: ML service inference endpoint is internal, no auth required
-                # If auth is needed, add headers with service token
+                # Note: ML service inference endpoint supports internal calls with company_id in body
                 async with session.post(inference_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as response:
                     if response.status == 404:
                         logger.warning(f"Model {model_id} not found for ML evaluation")
@@ -285,16 +443,21 @@ class RulesEngine:
 
             anomaly_score = result.get('prediction')
 
+            # For equipment-level ML alerts, sensor_id might not be in sensor_data
+            # Use rule's sensor_id if available, otherwise None (equipment-level alert)
+            sensor_id = sensor_data.get('sensor_id') or rule.get('sensor_id')
+
             alert = {
                 'company_id': company_id,
                 'rule_id': str(rule['rule_id']),
-                'sensor_id': str(sensor_data['sensor_id']),
+                'sensor_id': str(sensor_id) if sensor_id else None,
                 'equipment_id': str(sensor_data.get('equipment_id')) if sensor_data.get('equipment_id') else None,
                 'site_id': sensor_data.get('site_id'),
                 'triggered_at': timestamp,
                 'detection_type': 'ml',
                 'actual_value': sensor_data.get('value'),
-                'predicted_value': anomaly_score,
+                'anomaly_score': anomaly_score,
+                'model_id': str(model_id),
                 'threshold_value': anomaly_threshold,
                 'condition': 'ml_anomaly',
                 'severity': rule.get('severity', 'medium'),

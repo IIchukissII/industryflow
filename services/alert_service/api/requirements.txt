@@ -18,3 +18,6 @@ boto3==1.28.0
 # Utilities
 python-dateutil>=2.8.2
 setuptools>=65.0.0
+
+# Prometheus metrics
+prometheus-fastapi-instrumentator==6.1.0

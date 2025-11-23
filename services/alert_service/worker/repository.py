@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 def normalize_company_id_to_schema(company_id: str) -> str:
     """Convert company_id to schema name"""
-    clean_id = company_id.replace('-', '_')
+    # Handle both UUID objects and strings
+    clean_id = str(company_id).replace('-', '_')
     return f"tenant_{clean_id}"
 
 
@@ -68,15 +69,15 @@ class AlertRepository:
         """Save alert to database with schema routing"""
         company_id = alert_data['company_id']
         schema_name = normalize_company_id_to_schema(company_id)
-        
+
         # Generate alert_id if not provided
         alert_id = alert_data.get('alert_id', str(uuid_module.uuid4()))
         triggered_at = alert_data.get('triggered_at', datetime.utcnow())
-        
+
         async with self.pool.acquire() as conn:
             # Set search path to tenant schema
             await conn.execute(f"SET search_path TO {schema_name}, public")
-            
+
             # Insert without company_id column
             await conn.execute("""
                 INSERT INTO alerts (
@@ -100,7 +101,7 @@ class AlertRepository:
                 alert_id,
                 triggered_at,
                 alert_data['rule_id'],
-                alert_data['sensor_id'],
+                alert_data.get('sensor_id'),
                 alert_data.get('equipment_id'),
                 alert_data.get('site_id'),
                 alert_data['detection_type'],
@@ -133,6 +134,63 @@ class AlertRepository:
         # tenant_550e8400_e29b_41d4_a716_446655440000 -> 550e8400-e29b-41d4-a716-446655440000
         uuid_part = schema_name.replace('tenant_', '').replace('_', '-')
         return uuid_part
+
+    async def get_sensor_name(self, sensor_id: str, company_id: str) -> Optional[str]:
+        """Get sensor name from sensor UUID"""
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        async with self.pool.acquire() as conn:
+            # Set search path to tenant schema
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            # Query sensor name
+            sensor_name = await conn.fetchval(
+                "SELECT sensor_name FROM sensors WHERE sensor_id = $1",
+                uuid_module.UUID(sensor_id)
+            )
+
+            return sensor_name
+
+    async def get_feature_config(self, config_id: str, company_id: str) -> Optional[Dict]:
+        """Get feature engineering config by ID"""
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        async with self.pool.acquire() as conn:
+            # Set search path to tenant schema
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            # Query feature config
+            row = await conn.fetchrow(
+                """
+                SELECT id, name, base_sensors, transformations
+                FROM feature_engineering_configs
+                WHERE id = $1
+                """,
+                uuid_module.UUID(config_id)
+            )
+
+            return dict(row) if row else None
+
+    async def get_model_by_id(self, model_id: str, company_id: str) -> Optional[Dict]:
+        """Get ML model metadata by ID"""
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        async with self.pool.acquire() as conn:
+            # Set search_path to tenant schema
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            # Query model
+            row = await conn.fetchrow(
+                """
+                SELECT model_id, model_name, model_version, status,
+                       mlflow_run_id, feature_config_id
+                FROM ml_models
+                WHERE model_id = $1
+                """,
+                uuid_module.UUID(model_id)
+            )
+
+            return dict(row) if row else None
 
 
 class RuleRepository:

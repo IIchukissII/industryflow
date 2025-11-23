@@ -70,7 +70,7 @@ function Login({ onLogin }) {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@acme.com"
+              placeholder="Enter your email"
               required
               autoFocus
             />
@@ -99,9 +99,7 @@ function Login({ onLogin }) {
         </form>
 
         <div className="login-footer">
-          <p>Test Accounts:</p>
-          <p className="test-account">admin@acme.com / password</p>
-          <p className="test-account">admin@techcorp.com / password</p>
+          <p>Need an account? Contact your system administrator.</p>
         </div>
       </div>
     </div>

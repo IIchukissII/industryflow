@@ -40,7 +40,9 @@ BEGIN
     PERFORM create_base_tables(v_schema_name);
     PERFORM add_alert_tables_to_schema(v_schema_name);
     PERFORM add_ml_tables_to_schema(v_schema_name);
-    
+    PERFORM add_feature_engineering_tables_to_schema(v_schema_name);
+    PERFORM add_feature_config_columns_to_ml_models(v_schema_name);
+
     -- Grant table permissions
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO api_gateway_user', v_schema_name);
     EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO ingestion_service_user', v_schema_name);
@@ -64,6 +66,7 @@ BEGIN
     RAISE NOTICE '  - 3 aggregation tables (with compression)';
     RAISE NOTICE '  - Alert rules and alerts';
     RAISE NOTICE '  - ML models and predictions';
+    RAISE NOTICE '  - Feature engineering configurations';
     
     RETURN v_schema_name;
 END;

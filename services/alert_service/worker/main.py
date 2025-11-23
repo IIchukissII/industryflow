@@ -32,6 +32,7 @@ class AlertService:
         self.kafka_consumer = None
         self.running = False
         self.reload_task = None
+        self.ml_eval_task = None
         self.consume_task = None
     
     async def initialize(self):
@@ -109,37 +110,92 @@ class AlertService:
                 break
             except Exception as e:
                 logger.error(f"Error during rule reload: {e}", exc_info=True)
+
+    async def _periodic_ml_evaluation(self):
+        """Periodically evaluate ML rules at equipment level"""
+        logger.info("ML evaluation task started - waiting 15 seconds for Feature Store to populate")
+        # Wait a bit on startup to let Feature Store populate
+        await asyncio.sleep(15)
+        logger.info("ML evaluation task - starting periodic evaluation loop")
+
+        while self.running:
+            try:
+                # Get all equipment IDs with ML rules
+                equipment_to_evaluate = set()
+                for company_id, rules in self.rules_engine.tenant_rules.items():
+                    for rule in rules:
+                        if rule.get('enabled') and rule.get('detection_type') == 'ml':
+                            equipment_id = rule.get('equipment_id')
+                            if equipment_id:
+                                # Convert UUID to string for comparison
+                                equipment_to_evaluate.add((str(equipment_id), company_id))
+
+                # Evaluate ML rules for each equipment
+                if equipment_to_evaluate:
+                    logger.info(f"Evaluating ML rules for {len(equipment_to_evaluate)} equipment(s)")
+                    for equipment_id, company_id in equipment_to_evaluate:
+                        try:
+                            alerts = await self.rules_engine.evaluate_equipment_ml_rules(
+                                equipment_id=equipment_id,
+                                company_id=company_id
+                            )
+                            if alerts:
+                                logger.info(f"Generated {len(alerts)} ML alert(s) for equipment {equipment_id[:8]}...")
+                        except Exception as e:
+                            logger.error(f"Failed to evaluate ML for equipment {equipment_id}: {e}")
+
+                # Run every 10 seconds
+                await asyncio.sleep(10)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error during ML evaluation: {e}", exc_info=True)
+                await asyncio.sleep(10)
     
     async def run(self):
         """Main service loop"""
         self.running = True
-        
+
         # Start periodic rule reload task
         self.reload_task = asyncio.create_task(self._periodic_reload())
-        
+
+        # Start periodic ML evaluation task
+        self.ml_eval_task = asyncio.create_task(self._periodic_ml_evaluation())
+
         # Start Kafka consumer task
         self.consume_task = asyncio.create_task(
             self.kafka_consumer.consume_messages()
         )
-        
+
         logger.info("Alert Detection Service is running")
         logger.info(f"Rule reload interval: {config.RULE_RELOAD_INTERVAL}s")
-        
+        logger.info("ML evaluation interval: 10s")
+
         # Wait for tasks
-        await asyncio.gather(
+        results = await asyncio.gather(
             self.reload_task,
+            self.ml_eval_task,
             self.consume_task,
             return_exceptions=True
         )
+
+        # Log any exceptions
+        task_names = ["reload_task", "ml_eval_task", "consume_task"]
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"{task_names[i]} failed with exception: {result}", exc_info=result)
     
     async def shutdown(self):
         """Gracefully shutdown the service"""
         logger.info("Shutting down Alert Detection Service...")
         self.running = False
-        
+
         # Cancel tasks
         if self.reload_task:
             self.reload_task.cancel()
+        if self.ml_eval_task:
+            self.ml_eval_task.cancel()
         if self.consume_task:
             self.consume_task.cancel()
         

@@ -30,6 +30,8 @@ class AlertResponse(BaseModel):
     rule_id: str
     sensor_id: Optional[str]
     equipment_id: Optional[str]
+    sensor_name: Optional[str]
+    equipment_name: Optional[str]
     company_id: str
     severity: str
     message: str
@@ -66,45 +68,49 @@ async def list_alerts(
     if limit > 1000:
         limit = 1000
     
-    # Build query - automatic schema routing
+    # Build query - automatic schema routing with JOINs for names
     query = """
-        SELECT 
-            alert_id::text,
-            rule_id::text,
-            sensor_id::text,
-            equipment_id::text,
-            severity,
-            message,
-            actual_value,
-            threshold_value,
-            anomaly_score,
-            triggered_at,
-            acknowledged,
-            acknowledged_at,
-            acknowledged_by
-        FROM alerts
+        SELECT
+            a.alert_id::text,
+            a.rule_id::text,
+            a.sensor_id::text,
+            a.equipment_id::text,
+            s.sensor_name,
+            e.name as equipment_name,
+            a.severity,
+            a.message,
+            a.actual_value,
+            a.threshold_value,
+            a.anomaly_score,
+            a.triggered_at,
+            a.acknowledged,
+            a.acknowledged_at,
+            a.acknowledged_by
+        FROM alerts a
+        LEFT JOIN sensors s ON a.sensor_id = s.sensor_id
+        LEFT JOIN equipment e ON a.equipment_id = e.equipment_id
         WHERE 1=1
     """
     
     params = {"limit": limit}
-    
+
     if sensor_id:
-        query += " AND sensor_id = :sensor_id"
+        query += " AND a.sensor_id = :sensor_id"
         params["sensor_id"] = sensor_id
-    
+
     if equipment_id:
-        query += " AND equipment_id = :equipment_id"
+        query += " AND a.equipment_id = :equipment_id"
         params["equipment_id"] = equipment_id
-    
+
     if severity:
-        query += " AND severity = :severity"
+        query += " AND a.severity = :severity"
         params["severity"] = severity.value
-    
+
     if acknowledged is not None:
-        query += " AND acknowledged = :acknowledged"
+        query += " AND a.acknowledged = :acknowledged"
         params["acknowledged"] = acknowledged
-    
-    query += " ORDER BY triggered_at DESC LIMIT :limit"
+
+    query += " ORDER BY a.triggered_at DESC LIMIT :limit"
     
     result = await db.execute(text(query), params)
     rows = result.fetchall()
@@ -127,23 +133,27 @@ async def list_unacknowledged_alerts(
 ):
     """Get unacknowledged alerts for the authenticated user's company (schema-routed)"""
     query = """
-        SELECT 
-            alert_id::text,
-            rule_id::text,
-            sensor_id::text,
-            equipment_id::text,
-            severity,
-            message,
-            actual_value,
-            threshold_value,
-            anomaly_score,
-            triggered_at,
-            acknowledged,
-            acknowledged_at,
-            acknowledged_by
-        FROM alerts
-        WHERE acknowledged = FALSE
-        ORDER BY triggered_at DESC
+        SELECT
+            a.alert_id::text,
+            a.rule_id::text,
+            a.sensor_id::text,
+            a.equipment_id::text,
+            s.sensor_name,
+            e.name as equipment_name,
+            a.severity,
+            a.message,
+            a.actual_value,
+            a.threshold_value,
+            a.anomaly_score,
+            a.triggered_at,
+            a.acknowledged,
+            a.acknowledged_at,
+            a.acknowledged_by
+        FROM alerts a
+        LEFT JOIN sensors s ON a.sensor_id = s.sensor_id
+        LEFT JOIN equipment e ON a.equipment_id = e.equipment_id
+        WHERE a.acknowledged = FALSE
+        ORDER BY a.triggered_at DESC
         LIMIT :limit
     """
     
@@ -168,23 +178,27 @@ async def list_critical_alerts(
 ):
     """Get critical alerts for the authenticated user's company (schema-routed)"""
     query = """
-        SELECT 
-            alert_id::text,
-            rule_id::text,
-            sensor_id::text,
-            equipment_id::text,
-            severity,
-            message,
-            actual_value,
-            threshold_value,
-            anomaly_score,
-            triggered_at,
-            acknowledged,
-            acknowledged_at,
-            acknowledged_by
-        FROM alerts
-        WHERE severity = 'critical'
-        ORDER BY triggered_at DESC
+        SELECT
+            a.alert_id::text,
+            a.rule_id::text,
+            a.sensor_id::text,
+            a.equipment_id::text,
+            s.sensor_name,
+            e.name as equipment_name,
+            a.severity,
+            a.message,
+            a.actual_value,
+            a.threshold_value,
+            a.anomaly_score,
+            a.triggered_at,
+            a.acknowledged,
+            a.acknowledged_at,
+            a.acknowledged_by
+        FROM alerts a
+        LEFT JOIN sensors s ON a.sensor_id = s.sensor_id
+        LEFT JOIN equipment e ON a.equipment_id = e.equipment_id
+        WHERE a.severity = 'critical'
+        ORDER BY a.triggered_at DESC
         LIMIT :limit
     """
     

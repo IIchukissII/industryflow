@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.claude
 
 # IDE
 .vscode/
@@ -35,4 +36,9 @@ Thumbs.db
 *.tmp
 *~
 
-node_modules
+# Node modules
+node_modules/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/

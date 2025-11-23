@@ -1,0 +1,68 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Docker container logs - all containers
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # Extract container name
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+
+      # Extract container ID
+      - source_labels: ['__meta_docker_container_id']
+        target_label: 'container_id'
+
+      # Extract compose service name
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'service'
+
+      # Extract compose project
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'project'
+
+      # Add job label for docker logs
+      - replacement: 'docker'
+        target_label: 'job'
+
+      # Add environment label
+      - replacement: 'production'
+        target_label: 'environment'
+
+      # Add cluster label
+      - replacement: 'industryflow'
+        target_label: 'cluster'
+    pipeline_stages:
+      # Parse JSON logs if possible
+      - json:
+          expressions:
+            level: level
+            timestamp: timestamp
+            message: message
+            service: service
+      # Extract log level
+      - labels:
+          level:
+      # Output the message
+      - output:
+          source: message
+
+  # System logs (optional - can add if needed)
+  - job_name: system
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: varlogs
+          __path__: /var/log/*log

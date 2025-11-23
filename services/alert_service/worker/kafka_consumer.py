@@ -54,13 +54,26 @@ class AlertKafkaConsumer:
     async def consume_messages(self):
         """Main message consumption loop"""
         logger.info("Starting message consumption...")
-        
+        logger.info(f"Consumer running flag: {self.running}")
+        logger.info(f"Consumer object: {self.consumer}")
+
         try:
+            loop_count = 0
+            logger.info("Entering while loop...")
+
             while self.running:
                 # Get batch of messages
+                loop_count += 1
+                logger.info(f"Loop iteration {loop_count}, calling getmany...")
+
                 data = await self.consumer.getmany(timeout_ms=1000, max_records=10)
-                
+
+                logger.info(f"getmany returned, data: {bool(data)}")
+
                 if data:
+                    msg_count = sum(len(messages) for messages in data.values())
+                    logger.info(f"Received {msg_count} messages from Kafka")
+
                     for tp, messages in data.items():
                         for message in messages:
                             try:

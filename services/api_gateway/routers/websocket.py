@@ -7,17 +7,77 @@ from jose import jwt, JWTError
 from messaging.redis_client import redis_client
 from config import get_settings
 from database import AsyncSessionLocal
-from sqlalchemy import select
+from sqlalchemy import select, text
 from models.user import User
 
 router = APIRouter(prefix="/ws", tags=["websocket"])
 
 # Get settings for JWT
 settings = get_settings()
-SECRET = settings.jwt_secret_key if hasattr(settings, 'jwt_secret_key') else "CHANGE-THIS-TO-A-RANDOM-SECRET-KEY"
+SECRET = settings.JWT_SECRET_KEY
 
 # Track active WebSocket connections with their company_id
 active_connections: dict[WebSocket, str] = {}
+
+# Cache for sensor/equipment names to reduce DB queries
+_names_cache = {}
+_cache_timestamp = 0
+_cache_ttl = 60  # Refresh cache every 60 seconds
+
+
+async def enrich_sensors_with_names(sensors: dict, company_id: str) -> dict:
+    """
+    Enrich sensor data with sensor_name and equipment_name from database.
+    Uses caching to minimize database queries.
+    """
+    global _names_cache, _cache_timestamp
+
+    current_time = time.time()
+
+    # Refresh cache if expired or empty
+    if current_time - _cache_timestamp > _cache_ttl or not _names_cache:
+        try:
+            async with AsyncSessionLocal() as session:
+                # Set search path for tenant schema
+                schema_name = f"tenant_{company_id.replace('-', '_')}"
+                await session.execute(text(f"SET search_path TO {schema_name}, public"))
+
+                sensor_ids = list(sensors.keys())
+                if sensor_ids:
+                    query = """
+                        SELECT
+                            s.sensor_id::text,
+                            s.sensor_name,
+                            s.equipment_id::text,
+                            e.name as equipment_name
+                        FROM sensors s
+                        LEFT JOIN equipment e ON s.equipment_id = e.equipment_id
+                        WHERE s.sensor_id = ANY(:sensor_ids)
+                    """
+                    result = await session.execute(
+                        text(query),
+                        {"sensor_ids": sensor_ids}
+                    )
+                    rows = result.fetchall()
+
+                    _names_cache = {
+                        row[0]: {
+                            "sensor_name": row[1],
+                            "equipment_name": row[3]
+                        }
+                        for row in rows
+                    }
+                    _cache_timestamp = current_time
+        except Exception as e:
+            print(f"⚠️ Error loading names cache: {e}")
+
+    # Enrich sensor data with names from cache
+    for sensor_id, data in sensors.items():
+        if sensor_id in _names_cache:
+            data['sensor_name'] = _names_cache[sensor_id]['sensor_name']
+            data['equipment_name'] = _names_cache[sensor_id]['equipment_name']
+
+    return sensors
 
 
 async def get_user_from_token(token: str) -> Optional[User]:
@@ -86,23 +146,26 @@ async def websocket_sensors(websocket: WebSocket, token: Optional[str] = None):
         while True:
             try:
                 all_sensors = await redis_client.get_all_sensors()
-                
+
                 # Filter sensors by company_id
                 company_sensors = {
-                    sensor_id: data 
+                    sensor_id: data
                     for sensor_id, data in all_sensors.items()
                     if str(data.get('company_id')) == company_id
                 }
-                
+
+                # Enrich with sensor and equipment names
+                company_sensors = await enrich_sensors_with_names(company_sensors, company_id)
+
                 print(f"📊 Sending {len(company_sensors)}/{len(all_sensors)} sensors to {user.email}")
-                
+
                 await websocket.send_json({
                     "type": "sensor_update",
                     "timestamp": time.time(),
                     "sensors": company_sensors,
                     "count": len(company_sensors)
                 })
-                
+
                 await asyncio.sleep(1)
                 
             except Exception as e:
@@ -141,12 +204,15 @@ async def websocket_equipment_sensors(
         while True:
             all_sensors = await redis_client.get_all_sensors()
             equipment_sensors = {
-                sensor_id: data 
+                sensor_id: data
                 for sensor_id, data in all_sensors.items()
-                if (data.get('equipment_id') == equipment_id and 
+                if (data.get('equipment_id') == equipment_id and
                     str(data.get('company_id')) == company_id)
             }
-            
+
+            # Enrich with sensor and equipment names
+            equipment_sensors = await enrich_sensors_with_names(equipment_sensors, company_id)
+
             await websocket.send_json({
                 "type": "sensor_update",
                 "timestamp": time.time(),
@@ -154,7 +220,7 @@ async def websocket_equipment_sensors(
                 "sensors": equipment_sensors,
                 "count": len(equipment_sensors)
             })
-            
+
             await asyncio.sleep(1)
                 
     except WebSocketDisconnect:

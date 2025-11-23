@@ -287,6 +287,105 @@ class FeatureStore:
         logger.info(f"Cleared {count} sensor keys for equipment {equipment_id}")
         return count
 
+    async def compute_rolling_mean(
+        self,
+        equipment_id: str,
+        sensor_name: str,
+        window: int = 50
+    ) -> Optional[float]:
+        """
+        Compute rolling mean for a sensor over recent window
+
+        Args:
+            equipment_id: Equipment UUID
+            sensor_name: Sensor name
+            window: Number of recent readings to average
+
+        Returns:
+            Mean value, or None if insufficient data
+        """
+        readings = await self.get_recent_readings(equipment_id, sensor_name, limit=window)
+
+        if not readings:
+            return None
+
+        values = [r['value'] for r in readings]
+        return sum(values) / len(values) if values else None
+
+    async def compute_rolling_std(
+        self,
+        equipment_id: str,
+        sensor_name: str,
+        window: int = 50
+    ) -> Optional[float]:
+        """
+        Compute rolling standard deviation for a sensor
+
+        Args:
+            equipment_id: Equipment UUID
+            sensor_name: Sensor name
+            window: Number of recent readings
+
+        Returns:
+            Standard deviation, or None if insufficient data
+        """
+        readings = await self.get_recent_readings(equipment_id, sensor_name, limit=window)
+
+        if len(readings) < 2:
+            return None
+
+        values = [r['value'] for r in readings]
+        mean = sum(values) / len(values)
+        variance = sum((x - mean) ** 2 for x in values) / len(values)
+        return variance ** 0.5
+
+    async def compute_statistics(
+        self,
+        equipment_id: str,
+        sensor_name: str,
+        window: int = 50
+    ) -> Dict[str, Optional[float]]:
+        """
+        Compute multiple statistics for a sensor
+
+        Args:
+            equipment_id: Equipment UUID
+            sensor_name: Sensor name
+            window: Number of recent readings
+
+        Returns:
+            Dictionary with mean, std, min, max, current
+        """
+        readings = await self.get_recent_readings(equipment_id, sensor_name, limit=window)
+
+        if not readings:
+            return {
+                'mean': None,
+                'std': None,
+                'min': None,
+                'max': None,
+                'current': None,
+                'count': 0
+            }
+
+        values = [r['value'] for r in readings]
+        mean_val = sum(values) / len(values)
+
+        if len(values) >= 2:
+            variance = sum((x - mean_val) ** 2 for x in values) / len(values)
+            std_val = variance ** 0.5
+        else:
+            std_val = None
+
+        return {
+            'mean': mean_val,
+            'std': std_val,
+            'min': min(values),
+            'max': max(values),
+            'current': values[-1],
+            'count': len(values)
+        }
+
     async def health_check(self) -> Dict[str, Any]:
         """
         Check Feature Store health
