@@ -154,21 +154,41 @@ docker logs -f industryflow-spark-streaming
 ### User Guides
 
 - **[Monitoring & Observability](docs/MONITORING.md)** - Complete guide to metrics, logs, and dashboards
+- **[User Management](docs/USER_MANAGEMENT.md)** - User roles, permissions, and management
+- **[Authentication Setup](docs/AUTHENTICATION_SETUP.md)** - JWT authentication and configuration
 - **[API Documentation](http://localhost:8000/docs)** - Interactive API docs (when running)
-- **[Alert Rules Configuration](docs/ALERTS.md)** - Setting up threshold and ML-based alerts _(coming soon)_
 
-### Developer Guides
+### Architecture Documentation
 
-- **[Architecture Overview](docs/ARCHITECTURE.md)** - Detailed system design _(coming soon)_
-- **[Database Schema](docs/DATABASE.md)** - Schema-per-tenant design and tables _(coming soon)_
-- **[ML Model Development](docs/ML_MODELS.md)** - Training and deploying models _(coming soon)_
-- **[Feature Engineering](docs/FEATURES.md)** - Feature store and engineering pipeline _(coming soon)_
+**Core Architecture**:
+- **[Database Architecture](docs/architecture/IndustryFlow_Database_Architecture.md)** - Schema-per-tenant design, tables, and relationships
+- **[Spark Streaming Architecture](docs/architecture/Spark_Streaming_Schema_Per_Tenant_Architecture.md)** - Multi-tenant stream processing
+- **[TimescaleDB Compression](docs/architecture/TimescaleDB_Compression_Technical_Specification.md)** - Columnar compression and optimization
 
-### Operations
+**Service Architecture**:
+- **[Alert Detection Service](docs/architecture/Alert_Detection_Service_Architecture.md)** - Anomaly detection architecture
+- **[ML Service Architecture](docs/architecture/ML_Service_Architecture.md)** - Model training and management
+- **[ML Inference & Feature Engineering](docs/architecture/ML_Inference_and_Feature_Engineering.md)** - Real-time inference pipeline
+- **[Feature Engineering Service](docs/architecture/Feature_Engineering_Service_Architecture.md)** - Feature store and computation
 
-- **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment checklist _(coming soon)_
-- **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions _(coming soon)_
-- **[Performance Tuning](docs/PERFORMANCE.md)** - Optimization strategies _(coming soon)_
+### API Documentation
+
+**Service APIs**:
+- **[API Gateway](docs/api/API_Gateway_Documentation.md)** - Main API entry point and routing
+- **[Alert Service API](docs/api/Alert_Service_API_Documentation.md)** - Alert rules and detection
+- **[ML Service API](docs/api/ML_Service_API_Documentation.md)** - Model training and inference
+- **[Feature Engineering API](docs/api/Feature_Engineering_API_Documentation.md)** - Feature configuration and computation
+- **[Ingestion Service](docs/api/Ingestion_Service_Technical_Documentation.md)** - Sensor data ingestion
+- **[API Endpoints Reference](docs/api/api_endpoints.md)** - Complete endpoint listing
+
+### Test Reports
+
+- **[Feature Engineering Service Tests](docs/test-reports/Feature_Engineering_Service_Test_Report.md)** - Comprehensive test results
+
+### Infrastructure
+
+- **[TimescaleDB Init Scripts](infrastructure/timescaledb/init-scripts/README.md)** - Database initialization documentation
+- **[ML Notebooks Utils](services/ml_service/notebooks/utils/README.md)** - Jupyter notebook utilities
 
 ---
 
