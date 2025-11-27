@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IndustryFlow - Storage Layer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #f7f9fb;
+    padding: 20px;
+  }
+  .container {
+    max-width: 1120px;
+    margin: 0 auto;
+    background: #fff;
+    padding: 25px;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  }
+  h1 {
+    text-align: center;
+    color: #2c3e50;
+    margin-bottom: 25px;
+    font-size: 22px;
+  }
+  svg {
+    display: block;
+    margin: 0 auto;
+    background: #ffffff;
+  }
+  .main-box {
+    fill: #ffffff;
+    stroke: #34495e;
+    stroke-width: 2;
+    rx: 6;
+  }
+  .tenant-box {
+    fill: #fff9e6;
+    stroke: #f39c12;
+    stroke-width: 1.5;
+    stroke-dasharray: 4,3;
+    rx: 6;
+  }
+  .component-title {
+    font-size: 13px;
+    font-weight: 600;
+    fill: #2c3e50;
+  }
+  .component-detail {
+    font-size: 10px;
+    fill: #555;
+  }
+  .flow-arrow {
+    stroke: #e74c3c;
+    stroke-width: 2.5;
+    fill: none;
+    marker-end: url(#arrowhead);
+  }
+  .flow-label {
+    font-size: 10px;
+    fill: #c0392b;
+    font-style: italic;
+  }
+  @page { size: A4 landscape; margin: 10mm; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Storage Layer – Schema-Per-Tenant Architecture</h1>
+
+  <svg width="1080" height="500" viewBox="0 0 1080 500">
+    <defs>
+      <marker id="arrowhead" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto">
+        <polygon points="0 0, 12 4, 0 8" fill="#e74c3c" />
+      </marker>
+    </defs>
+
+    <!-- Spark Streaming Input -->
+    <rect x="400" y="20" width="280" height="50" style="fill:#f0f0f0;stroke:#666;stroke-width:1.5;rx:4"/>
+    <text x="540" y="50" class="component-title" text-anchor="middle">Spark Streaming</text>
+
+    <!-- Public Schema -->
+    <rect x="60" y="120" width="260" height="120" class="main-box"/>
+    <text x="190" y="145" class="component-title" text-anchor="middle">Public Schema</text>
+    <text x="190" y="170" class="component-detail" text-anchor="middle">companies</text>
+    <text x="190" y="185" class="component-detail" text-anchor="middle">users</text>
+    <text x="190" y="205" class="component-detail" text-anchor="middle" font-size="9">(tenant registry & auth)</text>
+
+    <!-- TimescaleDB Schemas -->
+    <rect x="450" y="120" width="570" height="280" class="main-box"/>
+    <text x="735" y="145" class="component-title" text-anchor="middle">TimescaleDB - Tenant Schemas</text>
+
+    <!-- Tenant Schema 1 -->
+    <rect x="475" y="170" width="165" height="210" class="tenant-box"/>
+    <text x="557" y="190" class="component-title" text-anchor="middle" font-size="11">tenant_uuid_1</text>
+    <text x="557" y="210" class="component-detail" text-anchor="middle" font-size="9">Tables (10):</text>
+    <text x="557" y="228" class="component-detail" text-anchor="middle">equipment</text>
+    <text x="557" y="243" class="component-detail" text-anchor="middle">sensors</text>
+    <text x="557" y="258" class="component-detail" text-anchor="middle">sensor_measurements*</text>
+    <text x="557" y="273" class="component-detail" text-anchor="middle">aggregations_1min*</text>
+    <text x="557" y="288" class="component-detail" text-anchor="middle">aggregations_5min*</text>
+    <text x="557" y="303" class="component-detail" text-anchor="middle">aggregations_1hour*</text>
+    <text x="557" y="318" class="component-detail" text-anchor="middle">alert_rules</text>
+    <text x="557" y="333" class="component-detail" text-anchor="middle">alerts*</text>
+    <text x="557" y="348" class="component-detail" text-anchor="middle">ml_models</text>
+    <text x="557" y="363" class="component-detail" text-anchor="middle">model_predictions*</text>
+
+    <!-- Tenant Schema 2 -->
+    <rect x="655" y="170" width="165" height="210" class="tenant-box"/>
+    <text x="737" y="190" class="component-title" text-anchor="middle" font-size="11">tenant_uuid_2</text>
+    <text x="737" y="210" class="component-detail" text-anchor="middle" font-size="9">Tables (10):</text>
+    <text x="737" y="228" class="component-detail" text-anchor="middle">equipment</text>
+    <text x="737" y="243" class="component-detail" text-anchor="middle">sensors</text>
+    <text x="737" y="258" class="component-detail" text-anchor="middle">sensor_measurements*</text>
+    <text x="737" y="273" class="component-detail" text-anchor="middle">aggregations_1min*</text>
+    <text x="737" y="288" class="component-detail" text-anchor="middle">aggregations_5min*</text>
+    <text x="737" y="303" class="component-detail" text-anchor="middle">aggregations_1hour*</text>
+    <text x="737" y="318" class="component-detail" text-anchor="middle">alert_rules</text>
+    <text x="737" y="333" class="component-detail" text-anchor="middle">alerts*</text>
+    <text x="737" y="348" class="component-detail" text-anchor="middle">ml_models</text>
+    <text x="737" y="363" class="component-detail" text-anchor="middle">model_predictions*</text>
+
+    <!-- Tenant Schema N -->
+    <rect x="835" y="170" width="165" height="210" class="tenant-box"/>
+    <text x="917" y="190" class="component-title" text-anchor="middle" font-size="11">tenant_uuid_N</text>
+    <text x="917" y="215" class="component-detail" text-anchor="middle" font-size="9">Same structure</text>
+    <text x="917" y="235" class="component-detail" text-anchor="middle">10 tables per tenant</text>
+    <text x="917" y="260" class="component-detail" text-anchor="middle">...</text>
+    <text x="917" y="290" class="component-detail" text-anchor="middle" font-weight="600" font-size="9">Schema-level isolation</text>
+    <text x="917" y="310" class="component-detail" text-anchor="middle" font-size="9">* = Hypertable</text>
+    <text x="917" y="330" class="component-detail" text-anchor="middle" font-size="9">(compressed)</text>
+
+    <!-- Arrows -->
+    <path d="M 540 70 L 540 115" class="flow-arrow"/>
+    <text x="560" y="95" class="flow-label">Batch writes</text>
+
+    <path d="M 325 180 L 445 180" class="flow-arrow"/>
+    <text x="375" y="170" class="flow-label">Schema routing</text>
+
+    <!-- Legend -->
+    <rect x="60" y="430" width="960" height="50" style="fill:#f9f9f9;stroke:#999;stroke-width:1;rx:3"/>
+    <text x="80" y="453" class="component-detail" font-weight="600">Architecture:</text>
+    <text x="200" y="453" class="component-detail">Schema-per-tenant isolation</text>
+    <text x="450" y="453" class="component-detail">• TimescaleDB compression enabled</text>
+    <text x="750" y="453" class="component-detail">• 90-95% storage savings</text>
+    <text x="80" y="468" class="component-detail" font-weight="600">Naming:</text>
+    <text x="200" y="468" class="component-detail">tenant_&lt;normalized_uuid&gt;</text>
+  </svg>
+</div>
+</body>
+</html>

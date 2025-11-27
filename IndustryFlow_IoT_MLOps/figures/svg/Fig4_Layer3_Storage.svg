@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 -175 900 550">
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#333"/>
+    </marker>
+  </defs>
+  <rect x="221.687" y="-140.75" width="260" height="70" fill="#E8F5E9" stroke="#388E3C" stroke-width="2" rx="5" style="stroke-width: 2;"/>
+  <text x="351.687" y="-112.75" font-size="13" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 13px;">
+    From Stream Processing
+  </text>
+  <text x="351.687" y="-90.753" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 11px;">
+    Processed sensor measurements
+  </text>
+  <path d="M 351.687 -70.75 L 351.687 -30.75" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" style="stroke-width: 2;"/>
+  <rect x="-78.313" y="-30.75" width="860" height="380" fill="#E1F5FE" stroke="#0277BD" stroke-width="3" rx="5" style="stroke-width: 3;"/>
+  <text x="351.687" y="-0.75" font-size="16" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 16px;">
+    TimescaleDB (PostgreSQL Extension)
+  </text>
+  <text x="351.687" y="21.25" font-size="13" text-anchor="middle" font-family="Arial" fill="#555" style="white-space: pre; stroke-width: 1; font-size: 13px;">
+    PostgreSQL 15 + TimescaleDB Extension (Port 5432)
+  </text>
+  <rect x="-51.532" y="47.319" width="250" height="130" fill="white" stroke="#0277BD" stroke-width="2" rx="4" style="stroke-width: 2;"/>
+  <text x="76.687" y="74.25" font-size="13" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 13px;">
+    Tenant A Schema
+  </text>
+  <text x="76.687" y="94.25" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 11px;">company 1<tspan x="76.68699645996094" dy="1em">​</tspan></text>
+  <rect x="-33.313" y="109.25" width="200" height="25" fill="#E8F5E9" stroke="#0277BD" stroke-width="1" rx="2" style="stroke-width: 1;"/>
+  <text x="66.687" y="126.25" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    sensor_measurements
+  </text>
+  <rect x="-33.313" y="139.25" width="200" height="25" fill="#E8F5E9" stroke="#0277BD" stroke-width="1" rx="2" style="stroke-width: 1;"/>
+  <text x="66.687" y="156.25" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    sensor_aggregations
+  </text>
+  <rect x="226.687" y="49.25" width="250" height="130" fill="white" stroke="#0277BD" stroke-width="2" rx="4" style="stroke-width: 2;"/>
+  <text x="351.687" y="74.25" font-size="13" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 13px;">
+    Tenant B Schema
+  </text>
+  <text x="351.687" y="94.25" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 11px;" transform="matrix(1, 0, 0, 1.110847, -1.287622, -21.540972)"><tspan x="351.68701171875" dy="1em">​</tspan>    company 2  </text>
+  <rect x="241.687" y="109.25" width="200" height="25" fill="#E8F5E9" stroke="#0277BD" stroke-width="1" rx="2" style="stroke-width: 1;"/>
+  <text x="341.687" y="126.25" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    sensor_measurements
+  </text>
+  <rect x="241.687" y="139.25" width="200" height="25" fill="#E8F5E9" stroke="#0277BD" stroke-width="1" rx="2" style="stroke-width: 1;"/>
+  <text x="341.687" y="156.25" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    sensor_aggregations
+  </text>
+  <rect x="501.687" y="49.25" width="250" height="130" fill="white" stroke="#0277BD" stroke-width="2" rx="4" style="stroke-width: 2;"/>
+  <text x="626.687" y="74.25" font-size="13" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 13px;">
+    Tenant C Schema
+  </text>
+  <text x="626.687" y="94.25" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 11px;">company n</text>
+  <rect x="516.687" y="109.25" width="200" height="25" fill="#E8F5E9" stroke="#0277BD" stroke-width="1" rx="2" style="stroke-width: 1;"/>
+  <text x="616.687" y="126.25" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    sensor_measurements
+  </text>
+  <rect x="516.687" y="139.25" width="200" height="25" fill="#E8F5E9" stroke="#0277BD" stroke-width="1" rx="2" style="stroke-width: 1;"/>
+  <text x="616.687" y="156.25" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    sensor_aggregations
+  </text>
+  <rect x="-48.313" y="209.25" width="800" height="120" fill="white" stroke="#0277BD" stroke-width="2" rx="4" style="stroke-width: 2;"/>
+  <text x="351.687" y="234.25" font-size="13" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 13px;">
+    Public Metadata Schema
+  </text>
+  <rect x="-8.313" y="249.25" width="180" height="30" fill="#FFF3E0" stroke="#0277BD" stroke-width="1" rx="2" style="stroke-width: 1;"/>
+  <text x="81.687" y="269.25" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">companies</text>
+  <rect x="191.687" y="249.25" width="180" height="30" fill="#FFF3E0" stroke="#0277BD" stroke-width="1" rx="2" style="stroke-width: 1;"/>
+  <text x="281.687" y="269.25" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">equipment_definitions</text>
+  <rect x="391.687" y="249.25" width="180" height="30" fill="#FFF3E0" stroke="#0277BD" stroke-width="1" rx="2" style="stroke-width: 1;"/>
+  <text x="481.687" y="269.25" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">alert_rules</text>
+  <rect x="91.687" y="289.25" width="180" height="30" fill="#FFF3E0" stroke="#0277BD" stroke-width="1" rx="2" style="stroke-width: 1;"/>
+  <text x="181.687" y="309.25" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">users</text>
+  <rect x="291.687" y="289.25" width="180" height="30" fill="#FFF3E0" stroke="#0277BD" stroke-width="1" rx="2" style="stroke-width: 1;"/>
+  <text x="381.687" y="309.25" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">tenant_configuration</text>
+  <rect x="-78.552" y="-140.32" width="200" height="90" fill="#FFEBEE" stroke="#C62828" stroke-width="2" rx="9.507" style="stroke-width: 2;" ry="9.507"/>
+  <text x="-7.086" y="-116.11" font-size="13" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 13px;">
+    Redis Cache (6379)
+  </text>
+  <text x="-3.663" y="-94.114" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 11px;">
+    256MB LRU Cache
+  </text>
+  <text x="-17.827" y="-71.611" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    Feature Store
+  </text>
+  <rect x="-118.31" y="389.25" width="940" height="110" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2" rx="5" style="stroke-width: 2;"/>
+  <text x="351.687" y="419.25" font-size="15" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 15px;">
+    Schema-per-Tenant Benefits
+  </text>
+  <text x="-98.312" y="449.25" font-size="11" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 11px;">
+    • Complete data isolation at database schema level
+  </text>
+  <text x="-98.312" y="466.25" font-size="10" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    • Gorilla compression (30x) columnar storage
+  </text>
+  <text x="-98.312" y="483.25" font-size="10" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    • Hypertables + aggregations per tenant
+  </text>
+  <text x="371.687" y="449.25" font-size="10" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    • Role-based access: api_gateway, spark, alerts, ml
+  </text>
+  <text x="371.687" y="466.25" font-size="10" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    • MinIO (9000) ML storage (S3-compatible)
+  </text>
+  <text x="371.687" y="483.25" font-size="10" font-family="Arial" style="white-space: pre; stroke-width: 1; font-size: 10px;">
+    • Config: 400 connections, 512MB buffers, 2GB cache
+  </text>
+  <text style="white-space: pre; fill: rgb(51, 51, 51); font-family: Arial, sans-serif; font-size: 28px;" x="-30.273" y="171.28">...</text>
+  <text style="white-space: pre; fill: rgb(51, 51, 51); font-family: Arial, sans-serif; font-size: 28px; stroke-width: 1;" x="518.877" y="172.207">...</text>
+  <text style="white-space: pre; fill: rgb(51, 51, 51); font-family: Arial, sans-serif; font-size: 28px; stroke-width: 1;" x="245.181" y="172.665">...</text>
+</svg>

@@ -1,0 +1,85 @@
+\babel@toc {ukrainian}{}\relax 
+\contentsline {chapter}{АНОТАЦІЯ}{3}{chapter*.1}%
+\contentsline {chapter}{ABSTRACT}{4}{chapter*.2}%
+\contentsline {chapter}{СПИСОК СКОРОЧЕНЬ}{10}{chapter*.3}%
+\contentsline {chapter}{\numberline {1}ВСТУП}{11}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Контекст та актуальність}{11}{section.1.1}%
+\contentsline {section}{\numberline {1.2}Проблема}{11}{section.1.2}%
+\contentsline {section}{\numberline {1.3}Мета та завдання}{12}{section.1.3}%
+\contentsline {subsection}{\numberline {1.3.1}Мета}{12}{subsection.1.3.1}%
+\contentsline {subsection}{\numberline {1.3.2}Завдання}{12}{subsection.1.3.2}%
+\contentsline {section}{\numberline {1.4}Вимоги до системи}{13}{section.1.4}%
+\contentsline {subsection}{\numberline {1.4.1}Функціональні вимоги}{13}{subsection.1.4.1}%
+\contentsline {subsection}{\numberline {1.4.2}Нефункціональні вимоги}{14}{subsection.1.4.2}%
+\contentsline {section}{\numberline {1.5}Практична цінність}{15}{section.1.5}%
+\contentsline {subsection}{\numberline {1.5.1}Для кого це корисно}{15}{subsection.1.5.1}%
+\contentsline {subsection}{\numberline {1.5.2}Технічні особливості}{15}{subsection.1.5.2}%
+\contentsline {section}{\numberline {1.6}Структура роботи}{15}{section.1.6}%
+\contentsline {section}{\numberline {1.7}Методологія дослідження}{16}{section.1.7}%
+\contentsline {section}{\numberline {1.8}Обмеження}{16}{section.1.8}%
+\contentsline {subsection}{\numberline {1.8.1}Обсяг проєкту}{16}{subsection.1.8.1}%
+\contentsline {section}{\numberline {1.9}Висновки}{16}{section.1.9}%
+\contentsline {chapter}{\numberline {2}ОГЛЯД ЛІТЕРАТУРИ}{18}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Архітектури для обробки потокових даних}{18}{section.2.1}%
+\contentsline {subsection}{\numberline {2.1.1}Lambda-архітектура}{18}{subsection.2.1.1}%
+\contentsline {subsection}{\numberline {2.1.2}Kappa-архітектура}{19}{subsection.2.1.2}%
+\contentsline {subsection}{\numberline {2.1.3}Архітектури для ML-систем}{19}{subsection.2.1.3}%
+\contentsline {section}{\numberline {2.2}Промисловий IoT моніторинг}{20}{section.2.2}%
+\contentsline {subsection}{\numberline {2.2.1}Існуючі платформи}{20}{subsection.2.2.1}%
+\contentsline {subsection}{\numberline {2.2.2}Порівняння функціональності}{20}{subsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.2.3}Виклики та обмеження}{20}{subsection.2.2.3}%
+\contentsline {section}{\numberline {2.3}Алгоритми виявлення аномалій}{21}{section.2.3}%
+\contentsline {subsection}{\numberline {2.3.1}Підходи без вчителя для часових рядів}{21}{subsection.2.3.1}%
+\contentsline {subsection}{\numberline {2.3.2}Isolation Forest для виявлення аномалій}{21}{subsection.2.3.2}%
+\contentsline {subsection}{\numberline {2.3.3}Підходи з вчителем для IoT-систем з незбалансованими даними}{22}{subsection.2.3.3}%
+\contentsline {subsection}{\numberline {2.3.4}Порівняння підходів для IoT}{22}{subsection.2.3.4}%
+\contentsline {section}{\numberline {2.4}Практики MLOps}{23}{section.2.4}%
+\contentsline {subsection}{\numberline {2.4.1}Версіонування та реєстр моделей}{23}{subsection.2.4.1}%
+\contentsline {subsection}{\numberline {2.4.2}Безперервне навчання}{23}{subsection.2.4.2}%
+\contentsline {subsection}{\numberline {2.4.3}Моніторинг та виявлення дрейфу}{23}{subsection.2.4.3}%
+\contentsline {subsection}{\numberline {2.4.4}Висновок}{24}{subsection.2.4.4}%
+\contentsline {section}{\numberline {2.5}Мультитенантна архітектура}{24}{section.2.5}%
+\contentsline {subsection}{\numberline {2.5.1}Моделі ізоляції даних}{24}{subsection.2.5.1}%
+\contentsline {subsection}{\numberline {2.5.2}Міркування щодо безпеки}{24}{subsection.2.5.2}%
+\contentsline {chapter}{\numberline {3}АРХІТЕКТУРА СИСТЕМИ}{26}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Загальний огляд архітектури}{26}{section.3.1}%
+\contentsline {subsection}{\numberline {3.1.1}Компоненти системи}{26}{subsection.3.1.1}%
+\contentsline {section}{\numberline {3.2}Потоки даних}{28}{section.3.2}%
+\contentsline {section}{\numberline {3.3}Реалізація шару зберігання}{29}{section.3.3}%
+\contentsline {subsection}{\numberline {3.3.1}Схема бази даних}{29}{subsection.3.3.1}%
+\contentsline {subsection}{\numberline {3.3.2}Неперервні агрегати та стиснення}{29}{subsection.3.3.2}%
+\contentsline {subsection}{\numberline {3.3.3}Механізми ізоляції}{30}{subsection.3.3.3}%
+\contentsline {section}{\numberline {3.4}Реалізація потокової обробки}{30}{section.3.4}%
+\contentsline {section}{\numberline {3.5}Реалізація API та веб-інтерфейсу}{31}{section.3.5}%
+\contentsline {subsection}{\numberline {3.5.1}Кінцеві точки API}{31}{subsection.3.5.1}%
+\contentsline {subsection}{\numberline {3.5.2}Сервіс сповіщень}{31}{subsection.3.5.2}%
+\contentsline {subsection}{\numberline {3.5.3}Сервіс ML}{32}{subsection.3.5.3}%
+\contentsline {subsection}{\numberline {3.5.4}Веб-інтерфейс}{32}{subsection.3.5.4}%
+\contentsline {section}{\numberline {3.6}Контейнеризація}{32}{section.3.6}%
+\contentsline {section}{\numberline {3.7}Висновки до розділу}{32}{section.3.7}%
+\contentsline {chapter}{\numberline {4}РЕЗУЛЬТАТИ ТА ОЦІНКА}{34}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Тестування продуктивності системи}{34}{section.4.1}%
+\contentsline {subsection}{\numberline {4.1.1}Тестування пропускної здатності}{34}{subsection.4.1.1}%
+\contentsline {subsection}{\numberline {4.1.2}Використання CPU компонентів}{34}{subsection.4.1.2}%
+\contentsline {subsection}{\numberline {4.1.3}Доказ горизонтальної масштабованості}{35}{subsection.4.1.3}%
+\contentsline {section}{\numberline {4.2}Оцінка ML моделі}{36}{section.4.2}%
+\contentsline {subsection}{\numberline {4.2.1}Набір даних та методологія}{36}{subsection.4.2.1}%
+\contentsline {subsection}{\numberline {4.2.2}Порівняння алгоритмів}{36}{subsection.4.2.2}%
+\contentsline {subsection}{\numberline {4.2.3}Матриця плутанини для XGBoost}{36}{subsection.4.2.3}%
+\contentsline {section}{\numberline {4.3}Стиснення TimescaleDB}{37}{section.4.3}%
+\contentsline {subsection}{\numberline {4.3.1}Алгоритм стиснення}{37}{subsection.4.3.1}%
+\contentsline {subsection}{\numberline {4.3.2}Результати стиснення}{37}{subsection.4.3.2}%
+\contentsline {subsection}{\numberline {4.3.3}Вплив на продуктивність запитів}{37}{subsection.4.3.3}%
+\contentsline {subsection}{\numberline {4.3.4}Проекція економії сховища}{38}{subsection.4.3.4}%
+\contentsline {section}{\numberline {4.4}Мультитенантна ізоляція}{38}{section.4.4}%
+\contentsline {subsection}{\numberline {4.4.1}Архітектура}{38}{subsection.4.4.1}%
+\contentsline {subsection}{\numberline {4.4.2}Тести ізоляції даних}{39}{subsection.4.4.2}%
+\contentsline {subsection}{\numberline {4.4.3}Накладні витрати продуктивності}{39}{subsection.4.4.3}%
+\contentsline {section}{\numberline {4.5}Висновки до розділу}{40}{section.4.5}%
+\contentsline {subsection}{\numberline {4.5.1}Досягнуті результати}{40}{subsection.4.5.1}%
+\contentsline {subsection}{\numberline {4.5.2}Верифікація горизонтальної масштабованості}{40}{subsection.4.5.2}%
+\contentsline {subsection}{\numberline {4.5.3}Ключові технічні досягнення}{40}{subsection.4.5.3}%
+\contentsline {subsection}{\numberline {4.5.4}Обмеження та компроміси}{41}{subsection.4.5.4}%
+\contentsline {subsection}{\numberline {4.5.5}Внесок}{41}{subsection.4.5.5}%
+\contentsline {subsection}{\numberline {4.5.6}Порівняння з існуючими рішеннями}{41}{subsection.4.5.6}%
+\contentsline {chapter}{\numberline {5}ВИСНОВКИ}{43}{chapter.5}%

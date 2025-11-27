@@ -190,12 +190,12 @@ services:
     container_name: industryflow-spark-master
     ports:
       - "7077:7077"
-      - "8080:8080"
+      - "8083:8080"
     environment:
-      SPARK_MODE: master
       SPARK_MASTER_HOST: spark-master
       SPARK_MASTER_PORT: 7077
       SPARK_MASTER_WEBUI_PORT: 8080
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
     networks:
       - industryflow-network
     restart: unless-stopped
@@ -209,11 +209,10 @@ services:
     ports:
       - "8081:8081"
     environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
       SPARK_WORKER_CORES: 4
       SPARK_WORKER_MEMORY: 4g
       SPARK_WORKER_WEBUI_PORT: 8081
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     networks:
       - industryflow-network
     restart: unless-stopped

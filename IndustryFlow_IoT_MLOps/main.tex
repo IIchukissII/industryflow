@@ -1,0 +1,241 @@
+\documentclass[12pt,a4paper,oneside]{report}
+
+% Pass options to url package before hyperref loads it
+\PassOptionsToPackage{hyphens}{url}
+
+% Пакети
+\usepackage[utf8]{inputenc}
+\usepackage[ukrainian]{babel}
+\usepackage[T2A]{fontenc}
+\usepackage[numbers]{natbib}  % Для налаштування бібліографії (числовий стиль)
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{tocloft}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage[tableposition=bottom]{caption}
+\usepackage{subcaption}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{enumitem}
+\usepackage{indentfirst}
+\usepackage{microtype}
+
+% Налаштування сторінки
+\geometry{
+    left=30mm,
+    right=15mm,
+    top=20mm,
+    bottom=20mm
+}
+
+% Покращення розбиття рядків
+\emergencystretch=1em
+\tolerance=1000
+\hyphenpenalty=500
+\exhyphenpenalty=50
+
+% Міжрядковий інтервал
+\setstretch{1.5}
+
+% ВАЖЛИВО: Відступ абзаців 1.25 см
+\setlength{\parindent}{1.25cm}
+
+% ВАЖЛИВО: Налаштування списків itemize/enumerate з інтервалом 1.5
+\setlist{
+    itemsep=0pt,
+    parsep=0pt,
+    topsep=0pt,
+    partopsep=0pt
+}
+
+% Налаштування шрифтів для заголовків
+\titleformat{\chapter}[hang]
+    {\normalfont\bfseries\centering\fontsize{14pt}{16.8pt}\selectfont}
+    {\MakeUppercase{\chaptertitlename\ \thechapter.}}
+    {0.5em}
+    {\MakeUppercase}
+\titlespacing*{\chapter}{0pt}{0pt}{2\baselineskip}
+
+\titleformat{\section}
+    {\normalfont\bfseries\fontsize{12pt}{14.4pt}\selectfont}
+    {\thesection}
+    {1em}
+    {}
+\titlespacing*{\section}{0pt}{\baselineskip}{0pt}
+
+\titleformat{\subsection}
+    {\normalfont\bfseries\fontsize{12pt}{14.4pt}\selectfont}
+    {\thesubsection}
+    {1em}
+    {}
+\titlespacing*{\subsection}{0pt}{\baselineskip}{0pt}
+
+% Налаштування колонтитулів
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+% Налаштування змісту
+\renewcommand{\cftchapfont}{\normalfont\bfseries}
+\renewcommand{\cftsecfont}{\normalfont}
+\renewcommand{\cftsubsecfont}{\normalfont}
+
+% Налаштування підписів
+\captionsetup{
+    labelsep=space,
+    justification=centering,
+    singlelinecheck=false,
+    font={normalsize,normalfont},
+    labelfont={normalsize,normalfont}
+}
+
+\captionsetup[table]{
+    position=bottom,
+    skip=10pt,
+    justification=centering,
+    font={normalsize,normalfont},
+    labelfont={normalsize,normalfont}
+}
+
+\captionsetup[figure]{
+    position=bottom,
+    justification=centering,
+    font={normalsize,normalfont},
+    labelfont={normalsize,normalfont}
+}
+
+% Налаштування listings для коду
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny,
+    tabsize=4,
+    showstringspaces=false
+}
+
+% Для коду в додатках
+\lstdefinestyle{code}{
+    basicstyle=\fontfamily{pcr}\selectfont\scriptsize,
+    breaklines=true,
+    frame=none,
+    numbers=left,
+    numberstyle=\tiny,
+    tabsize=4
+}
+
+% Гіперпосилання
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    citecolor=black,
+    urlcolor=blue
+}
+
+% Метадані
+\title{IndustryFlow: Платформа IoT MLOps для моніторингу промислових сенсорів}
+\author{Костянтин Романчук}
+\date{Листопад 2025}
+
+\begin{document}
+
+% Титульна сторінка (без нумерації)
+\pagenumbering{gobble}
+\input{sections/00_title}
+\clearpage
+
+% Початок арабської нумерації з сторінки 1
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+% Сертифікація
+\input{sections/01_certification}
+\clearpage
+
+% Декларація
+\input{sections/02_declaration}
+\clearpage
+
+% Анотація (українською)
+\input{sections/03_abstract_uk}
+\clearpage
+
+% Анотація (англійською)
+\input{sections/04_abstract_en}
+\clearpage
+
+% Подяки (за бажанням)
+% \input{sections/05_acknowledgments}
+% \clearpage
+
+% Зміст
+\tableofcontents
+\clearpage
+
+% Список таблиць
+\listoftables
+\clearpage
+
+% Список рисунків
+\listoffigures
+\clearpage
+
+% Список скорочень
+\input{sections/06_abbreviations}
+\clearpage
+
+% Основний текст (нумерація продовжується)
+
+% Розділ 1: Вступ
+\input{sections/chapter01_introduction}
+
+% Розділ 2: Огляд літератури
+\input{sections/chapter02_literature_review}
+
+% Розділ 3: Методологія
+\input{sections/chapter03_methodology}
+
+%\input{sections/chapter04_implementation}
+
+% Розділ 4: Результати та оцінка
+\input{sections/chapter05_results}
+
+
+% Розділ 5: Висновки
+\input{sections/chapter06_conclusions}
+
+% ============================================================================
+% БІБЛІОГРАФІЯ - НАЛАШТУВАННЯ ВІДСТАНЕЙ
+% ============================================================================
+
+% Варіант 1: Мінімальні відстані (рекомендовано для компактності)
+% Тільки базовий інтервал 1.5, без додаткових відступів між записами
+\setlength{\bibsep}{0pt plus 0.3ex}
+
+% Варіант 2: Невеликі відстані між записами
+% \setlength{\bibsep}{0.5\baselineskip}
+
+% Варіант 3: Стандартні відстані
+% \setlength{\bibsep}{\baselineskip}
+
+\bibliographystyle{ieeetr}
+\bibliography{references}
+
+% Додатки
+\appendix
+%\input{sections/appendix_a}
+%\input{sections/appendix_b}
+%\input{sections/appendix_c}
+
+\end{document}

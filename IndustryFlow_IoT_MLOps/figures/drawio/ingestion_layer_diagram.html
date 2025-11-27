@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IndustryFlow - Data Ingestion Layer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f0f2f5;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1120px;
+      margin: 0 auto;
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    h1 {
+      text-align: center;
+      color: #2c3e50;
+      margin-bottom: 20px;
+      font-size: 22px;
+    }
+    svg {
+      display: block;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    .component-box {
+      fill: #ffffff;
+      stroke: #34495e;
+      stroke-width: 2;
+      rx: 8;
+      filter: drop-shadow(2px 2px 5px rgba(0,0,0,0.1));
+    }
+    .component-title {
+      font-size: 13px;
+      font-weight: 600;
+      fill: #2c3e50;
+    }
+    .component-detail {
+      font-size: 10px;
+      fill: #555;
+    }
+    .flow-arrow {
+      stroke: #e74c3c;
+      stroke-width: 2.5;
+      fill: none;
+      marker-end: url(#arrowhead);
+    }
+    .flow-label {
+      font-size: 10px;
+      fill: #c0392b;
+      font-style: italic;
+    }
+    .note-box {
+      fill: #fdf8e3;
+      stroke: #f39c12;
+      stroke-width: 1.5;
+      rx: 5;
+      filter: drop-shadow(1px 1px 3px rgba(0,0,0,0.1));
+    }
+    .note-text {
+      font-size: 9px;
+      fill: #7d6608;
+    }
+    @page { size: A4 landscape; margin: 10mm; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Data Ingestion Layer Overview</h1>
+
+    <svg width="1080" height="550" viewBox="0 0 1080 550">
+      <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+          <polygon points="0 0, 9 3, 0 6" fill="#e74c3c" />
+        </marker>
+      </defs>
+
+      <!-- Common block dimensions -->
+      <!-- width: 180, height: 120 -->
+      <!-- y position aligned at 120 -->
+
+      <!-- IoT Devices -->
+      <rect x="60" y="120" width="180" height="120" class="component-box" />
+      <text x="150" y="145" class="component-title" text-anchor="middle">IoT Devices</text>
+      <text x="150" y="170" class="component-detail" text-anchor="middle">Sensors & Equipment</text>
+      <text x="150" y="185" class="component-detail" text-anchor="middle">Real-time data</text>
+
+      <!-- Ingestion Service -->
+      <rect x="310" y="120" width="180" height="120" class="component-box" />
+      <text x="400" y="145" class="component-title" text-anchor="middle">Ingestion Service</text>
+      <text x="400" y="170" class="component-detail" text-anchor="middle">Auth & Validation</text>
+      <text x="400" y="185" class="component-detail" text-anchor="middle">Async processing</text>
+
+      <!-- Apache Kafka -->
+      <rect x="560" y="120" width="180" height="120" class="component-box" />
+      <text x="650" y="145" class="component-title" text-anchor="middle">Apache Kafka</text>
+      <text x="650" y="170" class="component-detail" text-anchor="middle">Topic-based queue</text>
+      <text x="650" y="185" class="component-detail" text-anchor="middle">Tenant partitions</text>
+
+      <!-- Apache Spark -->
+      <rect x="810" y="120" width="180" height="120" class="component-box" />
+      <text x="900" y="145" class="component-title" text-anchor="middle">Apache Spark</text>
+      <text x="900" y="170" class="component-detail" text-anchor="middle">Stream processing</text>
+      <text x="900" y="185" class="component-detail" text-anchor="middle">Writes to DB</text>
+
+      <!-- Arrows (even spacing, not touching borders) -->
+      <path d="M 240 180 L 310 180" class="flow-arrow" />
+      <text x="260" y="170" class="flow-label">HTTP POST</text>
+
+      <path d="M 490 180 L 560 180" class="flow-arrow" />
+      <text x="505" y="170" class="flow-label">Publish</text>
+
+      <path d="M 740 180 L 810 180" class="flow-arrow" />
+      <text x="760" y="170" class="flow-label">Stream</text>
+
+      <!-- Downward arrow to DB -->
+      <path d="M 900 240 L 900 310" class="flow-arrow" />
+      <text x="910" y="280" class="flow-label">Batch write</text>
+
+      <!-- Notes section -->
+      <rect x="60" y="370" width="930" height="100" class="note-box" />
+      <text x="80" y="395" class="component-title">Key Highlights</text>
+      <text x="80" y="415" class="note-text">• Latency: ~200–500 ms end-to-end</text>
+      <text x="80" y="430" class="note-text">• Throughput: 1K+ messages/sec</text>
+      <text x="80" y="445" class="note-text">• Exactly-once delivery via Kafka + Spark</text>
+      <text x="80" y="460" class="note-text">• Horizontally scalable architecture</text>
+    </svg>
+  </div>
+</body>
+</html>

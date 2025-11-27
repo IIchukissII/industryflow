@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 900" style="background: white;">
+  <rect x="80" y="100" width="940" height="280" fill="#FFF9C4" stroke="#F57F17" stroke-width="2" rx="5"/>
+  <text x="550" y="130" font-size="15" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre;">
+    FastAPI Microservices
+  </text>
+  <rect x="120" y="160" width="200" height="180" fill="white" stroke="#F57F17" stroke-width="2" rx="5"/>
+  <text x="220" y="185" font-size="14" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre;">
+    API Gateway (8000)
+  </text>
+  <rect x="140" y="200" width="160" height="30" fill="#E3F2FD" stroke="#1976D2" stroke-width="1" rx="3"/>
+  <text x="220" y="220" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">JWT Authentication</text>
+  <rect x="140" y="235" width="160" height="30" fill="#E3F2FD" stroke="#1976D2" stroke-width="1" rx="3"/>
+  <text x="220" y="255" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Tenant Routing</text>
+  <rect x="140" y="270" width="160" height="30" fill="#E3F2FD" stroke="#1976D2" stroke-width="1" rx="3"/>
+  <text x="220" y="290" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">REST Endpoints</text>
+  <rect x="140" y="305" width="160" height="25" fill="#E3F2FD" stroke="#1976D2" stroke-width="1" rx="3"/>
+  <text x="220" y="322" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre;">Schema Selection</text>
+  <rect x="350" y="160" width="200" height="180" fill="white" stroke="#C2185B" stroke-width="2" rx="5"/>
+  <text x="450" y="185" font-size="14" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre;">
+    Alert Service (8001)
+  </text>
+  <rect x="370" y="200" width="160" height="30" fill="#FCE4EC" stroke="#C2185B" stroke-width="1" rx="3"/>
+  <text x="450" y="220" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Rule Management</text>
+  <rect x="370" y="235" width="160" height="30" fill="#FCE4EC" stroke="#C2185B" stroke-width="1" rx="3"/>
+  <text x="450" y="255" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Anomaly Detection</text>
+  <rect x="370" y="270" width="160" height="30" fill="#FCE4EC" stroke="#C2185B" stroke-width="1" rx="3"/>
+  <text x="450" y="290" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Notifications</text>
+  <rect x="370" y="305" width="160" height="25" fill="#FCE4EC" stroke="#C2185B" stroke-width="1" rx="3"/>
+  <text x="450" y="322" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre;">API + Detector Worker</text>
+  <rect x="580" y="160" width="200" height="180" fill="white" stroke="#00897B" stroke-width="2" rx="5"/>
+  <text x="680" y="185" font-size="14" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre;">
+    ML Service (8002)
+  </text>
+  <rect x="600" y="200" width="160" height="30" fill="#E0F2F1" stroke="#00897B" stroke-width="1" rx="3"/>
+  <text x="680" y="220" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Model Inference</text>
+  <rect x="600" y="235" width="160" height="30" fill="#E0F2F1" stroke="#00897B" stroke-width="1" rx="3"/>
+  <text x="680" y="255" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Prediction Serving</text>
+  <rect x="600" y="270" width="160" height="30" fill="#E0F2F1" stroke="#00897B" stroke-width="1" rx="3"/>
+  <text x="680" y="290" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Feature Engineering</text>
+  <rect x="600" y="305" width="160" height="25" fill="#E0F2F1" stroke="#00897B" stroke-width="1" rx="3"/>
+  <text x="680" y="322" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre;">Model Loading</text>
+  <rect x="810" y="160" width="200" height="180" fill="white" stroke="#F57C00" stroke-width="2" rx="5"/>
+  <text x="910" y="185" font-size="14" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre;">
+    Ingestion (8003)
+  </text>
+  <rect x="830" y="200" width="160" height="30" fill="#FFF3E0" stroke="#F57C00" stroke-width="1" rx="3"/>
+  <text x="910" y="220" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Token Authentication</text>
+  <rect x="830" y="235" width="160" height="30" fill="#FFF3E0" stroke="#F57C00" stroke-width="1" rx="3"/>
+  <text x="910" y="255" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Data Validation</text>
+  <rect x="830" y="270" width="160" height="30" fill="#FFF3E0" stroke="#F57C00" stroke-width="1" rx="3"/>
+  <text x="910" y="290" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Message Publishing</text>
+  <rect x="830" y="305" width="160" height="25" fill="#FFF3E0" stroke="#F57C00" stroke-width="1" rx="3"/>
+  <text x="910" y="322" font-size="10" text-anchor="middle" font-family="Arial" style="white-space: pre;">High Throughput</text>
+  <path d="M 461.871 677.626 L 461.871 342.012" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" style=""/>
+  <path d="M 193.883 680 L 193.883 341.22" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" style=""/>
+  <path d="M 683.957 680 L 683.957 341.22" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" style=""/>
+  <rect x="80" y="430" width="940" height="80" fill="#E1F5FE" stroke="#0277BD" stroke-width="2" rx="5"/>
+  <text x="550" y="460" font-size="13" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre;">
+    Connection to Storage Layer
+  </text>
+  <text x="550" y="482" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">
+    Query Execution | Data Retrieval | Transaction Management
+  </text>
+  <path d="M 243.743 340 L 243.743 427.626" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" style=""/>
+  <path d="M 415.177 340.791 L 415.177 429.208" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" style=""/>
+  <path d="M 619.851 341.583 L 619.851 426.834" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" style=""/>
+  <rect x="580" y="550" width="440" height="80" fill="#E0F2F1" stroke="#00897B" stroke-width="2" rx="5"/>
+  <text x="800" y="580" font-size="13" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre;">
+    Connection to MLOps Layer
+  </text>
+  <text x="800" y="602" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">
+    Model Loading | Experiment Tracking | Version Control
+  </text>
+  <path d="M 733.026 340 L 733.026 470 L 800 470 L 800 550" stroke="#333" stroke-width="2" fill="none" marker-end="url(#arrowhead)" stroke-dasharray="5,5" style=""/>
+  <rect x="80" y="680" width="940" height="120" fill="#E3F2FD" stroke="#1976D2" stroke-width="3" rx="5"/>
+  <text x="550" y="710" font-size="16" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre;">
+    React Frontend (3000) + Monitoring Stack
+  </text>
+  <text x="550" y="732" font-size="12" text-anchor="middle" font-family="Arial" fill="#555" style="white-space: pre;">
+    Dashboard | Prometheus (9090) | Grafana (3001) | Loki (3100)
+  </text>
+  <rect x="120" y="750" width="180" height="30" fill="white" stroke="#1976D2" stroke-width="1" rx="3"/>
+  <text x="210" y="770" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Real-time Charts</text>
+  <rect x="320" y="750" width="180" height="30" fill="white" stroke="#1976D2" stroke-width="1" rx="3"/>
+  <text x="410" y="770" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Equipment Monitoring</text>
+  <rect x="520" y="750" width="180" height="30" fill="white" stroke="#1976D2" stroke-width="1" rx="3"/>
+  <text x="610" y="770" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">Alert Management</text>
+  <rect x="720" y="750" width="180" height="30" fill="white" stroke="#1976D2" stroke-width="1" rx="3"/>
+  <text x="810" y="770" font-size="11" text-anchor="middle" font-family="Arial" style="white-space: pre;">WebSocket Updates</text>
+  <text x="240" y="530" font-size="9" font-family="Arial" style="white-space: pre;">HTTP Requests</text>
+  <rect x="80" y="550" width="440" height="80" fill="#FFF9C4" stroke="#F57F17" stroke-width="2" rx="5"/>
+  <text x="300" y="575" font-size="13" font-weight="bold" text-anchor="middle" font-family="Arial" style="white-space: pre;">
+    Multi-tenant Authentication Flow
+  </text>
+  <text x="110" y="597.208" font-size="10" font-family="Arial" style="white-space: pre; font-size: 10px;">1. User login → JWT token with tenant_id</text>
+  <text x="110" y="613" font-size="10" font-family="Arial" style="white-space: pre; font-size: 10px;">2. Token validation → Extract tenant_id claim</text>
+  <text x="317.84" y="597.209" font-size="10" font-family="Arial" style="white-space: pre; font-size: 10px;">3. Schema routing → SET search_path</text>
+  <text x="317.84" y="613" font-size="10" font-family="Arial" style="white-space: pre; font-size: 10px;">4. Query execution → Tenant-specific data</text>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#333"/>
+    </marker>
+  </defs>
+  <text x="550" y="870" font-size="10" text-anchor="middle" font-family="Arial" fill="#666" style="white-space: pre;">
+  </text>
+</svg>

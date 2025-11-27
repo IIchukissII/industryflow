@@ -1,0 +1,220 @@
+\chapter{ФРАГМЕНТИ КОДУ}
+
+\section{TimescaleDB Schema}
+
+\lstset{style=code}
+\begin{lstlisting}[language=SQL, caption={Повна схема бази даних}]
+-- Companies (tenants)
+CREATE TABLE companies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Equipment
+CREATE TABLE equipment (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id),
+    name VARCHAR(255) NOT NULL,
+    type VARCHAR(100) NOT NULL,
+    location VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Sensors
+CREATE TABLE sensors (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    equipment_id UUID REFERENCES equipment(id),
+    company_id UUID REFERENCES companies(id),
+    name VARCHAR(255) NOT NULL,
+    sensor_type VARCHAR(50) NOT NULL,
+    unit VARCHAR(50),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Sensor Measurements (Hypertable)
+CREATE TABLE sensor_measurements (
+    timestamp TIMESTAMPTZ NOT NULL,
+    sensor_id UUID NOT NULL REFERENCES sensors(id),
+    equipment_id UUID NOT NULL REFERENCES equipment(id),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    value DOUBLE PRECISION NOT NULL,
+    quality_code INTEGER DEFAULT 192
+);
+
+SELECT create_hypertable('sensor_measurements', 'timestamp');
+
+-- Continuous Aggregates
+CREATE MATERIALIZED VIEW sensor_agg_1min
+WITH (timescaledb.continuous) AS
+SELECT 
+    time_bucket('1 minute', timestamp) AS bucket,
+    sensor_id,
+    equipment_id,
+    company_id,
+    AVG(value) AS avg_value,
+    MIN(value) AS min_value,
+    MAX(value) AS max_value,
+    COUNT(*) AS count
+FROM sensor_measurements
+GROUP BY bucket, sensor_id, equipment_id, company_id;
+\end{lstlisting}
+
+\section{Spark Streaming Job}
+
+\begin{lstlisting}[language=Python, caption={Spark job для обробки raw даних}]
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import from_json, col
+from pyspark.sql.types import StructType, StringType, DoubleType
+
+# Schema for incoming messages
+schema = StructType() \
+    .add("sensor_id", StringType()) \
+    .add("equipment_id", StringType()) \
+    .add("company_id", StringType()) \
+    .add("timestamp", StringType()) \
+    .add("value", DoubleType())
+
+# Read from Kafka
+df = spark \
+    .readStream \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", "kafka:9092") \
+    .option("subscribe", "sensor-data-raw") \
+    .load()
+
+# Parse JSON
+parsed_df = df \
+    .select(from_json(col("value").cast("string"), schema).alias("data")) \
+    .select("data.*")
+
+# Write to TimescaleDB
+def write_to_db(batch_df, batch_id):
+    batch_df.write \
+        .format("jdbc") \
+        .option("url", jdbc_url) \
+        .option("dbtable", "sensor_measurements") \
+        .option("user", db_user) \
+        .option("password", db_password) \
+        .mode("append") \
+        .save()
+
+query = parsed_df.writeStream \
+    .foreachBatch(write_to_db) \
+    .start()
+
+query.awaitTermination()
+\end{lstlisting}
+
+\section{ML Model Training}
+
+\begin{lstlisting}[language=Python, caption={Навчання Isolation Forest моделі}]
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+import mlflow
+
+# Extract data
+async def extract_training_data(company_id: str):
+    query = """
+    SELECT 
+        timestamp,
+        sensor_id,
+        value,
+        LAG(value, 1) OVER (PARTITION BY sensor_id ORDER BY timestamp) as prev_value,
+        LAG(value, 2) OVER (PARTITION BY sensor_id ORDER BY timestamp) as prev_value_2
+    FROM sensor_measurements
+    WHERE company_id = %s
+    ORDER BY timestamp
+    """
+    df = await db.fetch_all(query, company_id)
+    return pd.DataFrame(df)
+
+# Feature engineering
+def create_features(df):
+    df['value_change'] = df['value'] - df['prev_value']
+    df['value_change_rate'] = df['value_change'] / df['prev_value']
+    df['rolling_mean_5'] = df.groupby('sensor_id')['value'].transform(
+        lambda x: x.rolling(5).mean()
+    )
+    df['rolling_std_5'] = df.groupby('sensor_id')['value'].transform(
+        lambda x: x.rolling(5).std()
+    )
+    return df.dropna()
+
+# Train model
+def train_model(X_train, contamination=0.1):
+    with mlflow.start_run():
+        model = IsolationForest(
+            n_estimators=100,
+            contamination=contamination,
+            random_state=42
+        )
+        
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_train)
+        
+        model.fit(X_scaled)
+        
+        mlflow.log_params({
+            "n_estimators": 100,
+            "contamination": contamination
+        })
+        
+        mlflow.sklearn.log_model(model, "model")
+        mlflow.sklearn.log_model(scaler, "scaler")
+        
+    return model, scaler
+\end{lstlisting}
+
+\section{FastAPI Endpoints}
+
+\begin{lstlisting}[language=Python, caption={API Gateway endpoints}]
+from fastapi import FastAPI, WebSocket, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import jwt
+
+app = FastAPI()
+security = HTTPBearer()
+
+# JWT verification
+def verify_token(credentials: HTTPAuthorizationCredentials):
+    token = credentials.credentials
+    payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+    return payload
+
+# Get latest sensor data
+@app.get("/api/sensors/{sensor_id}/latest")
+async def get_latest_data(
+    sensor_id: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    user = verify_token(credentials)
+    
+    # Get from cache first
+    cached = await redis.get(f"sensor:{sensor_id}")
+    if cached:
+        return json.loads(cached)
+    
+    # Fallback to database
+    query = """
+    SELECT * FROM sensor_measurements
+    WHERE sensor_id = %s
+    ORDER BY timestamp DESC
+    LIMIT 1
+    """
+    result = await db.fetch_one(query, sensor_id)
+    return result
+
+# WebSocket for real-time data
+@app.websocket("/ws/sensors")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    
+    while True:
+        # Get latest data from Redis
+        data = await redis.xread({"sensor-stream": "$"})
+        await websocket.send_json(data)
+        await asyncio.sleep(1)
+\end{lstlisting}
