@@ -228,9 +228,11 @@ services:
         condition: service_healthy
       timescaledb:
         condition: service_healthy
+      spark-master:
+        condition: service_started
     environment:
       # Spark configuration
-      SPARK_MASTER: local[*]
+      SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_MEMORY: 2g
       SPARK_EXECUTOR_MEMORY: 2g
       CHECKPOINT_LOCATION: /opt/spark/checkpoints
@@ -261,9 +263,11 @@ services:
         condition: service_healthy
       timescaledb:
         condition: service_healthy
+      spark-master:
+        condition: service_started
     environment:
       # Spark configuration
-      SPARK_MASTER: local[*]
+      SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_MEMORY: 2g
       SPARK_EXECUTOR_MEMORY: 2g
       CHECKPOINT_LOCATION: /opt/spark/checkpoints
