@@ -5,20 +5,10 @@ The style file: ieeetr.bst
 Database file #1: references.bib
 Warning--entry type for "kafka_monitoring" isn't style-file defined
 --line 106 of file references.bib
-Warning--entry type for "spark_monitoring" isn't style-file defined
---line 113 of file references.bib
-Warning--entry type for "kafka_partitions" isn't style-file defined
---line 120 of file references.bib
-Warning--entry type for "spark_parallelism" isn't style-file defined
---line 127 of file references.bib
-Warning--entry type for "spark_jdbc" isn't style-file defined
---line 134 of file references.bib
 Warning--entry type for "timescaledb_compression" isn't style-file defined
 --line 141 of file references.bib
 Warning--entry type for "timescaledb_performance" isn't style-file defined
 --line 148 of file references.bib
-Warning--entry type for "timescaledb_policies" isn't style-file defined
---line 155 of file references.bib
 Warning--entry type for "postgresql_schemas" isn't style-file defined
 --line 162 of file references.bib
 Warning--entry type for "jwt_rfc" isn't style-file defined
@@ -29,36 +19,36 @@ Warning--entry type for "azure_iot" isn't style-file defined
 --line 221 of file references.bib
 Warning--entry type for "thingsboard" isn't style-file defined
 --line 228 of file references.bib
-You've used 27 entries,
+You've used 22 entries,
             1876 wiz_defined-function locations,
-            601 strings with 6972 characters,
-and the built_in function-call counts, 5995 in all, are:
-= -- 591
-> -- 196
+            591 strings with 6748 characters,
+and the built_in function-call counts, 5390 in all, are:
+= -- 541
+> -- 176
 < -- 0
-+ -- 79
-- -- 52
-* -- 356
-:= -- 816
-add.period$ -- 28
-call.type$ -- 27
-change.case$ -- 26
++ -- 69
+- -- 47
+* -- 336
+:= -- 731
+add.period$ -- 23
+call.type$ -- 22
+change.case$ -- 21
 chr.to.int$ -- 0
-cite$ -- 27
-duplicate$ -- 288
-empty$ -- 652
-format.name$ -- 52
-if$ -- 1489
+cite$ -- 22
+duplicate$ -- 268
+empty$ -- 562
+format.name$ -- 47
+if$ -- 1334
 int.to.chr$ -- 0
-int.to.str$ -- 27
+int.to.str$ -- 22
 missing$ -- 13
-newline$ -- 85
-num.names$ -- 27
-pop$ -- 139
+newline$ -- 70
+num.names$ -- 22
+pop$ -- 104
 preamble$ -- 1
 purify$ -- 0
 quote$ -- 0
-skip$ -- 225
+skip$ -- 205
 stack$ -- 0
 substring$ -- 371
 swap$ -- 106
@@ -67,7 +57,7 @@ text.prefix$ -- 0
 top$ -- 0
 type$ -- 0
 warning$ -- 0
-while$ -- 60
-width$ -- 29
-write$ -- 233
-(There were 13 warnings)
+while$ -- 55
+width$ -- 24
+write$ -- 198
+(There were 8 warnings)

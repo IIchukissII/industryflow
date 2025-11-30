@@ -51,28 +51,21 @@ R.~Kumar, ``Multi-tenant saas architectures: Design principles and security
   considerations,'' {\em Journal of Architecture and Civil Engineering},
   vol.~5, no.~2, pp.~49--62, 2020.
 
-\bibitem{kafka_monitoring}
-{Apache Software Foundation}, ``Kafka monitoring,'' 2024.
-
-\bibitem{spark_monitoring}
-{Apache Software Foundation}, ``Spark monitoring and instrumentation,'' 2024.
-
-\bibitem{kafka_partitions}
-{Apache Software Foundation}, ``Kafka partitions,'' 2024.
-
-\bibitem{spark_parallelism}
-{Apache Software Foundation}, ``Tuning spark - parallelism,'' 2024.
-
-\bibitem{timescaledb_performance}
-{Timescale Inc.}, ``Timescaledb performance tuning,'' 2024.
-
-\bibitem{spark_jdbc}
-{Apache Software Foundation}, ``Spark sql - jdbc to other databases,'' 2024.
-
 \bibitem{tep_dataset}
 J.~J. Downs and E.~F. Vogel, ``A plant-wide industrial process control
   problem,'' {\em Computers \& Chemical Engineering}, vol.~17, no.~3,
   pp.~245--255, 1993.
+
+\bibitem{xgboost}
+T.~Chen and C.~Guestrin, ``Xgboost: A scalable tree boosting system,'' in {\em
+  Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge
+  Discovery and Data Mining}, pp.~785--794, 2016.
+
+\bibitem{timescaledb_performance}
+{Timescale Inc.}, ``Timescaledb performance tuning,'' 2024.
+
+\bibitem{kafka_monitoring}
+{Apache Software Foundation}, ``Kafka monitoring,'' 2024.
 
 \bibitem{optuna}
 T.~Akiba, S.~Sano, T.~Yanase, T.~Ohta, and M.~Koyama, ``Optuna: A
@@ -80,26 +73,18 @@ T.~Akiba, S.~Sano, T.~Yanase, T.~Ohta, and M.~Koyama, ``Optuna: A
   of the 25th ACM SIGKDD International Conference on Knowledge Discovery \&
   Data Mining}, pp.~2623--2631, 2019.
 
-\bibitem{xgboost}
-T.~Chen and C.~Guestrin, ``Xgboost: A scalable tree boosting system,'' in {\em
-  Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge
-  Discovery and Data Mining}, pp.~785--794, 2016.
-
 \bibitem{sklearn_metrics}
 F.~Pedregosa {\em et~al.}, ``Scikit-learn: Machine learning in python,'' {\em
   Journal of Machine Learning Research}, vol.~12, pp.~2825--2830, 2011.
-
-\bibitem{timescaledb_compression}
-{Timescale Inc.}, ``Timescaledb compression,'' 2024.
-
-\bibitem{timescaledb_policies}
-{Timescale Inc.}, ``Timescaledb compression policies,'' 2024.
 
 \bibitem{postgresql_schemas}
 {PostgreSQL Global Development Group}, ``Postgresql schemas,'' 2024.
 
 \bibitem{jwt_rfc}
 M.~Jones, J.~Bradley, and N.~Sakimura, ``Json web token (jwt),'' 2015.
+
+\bibitem{timescaledb_compression}
+{Timescale Inc.}, ``Timescaledb compression,'' 2024.
 
 \bibitem{aws_iot}
 {Amazon Web Services}, ``Aws iot core developer guide,'' 2024.

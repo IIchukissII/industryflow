@@ -2,16 +2,16 @@
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {3.1}{\ignorespaces Структурна схема багаторівневої архітектури платформи}}{26}{figure.caption.4}%
-\contentsline {figure}{\numberline {3.2}{\ignorespaces Схема компонентів шару прийому даних}}{27}{figure.caption.6}%
-\contentsline {figure}{\numberline {3.3}{\ignorespaces Діаграма потокової обробки даних через Apache Kafka та Apache Spark}}{28}{figure.caption.7}%
-\contentsline {figure}{\numberline {3.4}{\ignorespaces Архітектурна схема шару зберігання з мультитенантною ізоляцією}}{28}{figure.caption.8}%
-\contentsline {figure}{\numberline {3.5}{\ignorespaces Структурна схема MLOps інфраструктури з компонентами конвеєра ML}}{29}{figure.caption.9}%
-\contentsline {figure}{\numberline {3.6}{\ignorespaces Схема прикладного шару з мікросервісною архітектурою FastAPI}}{30}{figure.caption.10}%
-\contentsline {figure}{\numberline {3.7}{\ignorespaces Діаграма потоків даних між компонентами системи}}{31}{figure.caption.11}%
+\contentsline {figure}{\numberline {3.1}{\ignorespaces Структурна схема багаторівневої архітектури платформи}}{24}{figure.caption.5}%
+\contentsline {figure}{\numberline {3.2}{\ignorespaces Схема компонентів шару прийому даних}}{25}{figure.caption.7}%
+\contentsline {figure}{\numberline {3.3}{\ignorespaces Діаграма потокової обробки даних через Apache Kafka та Apache Spark}}{26}{figure.caption.8}%
+\contentsline {figure}{\numberline {3.4}{\ignorespaces Архітектурна схема шару зберігання з мультитенантною ізоляцією}}{26}{figure.caption.9}%
+\contentsline {figure}{\numberline {3.5}{\ignorespaces Структурна схема MLOps інфраструктури з компонентами конвеєра ML}}{27}{figure.caption.10}%
+\contentsline {figure}{\numberline {3.6}{\ignorespaces Схема прикладного шару з мікросервісною архітектурою FastAPI}}{28}{figure.caption.11}%
+\contentsline {figure}{\numberline {3.7}{\ignorespaces Діаграма потоків даних між компонентами системи}}{29}{figure.caption.12}%
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {4.1}{\ignorespaces Графік інкрементального масштабування пропускної здатності системи}}{35}{figure.caption.18}%
-\contentsline {figure}{\numberline {4.2}{\ignorespaces Порівняльний аналіз метрик якості алгоритмів машинного навчання}}{36}{figure.caption.22}%
-\contentsline {figure}{\numberline {4.3}{\ignorespaces Порівняльний аналіз затримки запитів для стиснутих та нестиснутих фрагментів}}{38}{figure.caption.26}%
-\contentsline {figure}{\numberline {4.4}{\ignorespaces Проекція річної економії сховища для мультитенантних сценаріїв}}{39}{figure.caption.28}%
+\contentsline {figure}{\numberline {4.1}{\ignorespaces Графік інкрементального масштабування пропускної здатності системи}}{33}{figure.caption.18}%
+\contentsline {figure}{\numberline {4.2}{\ignorespaces Порівняльний аналіз метрик якості алгоритмів машинного навчання}}{34}{figure.caption.21}%
+\contentsline {figure}{\numberline {4.3}{\ignorespaces Порівняльний аналіз затримки запитів для стиснутих та нестиснутих фрагментів}}{36}{figure.caption.26}%
+\contentsline {figure}{\numberline {4.4}{\ignorespaces Проекція річної економії сховища для мультитенантних сценаріїв}}{37}{figure.caption.28}%
 \addvspace {10\p@ }

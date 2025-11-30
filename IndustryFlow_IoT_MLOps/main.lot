@@ -2,24 +2,23 @@
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {table}{\numberline {3.1}{\ignorespaces Основні компоненти системи за функціональними шарами}}{27}{table.caption.5}%
-\contentsline {table}{\numberline {3.2}{\ignorespaces Структура бази даних}}{29}{table.caption.12}%
-\contentsline {table}{\numberline {3.3}{\ignorespaces Конфігурація Spark Streaming}}{30}{table.caption.13}%
-\contentsline {table}{\numberline {3.4}{\ignorespaces Кінцеві точки API}}{31}{table.caption.14}%
-\contentsline {table}{\numberline {3.5}{\ignorespaces Сервіси Docker Compose}}{32}{table.caption.15}%
-\contentsline {table}{\numberline {3.6}{\ignorespaces Технологічний стек платформи}}{32}{table.caption.16}%
+\contentsline {table}{\numberline {3.1}{\ignorespaces Технологічний стек платформи}}{24}{table.caption.4}%
+\contentsline {table}{\numberline {3.2}{\ignorespaces Основні компоненти системи за функціональними шарами}}{25}{table.caption.6}%
+\contentsline {table}{\numberline {3.3}{\ignorespaces Структура бази даних}}{27}{table.caption.13}%
+\contentsline {table}{\numberline {3.4}{\ignorespaces Конфігурація Spark Streaming}}{28}{table.caption.14}%
+\contentsline {table}{\numberline {3.5}{\ignorespaces Кінцеві точки API}}{29}{table.caption.15}%
+\contentsline {table}{\numberline {3.6}{\ignorespaces Сервіси Docker Compose}}{30}{table.caption.16}%
 \addvspace {10\p@ }
-\contentsline {table}{\numberline {4.1}{\ignorespaces Результати інкрементального масштабування компонентів}}{34}{table.caption.17}%
-\contentsline {table}{\numberline {4.2}{\ignorespaces Використання CPU під навантаженням}}{35}{table.caption.19}%
-\contentsline {table}{\numberline {4.3}{\ignorespaces План масштабування}}{35}{table.caption.20}%
-\contentsline {table}{\numberline {4.4}{\ignorespaces Метрики моделей на тестовому наборі даних}}{36}{table.caption.21}%
-\contentsline {table}{\numberline {4.5}{\ignorespaces Матриця плутанини для XGBoost (тестовий набір)}}{37}{table.caption.23}%
-\contentsline {table}{\numberline {4.6}{\ignorespaces Порівняння нестиснутих та стиснутих фрагментів}}{37}{table.caption.24}%
-\contentsline {table}{\numberline {4.7}{\ignorespaces Затримка запитів: нестиснуті та стиснуті дані}}{38}{table.caption.25}%
-\contentsline {table}{\numberline {4.8}{\ignorespaces Річна економія сховища (на тенанта)}}{38}{table.caption.27}%
-\contentsline {table}{\numberline {4.9}{\ignorespaces Верифікація ізоляції тенантів}}{39}{table.caption.29}%
-\contentsline {table}{\numberline {4.10}{\ignorespaces Накладні витрати схема-на-тенанта порівняно зі спільною схемою}}{40}{table.caption.30}%
-\contentsline {table}{\numberline {4.11}{\ignorespaces Підсумок ключових метрик системи}}{40}{table.caption.31}%
-\contentsline {table}{\numberline {4.12}{\ignorespaces Технічні обмеження та компроміси}}{41}{table.caption.32}%
-\contentsline {table}{\numberline {4.13}{\ignorespaces Порівняння з існуючими IoT платформами}}{42}{table.caption.33}%
+\contentsline {table}{\numberline {4.1}{\ignorespaces Результати інкрементального масштабування компонентів}}{33}{table.caption.17}%
+\contentsline {table}{\numberline {4.2}{\ignorespaces Використання CPU під навантаженням}}{34}{table.caption.19}%
+\contentsline {table}{\numberline {4.3}{\ignorespaces Метрики моделей на тестовому наборі даних}}{34}{table.caption.20}%
+\contentsline {table}{\numberline {4.4}{\ignorespaces Матриця плутанини для XGBoost (тестовий набір)}}{35}{table.caption.22}%
+\contentsline {table}{\numberline {4.5}{\ignorespaces Верифікація ізоляції тенантів}}{35}{table.caption.23}%
+\contentsline {table}{\numberline {4.6}{\ignorespaces Порівняння нестиснутих та стиснутих фрагментів}}{35}{table.caption.24}%
+\contentsline {table}{\numberline {4.7}{\ignorespaces Затримка запитів: нестиснуті та стиснуті дані}}{36}{table.caption.25}%
+\contentsline {table}{\numberline {4.8}{\ignorespaces Річна економія сховища (на тенанта)}}{36}{table.caption.27}%
+\contentsline {table}{\numberline {4.9}{\ignorespaces Технічні обмеження та компроміси}}{37}{table.caption.29}%
+\contentsline {table}{\numberline {4.10}{\ignorespaces Порівняння з існуючими IoT платформами}}{38}{table.caption.30}%
+\contentsline {table}{\numberline {4.11}{\ignorespaces Підсумок ключових метрик системи}}{38}{table.caption.31}%
+\contentsline {table}{\numberline {4.12}{\ignorespaces План масштабування}}{38}{table.caption.32}%
 \addvspace {10\p@ }

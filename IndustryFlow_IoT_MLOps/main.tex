@@ -19,7 +19,7 @@
 \usepackage{tocloft}
 \usepackage{titlesec}
 \usepackage{fancyhdr}
-\usepackage[tableposition=bottom]{caption}
+\usepackage[tableposition=top]{caption}
 \usepackage{subcaption}
 \usepackage{longtable}
 \usepackage{booktabs}
@@ -100,9 +100,10 @@
 }
 
 \captionsetup[table]{
-    position=bottom,
+    position=top,
     skip=10pt,
-    justification=centering,
+    justification=raggedright,
+    singlelinecheck=false,
     font={normalsize,normalfont},
     labelfont={normalsize,normalfont}
 }
