@@ -486,7 +486,7 @@ docker exec industryflow-kafka kafka-consumer-groups --list \
 
 ## License
 
-[Add license information]
+[LICENSE](LICENSE)
 
 ---
 
@@ -496,12 +496,4 @@ docker exec industryflow-kafka kafka-consumer-groups --list \
 - **Discussions**: [GitHub Discussions](https://github.com/your-org/industryflow/discussions)
 - **Documentation**: [docs/](docs/)
 
----
 
-## Acknowledgments
-
-Built with:
-- Apache Spark, Kafka, TimescaleDB
-- FastAPI, React
-- Prometheus, Grafana, Loki
-- MLflow, XGBoost, Scikit-learn
