@@ -1,4 +1,4 @@
-# IndustryFlow v2
+# IndustryFlow
 
 Real-time Industrial IoT Platform for Sensor Data Processing, Anomaly Detection, and Predictive Maintenance
 
