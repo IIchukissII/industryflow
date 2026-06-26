@@ -357,8 +357,10 @@ services:
       - "${FRONTEND_HTTPS_PORT:-3443}:443"
       - "${FRONTEND_PORT:-3000}:80"
     volumes:
-      # Mount a real TLS cert here in production (tls.crt/tls.key); empty = self-signed.
-      - frontend-certs:/etc/nginx/certs
+      # Default: a named volume the entrypoint self-signs into. Set TLS_CERT_DIR to a host
+      # directory holding tls.crt/tls.key (e.g. the output of scripts/gen-internal-ca.sh) to
+      # serve a real CA-signed certificate instead.
+      - "${TLS_CERT_DIR:-frontend-certs}:/etc/nginx/certs"
     depends_on:
       - api-gateway
     networks:

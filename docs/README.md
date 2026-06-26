@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 | Area | Start here |
 |------|-----------|
 | **Getting started & operations** | [getting-started.md](getting-started.md) — setup, configuration, API examples, troubleshooting |
-| **Operations guides** | [operations/](operations/) — [authentication](operations/authentication.md) · [user management](operations/user-management.md) · [monitoring](operations/monitoring.md) |
+| **Operations guides** | [operations/](operations/) — [authentication](operations/authentication.md) · [user management](operations/user-management.md) · [TLS & internal CA](operations/tls.md) · [monitoring](operations/monitoring.md) |
 | **Architecture** | [architecture/](architecture/README.md) — database, Spark streaming, ML, alerting, feature engineering |
 | **API reference** | [api/](api/README.md) — per-service API documentation |
 | **Decisions (the *why*)** | [../ADR/](../ADR/) — Architecture Decision Records (ADR-0000 … ADR-0009) |
