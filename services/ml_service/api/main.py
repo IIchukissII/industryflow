@@ -40,7 +40,7 @@ MODEL_DIR.mkdir(exist_ok=True)
 app = FastAPI(
     title="IndustryFlow MLOps Service",
     description="Machine Learning Operations API with schema-per-tenant isolation",
-    version="2.0.0",
+    version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )

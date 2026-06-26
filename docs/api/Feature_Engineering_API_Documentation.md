@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 **Service:** ML Service API
 **Base URL:** `http://localhost:8002`
-**Version:** 2.0.0
+**Version:** 0.1.0
 **Authentication:** JWT Bearer Token
 **Date:** November 2025
 

@@ -7,7 +7,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # TimescaleDB Initialization Scripts
 
 **Architecture:** Schema-per-Tenant (v5.0)
-**Purpose:** Automated database initialization for IndustryFlow v2
+**Purpose:** Automated database initialization for IndustryFlow
 
 ---
 
@@ -78,15 +78,21 @@ Scripts are executed in alphanumeric order by Docker container initialization:
   - `transformations` JSONB - Feature transformation specifications
 - `add_feature_config_columns_to_ml_models()` function
 - Adds `feature_config_id` foreign key to `ml_models`
-- **Must run before tenant seeding** — `create_tenant_schema()` calls these functions.
+- **Must run before any tenant is provisioned** — `create_tenant_schema()` calls these functions.
 
-### 07 - Seed Test Tenants (Development)
+### Provisioning tenants (runtime)
 
-**`07-seed-test-tenants.sql`**
-- Creates test tenant schemas for development
-- Example: `tenant_550e8400_e29b_41d4_a716_446655440000`
-- Runs after the feature-engineering functions (06) are defined and before the
-  ML-alert permission migration (08), which grants on the seeded schemas.
+No tenants are seeded — the database initializes with an empty `public.companies`
+registry and zero tenant schemas. Tenants are created at runtime, so no company is
+hardcoded in the repo:
+
+```sh
+scripts/create-tenant.sh "Your Company"        # prints the new company_id + schema
+```
+
+This inserts the company and calls `create_tenant_schema()`. Use the printed
+`company_id` for `ADMIN_USER_*_COMPANY_ID` (then run `scripts/seed_users.py`) or when
+creating users via the API.
 
 ### 08 - ML Alert Integration (Permissions)
 
@@ -272,12 +278,12 @@ INSERT INTO alert_rules (
 ```sql
 -- Insert company record
 INSERT INTO public.companies (company_id, company_name)
-VALUES ('550e8400-e29b-41d4-a716-446655440000', 'Acme Industries');
+VALUES ('550e8400-e29b-41d4-a716-446655440000', 'Example Tenant A');
 
 -- Create tenant schema (auto-creates all tables)
 SELECT create_tenant_schema(
     '550e8400-e29b-41d4-a716-446655440000'::UUID,
-    'Acme Industries'
+    'Example Tenant A'
 );
 ```
 

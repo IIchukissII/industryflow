@@ -7,7 +7,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Alert Detection Service - Technical Documentation
 
 **Service:** Alert Detection Service
-**Version:** 2.0.0
+**Version:** 0.1.0
 **Port:** 8001 (API), Kafka Consumer (Worker)
 **Architecture:** Schema-per-tenant (v5.0)
 **Date:** November 2025

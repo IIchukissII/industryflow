@@ -7,7 +7,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Alert Service API - Usage Documentation
 
 **Service:** Alert Service API
-**Version:** 2.0.0
+**Version:** 0.1.0
 **Port:** 8001
 **Architecture:** Schema-per-tenant (v5.0)
 **Date:** November 2025
@@ -35,7 +35,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 ```bash
 curl -X POST http://localhost:8000/auth/jwt/login \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=test@acme.com&password=SecurePass123!"
+  -d "username=test@example.com&password=SecurePass123!"
 ```
 
 **Response:**
@@ -583,7 +583,7 @@ curl -X POST http://localhost:8001/api/alerts/f1e2d3c4-b5a6-7890-1234-567890abcd
   -H "Authorization: Bearer {token}" \
   -H "Content-Type: application/json" \
   -d '{
-    "acknowledged_by": "john.doe@acme.com"
+    "acknowledged_by": "john.doe@example.com"
   }'
 ```
 
@@ -843,7 +843,7 @@ All errors return JSON with `detail` field:
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8000/auth/jwt/login \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=test@acme.com&password=SecurePass123!" \
+  -d "username=test@example.com&password=SecurePass123!" \
   | jq -r '.access_token')
 ```
 
@@ -894,7 +894,7 @@ curl -X POST http://localhost:8001/api/alerts/{alert_id}/acknowledge \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "acknowledged_by": "test@acme.com"
+    "acknowledged_by": "test@example.com"
   }'
 ```
 
@@ -1093,7 +1093,7 @@ Currently no rate limiting implemented. Consider implementing:
 ```json
 {
   "service": "IndustryFlow Alert Service API",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "architecture": "schema-per-tenant",
   "endpoints": {
     "health": "/health",

@@ -44,7 +44,7 @@ class SensorDataRequest(BaseModel):
     """Request parameters for querying sensor data"""
     sensor_ids: Optional[List[str]] = None
     equipment_ids: Optional[List[str]] = None
-    company_id: UUID = "acme_manufacturing"
+    company_id: Optional[UUID] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     limit: int = Field(default=1000, ge=1, le=10000)
