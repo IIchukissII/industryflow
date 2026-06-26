@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { WS_URL } from '../config';
+
 class WebSocketService {
   constructor() {
     this.ws = null;
@@ -24,7 +26,7 @@ class WebSocketService {
       }
 
       // Include token as query parameter
-      this.ws = new WebSocket(`ws://localhost:8000/ws/sensors?token=${token}`);
+      this.ws = new WebSocket(`${WS_URL}/ws/sensors?token=${token}`);
       
       this.ws.onopen = () => {
         console.log('WebSocket connected (authenticated)');

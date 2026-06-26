@@ -5,8 +5,9 @@
 import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
 import './AlertRules.css';
+import { ALERT_API_URL, API_URL } from '../config';
 
-const API_BASE_URL = 'http://localhost:8001';
+const API_BASE_URL = ALERT_API_URL;
 
 function AlertRules() {
   const [activeTab, setActiveTab] = useState('all');
@@ -24,7 +25,7 @@ function AlertRules() {
     }
 
     // Check API connection
-    fetch('http://localhost:8000/health')
+    fetch(`${API_URL}/health`)
       .then(res => res.json())
       .then(() => setConnected(true))
       .catch(() => setConnected(false));
@@ -360,7 +361,7 @@ function EditRuleModal({ rule, onClose, onSave }) {
       const token = localStorage.getItem('access_token');
 
       // Fetch sensors from cache
-      const sensorsResponse = await fetch('http://localhost:8000/api/cache/sensors', {
+      const sensorsResponse = await fetch(`${API_URL}/api/cache/sensors`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (sensorsResponse.ok) {
@@ -374,7 +375,7 @@ function EditRuleModal({ rule, onClose, onSave }) {
       }
 
       // Fetch equipment
-      const equipmentResponse = await fetch('http://localhost:8000/api/equipment', {
+      const equipmentResponse = await fetch(`${API_URL}/api/equipment`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (equipmentResponse.ok) {

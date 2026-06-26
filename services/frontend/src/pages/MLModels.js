@@ -5,8 +5,9 @@
 import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
 import './MLModels.css';
+import { ML_API_URL, API_URL } from '../config';
 
-const ML_API_BASE = 'http://localhost:8002';
+const ML_API_BASE = ML_API_URL;
 
 function MLModels() {
   const [user, setUser] = useState(null);
@@ -35,7 +36,7 @@ function MLModels() {
     }
 
     // Check API connection
-    fetch('http://localhost:8000/health')
+    fetch(`${API_URL}/health`)
       .then(res => res.json())
       .then(() => setConnected(true))
       .catch(() => setConnected(false));

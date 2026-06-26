@@ -3,9 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import axios from 'axios';
-
-// Use environment variable with fallback
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+import { API_URL as API_BASE_URL } from '../config';
 
 // Create axios instance with auth interceptor
 const api = axios.create({
