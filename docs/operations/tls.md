@@ -32,10 +32,12 @@ CERT_SAN="DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1,IP:
   scripts/gen-internal-ca.sh
 ```
 
-This writes to `deploy/certs/` (git-ignored — it holds private keys):
+This writes two git-ignored directories:
 
-- `ca.crt` — the root to install on client devices
-- `tls.crt` / `tls.key` — the server certificate served by nginx
+- `deploy/ca/` — `ca.key` (the CA signing key) and `ca.crt`. **Never mounted** into any
+  container, so the network-facing edge can't reach the signing key.
+- `deploy/certs/` — `tls.crt` / `tls.key` (served by nginx) plus a copy of `ca.crt` for
+  distribution. This is the only directory mounted into the frontend.
 
 The root CA is generated once and **reused** on later runs, so you only install `ca.crt`
 on clients a single time; re-running the script just reissues the leaf certificate.
@@ -72,5 +74,5 @@ LAN interface). macOS and Windows 10+ resolve `.local` names natively; Linux cli
 
 - **Reissue the server cert** (e.g. add a SAN, or before it expires): re-run the script and
   restart the frontend. The CA is unchanged, so clients need no action.
-- **Rotate the CA** (compromise, or a fresh trust anchor): delete `deploy/certs/ca.crt` and
-  `ca.key`, re-run the script, and reinstall the new `ca.crt` on every client.
+- **Rotate the CA** (compromise, or a fresh trust anchor): delete `deploy/ca/`, re-run the
+  script, and reinstall the new `ca.crt` on every client.
