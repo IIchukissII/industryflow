@@ -94,12 +94,12 @@ apps:
       limits: { cpu: "2", memory: 2Gi }
 
   frontend:
-    # Disabled: the frontend has no Dockerfile yet (review finding). Enable once built.
-    enabled: false
+    # The SPA served behind the TLS edge (ADR-0004/0009 dec 5). Probes hit /healthz.
+    enabled: true
     image: industryflow-frontend
     replicas: 2
     port: 80
-    probe: { path: /, port: 80 }
+    probe: { path: /healthz, port: 80 }
     ingress: { host: app.industryflow.local, path: / }
     resources:
       requests: { cpu: 50m, memory: 64Mi }
@@ -172,6 +172,8 @@ config:
   KAFKA_GROUP_ID: industryflow
   CORS_ORIGINS: "https://app.industryflow.local"
   ENVIRONMENT: production
+  # Extension plugin modules the ML service loads at startup (ADR-0008/0010); empty = built-ins.
+  EXTENSION_MODULES: ""
 
 # ---------------------------------------------------------------------------
 # Secrets. NEVER commit real values — these are placeholders. In real
@@ -199,10 +201,21 @@ ingress:
     enabled: true
     secretName: industryflow-tls
   annotations: {}
-  # The mTLS device-ingestion path (ADR-0002). The ingress controller verifies
-  # client certs against the device CA (ADR-0007) and forwards the verified
-  # identity. Annotations are controller-specific; filled in a later pass.
+  # The mTLS device-ingestion path (ADR-0002 / ADR-0007), realized as a second Ingress.
+  # The ingress-nginx controller verifies client certs against the device CA (a Secret with
+  # ca.crt [+ ca.crl]) and passes the verified cert to ingestion-service as ssl-client-cert.
+  # Enable per environment and supply the device-CA Secret (scripts/device-ca.sh output).
   mtls:
     enabled: false
     caSecret: industryflow-device-ca
     host: ingest.industryflow.local
+    verifyDepth: 2
+
+# ---------------------------------------------------------------------------
+# NetworkPolicy restricting ingestion-service ingress to the cluster TLS edge only
+# (ADR-0002 dec 3 — the service must be reachable only via the proxy). The selector for
+# the ingress controller is environment-specific; default targets the common label.
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  ingressControllerNamespace: ingress-nginx

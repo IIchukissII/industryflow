@@ -3,11 +3,11 @@
 apiVersion: v2
 name: industryflow
 description: >-
-  IndustryFlow — real-time industrial IoT platform. First-pass chart covering the
-  application services and core data services (TimescaleDB, Kafka, Redis, MinIO, MLflow).
-  Stateful dependencies are toggleable in-cluster/external (see ADR-0009).
+  IndustryFlow — real-time industrial IoT platform. Application services, the SPA, and core
+  data services (TimescaleDB, Kafka, Redis, MinIO, MLflow), with a single Ingress TLS edge
+  (HTTPS + device mTLS) and toggleable in-cluster/external datastores (see ADR-0009).
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "0.1.0"
 keywords:
   - industrial-iot
