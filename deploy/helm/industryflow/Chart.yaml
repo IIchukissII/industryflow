@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+apiVersion: v2
+name: industryflow
+description: >-
+  IndustryFlow — real-time industrial IoT platform. First-pass chart covering the
+  application services and core data services (TimescaleDB, Kafka, Redis, MinIO, MLflow).
+  Stateful dependencies are toggleable in-cluster/external (see ADR-0009).
+type: application
+version: 0.1.0
+appVersion: "2.0.0"
+keywords:
+  - industrial-iot
+  - timeseries
+  - kafka
+  - spark
+home: https://github.com/IIchukissII/industryflow
+sources:
+  - https://github.com/IIchukissII/industryflow

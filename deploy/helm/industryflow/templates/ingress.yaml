@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.ingress.enabled }}
+{{- $root := . -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "industryflow.fullname" . }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        {{- range $name, $app := .Values.apps }}
+        {{- if and $app.enabled $app.ingress }}
+        - {{ $app.ingress.host }}
+        {{- end }}
+        {{- end }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    {{- range $name, $app := .Values.apps }}
+    {{- if and $app.enabled $app.ingress }}
+    - host: {{ $app.ingress.host }}
+      http:
+        paths:
+          - path: {{ $app.ingress.path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "industryflow.fullname" $root }}-{{ $name }}
+                port:
+                  number: {{ $app.port }}
+    {{- end }}
+    {{- end }}
+{{- end }}
+# NOTE: the mTLS device-ingestion edge (ADR-0002 / ADR-0007) is a separate Ingress or
+# a controller-specific client-cert configuration verifying against the device CA. It is
+# left as a follow-up pass (values.ingress.mtls is the placeholder).

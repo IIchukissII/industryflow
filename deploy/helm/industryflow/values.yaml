@@ -1,0 +1,207 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Default values for the IndustryFlow chart.
+# See ADR-0009 for the decisions behind this layout.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # Registry/repo prefix for the application images. Override per environment.
+  registry: ghcr.io/iichukissii
+  pullPolicy: IfNotPresent
+  # Default tag for all app images. Pin by digest in production (ADR-0009 deferred).
+  tag: "latest"
+imagePullSecrets: []
+
+# ---------------------------------------------------------------------------
+# Application (stateless) services — each renders a Deployment (+ Service if it
+# exposes a port) via templates/apps.yaml.
+# ---------------------------------------------------------------------------
+apps:
+  api-gateway:
+    enabled: true
+    image: industryflow-api-gateway
+    replicas: 2
+    port: 8000
+    probe: { path: /health, port: 8000 }
+    ingress: { host: api.industryflow.local, path: / }
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+
+  ml-service-api:
+    enabled: true
+    image: industryflow-ml-service-api
+    replicas: 1
+    port: 8002
+    probe: { path: /health, port: 8002 }
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+
+  alert-service-api:
+    enabled: true
+    image: industryflow-alert-service-api
+    replicas: 1
+    port: 8001
+    probe: { path: /health, port: 8001 }
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+
+  alert-service-detector:
+    # Kafka consumer worker — no HTTP port/Service.
+    enabled: true
+    image: industryflow-alert-service-detector
+    replicas: 1
+    port: null
+    probe: null
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+
+  ingestion-service:
+    enabled: true
+    image: industryflow-ingestion-service
+    replicas: 2
+    port: 8003
+    probe: { path: /health, port: 8003 }
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+
+  spark-streaming:
+    # Long-running PySpark job (Kafka -> TimescaleDB). No HTTP port.
+    enabled: true
+    image: industryflow-spark-streaming
+    replicas: 1
+    port: null
+    probe: null
+    resources:
+      requests: { cpu: 500m, memory: 1Gi }
+      limits: { cpu: "2", memory: 2Gi }
+
+  spark-aggregations:
+    enabled: true
+    image: industryflow-spark-aggregations
+    replicas: 1
+    port: null
+    probe: null
+    resources:
+      requests: { cpu: 500m, memory: 1Gi }
+      limits: { cpu: "2", memory: 2Gi }
+
+  frontend:
+    # Disabled: the frontend has no Dockerfile yet (review finding). Enable once built.
+    enabled: false
+    image: industryflow-frontend
+    replicas: 2
+    port: 80
+    probe: { path: /, port: 80 }
+    ingress: { host: app.industryflow.local, path: / }
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { cpu: 200m, memory: 128Mi }
+
+# ---------------------------------------------------------------------------
+# Stateful infrastructure — `inCluster: true` renders a StatefulSet/Deployment +
+# Service here; `inCluster: false` renders nothing and the app config points at
+# `external.*` instead (ADR-0009 decision 3).
+# ---------------------------------------------------------------------------
+infra:
+  timescaledb:
+    inCluster: true
+    image: timescale/timescaledb:latest-pg15
+    port: 5432
+    storage: 20Gi
+    database: industryflow
+    external: { host: "", port: 5432 }
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+
+  zookeeper:
+    inCluster: true
+    image: confluentinc/cp-zookeeper:7.5.0
+    port: 2181
+    storage: 2Gi
+
+  kafka:
+    inCluster: true
+    image: confluentinc/cp-kafka:7.5.0
+    port: 9092
+    storage: 20Gi
+    external: { bootstrap: "" }
+    resources:
+      requests: { cpu: 250m, memory: 1Gi }
+      limits: { cpu: "1", memory: 2Gi }
+
+  redis:
+    inCluster: true
+    image: redis:7-alpine
+    port: 6379
+    storage: 2Gi
+    external: { host: "", port: 6379 }
+
+  minio:
+    inCluster: true
+    image: minio/minio:latest
+    apiPort: 9000
+    consolePort: 9001
+    storage: 20Gi
+    external: { endpoint: "" }
+
+  mlflow:
+    # Stateless front to TimescaleDB + MinIO; runs as a Deployment.
+    inCluster: true
+    image: industryflow-mlflow
+    port: 5000
+    external: { trackingUri: "" }
+
+# ---------------------------------------------------------------------------
+# Non-secret configuration (rendered into a ConfigMap, consumed by every app
+# via envFrom). Authoritative topic names etc. live here (ADR-0000).
+# ---------------------------------------------------------------------------
+config:
+  DB_NAME: industryflow
+  DB_PORT: "5432"
+  KAFKA_TOPIC_SENSOR_DATA: sensor-data-raw
+  KAFKA_TOPIC_ALERTS: sensor-alerts
+  KAFKA_GROUP_ID: industryflow
+  CORS_ORIGINS: "https://app.industryflow.local"
+  ENVIRONMENT: production
+
+# ---------------------------------------------------------------------------
+# Secrets. NEVER commit real values — these are placeholders. In real
+# deployments supply them via SealedSecrets/Vault/CSI (ADR-0009 decision 4).
+# If `create: false`, an existing Secret named `existingSecret` is used instead.
+# ---------------------------------------------------------------------------
+secrets:
+  create: true
+  existingSecret: ""
+  data:
+    DB_USER: postgres
+    DB_PASSWORD: "CHANGE_ME"
+    JWT_SECRET_KEY: "CHANGE_ME"
+    MINIO_ACCESS_KEY: "CHANGE_ME"
+    MINIO_SECRET_KEY: "CHANGE_ME"
+
+# ---------------------------------------------------------------------------
+# Ingress — the single TLS edge (ADR-0002 mTLS device path, ADR-0004 HTTPS).
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    enabled: true
+    secretName: industryflow-tls
+  annotations: {}
+  # The mTLS device-ingestion path (ADR-0002). The ingress controller verifies
+  # client certs against the device CA (ADR-0007) and forwards the verified
+  # identity. Annotations are controller-specific; filled in a later pass.
+  mtls:
+    enabled: false
+    caSecret: industryflow-device-ca
+    host: ingest.industryflow.local
