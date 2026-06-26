@@ -89,20 +89,23 @@ async def get_db_with_tenant(
     """
     async with AsyncSessionLocal() as session:
         try:
-            # Set schema search path for this session
-            if current_user and current_user.company_id:
-                schema_name = normalize_company_id_to_schema(current_user.company_id)
-                await session.execute(
-                    text(f"SET search_path TO {schema_name}, public")
-                )
-                logger.debug(f"Schema search path set to: {schema_name}")
-            else:
-                logger.warning("User has no company_id, schema routing not set")
-            
-            yield session
-            await session.commit()
+            # Scope the tenant search_path to a transaction via SET LOCAL, so it is
+            # discarded when the transaction ends and never lingers on the pooled
+            # connection for the next borrower (ADR-0003 decision 6).
+            async with session.begin():
+                if current_user and current_user.company_id:
+                    schema_name = normalize_company_id_to_schema(current_user.company_id)
+                    await session.execute(
+                        text(f"SET LOCAL search_path TO {schema_name}, public")
+                    )
+                    logger.debug(f"Schema search path set to: {schema_name}")
+                else:
+                    logger.warning("User has no company_id, schema routing not set")
+
+                yield session
+            # session.begin() commits on exit (or rolls back on error); the SET LOCAL
+            # search_path is discarded with the transaction.
         except Exception as e:
-            await session.rollback()
             logger.error(f"Database error with tenant routing: {e}")
             raise
         finally:
