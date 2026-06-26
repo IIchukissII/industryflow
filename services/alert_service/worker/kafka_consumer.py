@@ -25,25 +25,36 @@ class AlertKafkaConsumer:
         self.consumer: Optional[AIOKafkaConsumer] = None
         self.producer: Optional[AIOKafkaProducer] = None
         self.running = False
+        # At-least-once handling parameters (ADR-0005).
+        self._max_retries = getattr(config, 'KAFKA_MAX_RETRIES', 3)
+        self._retry_backoff = getattr(config, 'KAFKA_RETRY_BACKOFF_SECONDS', 1.0)
+        self._dlq_topic = getattr(
+            config, 'KAFKA_TOPIC_DLQ', f"{config.KAFKA_TOPIC_SENSOR_DATA}.dlq"
+        )
     
     async def start(self):
         """Initialize Kafka consumer and producer"""
         logger.info("Starting Kafka consumer...")
         
-        # Create consumer
+        # Create consumer. At-least-once (ADR-0005): start from the earliest offset so a
+        # fresh consumer does not skip the backlog, and commit manually only after a batch
+        # is fully handled (enable_auto_commit=False).
         self.consumer = AIOKafkaConsumer(
             self.config.KAFKA_TOPIC_SENSOR_DATA,
             bootstrap_servers=self.config.KAFKA_BOOTSTRAP_SERVERS,
             group_id=self.config.KAFKA_GROUP_ID,
             value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-            auto_offset_reset='latest',
-            enable_auto_commit=True
+            auto_offset_reset='earliest',
+            enable_auto_commit=False
         )
-        
-        # Create producer for alerts
+
+        # Create producer for alerts and the dead-letter topic. acks='all' + idempotence
+        # so a message is durably replicated before it counts as sent (ADR-0005).
         self.producer = AIOKafkaProducer(
             bootstrap_servers=self.config.KAFKA_BOOTSTRAP_SERVERS,
-            value_serializer=lambda v: json.dumps(v).encode('utf-8')
+            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+            acks='all',
+            enable_idempotence=True
         )
         
         await self.consumer.start()
@@ -56,42 +67,106 @@ class AlertKafkaConsumer:
         self.running = True
     
     async def consume_messages(self):
-        """Main message consumption loop"""
-        logger.info("Starting message consumption...")
-        logger.info(f"Consumer running flag: {self.running}")
-        logger.info(f"Consumer object: {self.consumer}")
+        """
+        Main consumption loop with at-least-once semantics (ADR-0005).
+
+        Each getmany batch is processed in full and only then committed. If any message
+        cannot be handled (processed, or dead-lettered after retries), the batch is not
+        committed and the consumer is rewound to the last committed offsets, so unhandled
+        messages are re-delivered rather than silently skipped.
+        """
+        logger.info("Starting message consumption (at-least-once)...")
 
         try:
-            loop_count = 0
-            logger.info("Entering while loop...")
-
             while self.running:
-                # Get batch of messages
-                loop_count += 1
-                logger.info(f"Loop iteration {loop_count}, calling getmany...")
-
                 data = await self.consumer.getmany(timeout_ms=1000, max_records=10)
 
-                logger.info(f"getmany returned, data: {bool(data)}")
-
-                if data:
-                    msg_count = sum(len(messages) for messages in data.values())
-                    logger.info(f"Received {msg_count} messages from Kafka")
-
-                    for tp, messages in data.items():
-                        for message in messages:
-                            try:
-                                sensor_data = message.value
-                                await self._process_message(sensor_data)
-                            except Exception as e:
-                                logger.error(f"Error processing message: {e}", exc_info=True)
-                else:
+                if not data:
                     await asyncio.sleep(0.1)
-        
+                    continue
+
+                msg_count = sum(len(messages) for messages in data.values())
+                logger.debug(f"Received {msg_count} message(s) from Kafka")
+
+                batch_handled = True
+                for tp, messages in data.items():
+                    for message in messages:
+                        if not await self._handle_message(message):
+                            batch_handled = False
+                            break
+                    if not batch_handled:
+                        break
+
+                if batch_handled:
+                    # Advance committed offsets only after the whole batch is handled.
+                    await self.consumer.commit()
+                else:
+                    # Rewind to the last committed offsets so nothing is skipped, then
+                    # back off before retrying the batch.
+                    await self._seek_to_committed()
+                    await asyncio.sleep(self._retry_backoff)
+
         except asyncio.CancelledError:
             logger.info("Message consumption cancelled")
         except Exception as e:
             logger.error(f"Fatal error in consumer loop: {e}", exc_info=True)
+
+    async def _handle_message(self, message) -> bool:
+        """
+        Process one message, retrying on failure and dead-lettering if it stays
+        unprocessable. Returns True when the message has been handled and its offset may
+        be committed, False when it could not be handled (so the offset must not advance).
+        """
+        for attempt in range(1, self._max_retries + 1):
+            try:
+                await self._process_message(message.value)
+                return True
+            except Exception as e:
+                logger.error(
+                    f"Error processing message (attempt {attempt}/{self._max_retries}): {e}",
+                    exc_info=True,
+                )
+                if attempt < self._max_retries:
+                    await asyncio.sleep(self._retry_backoff * attempt)
+
+        # Retries exhausted: route to the dead-letter topic.
+        return await self._dead_letter(message)
+
+    async def _dead_letter(self, message) -> bool:
+        """
+        Publish an unprocessable message to the dead-letter topic. Returns False if even
+        that fails, so the offset is not committed and the message is retried later.
+        """
+        try:
+            await self.producer.send_and_wait(
+                self._dlq_topic,
+                value={
+                    "original": message.value,
+                    "topic": message.topic,
+                    "partition": message.partition,
+                    "offset": message.offset,
+                },
+            )
+            logger.error(
+                f"Message dead-lettered to {self._dlq_topic} "
+                f"(partition={message.partition}, offset={message.offset}) after exhausting retries"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to dead-letter message; offset will not advance: {e}", exc_info=True)
+            return False
+
+    async def _seek_to_committed(self):
+        """
+        Rewind every assigned partition to its last committed offset so unhandled
+        messages are re-delivered instead of skipped.
+        """
+        for tp in self.consumer.assignment():
+            committed = await self.consumer.committed(tp)
+            if committed is not None:
+                self.consumer.seek(tp, committed)
+            else:
+                await self.consumer.seek_to_beginning(tp)
     
     async def _process_message(self, sensor_data: dict):
         """Process a single sensor message"""
