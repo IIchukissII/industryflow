@@ -2,8 +2,10 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import secrets
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -18,7 +20,7 @@ from messaging.redis_client import redis_client
 from messaging.cache_updater import update_redis_cache
 
 # Authentication imports
-from users import auth_backend, fastapi_users, current_active_user
+from users import auth_backend, fastapi_users, current_active_user, ACCESS_COOKIE
 from models.user import User
 from schemas import UserCreate, UserRead
 
@@ -64,11 +66,32 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    # Explicit origin allowlist (comma-separated in CORS_ORIGINS), never "*" with
+    # credentials (ADR-0004 dec 6). Split the string into a list.
+    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def csrf_protect(request, call_next):
+    """
+    Double-submit CSRF protection for cookie-authenticated browser requests (ADR-0004
+    dec 3). Enforced only on unsafe methods when the request carries the access cookie and
+    no bearer header (bearer/API clients are not CSRF-vulnerable). /auth/* is exempt — those
+    endpoints authenticate by credentials or the refresh token, not the access cookie.
+    """
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        cookie_authed = ACCESS_COOKIE in request.cookies and not request.headers.get("authorization")
+        if cookie_authed and not request.url.path.startswith("/auth/"):
+            csrf_cookie = request.cookies.get(auth_tokens.CSRF_COOKIE)
+            csrf_header = request.headers.get("x-csrf-token")
+            if not (csrf_cookie and csrf_header and secrets.compare_digest(csrf_cookie, csrf_header)):
+                return JSONResponse(status_code=403, content={"detail": "CSRF token missing or invalid"})
+    return await call_next(request)
+
 
 # Prometheus metrics
 Instrumentator().instrument(app).expose(app)

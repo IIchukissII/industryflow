@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # Short-lived access token; refresh token is revocable and rotated (ADR-0004 dec 2).
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # httpOnly cookie delivery + CSRF (ADR-0004 dec 3). COOKIE_SECURE must be true in
+    # production (requires HTTPS); false only for local plain-HTTP development.
+    COOKIE_SECURE: bool = False
+    COOKIE_SAMESITE: str = "lax"
     
     # CORS Configuration
     CORS_ORIGINS: str

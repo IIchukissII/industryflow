@@ -19,9 +19,13 @@ from config import get_settings
 from fastapi_users.authentication import (
     AuthenticationBackend,
     BearerTransport,
+    CookieTransport,
     JWTStrategy,
 )
 from fastapi_users.jwt import generate_jwt
+
+# Cookie name for the httpOnly access-token cookie (ADR-0004 dec 3).
+ACCESS_COOKIE = "if_access"
 
 settings = get_settings()
 
@@ -96,10 +100,25 @@ auth_backend = AuthenticationBackend(
     get_strategy=get_jwt_strategy,
 )
 
+# Cookie backend: the same JWT access token, delivered/read as an httpOnly cookie so it is
+# not exposed to page JavaScript (ADR-0004 dec 3). current_user accepts either transport.
+cookie_transport = CookieTransport(
+    cookie_name=ACCESS_COOKIE,
+    cookie_max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    cookie_secure=settings.COOKIE_SECURE,
+    cookie_httponly=True,
+    cookie_samesite=settings.COOKIE_SAMESITE,
+)
+cookie_auth_backend = AuthenticationBackend(
+    name="cookie",
+    transport=cookie_transport,
+    get_strategy=get_jwt_strategy,
+)
+
 # FastAPI Users instance - provides all auth routes and dependencies
 fastapi_users = FastAPIUsers[User, uuid.UUID](
     get_user_manager,
-    [auth_backend],
+    [auth_backend, cookie_auth_backend],
 )
 
 # Dependency to get current active user
