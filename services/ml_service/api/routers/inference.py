@@ -14,6 +14,8 @@ import mlflow
 import mlflow.pyfunc
 import numpy as np
 import os
+import hmac
+import uuid
 
 import auth
 from feature_engineering import FeatureEngineeringEngine
@@ -35,7 +37,7 @@ class InferenceRequest(BaseModel):
     model_id: str = Field(..., description="Model ID from database")
     sensor_data: Dict[str, Any] = Field(..., description="Sensor reading data")
     threshold: float = Field(default=0.85, ge=0.0, le=1.0, description="Anomaly threshold")
-    company_id: Optional[str] = Field(None, description="Company ID (for internal service calls without JWT)")
+    company_id: Optional[str] = Field(None, description="Tenant company_id; honoured only for authenticated internal service calls (see X-Internal-Service-Token)")
 
 
 class InferenceResponse(BaseModel):
@@ -51,13 +53,9 @@ class InferenceResponse(BaseModel):
 # Dependency Injection
 # ============================================================================
 
-async def get_company_id_dependency(
-    request: Request,
-    current_user: dict = Depends(auth.verify_jwt_token)
-) -> str:
-    """Get company_id with database pool from app state"""
+async def _company_id_from_user(request: Request, user_id: str) -> str:
+    """Look up a user's company_id across the tenant schemas."""
     db_pool = request.app.state.db_pool
-    user_id = current_user["user_id"]
 
     async with db_pool.acquire() as conn:
         # Get all tenant schemas
@@ -88,6 +86,41 @@ async def get_company_id_dependency(
         )
 
 
+async def get_company_id_dependency(
+    request: Request,
+    current_user: dict = Depends(auth.verify_jwt_token)
+) -> str:
+    """Resolve the caller's company_id from their verified JWT."""
+    return await _company_id_from_user(request, current_user["user_id"])
+
+
+async def _resolve_company_id(request: Request, request_data: InferenceRequest) -> str:
+    """
+    Resolve the tenant for an inference request — authentication required.
+
+    - Internal service-to-service callers (e.g. the alert worker) present a valid
+      X-Internal-Service-Token (shared secret INTERNAL_SERVICE_TOKEN); the company_id is
+      then read from the request body and validated as a UUID.
+    - All other callers must present a user JWT; the company_id is derived from it.
+
+    If INTERNAL_SERVICE_TOKEN is unset the internal path is disabled (fail closed). This
+    is an interim service-to-service mechanism; ADR-0004/ADR-0002 defer the full design.
+    """
+    internal_token = os.getenv("INTERNAL_SERVICE_TOKEN")
+    presented = request.headers.get("X-Internal-Service-Token")
+    if internal_token and presented and hmac.compare_digest(presented, internal_token):
+        if not request_data.company_id:
+            raise HTTPException(status_code=400, detail="company_id required for internal service calls")
+        try:
+            return str(uuid.UUID(str(request_data.company_id)))
+        except (ValueError, AttributeError, TypeError):
+            raise HTTPException(status_code=400, detail="company_id must be a valid UUID")
+
+    # Otherwise require a user JWT.
+    user_data = await auth.verify_jwt_token(request.headers.get("Authorization"))
+    return await _company_id_from_user(request, user_data["user_id"])
+
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -116,31 +149,16 @@ async def predict(
     request: Request
 ):
     """
-    Run ML inference on sensor data
-    Returns anomaly score and whether it exceeds threshold
+    Run ML inference on sensor data and return the anomaly score and threshold check.
 
-    Supports both authenticated (JWT) and internal service calls (company_id in body)
+    Requires authentication: either a user JWT, or a valid internal service token used by
+    the alert worker. The tenant is resolved by _resolve_company_id and is never trusted
+    from an unauthenticated request body (ADR-0004 decisions 4-5, ADR-0003).
     """
     repository = request.app.state.ml_repository
 
-    # Get company_id from request body (for internal calls) or JWT (for external calls)
-    company_id = request_data.company_id
-    if not company_id:
-        # Try to get from JWT token
-        try:
-            auth_header = request.headers.get('Authorization')
-            if auth_header:
-                token = auth_header.replace('Bearer ', '')
-                user_data = auth.verify_jwt_token_sync(token)  # We'll implement this
-                company_id = await get_company_id_from_user(request, user_data['user_id'])
-        except:
-            pass
-
-    if not company_id:
-        raise HTTPException(
-            status_code=401,
-            detail="company_id required in request body or Authorization header"
-        )
+    # Authenticated tenant resolution (user JWT or internal service token).
+    company_id = await _resolve_company_id(request, request_data)
 
     # Get model metadata from database
     model_data = await repository.get_model_by_id(
