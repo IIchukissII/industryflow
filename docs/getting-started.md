@@ -69,12 +69,22 @@ Additional users can be created by an admin through the API / admin UI.
 
 ## 5. Stream test data
 
-```bash
-# Terminal 1: Start data streaming
-cd services/mock_service
-python3 stream_tep_data.py
+The reference producer (the Tennessee-Eastman example dataset) lives in the
+`tep-reference` extension and ingests over **device mTLS**, so it first needs a device
+certificate ([device-mtls.md](operations/device-mtls.md)):
 
-# Terminal 2: Monitor in real-time
+```bash
+# Issue a device cert for the producer, bound to your tenant's company_id
+scripts/device-ca.sh init                                  # once
+scripts/device-ca.sh issue <company_id> tep-producer
+
+# Terminal 1: stream (data files resolve relative to the script; cert via env)
+DEVICE_CERT=deploy/device-ca/devices/tep-producer/tep-producer.chain.crt \
+DEVICE_KEY=deploy/device-ca/devices/tep-producer/tep-producer.key \
+INGESTION_URL=https://localhost:8443/ingest \
+  python3 extensions/tep-reference/producer/stream_tep_data.py
+
+# Terminal 2: monitor
 docker logs -f industryflow-spark-streaming
 ```
 
@@ -250,9 +260,10 @@ python3 tests/performance/performance_test.py        # see the scripts in tests/
 ### Generate test data
 
 ```bash
-cd services/mock_service
-python3 stream_tep_data.py                       # Stream TEP dataset
-python3 stream_tep_data.py --fault 1 --duration 300   # Stream with a specific fault
+# Reference producer (device mTLS — see step 5 for the cert). Data resolves relative to the script.
+DEVICE_CERT=deploy/device-ca/devices/tep-producer/tep-producer.chain.crt \
+DEVICE_KEY=deploy/device-ca/devices/tep-producer/tep-producer.key \
+  python3 extensions/tep-reference/producer/stream_tep_data.py
 ```
 
 ---
