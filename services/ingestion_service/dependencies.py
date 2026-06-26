@@ -54,7 +54,13 @@ async def get_current_user_with_company(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token: missing user_id"
             )
-        
+
+        # Prefer the company_id claim from the JWT (ADR-0003 dec 2); avoids the per-request
+        # tenant-schema scan below (review finding X2). Fall back to the scan for legacy tokens.
+        claim = payload.get("company_id")
+        if claim:
+            return {"user_id": user_id, "company_id": str(claim)}
+
         # Resolve company_id from database
         if not db_pool:
             raise HTTPException(

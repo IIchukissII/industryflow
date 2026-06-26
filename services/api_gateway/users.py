@@ -21,6 +21,7 @@ from fastapi_users.authentication import (
     BearerTransport,
     JWTStrategy,
 )
+from fastapi_users.jwt import generate_jwt
 
 settings = get_settings()
 
@@ -59,14 +60,33 @@ async def get_user_manager(user_db=Depends(get_user_db)):
 bearer_transport = BearerTransport(tokenUrl="auth/jwt/login")
 
 
+class CompanyClaimJWTStrategy(JWTStrategy):
+    """
+    JWT strategy that embeds company_id and role as claims, so downstream services resolve
+    the tenant directly from the token instead of scanning every tenant schema for the user
+    (ADR-0003 decision 2; closes review finding X2).
+    """
+
+    async def write_token(self, user) -> str:
+        data = {
+            "sub": str(user.id),
+            "aud": self.token_audience,
+            "company_id": str(user.company_id) if user.company_id else None,
+            "role": getattr(user, "role", None),
+        }
+        return generate_jwt(
+            data, self.encode_key, self.lifetime_seconds, algorithm=self.algorithm
+        )
+
+
 def get_jwt_strategy() -> JWTStrategy:
     """
-    JWT Strategy configuration
-    Token lifetime: 1 week (604800 seconds)
+    JWT strategy with a 1-week token lifetime. (ADR-0004 will shorten this and add
+    refresh/revocation in a later step of the auth-model refactor.)
     """
-    return JWTStrategy(
+    return CompanyClaimJWTStrategy(
         secret=SECRET,
-        lifetime_seconds=604800  # 1 week as you requested
+        lifetime_seconds=604800
     )
 
 # Authentication backend combining transport + strategy
