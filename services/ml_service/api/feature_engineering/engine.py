@@ -53,7 +53,7 @@ class FeatureEngineeringEngine:
 
         Args:
             sensor_data: Dictionary mapping sensor names to values
-                Example: {"xmeas_1": 2.5, "xmeas_2": 120.3, ...}
+                Example: {"temp_inlet": 72.5, "pressure_1": 4.2, ...}
 
         Returns:
             numpy array of engineered features in the order defined by transformations
