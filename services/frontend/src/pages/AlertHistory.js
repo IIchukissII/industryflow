@@ -5,7 +5,7 @@
 import React, { useState, useEffect } from 'react';
 import './AlertHistory.css';
 import Header from '../components/Header';
-import { API_URL } from '../config';
+import authFetch from '../services/http';
 
 function AlertHistory() {
   const [alerts, setAlerts] = useState([]);
@@ -24,7 +24,7 @@ function AlertHistory() {
       setUser(JSON.parse(savedUser));
     }
 
-    fetch(`${API_URL}/health`)
+    fetch('/health')
       .then(res => res.json())
       .then(() => setConnected(true))
       .catch(() => setConnected(false));
@@ -37,10 +37,7 @@ function AlertHistory() {
 
   const fetchAlerts = async () => {
     try {
-      const token = localStorage.getItem('access_token');
-      const response = await fetch(`${API_URL}/api/alerts?limit=1000`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const response = await authFetch('/api/alerts?limit=1000');
       if (!response.ok) throw new Error('Failed to fetch alerts');
       const data = await response.json();
       setAlerts(data || []);
@@ -53,10 +50,7 @@ function AlertHistory() {
 
   const fetchAlertRules = async () => {
     try {
-      const token = localStorage.getItem('access_token');
-      const response = await fetch(`${API_URL}/api/alert-rules`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const response = await authFetch('/api/alert-rules');
       if (!response.ok) throw new Error('Failed to fetch alert rules');
       const data = await response.json();
       setAlertRules(data || []);

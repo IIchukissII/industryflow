@@ -7,7 +7,6 @@ import Header from '../components/Header';
 import EquipmentConfigModal from '../components/EquipmentConfigModal';
 import { getEquipment, getEquipmentById, deleteEquipment } from '../services/equipmentApi';
 import './Equipment.css';
-import { API_URL as API_BASE_URL } from '../config';
 
 function Equipment() {
   const [equipment, setEquipment] = useState([]);
@@ -28,7 +27,7 @@ function Equipment() {
     }
 
     // Check API connection
-    fetch(`${API_BASE_URL}/health`)
+    fetch('/health')
       .then(res => res.json())
       .then(() => setConnected(true))
       .catch(() => setConnected(false));

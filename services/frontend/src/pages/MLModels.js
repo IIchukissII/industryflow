@@ -5,9 +5,7 @@
 import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
 import './MLModels.css';
-import { ML_API_URL, API_URL } from '../config';
-
-const ML_API_BASE = ML_API_URL;
+import authFetch from '../services/http';
 
 function MLModels() {
   const [user, setUser] = useState(null);
@@ -36,7 +34,7 @@ function MLModels() {
     }
 
     // Check API connection
-    fetch(`${API_URL}/health`)
+    fetch('/health')
       .then(res => res.json())
       .then(() => setConnected(true))
       .catch(() => setConnected(false));
@@ -46,26 +44,21 @@ function MLModels() {
 
   const fetchData = async () => {
     setLoading(true);
-    const token = localStorage.getItem('access_token');
 
     try {
-      const healthRes = await fetch(`${ML_API_BASE}/health`);
+      const healthRes = await fetch('/health');
       const healthData = await healthRes.json();
       setMlHealth(healthData);
 
-      const modelsRes = await fetch(`${ML_API_BASE}/api/models`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const modelsRes = await authFetch('/api/models');
       const modelsData = await modelsRes.json();
       const modelsList = modelsData.models || [];
       setModels(modelsList);
 
       // Fetch feature configs for models that have them
-      await fetchFeatureConfigs(modelsList, token);
+      await fetchFeatureConfigs(modelsList);
 
-      const expRes = await fetch(`${ML_API_BASE}/api/mlflow/experiments`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const expRes = await authFetch('/api/mlflow/experiments');
       const expData = await expRes.json();
       setExperiments(expData.experiments || []);
 
@@ -76,15 +69,13 @@ function MLModels() {
     }
   };
 
-  const fetchFeatureConfigs = async (models, token) => {
+  const fetchFeatureConfigs = async (models) => {
     const configs = {};
 
     for (const model of models) {
       if (model.feature_config_id) {
         try {
-          const res = await fetch(`${ML_API_BASE}/api/feature-configs/${model.feature_config_id}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
+          const res = await authFetch(`/api/feature-configs/${model.feature_config_id}`);
           if (res.ok) {
             const data = await res.json();
             configs[model.feature_config_id] = data;
@@ -99,11 +90,8 @@ function MLModels() {
   };
 
   const fetchRuns = async (experimentId) => {
-    const token = localStorage.getItem('access_token');
     try {
-      const res = await fetch(`${ML_API_BASE}/api/mlflow/experiments/${experimentId}/runs`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await authFetch(`/api/mlflow/experiments/${experimentId}/runs`);
       const data = await res.json();
       setRuns(data.runs || []);
       setSelectedExperiment(experimentId);
@@ -113,14 +101,10 @@ function MLModels() {
   };
 
   const changeModelStatus = async (modelId, newStatus) => {
-    const token = localStorage.getItem('access_token');
     try {
-      const res = await fetch(`${ML_API_BASE}/api/models/${modelId}/deploy`, {
+      const res = await authFetch(`/api/models/${modelId}/deploy`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model_id: modelId,
           environment: newStatus
@@ -143,21 +127,17 @@ function MLModels() {
   const handleTrainingSubmit = async (e) => {
     e.preventDefault();
     
-    const token = localStorage.getItem('access_token');
     const userData = JSON.parse(localStorage.getItem('user'));
-    
+
     if (!userData || !userData.company_id) {
       alert('Unable to get company information. Please log in again.');
       return;
     }
 
     try {
-      const res = await fetch(`${ML_API_BASE}/api/training/start`, {
+      const res = await authFetch('/api/training/start', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           config: {
             company_id: userData.company_id,
