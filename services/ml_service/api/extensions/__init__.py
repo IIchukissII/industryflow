@@ -13,7 +13,7 @@ operator names in EXTENSION_MODULES — never a named extension directly.
 """
 import importlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,50 @@ def registered_transforms() -> List[str]:
     return sorted(_TRANSFORMS)
 
 
+# --- anomaly-detector contract (ADR-0010: the second contract on the registry pattern) ---
+
+@dataclass
+class DetectorContext:
+    """Context an anomaly detector may use (feature names, the equipment under inference)."""
+    feature_names: Any = None
+    equipment_id: Any = None
+
+
+@dataclass
+class DetectionResult:
+    """A detector's verdict: a 0–1 anomaly score and whether it crosses the threshold."""
+    score: float
+    is_anomaly: bool
+    detail: Dict[str, Any] = field(default_factory=dict)
+
+
+# A detector is: async (features, model, threshold, ctx) -> DetectionResult. `model` is the
+# loaded model (or None for model-free detectors); a detector reads only what it needs.
+DetectorFn = Callable[[Any, Any, float, DetectorContext], Awaitable[DetectionResult]]
+
+_DETECTORS: Dict[str, DetectorFn] = {}
+
+
+def register_detector(name: str):
+    """Register an anomaly detector under ``name`` (ADR-0010). Re-registering a different
+    function is an error, mirroring transforms."""
+    def decorator(fn: DetectorFn) -> DetectorFn:
+        existing = _DETECTORS.get(name)
+        if existing is not None and existing is not fn:
+            raise ValueError(f"anomaly detector '{name}' is already registered")
+        _DETECTORS[name] = fn
+        return fn
+    return decorator
+
+
+def get_detector(name: str):
+    return _DETECTORS.get(name)
+
+
+def registered_detectors() -> List[str]:
+    return sorted(_DETECTORS)
+
+
 def check_api_version(target: str) -> None:
     """Accept an extension targeting ``target`` when the major matches and the platform minor is
     at least the target's; refuse otherwise (ADR-0010 dec 3)."""
@@ -85,5 +129,6 @@ def load_extension_modules(modules: List[str]) -> List[str]:
     return loaded
 
 
-# Register the platform's own generic transforms (no domain knowledge) on import.
+# Register the platform's own generic transforms + detectors (no domain knowledge) on import.
 from . import builtins as _builtins  # noqa: E402,F401
+from . import builtins_detectors as _builtins_detectors  # noqa: E402,F401

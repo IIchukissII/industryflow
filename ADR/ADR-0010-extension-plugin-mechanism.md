@@ -106,10 +106,20 @@ feature per reading is unacceptable on the inference hot path (decision 4 / ADR-
   for managed deployments is unaddressed here (deferred).
 - `EXTENSION_MODULES` is an operational trust boundary: whatever it names is imported and runs.
 
+## Added after acceptance
+
+- **Anomaly-detector contract.** The second contract, on the same registry pattern:
+  `async (features, model, threshold, ctx) -> DetectionResult` registered with
+  `@register_detector("<name>")`. The ML inference path dispatches a model record's
+  `detector` (default `sklearn`, the generic built-in that reproduces the previous
+  scikit-learn scoring) through the registry, so a domain can register a custom detector —
+  including a model-free one — without editing the inference scorer. The reference extension
+  adds an illustrative `tep_rule` detector. The model-adapter contract remains future work.
+
 ## Deferred decisions
 
-- **Anomaly-detector and model-adapter contracts.** Declared as the next contracts on the same
-  registry pattern; their signatures are not fixed here.
+- **Model-adapter contract.** A third contract (e.g. out-of-process / language-independent
+  model servers) on the same pattern; its signature is not fixed here.
 - **Entry-point discovery** for separately-installed extension packages (alternative A).
 - **Plugin trust/sandboxing** for untrusted plugins in the commercial-managed offering
   (inherited from ADR-0008).
