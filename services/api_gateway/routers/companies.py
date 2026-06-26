@@ -38,18 +38,41 @@ class CompanyResponse(BaseModel):
     created_at: datetime
 
 
+def _require_superuser(current_user: User) -> None:
+    """Provisioning a tenant (create/delete a company) requires a superuser (ADR-0004)."""
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Superuser privileges required")
+
+
+def _assert_own_company(current_user: User, company_id: UUID) -> None:
+    """
+    A non-superuser admin may only act on their own company (ADR-0004 decision 5).
+    Returns 404 rather than 403 so other tenants' company IDs are not confirmed.
+    """
+    if not current_user.is_superuser and str(current_user.company_id) != str(company_id):
+        raise HTTPException(status_code=404, detail="Company not found")
+
+
 @router.get("", response_model=List[CompanyResponse])
 async def list_companies(
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(require_role("admin"))
 ):
-    """Get companies (admin only, queries public.companies table)"""
-    result = await db.execute(text("""
-        SELECT company_id, company_name, is_active, created_at
-        FROM public.companies
-        ORDER BY company_name
-    """))
-    
+    """List companies. Superusers see all; a per-tenant admin sees only their own (ADR-0004)."""
+    if current_user.is_superuser:
+        result = await db.execute(text("""
+            SELECT company_id, company_name, is_active, created_at
+            FROM public.companies
+            ORDER BY company_name
+        """))
+    else:
+        result = await db.execute(text("""
+            SELECT company_id, company_name, is_active, created_at
+            FROM public.companies
+            WHERE company_id = :company_id
+            ORDER BY company_name
+        """), {"company_id": current_user.company_id})
+
     rows = result.fetchall()
     return [
         {
@@ -68,7 +91,8 @@ async def get_company(
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(require_role("admin"))
 ):
-    """Get single company by ID (admin only)"""
+    """Get a single company by ID (own company only, unless superuser)."""
+    _assert_own_company(current_user, company_id)
     result = await db.execute(
         text("""
             SELECT company_id, company_name, is_active, created_at
@@ -96,7 +120,8 @@ async def create_company(
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(require_role("admin"))
 ):
-    """Create a new company (admin only)"""
+    """Create a new company/tenant (superuser only — this is a provisioning action)."""
+    _require_superuser(current_user)
     # Check if company name already exists
     result = await db.execute(
         text("SELECT company_id FROM public.companies WHERE company_name = :name"),
@@ -138,7 +163,8 @@ async def update_company(
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(require_role("admin"))
 ):
-    """Update a company (admin only)"""
+    """Update a company (own company only, unless superuser)."""
+    _assert_own_company(current_user, company_id)
     # Build update query
     updates = []
     params = {"company_id": company_id}
@@ -184,7 +210,8 @@ async def delete_company(
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(require_role("admin"))
 ):
-    """Delete a company (admin only)"""
+    """Delete a company/tenant (superuser only — this is a provisioning action)."""
+    _require_superuser(current_user)
     # Check if company has users
     result = await db.execute(
         text('SELECT COUNT(*) FROM public."user" WHERE company_id = :company_id'),

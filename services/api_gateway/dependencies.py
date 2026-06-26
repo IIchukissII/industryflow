@@ -34,6 +34,9 @@ def require_role(required_role: str):
     Usage: user = Depends(require_role("admin"))
     """
     async def role_checker(current_user: User = Depends(current_active_user)) -> User:
+        # Superusers pass any role gate; otherwise the role must match exactly.
+        if current_user.is_superuser:
+            return current_user
         if current_user.role != required_role:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
