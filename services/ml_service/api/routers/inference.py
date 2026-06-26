@@ -19,6 +19,7 @@ import uuid
 
 import auth
 from feature_engineering import FeatureEngineeringEngine
+from extensions import get_detector, DetectorContext
 
 logger = logging.getLogger(__name__)
 
@@ -230,49 +231,22 @@ async def predict(
 
         logger.info(f"Engineered {input_features.shape[1]} features from sensor data (Feature Store: {feature_store is not None})")
 
-        # Run prediction
-        prediction = model.predict(input_features)
+        # Score the features through the anomaly-detector registry (ADR-0010). The model
+        # record may name a detector (a domain may register its own); the default 'sklearn'
+        # built-in reproduces the platform's scikit-learn scoring.
+        detector_name = model_data.get('detector', 'sklearn')
+        detector = get_detector(detector_name)
+        if detector is None:
+            raise HTTPException(status_code=500, detail=f"Unknown anomaly detector: {detector_name}")
 
-        # Extract anomaly score
-        # For binary classifiers, prediction is array of class labels
-        # For anomaly detectors, prediction might be anomaly score or -1/1
+        result = await detector(
+            input_features, model, request_data.threshold,
+            DetectorContext(equipment_id=equipment_id),
+        )
+        anomaly_score = result.score
+        is_anomaly = result.is_anomaly
 
-        # Try to get predict_proba from the model
-        # MLflow PyFuncModel wraps the actual model, need to unwrap it
-        actual_model = model
-        if hasattr(model, '_model_impl'):
-            # MLflow pyfunc wrapper - get underlying model
-            actual_model = model._model_impl
-
-        if hasattr(actual_model, 'predict_proba'):
-            # Get probability of anomaly class (class 1)
-            proba = actual_model.predict_proba(input_features)
-            anomaly_score = float(proba[0][1]) if proba.shape[1] > 1 else float(proba[0][0])
-        elif isinstance(prediction[0], (int, np.integer)):
-            # Binary prediction - handle both XGBoost (0=normal, 1=anomaly) and IsolationForest (-1=anomaly, 1=normal)
-            if prediction[0] == -1:
-                # IsolationForest convention: -1 = anomaly
-                anomaly_score = 1.0
-            elif prediction[0] == 1:
-                # Could be XGBoost (1=anomaly) or IsolationForest (1=normal)
-                # Since we're using XGBoost primarily, default to XGBoost convention
-                anomaly_score = 1.0  # XGBoost: 1 = anomaly
-            elif prediction[0] == 0:
-                # XGBoost convention: 0 = normal
-                anomaly_score = 0.0
-            else:
-                anomaly_score = float(abs(prediction[0]))
-        else:
-            # Direct anomaly score
-            anomaly_score = float(prediction[0])
-
-        # Ensure score is between 0 and 1
-        anomaly_score = max(0.0, min(1.0, anomaly_score))
-
-        # Check if anomaly
-        is_anomaly = anomaly_score >= request_data.threshold
-
-        logger.info(f"Inference complete: model={request_data.model_id}, score={anomaly_score:.4f}, anomaly={is_anomaly}")
+        logger.info(f"Inference complete: model={request_data.model_id}, detector={detector_name}, score={anomaly_score:.4f}, anomaly={is_anomaly}")
 
         return InferenceResponse(
             model_id=request_data.model_id,
