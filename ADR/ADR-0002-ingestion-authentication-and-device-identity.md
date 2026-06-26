@@ -1,16 +1,16 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-SPDX-License-Identifier: MIT
+SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # ADR-0002: Ingestion authentication and device identity — mTLS for gateways, JWT for the API
 
 - **ID:** ADR-0002
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
-- **Parent:** ADR-0001 (framing — pending)
-- **Companions:** ADR-0003 (tenant→schema resolution — pending), ADR-0004 (API authentication & CORS — pending)
+- **Parent:** ADR-0001 (framing)
+- **Companions:** ADR-0003 (tenant→schema resolution), ADR-0004 (API authentication & CORS)
 - **Related (IndustryGrow):** ADR-0004 rev 1 (gateway host hardening), ADR-0007 (PKI and secure-element identity)
 
 ## Context and problem
@@ -106,5 +106,5 @@ So ingestion authentication is really **two different trust domains wearing one 
 - IndustryFlow review (2026-06-26), findings X1 (`search_path` injection) and X2 (per-request tenant-schema scan), and the committed mock JWT — internal report.
 - IndustryGrow ADR-0004 rev 1 — gateway host hardening and stateless-edge operation (the device whose data IndustryFlow ingests).
 - IndustryGrow ADR-0007 — PKI and secure-element identity (the device-side counterpart to IndustryFlow's CA).
-- ADR-0003 (pending) — tenant→schema resolution, consumer of the verified identity decided here.
-- ADR-0004 (pending) — API authentication & CORS, the JWT trust domain this ADR leaves in place.
+- ADR-0003 — tenant→schema resolution, consumer of the verified identity decided here.
+- ADR-0004 — API authentication & CORS, the JWT trust domain this ADR leaves in place.

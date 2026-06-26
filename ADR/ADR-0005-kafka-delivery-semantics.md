@@ -1,16 +1,16 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-SPDX-License-Identifier: MIT
+SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # ADR-0005: Kafka delivery semantics — at-least-once with idempotent consumers
 
 - **ID:** ADR-0005
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
-- **Parent:** ADR-0001 (framing — pending)
-- **Companions:** ADR-0006 (Spark windowing & idempotent writes — pending)
+- **Parent:** ADR-0001 (framing)
+- **Companions:** ADR-0006 (Spark windowing & idempotent writes)
 
 ## Context and problem
 

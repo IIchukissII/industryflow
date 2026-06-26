@@ -56,4 +56,4 @@ Redis · MinIO · React 18 · Prometheus / Grafana / Loki.
 
 ## License
 
-[MIT](LICENSE) © 2026 The IndustryFlow contributors
+[AGPL-3.0-or-later](LICENSE) © 2026 The IndustryFlow contributors
