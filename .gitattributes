@@ -1,0 +1,4 @@
+# Jupyter notebooks: keep them out of GitHub's language breakdown and collapse their
+# large, output-heavy diffs so they don't dominate the repository.
+*.ipynb linguist-documentation
+*.ipynb -diff

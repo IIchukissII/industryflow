@@ -32,7 +32,10 @@ function Header({ user, connected }) {
   return (
     <header className="App-header">
       <div style={{ display: 'flex', alignItems: 'center', gap: '30px' }}>
-        <h1>IndustryFlow</h1>
+        <a href="/" style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none' }}>
+          <img src="/logo-mark.svg" alt="" width="30" height="30" />
+          <h1 style={{ margin: 0 }}>IndustryFlow</h1>
+        </a>
         <a href="/" style={linkStyle}
           onMouseOver={(e) => {
             e.target.style.color = '#2962ff';
