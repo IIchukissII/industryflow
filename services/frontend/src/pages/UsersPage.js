@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import api from '../services/api';
 
 function UsersPage() {
@@ -159,7 +160,9 @@ function UsersPage() {
                   </span>
                 </td>
                 <td>
-                  {user.is_superuser ? '⭐ Yes' : 'No'}
+                  {user.is_superuser
+                    ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--warn)' }}><Icon name="star" size={13} /> Yes</span>
+                    : 'No'}
                 </td>
                 <td>
                   <button className="btn-edit" onClick={() => handleEdit(user)}>

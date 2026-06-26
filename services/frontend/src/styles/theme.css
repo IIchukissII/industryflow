@@ -1,0 +1,106 @@
+/*
+ * SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * IndustryFlow design tokens + base. The product reads like a live control-room console:
+ * a technical type system (Space Grotesk display / IBM Plex Sans UI / IBM Plex Mono for
+ * every numeric readout) over a graphite + signal-blue palette.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* surfaces — strata of the ground, darkest at the base */
+  --bg: #090c16;
+  --panel: #11151f;
+  --panel-2: #161b27;
+  --panel-3: #1c2330;
+  --line: #232c3b;
+  --line-soft: #1a2130;
+
+  /* text */
+  --text: #e7ecf3;
+  --muted: #8b97a8;
+  --faint: #5b6573;
+
+  /* signal + status */
+  --signal: #3b82f6;
+  --signal-strong: #2563eb;
+  --signal-soft: rgba(59, 130, 246, 0.14);
+  --live: #2dd4bf;
+  --warn: #f5a623;
+  --crit: #f4496d;
+
+  /* type */
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* geometry */
+  --r-sm: 6px;
+  --r: 10px;
+  --r-lg: 14px;
+  --gap: 16px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.02), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --ring: 0 0 0 3px var(--signal-soft);
+
+  --sidebar-w: 236px;
+  --topbar-h: 60px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin: 0;
+}
+
+a { color: inherit; }
+
+/* numeric / telemetry readouts read as instrument values */
+.mono, .num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* eyebrow / section label */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--r-sm);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 10px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--panel-3); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}

@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import React, { useState, useEffect } from 'react';
-import Header from '../components/Header';
 import EquipmentConfigModal from '../components/EquipmentConfigModal';
 import { getEquipment, getEquipmentById, deleteEquipment } from '../services/equipmentApi';
 import './Equipment.css';
@@ -89,7 +88,6 @@ function Equipment() {
 
   return (
     <div className="App">
-      <Header user={user} connected={connected} />
 
       <div className="equipment-container">
         <div className="equipment-header">

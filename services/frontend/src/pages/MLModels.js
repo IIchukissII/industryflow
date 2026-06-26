@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import React, { useState, useEffect } from 'react';
-import Header from '../components/Header';
+import Icon from '../components/Icon';
 import './MLModels.css';
 import authFetch from '../services/http';
 
@@ -275,7 +275,6 @@ function MLModels() {
 
   return (
     <div className="App">
-      <Header user={user} connected={connected} />
 
       <div className="ml-models-container">
         <div className="ml-header">
@@ -284,7 +283,7 @@ function MLModels() {
             <p className="ml-subtitle">Train, deploy, and monitor machine learning models for anomaly detection</p>
           </div>
           <button className="btn-primary" onClick={() => setShowTrainingModal(true)}>
-            🚀 Start Training
+            <Icon name="play" size={14} /> Start Training
           </button>
         </div>
 

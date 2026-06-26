@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import React, { useState, useEffect } from 'react';
-import Header from '../components/Header';
 import './AlertRules.css';
 import authFetch from '../services/http';
 
@@ -164,7 +163,6 @@ function AlertRules() {
 
   return (
     <div className="App">
-      <Header user={user} connected={connected} />
 
       <div className="alert-rules-page">
         <div className="page-header">

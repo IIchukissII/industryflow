@@ -2,152 +2,53 @@
  * SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Dashboard (Overview) layout. Chrome lives in AppShell; shared primitives in
+ * styles/components.css. This file owns the chart + live-readout composition.
  */
 
-.App {
-  min-height: 100vh;
-  background-color: #0a0e27;
-  color: #ffffff;
-}
-
-.App-header {
-  background-color: #131722;
-  padding: 20px 40px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid #2a2e39;
-}
-
-.App-header h1 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-  color: #2962ff;
-}
-
-.status {
-  font-size: 14px;
-  color: #787b86;
-}
-
-.status .connected {
-  color: #26a69a;
-  font-weight: 500;
-}
-
-.status .disconnected {
-  color: #ef5350;
-  font-weight: 500;
-}
-
-.App-main {
-  padding: 20px 40px;
-}
-
-.dashboard-grid {
+.dash-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-  gap: 20px;
-  max-width: 1400px;
-  margin: 0 auto;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--gap);
+  align-items: start;
 }
 
-.card {
-  background-color: #131722;
-  border: 1px solid #2a2e39;
-  border-radius: 8px;
-  padding: 20px;
-  min-height: 200px;
-  transition: border-color 0.3s ease;
-}
+.dash-selectors { display: flex; gap: 8px; }
+.dash-selectors select { width: auto; min-width: 140px; padding: 6px 10px; font-size: 12.5px; }
 
-.card:hover {
-  border-color: #2962ff;
+.dash-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 50px 20px; text-align: center; color: var(--faint);
 }
+.dash-empty p { margin: 0; font-size: 13px; }
 
-.card.wide {
-  grid-column: 1 / -1;
-  min-height: 400px;
+/* live readout rail — the instrument signature */
+.readout-list { padding: 8px; overflow-y: auto; max-height: 560px; }
+.readout-group { margin-bottom: 10px; }
+.readout-eq {
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px 6px; color: var(--muted);
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
 }
-
-.card h2 {
-  margin: 0 0 15px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #d1d4dc;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #2a2e39;
+.readout {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  padding: 9px 11px; border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; color: var(--text); cursor: pointer; text-align: left;
+  transition: background 0.12s, border-color 0.12s;
 }
+.readout:hover { background: var(--panel-2); }
+.readout.active { background: var(--signal-soft); border-color: rgba(59, 130, 246, 0.3); }
+.readout-name { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.readout.active .readout-name { color: var(--text); }
+.readout-val { font-size: 14px; color: var(--live); white-space: nowrap; flex-shrink: 0; }
+.readout-val i { font-style: normal; color: var(--faint); font-size: 11px; margin-left: 4px; }
 
-.card p {
-  color: #787b86;
-  margin: 0;
+@media (max-width: 1024px) {
+  .dash-grid { grid-template-columns: 1fr; }
+  .readout-list { max-height: 360px; }
 }
-
-/* Sensor List Styling */
-.sensor-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 15px;
-}
-
-.sensor-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 12px;
-  background-color: #1e222d;
-  border-radius: 6px;
-  transition: background-color 0.2s ease;
-}
-
-.sensor-item:hover {
-  background-color: #2a2e39;
-}
-
-.sensor-name {
-  font-size: 13px;
-  color: #787b86;
-  text-transform: capitalize;
-  font-weight: 500;
-}
-
-.sensor-value {
-  font-size: 16px;
-  font-weight: 600;
-  color: #26a69a;
-  font-family: 'Courier New', monospace;
-}
-
-/* Loading animation */
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-.sensor-value {
-  animation: pulse 2s ease-in-out infinite;
-}
-
-/* Selected sensor highlighting */
-.sensor-item.selected {
-  background-color: #2a2e39;
-  border-left: 3px solid #2962ff;
-  padding-left: 9px;
-}
-
-.sensor-item.selected .sensor-name {
-  color: #2962ff;
-}
-
-.sensor-item.selected .sensor-value {
-  color: #2962ff;
+@media (max-width: 560px) {
+  .dash-selectors { flex-direction: column; }
+  .dash-selectors select { width: 100%; }
 }

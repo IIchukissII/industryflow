@@ -1,0 +1,141 @@
+/*
+ * SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Shared UI primitives. Element-level rules give every page's native controls the new
+ * look; class utilities (.btn, .panel, .kpi, .badge) are used by the redesigned views.
+ */
+
+button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+
+/* ---- form controls -------------------------------------------------------- */
+input:not([type='checkbox']):not([type='radio']),
+select,
+textarea {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  padding: 9px 11px;
+  font-size: 13px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+input::placeholder, textarea::placeholder { color: var(--faint); }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--signal);
+  box-shadow: var(--ring);
+}
+label { color: var(--muted); font-size: 12px; }
+
+/* ---- buttons -------------------------------------------------------------- */
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 9px 15px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
+  white-space: nowrap;
+}
+.btn:hover, .btn-primary:hover, .btn-secondary:hover, .btn-danger:hover { border-color: var(--faint); }
+.btn:active, .btn-primary:active { transform: translateY(1px); }
+.btn-primary {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--signal-strong); border-color: var(--signal-strong); }
+.btn-ghost { background: transparent; }
+.btn-danger { color: var(--crit); }
+.btn-danger:hover { border-color: var(--crit); background: rgba(244, 73, 109, 0.08); }
+.btn[disabled], .btn-primary[disabled] { opacity: 0.5; cursor: not-allowed; }
+.btn-sm { padding: 6px 10px; font-size: 12px; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0;
+  background: transparent; border: 1px solid var(--line);
+  border-radius: var(--r-sm); color: var(--muted); cursor: pointer;
+  transition: all 0.15s;
+}
+.icon-btn:hover { color: var(--text); border-color: var(--faint); }
+
+/* ---- panels / cards ------------------------------------------------------- */
+.panel, .card {
+  background: var(--panel);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+}
+.panel { padding: 18px; }
+.panel-pad { padding: 18px; }
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 18px; border-bottom: 1px solid var(--line-soft);
+}
+.panel-head h2, .panel-head h3 { font-size: 14px; }
+
+/* ---- page header ---------------------------------------------------------- */
+.page-head {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+  margin-bottom: 22px; flex-wrap: wrap;
+}
+.page-head h1 { font-size: 22px; }
+.page-head .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+/* ---- KPI tiles ------------------------------------------------------------ */
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--gap); }
+.kpi {
+  position: relative; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line-soft);
+  border-radius: var(--r); padding: 16px 18px;
+}
+.kpi::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--accent, var(--signal)); opacity: 0.9;
+}
+.kpi .kpi-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
+.kpi .kpi-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 30px; font-weight: 500; color: var(--text); margin-top: 8px; line-height: 1; }
+.kpi .kpi-foot { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+/* ---- badges / status pills ------------------------------------------------ */
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.04em;
+  text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--muted); background: var(--panel-2);
+}
+.badge-live { color: var(--live); border-color: rgba(45, 212, 191, 0.35); background: rgba(45, 212, 191, 0.08); }
+.badge-warn { color: var(--warn); border-color: rgba(245, 166, 35, 0.35); background: rgba(245, 166, 35, 0.08); }
+.badge-crit { color: var(--crit); border-color: rgba(244, 73, 109, 0.35); background: rgba(244, 73, 109, 0.08); }
+.badge-signal { color: var(--signal); border-color: rgba(59, 130, 246, 0.35); background: var(--signal-soft); }
+
+/* status dot */
+.sdot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--faint); flex-shrink: 0; }
+.sdot.ok { background: var(--live); box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.16); }
+.sdot.bad { background: var(--crit); box-shadow: 0 0 0 3px rgba(244, 73, 109, 0.16); }
+.sdot.pending { background: var(--warn); box-shadow: 0 0 0 3px rgba(245, 166, 35, 0.16); }
+
+/* ---- generic data table --------------------------------------------------- */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  text-align: left; font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint);
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
+}
+.data-table td { padding: 12px 14px; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+.data-table tbody tr:hover { background: var(--panel-2); }

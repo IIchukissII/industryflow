@@ -37,61 +37,79 @@ function Login({ onLogin }) {
     } catch (err) {
       const status = err.response?.status;
       setError(status === 400 || status === 401
-        ? 'Invalid email or password'
-        : 'Login failed. Please try again.');
+        ? 'Invalid email or password.'
+        : 'Sign-in failed. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="login-container">
-      <div className="login-box">
-        <div className="login-header">
-          <img src="/logo-mark.svg" alt="" width="64" height="64" style={{ marginBottom: '12px' }} />
-          <h1>IndustryFlow</h1>
-          <p>Industrial IoT Monitoring Platform</p>
+    <div className="login">
+      <aside className="login-hero">
+        <div className="login-strata" aria-hidden="true" />
+        <a href="/" className="login-brand">
+          <img src="/logo-mark.svg" alt="" width="32" height="32" />
+          <span>IndustryFlow</span>
+        </a>
+        <div className="login-hero-body">
+          <div className="eyebrow">Industrial IoT · Control plane</div>
+          <h2 className="login-tagline">Every signal from the floor, on one ground.</h2>
+          <p className="login-lede">
+            Stream sensor telemetry, catch anomalies, and act on alerts across every
+            tenant — in real time.
+          </p>
+          <ul className="login-points">
+            <li><span className="mono">wss://</span> live channel streaming</li>
+            <li><span className="mono">schema-per-tenant</span> isolation</li>
+            <li><span className="mono">ml</span> anomaly detection</li>
+          </ul>
         </div>
+        <div className="login-hero-foot mono">tenant-isolated · TLS edge</div>
+      </aside>
 
-        <form onSubmit={handleSubmit} className="login-form">
-          <div className="form-group">
-            <label>Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Enter your email"
-              required
-              autoFocus
-            />
-          </div>
+      <main className="login-panel">
+        <div className="login-card">
+          <img className="login-mark" src="/logo-mark.svg" alt="" width="40" height="40" />
+          <h1>Sign in</h1>
+          <p className="login-sub">Access your IndustryFlow workspace.</p>
 
-          <div className="form-group">
-            <label>Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              required
-            />
-          </div>
-
-          {error && (
-            <div className="error-message">
-              {error}
+          <form onSubmit={handleSubmit} className="login-form">
+            <div className="form-group">
+              <label htmlFor="email">Email</label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@company.com"
+                required
+                autoFocus
+              />
             </div>
-          )}
 
-          <button type="submit" className="login-button" disabled={loading}>
-            {loading ? 'Logging in...' : 'Login'}
-          </button>
-        </form>
+            <div className="form-group">
+              <label htmlFor="password">Password</label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+              />
+            </div>
 
-        <div className="login-footer">
-          <p>Need an account? Contact your system administrator.</p>
+            {error && <div className="login-error">{error}</div>}
+
+            <button type="submit" className="btn-primary login-submit" disabled={loading}>
+              {loading ? 'Signing in…' : 'Sign in'}
+            </button>
+          </form>
+
+          <div className="login-foot">Need access? Contact your administrator.</div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

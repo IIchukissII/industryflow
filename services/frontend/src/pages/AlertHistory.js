@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import './AlertHistory.css';
-import Header from '../components/Header';
 import authFetch from '../services/http';
 
 function AlertHistory() {
@@ -124,63 +124,49 @@ function AlertHistory() {
 
   if (loading) return (
     <div className="App">
-      <Header user={user} connected={connected} />
       <div className="loading">Loading alerts...</div>
     </div>
   );
 
   if (error) return (
     <div className="App">
-      <Header user={user} connected={connected} />
       <div className="error">Error: {error}</div>
     </div>
   );
 
   return (
     <div className="App">
-      <Header user={user} connected={connected} />
 
       <main className="App-main">
         <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '20px' }}>
           {/* Header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h2 style={{ margin: 0 }}>Alert History</h2>
-            <button onClick={fetchAlerts} style={{
-              background: '#2962ff',
-              color: 'white',
-              border: 'none',
-              padding: '10px 20px',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px'
-            }}>
-              🔄 Refresh
+          <div className="page-head">
+            <div>
+              <div className="eyebrow">Operations</div>
+              <h1>Alert history</h1>
+            </div>
+            <button onClick={fetchAlerts} className="btn">
+              <Icon name="refresh" size={15} /> Refresh
             </button>
           </div>
 
-          {/* Stats Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px', marginBottom: '20px' }}>
-            <div className="card" style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '32px', marginBottom: '10px' }}>📊</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2962ff' }}>{filteredAlerts.length}</div>
-              <div style={{ color: '#787b86', fontSize: '13px' }}>Total Alerts</div>
+          {/* Stats */}
+          <div className="kpi-row" style={{ marginBottom: '20px' }}>
+            <div className="kpi">
+              <div className="kpi-label">Total alerts</div>
+              <div className="kpi-value">{filteredAlerts.length}</div>
             </div>
-            <div className="card" style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '32px', marginBottom: '10px' }}>🚨</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#dc3545' }}>{severityDist.critical}</div>
-              <div style={{ color: '#787b86', fontSize: '13px' }}>Critical</div>
+            <div className="kpi" style={{ '--accent': 'var(--crit)' }}>
+              <div className="kpi-label">Critical</div>
+              <div className="kpi-value" style={{ color: 'var(--crit)' }}>{severityDist.critical}</div>
             </div>
-            <div className="card" style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '32px', marginBottom: '10px' }}>⚠️</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#fd7e14' }}>{severityDist.high}</div>
-              <div style={{ color: '#787b86', fontSize: '13px' }}>High Priority</div>
+            <div className="kpi" style={{ '--accent': 'var(--warn)' }}>
+              <div className="kpi-label">High priority</div>
+              <div className="kpi-value" style={{ color: 'var(--warn)' }}>{severityDist.high}</div>
             </div>
-            <div className="card" style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '32px', marginBottom: '10px' }}>🔔</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2962ff' }}>
-                {filteredAlerts.filter(a => !a.acknowledged).length}
-              </div>
-              <div style={{ color: '#787b86', fontSize: '13px' }}>Unacknowledged</div>
+            <div className="kpi" style={{ '--accent': 'var(--signal)' }}>
+              <div className="kpi-label">Unacknowledged</div>
+              <div className="kpi-value">{filteredAlerts.filter(a => !a.acknowledged).length}</div>
             </div>
           </div>
 
@@ -366,10 +352,10 @@ function AlertHistory() {
                       <div style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>
                         {alert.message}
                       </div>
-                      <div style={{ fontSize: '12px', color: '#787b86' }}>
-                        {alert.equipment_name && <span>📍 {alert.equipment_name}</span>}
-                        {alert.sensor_name && <span style={{ marginLeft: '10px' }}>🔌 {alert.sensor_name}</span>}
-                        <span style={{ marginLeft: '10px' }}>🕐 {formatDate(alert.triggered_at)}</span>
+                      <div style={{ fontSize: '12px', color: '#787b86', display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                        {alert.equipment_name && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="box" size={13} /> {alert.equipment_name}</span>}
+                        {alert.sensor_name && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="sensor" size={13} /> {alert.sensor_name}</span>}
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="clock" size={13} /> {formatDate(alert.triggered_at)}</span>
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -385,8 +371,8 @@ function AlertHistory() {
                         {alert.severity}
                       </span>
                       {alert.detection_type === 'ml' && (
-                        <span style={{ fontSize: '11px', color: '#9b59b6' }}>
-                          🤖 Score: {alert.anomaly_score?.toFixed(3)}
+                        <span style={{ fontSize: '11px', color: '#9b59b6', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                          <Icon name="cpu" size={13} /> Score: {alert.anomaly_score?.toFixed(3)}
                         </span>
                       )}
                     </div>

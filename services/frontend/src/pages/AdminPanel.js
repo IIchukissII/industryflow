@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import React, { useState } from 'react';
+import Icon from '../components/Icon';
 import { Link, Routes, Route, Navigate } from 'react-router-dom';
 import CompaniesPage from './CompaniesPage';
 import UsersPage from './UsersPage';
@@ -15,27 +16,24 @@ function AdminPanel() {
     <div className="admin-container">
       <div className="admin-sidebar">
         <div className="admin-header">
-          <h2>⚙️ Admin Panel</h2>
-          <p className="admin-subtitle">System Management</p>
+          <h2>Administration</h2>
+          <p className="admin-subtitle">Tenants &amp; access</p>
         </div>
-        
+
         <nav className="admin-nav">
-          <Link 
-            to="/admin/companies" 
+          <Link
+            to="/admin/companies"
             className={activeTab === 'companies' ? 'active' : ''}
             onClick={() => setActiveTab('companies')}
           >
-            🏢 Companies
+            <Icon name="building" size={16} /> Companies
           </Link>
-          <Link 
+          <Link
             to="/admin/users"
             className={activeTab === 'users' ? 'active' : ''}
             onClick={() => setActiveTab('users')}
           >
-            👥 Users
-          </Link>
-          <Link to="/" className="back-to-dashboard">
-            ← Back to Dashboard
+            <Icon name="users" size={16} /> Users
           </Link>
         </nav>
       </div>
