@@ -75,10 +75,31 @@ crlDistributionPoints  = URI:http://industryflow.local/device-ca.crl
 EOF
 }
 
+ROOTCNF="$CA/root.cnf"
+write_root_cnf() {
+  # Minimal 'ca' config so the offline root can publish its own CRL (covering the
+  # intermediate). The terminating proxy needs a CRL for EVERY CA in the chain, so the
+  # published list concatenates the root CRL and the intermediate CRL.
+  mkdir -p "$CA"
+  cat > "$ROOTCNF" <<EOF
+[ca]
+default_ca = CA_root
+[CA_root]
+dir               = $ROOT
+database          = \$dir/index.txt
+crlnumber         = \$dir/crlnumber
+certificate       = \$dir/root.crt
+private_key       = \$dir/root.key
+default_md        = sha256
+default_crl_days  = 30
+EOF
+}
+
 cmd_init() {
   [ -f "$INT/intermediate.crt" ] && die "CA already initialized at $CA (delete it to re-init)"
   mkdir -p "$ROOT" "$INT/newcerts" "$DEV" "$CA/crl"
   : > "$INT/index.txt"; echo 1000 > "$INT/serial"; echo 1000 > "$INT/crlnumber"
+  : > "$ROOT/index.txt"; echo 1000 > "$ROOT/crlnumber"
 
   echo "[root] generating offline root CA ($ROOT_DAYS d)"
   openssl genrsa -out "$ROOT/root.key" 4096
@@ -145,9 +166,14 @@ cmd_revoke() {
 }
 
 cmd_crl() {
+  # Publish a CRL bundle covering the whole chain: the intermediate's CRL (revoked devices)
+  # plus the root's CRL (revoked intermediates). The verifying proxy needs both.
   write_int_cnf
-  openssl ca -config "$CNF" -gencrl -out "$CA/crl/device-ca.crl"
-  echo "CRL: $CA/crl/device-ca.crl"
+  openssl ca -config "$CNF" -gencrl -out "$CA/crl/intermediate.crl"
+  write_root_cnf
+  openssl ca -config "$ROOTCNF" -gencrl -out "$CA/crl/root.crl"
+  cat "$CA/crl/root.crl" "$CA/crl/intermediate.crl" > "$CA/crl/device-ca.crl"
+  echo "CRL: $CA/crl/device-ca.crl (root + intermediate)"
 }
 
 cmd_chain() { echo "$CA/ca-chain.crt"; }
