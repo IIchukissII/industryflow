@@ -7,6 +7,7 @@ Configuration for Alert Service API
 All values from environment variables - NO DEFAULTS
 """
 import os
+import uuid
 from typing import Optional
 
 
@@ -59,9 +60,13 @@ class Config:
 
 def normalize_company_id_to_schema(company_id: str) -> str:
     """
-    Convert company_id (UUID) to schema name
-    Example: 550e8400-e29b-41d4-a716-446655440000 
+    Convert a company_id (UUID) to its tenant schema name.
+
+    company_id is validated as a UUID first, so the result is safe to interpolate into a
+    SET search_path statement; a non-UUID raises ValueError instead of reaching SQL
+    (defends against injection — see ADR-0003).
+    Example: 550e8400-e29b-41d4-a716-446655440000
           -> tenant_550e8400_e29b_41d4_a716_446655440000
     """
-    clean_id = company_id.replace('-', '_')
-    return f"tenant_{clean_id}"
+    canonical = str(uuid.UUID(str(company_id)))
+    return f"tenant_{canonical.replace('-', '_')}"

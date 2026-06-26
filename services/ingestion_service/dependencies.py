@@ -11,6 +11,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 from config import get_settings
+import uuid
 
 settings = get_settings()
 security = HTTPBearer()
@@ -19,8 +20,15 @@ security = HTTPBearer()
 db_pool: Optional[asyncpg.Pool] = None
 
 def normalize_company_id_to_schema(company_id: str) -> str:
-    """Convert company_id UUID to schema name"""
-    return f"tenant_{company_id.replace('-', '_')}"
+    """
+    Convert a company_id UUID to its tenant schema name.
+
+    company_id is validated as a UUID first, so the result is safe to interpolate into a
+    SET search_path statement; a non-UUID raises ValueError instead of reaching SQL
+    (defends against injection — see ADR-0003).
+    """
+    canonical = str(uuid.UUID(str(company_id)))
+    return f"tenant_{canonical.replace('-', '_')}"
 
 async def get_current_user_with_company(
     credentials: HTTPAuthorizationCredentials = Depends(security)

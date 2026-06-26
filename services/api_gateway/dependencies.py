@@ -10,6 +10,7 @@ from models.user import User
 from users import current_active_user
 from database import AsyncSessionLocal
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +62,15 @@ def require_any_role(*roles: str):
 
 def normalize_company_id_to_schema(company_id: str) -> str:
     """
-    Convert company_id UUID to schema name.
+    Convert a company_id UUID to its tenant schema name.
+
+    company_id is validated as a UUID first, so the result is safe to interpolate into a
+    SET search_path statement; a non-UUID raises ValueError instead of reaching SQL
+    (defends against injection — see ADR-0003).
     Example: '550e8400-e29b-41d4-a716-446655440000' -> 'tenant_550e8400_e29b_41d4_a716_446655440000'
     """
-    schema_uuid = str(company_id).replace("-", "_")
-    return f"tenant_{schema_uuid}"
+    canonical = str(uuid.UUID(str(company_id)))
+    return f"tenant_{canonical.replace('-', '_')}"
 
 async def get_db_with_tenant(
     current_user: User = Depends(current_active_user)

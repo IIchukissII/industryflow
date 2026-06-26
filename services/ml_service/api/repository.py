@@ -9,6 +9,7 @@ Handles queries to both industryflow and mlflow databases
 import asyncpg
 import logging
 import json
+import uuid
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -67,11 +68,16 @@ def _format_model_row(row: dict, company_id: str) -> Dict[str, Any]:
 
 def normalize_company_id_to_schema(company_id: str) -> str:
     """
-    Convert company_id UUID to schema name
+    Convert a company_id UUID to its tenant schema name.
+
+    company_id is validated as a UUID before the schema name is built, so the result is
+    always 'tenant_' followed by hex/underscore characters and is safe to interpolate
+    into a SET search_path statement. A non-UUID value raises ValueError instead of
+    reaching SQL (defends against injection — see ADR-0003).
     Example: 550e8400-e29b-41d4-a716-446655440000 -> tenant_550e8400_e29b_41d4_a716_446655440000
     """
-    clean_id = company_id.replace('-', '_')
-    return f"tenant_{clean_id}"
+    canonical = str(uuid.UUID(str(company_id)))
+    return f"tenant_{canonical.replace('-', '_')}"
 
 
 class MLRepository:

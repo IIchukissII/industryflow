@@ -16,10 +16,16 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_company_id_to_schema(company_id: str) -> str:
-    """Convert company_id to schema name"""
-    # Handle both UUID objects and strings
-    clean_id = str(company_id).replace('-', '_')
-    return f"tenant_{clean_id}"
+    """
+    Convert a company_id to its tenant schema name.
+
+    Validates company_id as a UUID first so the result is safe to interpolate into a
+    SET search_path statement; a non-UUID raises ValueError instead of reaching SQL
+    (defends against injection — see ADR-0003). This path is reachable from untrusted
+    Kafka payloads, so the validation is load-bearing.
+    """
+    canonical = str(uuid_module.UUID(str(company_id)))
+    return f"tenant_{canonical.replace('-', '_')}"
 
 
 class AlertRepository:

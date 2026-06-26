@@ -14,12 +14,19 @@ from pyspark.sql.functions import (
 )
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
 import os
+import uuid
 
 
 def company_id_to_schema(company_id):
-    """Convert company_id UUID to schema name"""
-    schema_uuid = company_id.replace("-", "_")
-    return f"tenant_{schema_uuid}"
+    """
+    Convert a company_id UUID to its tenant schema name.
+
+    company_id arrives in untrusted Kafka payloads, so it is validated as a UUID before
+    the schema/table name is built; a non-UUID raises ValueError instead of producing an
+    arbitrary JDBC target (defends against injection — see ADR-0003).
+    """
+    canonical = str(uuid.UUID(str(company_id)))
+    return f"tenant_{canonical.replace('-', '_')}"
 
 
 def write_aggregations_to_db(batch_df, batch_id, aggregation_table):

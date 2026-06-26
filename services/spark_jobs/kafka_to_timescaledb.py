@@ -12,6 +12,7 @@ from pyspark.sql.functions import from_json, col, to_timestamp, expr
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
 import logging
 import os
+import uuid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -50,10 +51,15 @@ def define_sensor_schema():
 
 
 def company_id_to_schema(company_id):
-    """Convert company_id UUID to schema name"""
-    # Replace hyphens with underscores: 550e8400-e29b-41d4-a716-446655440000 -> 550e8400_e29b_41d4_a716_446655440000
-    schema_uuid = company_id.replace("-", "_")
-    return f"tenant_{schema_uuid}"
+    """
+    Convert a company_id UUID to its tenant schema name.
+
+    company_id arrives in untrusted Kafka payloads, so it is validated as a UUID before
+    the schema/table name is built; a non-UUID raises ValueError instead of producing an
+    arbitrary JDBC target (defends against injection — see ADR-0003).
+    """
+    canonical = str(uuid.UUID(str(company_id)))
+    return f"tenant_{canonical.replace('-', '_')}"
 
 
 def write_to_timescaledb(batch_df, batch_id):
