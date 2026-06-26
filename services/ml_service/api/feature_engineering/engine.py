@@ -10,6 +10,10 @@ import numpy as np
 from typing import Dict, List, Any, Optional
 import logging
 
+# Feature transforms are resolved through the extension registry (ADR-0010): the platform's
+# generic transforms are built-ins; domains register new types in their own modules.
+from extensions import get_transform, TransformContext
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,112 +73,17 @@ class FeatureEngineeringEngine:
 
     async def _apply_transformation(self, transformation: Dict[str, Any], sensor_data: Dict[str, float]) -> float:
         """
-        Apply a single transformation
-
-        Args:
-            transformation: Transformation config with type, sensor(s), params
-            sensor_data: Raw sensor readings
-
-        Returns:
-            Transformed feature value
+        Apply a single transformation by dispatching its ``type`` through the extension
+        registry (ADR-0010). Built-in generic transforms and any loaded domain transforms
+        are resolved the same way; the engine holds no transform-type knowledge itself.
         """
         t_type = transformation['type']
-        params = transformation.get('params', {})
-
-        if t_type == 'identity':
-            # Pass-through transformation
-            sensor = transformation['sensor']
-            return sensor_data.get(sensor, 0.0)
-
-        elif t_type == 'polynomial':
-            # Power transformation: x^n
-            sensor = transformation['sensor']
-            power = params.get('power', 2)
-            value = sensor_data.get(sensor, 0.0)
-            return value ** power
-
-        elif t_type == 'interaction':
-            # Multi-sensor operations: ratio, difference, product, sum
-            sensors = transformation['sensors']
-            operation = params.get('operation', 'product')
-
-            if len(sensors) < 2:
-                logger.warning(f"Interaction requires at least 2 sensors, got {len(sensors)}")
-                return 0.0
-
-            sensor1_value = sensor_data.get(sensors[0], 0.0)
-            sensor2_value = sensor_data.get(sensors[1], 0.0)
-
-            if operation == 'ratio':
-                # Avoid division by zero
-                return sensor1_value / (sensor2_value + 1e-8)
-            elif operation == 'difference':
-                return sensor1_value - sensor2_value
-            elif operation == 'product':
-                return sensor1_value * sensor2_value
-            elif operation == 'sum':
-                return sensor1_value + sensor2_value
-            else:
-                logger.warning(f"Unknown interaction operation: {operation}")
-                return 0.0
-
-        elif t_type == 'deviation':
-            # Deviation from baseline
-            sensor = transformation['sensor']
-            baseline = params.get('baseline', 0.0)
-            value = sensor_data.get(sensor, 0.0)
-            return value - baseline
-
-        elif t_type == 'statistical':
-            # Statistical transformations
-            stat_type = params.get('stat_type', 'deviation_from_run_mean')
-            sensor = transformation.get('sensor')
-
-            if not sensor:
-                logger.warning(f"Statistical feature '{transformation['name']}' missing sensor field")
-                return 0.0
-
-            value = sensor_data.get(sensor, 0.0)
-
-            if stat_type == 'deviation_from_run_mean':
-                # Use Feature Store to compute rolling mean for deviation
-                if self.feature_store and self.equipment_id:
-                    try:
-                        # Get rolling mean from last 50 readings
-                        rolling_mean = await self.feature_store.compute_rolling_mean(
-                            equipment_id=self.equipment_id,
-                            sensor_name=sensor,
-                            window=50
-                        )
-
-                        if rolling_mean is not None:
-                            # Compute deviation from rolling mean
-                            deviation = value - rolling_mean
-                            logger.debug(f"Feature '{transformation['name']}': value={value:.2f}, mean={rolling_mean:.2f}, deviation={deviation:.2f}")
-                            return deviation
-                        else:
-                            # Not enough historical data, use current value
-                            logger.debug(f"Feature '{transformation['name']}': insufficient data, using current value")
-                            return value
-                    except Exception as e:
-                        logger.warning(f"Failed to compute rolling mean for {sensor}: {e}")
-                        return value
-                else:
-                    # No Feature Store available, use current value
-                    return value
-            else:
-                logger.warning(f"Unknown statistical type: {stat_type}")
-                return 0.0
-
-        elif t_type == 'rolling_stat':
-            # Rolling statistics (requires historical data from Feature Store)
-            # For now, not implemented - would need Feature Store integration
-            logger.warning(f"Rolling statistics not yet implemented for feature '{transformation['name']}'")
-            return 0.0
-
-        else:
+        fn = get_transform(t_type)
+        if fn is None:
             logger.warning(f"Unknown transformation type: {t_type}")
             return 0.0
+        ctx = TransformContext(feature_store=self.feature_store, equipment_id=self.equipment_id)
+        return await fn(transformation, sensor_data, ctx)
 
     def get_feature_names(self) -> List[str]:
         """Get ordered list of feature names"""

@@ -501,6 +501,8 @@ services:
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       MODEL_DIR: /app/models
+      # Extension plugin modules to import at startup (ADR-0010); empty = generic built-ins.
+      EXTENSION_MODULES: ${EXTENSION_MODULES:-}
       # MinIO/S3 credentials for loading models from MLflow
       AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
