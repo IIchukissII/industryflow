@@ -27,13 +27,13 @@ BEGIN
 
             -- Configuration
             base_sensors JSONB NOT NULL,
-            -- Example: ["xmeas_1", "xmeas_2", "xmeas_3", ...]
+            -- Example: ["temp_1", "pressure_1", "flow_1", ...]
             -- List of sensor names required as inputs
 
             transformations JSONB NOT NULL,
             -- Example: [
-            --   {"name": "xmeas_7_squared", "type": "polynomial", "sensor": "xmeas_7", "params": {"power": 2}},
-            --   {"name": "xmeas_7_xmeas_8_ratio", "type": "interaction", "sensors": ["xmeas_7", "xmeas_8"], "params": {"operation": "ratio"}}
+            --   {"name": "pressure_1_squared", "type": "polynomial", "sensor": "pressure_1", "params": {"power": 2}},
+            --   {"name": "pressure_1_flow_1_ratio", "type": "interaction", "sensors": ["pressure_1", "flow_1"], "params": {"operation": "ratio"}}
             -- ]
 
             -- Metadata

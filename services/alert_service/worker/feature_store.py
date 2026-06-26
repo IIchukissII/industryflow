@@ -80,7 +80,7 @@ class FeatureStore:
 
         Args:
             equipment_id: Equipment UUID
-            sensor_name: Sensor name (e.g., "xmeas_7", "temperature")
+            sensor_name: Sensor name (e.g., "pressure_1", "temperature")
 
         Returns:
             Redis key string

@@ -78,7 +78,7 @@ class TransformationConfig(BaseModel):
 
 class FeatureConfigCreate(BaseModel):
     """Request to create a feature engineering configuration"""
-    equipment_type: str = Field(..., description="Equipment type (e.g., 'tep_reactor', 'motor', 'pump')")
+    equipment_type: str = Field(..., description="Equipment type (e.g., 'motor', 'pump', 'compressor')")
     name: str = Field(..., description="Configuration name")
     description: Optional[str] = Field(None, description="Configuration description")
     base_sensors: List[str] = Field(..., description="List of required base sensor names")
@@ -308,7 +308,7 @@ async def get_configs_by_equipment_type(
     Get all feature configs for a specific equipment type
 
     This is useful when you want to see all available feature engineering
-    options for a particular type of equipment (e.g., all TEP reactor configs).
+    options for a particular type of equipment (e.g., all pump configs).
     """
     try:
         # company_id from dependency
