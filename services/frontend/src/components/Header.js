@@ -4,10 +4,17 @@
 
 import React from 'react';
 import './Header.css';
+import api from '../services/api';
 
 function Header({ user, connected }) {
-  const handleLogout = () => {
-    localStorage.removeItem('access_token');
+  const handleLogout = async () => {
+    // Revoke the refresh token and clear the auth cookies server-side (ADR-0004 dec 2),
+    // then drop the cached user and return to the login page.
+    try {
+      await api.post('/auth/logout');
+    } catch (err) {
+      // Even if the server call fails, fall through and clear local state.
+    }
     localStorage.removeItem('user');
     window.location.href = '/login';
   };

@@ -5,7 +5,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './Login.css';
-import { API_URL } from '../config';
+import api from '../services/api';
 
 function Login({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -20,41 +20,25 @@ function Login({ onLogin }) {
     setLoading(true);
 
     try {
-      // Login request
-      const formData = new FormData();
-      formData.append('username', email);
-      formData.append('password', password);
-
-      const response = await fetch(`${API_URL}/auth/jwt/login`, {
-        method: 'POST',
-        body: formData,
+      // The server sets httpOnly access + refresh cookies and a JS-readable CSRF cookie;
+      // no token is stored in JS (ADR-0004 dec 3).
+      const form = new URLSearchParams();
+      form.append('username', email);
+      form.append('password', password);
+      await api.post('/auth/login', form, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
-      if (!response.ok) {
-        throw new Error('Invalid email or password');
-      }
-
-      const data = await response.json();
-      
-      // Store token and user info
-      localStorage.setItem('access_token', data.access_token);
-      
-      // Get user info
-      const userResponse = await fetch(`${API_URL}/users/me`, {
-        headers: {
-          'Authorization': `Bearer ${data.access_token}`
-        }
-      });
-
-      if (userResponse.ok) {
-        const userData = await userResponse.json();
-        localStorage.setItem('user', JSON.stringify(userData));
-        onLogin(userData);
-        navigate('/');
-      }
-
+      // Identify the user (authenticated via the cookie); store only non-sensitive profile.
+      const me = await api.get('/users/me');
+      localStorage.setItem('user', JSON.stringify(me.data));
+      onLogin(me.data);
+      navigate('/');
     } catch (err) {
-      setError(err.message);
+      const status = err.response?.status;
+      setError(status === 400 || status === 401
+        ? 'Invalid email or password'
+        : 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }

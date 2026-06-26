@@ -59,7 +59,9 @@ function Settings() {
           <div className="settings-grid">
             <div className="settings-item">
               <label>API Endpoint</label>
-              <div className="settings-value">{API_URL}</div>
+              <div className="settings-value">
+                {API_URL || (typeof window !== 'undefined' ? window.location.origin : 'same-origin')}
+              </div>
             </div>
             <div className="settings-item">
               <label>WebSocket Endpoint</label>

@@ -5,7 +5,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import './App.css';
-import { getLatestSensors } from './services/api';
+import api, { getLatestSensors } from './services/api';
 import { API_URL } from './config';
 import websocketService from './services/websocket';
 import SensorChart from './components/SensorChart';
@@ -106,8 +106,8 @@ function Dashboard({ user }) {
 
   const equipmentGroups = groupByEquipment();
 
-  const handleLogout = () => {
-    localStorage.removeItem('access_token');
+  const handleLogout = async () => {
+    try { await api.post('/auth/logout'); } catch (e) { /* revoke best-effort */ }
     localStorage.removeItem('user');
     window.location.href = '/login';
   };
@@ -379,10 +379,11 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token');
+    // The access token is an httpOnly cookie (not visible to JS); restore the session from
+    // the saved (non-sensitive) user profile. An invalid/expired cookie surfaces as a 401
+    // on the first API call, which the api client handles (refresh, else redirect to login).
     const savedUser = localStorage.getItem('user');
-    
-    if (token && savedUser) {
+    if (savedUser) {
       setUser(JSON.parse(savedUser));
     }
     setLoading(false);

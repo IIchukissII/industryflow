@@ -14,19 +14,9 @@ class WebSocketService {
 
   connect(onMessage, onError) {
     try {
-      // Get JWT token from localStorage
-      const token = localStorage.getItem('access_token');
-      
-      if (!token) {
-        console.error('No authentication token found');
-        if (onError) {
-          onError(new Error('Not authenticated'));
-        }
-        return;
-      }
-
-      // Include token as query parameter
-      this.ws = new WebSocket(`${WS_URL}/ws/sensors?token=${token}`);
+      // Same-origin wss:// — the httpOnly access cookie is sent on the handshake and
+      // authenticates the connection; no token in the URL (ADR-0004 dec 3).
+      this.ws = new WebSocket(`${WS_URL}/ws/sensors`);
       
       this.ws.onopen = () => {
         console.log('WebSocket connected (authenticated)');

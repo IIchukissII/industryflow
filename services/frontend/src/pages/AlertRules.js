@@ -5,9 +5,7 @@
 import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
 import './AlertRules.css';
-import { ALERT_API_URL, API_URL } from '../config';
-
-const API_BASE_URL = ALERT_API_URL;
+import authFetch from '../services/http';
 
 function AlertRules() {
   const [activeTab, setActiveTab] = useState('all');
@@ -25,7 +23,7 @@ function AlertRules() {
     }
 
     // Check API connection
-    fetch(`${API_URL}/health`)
+    fetch('/health')
       .then(res => res.json())
       .then(() => setConnected(true))
       .catch(() => setConnected(false));
@@ -36,12 +34,7 @@ function AlertRules() {
   const fetchRules = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const response = await fetch(`${API_BASE_URL}/api/alert-rules?enabled_only=false`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await authFetch('/api/alert-rules?enabled_only=false');
       if (response.ok) {
         const data = await response.json();
         setRules(data);
@@ -65,25 +58,18 @@ function AlertRules() {
 
   const handleSaveRule = async (payload) => {
     try {
-      const token = localStorage.getItem('access_token');
       let response;
 
       if (payload.rule_id) {
-        response = await fetch(`${API_BASE_URL}/api/alert-rules/${payload.rule_id}`, {
+        response = await authFetch(`/api/alert-rules/${payload.rule_id}`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
       } else {
-        response = await fetch(`${API_BASE_URL}/api/alert-rules`, {
+        response = await authFetch('/api/alert-rules', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
       }
@@ -108,12 +94,8 @@ function AlertRules() {
     }
 
     try {
-      const token = localStorage.getItem('access_token');
-      const response = await fetch(`${API_BASE_URL}/api/alert-rules/${ruleId}`, {
+      const response = await authFetch(`/api/alert-rules/${ruleId}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
       });
 
       if (response.ok) {
@@ -358,12 +340,8 @@ function EditRuleModal({ rule, onClose, onSave }) {
   const fetchSensorsAndEquipment = async () => {
     setLoadingData(true);
     try {
-      const token = localStorage.getItem('access_token');
-
       // Fetch sensors from cache
-      const sensorsResponse = await fetch(`${API_URL}/api/cache/sensors`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const sensorsResponse = await authFetch('/api/cache/sensors');
       if (sensorsResponse.ok) {
         const sensorsData = await sensorsResponse.json();
         const sensorsList = Object.entries(sensorsData.sensors || {}).map(([id, data]) => ({
@@ -375,9 +353,7 @@ function EditRuleModal({ rule, onClose, onSave }) {
       }
 
       // Fetch equipment
-      const equipmentResponse = await fetch(`${API_URL}/api/equipment`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const equipmentResponse = await authFetch('/api/equipment');
       if (equipmentResponse.ok) {
         const equipmentData = await equipmentResponse.json();
         setEquipment(equipmentData);

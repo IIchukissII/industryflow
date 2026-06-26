@@ -8,8 +8,6 @@
 // (ADR-0004, ADR-0009). Override with build-time REACT_APP_* vars for a direct/dev setup
 // (e.g. REACT_APP_API_URL=http://localhost:8000 when running `npm start`).
 export const API_URL = process.env.REACT_APP_API_URL || '';
-export const ALERT_API_URL = process.env.REACT_APP_ALERT_URL || '';
-export const ML_API_URL = process.env.REACT_APP_ML_URL || '';
 export const WS_URL = process.env.REACT_APP_WS_URL ||
   (typeof window !== 'undefined'
     ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`

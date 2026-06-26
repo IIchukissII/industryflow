@@ -316,6 +316,10 @@ services:
       KAFKA_TOPIC_SENSOR_DATA: ${KAFKA_TOPIC_SENSOR_DATA}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
       CORS_ORIGINS: ${CORS_ORIGINS}
     depends_on:
       timescaledb:
@@ -345,7 +349,11 @@ services:
         REACT_APP_WS_URL: ${REACT_APP_WS_URL:-}
     container_name: industryflow-frontend
     ports:
+      - "${FRONTEND_HTTPS_PORT:-3443}:443"
       - "${FRONTEND_PORT:-3000}:80"
+    volumes:
+      # Mount a real TLS cert here in production (tls.crt/tls.key); empty = self-signed.
+      - frontend-certs:/etc/nginx/certs
     depends_on:
       - api-gateway
     networks:
@@ -720,6 +728,8 @@ volumes:
   prometheus-data:
     driver: local
   loki-data:
+    driver: local
+  frontend-certs:
     driver: local
 
 # ==========================================================================

@@ -12,6 +12,7 @@ from messaging.redis_client import redis_client
 from config import get_settings
 from database import AsyncSessionLocal
 from dependencies import normalize_company_id_to_schema
+from users import ACCESS_COOKIE
 from sqlalchemy import select, text
 from models.user import User
 
@@ -129,11 +130,13 @@ async def websocket_sensors(websocket: WebSocket, token: Optional[str] = None):
     """
     WebSocket endpoint for real-time sensor data with tenant isolation.
     """
-    print(f"🟢 WebSocket /sensors connection attempt - token present: {token is not None}")
-    
+    # Accept the access token from the httpOnly cookie (same-origin wss handshake) or, for
+    # backward compatibility, the ?token= query param (ADR-0004 dec 3).
+    if not token:
+        token = websocket.cookies.get(ACCESS_COOKIE)
+
     # Validate authentication
     if not token:
-        print("❌ WebSocket rejected: Missing token")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing token")
         return
     

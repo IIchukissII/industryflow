@@ -5,31 +5,47 @@
 import axios from 'axios';
 import { API_URL as API_BASE_URL } from '../config';
 
-// Create axios instance with auth interceptor
-const api = axios.create({
-  baseURL: API_BASE_URL
-});
+// Authentication is cookie-based (ADR-0004 dec 3): the access token lives in an httpOnly
+// cookie the browser sends automatically, so we never read or store it in JS. We only
+// echo the JS-readable CSRF token on unsafe requests, and refresh once on a 401.
+const api = axios.create({ baseURL: API_BASE_URL, withCredentials: true });
 
-// Add auth token to all requests
+export function getCookie(name) {
+  const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+  return m ? m.pop() : '';
+}
+
+// Attach the CSRF token (double-submit) on state-changing requests.
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  const method = (config.method || 'get').toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const csrf = getCookie('if_csrf');
+    if (csrf) config.headers['X-CSRF-Token'] = csrf;
   }
   return config;
-}, (error) => {
-  return Promise.reject(error);
-});
+}, (error) => Promise.reject(error));
 
-// Add response interceptor for error handling
+// On 401, try to refresh the session once, then retry; otherwise send the user to login.
+let refreshing = null;
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      // Token expired or invalid - redirect to login
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+  async (error) => {
+    const original = error.config;
+    const status = error.response?.status;
+    const url = original?.url || '';
+    if (status === 401 && original && !original._retry && !url.includes('/auth/')) {
+      original._retry = true;
+      try {
+        refreshing = refreshing || api.post('/auth/refresh');
+        await refreshing;
+        refreshing = null;
+        return api(original);
+      } catch (e) {
+        refreshing = null;
+        localStorage.removeItem('user');
+        if (window.location.pathname !== '/login') window.location.href = '/login';
+        return Promise.reject(e);
+      }
     }
     return Promise.reject(error);
   }
