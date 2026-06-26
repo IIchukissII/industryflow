@@ -65,9 +65,14 @@ async def get_company_id(
     db_pool: asyncpg.Pool = Depends(get_db_pool)
 ) -> str:
     """
-    Extract company_id by querying all tenant schemas for the user.
-    Matches Ingestion Service implementation.
+    Resolve company_id, preferring the JWT claim over a tenant-schema scan.
     """
+    # Prefer the company_id claim from the JWT (ADR-0003 dec 2); avoids the per-request
+    # tenant-schema scan below (review finding X2). Fall back to the scan for legacy tokens.
+    claim = current_user.get("payload", {}).get("company_id")
+    if claim:
+        return str(claim)
+
     user_id = current_user["user_id"]
 
     async with db_pool.acquire() as conn:

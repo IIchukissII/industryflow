@@ -91,6 +91,10 @@ async def get_company_id_dependency(
     current_user: dict = Depends(auth.verify_jwt_token)
 ) -> str:
     """Resolve the caller's company_id from their verified JWT."""
+    # Prefer the company_id claim (ADR-0003 dec 2; avoids the X2 tenant-schema scan).
+    claim = current_user.get("payload", {}).get("company_id")
+    if claim:
+        return str(claim)
     return await _company_id_from_user(request, current_user["user_id"])
 
 
@@ -118,6 +122,9 @@ async def _resolve_company_id(request: Request, request_data: InferenceRequest) 
 
     # Otherwise require a user JWT.
     user_data = await auth.verify_jwt_token(request.headers.get("Authorization"))
+    claim = user_data.get("payload", {}).get("company_id")
+    if claim:
+        return str(claim)
     return await _company_id_from_user(request, user_data["user_id"])
 
 

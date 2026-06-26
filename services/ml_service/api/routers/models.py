@@ -107,7 +107,13 @@ async def get_company_id_dependency(
     request: Request,
     current_user: dict = Depends(auth.verify_jwt_token)
 ) -> str:
-    """Get company_id with database pool from app state"""
+    """Get company_id, preferring the JWT claim over a tenant-schema scan."""
+    # Prefer the company_id claim from the JWT (ADR-0003 dec 2); avoids the per-request
+    # tenant-schema scan below (review finding X2). Fall back to the scan for legacy tokens.
+    claim = current_user.get("payload", {}).get("company_id")
+    if claim:
+        return str(claim)
+
     db_pool = request.app.state.db_pool
     user_id = current_user["user_id"]
     
