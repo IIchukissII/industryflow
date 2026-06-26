@@ -192,6 +192,10 @@ MLFLOW_S3_ENDPOINT_URL=http://minio:9000
 
 ### Authentication
 
+These examples use the **API/service** bearer flow against the gateway. The browser app
+authenticates differently — httpOnly cookies + CSRF over HTTPS — see
+**[operations/authentication.md](operations/authentication.md)**.
+
 ```bash
 curl -X POST http://localhost:8000/auth/jwt/login \
   -H "Content-Type: application/x-www-form-urlencoded" \
