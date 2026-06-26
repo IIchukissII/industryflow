@@ -19,3 +19,5 @@ export async function authFetch(path, options = {}) {
   const url = /^https?:|^wss?:/.test(path) ? path : `${API_URL}${path}`;
   return fetch(url, opts);
 }
+
+export default authFetch;
