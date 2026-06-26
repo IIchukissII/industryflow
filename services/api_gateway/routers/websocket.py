@@ -11,6 +11,7 @@ from jose import jwt, JWTError
 from messaging.redis_client import redis_client
 from config import get_settings
 from database import AsyncSessionLocal
+from dependencies import normalize_company_id_to_schema
 from sqlalchemy import select, text
 from models.user import User
 
@@ -42,8 +43,8 @@ async def enrich_sensors_with_names(sensors: dict, company_id: str) -> dict:
     if current_time - _cache_timestamp > _cache_ttl or not _names_cache:
         try:
             async with AsyncSessionLocal() as session:
-                # Set search path for tenant schema
-                schema_name = f"tenant_{company_id.replace('-', '_')}"
+                # Set search path for tenant schema (validated — see ADR-0003)
+                schema_name = normalize_company_id_to_schema(company_id)
                 await session.execute(text(f"SET search_path TO {schema_name}, public"))
 
                 sensor_ids = list(sensors.keys())
