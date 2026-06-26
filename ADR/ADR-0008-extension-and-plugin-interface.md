@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0008: Extension and plugin interface — keeping the core domain-generic
 
 - **ID:** ADR-0008
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001

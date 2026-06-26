@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0007: Public-key infrastructure — the IndustryFlow device certificate authority
 
 - **ID:** ADR-0007
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001
