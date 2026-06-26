@@ -86,7 +86,7 @@ def get_jwt_strategy() -> JWTStrategy:
     """
     return CompanyClaimJWTStrategy(
         secret=SECRET,
-        lifetime_seconds=604800
+        lifetime_seconds=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
 # Authentication backend combining transport + strategy

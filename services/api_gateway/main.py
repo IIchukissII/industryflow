@@ -9,9 +9,9 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from config import get_settings
 from routers import (
-    health, measurements, aggregations, websocket, cache, 
-    training_data, alerts_history, companies, 
-    equipment, alert_rules, ml_models
+    health, measurements, aggregations, websocket, cache,
+    training_data, alerts_history, companies,
+    equipment, alert_rules, ml_models, auth_tokens
 )
 from database import init_db_pool, close_db_pool, create_user_table
 from messaging.redis_client import redis_client
@@ -91,6 +91,9 @@ app.include_router(
     prefix="/users",
     tags=["users"],
 )
+
+# Refresh-token auth (login -> access + refresh, /auth/refresh, /auth/logout) — ADR-0004
+app.include_router(auth_tokens.router)
 
 
 # API routers
