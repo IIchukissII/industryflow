@@ -15,3 +15,10 @@ path = ["deploy/helm/**/NOTES.txt", "deploy/helm/**/.helmignore"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 The IndustryFlow contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+# Logo / brand assets (no inline SPDX header to keep the SVG clean).
+[[annotations]]
+path = ["img/*.svg"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The IndustryFlow contributors"
+SPDX-License-Identifier = "CC-BY-SA-4.0"

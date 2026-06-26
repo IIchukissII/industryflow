@@ -6,13 +6,30 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # IndustryFlow
 
-Real-time industrial IoT platform for sensor-data processing, anomaly detection, and predictive maintenance.
+**Real-time industrial IoT platform for sensor-data processing, anomaly detection, and predictive maintenance.**
+
+<table>
+<tr>
+<td width="300">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="img/industryflow-logo-mono-dark.svg" />
+    <img src="img/industryflow-logo-mono-light.svg" alt="IndustryFlow" width="280" />
+  </picture>
+</td>
+<td>
 
 IndustryFlow ingests high-velocity sensor streams, processes them through Kafka and Spark into
 TimescaleDB, detects anomalies with ML models, and surfaces real-time alerts — with a full
 Prometheus / Grafana / Loki observability stack. It is multi-tenant by design (schema-per-tenant
-isolation) and is the platform underlying the [IndustryGrow](https://github.com/IIchukissII/IndustryGrow)
-cultivation project.
+isolation) and is the platform that the [IndustryGrow](https://github.com/IIchukissII/IndustryGrow)
+cultivation project is built on.
+
+Where IndustryGrow is the **tree**, IndustryFlow is the **ground it grows from** — the gateway
+core at the centre, where every sensor stream converges.
+
+</td>
+</tr>
+</table>
 
 ## Features
 
@@ -38,11 +55,12 @@ The full setup, configuration, API examples, testing, and troubleshooting walkth
 
 ## Documentation
 
+Full index: **[docs/](docs/README.md)**.
+
 - **[Getting Started & Operations](docs/getting-started.md)** — setup, configuration, API, testing, troubleshooting
-- **[Architecture](docs/architecture/)** — database, Spark streaming, ML, alerting, feature engineering
-- **[API Reference](docs/api/)** — per-service API documentation
-- **[Monitoring & Observability](docs/MONITORING.md)** — metrics, logs, dashboards
-- **[Authentication Setup](docs/AUTHENTICATION_SETUP.md)** · **[User Management](docs/USER_MANAGEMENT.md)**
+- **[Operations](docs/operations/)** — [authentication](docs/operations/authentication.md) · [user management](docs/operations/user-management.md) · [monitoring](docs/operations/monitoring.md)
+- **[Architecture](docs/architecture/README.md)** — database, Spark streaming, ML, alerting, feature engineering
+- **[API Reference](docs/api/README.md)** — per-service API documentation
 - **[Architecture Decision Records](ADR/)** — the *why* behind the platform's design
 
 Interactive API docs are served at `http://localhost:8000/docs` when the stack is running.
