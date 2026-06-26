@@ -142,7 +142,10 @@ BEGIN
             value DOUBLE PRECISION NOT NULL,
             unit TEXT,
             quality_code INTEGER DEFAULT 1,
-            is_anomaly BOOLEAN DEFAULT false
+            is_anomaly BOOLEAN DEFAULT false,
+            -- Natural key for idempotent upserts from the Spark streaming job (ADR-0006);
+            -- includes the hypertable partition column (time).
+            UNIQUE (time, sensor_id)
         )
     ', p_schema_name, p_schema_name, p_schema_name);
     
