@@ -336,6 +336,22 @@ services:
       start_period: 40s
 
 
+  frontend:
+    build:
+      context: ./services/frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-}
+        REACT_APP_WS_URL: ${REACT_APP_WS_URL:-}
+    container_name: industryflow-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - api-gateway
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
   ingestion-service:
     container_name: industryflow-ingestion-service
     build:

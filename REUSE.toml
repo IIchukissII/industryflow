@@ -4,7 +4,7 @@ version = 1
 # notebooks, placeholder/dotfiles) are licensed here instead of inline.
 
 [[annotations]]
-path = ["**/*.json", "**/*.csv", "**/*.ipynb", "**/*.gitkeep", ".gitignore", ".gitattributes"]
+path = ["**/*.json", "**/*.csv", "**/*.ipynb", "**/*.gitkeep", ".gitignore", ".gitattributes", "**/.dockerignore"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 The IndustryFlow contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"

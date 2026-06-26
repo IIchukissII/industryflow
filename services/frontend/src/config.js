@@ -2,10 +2,15 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Central API base URLs. Override per environment with build-time REACT_APP_* vars
-// (e.g. the ingress hosts in a Kubernetes deployment — see ADR-0009). The localhost
-// fallbacks are for local development only.
-export const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-export const ALERT_API_URL = process.env.REACT_APP_ALERT_URL || 'http://localhost:8001';
-export const ML_API_URL = process.env.REACT_APP_ML_URL || 'http://localhost:8002';
-export const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000';
+// Central API base URLs. By default they are empty, i.e. **same-origin** — the app is
+// served behind a reverse proxy (nginx / ingress) that forwards /api, /auth, /users, /ws
+// to the gateway, so requests are first-party and cookies/CSRF work without CORS
+// (ADR-0004, ADR-0009). Override with build-time REACT_APP_* vars for a direct/dev setup
+// (e.g. REACT_APP_API_URL=http://localhost:8000 when running `npm start`).
+export const API_URL = process.env.REACT_APP_API_URL || '';
+export const ALERT_API_URL = process.env.REACT_APP_ALERT_URL || '';
+export const ML_API_URL = process.env.REACT_APP_ML_URL || '';
+export const WS_URL = process.env.REACT_APP_WS_URL ||
+  (typeof window !== 'undefined'
+    ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
+    : '');
