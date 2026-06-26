@@ -6,8 +6,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0009: Deployment and orchestration — Kubernetes, packaged with Helm
 
 - **ID:** ADR-0009
-- **Status:** Proposed
-- **Date:** 2026-06-26
+- **Status:** Accepted
+- **Date:** 2026-06-26 (accepted 2026-06-27)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001
 - **Companions:** ADR-0002 (ingestion mTLS edge), ADR-0004 (API HTTPS edge), ADR-0006 (durable Spark checkpoints)
@@ -76,8 +76,20 @@ Moving to Kubernetes raises immediate questions the project has not decided: how
 - **Secrets backend.** SealedSecrets vs Vault vs CSI driver for injecting the Secret's values.
 - **Image registry and CI.** Where images are built and published, and how the chart references digests (the review's "no pinned images" concern applies here too).
 - **Spark on Kubernetes.** Whether the Spark jobs stay as plain Deployments or move to native spark-on-k8s submission.
-- **Frontend.** The React frontend has no Dockerfile yet (review finding) and is wired into the chart as disabled until it can be built.
-- **NetworkPolicies.** Restricting the ingestion service to the ingress path (ADR-0002 decision 3) is expressed as a NetworkPolicy in a later pass.
+
+## Resolved since acceptance
+
+The chart at acceptance realizes decisions that were placeholders in the first pass:
+
+- **Frontend.** It now has a Dockerfile (the TLS edge of ADR-0004) and is **enabled** in the
+  chart, served behind the Ingress.
+- **mTLS device-ingestion edge (decision 5).** Realized as a dedicated Ingress whose
+  ingress-nginx controller verifies device client certificates against the device CA
+  (ADR-0007) and passes the verified certificate to `ingestion-service` — the same identity
+  the service reads in the compose path.
+- **NetworkPolicy (ADR-0002 decision 3).** A toggleable NetworkPolicy restricts
+  `ingestion-service` ingress to the cluster TLS edge, so the verified-identity headers
+  cannot be spoofed by another pod.
 
 ## References
 

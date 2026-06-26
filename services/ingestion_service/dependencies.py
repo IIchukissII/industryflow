@@ -149,11 +149,13 @@ async def get_ingestion_identity(
     SAN. The JWT bearer path is retained ONLY as a labelled transition (dec 8) and is removed
     once producers are on certificates.
     """
-    verify = request.headers.get("x-client-verify")
+    # Accept either edge's header convention: our compose nginx edge sends X-Client-*,
+    # while ingress-nginx (ADR-0009) sends ssl-client-* — same verified-cert meaning.
+    verify = request.headers.get("x-client-verify") or request.headers.get("ssl-client-verify")
     if verify is not None:
         if verify != "SUCCESS":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Client certificate not verified")
-        cert = request.headers.get("x-client-cert")
+        cert = request.headers.get("x-client-cert") or request.headers.get("ssl-client-cert")
         if not cert:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing client certificate")
         try:

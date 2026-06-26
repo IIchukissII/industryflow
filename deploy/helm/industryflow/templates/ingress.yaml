@@ -40,6 +40,39 @@ spec:
     {{- end }}
     {{- end }}
 {{- end }}
-# NOTE: the mTLS device-ingestion edge (ADR-0002 / ADR-0007) is a separate Ingress or
-# a controller-specific client-cert configuration verifying against the device CA. It is
-# left as a follow-up pass (values.ingress.mtls is the placeholder).
+{{- if and .Values.ingress.enabled .Values.ingress.mtls.enabled }}
+---
+# mTLS device-ingestion edge (ADR-0002 / ADR-0007): a dedicated Ingress that makes the
+# ingress-nginx controller verify device client certificates against the device CA and
+# forward the verified cert to ingestion-service (ssl-client-cert), realizing the single
+# TLS edge of ADR-0009 dec 5.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "industryflow.fullname" . }}-ingest
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+    nginx.ingress.kubernetes.io/auth-tls-secret: "{{ .Release.Namespace }}/{{ .Values.ingress.mtls.caSecret }}"
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "{{ .Values.ingress.mtls.verifyDepth }}"
+    nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.ingress.mtls.host | quote }}]
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.mtls.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "industryflow.fullname" . }}-ingestion-service
+                port:
+                  number: {{ (index .Values.apps "ingestion-service").port }}
+{{- end }}

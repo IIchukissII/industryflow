@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if and .Values.networkPolicy.enabled (index .Values.apps "ingestion-service").enabled }}
+# Restrict ingestion-service ingress to the cluster TLS edge (the ingress controller) so the
+# verified-identity headers cannot be spoofed by any other pod (ADR-0002 dec 3).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "industryflow.fullname" . }}-ingestion-from-edge-only
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingestion-service
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }}
+      ports:
+        - protocol: TCP
+          port: {{ (index .Values.apps "ingestion-service").port }}
+{{- end }}
