@@ -170,6 +170,10 @@ function MLModels() {
         setTimeout(() => {
           fetchData();
         }, 2000);
+      } else if (res.status === 501) {
+        const info = await res.json();
+        alert(info.detail || 'Automated training is not yet available.');
+        setShowTrainingModal(false);
       } else {
         const error = await res.json();
         alert(`Training failed: ${error.detail || JSON.stringify(error)}`);

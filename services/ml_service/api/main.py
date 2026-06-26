@@ -9,14 +9,20 @@ Schema-per-tenant architecture with dual database connections
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 import asyncpg
 import logging
+import secrets
 from pathlib import Path
+
+# Auth cookie names — must match the gateway's CookieTransport / CSRF cookie (ADR-0004 dec 3).
+ACCESS_COOKIE = "if_access"
+CSRF_COOKIE = "if_csrf"
 
 import config
 from repository import MLRepository, MLflowRepository
-from routers import health_router, models_router, mlflow_router, inference_router, feature_configs_router
+from routers import health_router, models_router, mlflow_router, inference_router, feature_configs_router, training_router
 from feature_engineering import init_feature_store, get_feature_store
 
 # Configure logging
@@ -48,6 +54,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def csrf_protect(request, call_next):
+    """
+    Double-submit CSRF protection for cookie-authenticated browser requests (ADR-0004
+    dec 3), mirroring the gateway. Enforced only on unsafe methods when the request
+    carries the access cookie and no bearer header — bearer/internal-token service
+    clients (e.g. the alert worker calling /api/inference) are not CSRF-vulnerable.
+    """
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        cookie_authed = ACCESS_COOKIE in request.cookies and not request.headers.get("authorization")
+        if cookie_authed:
+            csrf_cookie = request.cookies.get(CSRF_COOKIE)
+            csrf_header = request.headers.get("x-csrf-token")
+            if not (csrf_cookie and csrf_header and secrets.compare_digest(csrf_cookie, csrf_header)):
+                return JSONResponse(status_code=403, content={"detail": "CSRF token missing or invalid"})
+    return await call_next(request)
+
+
 # Prometheus metrics
 Instrumentator().instrument(app).expose(app)
 
@@ -61,6 +86,7 @@ app.include_router(models_router)
 app.include_router(mlflow_router)
 app.include_router(inference_router)
 app.include_router(feature_configs_router)
+app.include_router(training_router)
 
 
 # ============================================================================
