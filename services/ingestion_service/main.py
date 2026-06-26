@@ -14,7 +14,7 @@ import logging
 
 from config import get_settings
 from schemas import SensorDataInput, SensorDataResponse
-from dependencies import get_current_user_with_company, db_pool
+from dependencies import get_current_user_with_company, get_ingestion_identity, db_pool
 from kafka_producer import AsyncKafkaProducerSingleton, send_sensor_data
 import dependencies
 
@@ -105,32 +105,27 @@ async def health_check():
     "/ingest",
     response_model=SensorDataResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Ingest sensor data (authenticated)",
+    summary="Ingest sensor data (device mTLS)",
     description="""
-    Secure endpoint for sensor data ingestion.
-    
-    **Security:**
-    - Requires JWT authentication
-    - company_id is FORCED from authenticated user's token
-    - Prevents cross-tenant data injection
-    
-    **Usage:**
-    1. Login to get JWT token
-    2. Include token in Authorization header
-    3. Send sensor data (without company_id)
-    4. System automatically assigns your company_id
+    Sensor data ingestion for device/gateway producers.
+
+    **Security (ADR-0002):**
+    - Devices authenticate with mTLS at the edge; the tenant is read from the verified
+      client-certificate SAN, never from the request body.
+    - A JWT bearer is accepted only as a labelled transition until producers are migrated.
+    - company_id is forced from the verified identity, preventing cross-tenant injection.
     """
 )
 async def ingest_sensor_data(
     data: SensorDataInput,
-    current_user: dict = Depends(get_current_user_with_company)
+    identity: dict = Depends(get_ingestion_identity)
 ) -> SensorDataResponse:
     """
-    Ingest authenticated sensor data (OPTIMIZED).
-    The company_id is AUTOMATICALLY set from the authenticated user's JWT token.
+    Ingest sensor data. The company_id comes from the verified device certificate (or, in
+    transition, the JWT) — it is never taken from the request body (ADR-0002 dec 6).
     """
     try:
-        company_id_str = current_user["company_id"]
+        company_id_str = identity["company_id"]
         
         # Build Kafka message
         kafka_message = {
@@ -172,12 +167,13 @@ async def ingest_sensor_data(
 
 @app.get("/stats")
 async def get_ingestion_stats(
-    current_user: dict = Depends(get_current_user_with_company)
+    identity: dict = Depends(get_ingestion_identity)
 ):
-    """Get ingestion statistics for authenticated company"""
+    """Get ingestion statistics for the authenticated tenant."""
     return {
-        "company_id": current_user["company_id"],
-        "user_id": current_user["user_id"],
+        "company_id": identity["company_id"],
+        "device_id": identity.get("device_id"),
+        "auth": identity.get("source", "jwt"),
         "message": "Ingestion statistics endpoint",
         "status": "active"
     }

@@ -7,6 +7,7 @@ TEP Data Streaming Service
 Sends sensor data from CSV to Ingestion Service (Port 8003)
 1 row per second, sequential order
 """
+import os
 import pandas as pd
 import json
 import time
@@ -17,10 +18,20 @@ from pathlib import Path
 # Configuration
 CSV_FILE = 'data/tep_streaming_data.csv'
 SENSORS_MAPPING = 'data/sensors_mapping.json'
-INGESTION_URL = 'http://localhost:8003/ingest'
-EQUIPMENT_ID = '550e8400-e29b-41d4-a716-446655440100'
-SITE_ID = 'factory-tep'
-JWT_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiZDZhOGE0NC1lMDE4LTQwNDItODUzOS1jODRjZjY3MTU5MjEiLCJhdWQiOlsiZmFzdGFwaS11c2VyczphdXRoIl0sImV4cCI6MTc2NDQ5NzcwMn0.nWG1bHPk27mCPk7WNJ0s310Rwh_uR_y4RM4gZt9DizU'
+EQUIPMENT_ID = os.getenv('EQUIPMENT_ID', '550e8400-e29b-41d4-a716-446655440100')
+SITE_ID = os.getenv('SITE_ID', 'factory-tep')
+
+# Device mTLS (ADR-0002): connect to the ingestion edge and present a client certificate
+# issued by scripts/device-ca.sh. No bearer token — the tenant comes from the cert SAN.
+INGESTION_URL = os.getenv('INGESTION_URL', 'https://localhost:8443/ingest')
+DEVICE_CERT = os.getenv('DEVICE_CERT', 'deploy/device-ca/devices/mock-tep/mock-tep.chain.crt')
+DEVICE_KEY = os.getenv('DEVICE_KEY', 'deploy/device-ca/devices/mock-tep/mock-tep.key')
+CLIENT_CERT = (DEVICE_CERT, DEVICE_KEY)
+# Verify the edge's server certificate against this CA bundle; empty = skip (local self-signed).
+INGEST_CA = os.getenv('INGEST_CA', '')
+SERVER_VERIFY = INGEST_CA if INGEST_CA else False
+if not SERVER_VERIFY:
+    requests.packages.urllib3.disable_warnings()
 
 # Load sensor mapping
 print("=" * 80)
@@ -41,9 +52,8 @@ df = pd.read_csv(CSV_FILE)
 print(f"   ✓ Loaded {len(df):,} rows")
 print(f"   ✓ Columns: {len(df.columns)} ({df.columns[0]}, {df.columns[1]}, ...)")
 
-# Prepare headers
+# Prepare headers (no bearer token — authentication is the client certificate)
 headers = {
-    'Authorization': f'Bearer {JWT_TOKEN}',
     'Content-Type': 'application/json'
 }
 
@@ -85,7 +95,8 @@ try:
             
             # Send to ingestion service
             try:
-                response = requests.post(INGESTION_URL, json=payload, headers=headers, timeout=1)
+                response = requests.post(INGESTION_URL, json=payload, headers=headers,
+                                         cert=CLIENT_CERT, verify=SERVER_VERIFY, timeout=2)
                 if response.status_code == 202:
                     sensors_sent += 1
                 else:

@@ -370,8 +370,9 @@ services:
     build:
       context: ./services/ingestion_service
       dockerfile: Dockerfile
-    ports:
-      - "${INGESTION_SERVICE_PORT:-8003}:8003"
+    # No host port: ingestion is reachable only via the mTLS edge (ADR-0002 dec 3).
+    expose:
+      - "8003"
     environment:
       INGESTION_SERVICE_PORT: 8003
       DB_HOST: ${DB_HOST}
@@ -389,6 +390,24 @@ services:
       kafka:
         condition: service_started
     command: uvicorn main:app --host 0.0.0.0 --port 8003 --workers 2
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # mTLS ingestion edge (ADR-0002): verifies device client certs against the device CA +
+  # CRL and forwards the verified identity to ingestion-service (the only way in).
+  ingestion-edge:
+    image: nginx:1.27-alpine
+    container_name: industryflow-ingestion-edge
+    ports:
+      - "${INGESTION_MTLS_PORT:-8443}:8443"
+    volumes:
+      - ./services/ingestion_edge/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Server cert (handshake) — reuses the internal-CA TLS cert; device CA (verify + CRL).
+      - "${TLS_CERT_DIR:-frontend-certs}:/etc/nginx/server:ro"
+      - "${DEVICE_CA_DIR:-./deploy/device-ca}:/etc/nginx/device-ca:ro"
+    depends_on:
+      - ingestion-service
     networks:
       - industryflow-network
     restart: unless-stopped

@@ -13,3 +13,5 @@ python-snappy>=0.7.0
 
 # Authentication
 python-jose[cryptography]==3.5.0
+# X.509 parsing of the verified device certificate forwarded by the mTLS edge (ADR-0002)
+cryptography>=42.0.0
