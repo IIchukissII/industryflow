@@ -64,25 +64,29 @@ Scripts are executed in alphanumeric order by Docker container initialization:
 - Grants permissions to all application roles
 - Callable from API for dynamic tenant provisioning
 
-### 05-06 - Additional Setup
+### 05 - MLflow Permissions
 
 **`05-grant-mlflow-permissions.sql`**
 - Grants `mlflow_user` permissions on MLflow database
 
-**`06-seed-test-tenants.sql`**
-- Creates test tenant schemas for development
-- Example: `tenant_550e8400_e29b_41d4_a716_446655440000`
+### 06 - Feature Engineering (ML Enhancement)
 
-### 07 - Feature Engineering (ML Enhancement)
-
-**`07-feature-engineering-tables.sql`**
+**`06-feature-engineering-tables.sql`**
 - `add_feature_engineering_tables_to_schema()` function
 - Creates `feature_engineering_configs` table:
   - `base_sensors` JSONB - List of required sensor names
   - `transformations` JSONB - Feature transformation specifications
 - `add_feature_config_columns_to_ml_models()` function
 - Adds `feature_config_id` foreign key to `ml_models`
-- **Auto-applies to all existing tenant schemas**
+- **Must run before tenant seeding** — `create_tenant_schema()` calls these functions.
+
+### 07 - Seed Test Tenants (Development)
+
+**`07-seed-test-tenants.sql`**
+- Creates test tenant schemas for development
+- Example: `tenant_550e8400_e29b_41d4_a716_446655440000`
+- Runs after the feature-engineering functions (06) are defined and before the
+  ML-alert permission migration (08), which grants on the seeded schemas.
 
 ### 08 - ML Alert Integration (Permissions)
 

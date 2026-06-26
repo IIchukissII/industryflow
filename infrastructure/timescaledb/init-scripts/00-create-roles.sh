@@ -25,12 +25,12 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
     BEGIN
         -- API Gateway Role
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'api_gateway_user') THEN
-        
+            EXECUTE format('CREATE ROLE api_gateway_user WITH LOGIN PASSWORD %L', '${API_GATEWAY_DB_PASSWORD}');
+        END IF;
+
         -- Ingestion Service Role
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'ingestion_service_user') THEN
             EXECUTE format('CREATE ROLE ingestion_service_user WITH LOGIN PASSWORD %L', '${INGESTION_SERVICE_DB_PASSWORD}');
-        END IF;
-            EXECUTE format('CREATE ROLE api_gateway_user WITH LOGIN PASSWORD %L', '${API_GATEWAY_DB_PASSWORD}');
         END IF;
         
         -- Spark Streaming Role
@@ -78,21 +78,25 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
     -- PUBLIC SCHEMA PERMISSIONS
     -- =============================================================================
     
-    -- API Gateway needs CREATE on public for user table
+    -- API Gateway needs CREATE on public to create the (runtime) user table
     GRANT CREATE ON SCHEMA public TO api_gateway_user;
     GRANT USAGE ON SCHEMA public TO api_gateway_user;
-    
-    -- Grant SELECT on public tables (companies, user) for API Gateway
-    GRANT SELECT ON public.companies TO api_gateway_user;
-    GRANT SELECT ON public."user" TO api_gateway_user;
-    
-    -- Other roles only need USAGE on public
+
+    -- Other roles need USAGE on the public schema
+    GRANT USAGE ON SCHEMA public TO ingestion_service_user;
     GRANT USAGE ON SCHEMA public TO spark_streaming_user;
     GRANT USAGE ON SCHEMA public TO alert_service_user;
-    GRANT SELECT ON public."user" TO alert_service_user;
-    GRANT SELECT ON public."user" TO ingestion_service_user;
     GRANT USAGE ON SCHEMA public TO ml_service_user;
-    GRANT SELECT ON public."user" TO ml_service_user;
+
+    -- public."user" is created at runtime by api_gateway_user (fastapi-users), so it
+    -- does NOT exist yet at init time. Granting SELECT on it directly here would abort
+    -- init (relation does not exist). Instead grant it via default privileges so the
+    -- reader roles automatically receive SELECT when api_gateway_user creates the table.
+    ALTER DEFAULT PRIVILEGES FOR ROLE api_gateway_user IN SCHEMA public
+        GRANT SELECT ON TABLES TO alert_service_user, ingestion_service_user, ml_service_user;
+
+    -- SELECT on public.companies is granted in 01-init-schema.sql, after that table is
+    -- created (this roles script runs before it).
 EOSQL
 
 echo "✓ api_gateway_user (50 connections)"

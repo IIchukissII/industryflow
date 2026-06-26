@@ -42,6 +42,10 @@ CREATE TRIGGER companies_updated_at_trigger
     BEFORE UPDATE ON public.companies
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+-- API Gateway reads the shared companies registry. Granted here, after the table
+-- exists; the role was created earlier in 00-create-roles.sh.
+GRANT SELECT ON public.companies TO api_gateway_user;
+
 DO $$
 BEGIN
     RAISE NOTICE '========================================';
