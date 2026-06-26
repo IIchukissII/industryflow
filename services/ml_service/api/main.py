@@ -105,7 +105,14 @@ async def startup_event():
     except RuntimeError as e:
         logger.error(f"Configuration validation failed: {e}")
         raise
-    
+
+    # Load configured extension plugins (ADR-0010): registers their feature transforms.
+    from extensions import load_extension_modules, registered_transforms, EXTENSION_API_VERSION
+    modules = [m for m in config.config.EXTENSION_MODULES.split(",") if m.strip()]
+    loaded = load_extension_modules(modules)
+    logger.info(f"Extension API {EXTENSION_API_VERSION}; modules: {loaded or 'none'}; "
+                f"transforms: {registered_transforms()}")
+
     # Create connection pool for industryflow database
     try:
         app.state.db_pool = await asyncpg.create_pool(

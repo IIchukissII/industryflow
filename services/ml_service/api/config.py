@@ -39,6 +39,11 @@ class Config:
     
     # Model Storage
     MODEL_DIR: str = os.getenv('MODEL_DIR', '/app/models')
+
+    # Extension plugin modules to import at startup (ADR-0010). Comma-separated importable
+    # module names; each registers its transforms/plugins. The core loads only what is named
+    # here — never an extension directly. Empty = generic built-ins only.
+    EXTENSION_MODULES: str = os.getenv('EXTENSION_MODULES', '')
     
     @classmethod
     def validate(cls):
