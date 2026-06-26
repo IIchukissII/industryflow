@@ -411,7 +411,7 @@ class RulesEngine:
             # Get anomaly threshold from rule config
             anomaly_threshold = rule.get('anomaly_threshold', 0.85)
 
-            # Call ML inference endpoint
+            # Call ML inference endpoint (authenticated service-to-service call).
             async with aiohttp.ClientSession() as session:
                 inference_url = f"{ML_SERVICE_URL}/api/inference/predict"
 
@@ -419,11 +419,17 @@ class RulesEngine:
                     "model_id": str(model_id),
                     "sensor_data": sensor_data,
                     "threshold": anomaly_threshold,
-                    "company_id": company_id  # For internal service-to-service calls
+                    "company_id": company_id
                 }
 
-                # Note: ML service inference endpoint supports internal calls with company_id in body
-                async with session.post(inference_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                # Authenticate as an internal service so the ML endpoint trusts the
+                # company_id in the body. Without the shared token the call fails closed.
+                headers = {}
+                internal_token = os.getenv("INTERNAL_SERVICE_TOKEN")
+                if internal_token:
+                    headers["X-Internal-Service-Token"] = internal_token
+
+                async with session.post(inference_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
                     if response.status == 404:
                         logger.warning(f"Model {model_id} not found for ML evaluation")
                         return None

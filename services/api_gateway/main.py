@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -18,7 +18,8 @@ from messaging.redis_client import redis_client
 from messaging.cache_updater import update_redis_cache
 
 # Authentication imports
-from users import auth_backend, fastapi_users
+from users import auth_backend, fastapi_users, current_active_user
+from models.user import User
 from schemas import UserCreate, UserRead
 
 import asyncio
@@ -139,19 +140,29 @@ async def root():
     }
 
 
-# Custom endpoint to list all users (for admin panel)
+# Custom endpoint to list users (for the admin panel).
+# Authenticated and tenant-scoped: a caller sees only their own company's users,
+# unless they are a superuser (ADR-0004 decisions 4 and 5).
 @app.get("/api/users", tags=["users"])
-async def list_all_users():
-    """Get all users (admin only in production)"""
+async def list_all_users(current_user: User = Depends(current_active_user)):
+    """List users in the caller's company (all companies if superuser)."""
     from database import get_db_pool
 
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT id, email, company_id, role, is_active, is_superuser, is_verified
-            FROM "user"
-            ORDER BY email
-        """)
+        if current_user.is_superuser:
+            rows = await conn.fetch("""
+                SELECT id, email, company_id, role, is_active, is_superuser, is_verified
+                FROM "user"
+                ORDER BY email
+            """)
+        else:
+            rows = await conn.fetch("""
+                SELECT id, email, company_id, role, is_active, is_superuser, is_verified
+                FROM "user"
+                WHERE company_id = $1
+                ORDER BY email
+            """, current_user.company_id)
 
         return [dict(row) for row in rows]
 
