@@ -16,7 +16,7 @@ echo "Creating Application Roles"
 echo "=========================================="
 
 # Create roles with passwords from environment variables
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
     -- =============================================================================
     -- CREATE APPLICATION ROLES
     -- =============================================================================
