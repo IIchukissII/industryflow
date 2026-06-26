@@ -19,8 +19,8 @@ from statistics import mean, median
 import csv
 
 # Configuration
-CSV_FILE = '../../services/mock_service/data/tep_streaming_data.csv'
-SENSORS_MAPPING = '../../services/mock_service/data/sensors_mapping.json'
+CSV_FILE = '../../extensions/tep-reference/producer/data/tep_streaming_data.csv'
+SENSORS_MAPPING = '../../extensions/tep-reference/producer/data/sensors_mapping.json'
 INGESTION_URL = 'http://localhost:8003/ingest'
 EQUIPMENT_ID = '550e8400-e29b-41d4-a716-446655440100'
 SITE_ID = 'factory-tep'
