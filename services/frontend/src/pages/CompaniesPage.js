@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../services/api';
 
 function CompaniesPage() {
   const [companies, setCompanies] = useState([]);
@@ -22,7 +22,7 @@ function CompaniesPage() {
 
   const fetchCompanies = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/api/companies');
+      const response = await api.get('/api/companies');
       setCompanies(response.data);
       setLoading(false);
     } catch (error) {
@@ -51,13 +51,13 @@ function CompaniesPage() {
     try {
       if (editingCompany) {
         // Update existing company
-        await axios.put(
-          `http://localhost:8000/api/companies/${editingCompany.company_id}`,
+        await api.put(
+          `/api/companies/${editingCompany.company_id}`,
           formData
         );
       } else {
         // Create new company
-        await axios.post('http://localhost:8000/api/companies', formData);
+        await api.post('/api/companies', formData);
       }
       setShowModal(false);
       fetchCompanies();
@@ -72,7 +72,7 @@ function CompaniesPage() {
       return;
     }
     try {
-      await axios.delete(`http://localhost:8000/api/companies/${companyId}`);
+      await api.delete(`/api/companies/${companyId}`);
       fetchCompanies();
     } catch (error) {
       console.error('Error deleting company:', error);
