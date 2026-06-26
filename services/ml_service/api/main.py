@@ -121,8 +121,8 @@ async def startup_event():
             database=config.config.DB_NAME,
             user=config.config.ML_SERVICE_DB_USER,
             password=config.config.ML_SERVICE_DB_PASSWORD,
-            min_size=5,
-            max_size=20,
+            min_size=2,
+            max_size=4,
             command_timeout=60
         )
         logger.info(f"Database pool created: {config.config.ML_SERVICE_DB_USER}@{config.config.DB_HOST}/{config.config.DB_NAME}")
@@ -138,8 +138,8 @@ async def startup_event():
             database=config.config.MLFLOW_DB_NAME,
             user=config.config.MLFLOW_DB_USER,
             password=config.config.MLFLOW_DB_PASSWORD,
-            min_size=5,
-            max_size=20,
+            min_size=2,
+            max_size=4,
             command_timeout=60
         )
         logger.info(f"MLflow pool created: {config.config.MLFLOW_DB_USER}@{config.config.DB_HOST}/{config.config.MLFLOW_DB_NAME}")
