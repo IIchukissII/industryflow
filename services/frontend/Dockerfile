@@ -32,5 +32,5 @@ RUN chmod +x /docker-entrypoint.d/00-tls.sh
 COPY --from=build /app/build /usr/share/nginx/html
 EXPOSE 80 443
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -qO- --no-check-certificate https://localhost/ >/dev/null 2>&1 || exit 1
+    CMD wget -qO- http://localhost/healthz >/dev/null 2>&1 || exit 1
 CMD ["nginx", "-g", "daemon off;"]
