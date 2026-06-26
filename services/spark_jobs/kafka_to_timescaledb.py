@@ -28,7 +28,7 @@ def create_spark_session(app_name="IndustryFlow-Streaming"):
                 "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
                 "org.postgresql:postgresql:42.6.0") \
         .config("spark.sql.streaming.checkpointLocation",
-                os.getenv("CHECKPOINT_LOCATION", "/tmp/spark-checkpoint")) \
+                os.getenv("CHECKPOINT_LOCATION", "/opt/spark/checkpoints")) \
         .config("spark.streaming.stopGracefullyOnShutdown", "true") \
         .getOrCreate()
 
@@ -182,17 +182,16 @@ def main():
             col("quality_code")
         )
 
-    # Write to TimescaleDB using foreachBatch with tenant routing
-    checkpoint_location = os.getenv("CHECKPOINT_LOCATION", "/tmp/spark-checkpoint-timescale")
+    # Write to TimescaleDB using foreachBatch with tenant routing. Durable checkpoint
+    # location so a restart resumes from committed offsets, not /tmp (ADR-0006).
+    checkpoint_base = os.getenv("CHECKPOINT_LOCATION", "/opt/spark/checkpoints")
 
     query = parsed_stream \
         .writeStream \
         .outputMode("append") \
         .foreachBatch(write_to_timescaledb) \
         .trigger(processingTime="2 seconds") \
-        .option("checkpointInterval", "2 seconds") \
-        .option("spark.sql.streaming.minBatchesToRetain", "2") \
-        .option("checkpointLocation", checkpoint_location) \
+        .option("checkpointLocation", f"{checkpoint_base}/sensor_measurements") \
         .start()
 
     logger.info("Streaming query started with tenant routing. Waiting for data...")

@@ -206,7 +206,11 @@ BEGIN
                 stddev_value DOUBLE PRECISION,
                 count_values INTEGER,
                 anomaly_count INTEGER DEFAULT 0,
-                anomaly_percentage DOUBLE PRECISION
+                anomaly_percentage DOUBLE PRECISION,
+                -- Natural key for idempotent upserts from the Spark aggregation job
+                -- (ADR-0006). Includes the hypertable partition column (time), as
+                -- TimescaleDB requires for a unique constraint.
+                UNIQUE (time, sensor_id, equipment_id)
             )
         ', p_schema_name, agg_table);
         

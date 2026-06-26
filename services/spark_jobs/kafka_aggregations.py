@@ -4,17 +4,33 @@
 
 """
 Spark Structured Streaming: Sensor Aggregations
-Creates 1-minute, 5-minute, and 1-hour aggregations from Kafka stream
-Schema-per-tenant architecture: Routes to tenant_<uuid>.sensor_aggregations_*
+Creates 1-minute, 5-minute, and 1-hour aggregations from the Kafka stream.
+Schema-per-tenant architecture: routes to tenant_<uuid>.sensor_aggregations_*.
+
+Windowing and writes follow ADR-0006: a watermark bounds the streaming state, each
+window is emitted once (append mode) when it closes, and writes are idempotent upserts on
+(time, sensor_id, equipment_id) so retries and redeliveries do not duplicate rows.
 """
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    from_json, col, window, avg, min as spark_min, max as spark_max, 
-    stddev, count, to_timestamp, lit, expr
+    from_json, col, window, avg, min as spark_min, max as spark_max,
+    stddev, count, to_timestamp, lit
 )
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
 import os
 import uuid
+import psycopg2
+from psycopg2.extras import execute_values
+
+
+# Columns written to each tenant's aggregation table, in order.
+AGG_COLUMNS = [
+    "time", "sensor_id", "equipment_id",
+    "avg_value", "min_value", "max_value", "stddev_value",
+    "count_values", "anomaly_count", "anomaly_percentage",
+]
+# Natural key used for ON CONFLICT (must match the table's UNIQUE constraint).
+AGG_CONFLICT_KEY = ("time", "sensor_id", "equipment_id")
 
 
 def company_id_to_schema(company_id):
@@ -29,110 +45,81 @@ def company_id_to_schema(company_id):
     return f"tenant_{canonical.replace('-', '_')}"
 
 
+def _db_connection():
+    """Open a psycopg2 connection to TimescaleDB using the streaming role."""
+    return psycopg2.connect(
+        host=os.getenv("TIMESCALEDB_HOST", "localhost"),
+        port=os.getenv("TIMESCALEDB_PORT", "5432"),
+        dbname=os.getenv("TIMESCALEDB_DB", "industryflow"),
+        user=os.getenv("SPARK_STREAMING_DB_USER", "spark_streaming_user"),
+        password=os.getenv("SPARK_STREAMING_DB_PASSWORD"),
+    )
+
+
 def write_aggregations_to_db(batch_df, batch_id, aggregation_table):
     """
-    Write aggregated batch to TimescaleDB with schema-per-tenant routing
-    Groups by company_id and writes to respective tenant schemas
+    Idempotently upsert an aggregation batch into each tenant's schema (ADR-0006).
+
+    Each window is keyed by (time, sensor_id, equipment_id); on conflict the row is
+    updated, so a retried micro-batch (expected under the at-least-once pipeline,
+    ADR-0005) does not create duplicates. Any failure re-raises so Spark fails the batch
+    and retries it, rather than silently dropping data (the upsert makes that retry safe).
     """
+    rows = batch_df.collect()
+    if not rows:
+        return
+
+    # Group rows by tenant so each is written to its own schema.
+    by_company = {}
+    for r in rows:
+        company_id = r["company_id"]
+        if not company_id:
+            continue
+        by_company.setdefault(company_id, []).append(r)
+
+    if not by_company:
+        return
+
+    update_cols = [c for c in AGG_COLUMNS if c not in AGG_CONFLICT_KEY]
+    cols_sql = ", ".join(AGG_COLUMNS)
+    set_sql = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
+    conflict_sql = ", ".join(AGG_CONFLICT_KEY)
+
+    conn = _db_connection()
     try:
-        print(f"\n{'=' * 60}")
-        print(f"Batch {batch_id} for {aggregation_table}")
-
-        row_count = batch_df.count()
-        print(f"Row count: {row_count}")
-
-        if row_count == 0:
-            print(f"Empty batch, skipping {aggregation_table}")
-            print(f"{'=' * 60}\n")
-            return
-
-        print(f"Schema:")
-        batch_df.printSchema()
-        print("Sample data:")
-        batch_df.show(3, truncate=False)
-
-        # Get database config from environment
-        db_host = os.getenv("TIMESCALEDB_HOST", "localhost")
-        db_port = os.getenv("TIMESCALEDB_PORT", "5432")
-        db_name = os.getenv("TIMESCALEDB_DB", "industryflow")
-        db_user = os.getenv("SPARK_STREAMING_DB_USER", "spark_streaming_user")
-        db_password = os.getenv("SPARK_STREAMING_DB_PASSWORD")
-
-        jdbc_url = f"jdbc:postgresql://{db_host}:{db_port}/{db_name}"
-
-        db_properties = {
-            "user": db_user,
-            "password": db_password,
-            "driver": "org.postgresql.Driver",
-            "batchsize": "5000",
-            "reWriteBatchedInserts": "true",
-            "stringtype": "unspecified"
-        }
-
-        # Group by company_id and write to respective tenant schemas
-        company_ids = batch_df.select("company_id").distinct().collect()
-        
-        for row in company_ids:
-            company_id = row["company_id"]
-            if not company_id:
-                print(f"Batch {batch_id}: Skipping rows with null company_id")
-                continue
-            
-            # Filter data for this company
-            tenant_data = batch_df.filter(col("company_id") == company_id)
-            tenant_row_count = tenant_data.count()
-            
-            # Determine target schema and table
-            schema_name = company_id_to_schema(company_id)
-            full_table_name = f"{schema_name}.{aggregation_table}"
-            
-            print(f"Batch {batch_id}: Writing {tenant_row_count} rows to {full_table_name}")
-            
-            try:
-                # Drop company_id column and cast UUIDs for PostgreSQL
-                tenant_data_clean = tenant_data \
-                    .withColumn("sensor_id", expr("CAST(sensor_id AS STRING)")) \
-                    .withColumn("equipment_id", expr("CAST(equipment_id AS STRING)")) \
-                    .drop("company_id")
-                
-                # Write to tenant-specific schema
-                tenant_data_clean.write \
-                    .format("jdbc") \
-                    .option("url", jdbc_url) \
-                    .option("dbtable", full_table_name) \
-                    .option("user", db_user) \
-                    .option("password", db_password) \
-                    .option("driver", "org.postgresql.Driver") \
-                    .option("batchsize", "5000") \
-                    .option("reWriteBatchedInserts", "true") \
-                    .option("stringtype", "unspecified") \
-                    .mode("append") \
-                    .save()
-
-                print(f"✅ SUCCESS: Wrote {tenant_row_count} rows to {full_table_name}")
-                
-            except Exception as e:
-                print(f"❌ ERROR writing to {full_table_name}")
-                print(f"Error type: {type(e).__name__}")
-                print(f"Error message: {str(e)}")
-                import traceback
-                traceback.print_exc()
-
-        print(f"{'=' * 60}\n")
-
-    except Exception as e:
-        print(f"❌ ERROR processing batch {batch_id} for {aggregation_table}")
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        print(f"{'=' * 60}\n")
+        conn.autocommit = False
+        with conn.cursor() as cur:
+            for company_id, tenant_rows in by_company.items():
+                schema_name = company_id_to_schema(company_id)  # validates the UUID
+                target = f'"{schema_name}"."{aggregation_table}"'
+                values = [
+                    (
+                        r["time"], str(r["sensor_id"]), str(r["equipment_id"]),
+                        r["avg_value"], r["min_value"], r["max_value"], r["stddev_value"],
+                        r["count_values"], r["anomaly_count"], r["anomaly_percentage"],
+                    )
+                    for r in tenant_rows
+                ]
+                sql = (
+                    f"INSERT INTO {target} ({cols_sql}) VALUES %s "
+                    f"ON CONFLICT ({conflict_sql}) DO UPDATE SET {set_sql}"
+                )
+                execute_values(cur, sql, values)
+                print(f"Batch {batch_id}: upserted {len(values)} rows into {target}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        # Re-raise so Spark fails the batch and retries it (ADR-0006). The upsert above is
+        # idempotent, so re-processing the same window is safe.
+        raise
+    finally:
+        conn.close()
 
 
-def create_aggregation_stream(spark, window_duration, table_name):
-    """Create a streaming aggregation for a specific time window"""
+def create_aggregation_stream(spark, window_duration, watermark_delay, table_name):
+    """Create a streaming windowed aggregation for one time window."""
 
-    # Define schema for Kafka messages
+    # Schema for Kafka messages
     schema = StructType([
         StructField("timestamp", StringType(), True),
         StructField("sensor_id", StringType(), True),
@@ -144,81 +131,77 @@ def create_aggregation_stream(spark, window_duration, table_name):
         StructField("quality_code", IntegerType(), True)
     ])
 
-    # Get Kafka config from environment
     kafka_bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
-    # Read from Kafka
     df = spark \
         .readStream \
         .format("kafka") \
         .option("kafka.bootstrap.servers", kafka_bootstrap) \
         .option("subscribe", "sensor-data-raw") \
         .option("startingOffsets", "latest") \
+        .option("maxOffsetsPerTrigger", "10000") \
         .load()
 
-    # Parse JSON and extract fields
     parsed_df = df.select(
         from_json(col("value").cast("string"), schema).alias("data")
     ).select("data.*")
 
-    # Convert timestamp string to TimestampType (to_timestamp() handles ISO8601 with timezone)
     parsed_df = parsed_df.withColumn("time", to_timestamp(col("timestamp")))
 
-    # Perform windowed aggregation
+    # Watermark bounds the aggregation state and defines how late data may arrive before
+    # its window is closed (ADR-0006). Append mode then emits each window once, when the
+    # watermark passes its end.
     aggregated_df = parsed_df \
+        .withWatermark("time", watermark_delay) \
         .groupBy(
-        window(col("time"), window_duration),
-        col("sensor_id"),
-        col("equipment_id"),
-        col("company_id")
-    ) \
+            window(col("time"), window_duration),
+            col("sensor_id"),
+            col("equipment_id"),
+            col("company_id")
+        ) \
         .agg(
-        avg("value").alias("avg_value"),
-        spark_min("value").alias("min_value"),
-        spark_max("value").alias("max_value"),
-        stddev("value").alias("stddev_value"),
-        count("value").alias("count_values")
-    ) \
+            avg("value").alias("avg_value"),
+            spark_min("value").alias("min_value"),
+            spark_max("value").alias("max_value"),
+            stddev("value").alias("stddev_value"),
+            count("value").alias("count_values")
+        ) \
         .select(
-        col("window.end").alias("time"),
-        col("sensor_id"),
-        col("equipment_id"),
-        col("company_id"),
-        col("avg_value"),
-        col("min_value"),
-        col("max_value"),
-        col("stddev_value"),
-        col("count_values").cast("int").alias("count_values"),
-        lit(0).alias("anomaly_count"),
-        lit(0.0).alias("anomaly_percentage")
-    )
+            col("window.end").alias("time"),
+            col("sensor_id"),
+            col("equipment_id"),
+            col("company_id"),
+            col("avg_value"),
+            col("min_value"),
+            col("max_value"),
+            col("stddev_value"),
+            col("count_values").cast("int").alias("count_values"),
+            lit(0).alias("anomaly_count"),
+            lit(0.0).alias("anomaly_percentage")
+        )
 
-    # Get checkpoint location from environment
-    checkpoint_base = os.getenv("CHECKPOINT_LOCATION", "/tmp/spark-checkpoint")
+    # Durable checkpoint location so a restart resumes from committed offsets/state
+    # (ADR-0006). Defaults to the persistent path provisioned in the image, not /tmp.
+    checkpoint_base = os.getenv("CHECKPOINT_LOCATION", "/opt/spark/checkpoints")
 
-    # Write to TimescaleDB with tenant routing
     query = aggregated_df \
         .writeStream \
-        .outputMode("update") \
-        .foreachBatch(lambda df, id: write_aggregations_to_db(df, id, table_name)) \
+        .outputMode("append") \
+        .foreachBatch(lambda df, batch_id: write_aggregations_to_db(df, batch_id, table_name)) \
         .trigger(processingTime='5 seconds') \
-        .option("spark.sql.streaming.minBatchesToRetain", "2") \
-        .option("checkpointLocation", f"{checkpoint_base}-{table_name}") \
+        .option("checkpointLocation", f"{checkpoint_base}/{table_name}") \
         .start()
 
     return query
 
 
 if __name__ == "__main__":
-    # Create Spark session
     spark = SparkSession.builder \
         .appName("IndustryFlow-Aggregations") \
         .master(os.getenv("SPARK_MASTER", "local[*]")) \
         .config("spark.jars.packages",
                 "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
                 "org.postgresql:postgresql:42.6.0") \
-        .config("spark.sql.streaming.checkpointLocation",
-                os.getenv("CHECKPOINT_LOCATION", "/tmp/spark-checkpoint-agg")) \
         .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
@@ -226,26 +209,27 @@ if __name__ == "__main__":
     print("Starting aggregation streaming jobs with schema-per-tenant routing...")
     print("=" * 60)
 
-    # Create three parallel streaming queries for different time windows
-    query_1min = create_aggregation_stream(spark, "1 minute", "sensor_aggregations_1min")
-    print("✓ 1-minute aggregation stream started")
-
-    query_5min = create_aggregation_stream(spark, "5 minutes", "sensor_aggregations_5min")
-    print("✓ 5-minute aggregation stream started")
-
-    query_1hour = create_aggregation_stream(spark, "1 hour", "sensor_aggregations_1hour")
-    print("✓ 1-hour aggregation stream started")
-
+    # One query per window. Watermark (allowed lateness) is configurable per window.
+    queries = [
+        create_aggregation_stream(
+            spark, "1 minute", os.getenv("WATERMARK_1MIN", "2 minutes"),
+            "sensor_aggregations_1min"),
+        create_aggregation_stream(
+            spark, "5 minutes", os.getenv("WATERMARK_5MIN", "10 minutes"),
+            "sensor_aggregations_5min"),
+        create_aggregation_stream(
+            spark, "1 hour", os.getenv("WATERMARK_1HOUR", "15 minutes"),
+            "sensor_aggregations_1hour"),
+    ]
+    print("✓ 1-minute, 5-minute and 1-hour aggregation streams started")
     print("=" * 60)
-    print("All aggregation streams running with tenant routing. Press Ctrl+C to stop.")
-    print("=" * 60)
 
-    # Wait for all queries
+    # Await ALL queries: if any one dies, the process exits so the container's restart
+    # policy and healthcheck observe it (ADR-0006).
     try:
-        query_1min.awaitTermination()
+        spark.streams.awaitAnyTermination()
     except KeyboardInterrupt:
         print("\nStopping all streams...")
-        query_1min.stop()
-        query_5min.stop()
-        query_1hour.stop()
+        for q in queries:
+            q.stop()
         print("All streams stopped.")
