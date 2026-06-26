@@ -7,7 +7,7 @@ Authentication and Authorization
 JWT token validation with database company_id lookup
 """
 import asyncpg
-from fastapi import Header, HTTPException, Depends
+from fastapi import Cookie, Header, HTTPException, Depends
 from jose import jwt, JWTError
 from typing import Optional
 import logging
@@ -16,25 +16,37 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# httpOnly access-cookie name — must match the gateway's CookieTransport (ADR-0004 dec 3).
+ACCESS_COOKIE = "if_access"
 
-async def verify_jwt_token(authorization: Optional[str] = Header(None)) -> dict:
+
+async def verify_jwt_token(
+    authorization: Optional[str] = Header(None),
+    if_access: Optional[str] = Cookie(None),
+) -> dict:
     """
     Verify JWT token and extract user information
-    
+
+    Accepts the access token from the Authorization: Bearer header (API/service
+    clients) or, for same-origin browser requests behind the TLS edge, the httpOnly
+    if_access cookie (ADR-0004 dec 3).
+
     Returns:
         dict with user_id and other claims
-    
+
     Raises:
         HTTPException: 401 if token invalid or missing
     """
-    if not authorization or not authorization.startswith('Bearer '):
+    if authorization and authorization.startswith('Bearer '):
+        token = authorization.replace('Bearer ', '')
+    elif if_access:
+        token = if_access
+    else:
         raise HTTPException(
             status_code=401,
             detail="Missing or invalid authorization header"
         )
-    
-    token = authorization.replace('Bearer ', '')
-    
+
     try:
         payload = jwt.decode(
             token,
