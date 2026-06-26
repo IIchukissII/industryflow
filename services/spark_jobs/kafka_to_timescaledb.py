@@ -8,7 +8,7 @@ Reads sensor data from Kafka and writes to TimescaleDB in real-time
 Schema-per-tenant architecture: Routes data to tenant_<uuid>.sensor_measurements
 """
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, to_timestamp, expr
+from pyspark.sql.functions import from_json, col, to_timestamp
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
 import logging
 import os
@@ -62,78 +62,85 @@ def company_id_to_schema(company_id):
     return f"tenant_{canonical.replace('-', '_')}"
 
 
+MEASUREMENT_COLUMNS = ["time", "sensor_id", "equipment_id", "site_id", "value", "unit", "quality_code"]
+
+
+def _make_measurement_upsert(db_cfg, schema_name):
+    """
+    Build a foreachPartition function that upserts measurement rows into a tenant schema
+    with ON CONFLICT (time, sensor_id) DO NOTHING — so a retried or redelivered batch does
+    not duplicate readings (ADR-0006). It runs on the executors, one connection per
+    partition, which keeps this high-volume write distributed (not collected to the driver).
+    """
+    cols = ", ".join(MEASUREMENT_COLUMNS)
+    sql = (
+        f'INSERT INTO "{schema_name}".sensor_measurements ({cols}) VALUES %s '
+        f'ON CONFLICT (time, sensor_id) DO NOTHING'
+    )
+
+    def _upsert(rows):
+        import psycopg2
+        from psycopg2.extras import execute_values
+        conn = psycopg2.connect(**db_cfg)
+        try:
+            conn.autocommit = False
+            buffer = []
+            with conn.cursor() as cur:
+                for r in rows:
+                    buffer.append((
+                        r["time"], r["sensor_id"], r["equipment_id"],
+                        r["site_id"], r["value"], r["unit"], r["quality_code"],
+                    ))
+                    if len(buffer) >= 5000:
+                        execute_values(cur, sql, buffer)
+                        buffer.clear()
+                if buffer:
+                    execute_values(cur, sql, buffer)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    return _upsert
+
+
 def write_to_timescaledb(batch_df, batch_id):
     """
-    Write each micro-batch to TimescaleDB with schema-per-tenant routing
-    Groups by company_id and writes to respective tenant schemas
+    Write each micro-batch to TimescaleDB with schema-per-tenant routing, idempotently.
+
+    Rows are routed by company_id to the tenant schema and upserted with ON CONFLICT
+    (time, sensor_id) DO NOTHING via a distributed foreachPartition, so a Spark batch retry
+    or an at-least-once redelivery (ADR-0005) does not create duplicate readings (ADR-0006).
+    A write failure re-raises so Spark fails and retries the batch.
     """
-    if batch_df.count() > 0:
-        logger.info(f"Processing batch {batch_id} with {batch_df.count()} rows")
+    db_cfg = {
+        "host": os.getenv("TIMESCALEDB_HOST", "localhost"),
+        "port": os.getenv("TIMESCALEDB_PORT", "5432"),
+        "dbname": os.getenv("TIMESCALEDB_DB", "industryflow"),
+        "user": os.getenv("SPARK_STREAMING_DB_USER", "spark_streaming_user"),
+        "password": os.getenv("SPARK_STREAMING_DB_PASSWORD"),
+    }
 
-        # Get database config from environment
-        db_host = os.getenv("TIMESCALEDB_HOST", "localhost")
-        db_port = os.getenv("TIMESCALEDB_PORT", "5432")
-        db_name = os.getenv("TIMESCALEDB_DB", "industryflow")
-        db_user = os.getenv("SPARK_STREAMING_DB_USER", "spark_streaming_user")
-        db_password = os.getenv("SPARK_STREAMING_DB_PASSWORD")
-
-        jdbc_url = f"jdbc:postgresql://{db_host}:{db_port}/{db_name}"
-
-        db_properties = {
-            "user": db_user,
-            "password": db_password,
-            "driver": "org.postgresql.Driver",
-            "batchsize": "10000",
-            "reWriteBatchedInserts": "true",
-            "numPartitions": "12",
-            "stringtype": "unspecified"
-        }
-
-        # Group by company_id and write to respective tenant schemas
-        company_ids = batch_df.select("company_id").distinct().collect()
-        
-        for row in company_ids:
-            company_id = row["company_id"]
-            if not company_id:
-                logger.warning(f"Batch {batch_id}: Skipping rows with null company_id")
-                continue
-            
-            # Filter data for this company
-            tenant_data = batch_df.filter(col("company_id") == company_id)
-            row_count = tenant_data.count()
-            
-            # Determine target schema
-            schema_name = company_id_to_schema(company_id)
-            table_name = f"{schema_name}.sensor_measurements"
-            
-            logger.info(f"Batch {batch_id}: Writing {row_count} rows to {table_name}")
-            
-            try:
-                # Drop company_id (schema-per-tenant: company identified by schema name)
-                # Cast sensor_id and equipment_id to STRING for PostgreSQL UUID compatibility
-                tenant_data_clean = tenant_data \
-                    .withColumn("sensor_id", expr("CAST(sensor_id AS STRING)")) \
-                    .withColumn("equipment_id", expr("CAST(equipment_id AS STRING)")) \
-                    .drop("company_id")
-                
-                # Write to tenant-specific schema
-                tenant_data_clean.write \
-                    .jdbc(
-                        url=jdbc_url,
-                        table=table_name,
-                        mode="append",
-                        properties=db_properties
-                    )
-                
-                logger.info(f"Batch {batch_id}: Successfully wrote to {table_name}")
-                
-            except Exception as e:
-                logger.error(f"Batch {batch_id}: Failed to write to {table_name}: {str(e)}")
-                raise
-
-        logger.info(f"Batch {batch_id} processing complete")
-    else:
+    company_ids = [
+        r["company_id"]
+        for r in batch_df.select("company_id").distinct().collect()
+        if r["company_id"]
+    ]
+    if not company_ids:
         logger.info(f"Batch {batch_id} is empty, skipping write")
+        return
+
+    for company_id in company_ids:
+        schema_name = company_id_to_schema(company_id)  # validates the UUID
+        tenant_data = batch_df.filter(col("company_id") == company_id).select(*MEASUREMENT_COLUMNS)
+        try:
+            tenant_data.foreachPartition(_make_measurement_upsert(db_cfg, schema_name))
+            logger.info(f"Batch {batch_id}: upserted measurements into {schema_name}.sensor_measurements")
+        except Exception as e:
+            logger.error(f"Batch {batch_id}: failed writing to {schema_name}.sensor_measurements: {e}")
+            raise
 
 
 def main():
