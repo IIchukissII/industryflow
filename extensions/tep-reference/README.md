@@ -13,10 +13,15 @@ reference extension is IndustryGrow, in its own repository.
 
 It contains:
 
-- `tep_reference.py` — a Tennessee-Eastman domain feature transform
-  (`tep_reactor_pressure_margin`) registered through the platform contract.
+- `tep_reference.py` — Tennessee-Eastman domain plugins (a feature transform
+  `tep_reactor_pressure_margin` and a detector `tep_rule`) registered through the platform
+  contracts.
 - `tep_reactor_config.json` — the TEP feature definition that previously lived inside
   `ml_service`; a domain artifact now owned by the extension (ADR-0008 dec 5/7).
+- `producer/` — the reference **data producer**: streams the Tennessee-Eastman dataset to
+  the ingestion edge over device mTLS (`stream_tep_data.py`), plus the dataset and the
+  helpers that built it (`convert_tep_data.py`, `create_sensors.py`, `data/`). This is
+  reference/test tooling for the example dataset, not part of the platform core.
 
 ## How the platform loads it
 

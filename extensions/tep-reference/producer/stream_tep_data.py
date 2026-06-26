@@ -15,9 +15,10 @@ import requests
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Configuration
-CSV_FILE = 'data/tep_streaming_data.csv'
-SENSORS_MAPPING = 'data/sensors_mapping.json'
+# Configuration — data files resolve relative to this script, so it runs from any CWD.
+BASE_DIR = Path(__file__).resolve().parent
+CSV_FILE = BASE_DIR / 'data' / 'tep_streaming_data.csv'
+SENSORS_MAPPING = BASE_DIR / 'data' / 'sensors_mapping.json'
 EQUIPMENT_ID = os.getenv('EQUIPMENT_ID', '550e8400-e29b-41d4-a716-446655440100')
 SITE_ID = os.getenv('SITE_ID', 'factory-tep')
 
