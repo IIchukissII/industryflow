@@ -377,6 +377,6 @@ SELECT add_feature_config_columns_to_ml_models('tenant_550e8400_e29b_41d4_a716_4
 
 ## References
 
-- [Alert Detection Service Architecture](../../../docs/architecture/Alert_Detection_Service_Architecture.md)
-- [ML Inference and Feature Engineering](../../../docs/architecture/ML_Inference_and_Feature_Engineering.md)
-- [TimescaleDB Compression Specification](../../../docs/architecture/TimescaleDB_Compression_Technical_Specification.md)
+- [Data & storage architecture](../../../docs/architecture/data-and-storage.md)
+- [ML & feature engineering](../../../docs/architecture/ml-and-features.md)
+- [Alerting](../../../docs/architecture/alerting.md)

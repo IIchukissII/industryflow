@@ -291,7 +291,7 @@ from utils.feature_config_builder import FeatureConfigBuilder
 
 For questions or issues:
 - Check `Example_Feature_Config_Builder.ipynb` for complete examples
-- See API documentation: `/docs/api/Feature_Engineering_API_Documentation.md`
+- See the feature engineering & plugin docs: `docs/architecture/ml-and-features.md`, `docs/operations/extensions.md`
 - Report bugs: GitHub Issues
 
 ## Version History
