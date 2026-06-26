@@ -349,6 +349,10 @@ services:
         REACT_APP_API_URL: ${REACT_APP_API_URL:-}
         REACT_APP_WS_URL: ${REACT_APP_WS_URL:-}
     container_name: industryflow-frontend
+    environment:
+      # Extra SANs for the self-signed dev cert, e.g. the host LAN IP
+      # ("IP:192.168.178.55"). Ignored when a real cert is mounted at /etc/nginx/certs.
+      CERT_EXTRA_SAN: ${CERT_EXTRA_SAN:-}
     ports:
       - "${FRONTEND_HTTPS_PORT:-3443}:443"
       - "${FRONTEND_PORT:-3000}:80"
