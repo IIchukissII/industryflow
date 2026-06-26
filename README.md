@@ -33,11 +33,15 @@ core at the centre, where every sensor stream converges.
 
 ## Features
 
-- **Real-time stream processing** — Kafka + Apache Spark
-- **Multi-tenant** — schema-per-tenant isolation
-- **ML-powered anomaly detection** — XGBoost and ensemble models
-- **Time-series storage** — TimescaleDB
+- **Real-time stream processing** — Kafka + Apache Spark (at-least-once, idempotent writes)
+- **Multi-tenant** — schema-per-tenant isolation; tenants are provisioned at runtime, never hardcoded
+- **ML-powered anomaly detection** — pluggable detectors over engineered features
+- **Time-series storage** — TimescaleDB hypertables with compression
 - **Configurable alerting** — threshold and ML-based rules
+- **Secure by design** — HTTPS everywhere, httpOnly-cookie + CSRF browser auth, and
+  **device ingestion over mutual TLS** with an internal device CA
+- **Extensible** — domains add feature transforms and anomaly detectors as plugins without forking the core
+- **Deployable** — `docker compose` for local dev, a **Helm chart** for Kubernetes (self-hosted or managed datastores)
 - **Full observability** — Prometheus, Grafana, Loki
 
 ## Quick start
@@ -45,12 +49,17 @@ core at the centre, where every sensor stream converges.
 ```bash
 git clone https://github.com/IIchukissII/industryflow
 cd industryflow
-cp .env.example .env        # configure secrets and ports
-docker-compose up -d
+cp .env.example .env          # configure secrets and ports
+docker compose up -d
 curl http://localhost:8000/health
+
+# Provision your first tenant + admin (nothing is hardcoded), then sign in
+scripts/create-tenant.sh "Your Company"   # prints a company_id
+#   set ADMIN_USER_1_* in .env, then:  python3 scripts/seed_users.py
 ```
 
-The full setup, configuration, API examples, testing, and troubleshooting walkthrough lives in
+The frontend is served over HTTPS by its built-in TLS edge. The full setup — TLS, the
+first tenant/admin, API examples, and troubleshooting — is in
 **[docs/getting-started.md](docs/getting-started.md)**.
 
 ## Documentation
@@ -58,9 +67,11 @@ The full setup, configuration, API examples, testing, and troubleshooting walkth
 Full index: **[docs/](docs/README.md)**.
 
 - **[Getting Started & Operations](docs/getting-started.md)** — setup, configuration, API, testing, troubleshooting
-- **[Operations](docs/operations/)** — [authentication](docs/operations/authentication.md) · [user management](docs/operations/user-management.md) · [monitoring](docs/operations/monitoring.md)
+- **[Operations](docs/operations/)** — [authentication](docs/operations/authentication.md) · [user management](docs/operations/user-management.md) · [TLS & internal CA](docs/operations/tls.md) · [device mTLS](docs/operations/device-mtls.md) · [monitoring](docs/operations/monitoring.md)
 - **[Architecture](docs/architecture/README.md)** — database, Spark streaming, ML, alerting, feature engineering
 - **[API Reference](docs/api/README.md)** — per-service API documentation
+- **[Deployment](deploy/helm/industryflow/)** — the Helm chart for Kubernetes (ADR-0009)
+- **[Extensions](extensions/tep-reference/)** — the plugin contract for domain feature transforms & detectors (ADR-0008/0010)
 - **[Architecture Decision Records](ADR/)** — the *why* behind the platform's design
 
 Interactive API docs are served at `http://localhost:8000/docs` when the stack is running.

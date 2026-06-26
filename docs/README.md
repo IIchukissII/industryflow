@@ -11,7 +11,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 | **Operations guides** | [operations/](operations/) — [authentication](operations/authentication.md) · [user management](operations/user-management.md) · [TLS & internal CA](operations/tls.md) · [device mTLS](operations/device-mtls.md) · [monitoring](operations/monitoring.md) |
 | **Architecture** | [architecture/](architecture/README.md) — database, Spark streaming, ML, alerting, feature engineering |
 | **API reference** | [api/](api/README.md) — per-service API documentation |
-| **Decisions (the *why*)** | [../ADR/](../ADR/) — Architecture Decision Records (ADR-0000 … ADR-0009) |
+| **Deployment** | [../deploy/helm/industryflow/](../deploy/helm/industryflow/) — the Helm chart for Kubernetes (ADR-0009) |
+| **Extensions** | [../extensions/tep-reference/](../extensions/tep-reference/) — the plugin contract for feature transforms & detectors (ADR-0008/0010) |
+| **Decisions (the *why*)** | [../ADR/](../ADR/) — Architecture Decision Records (ADR-0000 … ADR-0010) |
 
 ## Source of truth
 
