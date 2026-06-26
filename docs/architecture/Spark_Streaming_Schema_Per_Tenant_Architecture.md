@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 # Spark Streaming Services: Schema-Per-Tenant Architecture
 
 **Version:** 2.0.0

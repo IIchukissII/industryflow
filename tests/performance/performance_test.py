@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """
 Performance Test Script for IndustryFlow
 Tests throughput with configurable msg/sec rate

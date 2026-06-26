@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """
 MLflow Router
 Endpoints for MLflow experiment tracking with schema-per-tenant isolation

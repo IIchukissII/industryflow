@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Background task to update Redis cache with latest sensor data."""
 import asyncio
 from datetime import datetime

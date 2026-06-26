@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """
 Spark Structured Streaming: Sensor Aggregations
 Creates 1-minute, 5-minute, and 1-hour aggregations from Kafka stream

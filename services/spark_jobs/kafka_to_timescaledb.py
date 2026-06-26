@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """
 Spark Structured Streaming Job: Kafka to TimescaleDB
 Reads sensor data from Kafka and writes to TimescaleDB in real-time

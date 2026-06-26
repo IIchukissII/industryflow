@@ -1,0 +1,10 @@
+version = 1
+
+# Files whose format cannot carry an SPDX header comment (JSON, CSV, Jupyter
+# notebooks, placeholder/dotfiles) are licensed here instead of inline.
+
+[[annotations]]
+path = ["**/*.json", "**/*.csv", "**/*.ipynb", "**/*.gitkeep", ".gitignore", ".gitattributes"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The IndustryFlow contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"

@@ -1,4 +1,9 @@
 #!/bin/bash
+
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 echo "=== BOTTLENECK ANALYSIS ==="
 echo ""
 echo "1. KAFKA METRICS (messages in topic):"

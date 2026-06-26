@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 # Feature Engineering Service Test Report
 
 **Test Suite:** Feature Engineering Registry & Real-Time Anomaly Detection

@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 # User Management - Production Ready Guide
 
 This guide explains how to manage users in IndustryFlow v2 using production-ready tools and best practices.

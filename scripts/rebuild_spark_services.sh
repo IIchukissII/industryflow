@@ -1,4 +1,9 @@
 #!/bin/bash
+
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # rebuild_spark_services.sh
 # Rebuild Spark Streaming and Aggregations services with updated code
 # Usage: ./rebuild_spark_services.sh [streaming|aggregations|both]

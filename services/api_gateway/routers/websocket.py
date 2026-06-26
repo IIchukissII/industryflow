@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """WebSocket endpoints for real-time data streaming with tenant isolation."""
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from typing import Optional

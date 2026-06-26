@@ -1,4 +1,9 @@
 #!/bin/bash
+
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Database Roles and Permissions
 # Version: 5.0 - Schema-per-tenant Architecture
 # Date: November 8, 2025

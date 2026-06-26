@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
 import './AlertRules.css';

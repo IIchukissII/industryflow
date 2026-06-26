@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+--
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+
 -- Add Alert Tables to Tenant Schema Template
 -- Version: 5.0 - SCHEMA-PER-TENANT ARCHITECTURE
 -- Date: November 7, 2025

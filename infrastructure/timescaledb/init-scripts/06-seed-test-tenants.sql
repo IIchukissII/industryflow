@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+--
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+
 -- Seed Test Tenants (Development Only)
 -- Version: 5.0 - SCHEMA-PER-TENANT ARCHITECTURE
 -- Date: November 7, 2025
