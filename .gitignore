@@ -3,6 +3,7 @@
 .venv/
 
 # Internal CA / TLS material — private keys and issued certs must never be committed
+deploy/ca/
 deploy/certs/
 venv/
 __pycache__/
