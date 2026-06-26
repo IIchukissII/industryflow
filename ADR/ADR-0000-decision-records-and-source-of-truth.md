@@ -1,12 +1,12 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-SPDX-License-Identifier: MIT
+SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # ADR-0000: Decision records and the single-source-of-truth discipline
 
 - **ID:** ADR-0000
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
 - **Parent:** — (root; this ADR governs the form of all other ADRs)

@@ -1,16 +1,16 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-SPDX-License-Identifier: MIT
+SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # ADR-0003: Tenant-to-schema resolution — verified identity, validated mapping, one implementation
 
 - **ID:** ADR-0003
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
-- **Parent:** ADR-0001 (framing — pending)
-- **Companions:** ADR-0002 (ingestion authentication & device identity), ADR-0004 (API authentication & CORS — pending)
+- **Parent:** ADR-0001 (framing)
+- **Companions:** ADR-0002 (ingestion authentication & device identity), ADR-0004 (API authentication & CORS)
 
 ## Context and problem
 
@@ -91,4 +91,4 @@ These are three symptoms of one missing decision. There is no single, recorded a
 
 - IndustryFlow review (2026-06-26), findings X1 (`search_path` injection), X2 (per-request tenant-schema scan), X4 (pooled-connection `search_path` leak) — internal report.
 - ADR-0002 — ingestion authentication & device identity; sources the verified tenant identity for the ingestion path that this ADR generalizes.
-- ADR-0004 (pending) — API authentication & CORS; owns the JWT claim that decision 2 relies on.
+- ADR-0004 — API authentication & CORS; owns the JWT claim that decision 2 relies on.

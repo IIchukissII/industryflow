@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0001: IndustryFlow framing — an open-core, general-purpose industrial-IoT platform
 
 - **ID:** ADR-0001
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
 - **Parent:** — (framing root; the technical ADRs take this as their Parent)

@@ -1,15 +1,15 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-SPDX-License-Identifier: MIT
+SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # ADR-0004: API authentication, session model, and transport security
 
 - **ID:** ADR-0004
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
-- **Parent:** ADR-0001 (framing — pending)
+- **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0002 (ingestion authentication & device identity), ADR-0003 (tenant→schema resolution)
 
 ## Context and problem

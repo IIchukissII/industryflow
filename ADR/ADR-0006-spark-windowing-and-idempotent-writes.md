@@ -1,15 +1,15 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-SPDX-License-Identifier: MIT
+SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # ADR-0006: Spark windowing and idempotent writes — bounded state, write-once aggregates, fail-fast batches
 
 - **ID:** ADR-0006
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
-- **Parent:** ADR-0001 (framing — pending)
+- **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0005 (Kafka delivery semantics)
 
 ## Context and problem
