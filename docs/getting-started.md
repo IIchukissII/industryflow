@@ -6,12 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # IndustryFlow — Getting Started & Operations Guide
 
-> ⚠️ **Pending verification.** This guide was relocated from the project README during the
-> repository cleanup. Its commands, ports, credentials, and benchmarks predate the code-baseline
-> cleanup and have **not yet been reconciled with the code** (see the review and the ADR process).
-> It is preserved here as-is and will be corrected once the code baseline is reached. Treat
-> specific values as indicative, not authoritative — the authoritative homes are
-> `docker-compose.yml`, `.env.example`, and the SQL init scripts (per ADR-0000).
+> The authoritative homes for concrete values are `docker-compose.yml`, `.env.example`, and
+> the SQL init scripts (per [ADR-0000](../ADR/ADR-0000-decision-records-and-source-of-truth.md));
+> this guide references them. For the auth model see [authentication](operations/authentication.md).
 
 ---
 
@@ -19,7 +16,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - Docker & Docker Compose
 - 8 GB+ RAM recommended
-- Ports available: 3000, 3001, 5432, 8000–8002, 8888, 9090 (and supporting infra ports)
+- Ports available: 3000, 3001, 5000, 5432, 8000–8003, 8888, 9000–9001, 9090, 3100 (and supporting infra ports)
 
 ## 1. Clone and configure
 
@@ -103,7 +100,7 @@ docker logs -f industryflow-spark-streaming
 | Component | Purpose | Port | Technology |
 |-----------|---------|------|------------|
 | **API Gateway** | Request routing, auth | 8000 | FastAPI |
-| **Ingestion Service** | Sensor data ingestion | — | Python/Kafka |
+| **Ingestion Service** | Sensor data ingestion | 8003 | Python/Kafka |
 | **Alert Service** | Anomaly detection | 8001 | FastAPI + PySpark |
 | **ML Service** | Model training/inference | 8002 | FastAPI + MLflow |
 | **Spark Streaming** | Real-time processing | — | PySpark |
@@ -130,7 +127,7 @@ docker logs -f industryflow-spark-streaming
 | **Promtail** | Log collection | — |
 | **Exporters** | cAdvisor, Node, PostgreSQL, Redis, Kafka | various |
 
-See [docs/MONITORING.md](MONITORING.md) for the complete metrics, logs, and dashboards guide.
+See the [monitoring guide](operations/monitoring.md) for the complete metrics, logs, and dashboards reference.
 
 ---
 
@@ -220,14 +217,12 @@ Interactive API docs: http://localhost:8000/docs (Swagger UI, when running).
 ## Testing
 
 ```bash
-# Unit tests
-pytest services/api_gateway/tests/
+# Service unit tests (where present)
+pytest services/ml_service/tests/
+pytest services/spark_jobs/tests/
 
-# Integration tests
-pytest tests/integration/
-
-# Load tests
-locust -f tests/load/locustfile.py
+# Performance / load testing harness
+python3 tests/performance/performance_test.py        # see the scripts in tests/performance/
 ```
 
 ### Generate test data
@@ -262,7 +257,7 @@ docker exec industryflow-kafka kafka-topics --list --bootstrap-server localhost:
 docker exec industryflow-kafka kafka-consumer-groups --list --bootstrap-server localhost:9092
 ```
 
-For monitoring issues, see [docs/MONITORING.md](MONITORING.md#troubleshooting).
+For monitoring issues, see the [monitoring guide](operations/monitoring.md#troubleshooting).
 
 ---
 
