@@ -48,6 +48,7 @@ function Login({ onLogin }) {
     <div className="login-container">
       <div className="login-box">
         <div className="login-header">
+          <img src="/logo-mark.svg" alt="" width="64" height="64" style={{ marginBottom: '12px' }} />
           <h1>IndustryFlow</h1>
           <p>Industrial IoT Monitoring Platform</p>
         </div>
