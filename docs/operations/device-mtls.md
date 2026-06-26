@@ -66,7 +66,7 @@ Point a producer at the edge with its certificate:
 INGESTION_URL=https://<host>:8443/ingest \
 DEVICE_CERT=deploy/device-ca/devices/<id>/<id>.chain.crt \
 DEVICE_KEY=deploy/device-ca/devices/<id>/<id>.key \
-  python3 services/mock_service/stream_tep_data.py
+  python3 extensions/tep-reference/producer/stream_tep_data.py
 ```
 
 ## Revoke a device
