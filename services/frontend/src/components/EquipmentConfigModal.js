@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import React, { useState, useEffect } from 'react';
+import Icon from './Icon';
 import './EquipmentConfigModal.css';
 import { createEquipment, updateEquipment, getEquipmentSensors, removeSensorFromEquipment } from '../services/equipmentApi';
 import api from '../services/api';
@@ -622,7 +623,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
                 <p>Equipment: <strong>{formData.name}</strong></p>
                 <p>Configured: <strong>{configuredCount}</strong> / <strong>{formData.sensor_count}</strong></p>
                 {isAllConfigured && (
-                  <div className="success-message">✓ All sensors configured!</div>
+                  <div className="success-message" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon name="check" size={15} /> All sensors configured!</div>
                 )}
                 {!isAllConfigured && (
                   <div className="error-message">
@@ -652,7 +653,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
                           <td>{sensor.sensor_id || <em className="text-muted">Not configured</em>}</td>
                           <td>{sensor.sensor_type}</td>
                           <td>{sensor.unit || '-'}</td>
-                          <td>{sensor.is_critical ? '✓' : '-'}</td>
+                          <td>{sensor.is_critical ? <Icon name="check" size={14} color="var(--live)" /> : '–'}</td>
                           <td>
                             <button
                               type="button"

@@ -5,10 +5,12 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import './App.css';
-import api, { getLatestSensors } from './services/api';
+import { getLatestSensors } from './services/api';
 import { API_URL } from './config';
 import websocketService from './services/websocket';
 import SensorChart from './components/SensorChart';
+import AppShell from './components/AppShell';
+import Icon from './components/Icon';
 import AlertRules from './pages/AlertRules';
 import AlertHistory from './pages/AlertHistory';
 import AdminPanel from './pages/AdminPanel';
@@ -105,272 +107,119 @@ function Dashboard({ user }) {
   };
 
   const equipmentGroups = groupByEquipment();
+  const sensorCount = Object.keys(sensors).length;
+  const equipmentCount = Object.keys(equipmentGroups).length;
+  const sel = selectedSensor ? sensors[selectedSensor] : null;
 
-  const handleLogout = async () => {
-    try { await api.post('/auth/logout'); } catch (e) { /* revoke best-effort */ }
-    localStorage.removeItem('user');
-    window.location.href = '/login';
-  };
-
-  const linkStyle = {
-    color: '#787b86',
-    textDecoration: 'none',
-    fontSize: '14px',
-    padding: '8px 16px',
-    borderRadius: '4px',
-    border: '1px solid #2a2e39',
-    transition: 'all 0.2s'
+  const selectEquipment = (key) => {
+    setSelectedEquipment(key);
+    const first = equipmentGroups[key]?.sensors?.[0];
+    if (first) setSelectedSensor(first.id);
   };
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '30px' }}>
-          <h1>IndustryFlow</h1>
-          <a href="/" style={linkStyle}
-            onMouseOver={(e) => {
-              e.target.style.color = '#2962ff';
-              e.target.style.borderColor = '#2962ff';
-            }}
-            onMouseOut={(e) => {
-              e.target.style.color = '#787b86';
-              e.target.style.borderColor = '#2a2e39';
-            }}>
-            Dashboard
-          </a>
-          <a href="/alerts" style={linkStyle}
-            onMouseOver={(e) => {
-              e.target.style.color = '#2962ff';
-              e.target.style.borderColor = '#2962ff';
-            }}
-            onMouseOut={(e) => {
-              e.target.style.color = '#787b86';
-              e.target.style.borderColor = '#2a2e39';
-            }}>
-            Alerts
-          </a>
-          <a href="/alert-rules" style={linkStyle}
-            onMouseOver={(e) => {
-              e.target.style.color = '#2962ff';
-              e.target.style.borderColor = '#2962ff';
-            }}
-            onMouseOut={(e) => {
-              e.target.style.color = '#787b86';
-              e.target.style.borderColor = '#2a2e39';
-            }}>
-            Alert Rules
-          </a>
-          <a href="/equipment" style={linkStyle}
-            onMouseOver={(e) => {
-              e.target.style.color = '#2962ff';
-              e.target.style.borderColor = '#2962ff';
-            }}
-            onMouseOut={(e) => {
-              e.target.style.color = '#787b86';
-              e.target.style.borderColor = '#2a2e39';
-            }}>
-            Equipment
-          </a>
-          <a href="/ml-models" style={linkStyle}
-            onMouseOver={(e) => {
-              e.target.style.color = '#2962ff';
-              e.target.style.borderColor = '#2962ff';
-            }}
-            onMouseOut={(e) => {
-              e.target.style.color = '#787b86';
-              e.target.style.borderColor = '#2a2e39';
-            }}>
-            ML Models
-          </a>
-          {user && user.is_superuser && (
-            <a href="/admin" style={linkStyle}
-              onMouseOver={(e) => {
-                e.target.style.color = '#2962ff';
-                e.target.style.borderColor = '#2962ff';
-              }}
-              onMouseOut={(e) => {
-                e.target.style.color = '#787b86';
-                e.target.style.borderColor = '#2a2e39';
-              }}>
-              ⚙️ Admin
-            </a>
-          )}
+    <AppShell user={user} title="Overview" wsConnected={wsConnected} lastUpdate={lastUpdate}>
+      <div className="page-head">
+        <div>
+          <div className="eyebrow">Live telemetry</div>
+          <h1>Overview</h1>
+          <div className="sub">Real-time sensor stream across your monitored equipment.</div>
         </div>
-        <div className="status">
-          <span style={{ marginRight: '20px', color: '#d1d4dc' }}>
-            👤 {user ? user.email : 'Guest'}
-          </span>
-          <a href="/settings" style={{
-            ...linkStyle,
-            marginRight: '15px',
-            padding: '6px 12px'
-          }}
-            onMouseOver={(e) => {
-              e.target.style.color = '#2962ff';
-              e.target.style.borderColor = '#2962ff';
-            }}
-            onMouseOut={(e) => {
-              e.target.style.color = '#787b86';
-              e.target.style.borderColor = '#2a2e39';
-            }}>
-            ⚙️ Settings
-          </a>
-          API: <span className={connected ? 'connected' : 'disconnected'}>
-            {connected ? '● Connected' : '● Disconnected'}
-          </span>
-          <span style={{ marginLeft: '15px' }}>
-            WebSocket: <span className={wsConnected ? 'connected' : 'disconnected'}>
-              {wsConnected ? '● Live' : '● Connecting'}
-            </span>
-          </span>
-          {lastUpdate && <span style={{ marginLeft: '20px', color: '#787b86' }}>
-            Last update: {lastUpdate}
-          </span>}
-          <button
-            onClick={handleLogout}
-            style={{
-              marginLeft: '20px',
-              background: 'transparent',
-              border: '1px solid #2a2e39',
-              color: '#787b86',
-              padding: '6px 12px',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              transition: 'all 0.2s'
-            }}
-            onMouseOver={(e) => {
-              e.target.style.borderColor = '#ef5350';
-              e.target.style.color = '#ef5350';
-            }}
-            onMouseOut={(e) => {
-              e.target.style.borderColor = '#2a2e39';
-              e.target.style.color = '#787b86';
-            }}
-          >
-            Logout
-          </button>
+        <span className={`badge ${wsConnected ? 'badge-live' : 'badge-warn'}`}>
+          <span className={`sdot ${wsConnected ? 'ok' : 'pending'}`} />
+          {wsConnected ? 'Streaming' : 'Connecting'}
+        </span>
+      </div>
+
+      <div className="kpi-row" style={{ marginBottom: 'var(--gap)' }}>
+        <div className="kpi">
+          <div className="kpi-label">Active channels</div>
+          <div className="kpi-value">{sensorCount}</div>
+          <div className="kpi-foot">sensors reporting</div>
         </div>
-      </header>
+        <div className="kpi">
+          <div className="kpi-label">Equipment</div>
+          <div className="kpi-value">{equipmentCount}</div>
+          <div className="kpi-foot">monitored units</div>
+        </div>
+        <div className="kpi" style={{ '--accent': 'var(--live)' }}>
+          <div className="kpi-label">Stream</div>
+          <div className="kpi-value" style={{ fontSize: '22px' }}>{wsConnected ? 'LIVE' : '—'}</div>
+          <div className="kpi-foot">{lastUpdate ? `updated ${lastUpdate}` : 'awaiting data'}</div>
+        </div>
+        <div className="kpi" style={{ '--accent': 'var(--signal)' }}>
+          <div className="kpi-label">Selected channel</div>
+          <div className="kpi-value">
+            {sel && sel.value !== undefined ? sel.value.toFixed(2) : '—'}
+            <span style={{ fontSize: '14px', color: 'var(--muted)', marginLeft: 6 }}>{sel?.unit || ''}</span>
+          </div>
+          <div className="kpi-foot">{sel ? (sel.sensor_name || selectedSensor) : 'none selected'}</div>
+        </div>
+      </div>
 
-      <main className="App-main">
-        <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '20px' }}>
-          {/* Dropdowns Section */}
-          <div className="card" style={{ marginBottom: '20px' }}>
-            <h2>Sensor Selection</h2>
-            <div style={{ display: 'flex', gap: '20px', marginTop: '15px' }}>
-              {/* Equipment Dropdown */}
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', color: '#787b86', marginBottom: '8px', fontSize: '13px' }}>
-                  Equipment
-                </label>
-                <select
-                  value={selectedEquipment || ''}
-                  onChange={(e) => {
-                    setSelectedEquipment(e.target.value);
-                    // Auto-select first sensor of this equipment
-                    const equipmentSensors = equipmentGroups[e.target.value]?.sensors || [];
-                    if (equipmentSensors.length > 0) {
-                      setSelectedSensor(equipmentSensors[0].id);
-                    }
-                  }}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    background: '#1a1e2e',
-                    border: '1px solid #2a2e39',
-                    borderRadius: '4px',
-                    color: '#d1d4dc',
-                    fontSize: '14px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <option value="">Select Equipment</option>
-                  {Object.entries(equipmentGroups).map(([equipmentKey, equipmentData]) => (
-                    <option key={equipmentData.equipmentId || equipmentKey} value={equipmentKey}>
-                      {equipmentData.equipmentName || equipmentKey}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Sensor Dropdown */}
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', color: '#787b86', marginBottom: '8px', fontSize: '13px' }}>
-                  Sensor
-                </label>
-                <select
-                  value={selectedSensor || ''}
-                  onChange={(e) => setSelectedSensor(e.target.value)}
-                  disabled={!selectedEquipment}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    background: '#1a1e2e',
-                    border: '1px solid #2a2e39',
-                    borderRadius: '4px',
-                    color: '#d1d4dc',
-                    fontSize: '14px',
-                    cursor: selectedEquipment ? 'pointer' : 'not-allowed',
-                    opacity: selectedEquipment ? 1 : 0.5
-                  }}
-                >
-                  <option value="">Select Sensor</option>
-                  {selectedEquipment && equipmentGroups[selectedEquipment]?.sensors.map(sensor => (
-                    <option key={sensor.id} value={sensor.id}>
-                      {sensor.sensor_name || sensor.id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Current Value Display */}
-              {selectedSensor && sensors[selectedSensor] && (
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', color: '#787b86', marginBottom: '8px', fontSize: '13px' }}>
-                    Current Value
-                  </label>
-                  <div style={{
-                    padding: '10px',
-                    background: '#0a0e27',
-                    border: '1px solid #2962ff',
-                    borderRadius: '4px',
-                    color: '#2962ff',
-                    fontSize: '20px',
-                    fontWeight: 'bold',
-                    textAlign: 'center'
-                  }}>
-                    {sensors[selectedSensor].value !== undefined
-                      ? sensors[selectedSensor].value.toFixed(2)
-                      : 'N/A'} {sensors[selectedSensor].unit || ''}
-                  </div>
-                </div>
-              )}
+      <div className="dash-grid">
+        <section className="panel" style={{ padding: 0 }}>
+          <div className="panel-head">
+            <h2>Real-time chart</h2>
+            <div className="dash-selectors">
+              <select value={selectedEquipment || ''} onChange={(e) => selectEquipment(e.target.value)}>
+                <option value="">Equipment…</option>
+                {Object.entries(equipmentGroups).map(([key, g]) => (
+                  <option key={g.equipmentId || key} value={key}>{g.equipmentName || key}</option>
+                ))}
+              </select>
+              <select value={selectedSensor || ''} onChange={(e) => setSelectedSensor(e.target.value)} disabled={!selectedEquipment}>
+                <option value="">Sensor…</option>
+                {selectedEquipment && equipmentGroups[selectedEquipment]?.sensors.map((s) => (
+                  <option key={s.id} value={s.id}>{s.sensor_name || s.id}</option>
+                ))}
+              </select>
             </div>
           </div>
-
-          {/* Chart Section */}
-          <div className="card wide">
-            <h2>Real-time Chart</h2>
-            {selectedSensor && sensors[selectedSensor] && (
-              <div style={{ marginBottom: '10px', color: '#787b86', fontSize: '13px' }}>
-                Viewing: <span style={{ color: '#2962ff', fontWeight: 'bold' }}>
-                  {sensors[selectedSensor].sensor_name || selectedSensor}
-                </span> ({sensors[selectedSensor].equipment_name || sensors[selectedSensor].equipment_id})
-              </div>
-            )}
+          <div style={{ padding: '18px' }}>
             {selectedSensor ? (
               <SensorChart
                 sensorId={selectedSensor}
-                title={`${sensors[selectedSensor]?.sensor_name || selectedSensor} - Historical Data`}
+                title={`${sensors[selectedSensor]?.sensor_name || selectedSensor} — historical`}
               />
             ) : (
-              <p style={{ color: '#787b86' }}>Select equipment and sensor to view chart</p>
+              <div className="dash-empty">
+                <Icon name="activity" size={26} color="var(--faint)" />
+                <p>Select equipment and a channel to plot its history.</p>
+              </div>
             )}
           </div>
-        </div>
-      </main>
-    </div>
+        </section>
+
+        <aside className="panel" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="panel-head">
+            <h2>Live readouts</h2>
+            <span className="badge">{sensorCount}</span>
+          </div>
+          <div className="readout-list">
+            {equipmentCount === 0 && <div className="dash-empty"><p>Waiting for sensor data…</p></div>}
+            {Object.entries(equipmentGroups).map(([key, g]) => (
+              <div className="readout-group" key={g.equipmentId || key}>
+                <div className="readout-eq"><Icon name="box" size={13} /> {g.equipmentName || key}</div>
+                {g.sensors.map((s) => (
+                  <button
+                    key={s.id}
+                    className={`readout${selectedSensor === s.id ? ' active' : ''}`}
+                    onClick={() => { setSelectedEquipment(key); setSelectedSensor(s.id); }}
+                  >
+                    <span className="readout-name">{s.sensor_name || s.id}</span>
+                    <span className="readout-val mono">
+                      {s.value !== undefined ? s.value.toFixed(2) : '—'}
+                      <i>{s.unit || ''}</i>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </aside>
+      </div>
+    </AppShell>
   );
 }
 
@@ -417,32 +266,32 @@ function App() {
         } />
         <Route path="/alerts" element={
           <ProtectedRoute user={user}>
-            <AlertHistory />
+            <AppShell user={user} title="Alerts"><AlertHistory /></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/alert-rules" element={
           <ProtectedRoute user={user}>
-            <AlertRules />
+            <AppShell user={user} title="Alert Rules"><AlertRules /></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/equipment" element={
           <ProtectedRoute user={user}>
-            <Equipment />
+            <AppShell user={user} title="Equipment"><Equipment /></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/ml-models" element={
           <ProtectedRoute user={user}>
-            <MLModels />
+            <AppShell user={user} title="Models"><MLModels /></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/settings" element={
           <ProtectedRoute user={user}>
-            <Settings />
+            <AppShell user={user} title="Settings"><Settings /></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/admin/*" element={
           <ProtectedRoute user={user}>
-            <AdminPanel />
+            <AppShell user={user} title="Admin"><AdminPanel /></AppShell>
           </ProtectedRoute>
         } />
       </Routes>
