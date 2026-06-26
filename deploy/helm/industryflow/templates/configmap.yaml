@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "industryflow.fullname" . }}-config
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+data:
+  # Resolved connection endpoints (in-cluster service names or external hosts).
+  DB_HOST: {{ include "industryflow.dbHost" . | quote }}
+  TIMESCALEDB_HOST: {{ include "industryflow.dbHost" . | quote }}
+  KAFKA_BOOTSTRAP_SERVERS: {{ include "industryflow.kafkaBootstrap" . | quote }}
+  REDIS_HOST: {{ include "industryflow.redisHost" . | quote }}
+  REDIS_URL: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
+  MLFLOW_TRACKING_URI: {{ include "industryflow.mlflowUri" . | quote }}
+  MLFLOW_S3_ENDPOINT_URL: {{ include "industryflow.minioEndpoint" . | quote }}
+  {{- range $k, $v := .Values.config }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

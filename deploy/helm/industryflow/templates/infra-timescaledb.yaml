@@ -1,0 +1,88 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.infra.timescaledb.inCluster }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "industryflow.fullname" . }}-timescaledb
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: timescaledb
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: timescaledb
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: postgres
+      port: {{ .Values.infra.timescaledb.port }}
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "industryflow.fullname" . }}-timescaledb
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: timescaledb
+spec:
+  serviceName: {{ include "industryflow.fullname" . }}-timescaledb
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: timescaledb
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: timescaledb
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: timescaledb
+          image: {{ .Values.infra.timescaledb.image | quote }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.infra.timescaledb.database | quote }}
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.secretName" . }}
+                  key: DB_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.secretName" . }}
+                  key: DB_PASSWORD
+          # TODO: mount infrastructure/timescaledb/init-scripts via a ConfigMap at
+          # /docker-entrypoint-initdb.d once those scripts are fixed (review: they
+          # currently abort on a fresh volume).
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 5432
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          {{- with .Values.infra.timescaledb.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.infra.timescaledb.storage }}
+{{- end }}

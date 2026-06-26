@@ -1,0 +1,83 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- $root := . -}}
+{{- range $name, $app := .Values.apps }}
+{{- if $app.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "industryflow.fullname" $root }}-{{ $name }}
+  labels:
+    {{- include "industryflow.labels" $root | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/component: app
+spec:
+  replicas: {{ $app.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/instance: {{ $root.Release.Name }}
+    spec:
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: "{{ $root.Values.image.registry }}/{{ $app.image }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "industryflow.fullname" $root }}-config
+            - secretRef:
+                name: {{ include "industryflow.secretName" $root }}
+          {{- if $app.port }}
+          ports:
+            - name: http
+              containerPort: {{ $app.port }}
+          {{- end }}
+          {{- if $app.probe }}
+          livenessProbe:
+            httpGet:
+              path: {{ $app.probe.path }}
+              port: {{ $app.probe.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: {{ $app.probe.path }}
+              port: {{ $app.probe.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          {{- end }}
+          {{- with $app.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- if $app.port }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "industryflow.fullname" $root }}-{{ $name }}
+  labels:
+    {{- include "industryflow.labels" $root | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ $root.Release.Name }}
+  ports:
+    - name: http
+      port: {{ $app.port }}
+      targetPort: {{ $app.port }}
+{{- end }}
+{{- end }}
+{{- end }}

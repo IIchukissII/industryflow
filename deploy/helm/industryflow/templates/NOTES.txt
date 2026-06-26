@@ -1,0 +1,28 @@
+IndustryFlow {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+This is a FIRST-PASS chart (ADR-0009): application services + core data services.
+Monitoring stack, stateful operators, autoscaling, and the mTLS device edge are later passes.
+
+Application services deployed:
+{{- range $name, $app := .Values.apps }}
+{{- if $app.enabled }}
+  - {{ $name }} ({{ $app.replicas }} replica(s){{ if $app.port }}, port {{ $app.port }}{{ end }})
+{{- end }}
+{{- end }}
+
+Stateful dependencies (in-cluster where inCluster=true):
+  - timescaledb : {{ .Values.infra.timescaledb.inCluster }}
+  - kafka       : {{ .Values.infra.kafka.inCluster }}
+  - redis       : {{ .Values.infra.redis.inCluster }}
+  - minio       : {{ .Values.infra.minio.inCluster }}
+  - mlflow      : {{ .Values.infra.mlflow.inCluster }}
+
+BEFORE PRODUCTION:
+  1. Replace placeholder secrets (secrets.data) with a real secrets backend
+     (SealedSecrets/Vault/CSI) or set secrets.create=false + secrets.existingSecret.
+  2. Pin app image tags by digest (image.tag) instead of "latest".
+  3. Provide the TLS certificate Secret "{{ .Values.ingress.tls.secretName }}".
+  4. Fix and wire the TimescaleDB init scripts (see chart README / review).
+
+Check status:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/part-of=industryflow

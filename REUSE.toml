@@ -8,3 +8,10 @@ path = ["**/*.json", "**/*.csv", "**/*.ipynb", "**/*.gitkeep", ".gitignore", ".g
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 The IndustryFlow contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+# Helm chart files that should not carry a rendered SPDX header.
+[[annotations]]
+path = ["deploy/helm/**/NOTES.txt", "deploy/helm/**/.helmignore"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The IndustryFlow contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"
