@@ -2,9 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# IndustryFlow v2 - Docker Compose
-# Version: 4.0 - NEW ARCHITECTURE
-# Date: November 7, 2025
+# IndustryFlow - Docker Compose
 
 services:
   # ==========================================================================

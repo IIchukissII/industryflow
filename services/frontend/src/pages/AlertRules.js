@@ -308,7 +308,7 @@ function AlertRules() {
 function EditRuleModal({ rule, onClose, onSave }) {
   const [formData, setFormData] = useState({
     rule_id: rule?.rule_id,
-    company_id: rule?.company_id || 'acme_manufacturing',
+    company_id: rule?.company_id || '',
     name: rule?.name || '',
     description: rule?.description || '',
     detection_type: rule?.detection_type || 'threshold',

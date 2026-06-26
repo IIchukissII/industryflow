@@ -32,9 +32,9 @@ REST API service providing multi-tenant access to industrial IoT sensor data, eq
 ### Schema-Per-Tenant Model
 
 Each tenant company has dedicated PostgreSQL schema:
-- `tenant_550e8400_e29b_41d4_a716_446655440000` (ACME Manufacturing)
-- `tenant_550e8400_e29b_41d4_a716_446655440001` (TechCorp Industries)  
-- `tenant_550e8400_e29b_41d4_a716_446655440002` (Global Systems Inc)
+- `tenant_550e8400_e29b_41d4_a716_446655440000` (Example Tenant A)
+- `tenant_550e8400_e29b_41d4_a716_446655440001` (Example Tenant B)  
+- `tenant_550e8400_e29b_41d4_a716_446655440002` (Example Tenant C)
 
 Shared `public` schema contains:
 - `companies` table (tenant registry)
@@ -139,7 +139,7 @@ GRANT SELECT ON public."user" TO api_gateway_user;
 ```bash
 curl -X POST http://localhost:8000/auth/jwt/login \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=test@acme.com&password=SecurePass123!"
+  -d "username=test@example.com&password=SecurePass123!"
 ```
 
 **Login Response:**
@@ -155,7 +155,7 @@ curl -X POST http://localhost:8000/auth/jwt/login \
 curl -X POST http://localhost:8000/auth/register \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "test@acme.com",
+    "email": "test@example.com",
     "password": "SecurePass123!",
     "company_id": "550e8400-e29b-41d4-a716-446655440000",
     "role": "engineer"
@@ -166,7 +166,7 @@ curl -X POST http://localhost:8000/auth/register \
 ```json
 {
   "id": "bd6a8a44-e018-4042-8539-c84cf6715921",
-  "email": "test@acme.com",
+  "email": "test@example.com",
   "is_active": true,
   "is_superuser": false,
   "is_verified": false,
@@ -185,7 +185,7 @@ curl -X GET http://localhost:8000/users/me \
 ```json
 {
   "id": "bd6a8a44-e018-4042-8539-c84cf6715921",
-  "email": "test@acme.com",
+  "email": "test@example.com",
   "is_active": true,
   "is_superuser": false,
   "is_verified": false,
@@ -636,19 +636,19 @@ curl -X GET http://localhost:8000/api/companies \
 [
   {
     "company_id": "550e8400-e29b-41d4-a716-446655440000",
-    "company_name": "ACME Manufacturing",
+    "company_name": "Example Tenant A",
     "is_active": true,
     "created_at": "2025-11-07T00:00:00Z"
   },
   {
     "company_id": "550e8400-e29b-41d4-a716-446655440001",
-    "company_name": "TechCorp Industries",
+    "company_name": "Example Tenant B",
     "is_active": true,
     "created_at": "2025-11-07T00:00:00Z"
   },
   {
     "company_id": "550e8400-e29b-41d4-a716-446655440002",
-    "company_name": "Global Systems Inc",
+    "company_name": "Example Tenant C",
     "is_active": true,
     "created_at": "2025-11-07T00:00:00Z"
   }

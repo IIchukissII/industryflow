@@ -21,7 +21,7 @@ async def root():
     """API information"""
     return {
         "service": "IndustryFlow MLOps API",
-        "version": "2.0.0",
+        "version": "0.1.0",
         "architecture": "schema-per-tenant",
         "endpoints": {
             "docs": "/docs",

@@ -7,7 +7,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Feature Engineering Service Architecture Documentation
 
 **Service:** Feature Engineering Registry (ML Service Extension)
-**Version:** 2.0.0
+**Version:** 0.1.0
 **Port:** 8002 (shared with ML Service)
 **Architecture:** Schema-per-tenant (v5.0)
 **Date:** November 2025

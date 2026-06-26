@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # IndustryFlow Monitoring & Observability
 
-Complete guide to the monitoring, metrics, and logging infrastructure for IndustryFlow v2.
+Complete guide to the monitoring, metrics, and logging infrastructure for IndustryFlow.
 
 ## Table of Contents
 

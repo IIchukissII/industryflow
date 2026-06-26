@@ -377,7 +377,7 @@ TimescaleDB (tenant schemas)
 
 ```yaml
 ingestion-service:
-  image: industryflow-v2-ingestion-service
+  image: industryflow-ingestion-service
   ports:
     - "8003:8003"
   environment:

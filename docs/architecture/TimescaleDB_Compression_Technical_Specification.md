@@ -139,7 +139,7 @@ Alternative: Partition by triggered_at, retain 90 days only
 
 **Test Methodology:**
 - Database: industryflow
-- Tenant: tenant_550e8400_e29b_41d4_a716_446655440000 (ACME Manufacturing)
+- Tenant: tenant_550e8400_e29b_41d4_a716_446655440000 (Example Tenant A)
 - Table: sensor_measurements
 - Equipment: 3 units with 52 sensors each
 - Measurement frequency: 1 Hz (1 reading/second/sensor)

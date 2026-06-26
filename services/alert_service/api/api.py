@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="IndustryFlow Alert Service API",
     description="Alert rules management and ML model API - Schema-per-tenant architecture",
-    version="2.0.0",
+    version="0.1.0",
     lifespan=lifespan
 )
 
@@ -85,7 +85,7 @@ app.include_router(alerts_history_router)
 async def root():
     return {
         "service": "IndustryFlow Alert Service API",
-        "version": "2.0.0",
+        "version": "0.1.0",
         "architecture": "schema-per-tenant",
         "endpoints": {
             "health": "/health",

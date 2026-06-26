@@ -39,7 +39,25 @@ docker-compose ps
 curl http://localhost:8000/health
 ```
 
-## 3. Access interfaces
+## 3. Create your first tenant and admin
+
+The database starts empty — no tenants are seeded, so nothing is hardcoded. Provision a
+tenant at runtime, then create an admin user in it:
+
+```bash
+# Create a tenant (prints its company_id + schema)
+scripts/create-tenant.sh "Your Company"
+
+# Put that company_id in .env, then seed the admin user
+#   ADMIN_USER_1_EMAIL=admin@your-company.example
+#   ADMIN_USER_1_PASSWORD=...
+#   ADMIN_USER_1_COMPANY_ID=<company_id from above>
+python3 scripts/seed_users.py
+```
+
+Additional users can be created by an admin through the API / admin UI.
+
+## 4. Access interfaces
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
@@ -49,7 +67,7 @@ curl http://localhost:8000/health
 | **MLflow** | http://localhost:5000 | — |
 | **Prometheus** | http://localhost:9090 | — |
 
-## 4. Stream test data
+## 5. Stream test data
 
 ```bash
 # Terminal 1: Start data streaming

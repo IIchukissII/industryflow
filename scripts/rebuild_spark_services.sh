@@ -41,7 +41,7 @@ SERVICE="${1:-both}"
 
 # Version info
 BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-VERSION="2.0.0"
+VERSION="0.1.0"
 VCS_REF=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 log_info "IndustryFlow Spark Services Rebuild"

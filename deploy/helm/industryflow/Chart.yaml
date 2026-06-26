@@ -8,7 +8,7 @@ description: >-
   Stateful dependencies are toggleable in-cluster/external (see ADR-0009).
 type: application
 version: 0.1.0
-appVersion: "2.0.0"
+appVersion: "0.1.0"
 keywords:
   - industrial-iot
   - timeseries

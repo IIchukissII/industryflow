@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 **Component:** ML Anomaly Detection System
 **Services:** ML Service, Alert Service, Feature Store
-**Version:** 2.0.0
+**Version:** 0.1.0
 **Date:** November 2025
 
 ---

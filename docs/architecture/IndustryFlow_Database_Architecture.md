@@ -39,7 +39,7 @@ IndustryFlow implements **schema-per-tenant architecture** where each company (t
 industryflow (database)
 ├── public schema
 │   └── companies (tenant registry table)
-├── tenant_550e8400_e29b_41d4_a716_446655440000 (ACME Manufacturing)
+├── tenant_550e8400_e29b_41d4_a716_446655440000 (Example Tenant A)
 │   ├── equipment (10 tables total)
 │   ├── sensors
 │   ├── sensor_measurements (hypertable)
@@ -51,9 +51,9 @@ industryflow (database)
 │   ├── ml_models
 │   ├── model_predictions (hypertable)
 │   └── labeled_predictions (view)
-├── tenant_<uuid_2> (TechCorp Industries)
+├── tenant_<uuid_2> (Example Tenant B)
 │   └── [same structure]
-└── tenant_<uuid_3> (Global Systems Inc)
+└── tenant_<uuid_3> (Example Tenant C)
     └── [same structure]
 
 mlflow (separate database)
