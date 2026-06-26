@@ -81,8 +81,9 @@ label { color: var(--muted); font-size: 12px; }
   border-radius: var(--r);
   box-shadow: var(--shadow);
 }
-.panel { padding: 18px; }
-.panel-pad { padding: 18px; }
+/* .card carries padding by default; .panel composers opt out with inline padding:0 */
+.panel, .card, .panel-pad { padding: 18px; }
+.card > h2, .card > h3 { margin-bottom: 12px; }
 .panel-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 14px 18px; border-bottom: 1px solid var(--line-soft);
