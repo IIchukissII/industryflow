@@ -43,36 +43,38 @@ async def enrich_sensors_with_names(sensors: dict, company_id: str) -> dict:
     if current_time - _cache_timestamp > _cache_ttl or not _names_cache:
         try:
             async with AsyncSessionLocal() as session:
-                # Set search path for tenant schema (validated — see ADR-0003)
-                schema_name = normalize_company_id_to_schema(company_id)
-                await session.execute(text(f"SET search_path TO {schema_name}, public"))
+                # SET LOCAL so the tenant path is scoped to this transaction and discarded
+                # when it ends; it never lingers on the pooled connection (ADR-0003 dec 6).
+                async with session.begin():
+                    schema_name = normalize_company_id_to_schema(company_id)
+                    await session.execute(text(f"SET LOCAL search_path TO {schema_name}, public"))
 
-                sensor_ids = list(sensors.keys())
-                if sensor_ids:
-                    query = """
-                        SELECT
-                            s.sensor_id::text,
-                            s.sensor_name,
-                            s.equipment_id::text,
-                            e.name as equipment_name
-                        FROM sensors s
-                        LEFT JOIN equipment e ON s.equipment_id = e.equipment_id
-                        WHERE s.sensor_id = ANY(:sensor_ids)
-                    """
-                    result = await session.execute(
-                        text(query),
-                        {"sensor_ids": sensor_ids}
-                    )
-                    rows = result.fetchall()
+                    sensor_ids = list(sensors.keys())
+                    if sensor_ids:
+                        query = """
+                            SELECT
+                                s.sensor_id::text,
+                                s.sensor_name,
+                                s.equipment_id::text,
+                                e.name as equipment_name
+                            FROM sensors s
+                            LEFT JOIN equipment e ON s.equipment_id = e.equipment_id
+                            WHERE s.sensor_id = ANY(:sensor_ids)
+                        """
+                        result = await session.execute(
+                            text(query),
+                            {"sensor_ids": sensor_ids}
+                        )
+                        rows = result.fetchall()
 
-                    _names_cache = {
-                        row[0]: {
-                            "sensor_name": row[1],
-                            "equipment_name": row[3]
+                        _names_cache = {
+                            row[0]: {
+                                "sensor_name": row[1],
+                                "equipment_name": row[3]
+                            }
+                            for row in rows
                         }
-                        for row in rows
-                    }
-                    _cache_timestamp = current_time
+                        _cache_timestamp = current_time
         except Exception as e:
             print(f"⚠️ Error loading names cache: {e}")
 
