@@ -7,8 +7,7 @@ import Header from '../components/Header';
 import EquipmentConfigModal from '../components/EquipmentConfigModal';
 import { getEquipment, getEquipmentById, deleteEquipment } from '../services/equipmentApi';
 import './Equipment.css';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+import { API_URL as API_BASE_URL } from '../config';
 
 function Equipment() {
   const [equipment, setEquipment] = useState([]);

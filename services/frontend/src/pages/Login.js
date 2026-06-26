@@ -5,6 +5,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './Login.css';
+import { API_URL } from '../config';
 
 function Login({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -24,7 +25,7 @@ function Login({ onLogin }) {
       formData.append('username', email);
       formData.append('password', password);
 
-      const response = await fetch('http://localhost:8000/auth/jwt/login', {
+      const response = await fetch(`${API_URL}/auth/jwt/login`, {
         method: 'POST',
         body: formData,
       });
@@ -39,7 +40,7 @@ function Login({ onLogin }) {
       localStorage.setItem('access_token', data.access_token);
       
       // Get user info
-      const userResponse = await fetch('http://localhost:8000/users/me', {
+      const userResponse = await fetch(`${API_URL}/users/me`, {
         headers: {
           'Authorization': `Bearer ${data.access_token}`
         }

@@ -4,6 +4,7 @@
 
 import React, { useState, useEffect } from 'react';
 import './Settings.css';
+import { API_URL, WS_URL } from '../config';
 
 function Settings() {
   const [user, setUser] = useState(null);
@@ -58,11 +59,11 @@ function Settings() {
           <div className="settings-grid">
             <div className="settings-item">
               <label>API Endpoint</label>
-              <div className="settings-value">http://localhost:8000</div>
+              <div className="settings-value">{API_URL}</div>
             </div>
             <div className="settings-item">
               <label>WebSocket Endpoint</label>
-              <div className="settings-value">ws://localhost:8000/ws</div>
+              <div className="settings-value">{WS_URL}/ws</div>
             </div>
           </div>
         </div>

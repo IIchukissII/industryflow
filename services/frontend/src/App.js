@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import './App.css';
 import { getLatestSensors } from './services/api';
+import { API_URL } from './config';
 import websocketService from './services/websocket';
 import SensorChart from './components/SensorChart';
 import AlertRules from './pages/AlertRules';
@@ -32,7 +33,7 @@ function Dashboard({ user }) {
   const [selectedSensor, setSelectedSensor] = useState(null);
 
   useEffect(() => {
-    fetch('http://localhost:8000/health')
+    fetch(`${API_URL}/health`)
       .then(res => res.json())
       .then(data => {
         console.log('API Health:', data);
