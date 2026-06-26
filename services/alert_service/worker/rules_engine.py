@@ -31,6 +31,9 @@ class RulesEngine:
         self.feature_store = feature_store
         self.ml_detectors = {}  # model_id -> detector (lazy loaded)
         self.sensor_name_cache = {}  # {company_id: {sensor_uuid: sensor_name}}
+        # Alert dedup/cooldown state: {(company_id, rule_id, sensor_id, equipment_id): last_fired}
+        self._last_emit = {}
+        self._cooldown_seconds = float(os.getenv("ALERT_COOLDOWN_SECONDS", "300"))
 
         # Log loaded rules
         total = sum(len(rules) for rules in tenant_rules.values())
@@ -67,7 +70,28 @@ class RulesEngine:
 
         # Fallback: use sensor_id if name not found
         return sensor_id
-    
+
+    def _should_emit(self, alert: Dict[str, Any]) -> bool:
+        """
+        Suppress a duplicate alert for the same (rule, sensor, equipment) within the
+        cooldown window. This makes alert writes idempotent against redelivered readings
+        (at-least-once, ADR-0005 decision 6) and stops a persisting anomaly from raising an
+        alert on every reading / every ML loop iteration (alert storms).
+        """
+        key = (
+            alert.get('company_id'),
+            alert.get('rule_id'),
+            alert.get('sensor_id'),
+            alert.get('equipment_id'),
+        )
+        now = datetime.now(timezone.utc)
+        last = self._last_emit.get(key)
+        if last is not None and (now - last).total_seconds() < self._cooldown_seconds:
+            logger.debug(f"Alert suppressed by cooldown: {key}")
+            return False
+        self._last_emit[key] = now
+        return True
+
     async def evaluate(self, sensor_data: Dict[str, Any], company_id: str) -> List[Dict]:
         """
         Evaluate sensor data against rules for the tenant
@@ -118,11 +142,11 @@ class RulesEngine:
         
         for rule in applicable_rules:
             alert = await self._evaluate_rule(sensor_data, rule, company_id)
-            if alert:
+            if alert and self._should_emit(alert):
                 triggered_alerts.append(alert)
                 # Save alert to database
                 await self.alert_repo.save_alert(alert)
-        
+
         return triggered_alerts
 
     async def evaluate_equipment_ml_rules(
@@ -223,7 +247,7 @@ class RulesEngine:
 
                 # Evaluate ML rule
                 alert = await self._evaluate_ml(sensor_data, rule, company_id)
-                if alert:
+                if alert and self._should_emit(alert):
                     triggered_alerts.append(alert)
                     # Save alert to database
                     await self.alert_repo.save_alert(alert)
