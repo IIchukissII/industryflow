@@ -1,3 +1,7 @@
+-- SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+--
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+
 -- IndustryFlow Database Initialization
 -- Version: 3.0 - New Architecture
 -- Date: November 7, 2025

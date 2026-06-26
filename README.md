@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 # IndustryFlow
 
 Real-time industrial IoT platform for sensor-data processing, anomaly detection, and predictive maintenance.

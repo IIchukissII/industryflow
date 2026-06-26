@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """
 Repository Layer - Schema-per-tenant Data Access
 Handles queries to both industryflow and mlflow databases

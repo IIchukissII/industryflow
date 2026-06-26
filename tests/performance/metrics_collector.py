@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """
 Real-time metrics collector for bottleneck analysis
 Runs alongside performance test and logs metrics every 10 seconds

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart } from 'lightweight-charts';
 import { getMeasurements, getCombinedAggregations } from '../services/api';

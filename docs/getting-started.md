@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 # IndustryFlow — Getting Started & Operations Guide
 
 > ⚠️ **Pending verification.** This guide was relocated from the project README during the

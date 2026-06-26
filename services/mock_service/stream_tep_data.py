@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """
 TEP Data Streaming Service
 Sends sensor data from CSV to Ingestion Service (Port 8003)

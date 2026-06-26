@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 # Feature Engineering Service Architecture Documentation
 
 **Service:** Feature Engineering Registry (ML Service Extension)

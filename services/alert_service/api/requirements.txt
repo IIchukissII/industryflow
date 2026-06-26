@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # FastAPI & Server
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
