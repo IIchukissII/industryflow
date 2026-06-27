@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Lints and renders the Helm chart so template regressions are caught in CI. This is a
+# render/lint check only — it does not deploy to or validate against a real cluster.
+name: Helm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/helm/**"
+      - ".github/workflows/helm.yml"
+  pull_request:
+    paths:
+      - "deploy/helm/**"
+      - ".github/workflows/helm.yml"
+
+jobs:
+  lint-and-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+      - name: helm lint
+        run: helm lint deploy/helm/industryflow
+      - name: Render (defaults)
+        run: helm template if deploy/helm/industryflow > /dev/null
+      - name: Render (all toggles on)
+        run: |
+          helm template if deploy/helm/industryflow \
+            --set networkPolicy.enabled=true \
+            --set notebookHub.enabled=true \
+            --set ingress.mtls.enabled=true > /dev/null
