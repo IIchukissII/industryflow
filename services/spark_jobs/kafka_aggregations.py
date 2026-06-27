@@ -45,6 +45,34 @@ def company_id_to_schema(company_id):
     return f"tenant_{canonical.replace('-', '_')}"
 
 
+def configure_s3a(builder, checkpoint_location):
+    """
+    Configure the S3A filesystem when the checkpoint lives on object storage (s3a://…).
+
+    The stateful (windowed) aggregations keep a state store in the checkpoint that the executor
+    writes and the driver reads, so on a multi-worker cluster the checkpoint must sit on ONE
+    store visible to every node — S3A/MinIO (docs/architecture/stream-processing.md). For a
+    local path this is a no-op. Credentials/endpoint default to the in-cluster MinIO.
+    """
+    if not str(checkpoint_location).startswith("s3a://"):
+        return builder
+    endpoint = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
+    access = os.getenv("MINIO_ACCESS_KEY") or os.getenv("AWS_ACCESS_KEY_ID")
+    secret = os.getenv("MINIO_SECRET_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY")
+    builder = builder \
+        .config("spark.hadoop.fs.s3a.endpoint", endpoint.split("://", 1)[-1]) \
+        .config("spark.hadoop.fs.s3a.connection.ssl.enabled",
+                "true" if endpoint.startswith("https://") else "false") \
+        .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+        .config("spark.hadoop.fs.s3a.aws.credentials.provider",
+                "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
+    if access and secret:
+        builder = builder \
+            .config("spark.hadoop.fs.s3a.access.key", access) \
+            .config("spark.hadoop.fs.s3a.secret.key", secret)
+    return builder
+
+
 def _db_connection():
     """Open a psycopg2 connection to TimescaleDB using the streaming role."""
     return psycopg2.connect(
@@ -214,6 +242,8 @@ if __name__ == "__main__":
     cores_max = os.getenv("SPARK_CORES_MAX")
     if cores_max:
         builder = builder.config("spark.cores.max", cores_max)
+    # S3A checkpoint store (multi-worker / spark-on-k8s); no-op for a local checkpoint path.
+    builder = configure_s3a(builder, os.getenv("CHECKPOINT_LOCATION", "/opt/spark/checkpoints"))
     spark = builder.getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")

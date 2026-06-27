@@ -19,21 +19,52 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def configure_s3a(builder, checkpoint_location):
+    """
+    Configure the S3A filesystem when the checkpoint lives on object storage (s3a://…).
+
+    A multi-worker standalone cluster (or spark-on-k8s) can't share a local checkpoint volume:
+    the executor writes Structured-Streaming state-store deltas and the driver reads them, so the
+    checkpoint must sit on ONE store visible to every node. S3A/MinIO is that store — see
+    docs/architecture/stream-processing.md. For a local path this is a no-op, so local/dev runs
+    are unaffected. Credentials/endpoint default to the in-cluster MinIO.
+    """
+    if not str(checkpoint_location).startswith("s3a://"):
+        return builder
+    endpoint = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
+    access = os.getenv("MINIO_ACCESS_KEY") or os.getenv("AWS_ACCESS_KEY_ID")
+    secret = os.getenv("MINIO_SECRET_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY")
+    builder = builder \
+        .config("spark.hadoop.fs.s3a.endpoint", endpoint.split("://", 1)[-1]) \
+        .config("spark.hadoop.fs.s3a.connection.ssl.enabled",
+                "true" if endpoint.startswith("https://") else "false") \
+        .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+        .config("spark.hadoop.fs.s3a.aws.credentials.provider",
+                "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
+    if access and secret:
+        builder = builder \
+            .config("spark.hadoop.fs.s3a.access.key", access) \
+            .config("spark.hadoop.fs.s3a.secret.key", secret)
+    return builder
+
+
 def create_spark_session(app_name="IndustryFlow-Streaming"):
     """Create and configure Spark session with Kafka support"""
     # SPARK_MASTER is the single source of truth for the master (spark-submit no longer passes
     # --master); defaults to local[*] when unset.
+    checkpoint_location = os.getenv("CHECKPOINT_LOCATION", "/opt/spark/checkpoints")
     builder = SparkSession.builder \
         .appName(app_name) \
         .master(os.getenv("SPARK_MASTER", "local[*]")) \
         .config("spark.jars.packages",
                 "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
                 "org.postgresql:postgresql:42.6.0") \
-        .config("spark.sql.streaming.checkpointLocation",
-                os.getenv("CHECKPOINT_LOCATION", "/opt/spark/checkpoints")) \
+        .config("spark.sql.streaming.checkpointLocation", checkpoint_location) \
         .config("spark.streaming.stopGracefullyOnShutdown", "true") \
         .config("spark.sql.shuffle.partitions",
                 os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200"))
+    # S3A checkpoint store (multi-worker / spark-on-k8s); no-op for a local checkpoint path.
+    builder = configure_s3a(builder, checkpoint_location)
     # Resource budget on a shared standalone cluster: cap this app's cores so it does not
     # starve the aggregation app on the same worker. The deployment sets the split (compose),
     # so it scales — raise the caps or add workers. Unset = Spark default (grab all cores).

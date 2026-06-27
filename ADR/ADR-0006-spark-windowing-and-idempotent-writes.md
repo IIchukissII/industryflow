@@ -41,7 +41,7 @@ These are facets of one missing decision: how windowed aggregation bounds its st
 
 4. **A write failure fails the batch — uniformly across both jobs.** On a sink error the batch raises, so Spark does not commit offsets and retries it; neither job swallows write exceptions. The streaming and aggregation jobs share this fail-fast policy. Combined with decision 3, a retried batch is safe because the writes are idempotent.
 
-5. **Checkpoints live on durable storage.** Each streaming query's checkpoint location is a persistent volume, not container-ephemeral `/tmp`, so a restart resumes from the committed offsets and state. The checkpoint location is configured explicitly rather than relying on a default.
+5. **Checkpoints live on durable, shared storage.** Each streaming query's checkpoint location is configured explicitly (never container-ephemeral `/tmp`), so a restart resumes from the committed offsets and state. Because the stateful queries keep a *state store* that the executor writes and the driver reads, the checkpoint must sit on **one store visible to every node**: a multi-worker standalone cluster (or spark-on-k8s) uses **MinIO via S3A** (`CHECKPOINT_LOCATION=s3a://…`), not a node-local volume, which is what lets the worker pool scale horizontally. A local path remains valid for single-node/local-mode runs. (Medium choice expanded from the deferral below; see `docs/architecture/stream-processing.md`.)
 
 6. **A failed query takes the process down.** The jobs await all streaming queries (e.g. `awaitAnyTermination`) so that if any query dies the process exits and the container's restart policy and healthcheck observe it, rather than one dead query being masked by a still-running sibling.
 

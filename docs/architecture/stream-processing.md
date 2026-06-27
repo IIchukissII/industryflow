@@ -39,15 +39,24 @@ duplicates or corrupt state:
   the hypertable partition column). Writes go through `foreachPartition` with a per-executor
   connection, and an error re-raises so Spark retries safely
   (**[ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md)**).
-- **Checkpoints** are durable (a persistent volume / PVC), so a restart resumes the stream
-  rather than reprocessing from the beginning. The **stateful** aggregation queries (windowed)
-  keep a *state store* in the checkpoint that the executor writes and the driver reads, so the
-  checkpoint must live on **one filesystem visible to both**. In compose's standalone cluster
-  (driver and executor in separate containers) that is a single shared `spark-checkpoints`
-  volume mounted into the worker and the jobs; under Helm, Spark runs in local mode (driver =
-  executor, one pod) so its RWO PVC suffices. Scaling to multiple workers — or spark-on-k8s —
-  requires a distributed checkpoint store (S3A/MinIO), not a local volume. (Raw streaming is
-  stateless, so it is unaffected.)
+- **Checkpoints** are durable, so a restart resumes the stream rather than reprocessing from the
+  beginning. The **stateful** aggregation queries (windowed) keep a *state store* in the
+  checkpoint that the executor writes and the driver reads, so the checkpoint must live on **one
+  store visible to every node**.
+
+  In compose the checkpoint is on **MinIO via S3A** (`CHECKPOINT_LOCATION=s3a://spark-checkpoints`),
+  shared over the network by the driver (the `spark-*` job containers) and every executor (the
+  `spark-worker` pool) — so the standalone cluster **scales to N workers** (`SPARK_WORKER_REPLICAS`
+  / `docker compose up -d --scale spark-worker=N`) with no shared local volume. The job's
+  SparkSession turns S3A on whenever `CHECKPOINT_LOCATION` is an `s3a://` URI (a local path opts
+  out for single-node dev); the S3A jars (`hadoop-aws` + `aws-java-sdk-bundle`, pinned to the
+  image's Hadoop 3.3.4) are baked into all three Spark images, and a `minio-init` one-shot creates
+  the bucket. (Raw streaming is stateless, so it is unaffected either way.)
+
+  Under **Helm** Spark runs in local mode (driver = executor, one pod), so its RWO PVC at
+  `/opt/spark/checkpoints` suffices by default. To scale Spark out on k8s, point
+  `config.CHECKPOINT_LOCATION` at `s3a://…`, give the spark workloads the MinIO credentials, and
+  disable their `persistence` — see the chart README.
 
 ## Tenant routing
 
