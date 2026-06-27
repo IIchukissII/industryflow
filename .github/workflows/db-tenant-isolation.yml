@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Proves the per-tenant read-only role boundary (ADR-0011 dec 3, ADR-0012 dec 4) against a
+# real database: it stands up TimescaleDB through the project's own compose (so the actual
+# init scripts run) and executes the GRANT-enforced isolation test.
+name: DB tenant isolation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infrastructure/timescaledb/**"
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".github/workflows/db-tenant-isolation.yml"
+  pull_request:
+    paths:
+      - "infrastructure/timescaledb/**"
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".github/workflows/db-tenant-isolation.yml"
+
+jobs:
+  reader-role-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Provide compose env
+        run: cp .env.example .env
+
+      - name: Start TimescaleDB (runs init scripts)
+        run: docker compose up -d --wait timescaledb
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install -r infrastructure/timescaledb/tests/requirements.txt
+
+      - name: Run tenant-isolation proof
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGDATABASE: industryflow
+        run: |
+          export PGPASSWORD="$(grep -E '^DB_PASSWORD=' .env | cut -d= -f2-)"
+          pytest infrastructure/timescaledb/tests/ -v
+
+      - name: Dump DB logs on failure
+        if: failure()
+        run: docker compose logs timescaledb
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
