@@ -16,5 +16,11 @@ RUN apk add --no-cache aws-cli bash \
 COPY db-backup.sh db-restore.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/db-backup.sh /usr/local/bin/db-restore.sh
 
+# Run as a non-root user (uid 10001) with a writable home (aws-cli/mktemp). pg_dump connects
+# over TCP, so no local DB privileges are needed.
+RUN adduser -D -u 10001 -h /home/backup backup
+USER 10001
+ENV HOME=/home/backup
+
 # Default action is a backup run; the CronJob/compose command can override to db-restore.sh.
 ENTRYPOINT ["db-backup.sh"]

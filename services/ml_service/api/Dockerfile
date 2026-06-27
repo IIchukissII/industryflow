@@ -26,8 +26,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy API application code
 COPY api/ .
 
-# Create models directory
-RUN mkdir -p /app/models
+# Create models directory, owned by the non-root runtime user (models are written at runtime).
+RUN mkdir -p /app/models \
+ && useradd -u 10001 -r -s /usr/sbin/nologin appuser \
+ && chown -R 10001:10001 /app/models
+USER 10001
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

@@ -20,5 +20,9 @@ COPY main.py .
 # Set Python path
 ENV PYTHONPATH=/app
 
+# Run as a non-root user (uid 10001).
+RUN useradd -u 10001 -r -s /usr/sbin/nologin appuser
+USER 10001
+
 # Run application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]

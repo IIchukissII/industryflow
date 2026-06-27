@@ -37,10 +37,27 @@ spec:
         app.kubernetes.io/name: mlflow
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- if .Values.securityContext.enabled }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       containers:
         - name: mlflow
           image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.infra.mlflow.image "tag" .Values.image.tag "digest" .Values.infra.mlflow.digest) | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            # mlflow keeps some local state; leave the root FS writable here.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          {{- end }}
           ports:
             - name: http
               containerPort: 5000

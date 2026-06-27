@@ -10,6 +10,12 @@ RUN pip install --no-cache-dir \
     psycopg2-binary==2.9.9 \
     boto3==1.28.0
 
+# Run as a non-root user (uid 10001) with a writable home/workdir for any local state mlflow
+# keeps (artifacts go to S3, backend to the DB).
+RUN useradd -u 10001 -r -m -d /home/mlflow -s /usr/sbin/nologin mlflow
+WORKDIR /home/mlflow
+USER 10001
+
 EXPOSE 5000
 
 CMD ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000"]
