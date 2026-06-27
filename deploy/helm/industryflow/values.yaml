@@ -229,8 +229,8 @@ networkPolicy:
 # the single-user pod isolation NetworkPolicy, and the notebooks Ingress.
 #
 # NOT YET CLUSTER-VALIDATED: these manifests render (helm template) but have not been run on a
-# cluster. The api-gateway session-verify endpoint the SSO proxy calls (verifyPath) is a
-# companion still to be implemented (ADR-0014 handoff contract).
+# cluster. The api-gateway session-verify endpoint the SSO proxy calls (verifyPath) is
+# implemented at GET /auth/verify (ADR-0014 handoff contract).
 notebookHub:
   enabled: false
   # External host for the notebooks UI (served via the SSO proxy → hub).
@@ -252,5 +252,5 @@ notebookHub:
     image: nginx:1.27-alpine
     port: 8080
     # api-gateway endpoint that validates the session cookie and returns the verified identity
-    # in X-IF-* response headers. Companion to implement (ADR-0014 deferred handoff contract).
+    # in X-IF-* response headers (implemented; ADR-0014 handoff contract).
     verifyPath: /auth/verify
