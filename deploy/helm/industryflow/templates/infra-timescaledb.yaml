@@ -66,7 +66,7 @@ spec:
                   key: DB_PASSWORD
             {{- /* Per-service role passwords consumed by 00-create-roles.sh at first init. */}}
             {{- $tsSecret := include "industryflow.workloadSecretName" (dict "ctx" . "workload" "timescaledb") }}
-            {{- range $key := list "API_GATEWAY_DB_PASSWORD" "SPARK_STREAMING_DB_PASSWORD" "ALERT_SERVICE_DB_PASSWORD" "ML_SERVICE_DB_PASSWORD" "MLFLOW_DB_PASSWORD" }}
+            {{- range $key := list "API_GATEWAY_DB_PASSWORD" "SPARK_STREAMING_DB_PASSWORD" "ALERT_SERVICE_DB_PASSWORD" "ML_SERVICE_DB_PASSWORD" "MLFLOW_DB_PASSWORD" "METRICS_DB_PASSWORD" }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:

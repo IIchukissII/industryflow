@@ -49,6 +49,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mlflow_user') THEN
             EXECUTE format('CREATE ROLE mlflow_user WITH LOGIN PASSWORD %L', '${MLFLOW_DB_PASSWORD}');
         END IF;
+
+        -- Metrics exporter role: read-only monitoring via the built-in pg_monitor role
+        -- (pg_stat_*, etc.) — NOT the superuser. Consumed by the postgres-exporter.
+        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'metrics_user') THEN
+            EXECUTE format('CREATE ROLE metrics_user WITH LOGIN PASSWORD %L', '${METRICS_DB_PASSWORD}');
+        END IF;
+        GRANT pg_monitor TO metrics_user;
     END \$\$;
     
     -- =============================================================================
@@ -63,6 +70,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     ALTER ROLE alert_service_user CONNECTION LIMIT 50;
     ALTER ROLE ml_service_user CONNECTION LIMIT 10;
     ALTER ROLE mlflow_user CONNECTION LIMIT 20;
+    ALTER ROLE metrics_user CONNECTION LIMIT 5;
     
     -- Statement timeouts
     ALTER ROLE api_gateway_user SET statement_timeout = '30s';
