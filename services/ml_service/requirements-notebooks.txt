@@ -8,7 +8,7 @@
 # Jupyter
 jupyter==1.0.0
 jupyterlab==4.0.9
-ipykernel==6.27.1
+ipykernel==7.3.0
 
 # Visualization
 matplotlib==3.8.2
