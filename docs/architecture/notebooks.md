@@ -23,10 +23,20 @@ yet built.
 | Phase | Scope | State |
 |-------|-------|-------|
 | 1 | Per-tenant read-only DB role + the tenant-scoped data path | **done** |
-| 2 | JupyterHub + per-user spawner + SSO from the session cookie | planned |
+| 2 | JupyterHub + per-user spawner + SSO from the session cookie | **in progress** |
 | 3 | Operator read-only surface (rendered dashboards) | planned |
 | 4 | Author surface (JupyterLab) + the SQL proxy + per-session capability minting | planned |
 | 5 | Experiment-tracking gateway (ADR-0013) | planned |
+
+**Phase 2 so far:** the SSO decision is recorded (ADR-0014) — the hub authenticates from the
+platform session via a trusted proxy and never re-verifies the token or runs its own login. The
+spawner's decision logic (`services/notebook_hub/identity.py`) is implemented and unit-tested:
+it reads the verified identity, chooses the spawn profile from the role (read-only analytics vs
+authoring), and binds the pod to its tenant with identity-only environment — no data credential
+(ADR-0012 dec 5). A reference `jupyterhub_config.py` wires this into JupyterHub/KubeSpawner, and
+the single-user pod isolation NetworkPolicy (egress to the data API + DNS only) ships in the
+Helm chart behind `notebookHub.enabled`. Still pending: the hub Deployment/proxy runtime, the
+SSO reverse-proxy handoff, and the per-session capability minting.
 
 ## What exists today (phase 1)
 
