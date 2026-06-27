@@ -190,6 +190,10 @@ secrets:
     INTERNAL_SERVICE_TOKEN: "CHANGE_ME"
     MINIO_ACCESS_KEY: "CHANGE_ME"
     MINIO_SECRET_KEY: "CHANGE_ME"
+    # Notebook hub (ADR-0011): shared token between the hub and its proxy, and the hub cookie
+    # secret. Only consumed when notebookHub.enabled.
+    CONFIGPROXY_AUTH_TOKEN: "CHANGE_ME"
+    JUPYTERHUB_COOKIE_SECRET: "CHANGE_ME"
 
 # ---------------------------------------------------------------------------
 # Ingress — the single TLS edge (ADR-0002 mTLS device path, ADR-0004 HTTPS).
@@ -220,8 +224,33 @@ networkPolicy:
   enabled: false
   ingressControllerNamespace: ingress-nginx
 
-# Embedded notebooks (ADR-0011/0012/0014). The hub Deployment/proxy wiring is not yet part of
-# this chart; this toggle currently gates the single-user pod isolation NetworkPolicy so the
-# containment manifest can land ahead of the runtime.
+# Embedded notebooks (ADR-0011/0012/0014). When enabled this renders the hub runtime (hub +
+# configurable-http-proxy + RBAC), the SSO reverse proxy that performs the ADR-0014 handoff,
+# the single-user pod isolation NetworkPolicy, and the notebooks Ingress.
+#
+# NOT YET CLUSTER-VALIDATED: these manifests render (helm template) but have not been run on a
+# cluster. The api-gateway session-verify endpoint the SSO proxy calls (verifyPath) is a
+# companion still to be implemented (ADR-0014 handoff contract).
 notebookHub:
   enabled: false
+  # External host for the notebooks UI (served via the SSO proxy → hub).
+  host: notebooks.industryflow.local
+  # The hub (JupyterHub, image built from services/notebook_hub/Dockerfile).
+  hub:
+    image: industryflow-notebook-hub
+    port: 8081
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+  # The configurable HTTP proxy the hub manages (routes /hub and /user/* to servers).
+  proxy:
+    image: jupyterhub/configurable-http-proxy:4.6.3
+    port: 8000
+  # SSO reverse proxy (ADR-0014): validates the platform session against api-gateway and
+  # forwards the verified identity to the hub, overwriting any client-supplied identity.
+  ssoProxy:
+    image: nginx:1.27-alpine
+    port: 8080
+    # api-gateway endpoint that validates the session cookie and returns the verified identity
+    # in X-IF-* response headers. Companion to implement (ADR-0014 deferred handoff contract).
+    verifyPath: /auth/verify
