@@ -61,10 +61,43 @@ services:
       - industryflow-network
     restart: unless-stopped
 
+  # Stages the TimescaleDB TLS cert into a postgres-owned volume with 0600 perms (ADR-0017):
+  # Postgres refuses a key it doesn't own / that is group-readable, which a bind mount can't
+  # satisfy. Uses the CA-signed db.crt/db.key from TLS_CERT_DIR if present, else self-signs a
+  # dev cert so `ssl=on` never breaks a bare `docker compose up`.
+  db-cert-init:
+    image: alpine:3.20
+    container_name: industryflow-db-cert-init
+    command:
+      - sh
+      - -ec
+      - |
+        if [ -f /src/db.key ] && [ -f /src/db.crt ]; then
+          cp /src/db.crt /dst/db.crt; cp /src/db.key /dst/db.key
+          { [ -f /src/ca.crt ] && cp /src/ca.crt /dst/ca.crt; } || cp /src/db.crt /dst/ca.crt
+          echo "staged CA-signed DB cert"
+        else
+          apk add --no-cache openssl >/dev/null
+          openssl req -x509 -nodes -newkey rsa:2048 -days 825 -keyout /dst/db.key -out /dst/db.crt \
+            -subj /CN=timescaledb -addext subjectAltName=DNS:timescaledb,DNS:localhost,IP:127.0.0.1 2>/dev/null
+          cp /dst/db.crt /dst/ca.crt
+          echo "generated self-signed DB cert (dev fallback)"
+        fi
+        chown -R 70:70 /dst && chmod 600 /dst/db.key && chmod 644 /dst/db.crt /dst/ca.crt
+    volumes:
+      - "${TLS_CERT_DIR:-frontend-certs}:/src:ro"
+      - db-certs:/dst
+    restart: "no"
+    networks:
+      - industryflow-network
+
   # TimescaleDB - Time-series database
   timescaledb:
     image: timescale/timescaledb:latest-pg15
     container_name: industryflow-timescaledb
+    depends_on:
+      db-cert-init:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:${DB_PORT}:5432"
     environment:
@@ -95,6 +128,7 @@ services:
       - ./infrastructure/timescaledb/init-scripts:/docker-entrypoint-initdb.d
       - ./infrastructure/timescaledb/config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - ./infrastructure/timescaledb/config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - db-certs:/etc/postgresql/certs:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
       interval: 30s
@@ -794,6 +828,7 @@ volumes:
   redis-data:
   minio-data:
   spark-checkpoints:
+  db-certs:
   ml-models:
     driver: local
   jupyter-data:

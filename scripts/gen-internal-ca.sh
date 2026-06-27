@@ -80,11 +80,34 @@ chmod 600 "$CA_DIR/ca.key"
 chmod 640 "$OUT_DIR/tls.key"
 chgrp "$NGINX_GID" "$OUT_DIR/tls.key" 2>/dev/null || echo "  (note: could not chgrp tls.key to $NGINX_GID — set it so the nginx group can read the key)"
 
+# 4) TimescaleDB server certificate (TLS for DB connections; clients verify it against ca.crt).
+#    SAN must include the hostname clients connect to (the in-cluster/compose service name) so
+#    sslmode=verify-full passes. Same internal CA, so clients trust both the edge and the DB.
+DB_CERT_SAN="${DB_CERT_SAN:-DNS:timescaledb,DNS:localhost,DNS:industryflow.local,IP:127.0.0.1}"
+echo "[db]  issuing TimescaleDB server certificate (SAN: $DB_CERT_SAN)"
+openssl genrsa -out "$OUT_DIR/db.key" 2048
+openssl req -new -key "$OUT_DIR/db.key" -subj "/O=IndustryFlow/CN=timescaledb" -out "$OUT_DIR/db.csr"
+cat > "$OUT_DIR/db.ext" <<EXT
+basicConstraints=CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=$DB_CERT_SAN
+EXT
+openssl x509 -req -in "$OUT_DIR/db.csr" \
+    -CA "$CA_DIR/ca.crt" -CAkey "$CA_DIR/ca.key" -CAcreateserial \
+    -days "$CERT_DAYS" -sha256 -extfile "$OUT_DIR/db.ext" -out "$OUT_DIR/db.crt"
+rm -f "$OUT_DIR/db.csr" "$OUT_DIR/db.ext"
+# Postgres requires the key be owned by its user (uid 70) or root, and not group/other readable.
+# A bind mount can't be re-owned from here without root; the db-cert-init step (compose) /
+# initContainer (helm) stages it into a postgres-owned volume with 0600. Keep it 0600 here.
+chmod 600 "$OUT_DIR/db.key"
+
 echo ""
 echo "CA (private, NOT mounted): $CA_DIR/ca.key, $CA_DIR/ca.crt"
 echo "Served dir ($OUT_DIR):"
-echo "  ca.crt   -> install on client devices as a trusted root (do this once)"
-echo "  tls.crt  -> nginx server certificate (leaf, signed by the CA)  [SAN: $CERT_SAN]"
-echo "  tls.key  -> nginx server private key"
+echo "  ca.crt   -> trusted root: install on client devices AND used as sslrootcert by DB clients"
+echo "  tls.crt/tls.key -> frontend nginx server cert  [SAN: $CERT_SAN]"
+echo "  db.crt/db.key   -> TimescaleDB server cert     [SAN: $DB_CERT_SAN]"
 echo ""
-echo "Next: set  TLS_CERT_DIR=$OUT_DIR  in .env, then rebuild/restart the frontend."
+echo "Next: set  TLS_CERT_DIR=$OUT_DIR  in .env, then rebuild/restart the frontend; the DB cert"
+echo "is staged into a postgres-owned volume by the db-cert-init service (compose)."
