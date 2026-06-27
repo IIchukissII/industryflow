@@ -27,6 +27,7 @@ jobs:
           - ingestion_service
           - api_gateway
           - notebook_hub
+          - notebook_sql_proxy
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
