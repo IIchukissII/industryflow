@@ -24,7 +24,6 @@ Scripts are executed in alphanumeric order by Docker container initialization:
 **`00-create-roles.sh`**
 - Creates application database roles:
   - `api_gateway_user` - Full CRUD access to tenant data
-  - `ingestion_service_user` - Read-only access
   - `spark_streaming_user` - SELECT and INSERT for aggregations
   - `alert_service_user` - CRUD for alerts, SELECT for feature configs
   - `ml_service_user` - CRUD for ML models and feature configs
@@ -178,7 +177,6 @@ Output: tenant_550e8400_e29b_41d4_a716_446655440000
 | Role | Purpose | Permissions |
 |------|---------|-------------|
 | `api_gateway_user` | Frontend API | Full CRUD on all tables |
-| `ingestion_service_user` | Data ingestion | SELECT only |
 | `spark_streaming_user` | Stream processing | SELECT + INSERT on aggregations |
 | `alert_service_user` | Alert detection | CRUD on alerts, SELECT on configs |
 | `ml_service_user` | ML operations | CRUD on ML tables |
