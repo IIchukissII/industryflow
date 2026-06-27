@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0014: Notebook hub single sign-on from the platform session
 
 - **ID:** ADR-0014
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-27
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
