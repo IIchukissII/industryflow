@@ -120,6 +120,12 @@ spec:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-hub") }}
                   key: JUPYTERHUB_COOKIE_SECRET
+            # Encrypts auth_state (the verified tenant/role carried to spawn); enable_auth_state.
+            - name: JUPYTERHUB_CRYPT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-hub") }}
+                  key: JUPYTERHUB_CRYPT_KEY
             - name: CONFIGPROXY_API_URL
               value: "http://{{ $proxySvc }}:8001"
           resources:

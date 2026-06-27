@@ -672,6 +672,9 @@ services:
       NOTEBOOK_NETWORK: industryflow-network
       HUB_CONNECT_IP: notebook-hub
       REDIS_URL: redis://redis:6379/0
+      # Required for enable_auth_state — the hub encrypts the verified tenant/role it carries from
+      # the SSO handoff to the spawn hook (ADR-0014). Generate: openssl rand -hex 32.
+      JUPYTERHUB_CRYPT_KEY: ${JUPYTERHUB_CRYPT_KEY}
       # The blessed tenant-scoped data path the kernel's client calls (ADR-0011 dec 4).
       INDUSTRYFLOW_API_URL: ${INDUSTRYFLOW_API_URL:-http://api-gateway:8000}
     volumes:
