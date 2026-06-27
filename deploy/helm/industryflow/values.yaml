@@ -90,6 +90,13 @@ apps:
     replicas: 1
     port: null
     probe: null
+    # Durable Structured-Streaming checkpoint (offsets + state). Without it, a restart
+    # reprocesses from scratch / loses exactly-once guarantees (ADR-0006). RWO, single writer.
+    persistence:
+      enabled: true
+      mountPath: /opt/spark/checkpoints
+      size: 10Gi
+      storageClass: ""
     resources:
       requests: { cpu: 500m, memory: 1Gi }
       limits: { cpu: "2", memory: 2Gi }
@@ -101,6 +108,11 @@ apps:
     replicas: 1
     port: null
     probe: null
+    persistence:
+      enabled: true
+      mountPath: /opt/spark/checkpoints
+      size: 10Gi
+      storageClass: ""
     resources:
       requests: { cpu: 500m, memory: 1Gi }
       limits: { cpu: "2", memory: 2Gi }
@@ -202,6 +214,15 @@ secrets:
   data:
     DB_USER: postgres
     DB_PASSWORD: "CHANGE_ME"
+    # Per-service least-privilege role passwords. 00-create-roles.sh consumes these at first
+    # DB init to create api_gateway_user / spark_streaming_user / alert_service_user /
+    # ml_service_user / mlflow_user (ADR-0003). Services still connect as DB_USER today;
+    # wiring each service to its own role is tracked under secret hardening.
+    API_GATEWAY_DB_PASSWORD: "CHANGE_ME"
+    SPARK_STREAMING_DB_PASSWORD: "CHANGE_ME"
+    ALERT_SERVICE_DB_PASSWORD: "CHANGE_ME"
+    ML_SERVICE_DB_PASSWORD: "CHANGE_ME"
+    MLFLOW_DB_PASSWORD: "CHANGE_ME"
     JWT_SECRET_KEY: "CHANGE_ME"
     INTERNAL_SERVICE_TOKEN: "CHANGE_ME"
     MINIO_ACCESS_KEY: "CHANGE_ME"
