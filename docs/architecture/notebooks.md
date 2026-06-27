@@ -62,9 +62,9 @@ containment use the Kubernetes profile.
 | Phase | Scope | State |
 |-------|-------|-------|
 | 1 | Per-tenant read-only DB role + tenant-scoped data path | **done** (DB-proven in CI) |
-| 2 | Hub SSO + per-user spawner logic + runtime manifests | **built; runtime not cluster-validated** |
+| 2 | Hub SSO + per-user spawner logic + runtime | **compose (DockerSpawner) live-validated; k8s (KubeSpawner) renders, not cluster-run** |
 | 3 | Operator read-only surface (rendered dashboards) | planned |
-| 4 | Capability minting + the SQL access proxy | **logic built & tested; wire cluster-bound** |
+| 4 | Capability minting + the SQL access proxy | **API capability live (notebook → data API); SQL-proxy wire backend pending** |
 | 5 | Experiment-tracking gateway (ADR-0013) | planned |
 
 The design is decision-complete (ADR-0011→0015). Every cluster-independent piece is built and
@@ -98,32 +98,43 @@ covered by tests; what remains needs a running cluster to validate.
 - **Client** (`clients/python/industryflow`): loads tenant data into pandas DataFrames, sending
   the handle in `X-IF-Capability`; holds no DB/object-store credential.
 
-## To build (per deployment profile, ADR-0018)
+## Compose / DockerSpawner profile — BUILT & live-validated (ADR-0018)
+
+The compose profile runs on the platform's primary live deployment and is **working end-to-end**:
+
+- `notebook-hub` (JupyterHub + **DockerSpawner**, hub-managed chp) + `notebook-sso` (nginx
+  `auth_request` → api-gateway `/auth/verify` → `X-IF-*` → hub), under the opt-in `notebooks`
+  compose profile. The pluggable spawner is selected by `NOTEBOOK_SPAWNER` (`docker` here).
+- A **non-root single-user image** (`services/notebook_hub/Dockerfile.singleuser`, built from
+  `clients/python`) shipping the `industryflow` client.
+- The hub reaches the Docker socket via a **supplementary group** (`DOCKER_GID`), not as root.
+- Run it: `docker compose --profile notebooks build` then
+  `docker compose --profile notebooks up -d notebook-hub notebook-sso` → `https://<host>:8888`
+  (see [getting-started](../getting-started.md)).
+
+**Validated on the box:** platform SSO login → DockerSpawner spawned a **non-root (uid 1000)**,
+tenant-bound notebook whose only data credentials are capability handles; the kernel read its
+tenant's data via the data API. This **retires the legacy root, auth-disabled, shared-credential
+`jupyter` shim** (ADR-0011 alt A, ADR-0018 dec 5).
+
+## Still to build
 
 Shared by both profiles (built once, reused under either spawner):
 
 - The **SQL proxy's Postgres-wire backend** (read the handle from the startup message, hold the
   privileged principal, relay bytes) — currently policy/orchestration only.
-- The **notebook images** (authoring JupyterLab / operator Voila), each non-root and shipping the
-  `industryflow` client.
+- Richer **notebook images** (operator Voila read-only surface; heavier DS libraries on authoring).
 
 **Kubernetes / KubeSpawner profile** (cluster-bound — needs a running cluster to validate):
 
 - The **hub runtime** in the Helm chart behind `notebookHub.enabled` (hub + RBAC, the
   configurable-http-proxy, the SSO reverse proxy, the single-user egress NetworkPolicy, the
-  Ingress) — these **render and lint** in CI but have not run on a cluster.
-- The **KubeSpawner config wiring** and an end-to-end spawn.
+  Ingress) — these **render and lint** in CI (the hub image now sets `NOTEBOOK_SPAWNER=kube`) but
+  have not run on a cluster.
+- An end-to-end spawn on the cluster (issue #19).
 
-**Compose / DockerSpawner profile** (ADR-0018 — runs on the platform's primary live deployment):
-
-- A **hub service in compose** with **DockerSpawner**, the SSO reverse proxy, and a dedicated
-  internal network for the per-user containers (egress bounded at the host/network level; see the
-  non-parity note above).
-- The **DockerSpawner config wiring** and an end-to-end spawn, reusing the same SSO, capability,
-  SQL-proxy, and `tenant_reader` machinery as the cluster profile.
-
-Either profile **retires the legacy root, auth-disabled, shared-credential compose `jupyter`
-shim** (ADR-0011 alt A, ADR-0018 dec 5).
+**Single-origin routing** (notebooks under the main front door vs the dedicated `:8888` port,
+ADR-0014) is a refinement on top of the working profile.
 
 ## Deferred to their own work
 

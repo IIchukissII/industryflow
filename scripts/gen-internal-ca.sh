@@ -23,8 +23,9 @@
 #   CA_DAYS       root CA validity in days    (default: 3650)
 #   CERT_DAYS     server cert validity        (default: 825)
 #
-# Example (server, also trusting the LAN IP):
-#   CERT_SAN="DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1,IP:192.168.178.55" \
+# The host's primary IP is auto-added to the SAN; override CERT_SAN to pin it explicitly.
+# Example (replace <host-ip> with the server's IP):
+#   CERT_SAN="DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1,IP:<host-ip>" \
 #     scripts/gen-internal-ca.sh
 set -e
 

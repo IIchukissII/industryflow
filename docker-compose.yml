@@ -455,7 +455,7 @@ services:
     container_name: industryflow-frontend
     environment:
       # Extra SANs for the self-signed dev cert, e.g. the host LAN IP
-      # ("IP:192.168.178.55"). Ignored when a real cert is mounted at /etc/nginx/certs.
+      # ("IP:<host-ip>"). Ignored when a real cert is mounted at /etc/nginx/certs.
       CERT_EXTRA_SAN: ${CERT_EXTRA_SAN:-}
     ports:
       # Unprivileged nginx listens on 8443/8080 inside the container; host ports unchanged.
