@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
 import asyncpg
 from datetime import datetime
-from config import Config
+from config import Config, db_ssl_context
 
 # Import routers
 from routers.alert_rules_router import router as alert_rules_router
@@ -40,7 +40,8 @@ async def lifespan(app: FastAPI):
         password=Config.ALERT_SERVICE_DB_PASSWORD,
         database=Config.DB_NAME,
         min_size=Config.DB_MIN_SIZE,
-        max_size=Config.DB_MAX_SIZE
+        max_size=Config.DB_MAX_SIZE,
+        ssl=db_ssl_context(),
     )
     print(f"✅ Database pool created: {Config.DB_MIN_SIZE}-{Config.DB_MAX_SIZE} connections")
     

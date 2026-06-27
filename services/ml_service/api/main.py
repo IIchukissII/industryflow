@@ -123,7 +123,8 @@ async def startup_event():
             password=config.config.ML_SERVICE_DB_PASSWORD,
             min_size=2,
             max_size=4,
-            command_timeout=60
+            command_timeout=60,
+            ssl=config.db_ssl_context(),
         )
         logger.info(f"Database pool created: {config.config.ML_SERVICE_DB_USER}@{config.config.DB_HOST}/{config.config.DB_NAME}")
     except Exception as e:
@@ -140,7 +141,8 @@ async def startup_event():
             password=config.config.MLFLOW_DB_PASSWORD,
             min_size=2,
             max_size=4,
-            command_timeout=60
+            command_timeout=60,
+            ssl=config.db_ssl_context(),
         )
         logger.info(f"MLflow pool created: {config.config.MLFLOW_DB_USER}@{config.config.DB_HOST}/{config.config.MLFLOW_DB_NAME}")
     except Exception as e:

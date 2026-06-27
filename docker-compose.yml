@@ -4,6 +4,14 @@
 
 # IndustryFlow - Docker Compose
 
+# DB TLS (ADR-0017): clients verify the TimescaleDB server cert against the internal CA. The CA
+# is mounted read-only into each DB client; DB_SSLMODE is overridable (.env) — default
+# verify-full, set 'disable' for a bare dev stack with no generated certs.
+x-db-tls-env: &db-tls-env
+  DB_SSLMODE: ${DB_SSLMODE:-verify-full}
+  DB_SSLROOTCERT: /etc/ssl/industryflow/ca.crt
+x-ca-mount: &ca-mount "${TLS_CERT_DIR:-frontend-certs}:/etc/ssl/industryflow:ro"
+
 services:
   # ==========================================================================
   # PHASE 1: CORE INFRASTRUCTURE
@@ -191,13 +199,13 @@ services:
     ports:
       - "5000:5000"
     environment:
-      BACKEND_STORE_URI: postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow
+      BACKEND_STORE_URI: postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow?sslmode=verify-full&sslrootcert=/etc/ssl/industryflow/ca.crt
       MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
       AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
     command: >
       mlflow server
-      --backend-store-uri postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow
+      --backend-store-uri postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow?sslmode=verify-full&sslrootcert=/etc/ssl/industryflow/ca.crt
       --default-artifact-root s3://mlflow
       --host 0.0.0.0
       --port 5000
@@ -213,6 +221,8 @@ services:
       timeout: 10s
       retries: 5
       start_period: 90s
+    volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
       - industryflow-network
     restart: unless-stopped
@@ -249,11 +259,13 @@ services:
     ports:
       - "8081:8081"
     environment:
+      <<: *db-tls-env
       SPARK_WORKER_CORES: 4
       SPARK_WORKER_MEMORY: 4g
       SPARK_WORKER_WEBUI_PORT: 8081
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     volumes:
+      - *ca-mount  # executor runs psycopg2 here; needs the CA to verify the DB cert (ADR-0017)
       # The executor runs here and writes Structured-Streaming STATE-store deltas to the
       # checkpoint; the driver (in the spark-* job containers) reads the same checkpoint, so
       # both must see ONE filesystem — otherwise stateful aggregations fail with
@@ -279,6 +291,7 @@ services:
       spark-master:
         condition: service_started
     environment:
+      <<: *db-tls-env
       # Spark configuration
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_MEMORY: 2g
@@ -299,6 +312,7 @@ services:
       SPARK_STREAMING_DB_USER: ${SPARK_STREAMING_DB_USER}
       SPARK_STREAMING_DB_PASSWORD: ${SPARK_STREAMING_DB_PASSWORD}
     volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
       - spark-checkpoints:/opt/spark/checkpoints
     networks:
       - industryflow-network
@@ -318,6 +332,7 @@ services:
       spark-master:
         condition: service_started
     environment:
+      <<: *db-tls-env
       # Spark configuration
       SPARK_MASTER: spark://spark-master:7077
       SPARK_DRIVER_MEMORY: 2g
@@ -338,6 +353,7 @@ services:
       SPARK_STREAMING_DB_USER: ${SPARK_STREAMING_DB_USER}
       SPARK_STREAMING_DB_PASSWORD: ${SPARK_STREAMING_DB_PASSWORD}
     volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
       - spark-checkpoints:/opt/spark/checkpoints
     networks:
       - industryflow-network
@@ -355,6 +371,7 @@ services:
     ports:
       - "${API_GATEWAY_PORT:-8000}:8000"
     environment:
+      <<: *db-tls-env
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
       DB_NAME: ${DB_NAME}
@@ -375,6 +392,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
       - industryflow-network
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
@@ -466,6 +485,7 @@ services:
       dockerfile: worker/Dockerfile
     container_name: industryflow-alert-service-detector
     environment:
+      <<: *db-tls-env
       TIMESCALEDB_HOST: ${DB_HOST}
       TIMESCALEDB_PORT: ${DB_PORT}
       TIMESCALEDB_DB: ${DB_NAME}
@@ -484,6 +504,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+    volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
       - industryflow-network
     restart: unless-stopped
@@ -504,6 +526,7 @@ services:
     ports:
       - "${ALERT_SERVICE_PORT}:8001"
     environment:
+      <<: *db-tls-env
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
       DB_NAME: ${DB_NAME}
@@ -517,6 +540,8 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
+    volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
       - industryflow-network
     restart: unless-stopped
@@ -540,6 +565,7 @@ services:
     ports:
       - "${ML_SERVICE_PORT}:8002"
     environment:
+      <<: *db-tls-env
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
       DB_NAME: ${DB_NAME}
@@ -560,6 +586,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
       MLFLOW_S3_ENDPOINT_URL: ${MINIO_ENDPOINT}
     volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
       - ml-models:/app/models
     networks:
       - industryflow-network
@@ -683,9 +710,11 @@ services:
     environment:
       DATA_SOURCE_USER: ${DB_USER}
       DATA_SOURCE_PASS: ${DB_PASSWORD}
-      DATA_SOURCE_URI: "timescaledb:${DB_PORT}/${DB_NAME}?sslmode=disable"
+      DATA_SOURCE_URI: "timescaledb:${DB_PORT}/${DB_NAME}?sslmode=verify-full&sslrootcert=/etc/ssl/industryflow/ca.crt"
     ports:
       - "9187:9187"
+    volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
       - industryflow-network
     depends_on:
@@ -799,6 +828,8 @@ services:
     container_name: industryflow-db-backup
     profiles: ["backup"]
     environment:
+      PGSSLMODE: ${DB_SSLMODE:-verify-full}
+      PGSSLROOTCERT: /etc/ssl/industryflow/ca.crt
       PGHOST: ${DB_HOST}
       PGPORT: ${DB_PORT}
       PGUSER: ${DB_USER}
@@ -811,6 +842,8 @@ services:
       S3_PREFIX: ${BACKUP_S3_PREFIX:-timescaledb}
       DATABASES: ${BACKUP_DATABASES:-industryflow mlflow}
       RETAIN_PER_DB: ${BACKUP_RETAIN_PER_DB:-14}
+    volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
       - industryflow-network
     restart: "no"

@@ -7,9 +7,28 @@ ML Service API Configuration
 All values from environment variables - NO DEFAULT VALUES
 """
 import os
+import ssl
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def db_ssl_context():
+    """SSLContext for DB connections per DB_SSLMODE (ADR-0017). Default verify-full: encrypt +
+    verify the server cert against DB_SSLROOTCERT (the internal CA) with hostname checking."""
+    mode = (os.getenv("DB_SSLMODE") or "verify-full").lower()
+    if mode in ("disable", "allow", ""):
+        return None
+    ca = os.getenv("DB_SSLROOTCERT") or None
+    if ca and not os.path.exists(ca):
+        ca = None
+    ctx = ssl.create_default_context(cafile=ca)
+    if mode in ("require", "prefer"):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    elif mode == "verify-ca":
+        ctx.check_hostname = False
+    return ctx
 
 
 class Config:

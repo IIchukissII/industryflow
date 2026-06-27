@@ -13,6 +13,27 @@ from models.user import User
 
 settings = get_settings()
 
+
+def _db_ssl():
+    """SSLContext for DB connections per DB_SSLMODE (ADR-0017). Default verify-full: encrypt +
+    verify the server cert against DB_SSLROOTCERT (the internal CA) with hostname checking."""
+    import os
+    import ssl
+    mode = (os.getenv("DB_SSLMODE") or "verify-full").lower()
+    if mode in ("disable", "allow", ""):
+        return None
+    ca = os.getenv("DB_SSLROOTCERT") or None
+    if ca and not os.path.exists(ca):
+        ca = None
+    ctx = ssl.create_default_context(cafile=ca)
+    if mode in ("require", "prefer"):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    elif mode == "verify-ca":
+        ctx.check_hostname = False
+    return ctx  # verify-full uses create_default_context defaults (CERT_REQUIRED + hostname)
+
+
 # Create async engine with optimized connection pool
 # 8 workers × 18 connections per worker = 144 connections (fits in 150 allocated)
 engine = create_async_engine(
@@ -21,6 +42,7 @@ engine = create_async_engine(
     pool_size=18,
     max_overflow=2,
     pool_pre_ping=True,
+    connect_args={"ssl": _db_ssl()},
 )
 
 # Create async session factory
@@ -72,7 +94,8 @@ async def get_db_pool() -> asyncpg.Pool:
             database=settings.timescaledb_database,
             min_size=5,
             max_size=20,
-            command_timeout=60
+            command_timeout=60,
+            ssl=_db_ssl(),
         )
     return _db_pool
 
