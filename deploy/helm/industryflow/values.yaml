@@ -20,6 +20,21 @@ image:
 imagePullSecrets: []
 
 # ---------------------------------------------------------------------------
+# Container hardening applied to first-party workloads (apps + mlflow + db-backup): non-root,
+# no privilege escalation, all capabilities dropped, seccomp RuntimeDefault, read-only root FS
+# with writable scratch dirs (the images declare USER 10001). Per-app overrides:
+# apps.<name>.{runAsUser,runAsGroup,fsGroup,readOnlyRootFilesystem,writablePaths}.
+# ---------------------------------------------------------------------------
+securityContext:
+  enabled: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  readOnlyRootFilesystem: true
+  # Writable in-memory mounts added when readOnlyRootFilesystem is true (apps still need /tmp).
+  writablePaths: ["/tmp"]
+
+# ---------------------------------------------------------------------------
 # Application (stateless) services — each renders a Deployment (+ Service if it
 # exposes a port) via templates/apps.yaml.
 # ---------------------------------------------------------------------------
@@ -45,6 +60,8 @@ apps:
     digest: ""
     # MINIO_* are also exposed as AWS_* (the MLflow client loads model artifacts from MinIO).
     secretKeys: [ML_SERVICE_DB_PASSWORD, MLFLOW_DB_PASSWORD, JWT_SECRET_KEY, INTERNAL_SERVICE_TOKEN, MINIO_ACCESS_KEY, MINIO_SECRET_KEY]
+    # Models are written to /app/models at runtime — make it writable under the read-only root FS.
+    writablePaths: ["/tmp", "/app/models"]
     replicas: 1
     port: 8002
     probe: { path: /health, port: 8002 }
@@ -96,6 +113,12 @@ apps:
     image: industryflow-spark-streaming
     digest: ""
     secretKeys: [SPARK_STREAMING_DB_PASSWORD]
+    # The apache/spark base runs as uid 185 and writes ivy2/work/tmp dirs, so it needs a
+    # writable root FS.
+    runAsUser: 185
+    runAsGroup: 185
+    fsGroup: 185
+    readOnlyRootFilesystem: false
     replicas: 1
     port: null
     probe: null
@@ -115,6 +138,10 @@ apps:
     image: industryflow-spark-aggregations
     digest: ""
     secretKeys: [SPARK_STREAMING_DB_PASSWORD]
+    runAsUser: 185
+    runAsGroup: 185
+    fsGroup: 185
+    readOnlyRootFilesystem: false
     replicas: 1
     port: null
     probe: null
@@ -134,6 +161,9 @@ apps:
     digest: ""
     # Static SPA behind the TLS edge — no app secrets.
     secretKeys: []
+    # nginx still runs as root and binds :80/:443; opt out of the non-root hardening until the
+    # image is switched to an unprivileged nginx (tracked follow-up for item 5).
+    hardened: false
     replicas: 2
     port: 80
     probe: { path: /healthz, port: 80 }

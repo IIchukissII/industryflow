@@ -3,6 +3,15 @@
 {{- $root := . -}}
 {{- range $name, $app := .Values.apps }}
 {{- if $app.enabled }}
+{{- $sc := $root.Values.securityContext }}
+{{- /* Per-app opt-out (apps.<name>.hardened=false) for images not yet non-root-ready (e.g. frontend nginx). */}}
+{{- $scOn := $sc.enabled }}
+{{- if hasKey $app "hardened" }}{{- $scOn = and $sc.enabled $app.hardened }}{{- end }}
+{{- $rorfs := $sc.readOnlyRootFilesystem }}
+{{- if hasKey $app "readOnlyRootFilesystem" }}{{- $rorfs = $app.readOnlyRootFilesystem }}{{- end }}
+{{- $wpaths := default $sc.writablePaths $app.writablePaths }}
+{{- $hasPVC := and $app.persistence $app.persistence.enabled }}
+{{- $writableMounts := and $scOn $rorfs (gt (len $wpaths) 0) }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -34,10 +43,26 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if $scOn }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $app.runAsUser | default $sc.runAsUser }}
+        runAsGroup: {{ $app.runAsGroup | default $sc.runAsGroup }}
+        fsGroup: {{ $app.fsGroup | default $sc.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       containers:
         - name: {{ $name }}
           image: {{ include "industryflow.image" (dict "registry" $root.Values.image.registry "image" $app.image "tag" $root.Values.image.tag "digest" $app.digest) | quote }}
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          {{- if $scOn }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: {{ $rorfs }}
+            capabilities:
+              drop: ["ALL"]
+          {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "industryflow.fullname" $root }}-config
@@ -82,16 +107,33 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if and $app.persistence $app.persistence.enabled }}
+          {{- if or $hasPVC $writableMounts }}
           volumeMounts:
+            {{- if $hasPVC }}
             - name: data
               mountPath: {{ $app.persistence.mountPath }}
+            {{- end }}
+            {{- if $writableMounts }}
+            {{- /* Read-only root FS still needs writable scratch dirs (e.g. /tmp). */}}
+            {{- range $i, $p := $wpaths }}
+            - name: writable-{{ $i }}
+              mountPath: {{ $p }}
+            {{- end }}
+            {{- end }}
           {{- end }}
-      {{- if and $app.persistence $app.persistence.enabled }}
+      {{- if or $hasPVC $writableMounts }}
       volumes:
+        {{- if $hasPVC }}
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "industryflow.fullname" $root }}-{{ $name }}-data
+        {{- end }}
+        {{- if $writableMounts }}
+        {{- range $i, $p := $wpaths }}
+        - name: writable-{{ $i }}
+          emptyDir: {}
+        {{- end }}
+        {{- end }}
       {{- end }}
 {{- if and $app.persistence $app.persistence.enabled }}
 ---
