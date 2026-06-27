@@ -15,7 +15,7 @@ engineering, the Helm path, backups, and HA/scaling.
 
 | # | Area | Severity | Gap | Action |
 |---|------|----------|-----|--------|
-| 1 | Release | HIGH | No image build/publish/scan pipeline; Helm references `ghcr.io/...:latest` images CI never builds | Add a workflow that builds every `services/*/Dockerfile`, pushes by **immutable digest** to GHCR, runs Trivy + `pip-audit`/`npm audit`; reference digests in Helm |
+| 1 | Release | HIGH → **in progress** | ~~No image build/publish/scan pipeline~~ — `images.yml` now builds all 13 images, Trivy-scans (fail on fixable CRITICAL), pip-audit/npm-audit (report), and pushes `:latest`+`:sha-<short>` to GHCR on main. **Remaining:** pin Helm to immutable **digests** (still `:latest`); gate dep-audit; per-image path filters | Reference digests in Helm; tighten audits |
 | 2 | Helm | HIGH | Chart not cluster-functional: TimescaleDB init scripts not mounted (roles/schemas never created), no Spark checkpoint PVCs, no observability stack | Run init scripts via a Job/mount; add PVCs; port the Prometheus/Grafana/Loki stack |
 | 3 | Data/DR | HIGH | No TimescaleDB backups or PITR (system of record) | pgBackRest/WAL-G or scheduled `pg_dump` + volume snapshots; document restore |
 | 4 | Secrets | HIGH | `CHANGE_ME`/`changeme_*` defaults render into a real Secret; one shared Secret handed to every pod; `pg_hba` allows superuser from `0.0.0.0/0` | Fail deploy on un-overridden placeholders; scope Secrets per service; lock down `pg_hba`, require TLS; stop publishing DB/Kafka/Redis host ports |
