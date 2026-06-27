@@ -46,14 +46,19 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     async def on_after_forgot_password(
         self, user: User, token: str, request: Optional[Request] = None
     ):
-        """Called after a user requests password reset"""
-        print(f"User {user.id} has forgot their password. Reset token: {token}")
+        """Called after a user requests password reset.
+
+        The reset token is a credential and is never logged (ADR-0004 dec 7); it is delivered
+        to the user out of band. Log only the event.
+        """
+        print(f"User {user.id} requested a password reset")
 
     async def on_after_request_verify(
         self, user: User, token: str, request: Optional[Request] = None
     ):
-        """Called after a user requests verification"""
-        print(f"Verification requested for user {user.id}. Verification token: {token}")
+        """Called after a user requests verification. The verification token is a credential
+        and is never logged (ADR-0004 dec 7)."""
+        print(f"User {user.id} requested verification")
 
 
 async def get_user_manager(user_db=Depends(get_user_db)):

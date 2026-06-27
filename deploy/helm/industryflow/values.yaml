@@ -169,7 +169,7 @@ config:
   DB_PORT: "5432"
   KAFKA_TOPIC_SENSOR_DATA: sensor-data-raw
   KAFKA_TOPIC_ALERTS: sensor-alerts
-  KAFKA_GROUP_ID: industryflow
+  KAFKA_GROUP_ID: alert-detector
   CORS_ORIGINS: "https://app.industryflow.local"
   ENVIRONMENT: production
   # Extension plugin modules the ML service loads at startup (ADR-0008/0010); empty = built-ins.
