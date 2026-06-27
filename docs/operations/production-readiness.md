@@ -15,7 +15,7 @@ engineering, the Helm path, backups, and HA/scaling.
 
 | # | Area | Severity | Gap | Action |
 |---|------|----------|-----|--------|
-| 1 | Release | HIGH | No image build/publish/scan pipeline; Helm references `ghcr.io/...:latest` images CI never builds | Add a workflow that builds every `services/*/Dockerfile`, pushes by **immutable digest** to GHCR, runs Trivy + `pip-audit`/`npm audit`; reference digests in Helm |
+| 1 | Release | HIGH → **in progress** | ~~No image build/publish/scan pipeline~~ — `images.yml` builds all 13 images, Trivy-scans, pip-audit/npm-audit, pushes `:latest`+`:sha-<short>` to GHCR on main. **Remaining:** (a) **remediate base-image CRITICALs** the scan found — spark images carry `avro` CVE-2024-47561 (→1.11.4) + others; ml-service/mlflow/jupyter/python-3.11 bases also flag CRITICALs — then flip Trivy `exit-code` to 1 to **gate**; (b) pin Helm to immutable **digests** (still `:latest`); (c) per-image path filters | Patch bases/deps → gate; digest-pin Helm |
 | 2 | Helm | HIGH | Chart not cluster-functional: TimescaleDB init scripts not mounted (roles/schemas never created), no Spark checkpoint PVCs, no observability stack | Run init scripts via a Job/mount; add PVCs; port the Prometheus/Grafana/Loki stack |
 | 3 | Data/DR | HIGH | No TimescaleDB backups or PITR (system of record) | pgBackRest/WAL-G or scheduled `pg_dump` + volume snapshots; document restore |
 | 4 | Secrets | HIGH | `CHANGE_ME`/`changeme_*` defaults render into a real Secret; one shared Secret handed to every pod; `pg_hba` allows superuser from `0.0.0.0/0` | Fail deploy on un-overridden placeholders; scope Secrets per service; lock down `pg_hba`, require TLS; stop publishing DB/Kafka/Redis host ports |
