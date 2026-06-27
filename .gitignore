@@ -2,6 +2,9 @@
 .env
 .venv/
 
+# Local dev sandbox (fake-data streamers, scratch scripts) — never committed
+/local/
+
 # Internal CA / TLS material — private keys and issued certs must never be committed
 deploy/ca/
 deploy/certs/
