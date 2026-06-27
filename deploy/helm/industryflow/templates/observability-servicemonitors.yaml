@@ -8,7 +8,7 @@
   gets one, as does each enabled data-store exporter. Requires the Prometheus Operator CRDs.
 */}}
 {{- range $name, $app := .Values.apps }}
-{{- if and $app.enabled $app.port $app.metrics }}
+{{- if and $app.enabled $app.metrics (or $app.port $app.metricsPort) }}
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -26,10 +26,19 @@ spec:
       app.kubernetes.io/name: {{ $name }}
       app.kubernetes.io/instance: {{ $root.Release.Name }}
   endpoints:
-    - port: http
-      path: /metrics
+    {{- /* A dedicated metricsPort (e.g. Spark's driver-UI :4040 PrometheusServlet) uses its own
+           path; otherwise scrape the app's http port at the conventional /metrics. metricsExtraPaths
+           adds more endpoints on the same metrics port (e.g. /metrics/executors/prometheus). */}}
+    - port: {{ if $app.metricsPort }}metrics{{ else }}http{{ end }}
+      path: {{ $app.metricsPath | default "/metrics" }}
       interval: {{ $sm.interval }}
       scrapeTimeout: {{ $sm.scrapeTimeout }}
+    {{- range ($app.metricsExtraPaths | default list) }}
+    - port: metrics
+      path: {{ . }}
+      interval: {{ $sm.interval }}
+      scrapeTimeout: {{ $sm.scrapeTimeout }}
+    {{- end }}
 {{- end }}
 {{- end }}
 {{- range $ex := list "postgres" "redis" "kafka" }}

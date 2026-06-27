@@ -115,10 +115,18 @@ spec:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" $root "workload" $name) }}
                   key: MINIO_SECRET_KEY
           {{- end }}
-          {{- if $app.port }}
+          {{- if or $app.port $app.metricsPort }}
           ports:
+            {{- if $app.port }}
             - name: http
               containerPort: {{ $app.port }}
+            {{- end }}
+            {{- if $app.metricsPort }}
+            {{- /* Port-less workers (e.g. Spark jobs) that still expose a metrics endpoint —
+                   e.g. the Spark driver UI's PrometheusServlet on 4040 (item 7). */}}
+            - name: metrics
+              containerPort: {{ $app.metricsPort }}
+            {{- end }}
           {{- end }}
           {{- if $app.probe }}
           livenessProbe:
@@ -198,7 +206,7 @@ spec:
     requests:
       storage: {{ $app.persistence.size }}
 {{- end }}
-{{- if $app.port }}
+{{- if or $app.port $app.metricsPort }}
 ---
 apiVersion: v1
 kind: Service
@@ -209,13 +217,24 @@ metadata:
     app.kubernetes.io/name: {{ $name }}
 spec:
   type: ClusterIP
+  {{- if not $app.port }}
+  # Headless: a metrics-only Service (no client port) just needs stable endpoints to scrape.
+  clusterIP: None
+  {{- end }}
   selector:
     app.kubernetes.io/name: {{ $name }}
     app.kubernetes.io/instance: {{ $root.Release.Name }}
   ports:
+    {{- if $app.port }}
     - name: http
       port: {{ $app.port }}
       targetPort: {{ $app.port }}
+    {{- end }}
+    {{- if $app.metricsPort }}
+    - name: metrics
+      port: {{ $app.metricsPort }}
+      targetPort: {{ $app.metricsPort }}
+    {{- end }}
 {{- end }}
 {{- if and $res.podDisruptionBudgets.enabled $multiReplica }}
 ---

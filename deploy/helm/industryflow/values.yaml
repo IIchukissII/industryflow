@@ -173,6 +173,8 @@ apps:
     digest: ""
     # mTLS-only, holds no DB role and no app secrets (ADR-0002) — gets no Secret.
     secretKeys: []
+    # /metrics on the service port → a ServiceMonitor (scraped in-cluster, not via the edge).
+    metrics: true
     replicas: 2
     port: 8003
     probe: { path: /health, port: 8003 }
@@ -195,6 +197,12 @@ apps:
     replicas: 1
     port: null
     probe: null
+    # Spark's native PrometheusServlet on the driver UI (item 7): a metrics-only Service on 4040,
+    # scraped at /metrics/prometheus (driver) + /metrics/executors/prometheus (executors).
+    metrics: true
+    metricsPort: 4040
+    metricsPath: /metrics/prometheus
+    metricsExtraPaths: ["/metrics/executors/prometheus"]
     # Durable Structured-Streaming checkpoint (offsets + state). Without it, a restart
     # reprocesses from scratch / loses exactly-once guarantees (ADR-0006). RWO, single writer.
     persistence:
@@ -218,6 +226,11 @@ apps:
     replicas: 1
     port: null
     probe: null
+    # Spark PrometheusServlet on the driver UI (item 7) — see spark-streaming above.
+    metrics: true
+    metricsPort: 4040
+    metricsPath: /metrics/prometheus
+    metricsExtraPaths: ["/metrics/executors/prometheus"]
     persistence:
       enabled: true
       mountPath: /opt/spark/checkpoints

@@ -46,6 +46,9 @@ RUN mkdir -p /app/spark_streaming && \
     chown -R spark:spark /home/spark/.ivy2 && \
     chown -R spark:spark /app
 
+# Spark -> Prometheus metrics config, read automatically from conf/metrics.properties (item 7).
+COPY metrics.properties /opt/spark/conf/metrics.properties
+
 # Copy the spark streaming script + the FK-resilience helper (shipped to executors via --py-files)
 COPY kafka_to_timescaledb.py upsert_filter.py /app/spark_streaming/
 RUN chown -R spark:spark /app/spark_streaming && \

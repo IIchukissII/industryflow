@@ -8,6 +8,7 @@ High-throughput sensor data ingestion endpoint (Port 8003)
 """
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 from datetime import datetime
 import logging
 
@@ -41,6 +42,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+# Prometheus metrics at /metrics (request rate/latency/in-flight — item 7). Scraped in-cluster
+# on the service port; the mTLS edge denies /metrics so it is never exposed to devices.
+Instrumentator().instrument(app).expose(app)
 
 @app.on_event("startup")
 async def startup_event():
