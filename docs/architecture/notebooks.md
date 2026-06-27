@@ -55,9 +55,15 @@ as the kernel's only data credentials (API capability for every profile; SQL cap
 authoring), never a database password. The Redis-backed store adapter is reference-only (not
 integration-tested).
 
-Still pending (cluster-bound): running the hub, the **SQL access proxy** that resolves an SQL
-capability and `SET ROLE`s into the per-tenant reader role (ADR-0015 dec 5-6), wiring the data
-API to accept API capabilities, and the notebook images.
+The **data API now accepts API capabilities** (ADR-0015): its read endpoints
+(`/api/measurements`, `/api/aggregations`, `/api/training-data`) resolve either the platform
+session or an `X-IF-Capability` handle to the caller's tenant, and a capability-sourced request
+runs **read-only** (a notebook cannot write through the data API even though the gateway's own
+role can). Resolution + scoping are unit-tested; the client sends the handle in `X-IF-Capability`.
+
+Still pending (cluster-bound): running the hub end-to-end, the **SQL access proxy** that
+resolves an SQL capability and `SET ROLE`s into the per-tenant reader role (ADR-0015 dec 5-6),
+and the notebook images.
 
 ## What exists today (phase 1)
 

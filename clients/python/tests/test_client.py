@@ -36,10 +36,11 @@ class _FakeSession:
         return _FakeResponse(self._payload)
 
 
-def test_bearer_token_is_set():
+def test_capability_header_is_set():
     sess = _FakeSession([])
     IndustryFlowClient("https://api.local", token="cap-123", session=sess)
-    assert sess.headers["Authorization"] == "Bearer cap-123"
+    assert sess.headers["X-IF-Capability"] == "cap-123"
+    assert "Authorization" not in sess.headers
 
 
 def test_measurements_builds_request_and_frame():

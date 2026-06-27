@@ -40,6 +40,9 @@ class IndustryFlowClient:
         verify: TLS verification, forwarded to the transport.
     """
 
+    # Header the data API reads the API-audience capability handle from (ADR-0015).
+    CAPABILITY_HEADER = "X-IF-Capability"
+
     def __init__(self, base_url: str, token: Optional[str] = None, *, session: Any = None, verify: bool = True):
         if session is None:
             import requests  # imported lazily so tests can inject a fake transport
@@ -48,8 +51,10 @@ class IndustryFlowClient:
         self._base_url = base_url.rstrip("/")
         self._session = session
         self._verify = verify
+        # The token is the per-session capability handle minted by the hub spawner (ADR-0015);
+        # it is sent as the capability header, not a bearer token, and is never a DB credential.
         if token:
-            self._session.headers["Authorization"] = f"Bearer {token}"
+            self._session.headers[self.CAPABILITY_HEADER] = token
 
     def _get(self, path: str, params: Optional[dict] = None) -> Any:
         resp = self._session.get(

@@ -6,16 +6,13 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from typing import Optional
 from datetime import datetime, timedelta
 import logging
 import csv
 import io
 
-from dependencies import get_db_with_tenant
+from dependencies import get_tenant_db, resolve_tenant_context, TenantContext
 from models.schemas import TrainingDataResponse, TrainingDataPoint
-from models.user import User
-from dependencies import get_current_user_with_company
 
 router = APIRouter(prefix="/api/training-data", tags=["Training Data"])
 logger = logging.getLogger(__name__)
@@ -23,10 +20,10 @@ logger = logging.getLogger(__name__)
 @router.get("/equipment/{equipment_id}/stream")
 async def stream_training_data_csv(
     equipment_id: str,
-    current_user: User = Depends(get_current_user_with_company),
+    ctx: TenantContext = Depends(resolve_tenant_context),
     lookback_days: int = Query(30, ge=1, le=365, description="Days of historical data"),
     min_quality: float = Query(0.8, ge=0.0, le=1.0, description="Minimum quality code (0-1)"),
-    db: AsyncSession = Depends(get_db_with_tenant)
+    db: AsyncSession = Depends(get_tenant_db)
 ):
     """
     Stream historical sensor data as CSV for ML training.
@@ -55,7 +52,7 @@ async def stream_training_data_csv(
     start_time = end_time - timedelta(days=lookback_days)
     
     logger.info(
-        f"User {current_user.email} streaming training data for equipment {equipment_id}"
+        f"User {ctx.user} streaming training data for equipment {equipment_id}"
     )
     
     async def generate_csv():
@@ -129,18 +126,18 @@ async def stream_training_data_csv(
 @router.get("/equipment/{equipment_id}", response_model=TrainingDataResponse)
 async def get_training_data_for_equipment(
     equipment_id: str,
-    current_user: User = Depends(get_current_user_with_company),
+    ctx: TenantContext = Depends(resolve_tenant_context),
     lookback_days: int = Query(30, ge=1, le=365, description="Days of historical data"),
     min_quality: float = Query(0.8, ge=0.0, le=1.0, description="Minimum quality code (0-1)"),
     limit: int = Query(10000, ge=1, le=100000, description="Maximum rows to return"),
-    db: AsyncSession = Depends(get_db_with_tenant)
+    db: AsyncSession = Depends(get_tenant_db)
 ):
     """
     Get historical sensor data for ML training (JSON, limited rows).
     For large datasets, use /stream endpoint instead.
     Automatically routed to user's tenant schema.
     """
-    company_id_str = str(current_user.company_id)
+    company_id_str = str(ctx.company_id)
     
     # Verify equipment exists (automatic schema routing)
     verify_query = """
@@ -215,7 +212,7 @@ async def get_training_data_for_equipment(
     unique_sensors = list(set(point.sensor_id for point in data_points))
     
     logger.info(
-        f"User {current_user.email} fetched {len(data_points)} training data points for equipment {equipment_id}"
+        f"User {ctx.user} fetched {len(data_points)} training data points for equipment {equipment_id}"
     )
     
     return TrainingDataResponse(
