@@ -104,8 +104,13 @@ Production deployments run images by **immutable digest**, not mutable tags:
    ConfigMap and run on a fresh data volume. Set the five per-service role passwords in
    `secrets.data` (`*_DB_PASSWORD`) alongside `DB_PASSWORD`. For an **external** database
    (`inCluster=false`) run those scripts yourself before first use.
-5. **Spark checkpoints** — `spark-streaming`/`spark-aggregations` claim a ReadWriteOnce PVC
-   (`apps.<name>.persistence`); ensure a default StorageClass exists or set `storageClass`.
+5. **Spark checkpoints** — by default `spark-streaming`/`spark-aggregations` run in local mode
+   and claim a ReadWriteOnce PVC (`apps.<name>.persistence`); ensure a default StorageClass exists
+   or set `storageClass`. **To scale Spark out** (separate executors / a real cluster), move the
+   Structured-Streaming checkpoint to a shared store (ADR-0006): set
+   `config.CHECKPOINT_LOCATION=s3a://spark-checkpoints`, add `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`
+   to both spark workloads' `secretKeys`, and set their `persistence.enabled=false`. The images
+   already carry the S3A jars; create the bucket in your object store first.
 
 ## Known follow-ups (ADR-0009 deferred)
 

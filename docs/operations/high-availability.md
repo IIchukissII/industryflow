@@ -54,7 +54,7 @@ or a managed service per backend:
 | **Kafka + ZooKeeper** | single broker | The **Strimzi** operator (multi-broker, KRaft — drops ZooKeeper), or managed Kafka. Replication factor ≥ 3 + `min.insync.replicas` ≥ 2. |
 | **Redis** | single | Redis Sentinel / Cluster, or a Redis operator, or managed. Redis here is a cache/feature store; loss is recoverable. |
 | **MinIO** | single | Distributed MinIO (≥ 4 drives/nodes) with erasure coding, or managed S3 (the recommended off-site DR target anyway). |
-| **Spark worker** | single worker | Scale workers (replicas) behind the master, or move to spark-on-k8s (ADR-0009 deferred) for per-job executors. |
+| **Spark worker** | scalable pool | The Structured-Streaming checkpoint is on **MinIO via S3A** (ADR-0006), shared by driver + executors, so workers scale horizontally — `SPARK_WORKER_REPLICAS` / `--scale spark-worker=N` (compose), or the S3A checkpoint path on k8s. Moving to spark-on-k8s for per-job executors stays an ADR-0009-deferred option. |
 
 Adopting these is a per-environment decision; the managed model (ADR-0001) typically uses the
 cloud provider's HA equivalents instead of running the operators.
