@@ -8,9 +8,8 @@ REST API endpoints for ML model management with schema-per-tenant routing
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
-from pydantic import BaseModel
 from enum import Enum
 
 from dependencies import get_db_with_tenant, get_current_user_with_company

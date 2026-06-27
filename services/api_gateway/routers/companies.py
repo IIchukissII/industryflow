@@ -14,7 +14,7 @@ from datetime import datetime
 from uuid import UUID
 import logging
 
-from dependencies import get_db_with_tenant, get_current_user_with_company, require_role
+from dependencies import get_db_with_tenant, require_role
 from models.user import User
 
 logger = logging.getLogger(__name__)
