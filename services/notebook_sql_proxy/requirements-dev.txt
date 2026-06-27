@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Test-only deps. binding.py / proxy.py are pure (no redis/postgres at import), so the tests
+# need only pytest + pytest-asyncio — not the runtime deps in requirements.txt.
+pytest==7.4.3
+pytest-asyncio==0.21.1

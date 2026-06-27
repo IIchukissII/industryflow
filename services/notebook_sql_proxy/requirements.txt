@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Runtime deps for the SQL proxy (ADR-0015). The Postgres-wire backend adapter that uses these
+# is the cluster-bound part (see README) and is not implemented/validated here.
+redis==5.0.8
+asyncpg==0.29.0
