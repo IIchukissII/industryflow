@@ -85,7 +85,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
       - name: Trivy scan (fail on fixable CRITICAL)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: ${{ env.REGISTRY }}/industryflow-${{ matrix.name }}:${{ steps.meta.outputs.version }}
           severity: CRITICAL
