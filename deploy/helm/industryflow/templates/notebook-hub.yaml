@@ -1,0 +1,313 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Notebook hub runtime (ADR-0011/0012/0014). REFERENCE — renders via `helm template` but has
+# NOT been validated on a cluster. Components:
+#   * RBAC for the hub to manage per-user pods (KubeSpawner).
+#   * The hub Deployment + Service.
+#   * The configurable-http-proxy (chp) Deployment + Service the hub manages.
+#   * The SSO reverse proxy that validates the platform session against api-gateway and forwards
+#     the verified identity to the hub, overwriting any client-supplied identity (ADR-0014).
+#   * The notebooks Ingress (→ SSO proxy).
+# The single-user pod isolation NetworkPolicy lives in networkpolicy.yaml (same toggle).
+{{- if .Values.notebookHub.enabled }}
+{{- $fullname := include "industryflow.fullname" . }}
+{{- $hubSvc := printf "%s-notebook-hub" $fullname }}
+{{- $proxySvc := printf "%s-notebook-proxy" $fullname }}
+{{- $ssoSvc := printf "%s-notebook-sso" $fullname }}
+{{- $apiSvc := printf "%s-api-gateway" $fullname }}
+{{- $apiPort := (index .Values.apps "api-gateway").port }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-notebook-hub
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-hub
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-notebook-hub
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-hub
+rules:
+  # KubeSpawner manages per-user pods (and their PVCs/events) in this namespace.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-notebook-hub
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-hub
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}-notebook-hub
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-notebook-hub
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $hubSvc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-hub
+spec:
+  selector:
+    app.kubernetes.io/name: notebook-hub
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: hub
+      port: {{ .Values.notebookHub.hub.port }}
+      targetPort: {{ .Values.notebookHub.hub.port }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $hubSvc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-hub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-hub
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notebook-hub
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ $fullname }}-notebook-hub
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: hub
+          image: "{{ .Values.image.registry }}/{{ .Values.notebookHub.hub.image }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: hub
+              containerPort: {{ .Values.notebookHub.hub.port }}
+          env:
+            # chp lives in a sibling container/service; the hub configures it over its API.
+            - name: CONFIGPROXY_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.secretName" . }}
+                  key: CONFIGPROXY_AUTH_TOKEN
+            - name: JUPYTERHUB_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.secretName" . }}
+                  key: JUPYTERHUB_COOKIE_SECRET
+            - name: CONFIGPROXY_API_URL
+              value: "http://{{ $proxySvc }}:8001"
+          resources:
+            {{- toYaml .Values.notebookHub.hub.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $proxySvc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-proxy
+spec:
+  selector:
+    app.kubernetes.io/name: notebook-proxy
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: public
+      port: {{ .Values.notebookHub.proxy.port }}
+      targetPort: 8000
+    - name: api
+      port: 8001
+      targetPort: 8001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $proxySvc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-proxy
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notebook-proxy
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: chp
+          image: {{ .Values.notebookHub.proxy.image | quote }}
+          command:
+            - configurable-http-proxy
+            - --ip=0.0.0.0
+            - --port=8000
+            - --api-ip=0.0.0.0
+            - --api-port=8001
+            - --default-target=http://{{ $hubSvc }}:{{ .Values.notebookHub.hub.port }}
+            - --error-target=http://{{ $hubSvc }}:{{ .Values.notebookHub.hub.port }}/hub/error
+          env:
+            - name: CONFIGPROXY_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.secretName" . }}
+                  key: CONFIGPROXY_AUTH_TOKEN
+          ports:
+            - name: public
+              containerPort: 8000
+            - name: api
+              containerPort: 8001
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $ssoSvc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-sso
+data:
+  default.conf: |
+    # SSO reverse proxy (ADR-0014). Validates the platform session against api-gateway and
+    # forwards the verified identity to the hub proxy, overwriting any client-supplied identity
+    # (ADR-0002 anti-spoofing). Included inside http{}, so the map directive is valid here.
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        ""      close;
+    }
+    server {
+        listen {{ .Values.notebookHub.ssoProxy.port }};
+
+        # Subrequest to the gateway: validates the if_access cookie and returns the verified
+        # identity in X-IF-* response headers. Companion endpoint to implement (ADR-0014).
+        location = /_notebook_auth {
+            internal;
+            proxy_pass http://{{ $apiSvc }}:{{ $apiPort }}{{ .Values.notebookHub.ssoProxy.verifyPath }};
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length "";
+            proxy_set_header Cookie $http_cookie;
+            proxy_set_header X-Original-URI $request_uri;
+        }
+
+        location / {
+            auth_request /_notebook_auth;
+            # Capture the verified identity from the subrequest response.
+            auth_request_set $if_user    $upstream_http_x_if_user;
+            auth_request_set $if_company $upstream_http_x_if_company_id;
+            auth_request_set $if_role    $upstream_http_x_if_role;
+
+            # Forward the verified identity; these always overwrite anything the client sent.
+            proxy_set_header X-IF-User       $if_user;
+            proxy_set_header X-IF-Company-Id $if_company;
+            proxy_set_header X-IF-Role       $if_role;
+
+            proxy_pass http://{{ $proxySvc }}:{{ .Values.notebookHub.proxy.port }};
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            # Notebook traffic is websocket-heavy.
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+        }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $ssoSvc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-sso
+spec:
+  selector:
+    app.kubernetes.io/name: notebook-sso
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.notebookHub.ssoProxy.port }}
+      targetPort: {{ .Values.notebookHub.ssoProxy.port }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $ssoSvc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-sso
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-sso
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notebook-sso
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: nginx
+          image: {{ .Values.notebookHub.ssoProxy.image | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.notebookHub.ssoProxy.port }}
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: conf
+          configMap:
+            name: {{ $ssoSvc }}
+{{- if .Values.ingress.enabled }}
+---
+# Notebooks edge → SSO proxy (which performs the ADR-0014 session handoff).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-notebooks
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.notebookHub.host | quote }}]
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.notebookHub.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $ssoSvc }}
+                port:
+                  number: {{ .Values.notebookHub.ssoProxy.port }}
+{{- end }}
+{{- end }}
