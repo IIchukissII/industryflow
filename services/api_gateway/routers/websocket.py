@@ -154,6 +154,8 @@ async def websocket_sensors(websocket: WebSocket, token: Optional[str] = None):
     
     try:
         while True:
+            # Build the update. A transient data-side error (Redis/DB hiccup) is logged and
+            # retried WITHOUT dropping the socket — keep `continue` scoped to data only.
             try:
                 all_sensors = await redis_client.get_all_sensors()
 
@@ -166,27 +168,28 @@ async def websocket_sensors(websocket: WebSocket, token: Optional[str] = None):
 
                 # Enrich with sensor and equipment names
                 company_sensors = await enrich_sensors_with_names(company_sensors, company_id)
-
-                print(f"📊 Sending {len(company_sensors)}/{len(all_sensors)} sensors to {user.email}")
-
-                await websocket.send_json({
-                    "type": "sensor_update",
-                    "timestamp": time.time(),
-                    "sensors": company_sensors,
-                    "count": len(company_sensors)
-                })
-
-                await asyncio.sleep(1)
-                
             except Exception as e:
-                print(f"❌ Error in sensor loop: {e}")
+                print(f"⚠️ Error building sensor update for {user.email}: {e}")
                 await asyncio.sleep(1)
-                
+                continue
+
+            # The send is OUTSIDE the data try: if it fails the client has gone away (e.g. a 1001
+            # "going away" close), so let it propagate out of the loop to be cleaned up below —
+            # NEVER catch-and-retry, which would spin forever on a dead socket (zombie loop).
+            await websocket.send_json({
+                "type": "sensor_update",
+                "timestamp": time.time(),
+                "sensors": company_sensors,
+                "count": len(company_sensors)
+            })
+            await asyncio.sleep(1)
+
     except WebSocketDisconnect:
-        active_connections.pop(websocket, None)
         print(f"❌ WebSocket DISCONNECTED - {user.email}")
     except Exception as e:
-        print(f"❌ WebSocket error: {e}")
+        # A closed/broken connection (ConnectionClosed, 1001, etc.) ends the coroutine cleanly.
+        print(f"❌ WebSocket closed - {user.email}: {e}")
+    finally:
         active_connections.pop(websocket, None)
 
 
@@ -212,17 +215,23 @@ async def websocket_equipment_sensors(
     
     try:
         while True:
-            all_sensors = await redis_client.get_all_sensors()
-            equipment_sensors = {
-                sensor_id: data
-                for sensor_id, data in all_sensors.items()
-                if (data.get('equipment_id') == equipment_id and
-                    str(data.get('company_id')) == company_id)
-            }
+            try:
+                all_sensors = await redis_client.get_all_sensors()
+                equipment_sensors = {
+                    sensor_id: data
+                    for sensor_id, data in all_sensors.items()
+                    if (data.get('equipment_id') == equipment_id and
+                        str(data.get('company_id')) == company_id)
+                }
 
-            # Enrich with sensor and equipment names
-            equipment_sensors = await enrich_sensors_with_names(equipment_sensors, company_id)
+                # Enrich with sensor and equipment names
+                equipment_sensors = await enrich_sensors_with_names(equipment_sensors, company_id)
+            except Exception as e:
+                print(f"⚠️ Error building equipment update ({equipment_id}): {e}")
+                await asyncio.sleep(1)
+                continue
 
+            # Send outside the data try: a failure means the client is gone — propagate and stop.
             await websocket.send_json({
                 "type": "sensor_update",
                 "timestamp": time.time(),
@@ -230,10 +239,11 @@ async def websocket_equipment_sensors(
                 "sensors": equipment_sensors,
                 "count": len(equipment_sensors)
             })
-
             await asyncio.sleep(1)
-                
+
     except WebSocketDisconnect:
-        active_connections.pop(websocket, None)
-    except Exception:
+        pass
+    except Exception as e:
+        print(f"❌ Equipment WebSocket closed ({equipment_id}): {e}")
+    finally:
         active_connections.pop(websocket, None)
