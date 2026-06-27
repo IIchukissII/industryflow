@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0011: Embedded notebooks for analytics and experimentation
 
 - **ID:** ADR-0011
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-27
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
