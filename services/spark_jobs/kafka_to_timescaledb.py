@@ -89,22 +89,31 @@ def _make_measurement_upsert(db_cfg, schema_name):
     def _upsert(rows):
         import psycopg2
         from psycopg2.extras import execute_values
+        from upsert_filter import split_known_sensors  # shipped via --py-files
+
         conn = psycopg2.connect(**db_cfg)
         try:
             conn.autocommit = False
-            buffer = []
             with conn.cursor() as cur:
-                for r in rows:
-                    buffer.append((
-                        r["time"], r["sensor_id"], r["equipment_id"],
-                        r["site_id"], r["value"], r["unit"], r["quality_code"],
-                    ))
-                    if len(buffer) >= 5000:
-                        execute_values(cur, sql, buffer)
-                        buffer.clear()
-                if buffer:
-                    execute_values(cur, sql, buffer)
+                # Drop rows whose sensor_id is not provisioned, so one orphan FK row does not
+                # abort the whole batch and wedge the stream (ADR-0006). The valid set is read
+                # per partition so newly-created sensors are picked up on the next batch.
+                cur.execute(f'SELECT sensor_id FROM "{schema_name}".sensors')
+                valid = {str(r[0]) for r in cur.fetchall()}
+                tuples = [
+                    (r["time"], r["sensor_id"], r["equipment_id"],
+                     r["site_id"], r["value"], r["unit"], r["quality_code"])
+                    for r in rows
+                ]
+                kept, skipped = split_known_sensors(tuples, valid)
+                for i in range(0, len(kept), 5000):
+                    execute_values(cur, sql, kept[i:i + 5000])
             conn.commit()
+            if skipped:
+                logger.warning(
+                    "%s: skipped %d measurement row(s) with unknown sensor_id "
+                    "(not provisioned)", schema_name, skipped
+                )
         except Exception:
             conn.rollback()
             raise
