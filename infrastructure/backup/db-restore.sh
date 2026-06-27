@@ -68,11 +68,14 @@ log "(re)creating database '${TARGET_DB}'"
 
 # TimescaleDB-aware restore: install the extension, enter pre-restore mode, pg_restore, then
 # post-restore. --no-owner/--no-privileges keeps it portable; grants come from globals.sql.
+# NB: no --exit-on-error — the dump re-issues CREATE EXTENSION timescaledb, which collides
+# with the one created above; that single error is expected/benign per the TimescaleDB
+# restore procedure. Review the pg_restore output and verify row counts afterwards.
 "${PSQL[@]}" -d "${TARGET_DB}" -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
 "${PSQL[@]}" -d "${TARGET_DB}" -c "SELECT timescaledb_pre_restore();"
 log "running pg_restore"
-pg_restore --no-owner --no-privileges --exit-on-error \
+pg_restore --no-owner --no-privileges \
   -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "${TARGET_DB}" "$DUMP" \
-  || log "pg_restore reported errors (review above)"
+  || log "pg_restore reported errors (the CREATE EXTENSION collision is expected; review above)"
 "${PSQL[@]}" -d "${TARGET_DB}" -c "SELECT timescaledb_post_restore();"
 log "restore into '${TARGET_DB}' complete — verify row counts before cutover"
