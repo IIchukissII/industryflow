@@ -18,9 +18,15 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
     v_schema_name TEXT;
+    -- Per-tenant read-only principal (ADR-0011 dec 3, ADR-0012 dec 4). NOLOGIN: it is
+    -- never connected to directly; the notebook SQL proxy assumes it via SET ROLE, so no
+    -- password exists to place in an untrusted kernel. Its single-schema grants make a
+    -- cross-tenant query fail at the GRANT level rather than rely on search_path discipline.
+    v_reader_role TEXT;
 BEGIN
     -- Generate schema name
     v_schema_name := 'tenant_' || REPLACE(p_company_id::TEXT, '-', '_');
+    v_reader_role := 'tenant_reader_' || REPLACE(p_company_id::TEXT, '-', '_');
     
     -- Check if schema already exists
     IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = v_schema_name) THEN
@@ -57,7 +63,20 @@ BEGIN
     EXECUTE format('GRANT USAGE ON ALL SEQUENCES IN SCHEMA %I TO spark_streaming_user', v_schema_name);
     EXECUTE format('GRANT USAGE ON ALL SEQUENCES IN SCHEMA %I TO alert_service_user', v_schema_name);
     EXECUTE format('GRANT USAGE ON ALL SEQUENCES IN SCHEMA %I TO ml_service_user', v_schema_name);
-    
+
+    -- Per-tenant read-only role (notebook data boundary). Read-only and scoped to this one
+    -- schema: USAGE here, SELECT on current and future tables, and nothing in any other
+    -- tenant. No INSERT/UPDATE/DELETE and no sequence access. TimescaleDB propagates the
+    -- table SELECT to the hypertables' chunks automatically. There is no CREATE ROLE IF NOT
+    -- EXISTS, so guard on pg_roles to stay idempotent.
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_reader_role) THEN
+        EXECUTE format('CREATE ROLE %I NOLOGIN', v_reader_role);
+    END IF;
+    EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', v_schema_name, v_reader_role);
+    EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO %I', v_schema_name, v_reader_role);
+    -- Future tables added to this schema by the creating role are granted SELECT too.
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT SELECT ON TABLES TO %I', v_schema_name, v_reader_role);
+
     -- Update companies table with schema name
     UPDATE public.companies 
     SET schema_name = v_schema_name 
@@ -69,6 +88,7 @@ BEGIN
     RAISE NOTICE '  - Alert rules and alerts';
     RAISE NOTICE '  - ML models and predictions';
     RAISE NOTICE '  - Feature engineering configurations';
+    RAISE NOTICE '  - Read-only role % (NOLOGIN, single-schema)', v_reader_role;
     
     RETURN v_schema_name;
 END;

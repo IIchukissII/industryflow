@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Test-only dependencies for the TimescaleDB isolation tests.
+# Install with: pip install -r requirements.txt
+pytest==7.4.3
+psycopg2-binary==2.9.9
