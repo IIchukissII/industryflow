@@ -65,6 +65,8 @@ So ingestion authentication is really **two different trust domains wearing one 
 
 8. **The JWT ingestion path is retired for devices but removed only after producers are migrated.** Until the reference producer and any real gateways present certificates, the JWT ingestion path may remain accepted as a temporary, explicitly-labelled transition mechanism; it is removed once producers are on mTLS. This transition window is the only period in which both mechanisms accept ingestion, and it is a migration aid, not the end state.
 
+   > **Transition closed (2026-06-27).** The reference producer now presents a client certificate (decision 7), so the JWT ingestion path and its database lookup have been removed: `get_ingestion_identity` accepts only a verified client certificate. As a consequence ingestion no longer holds a database role at all — it is stateless, authenticates by mTLS, and produces only to Kafka. The `ingestion_service_user` role, its `pg_hba` entry, and its per-tenant grants are removed, and a Kubernetes egress NetworkPolicy restricts the ingestion pod to Kafka + DNS (defense in depth against the shared-Secret credentials). The API's JWT trust domain (ADR-0004) is unaffected.
+
 ## Alternatives considered
 
 **A. Keep JWT for ingestion (status quo).** *Rejected:* it is a replayable bearer credential ill-suited to unattended field devices, it is the source of the committed-secret footgun, and it derives the tenant from untrusted input spliced into SQL (X1/X2). None of these are fixable while the credential remains an unbound bearer token.
@@ -92,7 +94,7 @@ So ingestion authentication is really **two different trust domains wearing one 
 - IndustryFlow must run and operate a certificate authority — issuance, provisioning onto devices, rotation, and revocation — which is real operational burden that did not exist under JWT. The bulk of it is deferred to the PKI ADR, but the burden is incurred by this decision.
 - The ingestion service now trusts an identity header from the terminating proxy; if the service is reachable off the proxy path, that header is spoofable. The deployment must enforce that the ingestion service is reachable only via the proxy (decision 3) — a network-isolation requirement that becomes a standing operational invariant.
 - Local development and testing get more complex: a dev CA, dev certificates, and the terminating proxy must be present to exercise the real ingestion path.
-- During the transition window (decision 8) two ingestion auth mechanisms are accepted at once, which is a temporary increase in surface area that must be actively closed, not left open.
+- During the transition window (decision 8) two ingestion auth mechanisms were accepted at once, a temporary increase in surface area. This window is now **closed** (see decision 8): ingestion accepts only mTLS and holds no database role.
 
 ## Deferred decisions
 

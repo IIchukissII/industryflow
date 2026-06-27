@@ -24,4 +24,77 @@ spec:
       ports:
         - protocol: TCP
           port: {{ (index .Values.apps "ingestion-service").port }}
+---
+# Least privilege (ADR-0002): ingestion is mTLS-only and stateless. Its only egress is to
+# Kafka (produce) and DNS — it must NOT be able to reach TimescaleDB or Redis, even though
+# the shared Secret hands every pod the DB credentials.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "industryflow.fullname" . }}-ingestion-egress
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingestion-service
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution.
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kafka brokers only.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kafka
+      ports:
+        - protocol: TCP
+          port: {{ .Values.infra.kafka.port }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled (index .Values.apps "api-gateway").enabled }}
+---
+# Least privilege: the API gateway is a read path over TimescaleDB + Redis. It does not
+# produce or consume Kafka, so it must NOT be able to reach the message bus.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "industryflow.fullname" . }}-api-gateway-egress
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution.
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # TimescaleDB.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: timescaledb
+      ports:
+        - protocol: TCP
+          port: {{ .Values.infra.timescaledb.port }}
+    # Redis.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: {{ .Values.infra.redis.port }}
 {{- end }}
