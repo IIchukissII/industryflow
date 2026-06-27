@@ -5,9 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Architecture
 
-Lean design overviews per subsystem — the *what* and *how*. The **decisions and rationale**
-live in the [ADRs](../../ADR/); the **code and SQL init scripts are authoritative for
-behaviour**.
+Lean design overviews per subsystem; see the [ADRs](../../ADR/) for the decisions behind them.
 
 | Document | Subsystem |
 |----------|-----------|
