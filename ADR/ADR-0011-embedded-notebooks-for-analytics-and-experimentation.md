@@ -11,6 +11,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0003 (tenant→schema resolution), ADR-0004 (API authentication, sessions and transport), ADR-0009 (Kubernetes deployment and packaging)
+- **Refined by:** ADR-0018 (spawner portability — decision 1's "per-user pod spawner" is realized as KubeSpawner on Kubernetes and DockerSpawner on Compose, so the per-user environment is a *pod or a container*; the isolation properties here are unchanged and binding under both)
 - **Related:** ADR-0002 (least-privilege, network-boundary posture for an untrusted-input service)
 
 ## Context and problem
