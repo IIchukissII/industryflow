@@ -80,7 +80,13 @@ Production deployments run images by **immutable digest**, not mutable tags:
 ## Before production (also printed in NOTES.txt)
 
 1. **Secrets** — replace the placeholder `secrets.data` with a real backend (SealedSecrets/Vault/CSI)
-   or `secrets.create=false` + `secrets.existingSecret`. Never commit real values.
+   or `secrets.create=false` + `secrets.existingSecret`. Never commit real values. The chart
+   **fails closed** if any value is still `CHANGE_ME` (`secrets.failOnPlaceholders`, default true;
+   CI/dev renders set it false). Each value is the single source: the chart renders a **scoped
+   Secret per workload** (only the keys that workload needs, e.g. `<release>-api-gateway-secrets`),
+   so no pod receives the whole bundle, and each service connects as its own least-privilege DB
+   role (`*_DB_USER` in config + `*_DB_PASSWORD` in its scoped Secret). With `existingSecret`, all
+   workloads reference that one Secret — scope it at your backend.
 2. **Images** — pin by digest (see *Image digest pinning* above): third-party in `values.yaml`,
    first-party via `scripts/pin-image-digests.sh > values-digests.yaml` + `-f`. Never ship `latest`.
 3. **TLS** — provide the `ingress.tls.secretName` certificate (ADR-0004 public cert).
