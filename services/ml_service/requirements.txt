@@ -25,7 +25,9 @@ seaborn==0.13.0
 mlflow==3.14.0
 
 # Model Monitoring
-evidently==0.4.11
+# 0.4.40 (latest 0.4.x) lifts the pydantic<2 cap that 0.4.11 carried, so it co-installs with
+# mlflow 3.x (pydantic>=2). Its numpy/pandas/scikit-learn floors are met by the pins above.
+evidently==0.4.40
 
 # Configuration
 pyyaml==6.0.1
