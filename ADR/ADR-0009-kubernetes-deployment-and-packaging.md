@@ -74,7 +74,6 @@ Moving to Kubernetes raises immediate questions the project has not decided: how
 - **Stateful operators (alternative E).** Whether and when to adopt Postgres/Kafka operators instead of StatefulSets.
 - **Autoscaling policy.** HPA metrics, thresholds, and which workloads scale.
 - **Secrets backend.** SealedSecrets vs Vault vs CSI driver for injecting the Secret's values.
-- **Image registry and CI.** Where images are built and published, and how the chart references digests (the review's "no pinned images" concern applies here too).
 - **Spark on Kubernetes.** Whether the Spark jobs stay as plain Deployments or move to native spark-on-k8s submission.
 
 ## Resolved since acceptance
@@ -90,6 +89,16 @@ The chart at acceptance realizes decisions that were placeholders in the first p
 - **NetworkPolicy (ADR-0002 decision 3).** A toggleable NetworkPolicy restricts
   `ingestion-service` ingress to the cluster TLS edge, so the verified-identity headers
   cannot be spoofed by another pod.
+- **Image registry and digest pinning.** Images are built, scanned (Trivy, gating on fixable
+  CRITICAL), and published to `ghcr.io/iichukissii` by `.github/workflows/images.yml`
+  (`:latest` + `:sha-<short>`). The chart references images by **immutable digest** in
+  production: third-party images (TimescaleDB, Kafka/ZooKeeper, Redis, MinIO, the notebook
+  proxy/nginx) are pinned as `name:tag@sha256:…` directly in `values.yaml`; first-party
+  `industryflow-*` images carry a per-image `digest:` (empty by default → the mutable
+  `image.tag` for dev) that, when set, wins over the tag via the `industryflow.image` helper.
+  Because first-party digests rotate per build, the production overlay is *generated*, not
+  hand-maintained: `scripts/pin-image-digests.sh <tag> > values-digests.yaml`, applied with
+  `-f`. This resolves the original "no pinned images" review concern.
 
 ## References
 

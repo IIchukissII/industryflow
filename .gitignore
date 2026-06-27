@@ -56,3 +56,6 @@ node_modules/
 
 # Internal review reports (public repo — keep out of source)
 REVIEW.md
+
+# Generated Helm image-digest overlay (build artifact; regenerate with scripts/pin-image-digests.sh)
+deploy/helm/industryflow/values-digests.yaml

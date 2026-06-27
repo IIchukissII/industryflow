@@ -96,7 +96,7 @@ spec:
       {{- end }}
       containers:
         - name: hub
-          image: "{{ .Values.image.registry }}/{{ .Values.notebookHub.hub.image }}:{{ .Values.image.tag }}"
+          image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.hub.image "tag" .Values.image.tag "digest" .Values.notebookHub.hub.digest) | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: hub

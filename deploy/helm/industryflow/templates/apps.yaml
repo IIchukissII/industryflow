@@ -30,7 +30,7 @@ spec:
       {{- end }}
       containers:
         - name: {{ $name }}
-          image: "{{ $root.Values.image.registry }}/{{ $app.image }}:{{ $root.Values.image.tag }}"
+          image: {{ include "industryflow.image" (dict "registry" $root.Values.image.registry "image" $app.image "tag" $root.Values.image.tag "digest" $app.digest) | quote }}
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
           envFrom:
             - configMapRef:

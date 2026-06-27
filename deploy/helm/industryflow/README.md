@@ -51,17 +51,38 @@ helm template if deploy/helm/industryflow
 helm lint deploy/helm/industryflow
 
 # Install (after providing real secrets + TLS cert)
+# Pin first-party images by digest: generate the overlay first, then apply it with -f.
+scripts/pin-image-digests.sh <tag> > deploy/helm/industryflow/values-digests.yaml
 helm install industryflow deploy/helm/industryflow \
   --namespace industryflow --create-namespace \
-  --set image.tag=<digest-or-version> \
+  -f deploy/helm/industryflow/values-digests.yaml \
   --set-file ...   # or use a secrets backend
 ```
+
+### Image digest pinning
+
+Production deployments run images by **immutable digest**, not mutable tags:
+
+- **Third-party** images (TimescaleDB, Kafka/ZooKeeper, Redis, MinIO, the notebook
+  proxy/nginx) are pinned as `name:tag@sha256:…` directly in `values.yaml`. Re-pin on upgrade.
+- **First-party** `industryflow-*` images carry a per-image `digest:` (`apps.<name>.digest`,
+  `infra.mlflow.digest`, `notebookHub.hub.digest`). Empty by default → the chart uses the
+  mutable `image.tag` (dev convenience); when set, the digest wins over the tag. Because these
+  digests rotate every build, generate the overlay rather than hand-editing:
+
+  ```bash
+  scripts/pin-image-digests.sh latest > deploy/helm/industryflow/values-digests.yaml
+  ```
+
+  The script resolves digests from GHCR via the registry API (`gh auth token` or `GITHUB_TOKEN`
+  for private packages); no docker/skopeo needed.
 
 ## Before production (also printed in NOTES.txt)
 
 1. **Secrets** — replace the placeholder `secrets.data` with a real backend (SealedSecrets/Vault/CSI)
    or `secrets.create=false` + `secrets.existingSecret`. Never commit real values.
-2. **Images** — pin `image.tag` by digest, not `latest`; publish images to `image.registry`.
+2. **Images** — pin by digest (see *Image digest pinning* above): third-party in `values.yaml`,
+   first-party via `scripts/pin-image-digests.sh > values-digests.yaml` + `-f`. Never ship `latest`.
 3. **TLS** — provide the `ingress.tls.secretName` certificate (ADR-0004 public cert).
 4. **DB init** — mount `infrastructure/timescaledb/init-scripts` via a ConfigMap once those scripts
    are fixed (the review found they abort on a fresh volume).
@@ -70,4 +91,4 @@ helm install industryflow deploy/helm/industryflow \
 ## Known follow-ups (ADR-0009 deferred)
 
 Monitoring stack chart · stateful operators (Postgres/Kafka) · HPA policies · secrets backend ·
-image registry/CI · Spark-on-k8s · NetworkPolicies · the mTLS device Ingress.
+Spark-on-k8s.

@@ -11,7 +11,11 @@ image:
   # Registry/repo prefix for the application images. Override per environment.
   registry: ghcr.io/iichukissii
   pullPolicy: IfNotPresent
-  # Default tag for all app images. Pin by digest in production (ADR-0009 deferred).
+  # Default tag for all first-party app images (dev/default path). In production, pin each
+  # image by immutable digest instead: set the per-image `digest:` (apps.<name>.digest,
+  # infra.mlflow.digest, notebookHub.hub.digest) — a digest, when present, wins over this tag.
+  # Generate a ready-made overlay with scripts/pin-image-digests.sh > values-digests.yaml,
+  # then `-f values-digests.yaml` at install (ADR-0009).
   tag: "latest"
 imagePullSecrets: []
 
@@ -23,6 +27,8 @@ apps:
   api-gateway:
     enabled: true
     image: industryflow-api-gateway
+    # Immutable digest (sha256:…); when set it overrides image.tag. See values-digests.yaml.
+    digest: ""
     replicas: 2
     port: 8000
     probe: { path: /health, port: 8000 }
@@ -34,6 +40,7 @@ apps:
   ml-service-api:
     enabled: true
     image: industryflow-ml-service-api
+    digest: ""
     replicas: 1
     port: 8002
     probe: { path: /health, port: 8002 }
@@ -44,6 +51,7 @@ apps:
   alert-service-api:
     enabled: true
     image: industryflow-alert-service-api
+    digest: ""
     replicas: 1
     port: 8001
     probe: { path: /health, port: 8001 }
@@ -55,6 +63,7 @@ apps:
     # Kafka consumer worker — no HTTP port/Service.
     enabled: true
     image: industryflow-alert-service-detector
+    digest: ""
     replicas: 1
     port: null
     probe: null
@@ -65,6 +74,7 @@ apps:
   ingestion-service:
     enabled: true
     image: industryflow-ingestion-service
+    digest: ""
     replicas: 2
     port: 8003
     probe: { path: /health, port: 8003 }
@@ -76,6 +86,7 @@ apps:
     # Long-running PySpark job (Kafka -> TimescaleDB). No HTTP port.
     enabled: true
     image: industryflow-spark-streaming
+    digest: ""
     replicas: 1
     port: null
     probe: null
@@ -86,6 +97,7 @@ apps:
   spark-aggregations:
     enabled: true
     image: industryflow-spark-aggregations
+    digest: ""
     replicas: 1
     port: null
     probe: null
@@ -97,6 +109,7 @@ apps:
     # The SPA served behind the TLS edge (ADR-0004/0009 dec 5). Probes hit /healthz.
     enabled: true
     image: industryflow-frontend
+    digest: ""
     replicas: 2
     port: 80
     probe: { path: /healthz, port: 80 }
@@ -113,7 +126,8 @@ apps:
 infra:
   timescaledb:
     inCluster: true
-    image: timescale/timescaledb:latest-pg15
+    # Pinned by immutable digest (the tag is kept for readability only). Re-pin on upgrade.
+    image: timescale/timescaledb:latest-pg15@sha256:d621009854b8519a1bf63f81eebc979c1acc06a16843086f244edd44dcce6eea
     port: 5432
     storage: 20Gi
     database: industryflow
@@ -124,13 +138,13 @@ infra:
 
   zookeeper:
     inCluster: true
-    image: confluentinc/cp-zookeeper:7.5.0
+    image: confluentinc/cp-zookeeper:7.5.0@sha256:02f6c042bb9a7844382fc4cedc513a44585d8a5acae873fb9e510e3ca9dcabc6
     port: 2181
     storage: 2Gi
 
   kafka:
     inCluster: true
-    image: confluentinc/cp-kafka:7.5.0
+    image: confluentinc/cp-kafka:7.5.0@sha256:fbbb6fa11b258a88b83f54d4f0bddfcffbf2279f99d66a843486e3da7bdfbf41
     port: 9092
     storage: 20Gi
     external: { bootstrap: "" }
@@ -140,14 +154,15 @@ infra:
 
   redis:
     inCluster: true
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     port: 6379
     storage: 2Gi
     external: { host: "", port: 6379 }
 
   minio:
     inCluster: true
-    image: minio/minio:latest
+    # Pinned by immutable digest (minio:latest is mutable; the tag is kept for readability).
+    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     apiPort: 9000
     consolePort: 9001
     storage: 20Gi
@@ -157,6 +172,7 @@ infra:
     # Stateless front to TimescaleDB + MinIO; runs as a Deployment.
     inCluster: true
     image: industryflow-mlflow
+    digest: ""
     port: 5000
     external: { trackingUri: "" }
 
@@ -238,18 +254,19 @@ notebookHub:
   # The hub (JupyterHub, image built from services/notebook_hub/Dockerfile).
   hub:
     image: industryflow-notebook-hub
+    digest: ""
     port: 8081
     resources:
       requests: { cpu: 100m, memory: 256Mi }
       limits: { cpu: 500m, memory: 512Mi }
   # The configurable HTTP proxy the hub manages (routes /hub and /user/* to servers).
   proxy:
-    image: jupyterhub/configurable-http-proxy:4.6.3
+    image: jupyterhub/configurable-http-proxy:4.6.3@sha256:3e93aaee24350050dca97bfe9a05eab8bd26781d08cd9682268a38053643d709
     port: 8000
   # SSO reverse proxy (ADR-0014): validates the platform session against api-gateway and
   # forwards the verified identity to the hub, overwriting any client-supplied identity.
   ssoProxy:
-    image: nginx:1.27-alpine
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     port: 8080
     # api-gateway endpoint that validates the session cookie and returns the verified identity
     # in X-IF-* response headers (implemented; ADR-0014 handoff contract).

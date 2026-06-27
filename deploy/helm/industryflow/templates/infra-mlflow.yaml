@@ -39,7 +39,7 @@ spec:
     spec:
       containers:
         - name: mlflow
-          image: "{{ .Values.image.registry }}/{{ .Values.infra.mlflow.image }}:{{ .Values.image.tag }}"
+          image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.infra.mlflow.image "tag" .Values.image.tag "digest" .Values.infra.mlflow.digest) | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
