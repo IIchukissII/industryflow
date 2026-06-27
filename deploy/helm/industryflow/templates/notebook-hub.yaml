@@ -102,6 +102,13 @@ spec:
             - name: hub
               containerPort: {{ .Values.notebookHub.hub.port }}
           env:
+            # Spawner profile (ADR-0018): Kubernetes runs KubeSpawner. The image also ships
+            # DockerSpawner for the compose profile; this selects KubeSpawner here.
+            - name: NOTEBOOK_SPAWNER
+              value: "kube"
+            # Capability store (ADR-0015) — the same Redis the rest of the platform uses.
+            - name: REDIS_URL
+              value: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
             # chp lives in a sibling container/service; the hub configures it over its API.
             - name: CONFIGPROXY_AUTH_TOKEN
               valueFrom:

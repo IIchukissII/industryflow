@@ -1,0 +1,6 @@
+# Build-context hygiene for the single-user notebook image (Dockerfile.singleuser).
+.ruff_cache
+.pytest_cache
+__pycache__
+*.pyc
+tests
