@@ -18,6 +18,10 @@ COPY api/repository.py .
 COPY api/api.py .
 COPY api/routers/ ./routers/
 
+# Run as a non-root user (uid 10001).
+RUN useradd -u 10001 -r -s /usr/sbin/nologin appuser
+USER 10001
+
 # Expose API port
 EXPOSE 8001
 

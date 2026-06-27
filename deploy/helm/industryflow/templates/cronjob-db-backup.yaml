@@ -34,10 +34,26 @@ spec:
           imagePullSecrets:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            fsGroup: {{ .Values.securityContext.fsGroup }}
+            seccompProfile:
+              type: RuntimeDefault
+          {{- end }}
           containers:
             - name: db-backup
               image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.backup.image "tag" .Values.image.tag "digest" .Values.backup.digest) | quote }}
               imagePullPolicy: {{ .Values.image.pullPolicy }}
+              {{- if .Values.securityContext.enabled }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              {{- end }}
               env:
                 - name: PGHOST
                   value: {{ include "industryflow.dbHost" . | quote }}
@@ -79,4 +95,18 @@ spec:
               resources:
                 {{- toYaml . | nindent 16 }}
               {{- end }}
+              {{- if .Values.securityContext.enabled }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: home
+                  mountPath: /home/backup
+              {{- end }}
+          {{- if .Values.securityContext.enabled }}
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            - name: home
+              emptyDir: {}
+          {{- end }}
 {{- end }}
