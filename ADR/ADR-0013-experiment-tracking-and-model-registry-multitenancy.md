@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0013: Experiment-tracking and model-registry multi-tenancy
 
 - **ID:** ADR-0013
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-27
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
