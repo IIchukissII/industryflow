@@ -196,13 +196,22 @@ def create_aggregation_stream(spark, window_duration, watermark_delay, table_nam
 
 
 if __name__ == "__main__":
-    spark = SparkSession.builder \
+    builder = SparkSession.builder \
         .appName("IndustryFlow-Aggregations") \
         .master(os.getenv("SPARK_MASTER", "local[*]")) \
         .config("spark.jars.packages",
                 "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
                 "org.postgresql:postgresql:42.6.0") \
-        .getOrCreate()
+        .config("spark.sql.shuffle.partitions",
+                os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200"))
+    # Resource budget on a shared standalone cluster: cap this app's cores so streaming and
+    # aggregations coexist on one worker (the deployment sets the split, so it scales). Unset
+    # = Spark default (grab all cores). NOTE: spark.sql.shuffle.partitions is pinned into a
+    # streaming query's checkpoint — changing it requires a fresh checkpoint.
+    cores_max = os.getenv("SPARK_CORES_MAX")
+    if cores_max:
+        builder = builder.config("spark.cores.max", cores_max)
+    spark = builder.getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
 
