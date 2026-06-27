@@ -33,10 +33,18 @@ platform session via a trusted proxy and never re-verifies the token or runs its
 spawner's decision logic (`services/notebook_hub/identity.py`) is implemented and unit-tested:
 it reads the verified identity, chooses the spawn profile from the role (read-only analytics vs
 authoring), and binds the pod to its tenant with identity-only environment — no data credential
-(ADR-0012 dec 5). A reference `jupyterhub_config.py` wires this into JupyterHub/KubeSpawner, and
-the single-user pod isolation NetworkPolicy (egress to the data API + DNS only) ships in the
-Helm chart behind `notebookHub.enabled`. Still pending: the hub Deployment/proxy runtime, the
-SSO reverse-proxy handoff, and the per-session capability minting.
+(ADR-0012 dec 5). A reference `jupyterhub_config.py` wires this into JupyterHub/KubeSpawner.
+
+The hub **runtime manifests** are drafted in the Helm chart behind `notebookHub.enabled`
+(default off): the hub Deployment + RBAC, the configurable-http-proxy, the **SSO reverse proxy**
+that performs the ADR-0014 handoff (validate the session against api-gateway, forward the
+verified `X-IF-*` identity, overwrite any client-supplied one), the notebooks Ingress, and the
+single-user pod egress NetworkPolicy (data API + DNS only). These **render and lint** but are
+**not yet cluster-validated**.
+
+Still pending: the **api-gateway session-verify endpoint** the SSO proxy calls (the ADR-0014
+handoff contract — returns the verified identity in `X-IF-*` headers), running the hub on a
+cluster, the per-session capability minting + SQL proxy (ADR-0012), and the notebook images.
 
 ## What exists today (phase 1)
 
