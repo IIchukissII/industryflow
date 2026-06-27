@@ -106,12 +106,12 @@ spec:
             - name: CONFIGPROXY_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "industryflow.secretName" . }}
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-hub") }}
                   key: CONFIGPROXY_AUTH_TOKEN
             - name: JUPYTERHUB_COOKIE_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "industryflow.secretName" . }}
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-hub") }}
                   key: JUPYTERHUB_COOKIE_SECRET
             - name: CONFIGPROXY_API_URL
               value: "http://{{ $proxySvc }}:8001"
@@ -171,7 +171,7 @@ spec:
             - name: CONFIGPROXY_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "industryflow.secretName" . }}
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-hub") }}
                   key: CONFIGPROXY_AUTH_TOKEN
           ports:
             - name: public

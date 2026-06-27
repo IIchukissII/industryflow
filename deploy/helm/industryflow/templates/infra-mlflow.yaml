@@ -48,7 +48,19 @@ spec:
             - configMapRef:
                 name: {{ include "industryflow.fullname" . }}-config
             - secretRef:
-                name: {{ include "industryflow.secretName" . }}
+                name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "mlflow") }}
+          env:
+            # MLflow stores artifacts in MinIO over the S3 API — boto reads AWS_* names.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "mlflow") }}
+                  key: MINIO_ACCESS_KEY
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "mlflow") }}
+                  key: MINIO_SECRET_KEY
           readinessProbe:
             httpGet:
               path: /health

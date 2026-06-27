@@ -53,12 +53,12 @@ spec:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "industryflow.secretName" . }}
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "minio") }}
                   key: MINIO_ACCESS_KEY
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "industryflow.secretName" . }}
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "minio") }}
                   key: MINIO_SECRET_KEY
           readinessProbe:
             httpGet:

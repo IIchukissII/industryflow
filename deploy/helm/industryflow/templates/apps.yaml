@@ -41,8 +41,24 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "industryflow.fullname" $root }}-config
+            {{- if $app.secretKeys }}
             - secretRef:
-                name: {{ include "industryflow.secretName" $root }}
+                name: {{ include "industryflow.workloadSecretName" (dict "ctx" $root "workload" $name) }}
+            {{- end }}
+          {{- if has "MINIO_ACCESS_KEY" ($app.secretKeys | default list) }}
+          {{- /* MinIO creds are consumed as S3/AWS creds (e.g. the MLflow client loading model artifacts). */}}
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" $root "workload" $name) }}
+                  key: MINIO_ACCESS_KEY
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" $root "workload" $name) }}
+                  key: MINIO_SECRET_KEY
+          {{- end }}
           {{- if $app.port }}
           ports:
             - name: http
