@@ -17,14 +17,14 @@ from config import normalize_company_id_to_schema
 try:
     from .models import (
         AlertRule, AlertRuleCreate, AlertRuleUpdate,
-        MLModel, MLModelCreate,
+        MLModelCreate,
         Alert, AlertCreate,
         DetectionType, DetectionModeSwitch
     )
 except ImportError:
     from models import (
         AlertRule, AlertRuleCreate, AlertRuleUpdate,
-        MLModel, MLModelCreate,
+        MLModelCreate,
         Alert, AlertCreate,
         DetectionType, DetectionModeSwitch
     )
@@ -239,7 +239,7 @@ class AlertRuleRepository:
         if not update_fields:
             return await self.get_rule_by_id(rule_id, company_id)
 
-        update_fields.append(f"updated_at = NOW()")
+        update_fields.append("updated_at = NOW()")
         params.append(rule_id)
 
         query = f"""
@@ -281,7 +281,7 @@ class AlertRuleRepository:
         """Switch detection mode for a rule"""
         schema_name = normalize_company_id_to_schema(company_id)
         
-        update_fields = [f"detection_type = $1"]
+        update_fields = ["detection_type = $1"]
         params = [mode_switch.detection_type.value]
         param_count = 2
 

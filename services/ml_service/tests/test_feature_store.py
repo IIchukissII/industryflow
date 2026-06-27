@@ -8,7 +8,6 @@ Tests both in-memory and Redis backends
 """
 import pytest
 import pytest_asyncio
-import asyncio
 from datetime import datetime, timezone, timedelta
 import sys
 import os

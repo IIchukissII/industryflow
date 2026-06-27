@@ -12,7 +12,6 @@ from typing import List, Optional, Dict, Any
 import logging
 import mlflow
 import mlflow.pyfunc
-import numpy as np
 import os
 import hmac
 import uuid
@@ -297,45 +296,13 @@ async def batch_predict(
     if not mlflow_run_id:
         raise HTTPException(status_code=400, detail="Model has no MLflow run_id")
 
-    try:
-        # TODO: Phase 2-3 - Implement flexible feature engineering for batch predictions
-        raise HTTPException(
-            status_code=501,
-            detail="Batch inference not yet implemented. "
-                   "Feature engineering system is being redesigned for flexibility. "
-                   "Phase 1 (Feature Store) is complete. "
-                   "Phase 2-3 will implement configuration-driven feature engineering."
-        )
-
-        # Batch prediction
-        predictions = model.predict(batch_input)
-
-        # Process predictions
-        results = []
-        for i, pred in enumerate(predictions):
-            if hasattr(model, 'predict_proba'):
-                proba = model.predict_proba(batch_input)
-                anomaly_score = float(proba[i][1]) if proba.shape[1] > 1 else float(proba[i][0])
-            elif isinstance(pred, (int, np.integer)):
-                anomaly_score = 1.0 if pred == -1 else 0.0
-            else:
-                anomaly_score = float(pred)
-
-            anomaly_score = max(0.0, min(1.0, anomaly_score))
-
-            results.append({
-                "index": i,
-                "prediction": anomaly_score,
-                "is_anomaly": anomaly_score >= threshold
-            })
-
-        return {
-            "model_id": model_id,
-            "total": len(results),
-            "threshold": threshold,
-            "results": results
-        }
-
-    except Exception as e:
-        logger.error(f"Batch inference failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Batch inference failed: {str(e)}")
+    # TODO: Phase 2-3 — flexible feature engineering for batch predictions. Until then this
+    # endpoint is explicitly unimplemented. (The previous stub had unreachable prediction code
+    # after this raise, and an `except Exception` that would have swallowed this 501 into a 500.)
+    raise HTTPException(
+        status_code=501,
+        detail="Batch inference not yet implemented. "
+               "Feature engineering system is being redesigned for flexibility. "
+               "Phase 1 (Feature Store) is complete. "
+               "Phase 2-3 will implement configuration-driven feature engineering."
+    )

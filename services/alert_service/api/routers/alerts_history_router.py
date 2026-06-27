@@ -8,7 +8,6 @@ Schema-per-tenant architecture with JWT-based company_id
 """
 from fastapi import APIRouter, HTTPException, Depends, Request, Query
 from typing import List, Optional
-from datetime import datetime
 import asyncpg
 import sys
 from pathlib import Path
