@@ -394,7 +394,10 @@ services:
     # Ingestion is stateless: mTLS-authenticated, Kafka-only. No database role (ADR-0002).
     depends_on:
       kafka:
-        condition: service_started
+        # Wait for Kafka to be READY, not just started — otherwise the producer can hit a
+        # not-yet-ready broker on a recreate. (The producer also retries bootstrap as a
+        # belt-and-suspenders for k8s, where there is no depends_on.)
+        condition: service_healthy
     command: uvicorn main:app --host 0.0.0.0 --port 8003 --workers 2
     networks:
       - industryflow-network
