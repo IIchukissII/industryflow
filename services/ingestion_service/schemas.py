@@ -13,7 +13,7 @@ import uuid
 class SensorDataInput(BaseModel):
     """
     Input schema for authenticated sensor data ingestion.
-    company_id is NOT included here - it's forced from JWT token.
+    company_id is NOT included here - it's read from the verified device certificate (ADR-0002).
     """
     timestamp: datetime = Field(..., description="Sensor reading timestamp")
     sensor_id: uuid.UUID = Field(..., description="Sensor UUID")
