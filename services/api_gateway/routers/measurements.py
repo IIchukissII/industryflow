@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import List, Optional
 from uuid import UUID
+from datetime import datetime
 import logging
 
 from dependencies import get_db_with_tenant
@@ -22,16 +23,22 @@ async def get_measurements(
         current_user: User = Depends(get_current_user_with_company),
         sensor_id: Optional[UUID] = Query(None, description="Filter by sensor ID"),
         equipment_id: Optional[str] = Query(None, description="Filter by equipment ID"),
+        start: Optional[datetime] = Query(None, description="Only measurements at/after this time (inclusive)"),
+        end: Optional[datetime] = Query(None, description="Only measurements at/before this time (inclusive)"),
+        order: str = Query("desc", pattern="^(asc|desc)$", description="Time order: 'asc' for analytics, 'desc' (default) for newest-first"),
         limit: int = Query(100, ge=1, le=1000, description="Maximum number of results"),
         db: AsyncSession = Depends(get_db_with_tenant)
 ):
     """
     Get raw sensor measurements with optional filtering.
     Automatically routed to user's tenant schema.
-    Returns the most recent measurements ordered by timestamp (newest first).
+
+    Defaults to the most recent measurements (newest first). Pass start/end to pull a time
+    window and order=asc for time-series/analytics consumption. The per-request cap is 1000;
+    for bulk historical pulls use /api/training-data/equipment/{id} (JSON) or its /stream (CSV).
     """
     query = """
-        SELECT time, sensor_id, equipment_id, site_id, 
+        SELECT time, sensor_id, equipment_id, site_id,
                value, unit, quality_code
         FROM sensor_measurements
         WHERE 1=1
@@ -46,7 +53,16 @@ async def get_measurements(
         query += " AND equipment_id = :equipment_id"
         params["equipment_id"] = equipment_id
 
-    query += " ORDER BY time DESC LIMIT :limit"
+    if start:
+        query += " AND time >= :start"
+        params["start"] = start
+
+    if end:
+        query += " AND time <= :end"
+        params["end"] = end
+
+    # order is validated by the route pattern, so this interpolation cannot carry injection.
+    query += f" ORDER BY time {'ASC' if order == 'asc' else 'DESC'} LIMIT :limit"
 
     result = await db.execute(text(query), params)
     rows = result.fetchall()
@@ -111,21 +127,35 @@ async def get_latest_measurements(
 async def get_measurements_by_sensor(
         sensor_id: UUID,
         current_user: User = Depends(get_current_user_with_company),
+        start: Optional[datetime] = Query(None, description="Only measurements at/after this time (inclusive)"),
+        end: Optional[datetime] = Query(None, description="Only measurements at/before this time (inclusive)"),
+        order: str = Query("desc", pattern="^(asc|desc)$", description="Time order: 'asc' for analytics, 'desc' (default) for newest-first"),
         limit: int = Query(100, ge=1, le=1000),
         db: AsyncSession = Depends(get_db_with_tenant)
 ):
-    """Get measurements for a specific sensor"""
+    """Get measurements for a specific sensor, optionally within a [start, end] window."""
     query = """
-        SELECT time, sensor_id, equipment_id, site_id, 
+        SELECT time, sensor_id, equipment_id, site_id,
                value, unit, quality_code
         FROM sensor_measurements
         WHERE sensor_id = :sensor_id
-        ORDER BY time DESC
-        LIMIT :limit
     """
+    params = {"sensor_id": sensor_id, "limit": limit}
+
+    if start:
+        query += " AND time >= :start"
+        params["start"] = start
+
+    if end:
+        query += " AND time <= :end"
+        params["end"] = end
+
+    # order is validated by the route pattern, so this interpolation cannot carry injection.
+    query += f" ORDER BY time {'ASC' if order == 'asc' else 'DESC'} LIMIT :limit"
+
     result = await db.execute(
-        text(query), 
-        {"sensor_id": sensor_id, "limit": limit}
+        text(query),
+        params
     )
     rows = result.fetchall()
     
