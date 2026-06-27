@@ -6,7 +6,7 @@ FROM python:3.11-slim
 
 # Install MLflow 2.8.1 and dependencies
 RUN pip install --no-cache-dir \
-    mlflow==2.8.1 \
+    mlflow==2.17.2 \
     psycopg2-binary==2.9.9 \
     boto3==1.28.0
 
