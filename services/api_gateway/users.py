@@ -10,7 +10,6 @@ from fastapi import Depends, Request
 from fastapi_users import BaseUserManager, UUIDIDMixin
 from fastapi_users import FastAPIUsers
 
-from schemas import UserRead, UserCreate, UserUpdate
 
 from models.user import User
 from database import get_user_db

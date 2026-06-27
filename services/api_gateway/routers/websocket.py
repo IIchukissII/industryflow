@@ -94,7 +94,7 @@ async def get_user_from_token(token: str) -> Optional[User]:
     Returns None if token is invalid or user not found.
     """
     try:
-        print(f"🔍 Decoding JWT token...")
+        print("🔍 Decoding JWT token...")
         # Decode JWT token
         payload = jwt.decode(token, SECRET, algorithms=["HS256"], audience="fastapi-users:auth")
         user_id: str = payload.get("sub")
@@ -105,7 +105,7 @@ async def get_user_from_token(token: str) -> Optional[User]:
             return None
             
         # Fetch user from database
-        print(f"🔍 Fetching user from database...")
+        print("🔍 Fetching user from database...")
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(User).where(User.id == user_id)
@@ -114,7 +114,7 @@ async def get_user_from_token(token: str) -> Optional[User]:
             if user:
                 print(f"✅ User found: {user.email}, company_id: {user.company_id}")
             else:
-                print(f"❌ User not found in database")
+                print("❌ User not found in database")
             return user
             
     except JWTError as e:
@@ -142,7 +142,7 @@ async def websocket_sensors(websocket: WebSocket, token: Optional[str] = None):
     
     user = await get_user_from_token(token)
     if not user or not user.company_id:
-        print(f"❌ WebSocket rejected: Invalid token or no company")
+        print("❌ WebSocket rejected: Invalid token or no company")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token or no company")
         return
     
@@ -235,5 +235,5 @@ async def websocket_equipment_sensors(
                 
     except WebSocketDisconnect:
         active_connections.pop(websocket, None)
-    except Exception as e:
+    except Exception:
         active_connections.pop(websocket, None)
