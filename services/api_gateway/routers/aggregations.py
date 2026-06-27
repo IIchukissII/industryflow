@@ -8,9 +8,7 @@ from sqlalchemy import text
 from typing import List, Optional
 from datetime import datetime
 
-from dependencies import get_db_with_tenant
-from dependencies import get_current_user_with_company
-from models.user import User
+from dependencies import get_tenant_db, resolve_tenant_context, TenantContext
 from models import SensorAggregation
 
 router = APIRouter(prefix="/api/aggregations", tags=["Aggregations"])
@@ -22,14 +20,14 @@ VALID_WINDOWS = ["1min", "5min", "1hour"]
 @router.get("/{window}", response_model=List[SensorAggregation])
 async def get_aggregations(
         window: str = Path(..., description="Aggregation window: 1min, 5min, or 1hour"),
-        current_user: User = Depends(get_current_user_with_company),
+        ctx: TenantContext = Depends(resolve_tenant_context),
         sensor_id: Optional[str] = Query(None, description="Filter by sensor ID"),
         equipment_id: Optional[str] = Query(None, description="Filter by equipment ID"),
         start: Optional[datetime] = Query(None, description="Only windows at/after this time (inclusive)"),
         end: Optional[datetime] = Query(None, description="Only windows at/before this time (inclusive)"),
         order: str = Query("desc", pattern="^(asc|desc)$", description="Time order: 'asc' for analytics, 'desc' (default) for newest-first"),
         limit: int = Query(100, ge=1, le=1000, description="Maximum number of results"),
-        db: AsyncSession = Depends(get_db_with_tenant)
+        db: AsyncSession = Depends(get_tenant_db)
 ):
     """
     Get aggregated sensor statistics for specified time window.
@@ -102,7 +100,7 @@ async def get_aggregations(
             sensor_id=row[1],
             equipment_id=row[2],
             site_id=row[3],
-            company_id=current_user.company_id,
+            company_id=ctx.company_id,
             avg_value=row[4],
             min_value=row[5],
             max_value=row[6],
@@ -118,9 +116,9 @@ async def get_aggregations(
 @router.get("/{window}/latest", response_model=List[SensorAggregation])
 async def get_latest_aggregations(
         window: str = Path(..., description="Aggregation window: 1min, 5min, or 1hour"),
-        current_user: User = Depends(get_current_user_with_company),
+        ctx: TenantContext = Depends(resolve_tenant_context),
         limit: int = Query(100, ge=1, le=1000, description="Maximum number of results per sensor"),
-        db: AsyncSession = Depends(get_db_with_tenant)
+        db: AsyncSession = Depends(get_tenant_db)
 ):
     """
     Get the latest aggregation for each sensor in the specified time window.
@@ -161,7 +159,7 @@ async def get_latest_aggregations(
             sensor_id=row[1],
             equipment_id=row[2],
             site_id=row[3],
-            company_id=current_user.company_id,
+            company_id=ctx.company_id,
             avg_value=row[4],
             min_value=row[5],
             max_value=row[6],
@@ -176,10 +174,10 @@ async def get_latest_aggregations(
 
 @router.get("/combined/{sensor_id}", response_model=dict)
 async def get_combined_aggregations(
-        current_user: User = Depends(get_current_user_with_company),
+        ctx: TenantContext = Depends(resolve_tenant_context),
         sensor_id: str = Path(..., description="Sensor ID to fetch all timeframes for"),
         limit: int = Query(100, ge=1, le=500, description="Maximum results per timeframe"),
-        db: AsyncSession = Depends(get_db_with_tenant)
+        db: AsyncSession = Depends(get_tenant_db)
 ):
     """
     Get aggregations for a specific sensor across all time windows.
