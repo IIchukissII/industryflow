@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # src/api/models/user.py
-import uuid
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from sqlalchemy import Column, String, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID

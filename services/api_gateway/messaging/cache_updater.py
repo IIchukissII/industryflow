@@ -4,8 +4,6 @@
 
 """Background task to update Redis cache with latest sensor data."""
 import asyncio
-from datetime import datetime
-from sqlalchemy import text
 from database import get_db_pool
 from messaging.redis_client import redis_client
 

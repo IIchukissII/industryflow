@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from uuid import UUID
 import logging
 from dependencies import get_db_with_tenant, get_current_user_with_company
 from models.user import User
