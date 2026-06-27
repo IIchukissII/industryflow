@@ -11,7 +11,7 @@ import signal
 import logging
 import sys
 
-from config import config
+from config import config, db_ssl_context
 from repository import RuleRepository, AlertRepository
 from rules_engine import RulesEngine
 from kafka_consumer import AlertKafkaConsumer
@@ -55,7 +55,8 @@ class AlertService:
             password=config.ALERT_SERVICE_DB_PASSWORD,
             min_size=5,
             max_size=10,
-            command_timeout=60
+            command_timeout=60,
+            ssl=db_ssl_context(),
         )
 
         # Initialize Feature Store
