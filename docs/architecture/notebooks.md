@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Embedded notebooks (analytics & experimentation)
 
-The *what* and *how*; the **why** is in the ADRs:
+Design overview; see the ADRs for the decisions:
 [ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (shape),
 [ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md) (credentials),
 [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (experiment tracking),

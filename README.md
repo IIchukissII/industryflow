@@ -72,7 +72,7 @@ Full index: **[docs/](docs/README.md)**.
 - **[API Reference](docs/api/README.md)** — per-service API documentation
 - **[Deployment](deploy/helm/industryflow/)** — the Helm chart for Kubernetes (ADR-0009)
 - **[Extensions](docs/operations/extensions.md)** — the plugin contracts for domain feature transforms & detectors (ADR-0008/0010)
-- **[Architecture Decision Records](ADR/)** — the *why* behind the platform's design
+- **[Architecture Decision Records](ADR/)** — the platform's design decisions (ADR-0000 … ADR-0016)
 
 Interactive API docs are served at `http://localhost:8000/docs` when the stack is running.
 
