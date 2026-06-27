@@ -4,5 +4,5 @@
 
 # Test-only dependencies. Minimal: importing the rules engine pulls in aiohttp; the rest of
 # the runtime stack (Kafka/snappy/asyncpg) isn't needed for the pure threshold-rule tests.
-aiohttp>=3.9.0
+aiohttp>=3.14.1
 pytest==7.4.3
