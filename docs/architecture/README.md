@@ -15,6 +15,7 @@ behaviour**.
 | [stream-processing.md](stream-processing.md) | Ingestion → Kafka → Spark → TimescaleDB, with at-least-once + idempotent writes |
 | [ml-and-features.md](ml-and-features.md) | Config-driven feature engineering, MLflow models, inference, the plugin registry |
 | [alerting.md](alerting.md) | Threshold & ML-based detection, dedup/cooldown, the detection worker |
+| [notebooks.md](notebooks.md) | Embedded analytics & experimentation: per-tenant read-only role, tenant-scoped data path (ADR-0011/0012/0013) |
 
 For the **plugin/extension** model that keeps these subsystems domain-generic, see
 [operations/extensions.md](../operations/extensions.md) (ADR-0008/0010).
