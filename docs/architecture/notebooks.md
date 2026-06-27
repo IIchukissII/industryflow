@@ -5,102 +5,86 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Embedded notebooks (analytics & experimentation)
 
-The *what* and *how*; the **why** is in [ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md)
-(shape), [ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md) (credentials), and
-[ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (experiment tracking).
+The *what* and *how*; the **why** is in the ADRs:
+[ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (shape),
+[ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md) (credentials),
+[ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (experiment tracking),
+[ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on.md) (SSO), and
+[ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability minting + the SQL proxy).
 
-The platform is growing in-product analytics (for operators) and experimentation (for data
-scientists) as per-user, isolated notebook environments embedded in the frontend. Because a
-kernel runs **user-authored code**, it is treated as untrusted: it holds no shared or ambient
-credential, and tenant isolation for it is enforced by database privilege, not by the
-trusted-code `search_path` discipline used elsewhere (ADR-0003).
+In-product analytics (for operators) and experimentation (for data scientists) are delivered as
+per-user, isolated notebook environments embedded in the frontend. Because a kernel runs
+**user-authored code**, it is treated as untrusted: it holds no shared or ambient credential and
+never a database password, and tenant isolation for it is enforced by **database privilege**, not
+by the trusted-code `search_path` discipline used elsewhere (ADR-0003).
+
+## How it fits together
+
+```
+browser ─▶ SSO proxy ──auth_request──▶ api-gateway GET /auth/verify   (validate session)
+   (logged-in)  │ forwards verified X-IF-* identity (overwrites client-supplied)
+                ▼
+          notebook hub ──spawns──▶ per-user pod (role-chosen profile, tenant-bound,
+                │ mints per-session capabilities                 network-restricted)
+                ▼
+   kernel holds opaque capability handles only ─▶ data API (X-IF-Capability, read-only)
+                                                └▶ SQL proxy (SET ROLE tenant_reader_<uuid>)
+```
+
+The kernel's only credentials are opaque, single-tenant, read-only, revocable capability
+handles minted by the hub at spawn (ADR-0012/0015) — never a session token, DB password, or
+object-store secret.
 
 ## Status
 
-Delivery is phased. **Phase 1 (the keystone) is in place**; the interactive surfaces are not
-yet built.
-
 | Phase | Scope | State |
 |-------|-------|-------|
-| 1 | Per-tenant read-only DB role + the tenant-scoped data path | **done** |
-| 2 | JupyterHub + per-user spawner + SSO from the session cookie | **in progress** |
+| 1 | Per-tenant read-only DB role + tenant-scoped data path | **done** (DB-proven in CI) |
+| 2 | Hub SSO + per-user spawner logic + runtime manifests | **built; runtime not cluster-validated** |
 | 3 | Operator read-only surface (rendered dashboards) | planned |
-| 4 | Author surface (JupyterLab) + the SQL proxy + per-session capability minting | planned |
+| 4 | Capability minting + the SQL access proxy | **logic built & tested; wire cluster-bound** |
 | 5 | Experiment-tracking gateway (ADR-0013) | planned |
 
-**Phase 2 so far:** the SSO decision is recorded (ADR-0014) — the hub authenticates from the
-platform session via a trusted proxy and never re-verifies the token or runs its own login. The
-spawner's decision logic (`services/notebook_hub/identity.py`) is implemented and unit-tested:
-it reads the verified identity, chooses the spawn profile from the role (read-only analytics vs
-authoring), and binds the pod to its tenant with identity-only environment — no data credential
-(ADR-0012 dec 5). A reference `jupyterhub_config.py` wires this into JupyterHub/KubeSpawner.
+The design is decision-complete (ADR-0011→0015). Every cluster-independent piece is built and
+covered by tests; what remains needs a running cluster to validate.
 
-The hub **runtime manifests** are drafted in the Helm chart behind `notebookHub.enabled`
-(default off): the hub Deployment + RBAC, the configurable-http-proxy, the **SSO reverse proxy**
-that performs the ADR-0014 handoff (validate the session against api-gateway, forward the
-verified `X-IF-*` identity, overwrite any client-supplied one), the notebooks Ingress, and the
-single-user pod egress NetworkPolicy (data API + DNS only). These **render and lint** but are
-**not yet cluster-validated**.
+## Built and tested in-process
 
-The **api-gateway session-verify endpoint** the SSO proxy calls is implemented at
-`GET /auth/verify` (ADR-0014 handoff contract): it validates the platform session with the one
-existing verification and returns the verified identity in `X-IF-*` headers; a request without a
-valid session or tenant is rejected, which the proxy treats as "deny".
+- **Per-tenant read-only role.** `create_tenant_schema()` provisions a `NOLOGIN`,
+  read-only, single-schema `tenant_reader_<uuid>` (USAGE + SELECT on current and future tables;
+  TimescaleDB propagates SELECT to hypertable chunks). A cross-tenant query as this role **fails
+  at the GRANT level**. Existing tenants are backfilled by
+  `infrastructure/timescaledb/init-scripts/09-tenant-reader-roles-migration.sql`, and the
+  boundary is **proven against a real database** by `test_tenant_reader_isolation.py` in the
+  `db-tenant-isolation` CI workflow.
+- **Tenant-scoped data API** (`api_gateway`). `GET /api/measurements` (+ `/{sensor_id}`),
+  `GET /api/aggregations/{window}` (with `start`/`end`/`order`, capped at 1000 rows), and
+  `GET /api/training-data/equipment/{id}` (+ `/stream`, bulk DataFrame pulls). Each resolves
+  **either** the platform session **or** an `X-IF-Capability` handle to the caller's tenant; a
+  capability request runs **read-only**.
+- **SSO handoff.** `GET /auth/verify` validates the session with the one existing verification
+  and returns the identity in `X-IF-*` headers (ADR-0014); the SSO reverse proxy consumes it.
+- **Spawner logic** (`services/notebook_hub/identity.py`): parse the verified identity, choose
+  the profile from the role, bind the pod to its tenant with identity-only environment.
+- **Capability mint/resolve/revoke** (`services/notebook_hub/capabilities.py` + the
+  verifier-side `capability_auth.py` in api_gateway and `binding.py` in the SQL proxy): opaque
+  handles backed by a short-lived store entry, single-tenant, read-only, audience-bound
+  (API vs SQL, not interchangeable), revoked by deleting the entry.
+- **SQL proxy policy + orchestration** (`services/notebook_sql_proxy`): resolve an SQL handle →
+  tenant, `SET ROLE` into the reader role, relay; a denied handle opens no backend.
+- **Client** (`clients/python/industryflow`): loads tenant data into pandas DataFrames, sending
+  the handle in `X-IF-Capability`; holds no DB/object-store credential.
 
-The **capability minting logic** (ADR-0015) is implemented and unit-tested
-(`services/notebook_hub/capabilities.py`): a capability is an opaque handle backed by a
-short-lived store entry, minted per session by the spawner, bound to one tenant + read-only +
-one audience (API or SQL), and revoked by deleting its entry. The spawner injects the handles
-as the kernel's only data credentials (API capability for every profile; SQL capability for
-authoring), never a database password. The Redis-backed store adapter is reference-only (not
-integration-tested).
+## Cluster-bound (not yet validated)
 
-The **data API now accepts API capabilities** (ADR-0015): its read endpoints
-(`/api/measurements`, `/api/aggregations`, `/api/training-data`) resolve either the platform
-session or an `X-IF-Capability` handle to the caller's tenant, and a capability-sourced request
-runs **read-only** (a notebook cannot write through the data API even though the gateway's own
-role can). Resolution + scoping are unit-tested; the client sends the handle in `X-IF-Capability`.
+- The **hub runtime** in the Helm chart behind `notebookHub.enabled` (hub + RBAC, the
+  configurable-http-proxy, the SSO reverse proxy, the single-user egress NetworkPolicy, the
+  Ingress) — these **render and lint** in CI but have not run on a cluster.
+- The **SQL proxy's Postgres-wire backend** (read the handle from the startup message, hold the
+  privileged principal, relay bytes).
+- The **JupyterHub config wiring**, an end-to-end spawn, and the **notebook images**.
 
-Still pending (cluster-bound): running the hub end-to-end, the **SQL access proxy** that
-resolves an SQL capability and `SET ROLE`s into the per-tenant reader role (ADR-0015 dec 5-6),
-and the notebook images.
+## Deferred to their own work
 
-## What exists today (phase 1)
-
-**Per-tenant read-only role.** `create_tenant_schema()` provisions a `tenant_reader_<uuid>`
-role per tenant: `NOLOGIN`, read-only, granted only its own schema (USAGE + SELECT on current
-and future tables; TimescaleDB propagates SELECT to hypertable chunks). A cross-tenant query
-made as this role **fails at the GRANT level** — it does not depend on the querying code
-behaving. It is `NOLOGIN` because the future SQL proxy assumes it via `SET ROLE`, so no
-password exists to place in a kernel (ADR-0012 dec 4). Existing tenants are backfilled by
-`infrastructure/timescaledb/init-scripts/09-tenant-reader-roles-migration.sql`. The boundary
-is proven by `infrastructure/timescaledb/tests/test_tenant_reader_isolation.py` in the
-`db-tenant-isolation` CI workflow.
-
-**Tenant-scoped data path.** The default way a notebook will read data is the existing
-`api_gateway` read API, called **as the user** so the standard per-tenant scoping
-(`get_db_with_tenant`, ADR-0003) applies:
-
-- `GET /api/measurements` (and `/{sensor_id}`) — raw readings; supports `start`/`end`/`order`
-  for time-window/analytics pulls, capped at 1000 rows/request.
-- `GET /api/aggregations/{window}` — `1min`/`5min`/`1hour` rollups; same time-range params.
-- `GET /api/training-data/equipment/{id}` (+ `/stream`) — bulk per-equipment datasets for
-  DataFrame loading (JSON to 100k rows, or streamed CSV).
-
-**Client skeleton.** `clients/python/industryflow` wraps that API into pandas DataFrames — the
-blessed path notebook images will ship. It carries a per-session capability as a bearer token
-and never holds a database or object-store credential.
-
-## The two data paths (target)
-
-- **API path (default, all profiles).** The kernel calls the read API as the user with a
-  per-session capability (ADR-0012). No database credential in the kernel.
-- **Direct SQL (authoring profile).** The kernel connects to a trusted SQL proxy presenting
-  its capability; the proxy holds the privileged principal and `SET ROLE`s into the tenant's
-  `tenant_reader_<uuid>` for that session. The per-tenant role above is what makes this safe.
-
-## Deferred
-
-The spawner, SSO authenticator, the SQL proxy and per-session capability minting, the
-experiment-tracking gateway, and the frontend pages are later phases. Experiment tracking from
-notebooks remains gated until its multi-tenancy gateway lands (ADR-0013).
+The experiment-tracking gateway (ADR-0013) and the frontend `/analytics` and `/experiments`
+pages. Experiment tracking from notebooks remains gated until that gateway lands.
