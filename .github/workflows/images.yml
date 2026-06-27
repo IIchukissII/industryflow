@@ -50,6 +50,7 @@ jobs:
           - { name: notebook-hub,           context: services/notebook_hub,     file: services/notebook_hub/Dockerfile }
           - { name: notebook-sql-proxy,     context: services/notebook_sql_proxy, file: services/notebook_sql_proxy/Dockerfile }
           - { name: jupyter,                context: services/ml_service,       file: services/ml_service/Dockerfile.jupyter }
+          - { name: db-backup,              context: infrastructure/backup,     file: infrastructure/backup/Dockerfile }
     steps:
       - uses: actions/checkout@v4
 
