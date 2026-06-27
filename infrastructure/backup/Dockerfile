@@ -5,7 +5,7 @@
 # IndustryFlow database-backup image (tier-1 DR).
 # postgres:15-alpine ships pg_dump/pg_dumpall/pg_restore matching the pg15 server; aws-cli
 # (alpine community) speaks S3 to MinIO or any S3-compatible / off-site bucket.
-FROM postgres:15-alpine
+FROM postgres:18-alpine
 
 # gosu (a Go binary the postgres base ships for its entrypoint's privilege drop) is unused
 # here — we run the backup script directly, not the postgres entrypoint — and it carries a
