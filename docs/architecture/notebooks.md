@@ -42,9 +42,13 @@ verified `X-IF-*` identity, overwrite any client-supplied one), the notebooks In
 single-user pod egress NetworkPolicy (data API + DNS only). These **render and lint** but are
 **not yet cluster-validated**.
 
-Still pending: the **api-gateway session-verify endpoint** the SSO proxy calls (the ADR-0014
-handoff contract — returns the verified identity in `X-IF-*` headers), running the hub on a
-cluster, the per-session capability minting + SQL proxy (ADR-0012), and the notebook images.
+The **api-gateway session-verify endpoint** the SSO proxy calls is implemented at
+`GET /auth/verify` (ADR-0014 handoff contract): it validates the platform session with the one
+existing verification and returns the verified identity in `X-IF-*` headers; a request without a
+valid session or tenant is rejected, which the proxy treats as "deny".
+
+Still pending: running the hub on a cluster, the per-session capability minting + SQL proxy
+(ADR-0012), and the notebook images.
 
 ## What exists today (phase 1)
 
