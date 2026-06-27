@@ -66,7 +66,7 @@ async def send_sensor_data(
         True if message sent successfully, False otherwise
     """
     if topic is None:
-        topic = settings.KAFKA_TOPIC_RAW
+        topic = settings.KAFKA_TOPIC_SENSOR_DATA
     
     try:
         producer = await AsyncKafkaProducerSingleton.get_producer()

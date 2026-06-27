@@ -79,8 +79,9 @@ docker compose exec ingestion-edge nginx -s reload   # reload so the edge picks 
 A revoked device is refused at the edge immediately, without waiting for its certificate to
 expire.
 
-## Transition note
+## mTLS only
 
-The JWT ingestion path is retained only as a labelled transition (ADR-0002 dec 8) and
-should be removed once all producers present certificates. The previously committed mock
-JWT has been removed with no bearer successor.
+Ingestion accepts **only** a verified client certificate. The transitional JWT ingestion
+path (ADR-0002 dec 8) has been removed now that producers present certificates, and with it
+the service's database access: ingestion holds no database role, never queries the database,
+and produces only to Kafka. There is no bearer successor to the previously committed mock JWT.
