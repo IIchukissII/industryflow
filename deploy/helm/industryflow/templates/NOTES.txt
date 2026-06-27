@@ -17,11 +17,20 @@ Stateful dependencies (in-cluster where inCluster=true):
   - minio       : {{ .Values.infra.minio.inCluster }}
   - mlflow      : {{ .Values.infra.mlflow.inCluster }}
 
+{{- if and .Values.tls.db.enabled .Values.infra.timescaledb.inCluster (not .Values.tls.db.certManager.enabled) }}
+
+⚠  DB TLS is enforced (ADR-0017): the in-cluster TimescaleDB requires a server certificate.
+   Provide a Secret named "{{ .Values.tls.db.secretName }}" with tls.crt / tls.key / ca.crt,
+   OR set tls.db.certManager.enabled=true to self-provision it (needs the cert-manager CRDs).
+   Without it the timescaledb pod and every DB client stall on the missing Secret.
+{{- end }}
+
 BEFORE PRODUCTION:
   1. Replace placeholder secrets (secrets.data) with a real secrets backend
      (SealedSecrets/Vault/CSI) or set secrets.create=false + secrets.existingSecret.
   2. Pin app image tags by digest (image.tag) instead of "latest".
-  3. Provide the TLS certificate Secret "{{ .Values.ingress.tls.secretName }}".
+  3. Provide the ingress TLS Secret "{{ .Values.ingress.tls.secretName }}" and the DB TLS
+     Secret "{{ .Values.tls.db.secretName }}" (or tls.db.certManager.enabled=true) — ADR-0017.
   4. Fix and wire the TimescaleDB init scripts (see chart README / review).
 
 Check status:
