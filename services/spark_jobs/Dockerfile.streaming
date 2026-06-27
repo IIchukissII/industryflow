@@ -37,10 +37,10 @@ RUN mkdir -p /app/spark_streaming && \
     chown -R spark:spark /home/spark/.ivy2 && \
     chown -R spark:spark /app
 
-# Copy the spark streaming script
-COPY kafka_to_timescaledb.py /app/spark_streaming/
+# Copy the spark streaming script + the FK-resilience helper (shipped to executors via --py-files)
+COPY kafka_to_timescaledb.py upsert_filter.py /app/spark_streaming/
 RUN chown -R spark:spark /app/spark_streaming && \
-    chmod 644 /app/spark_streaming/kafka_to_timescaledb.py
+    chmod 644 /app/spark_streaming/kafka_to_timescaledb.py /app/spark_streaming/upsert_filter.py
 
 # Switch to spark user to pre-download dependencies
 USER spark
@@ -62,4 +62,5 @@ CMD ["/opt/spark/bin/spark-submit", \
      "--master", "local[*]", \
      "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.postgresql:postgresql:42.6.0", \
      "--conf", "spark.sql.streaming.checkpointLocation=/opt/spark/checkpoints", \
+     "--py-files", "/app/spark_streaming/upsert_filter.py", \
      "/app/spark_streaming/kafka_to_timescaledb.py"]
