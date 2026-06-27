@@ -25,10 +25,6 @@ class Settings(BaseSettings):
     REDIS_PORT: int
     REDIS_DB: int
     
-    # Kafka Configuration
-    KAFKA_BOOTSTRAP_SERVERS: str
-    KAFKA_TOPIC_SENSOR_DATA: str
-    
     # JWT Configuration
     JWT_SECRET_KEY: str
     # Short-lived access token; refresh token is revocable and rotated (ADR-0004 dec 2).
@@ -51,11 +47,6 @@ class Settings(BaseSettings):
     def redis_url(self) -> str:
         """Construct Redis connection URL"""
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
-    
-    @property
-    def kafka_bootstrap_servers(self) -> str:
-        """Kafka bootstrap servers"""
-        return self.KAFKA_BOOTSTRAP_SERVERS
     
     # Properties for asyncpg pool
     @property

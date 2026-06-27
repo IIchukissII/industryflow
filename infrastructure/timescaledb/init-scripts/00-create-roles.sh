@@ -28,11 +28,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
             EXECUTE format('CREATE ROLE api_gateway_user WITH LOGIN PASSWORD %L', '${API_GATEWAY_DB_PASSWORD}');
         END IF;
 
-        -- Ingestion Service Role
-        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'ingestion_service_user') THEN
-            EXECUTE format('CREATE ROLE ingestion_service_user WITH LOGIN PASSWORD %L', '${INGESTION_SERVICE_DB_PASSWORD}');
-        END IF;
-        
+        -- (No ingestion_service role: ingestion is mTLS-only and never touches the DB — ADR-0002.)
+
         -- Spark Streaming Role
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'spark_streaming_user') THEN
             EXECUTE format('CREATE ROLE spark_streaming_user WITH LOGIN PASSWORD %L', '${SPARK_STREAMING_DB_PASSWORD}');
@@ -60,7 +57,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     
     -- Connection limits
     ALTER ROLE api_gateway_user CONNECTION LIMIT 50;
-    ALTER ROLE ingestion_service_user CONNECTION LIMIT 300;
     ALTER ROLE spark_streaming_user CONNECTION LIMIT 50;
     ALTER ROLE alert_service_user CONNECTION LIMIT 10;
     ALTER ROLE ml_service_user CONNECTION LIMIT 10;
@@ -68,7 +64,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     
     -- Statement timeouts
     ALTER ROLE api_gateway_user SET statement_timeout = '30s';
-    ALTER ROLE ingestion_service_user SET statement_timeout = '30s';
     ALTER ROLE spark_streaming_user SET statement_timeout = '120s';
     ALTER ROLE alert_service_user SET statement_timeout = '60s';
     ALTER ROLE ml_service_user SET statement_timeout = '60s';
@@ -83,7 +78,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     GRANT USAGE ON SCHEMA public TO api_gateway_user;
 
     -- Other roles need USAGE on the public schema
-    GRANT USAGE ON SCHEMA public TO ingestion_service_user;
     GRANT USAGE ON SCHEMA public TO spark_streaming_user;
     GRANT USAGE ON SCHEMA public TO alert_service_user;
     GRANT USAGE ON SCHEMA public TO ml_service_user;
@@ -93,14 +87,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     -- init (relation does not exist). Instead grant it via default privileges so the
     -- reader roles automatically receive SELECT when api_gateway_user creates the table.
     ALTER DEFAULT PRIVILEGES FOR ROLE api_gateway_user IN SCHEMA public
-        GRANT SELECT ON TABLES TO alert_service_user, ingestion_service_user, ml_service_user;
+        GRANT SELECT ON TABLES TO alert_service_user, ml_service_user;
 
     -- SELECT on public.companies is granted in 01-init-schema.sql, after that table is
     -- created (this roles script runs before it).
 EOSQL
 
 echo "✓ api_gateway_user (50 connections)"
-echo "✓ ingestion_service_user (300 connections)"
 echo "✓ spark_streaming_user (50 connections)"
 echo "✓ alert_service_user (10 connections)"
 echo "✓ ml_service_user (10 connections)"

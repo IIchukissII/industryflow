@@ -9,14 +9,12 @@ High-throughput sensor data ingestion endpoint (Port 8003)
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
-import asyncpg
 import logging
 
 from config import get_settings
 from schemas import SensorDataInput, SensorDataResponse
-from dependencies import get_current_user_with_company, get_ingestion_identity, db_pool
+from dependencies import get_ingestion_identity
 from kafka_producer import AsyncKafkaProducerSingleton, send_sensor_data
-import dependencies
 
 # Configure logging
 logging.basicConfig(
@@ -51,28 +49,13 @@ async def startup_event():
     logger.info("🚀 Ingestion Service starting...")
     logger.info(f"Port: {settings.INGESTION_SERVICE_PORT}")
     logger.info(f"Kafka: {settings.KAFKA_BOOTSTRAP_SERVERS}")
-    logger.info(f"Topic: {settings.KAFKA_TOPIC_RAW}")
-    logger.info(f"Database: {settings.INGESTION_SERVICE_DB_USER}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}")
-    
-    # Initialize database pool (same as API Gateway)
-    logger.info("Initializing database connection pool...")
-    dependencies.db_pool = await asyncpg.create_pool(
-        host=settings.DB_HOST,
-        port=settings.DB_PORT,
-        database=settings.DB_NAME,
-        user=settings.INGESTION_SERVICE_DB_USER,
-        password=settings.INGESTION_SERVICE_DB_PASSWORD,
-        min_size=20,
-        max_size=50,
-        command_timeout=60
-    )
-    logger.info("✅ Database pool created")
-    
-    # Initialize Kafka producer
+    logger.info(f"Topic: {settings.KAFKA_TOPIC_SENSOR_DATA}")
+
+    # Ingestion holds no database role; it only produces to Kafka (ADR-0002).
     logger.info("Initializing Kafka producer...")
     await AsyncKafkaProducerSingleton.get_producer()
     logger.info("✅ Kafka producer initialized")
-    
+
     logger.info("✅ Ingestion Service started successfully")
     logger.info("=" * 80)
 
@@ -80,15 +63,10 @@ async def startup_event():
 async def shutdown_event():
     """Clean shutdown"""
     logger.info("🛑 Ingestion Service shutting down...")
-    
+
     # Close Kafka producer
     await AsyncKafkaProducerSingleton.close()
-    
-    # Close database pool
-    if dependencies.db_pool:
-        await dependencies.db_pool.close()
-        logger.info("✅ Database pool closed")
-    
+
     logger.info("✅ Ingestion Service stopped")
 
 @app.get("/health")
@@ -112,7 +90,6 @@ async def health_check():
     **Security (ADR-0002):**
     - Devices authenticate with mTLS at the edge; the tenant is read from the verified
       client-certificate SAN, never from the request body.
-    - A JWT bearer is accepted only as a labelled transition until producers are migrated.
     - company_id is forced from the verified identity, preventing cross-tenant injection.
     """
 )
@@ -121,8 +98,8 @@ async def ingest_sensor_data(
     identity: dict = Depends(get_ingestion_identity)
 ) -> SensorDataResponse:
     """
-    Ingest sensor data. The company_id comes from the verified device certificate (or, in
-    transition, the JWT) — it is never taken from the request body (ADR-0002 dec 6).
+    Ingest sensor data. The company_id comes from the verified device certificate — it is
+    never taken from the request body (ADR-0002 dec 6).
     """
     try:
         company_id_str = identity["company_id"]
@@ -173,7 +150,7 @@ async def get_ingestion_stats(
     return {
         "company_id": identity["company_id"],
         "device_id": identity.get("device_id"),
-        "auth": identity.get("source", "jwt"),
+        "auth": identity.get("source", "mtls"),
         "message": "Ingestion statistics endpoint",
         "status": "active"
     }

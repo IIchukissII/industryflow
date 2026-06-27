@@ -57,8 +57,9 @@ the deployment's storage and query needs.
 
 ## Roles & grants
 
-Each service connects as its own least-privilege role (`api_gateway_user`,
-`ingestion_service_user`, `spark_streaming_user`, `alert_service_user`, `ml_service_user`), and
+Each service that touches the database connects as its own least-privilege role
+(`api_gateway_user`, `spark_streaming_user`, `alert_service_user`, `ml_service_user`), and
 `create_tenant_schema()` grants each role only the access it needs within every tenant schema
-(e.g. ingestion/Spark insert, the gateway full CRUD). Role connection limits apply — size
-service connection pools (workers × pool size) within them.
+(e.g. Spark insert, the gateway full CRUD). Ingestion is mTLS-only and holds no database role
+at all — it produces to Kafka and Spark performs the writes (ADR-0002). Role connection limits
+apply — size service connection pools (workers × pool size) within them.
