@@ -40,7 +40,7 @@ with open('data/sensors_mapping.json', 'w') as f:
     json.dump(sensors, f, indent=2)
 
 print(f"✅ Generated {len(sensors)} sensors")
-print(f"   Saved to: data/sensors_mapping.json")
+print("   Saved to: data/sensors_mapping.json")
 
 # Create bulk add payload
 bulk_payload = {
@@ -60,4 +60,4 @@ bulk_payload = {
 with open('data/bulk_sensors_payload.json', 'w') as f:
     json.dump(bulk_payload, f, indent=2)
 
-print(f"✅ Bulk payload saved to: data/bulk_sensors_payload.json")
+print("✅ Bulk payload saved to: data/bulk_sensors_payload.json")

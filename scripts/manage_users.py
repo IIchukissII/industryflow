@@ -108,7 +108,7 @@ async def create_user(args):
             print(f"User ID:    {user_id}")
             print(f"Company ID: {args.company_id}")
             print(f"Role:       {args.role}")
-            print(f"Active:     Yes")
+            print("Active:     Yes")
             print("=" * 80)
 
         except Exception as e:
@@ -241,7 +241,7 @@ def main():
     create_parser.add_argument('--role', required=True, choices=['admin', 'engineer', 'observer'], help='User role')
 
     # List users command
-    list_parser = subparsers.add_parser('list', help='List all users')
+    subparsers.add_parser('list', help='List all users')
 
     # Delete user command
     delete_parser = subparsers.add_parser('delete', help='Delete a user')

@@ -14,7 +14,6 @@ import requests
 import psutil
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from collections import deque
 from statistics import mean, median
 import csv
@@ -96,7 +95,7 @@ def send_measurement(sensor_id, value, unit, timestamp, headers, monitor):
         else:
             monitor.record_error()
             return False
-    except Exception as e:
+    except Exception:
         monitor.record_error()
         return False
 

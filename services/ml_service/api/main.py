@@ -23,7 +23,7 @@ CSRF_COOKIE = "if_csrf"
 import config
 from repository import MLRepository, MLflowRepository
 from routers import health_router, models_router, mlflow_router, inference_router, feature_configs_router, training_router
-from feature_engineering import init_feature_store, get_feature_store
+from feature_engineering import init_feature_store
 
 # Configure logging
 logging.basicConfig(

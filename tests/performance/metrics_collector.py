@@ -10,7 +10,6 @@ import subprocess
 import time
 import csv
 from datetime import datetime
-import re
 
 METRICS_FILE = 'bottleneck_metrics.csv'
 COLLECTION_INTERVAL = 10  # seconds

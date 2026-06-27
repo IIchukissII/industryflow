@@ -11,8 +11,7 @@ Tests both raw streaming and aggregation pipelines
 
 import psycopg2
 import time
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Tuple
 import sys
 
@@ -247,10 +246,10 @@ def test_aggregation_pipeline() -> Dict:
                 );
             """)
             if cur.fetchone()[0]:
-                print_success(f"  ✓ Table exists")
+                print_success("  ✓ Table exists")
                 agg_result['exists'] = True
             else:
-                print_error(f"  ✗ Table not found")
+                print_error("  ✗ Table not found")
                 results['passed'] = False
                 continue
 
@@ -281,7 +280,7 @@ def test_aggregation_pipeline() -> Dict:
             if sensor_count > 0:
                 print_success(f"  ✓ Sensor coverage: {sensor_count} sensors")
             else:
-                print_warning(f"  ⚠ No sensor coverage")
+                print_warning("  ⚠ No sensor coverage")
 
             # Check aggregation quality (avg, min, max relationships)
             cur.execute(f"""
@@ -417,7 +416,7 @@ def test_spark_performance() -> Dict:
             max_gap = row[2]
 
             if significant_gaps == 0:
-                print_success(f"Data continuity: No significant gaps detected")
+                print_success("Data continuity: No significant gaps detected")
             else:
                 print_warning(f"Data continuity: {significant_gaps} gaps > 1 minute (max: {max_gap})")
 
@@ -475,7 +474,7 @@ def test_spark_fault_tolerance() -> Dict:
             results['checks'].append(('no_duplicates', True))
         else:
             print_warning(f"Found {total_duplicates} duplicate records in {duplicate_groups} groups")
-            print_info(f"  This may indicate Spark checkpoint issues or multiple restarts")
+            print_info("  This may indicate Spark checkpoint issues or multiple restarts")
 
             # Show sample duplicates
             cur.execute("""
@@ -524,7 +523,7 @@ def test_spark_fault_tolerance() -> Dict:
         if row and row[0] > 0:
             total, out_of_order = row
             if out_of_order == 0:
-                print_success(f"Data ordering correct: 0 out-of-order records")
+                print_success("Data ordering correct: 0 out-of-order records")
                 results['checks'].append(('data_ordering', True))
             else:
                 print_warning(f"Out-of-order records: {out_of_order}/{total}")

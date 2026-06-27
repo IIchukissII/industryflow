@@ -10,7 +10,6 @@ import asyncpg
 import signal
 import logging
 import sys
-from typing import Dict, List
 
 from config import config
 from repository import RuleRepository, AlertRepository

@@ -13,7 +13,6 @@ import aiohttp
 import asyncio
 import psutil
 from datetime import datetime, timezone
-from pathlib import Path
 from collections import deque
 from statistics import mean, median
 import csv
@@ -96,7 +95,7 @@ async def send_measurement(session, sensor_id, value, unit, timestamp, headers, 
             else:
                 await monitor.record_error()
                 return False
-    except Exception as e:
+    except Exception:
         await monitor.record_error()
         return False
 
@@ -109,7 +108,7 @@ async def worker(queue, session, headers, monitor):
             queue.task_done()
         except asyncio.TimeoutError:
             continue
-        except Exception as e:
+        except Exception:
             break
 
 async def main():

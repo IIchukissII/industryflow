@@ -8,7 +8,6 @@ All values from environment variables - NO DEFAULTS
 """
 import os
 import uuid
-from typing import Optional
 
 
 class Config:

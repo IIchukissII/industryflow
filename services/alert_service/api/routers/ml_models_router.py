@@ -17,7 +17,7 @@ from pathlib import Path
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
-from models import MLModel, MLModelCreate
+from models import MLModelCreate
 from repository import MLModelRepository
 from auth import get_company_id
 
@@ -117,7 +117,6 @@ async def register_model_from_mlflow(
     import mlflow
     import os
     from datetime import datetime
-    from uuid import UUID
     from config import normalize_company_id_to_schema
     
     try:
