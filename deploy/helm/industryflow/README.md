@@ -89,7 +89,16 @@ Production deployments run images by **immutable digest**, not mutable tags:
    workloads reference that one Secret — scope it at your backend.
 2. **Images** — pin by digest (see *Image digest pinning* above): third-party in `values.yaml`,
    first-party via `scripts/pin-image-digests.sh > values-digests.yaml` + `-f`. Never ship `latest`.
-3. **TLS** — provide the `ingress.tls.secretName` certificate (ADR-0004 public cert).
+3. **TLS** — provide two certs:
+   - **Ingress** — the `ingress.tls.secretName` certificate (ADR-0004 public cert).
+   - **Database (ADR-0017)** — the hardened `pg_hba` is `hostssl` + `scram-sha-256`, so an
+     in-cluster TimescaleDB **requires** a server cert and every client connects `verify-full`.
+     Either let the chart self-provision it with cert-manager — `--set tls.db.certManager.enabled=true`
+     (a SelfSigned issuer → internal CA → server cert, mirroring `scripts/gen-internal-ca.sh`) —
+     or supply a Secret (`tls.crt`/`tls.key`/`ca.crt`) from your own PKI as `tls.db.secretName`
+     (default `industryflow-db-tls`). The DB pod mounts all three (an initContainer stages the key
+     with `0600`/postgres-uid); clients mount only `ca.crt` and read `DB_SSLMODE`/`DB_SSLROOTCERT`
+     from the shared ConfigMap. Without it the DB + clients stay pending. Knobs live under `tls.db`.
 4. **DB init** — handled automatically when `infra.timescaledb.inCluster=true`: the canonical
    `infrastructure/timescaledb/init-scripts` are mounted at `/docker-entrypoint-initdb.d` via a
    ConfigMap and run on a fresh data volume. Set the five per-service role passwords in

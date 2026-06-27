@@ -55,6 +55,44 @@ securityContext:
   writablePaths: ["/tmp"]
 
 # ---------------------------------------------------------------------------
+# Database TLS + SCRAM (ADR-0017). The hardened pg_hba.conf is `hostssl` + scram-sha-256,
+# so an in-cluster TimescaleDB *requires* a server certificate — every client connects
+# verify-full (encrypt + CA-verify + hostname) and authenticates with SCRAM. This is the
+# k8s mirror of the enforced compose deployment.
+#
+# The chart needs a Secret holding `tls.crt`, `tls.key`, `ca.crt` (the standard cert-manager
+# Certificate layout). Either let the chart self-provision it with cert-manager
+# (tls.db.certManager.enabled=true — needs the cert-manager CRDs), or supply your own PKI's
+# Secret via tls.db.secretName. The timescaledb pod mounts all three (an initContainer stages
+# them with postgres-only key perms); every DB client mounts just ca.crt.
+# ---------------------------------------------------------------------------
+tls:
+  db:
+    enabled: true
+    # libpq/asyncpg sslmode for clients. verify-full = encrypt + verify CA + check hostname.
+    sslmode: verify-full
+    # Secret with tls.crt / tls.key / ca.crt. Created by cert-manager below, or bring your own.
+    secretName: industryflow-db-tls
+    # Where ca.crt (and, on the DB pod, the staged server cert) is mounted. Matches the client
+    # code defaults (DB_SSLROOTCERT=<mountPath>/ca.crt).
+    mountPath: /etc/ssl/industryflow
+    # Numeric uid the postgres process runs as inside the timescaledb image; the cert-init
+    # initContainer chowns the private key to it (postgres refuses a group/world-readable key).
+    # timescale/timescaledb (Debian) runs postgres as uid 999.
+    postgresUser: 999
+    # BusyBox image for the cert-init initContainer (copy + chmod 600 + chown the key).
+    initImage: busybox:1.36
+    # Self-provision the cert + CA with cert-manager: a SelfSigned issuer bootstraps a CA, a CA
+    # issuer then signs the DB server cert into secretName. Defaults OFF (needs the cert-manager
+    # CRDs, like the observability CRs); enable where cert-manager is installed, otherwise set
+    # secretName to a Secret you create out-of-band.
+    certManager:
+      enabled: false
+      duration: 8760h     # server cert lifetime (1y)
+      renewBefore: 720h   # renew 30d before expiry
+      caDuration: 43800h  # internal CA lifetime (5y)
+
+# ---------------------------------------------------------------------------
 # Application (stateless) services — each renders a Deployment (+ Service if it
 # exposes a port) via templates/apps.yaml.
 # ---------------------------------------------------------------------------

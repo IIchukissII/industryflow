@@ -17,6 +17,12 @@ data:
   REDIS_URL: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
   MLFLOW_TRACKING_URI: {{ include "industryflow.mlflowUri" . | quote }}
   MLFLOW_S3_ENDPOINT_URL: {{ include "industryflow.minioEndpoint" . | quote }}
+  {{- if .Values.tls.db.enabled }}
+  # DB TLS (ADR-0017): clients connect verify-full against the internal CA. The asyncpg/libpq
+  # callers read these; ca.crt is mounted per-workload at tls.db.mountPath.
+  DB_SSLMODE: {{ .Values.tls.db.sslmode | quote }}
+  DB_SSLROOTCERT: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
+  {{- end }}
   {{- range $k, $v := .Values.config }}
   {{ $k }}: {{ $v | quote }}
   {{- end }}

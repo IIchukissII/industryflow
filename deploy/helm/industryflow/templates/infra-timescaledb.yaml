@@ -43,11 +43,61 @@ spec:
         checksum/db-init: {{ include (print $.Template.BasePath "/configmap-db-init.yaml") . | sha256sum }}
         checksum/pg-hba: {{ include (print $.Template.BasePath "/configmap-pg-hba.yaml") . | sha256sum }}
     spec:
+      {{- if .Values.tls.db.enabled }}
+      initContainers:
+        # Stage the server cert into a postgres-owned dir with private-key perms. postgres refuses
+        # to start if ssl_key_file is group/world-readable, but a Secret volume mounts root-owned
+        # 0644 — so copy it out, chmod 0600, and chown to the postgres uid (mirrors the compose
+        # db-cert-init one-shot; ADR-0017).
+        - name: db-cert-init
+          image: {{ .Values.tls.db.initImage | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              cp /tls/tls.crt /certs/db.crt
+              cp /tls/tls.key /certs/db.key
+              cp /tls/ca.crt  /certs/ca.crt
+              chmod 0644 /certs/db.crt /certs/ca.crt
+              chmod 0600 /certs/db.key
+              chown {{ .Values.tls.db.postgresUser }}:{{ .Values.tls.db.postgresUser }} /certs/db.crt /certs/db.key /certs/ca.crt
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: db-tls-secret
+              mountPath: /tls
+              readOnly: true
+            - name: db-certs
+              mountPath: /certs
+      {{- end }}
       containers:
         - name: timescaledb
           image: {{ .Values.infra.timescaledb.image | quote }}
           # Use the hardened pg_hba.conf (mounted below) instead of the image's permissive default.
+          {{- if .Values.tls.db.enabled }}
+          # TLS + SCRAM (ADR-0017): the hardened pg_hba is hostssl+scram, so ssl must be on and
+          # passwords stored as scram-sha-256. Passed as -c flags (the canonical postgresql.conf
+          # lines) so the image's own defaults/entrypoint stay intact.
+          args:
+            - postgres
+            - -c
+            - hba_file=/etc/postgresql/pg_hba.conf
+            - -c
+            - ssl=on
+            - -c
+            - ssl_cert_file=/etc/postgresql/certs/db.crt
+            - -c
+            - ssl_key_file=/etc/postgresql/certs/db.key
+            - -c
+            - ssl_ca_file=/etc/postgresql/certs/ca.crt
+            - -c
+            - ssl_min_protocol_version=TLSv1.2
+            - -c
+            - password_encryption=scram-sha-256
+          {{- else }}
           args: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
+          {{- end }}
           ports:
             - name: postgres
               containerPort: 5432
@@ -93,6 +143,11 @@ spec:
               mountPath: /etc/postgresql/pg_hba.conf
               subPath: pg_hba.conf
               readOnly: true
+            {{- if .Values.tls.db.enabled }}
+            - name: db-certs
+              mountPath: /etc/postgresql/certs
+              readOnly: true
+            {{- end }}
           {{- with .Values.infra.timescaledb.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -107,6 +162,13 @@ spec:
         - name: pg-hba
           configMap:
             name: {{ include "industryflow.fullname" . }}-pg-hba
+        {{- if .Values.tls.db.enabled }}
+        - name: db-tls-secret
+          secret:
+            secretName: {{ .Values.tls.db.secretName | quote }}
+        - name: db-certs
+          emptyDir: {}
+        {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: data

@@ -66,6 +66,17 @@ hashing is also deprecated in favour of SCRAM.
    (ADR-0002) and the API HTTPS edge (ADR-0004) are unchanged; this ADR is about
    service→database transport.
 
+7. **Helm cert source: a Secret, provisioned by cert-manager.** In k8s the server cert + CA
+   cannot be self-signed at DB-pod start the way compose does it — clients are separate pods and
+   must mount the *same* CA. So the chart consumes a Secret (`tls.crt`/`tls.key`/`ca.crt`,
+   `tls.db.secretName`): the TimescaleDB pod mounts all three (the initContainer stages them with
+   `0600`/postgres-uid), every DB client mounts just `ca.crt`, and `DB_SSLMODE`/`DB_SSLROOTCERT`
+   come from the shared ConfigMap. The chart can self-provision that Secret with **cert-manager**
+   (`tls.db.certManager.enabled` — a SelfSigned issuer → internal CA → server cert, the k8s
+   equivalent of `gen-internal-ca.sh`), or the operator supplies one from their own PKI. Because
+   the hardened `pg_hba` is `hostssl`, DB TLS is **mandatory** for an in-cluster TimescaleDB, not
+   optional. The monitoring role (`metrics_user`, postgres-exporter) gets its own `hostssl` rule.
+
 ## Alternatives considered
 
 - **Encrypt-only (`sslmode=require`).** Simpler (no CA distribution), but no server
@@ -83,10 +94,16 @@ hashing is also deprecated in favour of SCRAM.
 - Every client carries the CA (`sslrootcert`) and a `DB_SSLMODE` setting; cert rotation is via
   the internal CA (reissue `db.crt`, restart the DB).
 - A failed cert/permission/rotation breaks DB connectivity, so changes are staged and validated.
-- k8s adds an initContainer for key perms; both deployment models share one mechanism.
+- k8s adds an initContainer for key perms; both deployment models share one mechanism (the same
+  canonical `pg_hba.conf` via the chart's `files/db-config` symlink).
+- The Helm chart now requires a DB-cert Secret (cert-manager or operator-supplied); a plain
+  `helm install` without it leaves the DB + clients pending — surfaced in `NOTES.txt`.
+- The compose path is enforced and validated live; the Helm path is render-validated only (no
+  cluster yet — the live deployment is docker-compose).
 
 ## References
 
 - ADR-0007 — the internal CA this reuses. ADR-0004 — API transport (same CA).
-- `scripts/gen-internal-ca.sh` — issues the DB server cert.
+- `scripts/gen-internal-ca.sh` — issues the DB server cert (compose); the Helm equivalent is
+  `templates/db-tls-certificate.yaml` (cert-manager) under `tls.db` in `values.yaml`.
 - `docs/operations/production-readiness.md` — item 4 (the remaining "DB TLS").
