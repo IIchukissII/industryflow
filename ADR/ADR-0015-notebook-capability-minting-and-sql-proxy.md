@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0015: Notebook capability minting and the SQL access proxy
 
 - **ID:** ADR-0015
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-27
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
