@@ -173,11 +173,12 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      # Slim image has no curl — use the Python stdlib. Longer start_period: mlflow boots slowly.
+      test: [ "CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/health').status==200 else 1)" ]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 90s
     networks:
       - industryflow-network
     restart: unless-stopped
@@ -453,7 +454,13 @@ services:
       - industryflow-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep -v grep | grep 'python main.py' || exit 1"]
+      # No HTTP endpoint and the slim image has no ps — liveness via PID 1's cmdline (the worker
+      # runs as PID 1, so if it dies the container exits anyway). Python only, no external tools.
+      test: [ "CMD", "python", "-c", "import sys; sys.exit(0 if b'main.py' in open('/proc/1/cmdline','rb').read() else 1)" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   alert-service-api:
     build:
@@ -480,7 +487,8 @@ services:
       - industryflow-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      # Slim image has no curl — use the Python stdlib (matches api-gateway/ml-service).
+      test: [ "CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)" ]
       interval: 30s
       timeout: 10s
       retries: 3
