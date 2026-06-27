@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def create_spark_session(app_name="IndustryFlow-Streaming"):
     """Create and configure Spark session with Kafka support"""
-    spark = SparkSession.builder \
+    builder = SparkSession.builder \
         .appName(app_name) \
         .master(os.getenv("SPARK_MASTER", "local[*]")) \
         .config("spark.jars.packages",
@@ -30,7 +30,15 @@ def create_spark_session(app_name="IndustryFlow-Streaming"):
         .config("spark.sql.streaming.checkpointLocation",
                 os.getenv("CHECKPOINT_LOCATION", "/opt/spark/checkpoints")) \
         .config("spark.streaming.stopGracefullyOnShutdown", "true") \
-        .getOrCreate()
+        .config("spark.sql.shuffle.partitions",
+                os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200"))
+    # Resource budget on a shared standalone cluster: cap this app's cores so it does not
+    # starve the aggregation app on the same worker. The deployment sets the split (compose),
+    # so it scales — raise the caps or add workers. Unset = Spark default (grab all cores).
+    cores_max = os.getenv("SPARK_CORES_MAX")
+    if cores_max:
+        builder = builder.config("spark.cores.max", cores_max)
+    spark = builder.getOrCreate()
 
     logger.info(f"Spark session created: {spark.version}")
     return spark
