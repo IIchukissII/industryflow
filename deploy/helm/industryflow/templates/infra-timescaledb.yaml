@@ -41,10 +41,13 @@ spec:
         # Roll the pod when the init scripts change. (NB: the entrypoint only re-runs them on
         # an EMPTY data volume; on an existing volume this restart is a no-op for init.)
         checksum/db-init: {{ include (print $.Template.BasePath "/configmap-db-init.yaml") . | sha256sum }}
+        checksum/pg-hba: {{ include (print $.Template.BasePath "/configmap-pg-hba.yaml") . | sha256sum }}
     spec:
       containers:
         - name: timescaledb
           image: {{ .Values.infra.timescaledb.image | quote }}
+          # Use the hardened pg_hba.conf (mounted below) instead of the image's permissive default.
+          args: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
           ports:
             - name: postgres
               containerPort: 5432
@@ -86,6 +89,10 @@ spec:
             - name: db-init
               mountPath: /docker-entrypoint-initdb.d
               readOnly: true
+            - name: pg-hba
+              mountPath: /etc/postgresql/pg_hba.conf
+              subPath: pg_hba.conf
+              readOnly: true
           {{- with .Values.infra.timescaledb.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -97,6 +104,9 @@ spec:
             # Executable so the postgres entrypoint runs 00-create-roles.sh as a subprocess
             # (rather than sourcing it), matching the compose bind-mount behaviour.
             defaultMode: 0755
+        - name: pg-hba
+          configMap:
+            name: {{ include "industryflow.fullname" . }}-pg-hba
   volumeClaimTemplates:
     - metadata:
         name: data
