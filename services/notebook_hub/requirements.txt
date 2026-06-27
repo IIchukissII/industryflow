@@ -5,6 +5,9 @@
 # Runtime deps for the notebook hub image (jupyterhub_config.py). Not needed for the unit
 # tests, which exercise the pure identity.py (see requirements-dev.txt).
 jupyterhub==4.1.6
+# Spawner is a deployment profile (ADR-0018): KubeSpawner on k8s, DockerSpawner on Compose.
+# Both are installed so one image serves either deployment; NOTEBOOK_SPAWNER selects at runtime.
 jupyterhub-kubespawner==6.2.0
+dockerspawner==13.0.0
 # Capability store (ADR-0015): minted handles + bindings live in the shared Redis.
 redis==5.0.8

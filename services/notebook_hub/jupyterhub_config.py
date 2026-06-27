@@ -3,21 +3,21 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-JupyterHub configuration for the IndustryFlow notebook hub (ADR-0011, ADR-0012, ADR-0014).
+JupyterHub configuration for the IndustryFlow notebook hub (ADR-0011/0012/0014/0018).
 
-REFERENCE CONFIGURATION — not yet cluster-validated. The decision logic (identity parsing,
-role→profile, label/env binding) lives in identity.py and IS unit-tested; this file is the
-JupyterHub/KubeSpawner wiring around it and must be validated against a running hub before use.
+The spawner is a DEPLOYMENT PROFILE (ADR-0018): set ``NOTEBOOK_SPAWNER=kube`` for KubeSpawner
+(per-user pod on Kubernetes) or ``NOTEBOOK_SPAWNER=docker`` for DockerSpawner (per-user container
+on a Docker host / Compose). Everything ABOVE the spawner is identical and lives in the pure,
+unit-tested ``identity.py`` + ``capabilities.py``:
 
-What it encodes:
   * SSO from the platform session via the trusted proxy (ADR-0014): the hub trusts the verified
     identity headers the proxy forwards and runs no login of its own.
-  * Role-driven, enforced spawn profiles (ADR-0011 dec 5): the profile is derived from the
-    verified role, NOT chosen by the user.
-  * Identity-only environment (ADR-0012 dec 5): the kernel gets its tenant/identity, never a
-    data credential — those are minted separately by the spawner step (deferred).
-  * Contained pods (ADR-0009 / ADR-0011 dec 7): non-root, no privilege escalation, dropped
-    capabilities, resource limits. Network egress is constrained by NetworkPolicy (Helm).
+  * Role-driven, enforced spawn profiles (ADR-0011 dec 5): profile derived from the verified role.
+  * Identity-only environment (ADR-0012 dec 5): the kernel gets its tenant/identity, never a data
+    credential — only opaque, per-session, single-tenant capability handles minted here (ADR-0015).
+  * Contained per-user environment (ADR-0011 dec 7): non-root, no privilege escalation, dropped
+    capabilities, resource limits. Egress is a NetworkPolicy on k8s; on Compose it is a dedicated
+    internal network (the documented non-parity, ADR-0018 dec 4).
 """
 import os
 import sys
@@ -25,6 +25,10 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import capabilities as cap  # noqa: E402
 import identity as ident  # noqa: E402
+
+# Which spawner profile this deployment runs (ADR-0018). Default kube preserves the original
+# Kubernetes behaviour; the Compose deployment sets NOTEBOOK_SPAWNER=docker.
+SPAWNER = os.environ.get("NOTEBOOK_SPAWNER", "kube").strip().lower()
 
 # Capability lifetime (ADR-0015 dec 2). The store entry is the backstop; the hub keeps it alive
 # while the session is healthy and deletes it on logout (deferred lifecycle). Config-owned.
@@ -43,9 +47,9 @@ from tornado import web  # noqa: E402
 class _ProxyHeaderLoginHandler(BaseHandler):
     """Establish a hub session from the proxy-forwarded verified identity.
 
-    The hub is reachable only through the trusted proxy, which validates the platform session
-    and overwrites any client-supplied identity headers (ADR-0014 dec 2-3); this handler does
-    not re-verify the session token.
+    The hub is reachable only through the trusted SSO proxy, which validates the platform session
+    and overwrites any client-supplied identity headers (ADR-0014 dec 2-3); this handler does not
+    re-verify the session token.
     """
 
     async def get(self):
@@ -75,10 +79,8 @@ class ProxyHeaderAuthenticator(Authenticator):
 c.JupyterHub.authenticator_class = ProxyHeaderAuthenticator
 
 # ---------------------------------------------------------------------------
-# Spawner — role-driven profile, identity-only env, contained pods
+# Spawn profiles — role-driven caps (ADR-0011 dec 5/7), spawner-independent
 # ---------------------------------------------------------------------------
-# Per-profile resource caps. Values are deployment-owned and intentionally modest defaults
-# (ADR-0011 dec 7); tune in the deployment, not here.
 PROFILE_RESOURCES = {
     ident.PROFILE_ANALYTICS: {"cpu_limit": 0.5, "mem_limit": "1G"},
     ident.PROFILE_AUTHORING: {"cpu_limit": 2.0, "mem_limit": "4G"},
@@ -86,14 +88,18 @@ PROFILE_RESOURCES = {
 
 
 def _capability_store():
-    """Build the Redis-backed capability store (ADR-0015 dec 7). Reference wiring."""
+    """Build the Redis-backed capability store (ADR-0015 dec 7)."""
     import redis  # runtime dep; imported lazily so config import doesn't require it
 
     return cap.RedisCapabilityStore(redis.Redis.from_url(os.environ["REDIS_URL"]))
 
 
 async def bind_identity_and_profile(spawner):
-    """Bind the environment to its tenant, enforce the role profile, and mint capabilities."""
+    """Bind the environment to its tenant, enforce the role profile, and mint capabilities.
+
+    Spawner-agnostic: the identity env, resource caps, and capability handles are set the same way
+    for KubeSpawner and DockerSpawner; only how the attribution labels are attached differs.
+    """
     auth_state = await spawner.user.get_auth_state() or {}
     who = ident.Identity(
         user=spawner.user.name,
@@ -102,19 +108,27 @@ async def bind_identity_and_profile(spawner):
     )
     # Identity only — this carries no data credential (ADR-0012 dec 5).
     spawner.environment.update(ident.pod_environment(who))
-    spawner.extra_labels = {**getattr(spawner, "extra_labels", {}), **ident.pod_labels(who)}
 
+    labels = ident.pod_labels(who)
+    if SPAWNER == "docker":
+        # DockerSpawner attaches labels via the container create kwargs.
+        existing = dict(getattr(spawner, "extra_create_kwargs", {}) or {})
+        existing_labels = dict(existing.get("labels", {}))
+        existing_labels.update(labels)
+        existing["labels"] = existing_labels
+        spawner.extra_create_kwargs = existing
+    else:
+        spawner.extra_labels = {**getattr(spawner, "extra_labels", {}), **labels}
+
+    # The profile is chosen by role, not offered to the user (ADR-0011 dec 5).
     profile = ident.select_profile(who.role)
-
-    # The profile is chosen by role, not offered to the user.
     resources = PROFILE_RESOURCES[profile]
     spawner.cpu_limit = resources["cpu_limit"]
     spawner.mem_limit = resources["mem_limit"]
 
-    # Mint per-session, single-tenant, read-only capabilities and inject the handles (ADR-0015).
-    # These are the kernel's only data credentials — opaque handles, not DB passwords, and
-    # revocable by deleting their store entries. Every profile gets the data-API capability; the
-    # authoring profile additionally gets the SQL-proxy capability.
+    # Mint per-session, single-tenant, read-only capabilities and inject the handles (ADR-0015):
+    # the kernel's only data credentials — opaque handles, not DB passwords, revocable by deleting
+    # their store entries. Every profile gets the data-API capability; authoring also gets SQL.
     store = _capability_store()
     spawner.environment["INDUSTRYFLOW_API_CAPABILITY"] = cap.mint(
         store, user=who.user, company_id=who.company_id,
@@ -125,21 +139,51 @@ async def bind_identity_and_profile(spawner):
             store, user=who.user, company_id=who.company_id,
             audience=cap.AUDIENCE_SQL, ttl_seconds=CAPABILITY_TTL_SECONDS,
         )
+    # The blessed data path the client uses (ADR-0011 dec 4): the gateway origin, reachable from
+    # the single-user environment. Identity-only; the capability above is what authorises it.
+    if os.environ.get("INDUSTRYFLOW_API_URL"):
+        spawner.environment["INDUSTRYFLOW_API_URL"] = os.environ["INDUSTRYFLOW_API_URL"]
 
 
-c.KubeSpawner.pre_spawn_hook = bind_identity_and_profile
-
-# Containment (ADR-0009 / ADR-0011 dec 7). Network egress is constrained by NetworkPolicy.
-c.KubeSpawner.uid = 1000
-c.KubeSpawner.fs_gid = 1000
-c.KubeSpawner.privileged = False
-c.KubeSpawner.allow_privilege_escalation = False
-c.KubeSpawner.extra_container_config = {
-    "securityContext": {
-        "runAsNonRoot": True,
-        "allowPrivilegeEscalation": False,
-        "capabilities": {"drop": ["ALL"]},
+# ---------------------------------------------------------------------------
+# Spawner wiring — KubeSpawner (pods) or DockerSpawner (containers), per ADR-0018
+# ---------------------------------------------------------------------------
+if SPAWNER == "docker":
+    c.JupyterHub.spawner_class = "dockerspawner.DockerSpawner"
+    c.DockerSpawner.pre_spawn_hook = bind_identity_and_profile
+    # The per-user notebook image (non-root) and the network it shares with the hub + proxy.
+    c.DockerSpawner.image = os.environ["NOTEBOOK_IMAGE"]
+    c.DockerSpawner.network_name = os.environ["NOTEBOOK_NETWORK"]
+    c.DockerSpawner.use_internal_ip = True
+    # Ephemeral by default (ADR-0011 dec 1): drop the container when the server stops.
+    c.DockerSpawner.remove = True
+    c.DockerSpawner.debug = False
+    # Containment (ADR-0011 dec 7 / ADR-0018 dec 3-4): non-root, no new privileges, drop all caps.
+    # The image already declares a non-root USER; pin it explicitly as defence in depth.
+    c.DockerSpawner.extra_create_kwargs = {"user": "1000:1000"}
+    c.DockerSpawner.extra_host_config = {
+        "cap_drop": ["ALL"],
+        "security_opt": ["no-new-privileges:true"],
     }
-}
-# Ephemeral by default; per-user persistence for the authoring profile is a deferred decision.
-c.KubeSpawner.storage_pvc_ensure = False
+    # How the single-user container reaches the hub API, and the hub's public (chp) bind. On
+    # Compose the hub is addressed by its service name; chp is hub-managed (internal).
+    c.JupyterHub.hub_ip = "0.0.0.0"
+    c.JupyterHub.hub_connect_ip = os.environ.get("HUB_CONNECT_IP", "notebook-hub")
+    c.JupyterHub.bind_url = os.environ.get("HUB_PUBLIC_URL", "http://0.0.0.0:8000")
+else:
+    c.JupyterHub.spawner_class = "kubespawner.KubeSpawner"
+    c.KubeSpawner.pre_spawn_hook = bind_identity_and_profile
+    # Containment (ADR-0009 / ADR-0011 dec 7). Network egress is constrained by NetworkPolicy.
+    c.KubeSpawner.uid = 1000
+    c.KubeSpawner.fs_gid = 1000
+    c.KubeSpawner.privileged = False
+    c.KubeSpawner.allow_privilege_escalation = False
+    c.KubeSpawner.extra_container_config = {
+        "securityContext": {
+            "runAsNonRoot": True,
+            "allowPrivilegeEscalation": False,
+            "capabilities": {"drop": ["ALL"]},
+        }
+    }
+    # Ephemeral by default; per-user persistence for authoring is a deferred decision.
+    c.KubeSpawner.storage_pvc_ensure = False

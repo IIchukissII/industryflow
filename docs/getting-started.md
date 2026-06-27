@@ -61,11 +61,40 @@ Additional users can be created by an admin through the API / admin UI.
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
+| **Frontend** | https://localhost | platform login |
 | **API Gateway** | http://localhost:8000 | — |
 | **Grafana** | http://localhost:3001 | admin / see `.env` |
-| **Jupyter** | http://localhost:8888 | Token in logs |
+| **Notebooks (hub)** | https://localhost:8888 | platform **SSO** — opt-in `notebooks` profile (see below) |
 | **MLflow** | http://localhost:5000 | — |
 | **Prometheus** | http://localhost:9090 | — |
+
+### Notebooks (multi-tenant, per-user, non-root)
+
+Per-user JupyterHub notebooks (ADR-0011/0018) are an **opt-in profile** — they spawn per-user
+containers via DockerSpawner, so the hub needs the Docker socket (granted via a supplementary
+group, set `DOCKER_GID` = `getent group docker | cut -d: -f3`) and `JUPYTERHUB_CRYPT_KEY` in `.env`:
+
+```bash
+docker compose --profile notebooks build
+docker compose --profile notebooks up -d notebook-hub notebook-sso
+# Open https://<host>:8888 — log in once on the platform, the hub trusts that session (SSO).
+```
+
+Each user gets their own **non-root** environment bound to their tenant; the kernel holds only
+short-lived, read-only **capability handles**, never a DB password (ADR-0012/0015).
+
+### Reaching the box from another machine (LAN)
+
+`localhost` works on the box itself. From another machine, use the host's name or IP — the
+internal-CA TLS cert covers **both** (the hostname plus the host's primary IP, auto-added by
+`scripts/gen-internal-ca.sh`):
+
+- **`https://industryflow.local`** — resolves via **mDNS** when the box runs avahi with hostname
+  `industryflow` (it does on the reference box). Needs an mDNS-capable client on the same subnet
+  (Bonjour on Windows, `nss-mdns`/avahi on Linux, native on macOS).
+- **`https://<host-ip>`** (the server's IP; notebooks on `:8888`) — always works.
+- If `industryflow.local` does **not** resolve on your machine (no mDNS, or across subnets), add a
+  hosts entry: `<ip> industryflow.local` (`/etc/hosts`, or `C:\Windows\System32\drivers\etc\hosts`).
 
 ## 5. Stream test data
 

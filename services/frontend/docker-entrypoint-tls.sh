@@ -7,7 +7,7 @@
 #
 # The cert is valid for industryflow.local (the mDNS name advertised on the LAN) plus
 # the bare hostname and loopback. Set CERT_EXTRA_SAN to add more names/IPs, e.g.
-# CERT_EXTRA_SAN="IP:192.168.178.55,DNS:industryflow.example.com".
+# CERT_EXTRA_SAN="IP:<host-ip>,DNS:industryflow.example.com".
 set -e
 CERT_DIR=/etc/nginx/certs
 SAN="DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1"

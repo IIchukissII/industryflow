@@ -455,7 +455,7 @@ services:
     container_name: industryflow-frontend
     environment:
       # Extra SANs for the self-signed dev cert, e.g. the host LAN IP
-      # ("IP:192.168.178.55"). Ignored when a real cert is mounted at /etc/nginx/certs.
+      # ("IP:<host-ip>"). Ignored when a real cert is mounted at /etc/nginx/certs.
       CERT_EXTRA_SAN: ${CERT_EXTRA_SAN:-}
     ports:
       # Unprivileged nginx listens on 8443/8080 inside the container; host ports unchanged.
@@ -639,39 +639,77 @@ services:
       timeout: 10s
       retries: 3
 
-  jupyter:
+  # ==========================================================================
+  # NOTEBOOK HUB (ADR-0011/0014/0018) — opt-in `notebooks` profile.
+  # Multi-tenant, per-user, NON-ROOT notebooks via JupyterHub + DockerSpawner. Replaces the old
+  # root, auth-disabled, shared-credential `jupyter` shim (retired, ADR-0018 dec 5). The kernel
+  # holds only opaque, single-tenant, read-only capability handles minted by the hub — never a DB
+  # password. Bring up:  docker compose --profile notebooks build
+  #                      docker compose --profile notebooks up -d notebook-hub notebook-sso
+  # ==========================================================================
+
+  # Build-only: the per-user notebook image the hub spawns. Never started directly (DockerSpawner
+  # runs per-user copies); the `command` makes an accidental `up` a no-op.
+  notebook-singleuser:
+    profiles: ["notebooks"]
     build:
-      context: ./services/ml_service
-      dockerfile: Dockerfile.jupyter
-    container_name: industryflow-jupyter
-    ports:
-      - "${JUPYTER_PORT}:8888"
+      context: ./clients/python
+      dockerfile: ../../services/notebook_hub/Dockerfile.singleuser
+    image: industryflow-notebook-singleuser
+    command: ["true"]
+    restart: "no"
+
+  notebook-hub:
+    profiles: ["notebooks"]
+    build:
+      context: ./services/notebook_hub
+      dockerfile: Dockerfile
+    image: industryflow-notebook-hub
+    container_name: industryflow-notebook-hub
     environment:
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-      DB_NAME: ${DB_NAME}
-      ML_SERVICE_DB_USER: ${ML_SERVICE_DB_USER}
-      ML_SERVICE_DB_PASSWORD: ${ML_SERVICE_DB_PASSWORD}
-      MLFLOW_DB_NAME: ${MLFLOW_DB_NAME}
-      MLFLOW_DB_USER: ${MLFLOW_DB_USER}
-      MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD}
-      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
-      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
+      NOTEBOOK_SPAWNER: docker
+      NOTEBOOK_IMAGE: industryflow-notebook-singleuser
+      NOTEBOOK_NETWORK: industryflow-network
+      HUB_CONNECT_IP: notebook-hub
+      REDIS_URL: redis://redis:6379/0
+      # Required for enable_auth_state — the hub encrypts the verified tenant/role it carries from
+      # the SSO handoff to the spawn hook (ADR-0014). Generate: openssl rand -hex 32.
+      JUPYTERHUB_CRYPT_KEY: ${JUPYTERHUB_CRYPT_KEY}
+      # The blessed tenant-scoped data path the kernel's client calls (ADR-0011 dec 4).
+      INDUSTRYFLOW_API_URL: ${INDUSTRYFLOW_API_URL:-http://api-gateway:8000}
     volumes:
-      - ./services/ml_service/notebooks:/app/notebooks
-      - ml-models:/app/models
-      - jupyter-data:/root/.jupyter
+      # DockerSpawner talks to the Docker daemon to spawn per-user containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - notebook-hub-data:/srv/jupyterhub
+    # Reach the Docker socket WITHOUT running the hub as root: add the host's docker group as a
+    # supplementary group (set DOCKER_GID in .env — `getent group docker | cut -d: -f3`).
+    group_add:
+      - "${DOCKER_GID:-999}"
+    depends_on:
+      - redis
+      - api-gateway
     networks:
       - industryflow-network
+    restart: unless-stopped
+
+  # SSO reverse proxy (ADR-0014): the hub's only entry point. Validates the platform session via
+  # api-gateway /auth/verify and forwards the verified identity, overwriting client-supplied values.
+  notebook-sso:
+    profiles: ["notebooks"]
+    image: nginx:1.27-alpine
+    container_name: industryflow-notebook-sso
+    # HTTPS edge for notebooks (the platform is https-only; the session cookie is Secure).
+    ports:
+      - "${NOTEBOOK_PORT:-8888}:8443"
+    volumes:
+      - ./services/notebook_hub/sso-nginx.conf:/etc/nginx/nginx.conf:ro
+      # Internal-CA server cert (tls.crt/tls.key) — the same one the frontend/edge serve.
+      - "${TLS_CERT_DIR:-frontend-certs}:/etc/nginx/certs:ro"
     depends_on:
-      - timescaledb
-      - mlflow
-      - minio
+      - notebook-hub
+      - api-gateway
+    networks:
+      - industryflow-network
     restart: unless-stopped
 
   # ==========================================================================
@@ -901,7 +939,7 @@ volumes:
   db-certs:
   ml-models:
     driver: local
-  jupyter-data:
+  notebook-hub-data:
     driver: local
   grafana-data:
     driver: local

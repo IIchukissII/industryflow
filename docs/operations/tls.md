@@ -27,8 +27,12 @@ install on your devices once, which signs the server certificate. After that
 Run on the host that serves the frontend (needs `openssl`):
 
 ```sh
-# Include every name/IP clients will use to reach the edge.
-CERT_SAN="DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1,IP:192.168.178.55" \
+# The host's primary IP is auto-added to the SAN, so usually just:
+scripts/gen-internal-ca.sh
+
+# To pin the SAN explicitly (extra names/IPs, or to override auto-detection), set CERT_SAN —
+# include every name/IP clients use to reach the edge (replace <host-ip> with the server's IP):
+CERT_SAN="DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1,IP:<host-ip>" \
   scripts/gen-internal-ca.sh
 ```
 
@@ -66,9 +70,10 @@ Then browse to **https://industryflow.local** — no warning.
 ## Reaching it by name
 
 `industryflow.local` is published over mDNS by `avahi-daemon` on the server (pinned to the
-LAN interface). macOS and Windows 10+ resolve `.local` names natively; Linux clients need
-`avahi`/`nss-mdns`. If a device can't resolve it, use the IP in the SAN (e.g.
-`https://192.168.178.55`) or add a `hosts` entry.
+LAN interface) when the host's name is `industryflow`. macOS and Windows 10+ resolve `.local`
+names natively; Linux clients need `avahi`/`nss-mdns`. If a device can't resolve it, use the
+host's IP (which is in the cert SAN) — `https://<host-ip>` — or add a `hosts` entry
+(`<host-ip> industryflow.local`).
 
 ## Renewing / rotating
 

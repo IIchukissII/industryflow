@@ -23,8 +23,9 @@
 #   CA_DAYS       root CA validity in days    (default: 3650)
 #   CERT_DAYS     server cert validity        (default: 825)
 #
-# Example (server, also trusting the LAN IP):
-#   CERT_SAN="DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1,IP:192.168.178.55" \
+# The host's primary IP is auto-added to the SAN; override CERT_SAN to pin it explicitly.
+# Example (replace <host-ip> with the server's IP):
+#   CERT_SAN="DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1,IP:<host-ip>" \
 #     scripts/gen-internal-ca.sh
 set -e
 
@@ -34,7 +35,14 @@ OUT_DIR="${CERT_OUT_DIR:-$ROOT/deploy/certs}"
 CA_DAYS="${CA_DAYS:-3650}"
 CERT_DAYS="${CERT_DAYS:-825}"
 PRIMARY_HOST="${PRIMARY_HOST:-industryflow.local}"
-CERT_SAN="${CERT_SAN:-DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1}"
+# Auto-include the host's primary LAN IP in the SAN so browsing the front door by IP works when
+# `industryflow.local` does not resolve (no local DNS/hosts entry) — a common single-host setup.
+# Detected from the default route; overridden entirely if CERT_SAN is set explicitly.
+_host_ip="$(ip -4 route get 1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+[ -z "$_host_ip" ] && _host_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+_auto_ip_san=""
+[ -n "$_host_ip" ] && _auto_ip_san=",IP:$_host_ip"
+CERT_SAN="${CERT_SAN:-DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1${_auto_ip_san}}"
 # GID the served key is made group-readable to, so the non-root frontend nginx (unprivileged
 # image, uid/gid 101) can read it when this dir is bind-mounted into the container.
 NGINX_GID="${NGINX_GID:-101}"
