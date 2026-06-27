@@ -234,7 +234,8 @@ if __name__ == "__main__":
                 "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
                 "org.postgresql:postgresql:42.6.0") \
         .config("spark.sql.shuffle.partitions",
-                os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200"))
+                os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200")) \
+        .config("spark.ui.prometheus.enabled", "true")
     # Resource budget on a shared standalone cluster: cap this app's cores so streaming and
     # aggregations coexist on one worker (the deployment sets the split, so it scales). Unset
     # = Spark default (grab all cores). NOTE: spark.sql.shuffle.partitions is pinned into a

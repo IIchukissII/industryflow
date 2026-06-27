@@ -60,7 +60,28 @@ scrape_configs:
     static_configs:
       - targets: ['ml-service-api:8002']
 
+  # Ingestion Service (scraped directly on the service port, not via the mTLS edge)
+  - job_name: 'ingestion-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['ingestion-service:8003']
+
   # Kafka
   - job_name: 'kafka'
     static_configs:
       - targets: ['kafka-exporter:9308']
+
+  # Spark — native PrometheusServlet on each component's web UI (item 7). The driver UI (4040)
+  # lives in each job container; the executor metrics need spark.ui.prometheus.enabled.
+  - job_name: 'spark-driver'
+    metrics_path: '/metrics/prometheus'
+    static_configs:
+      - targets: ['spark-streaming:4040', 'spark-aggregations:4040']
+  - job_name: 'spark-executors'
+    metrics_path: '/metrics/executors/prometheus'
+    static_configs:
+      - targets: ['spark-streaming:4040', 'spark-aggregations:4040']
+  - job_name: 'spark-master'
+    metrics_path: '/metrics/master/prometheus'
+    static_configs:
+      - targets: ['spark-master:8080']
