@@ -62,7 +62,8 @@ def create_spark_session(app_name="IndustryFlow-Streaming"):
         .config("spark.sql.streaming.checkpointLocation", checkpoint_location) \
         .config("spark.streaming.stopGracefullyOnShutdown", "true") \
         .config("spark.sql.shuffle.partitions",
-                os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200"))
+                os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200")) \
+        .config("spark.ui.prometheus.enabled", "true")
     # S3A checkpoint store (multi-worker / spark-on-k8s); no-op for a local checkpoint path.
     builder = configure_s3a(builder, checkpoint_location)
     # Resource budget on a shared standalone cluster: cap this app's cores so it does not

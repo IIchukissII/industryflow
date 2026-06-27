@@ -279,6 +279,10 @@ services:
       SPARK_MASTER_PORT: 7077
       SPARK_MASTER_WEBUI_PORT: 8080
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    volumes:
+      # Stock image: mount the PrometheusServlet config so the master serves
+      # /metrics/master/prometheus on 8080 (the built images bake it in). Item 7.
+      - ./services/spark_jobs/metrics.properties:/opt/spark/conf/metrics.properties:ro
     networks:
       - industryflow-network
     restart: unless-stopped
