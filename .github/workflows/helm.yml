@@ -25,13 +25,22 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: v3.16.3
+      # secrets.failOnPlaceholders=false: these steps render with the placeholder defaults
+      # (no real secrets in CI); the fail-closed guard is exercised separately below.
       - name: helm lint
-        run: helm lint deploy/helm/industryflow
+        run: helm lint deploy/helm/industryflow --set secrets.failOnPlaceholders=false
       - name: Render (defaults)
-        run: helm template if deploy/helm/industryflow > /dev/null
+        run: helm template if deploy/helm/industryflow --set secrets.failOnPlaceholders=false > /dev/null
       - name: Render (all toggles on)
         run: |
           helm template if deploy/helm/industryflow \
+            --set secrets.failOnPlaceholders=false \
             --set networkPolicy.enabled=true \
             --set notebookHub.enabled=true \
             --set ingress.mtls.enabled=true > /dev/null
+      - name: Fail-closed guard rejects placeholder secrets
+        run: |
+          if helm template if deploy/helm/industryflow > /dev/null 2>&1; then
+            echo "::error::expected render to fail on placeholder secrets, but it succeeded"; exit 1
+          fi
+          echo "OK: render correctly refused placeholder secrets"

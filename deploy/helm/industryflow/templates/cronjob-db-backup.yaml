@@ -46,22 +46,22 @@ spec:
                 - name: PGUSER
                   valueFrom:
                     secretKeyRef:
-                      name: {{ include "industryflow.secretName" . }}
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
                       key: DB_USER
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: {{ include "industryflow.secretName" . }}
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
                       key: DB_PASSWORD
                 - name: AWS_ACCESS_KEY_ID
                   valueFrom:
                     secretKeyRef:
-                      name: {{ include "industryflow.secretName" . }}
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
                       key: MINIO_ACCESS_KEY
                 - name: AWS_SECRET_ACCESS_KEY
                   valueFrom:
                     secretKeyRef:
-                      name: {{ include "industryflow.secretName" . }}
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
                       key: MINIO_SECRET_KEY
                 - name: AWS_DEFAULT_REGION
                   value: {{ .Values.backup.s3.region | quote }}

@@ -10,6 +10,8 @@ data:
   # Resolved connection endpoints (in-cluster service names or external hosts).
   DB_HOST: {{ include "industryflow.dbHost" . | quote }}
   TIMESCALEDB_HOST: {{ include "industryflow.dbHost" . | quote }}
+  TIMESCALEDB_PORT: {{ .Values.infra.timescaledb.port | quote }}
+  TIMESCALEDB_DB: {{ .Values.infra.timescaledb.database | quote }}
   KAFKA_BOOTSTRAP_SERVERS: {{ include "industryflow.kafkaBootstrap" . | quote }}
   REDIS_HOST: {{ include "industryflow.redisHost" . | quote }}
   REDIS_URL: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
