@@ -46,6 +46,8 @@ apps:
     digest: ""
     # Secret keys this workload receives (its own scoped Secret — not the whole bundle).
     secretKeys: [API_GATEWAY_DB_PASSWORD, JWT_SECRET_KEY]
+    # Exposes Prometheus metrics at /metrics → a ServiceMonitor is generated for it.
+    metrics: true
     replicas: 2
     port: 8000
     probe: { path: /health, port: 8000 }
@@ -60,6 +62,7 @@ apps:
     digest: ""
     # MINIO_* are also exposed as AWS_* (the MLflow client loads model artifacts from MinIO).
     secretKeys: [ML_SERVICE_DB_PASSWORD, MLFLOW_DB_PASSWORD, JWT_SECRET_KEY, INTERNAL_SERVICE_TOKEN, MINIO_ACCESS_KEY, MINIO_SECRET_KEY]
+    metrics: true
     # Models are written to /app/models at runtime — make it writable under the read-only root FS.
     writablePaths: ["/tmp", "/app/models"]
     replicas: 1
@@ -74,6 +77,7 @@ apps:
     image: industryflow-alert-service-api
     digest: ""
     secretKeys: [ALERT_SERVICE_DB_PASSWORD, JWT_SECRET_KEY, INTERNAL_SERVICE_TOKEN]
+    metrics: true
     replicas: 1
     port: 8001
     probe: { path: /health, port: 8001 }
@@ -255,6 +259,51 @@ backup:
     limits: { cpu: 500m, memory: 512Mi }
 
 # ---------------------------------------------------------------------------
+# Observability integration (ADR-0009). The chart does NOT run Prometheus/Grafana/Loki —
+# those are the cluster's monitoring stack (kube-prometheus-stack + Loki; see
+# deploy/observability/). The app only EMITS the objects that stack discovers:
+#   - ServiceMonitors  — generated for every app with `metrics: true` (data-driven)
+#   - PrometheusRules   — platform alert rules
+#   - Grafana dashboards — ConfigMaps the Grafana sidecar auto-loads
+#   - data-store exporters (postgres/redis/kafka) that expose metrics for the above
+# CR-emitting toggles default OFF (they need the Prometheus Operator CRDs); turn on where
+# the operator is installed. This keeps a plain `helm install` working without the CRDs.
+# ---------------------------------------------------------------------------
+observability:
+  serviceMonitors:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    # Extra labels so the operator's serviceMonitorSelector matches these (e.g. release: monitoring).
+    labels: {}
+  prometheusRules:
+    enabled: false
+    labels: {}
+    # Tunable thresholds for the platform alert rules.
+    targetDownFor: 5m
+    kafkaConsumerLagThreshold: 1000
+    kafkaConsumerLagFor: 10m
+  dashboards:
+    # ConfigMaps labelled for the Grafana sidecar; harmless (just ConfigMaps) without it.
+    enabled: true
+    label: grafana_dashboard
+  # Data-store exporters — app-specific (they target our DB/Redis/Kafka). node-exporter and
+  # kube-state-metrics come from the cluster stack, not here.
+  exporters:
+    postgres:
+      enabled: true
+      image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
+      port: 9187
+    redis:
+      enabled: true
+      image: oliver006/redis_exporter:v1.67.0
+      port: 9121
+    kafka:
+      enabled: true
+      image: danielqsj/kafka-exporter:v1.8.0
+      port: 9308
+
+# ---------------------------------------------------------------------------
 # Non-secret configuration (rendered into a ConfigMap, consumed by every app
 # via envFrom). Authoritative topic names etc. live here (ADR-0000).
 # ---------------------------------------------------------------------------
@@ -304,6 +353,8 @@ secrets:
     ALERT_SERVICE_DB_PASSWORD: "CHANGE_ME"
     ML_SERVICE_DB_PASSWORD: "CHANGE_ME"
     MLFLOW_DB_PASSWORD: "CHANGE_ME"
+    # Read-only monitoring role used by the postgres-exporter (pg_monitor).
+    METRICS_DB_PASSWORD: "CHANGE_ME"
     JWT_SECRET_KEY: "CHANGE_ME"
     INTERNAL_SERVICE_TOKEN: "CHANGE_ME"
     MINIO_ACCESS_KEY: "CHANGE_ME"

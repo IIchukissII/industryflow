@@ -69,8 +69,6 @@ Moving to Kubernetes raises immediate questions the project has not decided: how
 - There are now two deployment descriptions (compose for dev, Helm for deploy); decision 6 and ADR-0000 bound the drift, but the surface exists.
 
 ## Deferred decisions
-
-- **Monitoring stack.** The Prometheus/Grafana/Loki/exporters chart is a later pass (this scope is app + core data services).
 - **Stateful operators (alternative E).** Whether and when to adopt Postgres/Kafka operators instead of StatefulSets.
 - **Autoscaling policy.** HPA metrics, thresholds, and which workloads scale.
 - **Secrets backend.** SealedSecrets vs Vault vs CSI driver for injecting the Secret's values.
@@ -99,6 +97,10 @@ The chart at acceptance realizes decisions that were placeholders in the first p
 - **Durable Spark checkpoints (ADR-0006).** `spark-streaming` and `spark-aggregations` now get
   a ReadWriteOnce checkpoint PVC (`Recreate` strategy, single writer), so a restart resumes
   from committed Kafka offsets/state instead of reprocessing — matching the compose volumes.
+- **Monitoring stack → ADR-0016.** The deferred Prometheus/Grafana/Loki decision is resolved
+  there: the app chart emits ServiceMonitors / PrometheusRules / Grafana-dashboard ConfigMaps
+  and ships the data-store exporters, while the backend (`kube-prometheus-stack` + Loki) runs
+  separately (`deploy/observability/`). Tenant sensor alerts stay out of the shared stack.
 - **Image registry and digest pinning.** Images are built, scanned (Trivy, gating on fixable
   CRITICAL), and published to `ghcr.io/iichukissii` by `.github/workflows/images.yml`
   (`:latest` + `:sha-<short>`). The chart references images by **immutable digest** in
