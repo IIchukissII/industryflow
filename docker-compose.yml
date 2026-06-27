@@ -218,6 +218,14 @@ services:
       SPARK_WORKER_MEMORY: 4g
       SPARK_WORKER_WEBUI_PORT: 8081
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    volumes:
+      # The executor runs here and writes Structured-Streaming STATE-store deltas to the
+      # checkpoint; the driver (in the spark-* job containers) reads the same checkpoint, so
+      # both must see ONE filesystem — otherwise stateful aggregations fail with
+      # "state/.../N.delta does not exist". A single shared volume satisfies that for this
+      # one-worker standalone cluster; multiple workers / spark-on-k8s need a distributed
+      # store (S3A/MinIO) — see docs/architecture/stream-processing.md.
+      - spark-checkpoints:/opt/spark/checkpoints
     networks:
       - industryflow-network
     restart: unless-stopped
@@ -256,7 +264,7 @@ services:
       SPARK_STREAMING_DB_USER: ${SPARK_STREAMING_DB_USER}
       SPARK_STREAMING_DB_PASSWORD: ${SPARK_STREAMING_DB_PASSWORD}
     volumes:
-      - spark-checkpoints-streaming:/opt/spark/checkpoints
+      - spark-checkpoints:/opt/spark/checkpoints
     networks:
       - industryflow-network
     restart: unless-stopped
@@ -295,7 +303,7 @@ services:
       SPARK_STREAMING_DB_USER: ${SPARK_STREAMING_DB_USER}
       SPARK_STREAMING_DB_PASSWORD: ${SPARK_STREAMING_DB_PASSWORD}
     volumes:
-      - spark-checkpoints-aggregations:/opt/spark/checkpoints
+      - spark-checkpoints:/opt/spark/checkpoints
     networks:
       - industryflow-network
     restart: unless-stopped
@@ -773,8 +781,7 @@ volumes:
   timescaledb-data:
   redis-data:
   minio-data:
-  spark-checkpoints-streaming:
-  spark-checkpoints-aggregations:
+  spark-checkpoints:
   ml-models:
     driver: local
   jupyter-data:

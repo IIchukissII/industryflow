@@ -40,7 +40,14 @@ duplicates or corrupt state:
   connection, and an error re-raises so Spark retries safely
   (**[ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md)**).
 - **Checkpoints** are durable (a persistent volume / PVC), so a restart resumes the stream
-  rather than reprocessing from the beginning.
+  rather than reprocessing from the beginning. The **stateful** aggregation queries (windowed)
+  keep a *state store* in the checkpoint that the executor writes and the driver reads, so the
+  checkpoint must live on **one filesystem visible to both**. In compose's standalone cluster
+  (driver and executor in separate containers) that is a single shared `spark-checkpoints`
+  volume mounted into the worker and the jobs; under Helm, Spark runs in local mode (driver =
+  executor, one pod) so its RWO PVC suffices. Scaling to multiple workers — or spark-on-k8s —
+  requires a distributed checkpoint store (S3A/MinIO), not a local volume. (Raw streaming is
+  stateless, so it is unaffected.)
 
 ## Tenant routing
 
