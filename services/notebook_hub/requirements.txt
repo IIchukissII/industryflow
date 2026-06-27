@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Runtime deps for the notebook hub image (jupyterhub_config.py). Not needed for the unit
+# tests, which exercise the pure identity.py (see requirements-dev.txt).
+jupyterhub==4.1.6
+jupyterhub-kubespawner==6.2.0

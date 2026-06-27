@@ -98,3 +98,38 @@ spec:
         - protocol: TCP
           port: {{ .Values.infra.redis.port }}
 {{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.notebookHub.enabled }}
+---
+# Notebook single-user pods run untrusted, user-authored code (ADR-0011). Their egress is
+# restricted to the tenant-scoped data API and DNS only — no lateral reach to other services
+# or tenants (ADR-0011 dec 7). The SQL proxy and the experiment-tracking gateway are added
+# here when those phases land. The pods carry these labels from the spawner (identity.py).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "industryflow.fullname" . }}-notebook-singleuser-egress
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-singleuser
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution.
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The tenant-scoped data API only (ADR-0011 dec 4); per-tenant data scoping is enforced
+    # server-side, not by reachability.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: api-gateway
+      ports:
+        - protocol: TCP
+          port: {{ (index .Values.apps "api-gateway").port }}
+{{- end }}
