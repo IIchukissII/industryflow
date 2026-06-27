@@ -459,6 +459,9 @@ secrets:
     # secret. Only consumed when notebookHub.enabled.
     CONFIGPROXY_AUTH_TOKEN: "CHANGE_ME"
     JUPYTERHUB_COOKIE_SECRET: "CHANGE_ME"
+    # Encrypts auth_state (the verified tenant/role the hub carries to spawn); required by
+    # enable_auth_state. Generate: openssl rand -hex 32.
+    JUPYTERHUB_CRYPT_KEY: "CHANGE_ME"
 
 # ---------------------------------------------------------------------------
 # Ingress — the single TLS edge (ADR-0002 mTLS device path, ADR-0004 HTTPS).
