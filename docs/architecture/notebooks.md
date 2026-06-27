@@ -24,8 +24,9 @@ by the trusted-code `search_path` discipline used elsewhere (ADR-0003).
 browser ─▶ SSO proxy ──auth_request──▶ api-gateway GET /auth/verify   (validate session)
    (logged-in)  │ forwards verified X-IF-* identity (overwrites client-supplied)
                 ▼
-          notebook hub ──spawns──▶ per-user pod (role-chosen profile, tenant-bound,
-                │ mints per-session capabilities                 network-restricted)
+          notebook hub ──spawns──▶ per-user env (role-chosen profile, tenant-bound, non-root,
+                │ mints per-session capabilities       resource/network-limited)
+                │                                       pod on k8s / container on compose (ADR-0018)
                 ▼
    kernel holds opaque capability handles only ─▶ data API (X-IF-Capability, read-only)
                                                 └▶ SQL proxy (SET ROLE tenant_reader_<uuid>)
@@ -34,6 +35,27 @@ browser ─▶ SSO proxy ──auth_request──▶ api-gateway GET /auth/verif
 The kernel's only credentials are opaque, single-tenant, read-only, revocable capability
 handles minted by the hub at spawn (ADR-0012/0015) — never a session token, DB password, or
 object-store secret.
+
+## Deployment: one design, two spawners (ADR-0018)
+
+The hub is JupyterHub; *how* it places each per-user environment is a deployment profile, not part
+of the isolation design:
+
+- **Kubernetes → KubeSpawner** — a per-user **pod**, contained by a single-user-pod egress
+  **NetworkPolicy** (ADR-0009). This is the strongest containment and the production posture.
+- **Compose / single host → DockerSpawner** — a per-user **container** on a dedicated internal
+  network. So the platform's primary live deployment (ADR-0001) gets multi-tenant notebooks too,
+  retiring the legacy root, auth-disabled, shared-credential Jupyter shim (ADR-0011 alt A).
+
+Everything above the spawner is **spawner-independent and shared** by both: SSO (ADR-0014),
+capability minting + the SQL proxy (ADR-0015), and the `tenant_reader_<uuid>` grants (ADR-0012).
+The spawner only places the environment and injects the handles the upper layers mint.
+
+**Non-parity, stated honestly (ADR-0018 dec 4):** allowlist-grade egress containment is a
+Kubernetes property (the NetworkPolicy). On compose the kernel's boundary is the per-user,
+**non-root**, **no-ambient-credential**, database-privilege-enforced isolation, with egress bounded
+at the host/network level rather than per environment. Deployments needing strict egress
+containment use the Kubernetes profile.
 
 ## Status
 
@@ -65,7 +87,8 @@ covered by tests; what remains needs a running cluster to validate.
 - **SSO handoff.** `GET /auth/verify` validates the session with the one existing verification
   and returns the identity in `X-IF-*` headers (ADR-0014); the SSO reverse proxy consumes it.
 - **Spawner logic** (`services/notebook_hub/identity.py`): parse the verified identity, choose
-  the profile from the role, bind the pod to its tenant with identity-only environment.
+  the profile from the role, bind the environment to its tenant with identity-only config
+  (spawner-agnostic — consumed by KubeSpawner or DockerSpawner, ADR-0018).
 - **Capability mint/resolve/revoke** (`services/notebook_hub/capabilities.py` + the
   verifier-side `capability_auth.py` in api_gateway and `binding.py` in the SQL proxy): opaque
   handles backed by a short-lived store entry, single-tenant, read-only, audience-bound
@@ -75,14 +98,32 @@ covered by tests; what remains needs a running cluster to validate.
 - **Client** (`clients/python/industryflow`): loads tenant data into pandas DataFrames, sending
   the handle in `X-IF-Capability`; holds no DB/object-store credential.
 
-## Cluster-bound (not yet validated)
+## To build (per deployment profile, ADR-0018)
+
+Shared by both profiles (built once, reused under either spawner):
+
+- The **SQL proxy's Postgres-wire backend** (read the handle from the startup message, hold the
+  privileged principal, relay bytes) — currently policy/orchestration only.
+- The **notebook images** (authoring JupyterLab / operator Voila), each non-root and shipping the
+  `industryflow` client.
+
+**Kubernetes / KubeSpawner profile** (cluster-bound — needs a running cluster to validate):
 
 - The **hub runtime** in the Helm chart behind `notebookHub.enabled` (hub + RBAC, the
   configurable-http-proxy, the SSO reverse proxy, the single-user egress NetworkPolicy, the
   Ingress) — these **render and lint** in CI but have not run on a cluster.
-- The **SQL proxy's Postgres-wire backend** (read the handle from the startup message, hold the
-  privileged principal, relay bytes).
-- The **JupyterHub config wiring**, an end-to-end spawn, and the **notebook images**.
+- The **KubeSpawner config wiring** and an end-to-end spawn.
+
+**Compose / DockerSpawner profile** (ADR-0018 — runs on the platform's primary live deployment):
+
+- A **hub service in compose** with **DockerSpawner**, the SSO reverse proxy, and a dedicated
+  internal network for the per-user containers (egress bounded at the host/network level; see the
+  non-parity note above).
+- The **DockerSpawner config wiring** and an end-to-end spawn, reusing the same SSO, capability,
+  SQL-proxy, and `tenant_reader` machinery as the cluster profile.
+
+Either profile **retires the legacy root, auth-disabled, shared-credential compose `jupyter`
+shim** (ADR-0011 alt A, ADR-0018 dec 5).
 
 ## Deferred to their own work
 
