@@ -1,0 +1,76 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if and .Values.tls.db.enabled .Values.tls.db.certManager.enabled }}
+{{- /*
+  Self-provision the DB server cert + internal CA with cert-manager (ADR-0017): a SelfSigned
+  issuer bootstraps a CA, a CA issuer then signs the TimescaleDB server cert into
+  tls.db.secretName (tls.crt/tls.key/ca.crt). Both the DB pod and every client mount that Secret.
+  Needs the cert-manager CRDs — defaults OFF; where cert-manager is absent, disable this and
+  point tls.db.secretName at a Secret from your own PKI. Mirrors scripts/gen-internal-ca.sh
+  (the compose path's internal CA).
+*/}}
+{{- $fullname := include "industryflow.fullname" . }}
+{{- $dbHost := include "industryflow.dbHost" . }}
+{{- $ns := .Release.Namespace }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $fullname }}-db-selfsigned
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fullname }}-db-ca
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  isCA: true
+  commonName: industryflow-internal-db-ca
+  secretName: {{ $fullname }}-db-ca
+  duration: {{ .Values.tls.db.certManager.caDuration | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $fullname }}-db-selfsigned
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $fullname }}-db-ca-issuer
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: {{ $fullname }}-db-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fullname }}-db-tls
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  # Output layout (tls.crt/tls.key/ca.crt) is exactly what the DB pod and clients mount.
+  secretName: {{ .Values.tls.db.secretName | quote }}
+  duration: {{ .Values.tls.db.certManager.duration | quote }}
+  renewBefore: {{ .Values.tls.db.certManager.renewBefore | quote }}
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  # SANs cover how clients address the DB Service (verify-full checks the hostname). DB_HOST is
+  # the short Service name; the FQDN forms cover cross-namespace / fully-qualified resolution.
+  dnsNames:
+    - {{ $dbHost | quote }}
+    - {{ printf "%s.%s.svc" $dbHost $ns | quote }}
+    - {{ printf "%s.%s.svc.cluster.local" $dbHost $ns | quote }}
+    - localhost
+  issuerRef:
+    name: {{ $fullname }}-db-ca-issuer
+    kind: Issuer
+{{- end }}

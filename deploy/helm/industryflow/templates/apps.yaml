@@ -15,6 +15,11 @@
 {{- $hpaOn := and $app.hpa $app.hpa.enabled }}
 {{- $res := $root.Values.resilience }}
 {{- $multiReplica := or $hpaOn (gt (int ($app.replicas | default 1)) 1) }}
+{{- /* Apps that hold a DB role (a *_DB_PASSWORD secret key) talk to TimescaleDB and must mount
+       the CA for verify-full (ADR-0017). ingestion (mTLS-only) and the frontend hold none. */}}
+{{- $usesDb := false }}
+{{- range $k := ($app.secretKeys | default list) }}{{- if hasSuffix "_DB_PASSWORD" $k }}{{- $usesDb = true }}{{- end }}{{- end }}
+{{- $dbCa := and $root.Values.tls.db.enabled $usesDb }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -133,7 +138,7 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or $hasPVC $writableMounts }}
+          {{- if or $hasPVC $writableMounts $dbCa }}
           volumeMounts:
             {{- if $hasPVC }}
             - name: data
@@ -146,8 +151,14 @@ spec:
               mountPath: {{ $p }}
             {{- end }}
             {{- end }}
+            {{- if $dbCa }}
+            - name: db-ca
+              mountPath: {{ printf "%s/ca.crt" $root.Values.tls.db.mountPath }}
+              subPath: ca.crt
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if or $hasPVC $writableMounts }}
+      {{- if or $hasPVC $writableMounts $dbCa }}
       volumes:
         {{- if $hasPVC }}
         - name: data
@@ -159,6 +170,14 @@ spec:
         - name: writable-{{ $i }}
           emptyDir: {}
         {{- end }}
+        {{- end }}
+        {{- if $dbCa }}
+        - name: db-ca
+          secret:
+            secretName: {{ $root.Values.tls.db.secretName | quote }}
+            items:
+              - key: ca.crt
+                path: ca.crt
         {{- end }}
       {{- end }}
 {{- if and $app.persistence $app.persistence.enabled }}

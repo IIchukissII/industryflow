@@ -57,7 +57,13 @@ spec:
           env:
             # Read-only monitoring role (pg_monitor), never the superuser.
             - name: DATA_SOURCE_URI
+              {{- if $root.Values.tls.db.enabled }}
+              # TLS to the DB (ADR-0017): the pg_hba is hostssl, so the exporter connects
+              # verify-full against the internal CA (mounted below), not sslmode=disable.
+              value: {{ printf "%s:%v/%s?sslmode=%s&sslrootcert=%s/ca.crt" (include "industryflow.dbHost" $root) $root.Values.infra.timescaledb.port $root.Values.infra.timescaledb.database $root.Values.tls.db.sslmode $root.Values.tls.db.mountPath | quote }}
+              {{- else }}
               value: {{ printf "%s:%v/%s?sslmode=disable" (include "industryflow.dbHost" $root) $root.Values.infra.timescaledb.port $root.Values.infra.timescaledb.database | quote }}
+              {{- end }}
             - name: DATA_SOURCE_USER
               value: metrics_user
             - name: DATA_SOURCE_PASS
@@ -68,6 +74,22 @@ spec:
           ports:
             - name: metrics
               containerPort: {{ $ex.postgres.port }}
+          {{- if $root.Values.tls.db.enabled }}
+          volumeMounts:
+            - name: db-ca
+              mountPath: {{ printf "%s/ca.crt" $root.Values.tls.db.mountPath }}
+              subPath: ca.crt
+              readOnly: true
+          {{- end }}
+      {{- if $root.Values.tls.db.enabled }}
+      volumes:
+        - name: db-ca
+          secret:
+            secretName: {{ $root.Values.tls.db.secretName | quote }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

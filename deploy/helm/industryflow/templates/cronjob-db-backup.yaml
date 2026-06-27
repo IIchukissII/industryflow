@@ -91,22 +91,47 @@ spec:
                   value: {{ .Values.backup.databases | quote }}
                 - name: RETAIN_PER_DB
                   value: {{ .Values.backup.retainPerDatabase | quote }}
+                {{- if .Values.tls.db.enabled }}
+                # pg_dump over TLS (ADR-0017); libpq reads PGSSLMODE/PGSSLROOTCERT.
+                - name: PGSSLMODE
+                  value: {{ .Values.tls.db.sslmode | quote }}
+                - name: PGSSLROOTCERT
+                  value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
+                {{- end }}
               {{- with .Values.backup.resources }}
               resources:
                 {{- toYaml . | nindent 16 }}
               {{- end }}
-              {{- if .Values.securityContext.enabled }}
+              {{- if or .Values.securityContext.enabled .Values.tls.db.enabled }}
               volumeMounts:
+                {{- if .Values.securityContext.enabled }}
                 - name: tmp
                   mountPath: /tmp
                 - name: home
                   mountPath: /home/backup
+                {{- end }}
+                {{- if .Values.tls.db.enabled }}
+                - name: db-ca
+                  mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
+                  subPath: ca.crt
+                  readOnly: true
+                {{- end }}
               {{- end }}
-          {{- if .Values.securityContext.enabled }}
+          {{- if or .Values.securityContext.enabled .Values.tls.db.enabled }}
           volumes:
+            {{- if .Values.securityContext.enabled }}
             - name: tmp
               emptyDir: {}
             - name: home
               emptyDir: {}
+            {{- end }}
+            {{- if .Values.tls.db.enabled }}
+            - name: db-ca
+              secret:
+                secretName: {{ .Values.tls.db.secretName | quote }}
+                items:
+                  - key: ca.crt
+                    path: ca.crt
+            {{- end }}
           {{- end }}
 {{- end }}

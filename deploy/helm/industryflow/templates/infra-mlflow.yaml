@@ -84,4 +84,22 @@ spec:
               port: 5000
             initialDelaySeconds: 20
             periodSeconds: 15
+          {{- if .Values.tls.db.enabled }}
+          # CA for the Postgres backend store over TLS (ADR-0017). The backend-store-uri must
+          # carry ?sslmode=verify-full&sslrootcert=<mountPath>/ca.crt (as the compose path does).
+          volumeMounts:
+            - name: db-ca
+              mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
+              subPath: ca.crt
+              readOnly: true
+          {{- end }}
+      {{- if .Values.tls.db.enabled }}
+      volumes:
+        - name: db-ca
+          secret:
+            secretName: {{ .Values.tls.db.secretName | quote }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+      {{- end }}
 {{- end }}
