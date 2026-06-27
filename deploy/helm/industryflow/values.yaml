@@ -219,3 +219,9 @@ ingress:
 networkPolicy:
   enabled: false
   ingressControllerNamespace: ingress-nginx
+
+# Embedded notebooks (ADR-0011/0012/0014). The hub Deployment/proxy wiring is not yet part of
+# this chart; this toggle currently gates the single-user pod isolation NetworkPolicy so the
+# containment manifest can land ahead of the runtime.
+notebookHub:
+  enabled: false

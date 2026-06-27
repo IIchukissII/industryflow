@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Test-only deps. identity.py is pure stdlib, so the tests need only pytest — not jupyterhub
+# or kubespawner (those are runtime image deps, see requirements.txt).
+pytest==7.4.3
