@@ -23,7 +23,7 @@ ENV REACT_APP_API_URL=$REACT_APP_API_URL \
 RUN npm run build
 
 # ---- serve stage ----
-FROM nginx:1.27-alpine
+FROM nginx:1.31-alpine
 RUN apk add --no-cache openssl
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 # TLS cert bootstrap runs before nginx starts (nginx image runs /docker-entrypoint.d/*.sh).
