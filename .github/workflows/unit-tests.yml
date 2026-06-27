@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# In-process unit/functional tests that need no external services (no DB, broker, or edge).
+# Database-backed proofs live in db-tenant-isolation.yml.
+name: Unit tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/**"
+      - ".github/workflows/unit-tests.yml"
+  pull_request:
+    paths:
+      - "services/**"
+      - ".github/workflows/unit-tests.yml"
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - ingestion_service
+          - api_gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r services/${{ matrix.service }}/requirements-dev.txt
+      - name: Run tests
+        run: pytest services/${{ matrix.service }}/tests -v

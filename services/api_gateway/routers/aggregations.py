@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import List, Optional
+from datetime import datetime
 
 from dependencies import get_db_with_tenant
 from dependencies import get_current_user_with_company
@@ -24,19 +25,23 @@ async def get_aggregations(
         current_user: User = Depends(get_current_user_with_company),
         sensor_id: Optional[str] = Query(None, description="Filter by sensor ID"),
         equipment_id: Optional[str] = Query(None, description="Filter by equipment ID"),
+        start: Optional[datetime] = Query(None, description="Only windows at/after this time (inclusive)"),
+        end: Optional[datetime] = Query(None, description="Only windows at/before this time (inclusive)"),
+        order: str = Query("desc", pattern="^(asc|desc)$", description="Time order: 'asc' for analytics, 'desc' (default) for newest-first"),
         limit: int = Query(100, ge=1, le=1000, description="Maximum number of results"),
         db: AsyncSession = Depends(get_db_with_tenant)
 ):
     """
     Get aggregated sensor statistics for specified time window.
     Automatically routed to user's tenant schema.
-    
+
     Available windows:
     - 1min: 1-minute aggregations
     - 5min: 5-minute aggregations
     - 1hour: 1-hour aggregations
-    
-    Returns min, max, avg, and count for each time window.
+
+    Returns min, max, avg, and count for each time window. Pass start/end to pull a time
+    range and order=asc for time-series consumption; the per-request cap is 1000.
     """
     # Validate window parameter
     if window not in VALID_WINDOWS:
@@ -75,7 +80,16 @@ async def get_aggregations(
         query += " AND a.equipment_id = :equipment_id"
         params["equipment_id"] = equipment_id
 
-    query += " ORDER BY a.time DESC LIMIT :limit"
+    if start:
+        query += " AND a.time >= :start"
+        params["start"] = start
+
+    if end:
+        query += " AND a.time <= :end"
+        params["end"] = end
+
+    # order is validated by the route pattern, so this interpolation cannot carry injection.
+    query += f" ORDER BY a.time {'ASC' if order == 'asc' else 'DESC'} LIMIT :limit"
 
     # Execute query
     result = await db.execute(text(query), params)
