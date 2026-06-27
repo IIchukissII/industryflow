@@ -47,8 +47,17 @@ The **api-gateway session-verify endpoint** the SSO proxy calls is implemented a
 existing verification and returns the verified identity in `X-IF-*` headers; a request without a
 valid session or tenant is rejected, which the proxy treats as "deny".
 
-Still pending: running the hub on a cluster, the per-session capability minting + SQL proxy
-(ADR-0012), and the notebook images.
+The **capability minting logic** (ADR-0015) is implemented and unit-tested
+(`services/notebook_hub/capabilities.py`): a capability is an opaque handle backed by a
+short-lived store entry, minted per session by the spawner, bound to one tenant + read-only +
+one audience (API or SQL), and revoked by deleting its entry. The spawner injects the handles
+as the kernel's only data credentials (API capability for every profile; SQL capability for
+authoring), never a database password. The Redis-backed store adapter is reference-only (not
+integration-tested).
+
+Still pending (cluster-bound): running the hub, the **SQL access proxy** that resolves an SQL
+capability and `SET ROLE`s into the per-tenant reader role (ADR-0015 dec 5-6), wiring the data
+API to accept API capabilities, and the notebook images.
 
 ## What exists today (phase 1)
 
