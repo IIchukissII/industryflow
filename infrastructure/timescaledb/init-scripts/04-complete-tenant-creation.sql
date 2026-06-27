@@ -54,7 +54,9 @@ BEGIN
 
     -- Grant table permissions
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO api_gateway_user', v_schema_name);
-    EXECUTE format('GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA %I TO spark_streaming_user', v_schema_name);
+    -- spark_streaming_user needs UPDATE too: the aggregation job upserts rollups with
+    -- ON CONFLICT DO UPDATE (sensor_aggregations_*). Without UPDATE it fails "permission denied".
+    EXECUTE format('GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA %I TO spark_streaming_user', v_schema_name);
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO alert_service_user', v_schema_name);
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO ml_service_user', v_schema_name);
     

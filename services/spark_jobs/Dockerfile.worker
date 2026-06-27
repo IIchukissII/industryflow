@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Spark worker image. The streaming/aggregation jobs write to TimescaleDB via psycopg2 inside
+# foreachPartition — which runs in the EXECUTOR, i.e. this worker container. The base
+# apache/spark image has no psycopg2, so executors fail with ModuleNotFoundError; install it here.
+FROM apache/spark:3.5.0
+
+USER root
+RUN pip3 install --no-cache-dir psycopg2-binary==2.9.9
+USER spark
