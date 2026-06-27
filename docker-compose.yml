@@ -730,6 +730,37 @@ services:
       - loki
     restart: unless-stopped
 
+  # ==========================================================================
+  # DATABASE BACKUPS (tier-1 DR) — on-demand / cron-driven, not a long-running
+  # service. Enabled via the "backup" profile so it doesn't start with `up`.
+  #   one-off:   docker compose run --rm db-backup
+  #   restore:   docker compose run --rm --entrypoint db-restore.sh db-backup <db> latest
+  #   schedule:  add a host cron calling the one-off command.
+  # See docs/operations/backup-and-recovery.md.
+  # ==========================================================================
+  db-backup:
+    build:
+      context: ./infrastructure/backup
+      dockerfile: Dockerfile
+    container_name: industryflow-db-backup
+    profiles: ["backup"]
+    environment:
+      PGHOST: ${DB_HOST}
+      PGPORT: ${DB_PORT}
+      PGUSER: ${DB_USER}
+      PGPASSWORD: ${DB_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      AWS_DEFAULT_REGION: ${BACKUP_S3_REGION:-us-east-1}
+      S3_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
+      S3_BUCKET: ${BACKUP_S3_BUCKET:-industryflow-backups}
+      S3_PREFIX: ${BACKUP_S3_PREFIX:-timescaledb}
+      DATABASES: ${BACKUP_DATABASES:-industryflow mlflow}
+      RETAIN_PER_DB: ${BACKUP_RETAIN_PER_DB:-14}
+    networks:
+      - industryflow-network
+    restart: "no"
+
 
 # ==========================================================================
 # VOLUMES

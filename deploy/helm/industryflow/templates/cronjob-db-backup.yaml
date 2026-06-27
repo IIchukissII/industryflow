@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.backup.enabled }}
+{{- /*
+  Tier-1 DR: scheduled logical backups (pg_dump) of every application database to S3/MinIO.
+  Recovery granularity = the schedule interval (RPO). Continuous-WAL PITR (pgBackRest) is the
+  documented tier-2 upgrade — docs/operations/backup-and-recovery.md.
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "industryflow.fullname" . }}-db-backup
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: db-backup
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: db-backup
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: db-backup
+              image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.backup.image "tag" .Values.image.tag "digest" .Values.backup.digest) | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              env:
+                - name: PGHOST
+                  value: {{ include "industryflow.dbHost" . | quote }}
+                - name: PGPORT
+                  value: {{ .Values.infra.timescaledb.port | quote }}
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.secretName" . }}
+                      key: DB_USER
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.secretName" . }}
+                      key: DB_PASSWORD
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.secretName" . }}
+                      key: MINIO_ACCESS_KEY
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.secretName" . }}
+                      key: MINIO_SECRET_KEY
+                - name: AWS_DEFAULT_REGION
+                  value: {{ .Values.backup.s3.region | quote }}
+                - name: S3_ENDPOINT_URL
+                  value: {{ .Values.backup.s3.endpoint | default (include "industryflow.minioEndpoint" .) | quote }}
+                - name: S3_BUCKET
+                  value: {{ .Values.backup.s3.bucket | quote }}
+                - name: S3_PREFIX
+                  value: {{ .Values.backup.s3.prefix | quote }}
+                - name: DATABASES
+                  value: {{ .Values.backup.databases | quote }}
+                - name: RETAIN_PER_DB
+                  value: {{ .Values.backup.retainPerDatabase | quote }}
+              {{- with .Values.backup.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+{{- end }}
