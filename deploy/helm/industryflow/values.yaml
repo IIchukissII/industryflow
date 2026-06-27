@@ -398,6 +398,12 @@ config:
   KAFKA_TOPIC_SENSOR_DATA: sensor-data-raw
   KAFKA_TOPIC_ALERTS: sensor-alerts
   KAFKA_GROUP_ID: alert-detector
+  # Spark Structured-Streaming checkpoint (ADR-0006). Default = the per-pod PVC (Helm runs Spark
+  # in local mode: driver = executor = one pod, so a local checkpoint is fine). To scale Spark
+  # out (a real standalone/k8s cluster with separate executors), move the checkpoint to a shared
+  # store: set this to `s3a://spark-checkpoints`, add MINIO_ACCESS_KEY/MINIO_SECRET_KEY to the
+  # spark-streaming/spark-aggregations `secretKeys`, and set their `persistence.enabled=false`.
+  CHECKPOINT_LOCATION: /opt/spark/checkpoints
   CORS_ORIGINS: "https://app.industryflow.local"
   ENVIRONMENT: production
   # Extension plugin modules the ML service loads at startup (ADR-0008/0010); empty = built-ins.
