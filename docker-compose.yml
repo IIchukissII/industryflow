@@ -698,10 +698,13 @@ services:
     profiles: ["notebooks"]
     image: nginx:1.27-alpine
     container_name: industryflow-notebook-sso
+    # HTTPS edge for notebooks (the platform is https-only; the session cookie is Secure).
     ports:
-      - "${NOTEBOOK_PORT:-8888}:8080"
+      - "${NOTEBOOK_PORT:-8888}:8443"
     volumes:
       - ./services/notebook_hub/sso-nginx.conf:/etc/nginx/nginx.conf:ro
+      # Internal-CA server cert (tls.crt/tls.key) — the same one the frontend/edge serve.
+      - "${TLS_CERT_DIR:-frontend-certs}:/etc/nginx/certs:ro"
     depends_on:
       - notebook-hub
       - api-gateway
