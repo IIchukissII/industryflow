@@ -23,14 +23,21 @@ ENV REACT_APP_API_URL=$REACT_APP_API_URL \
 RUN npm run build
 
 # ---- serve stage ----
-FROM nginx:1.27-alpine
+# Unprivileged nginx: runs as uid 101 and listens on high ports (8080/8443), so the edge
+# needs no root and no NET_BIND_SERVICE. apk/copy/chown need root; we drop back to 101 at the end.
+FROM nginxinc/nginx-unprivileged:1.27-alpine
+USER root
 RUN apk add --no-cache openssl
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-# TLS cert bootstrap runs before nginx starts (nginx image runs /docker-entrypoint.d/*.sh).
+# TLS cert bootstrap runs before nginx starts (the image runs /docker-entrypoint.d/*.sh).
 COPY docker-entrypoint-tls.sh /docker-entrypoint.d/00-tls.sh
-RUN chmod +x /docker-entrypoint.d/00-tls.sh
+# Make the cert dir writable by uid 101 so the dev self-sign works (a compose named volume or
+# k8s emptyDir mounted here inherits this ownership); a real cert mounted here overrides it.
+RUN chmod +x /docker-entrypoint.d/00-tls.sh \
+ && mkdir -p /etc/nginx/certs && chown -R 101:101 /etc/nginx/certs
 COPY --from=build /app/build /usr/share/nginx/html
-EXPOSE 80 443
+USER 101
+EXPOSE 8080 8443
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -qO- http://127.0.0.1/healthz >/dev/null 2>&1 || exit 1
+    CMD wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1 || exit 1
 CMD ["nginx", "-g", "daemon off;"]

@@ -35,6 +35,9 @@ CA_DAYS="${CA_DAYS:-3650}"
 CERT_DAYS="${CERT_DAYS:-825}"
 PRIMARY_HOST="${PRIMARY_HOST:-industryflow.local}"
 CERT_SAN="${CERT_SAN:-DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1}"
+# GID the served key is made group-readable to, so the non-root frontend nginx (unprivileged
+# image, uid/gid 101) can read it when this dir is bind-mounted into the container.
+NGINX_GID="${NGINX_GID:-101}"
 
 mkdir -p "$CA_DIR" "$OUT_DIR"
 
@@ -71,7 +74,11 @@ openssl x509 -req -in "$OUT_DIR/tls.csr" \
 rm -f "$OUT_DIR/tls.csr" "$OUT_DIR/tls.ext"
 # Copy the public CA cert next to the served files for easy client distribution.
 cp "$CA_DIR/ca.crt" "$OUT_DIR/ca.crt"
-chmod 600 "$CA_DIR/ca.key" "$OUT_DIR/tls.key"
+# CA root key stays owner-only. The SERVED leaf key is owner-rw + group-read and grouped to the
+# nginx gid, so the non-root frontend nginx can read it via the bind mount (k8s uses fsGroup).
+chmod 600 "$CA_DIR/ca.key"
+chmod 640 "$OUT_DIR/tls.key"
+chgrp "$NGINX_GID" "$OUT_DIR/tls.key" 2>/dev/null || echo "  (note: could not chgrp tls.key to $NGINX_GID — set it so the nginx group can read the key)"
 
 echo ""
 echo "CA (private, NOT mounted): $CA_DIR/ca.key, $CA_DIR/ca.crt"

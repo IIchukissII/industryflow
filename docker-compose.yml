@@ -366,8 +366,9 @@ services:
       # ("IP:192.168.178.55"). Ignored when a real cert is mounted at /etc/nginx/certs.
       CERT_EXTRA_SAN: ${CERT_EXTRA_SAN:-}
     ports:
-      - "${FRONTEND_HTTPS_PORT:-3443}:443"
-      - "${FRONTEND_PORT:-3000}:80"
+      # Unprivileged nginx listens on 8443/8080 inside the container; host ports unchanged.
+      - "${FRONTEND_HTTPS_PORT:-3443}:8443"
+      - "${FRONTEND_PORT:-3000}:8080"
     volumes:
       # Default: a named volume the entrypoint self-signs into. Set TLS_CERT_DIR to a host
       # directory holding tls.crt/tls.key (e.g. the output of scripts/gen-internal-ca.sh) to
