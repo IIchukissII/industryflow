@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.infra.timescaledb.inCluster }}
+{{- /*
+  Hardened pg_hba.conf (private-network-only auth) sourced from the canonical
+  infrastructure/timescaledb/config via the files/db-config symlink (single source of truth
+  with the compose path). Mounted at /etc/postgresql/pg_hba.conf and selected with
+  `-c hba_file=…`, replacing the postgres image's permissive default (host all all all).
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "industryflow.fullname" . }}-pg-hba
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: timescaledb
+data:
+  pg_hba.conf: |
+{{ .Files.Get "files/db-config/pg_hba.conf" | indent 4 }}
+{{- end }}

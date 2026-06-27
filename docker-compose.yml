@@ -14,7 +14,7 @@ services:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: industryflow-zookeeper
     ports:
-      - "2181:2181"
+      - "127.0.0.1:2181:2181"
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
@@ -38,8 +38,8 @@ services:
       zookeeper:
         condition: service_healthy
     ports:
-      - "9092:9092"
-      - "29092:29092"
+      - "127.0.0.1:9092:9092"
+      - "127.0.0.1:29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: ${KAFKA_ZOOKEEPER_CONNECT}
@@ -66,7 +66,7 @@ services:
     image: timescale/timescaledb:latest-pg15
     container_name: industryflow-timescaledb
     ports:
-      - "${DB_PORT}:5432"
+      - "127.0.0.1:${DB_PORT}:5432"
     environment:
       # Postgres superuser credentials
       POSTGRES_USER: ${DB_USER}
@@ -109,7 +109,7 @@ services:
     image: redis:7-alpine
     container_name: industryflow-redis
     ports:
-      - "${REDIS_PORT}:6379"
+      - "127.0.0.1:${REDIS_PORT}:6379"
     command: >
       redis-server
       --appendonly yes
