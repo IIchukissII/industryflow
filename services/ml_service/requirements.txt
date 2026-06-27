@@ -22,7 +22,7 @@ matplotlib==3.8.2
 seaborn==0.13.0
 
 # MLOps & Experiment Tracking
-mlflow==2.17.2
+mlflow==3.14.0
 
 # Model Monitoring
 evidently==0.4.11
