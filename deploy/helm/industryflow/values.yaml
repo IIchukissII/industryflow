@@ -20,6 +20,26 @@ image:
 imagePullSecrets: []
 
 # ---------------------------------------------------------------------------
+# Resilience / HA for the stateless app tier (item 8). PodDisruptionBudgets keep a voluntary
+# disruption (node drain/upgrade) from taking every replica at once; soft anti-affinity spreads
+# replicas across nodes. Per-app autoscaling lives under apps.<name>.hpa. The stateful SPOFs
+# (TimescaleDB/Kafka/ZK/Redis/MinIO) need operator/replication HA — see deploy/observability
+# and docs; not addressed by these knobs.
+# ---------------------------------------------------------------------------
+resilience:
+  podDisruptionBudgets:
+    enabled: true
+    # Applied to apps with >1 replica (or HPA on). maxUnavailable keeps drain working even at
+    # one replica, unlike minAvailable.
+    maxUnavailable: 1
+  antiAffinity:
+    enabled: true
+    # "soft" = preferredDuringScheduling (won't block scheduling on small clusters);
+    # "hard" = requiredDuringScheduling (one replica per node, needs enough nodes).
+    type: soft
+    topologyKey: kubernetes.io/hostname
+
+# ---------------------------------------------------------------------------
 # Container hardening applied to first-party workloads (apps + mlflow + db-backup): non-root,
 # no privilege escalation, all capabilities dropped, seccomp RuntimeDefault, read-only root FS
 # with writable scratch dirs (the images declare USER 10001). Per-app overrides:
@@ -49,6 +69,12 @@ apps:
     # Exposes Prometheus metrics at /metrics → a ServiceMonitor is generated for it.
     metrics: true
     replicas: 2
+    # Opt-in CPU autoscaling (needs metrics-server). When enabled, `replicas` is ignored.
+    hpa:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
     port: 8000
     probe: { path: /health, port: 8000 }
     ingress: { host: api.industryflow.local, path: / }
@@ -63,6 +89,11 @@ apps:
     # MINIO_* are also exposed as AWS_* (the MLflow client loads model artifacts from MinIO).
     secretKeys: [ML_SERVICE_DB_PASSWORD, MLFLOW_DB_PASSWORD, JWT_SECRET_KEY, INTERNAL_SERVICE_TOKEN, MINIO_ACCESS_KEY, MINIO_SECRET_KEY]
     metrics: true
+    hpa:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 75
     # Models are written to /app/models at runtime — make it writable under the read-only root FS.
     writablePaths: ["/tmp", "/app/models"]
     replicas: 1
@@ -169,6 +200,11 @@ apps:
     # image is switched to an unprivileged nginx (tracked follow-up for item 5).
     hardened: false
     replicas: 2
+    hpa:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
     port: 80
     probe: { path: /healthz, port: 80 }
     ingress: { host: app.industryflow.local, path: / }
