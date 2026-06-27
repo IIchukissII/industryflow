@@ -196,17 +196,20 @@ apps:
     digest: ""
     # Static SPA behind the TLS edge — no app secrets.
     secretKeys: []
-    # nginx still runs as root and binds :80/:443; opt out of the non-root hardening until the
-    # image is switched to an unprivileged nginx (tracked follow-up for item 5).
-    hardened: false
+    # Unprivileged nginx (uid 101) listening on 8080; non-root + dropped caps. Root FS stays
+    # writable (nginx cache + the dev cert self-signed into /etc/nginx/certs).
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+    readOnlyRootFilesystem: false
     replicas: 2
     hpa:
       enabled: false
       minReplicas: 2
       maxReplicas: 6
       targetCPUUtilizationPercentage: 70
-    port: 80
-    probe: { path: /healthz, port: 80 }
+    port: 8080
+    probe: { path: /healthz, port: 8080 }
     ingress: { host: app.industryflow.local, path: / }
     resources:
       requests: { cpu: 50m, memory: 64Mi }
