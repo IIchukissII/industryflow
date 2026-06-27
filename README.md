@@ -67,7 +67,7 @@ first tenant/admin, API examples, and troubleshooting — is in
 Full index: **[docs/](docs/README.md)**.
 
 - **[Getting Started & Operations](docs/getting-started.md)** — setup, configuration, API, testing, troubleshooting
-- **[Operations](docs/operations/)** — [authentication](docs/operations/authentication.md) · [user management](docs/operations/user-management.md) · [TLS & internal CA](docs/operations/tls.md) · [device mTLS](docs/operations/device-mtls.md) · [monitoring](docs/operations/monitoring.md)
+- **[Operations](docs/operations/)** — [authentication](docs/operations/authentication.md) · [user management](docs/operations/user-management.md) · [TLS & internal CA](docs/operations/tls.md) · [device mTLS](docs/operations/device-mtls.md) · [monitoring](docs/operations/monitoring.md) · [backup & recovery](docs/operations/backup-and-recovery.md)
 - **[Architecture](docs/architecture/README.md)** — database, Spark streaming, ML, alerting, feature engineering
 - **[API Reference](docs/api/README.md)** — per-service API documentation
 - **[Deployment](deploy/helm/industryflow/)** — the Helm chart for Kubernetes (ADR-0009)

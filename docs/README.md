@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 | Area | Start here |
 |------|-----------|
 | **Getting started & operations** | [getting-started.md](getting-started.md) — setup, configuration, API examples, troubleshooting |
-| **Operations guides** | [operations/](operations/) — [authentication](operations/authentication.md) · [user management](operations/user-management.md) · [TLS & internal CA](operations/tls.md) · [device mTLS](operations/device-mtls.md) · [monitoring](operations/monitoring.md) |
+| **Operations guides** | [operations/](operations/) — [authentication](operations/authentication.md) · [user management](operations/user-management.md) · [TLS & internal CA](operations/tls.md) · [device mTLS](operations/device-mtls.md) · [monitoring](operations/monitoring.md) · [backup & recovery](operations/backup-and-recovery.md) |
 | **Architecture** | [architecture/](architecture/README.md) — data & storage, stream processing, ML & features, alerting |
 | **API reference** | [api/](api/README.md) — services map; the live Swagger UI is authoritative |
 | **Deployment** | [../deploy/helm/industryflow/](../deploy/helm/industryflow/) — the Helm chart for Kubernetes (ADR-0009) |

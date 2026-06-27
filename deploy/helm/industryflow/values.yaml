@@ -189,6 +189,30 @@ infra:
     external: { trackingUri: "" }
 
 # ---------------------------------------------------------------------------
+# Logical database backups (tier-1 DR) — a CronJob dumps each database to S3/MinIO
+# with retention. See docs/operations/backup-and-recovery.md (incl. restore + the
+# tier-2 pgBackRest/PITR path). Credentials reuse the Secret (DB_USER/DB_PASSWORD,
+# MINIO_ACCESS_KEY/MINIO_SECRET_KEY).
+# ---------------------------------------------------------------------------
+backup:
+  enabled: true
+  image: industryflow-db-backup
+  digest: ""
+  schedule: "0 2 * * *"        # daily 02:00 UTC
+  retainPerDatabase: 14        # copies kept per database (≈ days at a daily schedule)
+  databases: "industryflow mlflow"
+  s3:
+    # Defaults to the in-cluster MinIO. For genuine disaster recovery point this at an
+    # OFF-SITE / managed S3 bucket (override endpoint + bucket and supply credentials).
+    endpoint: ""               # "" -> derive the in-cluster MinIO endpoint
+    bucket: industryflow-backups
+    region: us-east-1
+    prefix: timescaledb
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+# ---------------------------------------------------------------------------
 # Non-secret configuration (rendered into a ConfigMap, consumed by every app
 # via envFrom). Authoritative topic names etc. live here (ADR-0000).
 # ---------------------------------------------------------------------------
