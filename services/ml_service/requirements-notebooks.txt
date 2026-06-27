@@ -6,13 +6,13 @@
 # Install with: pip install -r requirements-notebooks.txt
 
 # Jupyter
-jupyter==1.0.0
-jupyterlab==4.0.9
+jupyter==1.1.1
+jupyterlab==4.6.0
 ipykernel==6.27.1
 
 # Visualization
-matplotlib==3.8.2
-seaborn==0.13.0
+matplotlib==3.11.0
+seaborn==0.13.2
 plotly==5.18.0
 
 # Hyperparameter Optimization
@@ -22,9 +22,9 @@ optuna==3.4.0
 xgboost==2.0.3
 
 # AWS SDK for MinIO/MLflow
-boto3==1.34.10
+boto3==1.43.36
 
 # Additional utilities
-tqdm==4.66.1
-ipywidgets==8.1.1
+tqdm==4.68.3
+ipywidgets==8.1.8
 pyreadr

@@ -5,4 +5,4 @@
 # Runtime deps for the SQL proxy (ADR-0015). The Postgres-wire backend adapter that uses these
 # is the cluster-bound part (see README) and is not implemented/validated here.
 redis==5.0.8
-asyncpg==0.29.0
+asyncpg==0.31.0
