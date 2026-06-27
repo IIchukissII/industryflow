@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.observability.serviceMonitors.enabled }}
+{{- $root := . }}
+{{- $sm := .Values.observability.serviceMonitors }}
+{{- /*
+  ServiceMonitors are generated, not hand-listed: any app with `metrics: true` (and a port)
+  gets one, as does each enabled data-store exporter. Requires the Prometheus Operator CRDs.
+*/}}
+{{- range $name, $app := .Values.apps }}
+{{- if and $app.enabled $app.port $app.metrics }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "industryflow.fullname" $root }}-{{ $name }}
+  labels:
+    {{- include "industryflow.labels" $root | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ $sm.interval }}
+      scrapeTimeout: {{ $sm.scrapeTimeout }}
+{{- end }}
+{{- end }}
+{{- range $ex := list "postgres" "redis" "kafka" }}
+{{- $cfg := index $root.Values.observability.exporters $ex }}
+{{- if $cfg.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "industryflow.fullname" $root }}-{{ $ex }}-exporter
+  labels:
+    {{- include "industryflow.labels" $root | nindent 4 }}
+    app.kubernetes.io/name: {{ $ex }}-exporter
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $ex }}-exporter
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+  endpoints:
+    - port: metrics
+      interval: {{ $sm.interval }}
+      scrapeTimeout: {{ $sm.scrapeTimeout }}
+{{- end }}
+{{- end }}
+{{- end }}

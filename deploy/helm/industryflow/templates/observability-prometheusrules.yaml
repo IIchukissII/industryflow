@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.observability.prometheusRules.enabled }}
+{{- $pr := .Values.observability.prometheusRules }}
+{{- /*
+  Platform alert rules. Deliberately built on metrics that always exist — `up` (every scraped
+  target) and the exporters' own up/lag series — rather than app-specific metric names, so the
+  rules stay valid as services come and go. Requires the Prometheus Operator CRDs.
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "industryflow.fullname" . }}-platform
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    {{- with $pr.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: industryflow.platform
+      rules:
+        - alert: IndustryFlowTargetDown
+          expr: up{job=~".*industryflow.*"} == 0
+          for: {{ $pr.targetDownFor }}
+          labels:
+            severity: critical
+          annotations:
+            summary: "Scrape target down"
+            description: "{{`{{ $labels.job }}/{{ $labels.instance }}`}} has been unreachable for {{ $pr.targetDownFor }}."
+        - alert: IndustryFlowPostgresDown
+          expr: pg_up == 0
+          for: {{ $pr.targetDownFor }}
+          labels:
+            severity: critical
+          annotations:
+            summary: "TimescaleDB exporter reports the database down"
+            description: "pg_up == 0 (postgres-exporter cannot reach TimescaleDB)."
+        - alert: IndustryFlowRedisDown
+          expr: redis_up == 0
+          for: {{ $pr.targetDownFor }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis is down"
+            description: "redis_up == 0 (redis-exporter cannot reach Redis)."
+        - alert: IndustryFlowKafkaConsumerLag
+          expr: kafka_consumergroup_lag > {{ $pr.kafkaConsumerLagThreshold }}
+          for: {{ $pr.kafkaConsumerLagFor }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka consumer lag is high"
+            description: "Consumer group {{`{{ $labels.consumergroup }}`}} lag on {{`{{ $labels.topic }}`}} exceeds {{ $pr.kafkaConsumerLagThreshold }}."
+{{- end }}

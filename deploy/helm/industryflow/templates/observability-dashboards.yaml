@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.observability.dashboards.enabled }}
+{{- $root := . }}
+{{- /*
+  Ship Grafana dashboards as ConfigMaps labelled for the Grafana sidecar to auto-import
+  (no Grafana instance required here — these are just ConfigMaps if no sidecar is present).
+  Sourced from the canonical infrastructure/grafana/provisioning via the files/grafana symlink
+  (single source of truth with compose). The {{ ... }} in the JSON are Grafana legend tokens,
+  left intact because .Files.Get returns raw bytes (not re-templated).
+*/}}
+{{- range $path, $_ := .Files.Glob "files/grafana/*.json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-dashboard-%s" (include "industryflow.fullname" $root) (base $path | trimSuffix ".json" | replace "_" "-") }}
+  labels:
+    {{- include "industryflow.labels" $root | nindent 4 }}
+    {{ $root.Values.observability.dashboards.label }}: "1"
+data:
+  {{ base $path }}: |-
+{{ $root.Files.Get $path | indent 4 }}
+{{- end }}
+{{- end }}
