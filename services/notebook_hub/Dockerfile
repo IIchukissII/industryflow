@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Notebook hub image (ADR-0011/0012/0014). REFERENCE — not yet cluster-validated.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 WORKDIR /srv/jupyterhub
 
