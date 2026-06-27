@@ -3,15 +3,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import declarative_base
-from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 from config import get_settings
 from sqlalchemy import text
 import asyncpg
 from fastapi import Depends
 from fastapi_users.db import SQLAlchemyUserDatabase
-from models.user import User, Base
+from models.user import User
 
 settings = get_settings()
 
@@ -33,9 +31,6 @@ AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
     autoflush=False,
 )
-
-# Base class for models
-Base = declarative_base()
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """

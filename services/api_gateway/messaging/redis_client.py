@@ -4,7 +4,6 @@
 
 """Redis client for caching sensor data."""
 import json
-import os
 from typing import Optional, Dict, Any
 import redis.asyncio as aioredis
 
