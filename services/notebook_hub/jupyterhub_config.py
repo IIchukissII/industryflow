@@ -23,7 +23,12 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
+import capabilities as cap  # noqa: E402
 import identity as ident  # noqa: E402
+
+# Capability lifetime (ADR-0015 dec 2). The store entry is the backstop; the hub keeps it alive
+# while the session is healthy and deletes it on logout (deferred lifecycle). Config-owned.
+CAPABILITY_TTL_SECONDS = int(os.environ.get("NOTEBOOK_CAPABILITY_TTL_SECONDS", "3600"))
 
 c = get_config()  # noqa: F821  (provided by JupyterHub at load time)
 
@@ -80,22 +85,46 @@ PROFILE_RESOURCES = {
 }
 
 
+def _capability_store():
+    """Build the Redis-backed capability store (ADR-0015 dec 7). Reference wiring."""
+    import redis  # runtime dep; imported lazily so config import doesn't require it
+
+    return cap.RedisCapabilityStore(redis.Redis.from_url(os.environ["REDIS_URL"]))
+
+
 async def bind_identity_and_profile(spawner):
-    """Bind the environment to its tenant and enforce the role-derived profile (ADR-0011 dec 5)."""
+    """Bind the environment to its tenant, enforce the role profile, and mint capabilities."""
     auth_state = await spawner.user.get_auth_state() or {}
     who = ident.Identity(
         user=spawner.user.name,
         company_id=auth_state.get("company_id", ""),
         role=auth_state.get("role", ""),
     )
-    # Identity only — never a data credential (ADR-0012 dec 5).
+    # Identity only — this carries no data credential (ADR-0012 dec 5).
     spawner.environment.update(ident.pod_environment(who))
     spawner.extra_labels = {**getattr(spawner, "extra_labels", {}), **ident.pod_labels(who)}
 
+    profile = ident.select_profile(who.role)
+
     # The profile is chosen by role, not offered to the user.
-    resources = PROFILE_RESOURCES[ident.select_profile(who.role)]
+    resources = PROFILE_RESOURCES[profile]
     spawner.cpu_limit = resources["cpu_limit"]
     spawner.mem_limit = resources["mem_limit"]
+
+    # Mint per-session, single-tenant, read-only capabilities and inject the handles (ADR-0015).
+    # These are the kernel's only data credentials — opaque handles, not DB passwords, and
+    # revocable by deleting their store entries. Every profile gets the data-API capability; the
+    # authoring profile additionally gets the SQL-proxy capability.
+    store = _capability_store()
+    spawner.environment["INDUSTRYFLOW_API_CAPABILITY"] = cap.mint(
+        store, user=who.user, company_id=who.company_id,
+        audience=cap.AUDIENCE_API, ttl_seconds=CAPABILITY_TTL_SECONDS,
+    )
+    if profile == ident.PROFILE_AUTHORING:
+        spawner.environment["INDUSTRYFLOW_SQL_CAPABILITY"] = cap.mint(
+            store, user=who.user, company_id=who.company_id,
+            audience=cap.AUDIENCE_SQL, ttl_seconds=CAPABILITY_TTL_SECONDS,
+        )
 
 
 c.KubeSpawner.pre_spawn_hook = bind_identity_and_profile
