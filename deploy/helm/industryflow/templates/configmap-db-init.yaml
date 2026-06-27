@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.infra.timescaledb.inCluster }}
+{{- /*
+  TimescaleDB init scripts (databases, roles, schemas, tenant machinery). Sourced from the
+  canonical infrastructure/timescaledb/init-scripts via the files/db-init symlink (single
+  source of truth with the compose path; Helm follows the symlink when loading the chart).
+  Mounted at /docker-entrypoint-initdb.d on the StatefulSet, so the official postgres
+  entrypoint runs them in filename order on a fresh data volume only. README.md is excluded.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "industryflow.fullname" . }}-db-init
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: timescaledb
+data:
+{{- $root := . }}
+{{- range $path, $_ := .Files.Glob "files/db-init/*.sql" }}
+  {{ base $path }}: |
+{{ $root.Files.Get $path | indent 4 }}
+{{- end }}
+{{- range $path, $_ := .Files.Glob "files/db-init/*.sh" }}
+  {{ base $path }}: |
+{{ $root.Files.Get $path | indent 4 }}
+{{- end }}
+{{- end }}

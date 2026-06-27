@@ -14,6 +14,12 @@ metadata:
     app.kubernetes.io/component: app
 spec:
   replicas: {{ $app.replicas | default 1 }}
+  {{- if and $app.persistence $app.persistence.enabled }}
+  # Single-writer ReadWriteOnce checkpoint volume — Recreate avoids two pods racing for it
+  # during a rollout (a rolling update would deadlock on the RWO claim).
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}
@@ -60,6 +66,35 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if and $app.persistence $app.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ $app.persistence.mountPath }}
+          {{- end }}
+      {{- if and $app.persistence $app.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "industryflow.fullname" $root }}-{{ $name }}-data
+      {{- end }}
+{{- if and $app.persistence $app.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "industryflow.fullname" $root }}-{{ $name }}-data
+  labels:
+    {{- include "industryflow.labels" $root | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with $app.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $app.persistence.size }}
+{{- end }}
 {{- if $app.port }}
 ---
 apiVersion: v1

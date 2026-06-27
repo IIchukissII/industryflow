@@ -84,9 +84,13 @@ Production deployments run images by **immutable digest**, not mutable tags:
 2. **Images** — pin by digest (see *Image digest pinning* above): third-party in `values.yaml`,
    first-party via `scripts/pin-image-digests.sh > values-digests.yaml` + `-f`. Never ship `latest`.
 3. **TLS** — provide the `ingress.tls.secretName` certificate (ADR-0004 public cert).
-4. **DB init** — mount `infrastructure/timescaledb/init-scripts` via a ConfigMap once those scripts
-   are fixed (the review found they abort on a fresh volume).
-5. **Frontend** — has no Dockerfile yet; `apps.frontend.enabled=false` until it can be built.
+4. **DB init** — handled automatically when `infra.timescaledb.inCluster=true`: the canonical
+   `infrastructure/timescaledb/init-scripts` are mounted at `/docker-entrypoint-initdb.d` via a
+   ConfigMap and run on a fresh data volume. Set the five per-service role passwords in
+   `secrets.data` (`*_DB_PASSWORD`) alongside `DB_PASSWORD`. For an **external** database
+   (`inCluster=false`) run those scripts yourself before first use.
+5. **Spark checkpoints** — `spark-streaming`/`spark-aggregations` claim a ReadWriteOnce PVC
+   (`apps.<name>.persistence`); ensure a default StorageClass exists or set `storageClass`.
 
 ## Known follow-ups (ADR-0009 deferred)
 
