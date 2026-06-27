@@ -23,11 +23,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - ingestion_service
-          - api_gateway
-          - notebook_hub
-          - notebook_sql_proxy
+        include:
+          - { service: ingestion_service,   path: services/ingestion_service/tests }
+          - { service: api_gateway,         path: services/api_gateway/tests }
+          - { service: notebook_hub,        path: services/notebook_hub/tests }
+          - { service: notebook_sql_proxy,  path: services/notebook_sql_proxy/tests }
+          - { service: alert_service,       path: services/alert_service/tests }
+          # Redis-backed tests are marked `redis` and skipped (no server in CI).
+          - { service: ml_service,          path: services/ml_service/tests, args: "-m 'not redis'" }
+          # Pure FK-resilience filter test only; test_spark_service.py is a live-DB harness.
+          - { service: spark_jobs,          path: services/spark_jobs/tests/test_upsert_filter.py }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,4 +41,4 @@ jobs:
       - name: Install dependencies
         run: pip install -r services/${{ matrix.service }}/requirements-dev.txt
       - name: Run tests
-        run: pytest services/${{ matrix.service }}/tests -v
+        run: pytest ${{ matrix.path }} ${{ matrix.args }} -v

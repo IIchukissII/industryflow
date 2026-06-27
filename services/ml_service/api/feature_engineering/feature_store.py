@@ -15,7 +15,6 @@ Backend: Redis (production) or In-Memory (development/testing)
 import json
 import logging
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timezone
 import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)

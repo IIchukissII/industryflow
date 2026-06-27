@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Test-only dependencies for the feature-store unit tests (services/ml_service/tests).
+# Minimal — the in-memory FeatureStore tests need the redis client importable (no running
+# server; Redis-backed tests are marked `redis` and skipped in CI). numpy is pulled in because
+# the feature_engineering package __init__ eagerly imports its engine module.
+# numpy is only an indirect import here (the package __init__ loads the engine), so the dev
+# pin just needs to install on the CI interpreter (py3.12) — it isn't exercised by these tests.
+redis==5.0.1
+numpy>=1.26.0
+pytest==7.4.3
+pytest-asyncio==0.21.1

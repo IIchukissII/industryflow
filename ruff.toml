@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Lint configuration for the Python services (gated in CI via .github/workflows/lint.yml).
+# Scope is high-signal correctness — pyflakes (F: undefined names, unused imports, bad
+# f-strings, redefinitions) plus syntax errors (E9). Stylistic rules are intentionally not
+# gated yet to keep the gate about real bugs, not formatting churn.
+target-version = "py311"
+
+# Experiment notebooks and caches are not service code.
+extend-exclude = ["**/notebooks/**", "*.ipynb", "**/__pycache__/**", "**/.venv/**"]
+
+[lint]
+select = ["F", "E9"]

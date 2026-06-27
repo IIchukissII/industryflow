@@ -67,7 +67,7 @@ async def test_feature_store():
         print(f"   ✓ Stored {sensor_name}: {value}")
 
     # Retrieve readings
-    print(f"\n4. Retrieving readings...")
+    print("\n4. Retrieving readings...")
     for sensor_name in sensor_names:
         readings = await feature_store.get_recent_readings(
             equipment_id=equipment_id,
@@ -79,7 +79,7 @@ async def test_feature_store():
             print(f"     Latest: {readings[-1]}")
 
     # Get current snapshot
-    print(f"\n5. Getting current snapshot...")
+    print("\n5. Getting current snapshot...")
     snapshot = await feature_store.get_current_snapshot(
         equipment_id=equipment_id,
         sensor_names=sensor_names
@@ -87,14 +87,14 @@ async def test_feature_store():
     print(f"   Snapshot: {snapshot}")
 
     # Check total keys again
-    print(f"\n6. Final health check...")
+    print("\n6. Final health check...")
     health = await feature_store.health_check()
     total_keys = health.get('redis_keys', health.get('total_keys', 0))
     print(f"   Total keys: {total_keys}")
 
     # List some keys
     if total_keys > 0:
-        print(f"\n7. Sample keys in Redis:")
+        print("\n7. Sample keys in Redis:")
         # Use Redis client to list keys
         import redis.asyncio as redis
         redis_client = redis.from_url(redis_url, decode_responses=True)
