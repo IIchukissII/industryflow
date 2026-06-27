@@ -7,7 +7,11 @@
 # (alpine community) speaks S3 to MinIO or any S3-compatible / off-site bucket.
 FROM postgres:15-alpine
 
-RUN apk add --no-cache aws-cli bash
+# gosu (a Go binary the postgres base ships for its entrypoint's privilege drop) is unused
+# here — we run the backup script directly, not the postgres entrypoint — and it carries a
+# Go-stdlib CRITICAL (CVE-2025-68121). Remove it so the image has no vulnerable Go binary.
+RUN apk add --no-cache aws-cli bash \
+ && rm -f /usr/local/bin/gosu
 
 COPY db-backup.sh db-restore.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/db-backup.sh /usr/local/bin/db-restore.sh
