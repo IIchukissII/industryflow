@@ -12,6 +12,9 @@
 {{- $wpaths := default $sc.writablePaths $app.writablePaths }}
 {{- $hasPVC := and $app.persistence $app.persistence.enabled }}
 {{- $writableMounts := and $scOn $rorfs (gt (len $wpaths) 0) }}
+{{- $hpaOn := and $app.hpa $app.hpa.enabled }}
+{{- $res := $root.Values.resilience }}
+{{- $multiReplica := or $hpaOn (gt (int ($app.replicas | default 1)) 1) }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -22,7 +25,9 @@ metadata:
     app.kubernetes.io/name: {{ $name }}
     app.kubernetes.io/component: app
 spec:
+  {{- if not $hpaOn }}
   replicas: {{ $app.replicas | default 1 }}
+  {{- end }}
   {{- if and $app.persistence $app.persistence.enabled }}
   # Single-writer ReadWriteOnce checkpoint volume — Recreate avoids two pods racing for it
   # during a rollout (a rolling update would deadlock on the RWO claim).
@@ -42,6 +47,27 @@ spec:
       {{- with $root.Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if and $res.antiAffinity.enabled $multiReplica }}
+      affinity:
+        podAntiAffinity:
+          {{- if eq $res.antiAffinity.type "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: {{ $name }}
+                  app.kubernetes.io/instance: {{ $root.Release.Name }}
+              topologyKey: {{ $res.antiAffinity.topologyKey }}
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: {{ $name }}
+                    app.kubernetes.io/instance: {{ $root.Release.Name }}
+                topologyKey: {{ $res.antiAffinity.topologyKey }}
+          {{- end }}
       {{- end }}
       {{- if $scOn }}
       securityContext:
@@ -171,6 +197,46 @@ spec:
     - name: http
       port: {{ $app.port }}
       targetPort: {{ $app.port }}
+{{- end }}
+{{- if and $res.podDisruptionBudgets.enabled $multiReplica }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "industryflow.fullname" $root }}-{{ $name }}
+  labels:
+    {{- include "industryflow.labels" $root | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  maxUnavailable: {{ $res.podDisruptionBudgets.maxUnavailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+{{- end }}
+{{- if $hpaOn }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "industryflow.fullname" $root }}-{{ $name }}
+  labels:
+    {{- include "industryflow.labels" $root | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "industryflow.fullname" $root }}-{{ $name }}
+  minReplicas: {{ $app.hpa.minReplicas }}
+  maxReplicas: {{ $app.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $app.hpa.targetCPUUtilizationPercentage }}
 {{- end }}
 {{- end }}
 {{- end }}
