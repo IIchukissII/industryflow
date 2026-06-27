@@ -53,6 +53,9 @@ def _db_connection():
         dbname=os.getenv("TIMESCALEDB_DB", "industryflow"),
         user=os.getenv("SPARK_STREAMING_DB_USER", "spark_streaming_user"),
         password=os.getenv("SPARK_STREAMING_DB_PASSWORD"),
+        # TLS to the DB (ADR-0017); libpq reads these directly.
+        sslmode=os.getenv("DB_SSLMODE", "verify-full"),
+        sslrootcert=os.getenv("DB_SSLROOTCERT", "/etc/ssl/industryflow/ca.crt"),
     )
 
 
