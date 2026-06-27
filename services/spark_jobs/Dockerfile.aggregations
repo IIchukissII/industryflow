@@ -57,9 +57,9 @@ WORKDIR /app
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD pgrep -f "kafka_aggregations.py" || exit 1
 
-# Run the aggregations job
+# Run the aggregations job. Master is set once via SPARK_MASTER (default local[*]) in the
+# job's SparkSession builder — not here — so there is a single source of truth.
 CMD ["/opt/spark/bin/spark-submit", \
-     "--master", "local[*]", \
      "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.postgresql:postgresql:42.6.0", \
      "--conf", "spark.sql.streaming.checkpointLocation=/opt/spark/checkpoints", \
      "/app/spark_streaming/kafka_aggregations.py"]

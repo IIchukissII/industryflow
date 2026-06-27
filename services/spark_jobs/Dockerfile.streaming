@@ -57,9 +57,10 @@ WORKDIR /app
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD pgrep -f "kafka_to_timescaledb.py" || exit 1
 
-# Run the streaming job
+# Run the streaming job. The master is NOT set here — the job reads it from SPARK_MASTER
+# (default local[*]) in its SparkSession builder, so the master has one source of truth.
+# Passing --master here would be a misleading no-op (the builder's .master() overrides it).
 CMD ["/opt/spark/bin/spark-submit", \
-     "--master", "local[*]", \
      "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.postgresql:postgresql:42.6.0", \
      "--conf", "spark.sql.streaming.checkpointLocation=/opt/spark/checkpoints", \
      "--py-files", "/app/spark_streaming/upsert_filter.py", \

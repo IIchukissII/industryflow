@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 def create_spark_session(app_name="IndustryFlow-Streaming"):
     """Create and configure Spark session with Kafka support"""
+    # SPARK_MASTER is the single source of truth for the master (spark-submit no longer passes
+    # --master); defaults to local[*] when unset.
     builder = SparkSession.builder \
         .appName(app_name) \
         .master(os.getenv("SPARK_MASTER", "local[*]")) \
