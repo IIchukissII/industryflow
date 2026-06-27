@@ -294,13 +294,16 @@ For monitoring issues, see the [monitoring guide](operations/monitoring.md#troub
 
 ---
 
-## Performance notes
+## Performance-relevant design
 
-> ⚠️ The figures below are claims inherited from the original README and are **not yet
-> substantiated by benchmarks in this repository**. They are retained pending verification.
+Implemented mechanisms (not benchmarked throughput claims):
 
-- Columnar compression (TimescaleDB) for time-series storage
-- Continuous aggregations — pre-computed 1 min / 5 min / 1 hour windows
-- Redis-based feature store for real-time inference
-- Configurable batch sizes for Spark jobs
-- Async database connection pooling
+- Columnar compression + retention policies on the TimescaleDB hypertables.
+- Pre-computed 1 min / 5 min / 1 hour aggregation windows (Spark).
+- Redis-based feature store for real-time inference.
+- Configurable Spark resource budgets — `SPARK_CORES_MAX` / `SPARK_SQL_SHUFFLE_PARTITIONS`
+  per job (`docker-compose.yml`); raise them or add workers to scale.
+- Async database connection pooling.
+
+Capacity, SPOF and HA gaps are tracked in
+[operations/production-readiness.md](operations/production-readiness.md).
