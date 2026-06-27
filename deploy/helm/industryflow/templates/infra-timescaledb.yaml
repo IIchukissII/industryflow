@@ -37,6 +37,10 @@ spec:
       labels:
         app.kubernetes.io/name: timescaledb
         app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        # Roll the pod when the init scripts change. (NB: the entrypoint only re-runs them on
+        # an EMPTY data volume; on an existing volume this restart is a no-op for init.)
+        checksum/db-init: {{ include (print $.Template.BasePath "/configmap-db-init.yaml") . | sha256sum }}
     spec:
       containers:
         - name: timescaledb
@@ -57,9 +61,14 @@ spec:
                 secretKeyRef:
                   name: {{ include "industryflow.secretName" . }}
                   key: DB_PASSWORD
-          # TODO: mount infrastructure/timescaledb/init-scripts via a ConfigMap at
-          # /docker-entrypoint-initdb.d once those scripts are fixed (review: they
-          # currently abort on a fresh volume).
+            {{- /* Per-service role passwords consumed by 00-create-roles.sh at first init. */}}
+            {{- range $key := list "API_GATEWAY_DB_PASSWORD" "SPARK_STREAMING_DB_PASSWORD" "ALERT_SERVICE_DB_PASSWORD" "ML_SERVICE_DB_PASSWORD" "MLFLOW_DB_PASSWORD" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.secretName" $ }}
+                  key: {{ $key }}
+            {{- end }}
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
@@ -73,10 +82,20 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: db-init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
           {{- with .Values.infra.timescaledb.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      volumes:
+        - name: db-init
+          configMap:
+            name: {{ include "industryflow.fullname" . }}-db-init
+            # Executable so the postgres entrypoint runs 00-create-roles.sh as a subprocess
+            # (rather than sourcing it), matching the compose bind-mount behaviour.
+            defaultMode: 0755
   volumeClaimTemplates:
     - metadata:
         name: data

@@ -89,6 +89,16 @@ The chart at acceptance realizes decisions that were placeholders in the first p
 - **NetworkPolicy (ADR-0002 decision 3).** A toggleable NetworkPolicy restricts
   `ingestion-service` ingress to the cluster TLS edge, so the verified-identity headers
   cannot be spoofed by another pod.
+- **Database initialization (decision 3).** The TimescaleDB StatefulSet now mounts the
+  canonical `infrastructure/timescaledb/init-scripts` (databases, roles, schemas, tenant
+  machinery) at `/docker-entrypoint-initdb.d` via a ConfigMap, so a fresh cluster is
+  self-initializing — the same scripts the compose path runs (single source of truth: the
+  chart reaches them through a `files/db-init` symlink that Helm follows). The five
+  per-service role passwords are injected from the Secret. Without this the chart rendered but
+  produced an empty database; this is what made it *cluster-functional*.
+- **Durable Spark checkpoints (ADR-0006).** `spark-streaming` and `spark-aggregations` now get
+  a ReadWriteOnce checkpoint PVC (`Recreate` strategy, single writer), so a restart resumes
+  from committed Kafka offsets/state instead of reprocessing — matching the compose volumes.
 - **Image registry and digest pinning.** Images are built, scanned (Trivy, gating on fixable
   CRITICAL), and published to `ghcr.io/iichukissii` by `.github/workflows/images.yml`
   (`:latest` + `:sha-<short>`). The chart references images by **immutable digest** in
