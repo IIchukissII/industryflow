@@ -59,14 +59,22 @@ def test_reader_role_rejects_non_uuid():
         b.reader_role("not-a-uuid")
 
 
-def test_setup_statements_set_role_then_read_only():
+def test_setup_statements_set_role_search_path_then_read_only():
     cid = str(uuid.uuid4())
     stmts = b.session_setup_statements(b.SqlBinding(user="u", company_id=cid, read_only=True))
+    # SET ROLE first, then point search_path at the tenant schema, then the read-only default.
     assert stmts[0] == f'SET ROLE "{b.reader_role(cid)}"'
+    assert stmts[1] == f'SET search_path TO "{b.tenant_schema(cid)}"'
     assert any("read_only" in s for s in stmts)
+
+
+def test_tenant_schema_matches_reader_role_uuid():
+    cid = str(uuid.uuid4())
+    # Both derive from the same validated UUID: tenant_<uuid> and tenant_reader_<uuid>.
+    assert b.reader_role(cid) == "tenant_reader_" + b.tenant_schema(cid)[len("tenant_"):]
 
 
 def test_setup_statements_without_read_only():
     cid = str(uuid.uuid4())
     stmts = b.session_setup_statements(b.SqlBinding(user="u", company_id=cid, read_only=False))
-    assert stmts == [f'SET ROLE "{b.reader_role(cid)}"']
+    assert stmts == [f'SET ROLE "{b.reader_role(cid)}"', f'SET search_path TO "{b.tenant_schema(cid)}"']
