@@ -28,6 +28,7 @@ jobs:
           - { service: api_gateway,         path: services/api_gateway/tests }
           - { service: notebook_hub,        path: services/notebook_hub/tests }
           - { service: notebook_sql_proxy,  path: services/notebook_sql_proxy/tests }
+          - { service: notebook_tracking_gateway, path: services/notebook_tracking_gateway/tests }
           - { service: alert_service,       path: services/alert_service/tests }
           # Redis-backed tests are marked `redis` and skipped (no server in CI).
           - { service: ml_service,          path: services/ml_service/tests, args: "-m 'not redis'" }

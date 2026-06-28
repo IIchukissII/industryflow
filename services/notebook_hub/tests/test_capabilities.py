@@ -108,3 +108,22 @@ def test_store_holds_no_database_secret():
     _mint(store)
     blob = " ".join(store.data.values()).lower()
     assert "password" not in blob and "secret" not in blob
+
+
+def test_tracking_audience_is_read_write_and_distinct():
+    store = FakeStore()
+    h = _mint(store, audience=cap.AUDIENCE_TRACKING)
+    # Tracking resolves only for tracking, and (unlike api/sql) is read-write within the tenant
+    # namespace the gateway enforces (ADR-0019).
+    b = cap.resolve(store, h, expected_audience=cap.AUDIENCE_TRACKING)
+    assert b is not None and b.audience == cap.AUDIENCE_TRACKING
+    assert b.read_only is False
+    assert cap.resolve(store, h, expected_audience=cap.AUDIENCE_SQL) is None
+    assert cap.resolve(store, h, expected_audience=cap.AUDIENCE_API) is None
+
+
+def test_unknown_audience_rejected():
+    store = FakeStore()
+    import pytest
+    with pytest.raises(ValueError):
+        cap.mint(store, user="u", company_id="c", audience="mlflow-direct", ttl_seconds=60)

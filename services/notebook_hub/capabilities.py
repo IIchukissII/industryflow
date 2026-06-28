@@ -26,6 +26,13 @@ from typing import Optional, Protocol
 # Audiences (ADR-0015 dec 3). A handle resolves only for the audience it was minted for.
 AUDIENCE_API = "api"  # the tenant-scoped data API (ADR-0011 dec 4)
 AUDIENCE_SQL = "sql"  # the SQL access proxy (ADR-0015 dec 5)
+AUDIENCE_TRACKING = "tracking"  # the experiment-tracking gateway (ADR-0019)
+
+_AUDIENCES = (AUDIENCE_API, AUDIENCE_SQL, AUDIENCE_TRACKING)
+# The data planes are read-only (ADR-0011); tracking is read-write *within the tenant namespace*
+# the gateway enforces (ADR-0019) — a kernel logs runs and registers models, but never crosses its
+# tenant. For tracking, the boundary is the namespace, not read-only-ness.
+_READ_ONLY_AUDIENCES = (AUDIENCE_API, AUDIENCE_SQL)
 
 # Store keys are namespaced so capability handles never collide with other store users.
 _KEY_PREFIX = "nbcap:"
@@ -59,13 +66,14 @@ def mint(store: CapabilityStore, *, user: str, company_id: str, audience: str, t
     Returns the handle to inject into the environment. The handle carries no authority by
     itself — its authority is the store entry (ADR-0015 dec 1).
     """
-    if audience not in (AUDIENCE_API, AUDIENCE_SQL):
+    if audience not in _AUDIENCES:
         raise ValueError(f"unknown capability audience: {audience!r}")
     if not user or not company_id:
         raise ValueError("capability requires a user and a tenant")
 
     handle = secrets.token_urlsafe(32)
-    record = {"user": user, "company_id": company_id, "audience": audience, "read_only": True}
+    read_only = audience in _READ_ONLY_AUDIENCES
+    record = {"user": user, "company_id": company_id, "audience": audience, "read_only": read_only}
     store.set(_key(handle), json.dumps(record), ttl_seconds)
     return handle
 

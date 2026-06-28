@@ -238,15 +238,30 @@ services:
       - "5000:5000"
     environment:
       BACKEND_STORE_URI: postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow?sslmode=verify-full&sslrootcert=/etc/ssl/industryflow/ca.crt
+      # psycopg2 does not always honour the URI's sslrootcert query param (it then falls back to
+      # ~/.postgresql/root.crt and fails against the verify-full DB, ADR-0017). The libpq env vars
+      # are always honoured, so set them explicitly to the mounted internal-CA cert.
+      PGSSLMODE: ${DB_SSLMODE:-verify-full}
+      PGSSLROOTCERT: /etc/ssl/industryflow/ca.crt
       MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
       AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
-    command: >
-      mlflow server
-      --backend-store-uri postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow?sslmode=verify-full&sslrootcert=/etc/ssl/industryflow/ca.crt
-      --default-artifact-root s3://mlflow
-      --host 0.0.0.0
-      --port 5000
+    # List form (not a folded scalar): the `&` in a URI query string truncates a `command: >`
+    # block, which silently dropped --host/--port and left MLflow bound to localhost. TLS to the
+    # DB is supplied by PGSSLMODE/PGSSLROOTCERT above, so the URI needs no query params.
+    command:
+      - mlflow
+      - server
+      - --backend-store-uri
+      - postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow
+      - --default-artifact-root
+      - s3://mlflow
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --allowed-hosts
+      - "*"
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -697,6 +712,9 @@ services:
       # Where authoring kernels reach the SQL access proxy (ADR-0015); the kernel authenticates
       # with its SQL capability handle as the password. Forwarded to authoring spawns only.
       INDUSTRYFLOW_SQL_PROXY_URL: ${INDUSTRYFLOW_SQL_PROXY_URL:-postgresql://notebook-sql-proxy:6432/${DB_NAME}}
+      # Where authoring kernels reach the experiment-tracking gateway (ADR-0019); the kernel's MLflow
+      # client uses its tracking capability as the bearer token. Forwarded to authoring spawns only.
+      INDUSTRYFLOW_TRACKING_URL: ${INDUSTRYFLOW_TRACKING_URL:-http://notebook-tracking-gateway:5050}
     volumes:
       # DockerSpawner talks to the Docker daemon to spawn per-user containers.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -745,6 +763,35 @@ services:
     depends_on:
       - redis
       - timescaledb
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # Experiment-tracking gateway (ADR-0019): authoring kernels point their MLflow client here
+  # (MLFLOW_TRACKING_URI) with their tracking capability as the bearer token. The gateway scopes
+  # every experiment/run/model/artifact to the caller's tenant and holds MLflow's backend +
+  # object-store credentials. Artifacts come back as tenant-scoped pre-signed URLs (dec 6). Not
+  # host-published — only spawned kernels (same network) reach it at notebook-tracking-gateway:5050.
+  notebook-tracking-gateway:
+    profiles: ["notebooks"]
+    build:
+      context: ./services/notebook_tracking_gateway
+      dockerfile: Dockerfile
+    image: industryflow-notebook-tracking-gateway
+    container_name: industryflow-notebook-tracking-gateway
+    environment:
+      TRACKING_HOST: 0.0.0.0
+      TRACKING_PORT: "5050"
+      TRACKING_MLFLOW_URL: http://mlflow:5000
+      TRACKING_REDIS_URL: redis://redis:6379/0
+      TRACKING_ARTIFACT_BUCKET: mlflow
+      TRACKING_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL:-http://minio:9000}
+      TRACKING_S3_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      TRACKING_S3_SECRET_KEY: ${MINIO_SECRET_KEY}
+    depends_on:
+      - redis
+      - mlflow
+      - minio
     networks:
       - industryflow-network
     restart: unless-stopped
