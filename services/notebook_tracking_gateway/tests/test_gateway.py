@@ -116,6 +116,6 @@ def test_artifact_returns_tenant_scoped_presigned_url():
     c = _client()
     r = c.get("/api/2.0/mlflow/artifacts?path=models/m.pkl", headers=_auth())
     body = r.json()
-    assert body["key"] == policy.tenant_prefix(CID) + "models/m.pkl"
+    assert body["key"] == policy.artifact_prefix(CID) + "models/m.pkl"
     assert body["method"] == "GET"
-    assert body["url"].startswith("https://store.local/" + policy.tenant_prefix(CID))
+    assert body["url"].startswith("https://store.local/" + policy.artifact_prefix(CID))
