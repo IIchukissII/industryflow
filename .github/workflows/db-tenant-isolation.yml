@@ -26,7 +26,7 @@ jobs:
   reader-role-isolation:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Provide compose env
         run: cp .env.example .env
@@ -34,7 +34,7 @@ jobs:
       - name: Start TimescaleDB (runs init scripts)
         run: docker compose up -d --wait timescaledb
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
