@@ -3,23 +3,23 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Core ML Libraries
-scikit-learn==1.3.2
+scikit-learn==1.9.0
 numpy==1.24.3
 pandas==2.1.3
-scipy==1.11.4
-joblib==1.3.2
+scipy==1.18.0
+joblib==1.5.3
 
 # Database
-asyncpg==0.29.0
-psycopg2-binary==2.9.9
+asyncpg==0.31.0
+psycopg2-binary==2.9.12
 redis[asyncio]==5.0.1
 
 # Data Processing
 pyarrow==14.0.1
 
 # Visualization & Analysis
-matplotlib==3.8.2
-seaborn==0.13.0
+matplotlib==3.11.0
+seaborn==0.13.2
 
 # MLOps & Experiment Tracking
 mlflow==3.14.0
@@ -27,21 +27,21 @@ mlflow==3.14.0
 # Model Monitoring
 # 0.4.40 (latest 0.4.x) lifts the pydantic<2 cap that 0.4.11 carried, so it co-installs with
 # mlflow 3.x (pydantic>=2). Its numpy/pandas/scikit-learn floors are met by the pins above.
-evidently==0.4.40
+evidently==0.7.21
 
 # Configuration
-pyyaml==6.0.1
-python-dotenv==1.0.0
+pyyaml==6.0.3
+python-dotenv==1.2.2
 
 # Utilities
-tqdm==4.66.1
-colorlog==6.8.0
+tqdm==4.68.3
+colorlog==6.10.1
 
 # Object Storage (for model registry)
-minio==7.2.0
+minio==7.2.20
 
 # Metrics Export
-prometheus-client==0.19.0
+prometheus-client==0.25.0
 
 # Testing
 pytest==7.4.3
