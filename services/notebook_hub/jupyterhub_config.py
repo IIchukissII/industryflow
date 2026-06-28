@@ -34,6 +34,19 @@ SPAWNER = os.environ.get("NOTEBOOK_SPAWNER", "kube").strip().lower()
 # while the session is healthy and deletes it on logout (deferred lifecycle). Config-owned.
 CAPABILITY_TTL_SECONDS = int(os.environ.get("NOTEBOOK_CAPABILITY_TTL_SECONDS", "3600"))
 
+# Per-user durable work storage (ADR-0020): a data scientist's notebooks persist at work/ across
+# the ephemeral container; the rest of the home (incl the read-only examples/ baked into the image)
+# stays image-supplied, so an immutable example or a stack upgrade is always the fresh image's.
+NB_HOME = os.environ.get("NOTEBOOK_HOME", "/home/jovyan")
+NB_WORK_DIR = NB_HOME + "/work"
+# Per-user volume / PVC name — {username} is templated by the spawner. The username is already
+# tenant-bound (ADR-0014), so the volume is per user within one tenant.
+NB_VOLUME_TEMPLATE = os.environ.get("NOTEBOOK_VOLUME_TEMPLATE", "industryflow-nb-{username}")
+# Idle reclamation (ADR-0011 dec 1/7, made concrete in ADR-0020): cull servers idle past the
+# timeout. Reclaiming is free — the work is safe on the volume and respawns from a fresh image.
+IDLE_TIMEOUT_SECONDS = int(os.environ.get("NOTEBOOK_IDLE_TIMEOUT_SECONDS", "3600"))
+CULL_EVERY_SECONDS = int(os.environ.get("NOTEBOOK_CULL_EVERY_SECONDS", "300"))
+
 c = get_config()  # noqa: F821  (provided by JupyterHub at load time)
 
 # Mount the hub under a path prefix so it can be embedded same-origin in the platform UI
@@ -183,6 +196,49 @@ async def bind_identity_and_profile(spawner):
     if os.environ.get("INDUSTRYFLOW_API_URL"):
         spawner.environment["INDUSTRYFLOW_API_URL"] = os.environ["INDUSTRYFLOW_API_URL"]
 
+    # Durable per-user work storage (ADR-0020) — authoring only; operators (analytics) author
+    # nothing. work/ persists across the ephemeral container; the capabilities minted above are
+    # NEVER written here — they are re-minted every spawn, so a restored volume carries notebooks,
+    # not credentials. DockerSpawner uses a per-user named volume; KubeSpawner an auto-ensured PVC.
+    if profile == ident.PROFILE_AUTHORING:
+        if SPAWNER == "docker":
+            spawner.volumes = {NB_VOLUME_TEMPLATE: NB_WORK_DIR}
+        else:
+            spawner.storage_pvc_ensure = True
+            spawner.pvc_name_template = NB_VOLUME_TEMPLATE
+            spawner.storage_capacity = os.environ.get("NOTEBOOK_STORAGE_CAPACITY", "2Gi")
+            spawner.volumes = [{"name": "work", "persistentVolumeClaim": {"claimName": NB_VOLUME_TEMPLATE}}]
+            spawner.volume_mounts = [{"name": "work", "mountPath": NB_WORK_DIR}]
+
+
+# ---------------------------------------------------------------------------
+# Durable work + idle reclamation (ADR-0020), spawner-agnostic
+# ---------------------------------------------------------------------------
+# File-browser root: the home, so a data scientist sees both examples/ (image, read-only) and
+# work/ (their persistent volume).
+c.Spawner.notebook_dir = NB_HOME
+
+# Implement ADR-0011 dec 1/7 "reclaimed when idle": cull idle servers with a managed service that
+# holds a MINIMAL scoped token (ADR-0020 dec 2) — least-privilege, not an ambient admin credential.
+c.JupyterHub.services = [
+    {
+        "name": "idle-culler",
+        "command": [
+            sys.executable, "-m", "jupyterhub_idle_culler",
+            "--timeout=%d" % IDLE_TIMEOUT_SECONDS,
+            "--cull-every=%d" % CULL_EVERY_SECONDS,
+        ],
+    },
+]
+c.JupyterHub.load_roles = [
+    {
+        "name": "idle-culler",
+        "services": ["idle-culler"],
+        # Exactly what the culler needs to find and stop idle servers — nothing more.
+        "scopes": ["list:users", "read:users:activity", "read:servers", "delete:servers"],
+    },
+]
+
 
 # ---------------------------------------------------------------------------
 # Spawner wiring — KubeSpawner (pods) or DockerSpawner (containers), per ADR-0018
@@ -225,5 +281,7 @@ else:
             "capabilities": {"drop": ["ALL"]},
         }
     }
-    # Ephemeral by default; per-user persistence for authoring is a deferred decision.
+    # fs_gid=1000 makes a freshly-provisioned PVC group-writable by the non-root uid. Per-user
+    # persistence for the authoring profile is ensured in the spawn hook (ADR-0020); analytics
+    # spawns request no storage, so the class default stays off here.
     c.KubeSpawner.storage_pvc_ensure = False
