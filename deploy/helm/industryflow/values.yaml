@@ -506,6 +506,12 @@ notebookHub:
   enabled: false
   # External host for the notebooks UI (served via the SSO proxy → hub).
   host: notebooks.industryflow.local
+  # Per-user images the hub spawns by role profile (ADR-0011 dec 5): authoring = JupyterLab + the
+  # lean DS stack; analytics = Voila read-only dashboards. Referenced by the spawner, not run as
+  # chart workloads. Pin by digest in production like the other first-party images.
+  singleUser:
+    authoring: { image: industryflow-notebook-authoring, digest: "" }
+    analytics: { image: industryflow-notebook-analytics, digest: "" }
   # The hub (JupyterHub, image built from services/notebook_hub/Dockerfile).
   hub:
     image: industryflow-notebook-hub
