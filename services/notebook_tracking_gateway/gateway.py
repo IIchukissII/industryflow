@@ -170,6 +170,7 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
     import httpx
     import redis.asyncio as aioredis
     import uvicorn
+    from botocore.client import Config
 
     mlflow_url = os.environ["TRACKING_MLFLOW_URL"].rstrip("/")
     store = aioredis.from_url(os.environ["TRACKING_REDIS_URL"])
@@ -180,6 +181,11 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
         endpoint_url=os.environ.get("TRACKING_S3_ENDPOINT_URL"),
         aws_access_key_id=os.environ["TRACKING_S3_ACCESS_KEY"],
         aws_secret_access_key=os.environ["TRACKING_S3_SECRET_KEY"],
+        region_name=os.environ.get("TRACKING_S3_REGION", "us-east-1"),
+        # SigV4 + path-style: MinIO rejects SigV2 presigned PUTs that carry extra headers, and does
+        # not serve virtual-host buckets. SigV4 presigned URLs sign only host+key, so the client's
+        # follow-the-redirect PUT (with its own Content-Type) is accepted.
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
     )
     client = httpx.AsyncClient(base_url=mlflow_url, timeout=30)
 
