@@ -103,7 +103,7 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore)
 
     # --- tracking/registry metadata: tenant-namespaced, proxied to MLflow ---
 
-    @app.api_route(_MLFLOW_PREFIX + "{endpoint:path}", methods=["GET", "POST", "DELETE"])
+    @app.api_route(_MLFLOW_PREFIX + "{endpoint:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def proxy(endpoint: str, request: Request, binding: policy.TrackingBinding = Depends(tenant)):
         cid = binding.company_id
         params = dict(request.query_params)
