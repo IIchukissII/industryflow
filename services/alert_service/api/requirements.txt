@@ -20,7 +20,7 @@ mlflow-skinny==2.8.0
 boto3==1.43.36
 
 # Utilities
-python-dateutil>=2.8.2
+python-dateutil>=2.9.0.post0
 setuptools>=65.0.0
 
 # Prometheus metrics
