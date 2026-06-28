@@ -25,7 +25,8 @@ egress **NetworkPolicy** (ADR-0009, ADR-0011 dec 7). The hub configuration, the 
 `notebookHub` stack, and the cluster-bound TODO in the design doc all assume Kubernetes.
 
 That assumption now collides with how the platform actually runs. The primary live deployment is
-**Docker Compose on a single host** (the self-hosted model of ADR-0001); Kubernetes is supported
+**Docker Compose on a single host** (the single-host self-hosted shape ADR-0009 rev 1 supports);
+Kubernetes is supported
 but not the only — or, today, the validated — target. As written, the notebook capability cannot
 exist anywhere but on a cluster, so the one place the platform is actually operated has no path to
 multi-tenant notebooks at all. What it has instead is the very thing ADR-0011 set out to replace:
@@ -106,7 +107,7 @@ realization rather than a divergence.
 ## Alternatives considered
 
 **A. Keep KubeSpawner only; require a cluster for any multi-tenant notebooks.** *Rejected:* it
-leaves the platform's actual live deployment (Compose, ADR-0001) with no conforming notebook
+leaves the platform's actual live deployment (single-host Compose, ADR-0009 rev 1) with no conforming notebook
 capability, so the root/shared-credential shim persists indefinitely. The isolation model does not
 in fact require Kubernetes — it requires a spawner, a capability store, and per-tenant grants — so
 the cluster requirement is incidental, not essential.
@@ -168,7 +169,10 @@ quota-bounded posture and add operational burden, now compounded across hosts.
   its decision 1 abstracts the spawner, and this ADR names the two realizations.
 - ADR-0014 — SSO; written against "the spawner" generically and unchanged by this ADR.
 - ADR-0015 — capability minting and the SQL proxy; spawner-independent and unchanged.
-- ADR-0009 — the Kubernetes packaging and the single-user-pod egress NetworkPolicy that decision 4
-  names as the strongest containment.
-- ADR-0001 — the self-hosted (Compose) vs managed (Kubernetes) deployment framing this serves.
+- ADR-0009 (rev 1) — the Kubernetes packaging and the single-user-pod egress NetworkPolicy that
+  decision 4 names as the strongest containment; rev 1 also establishes single-host Compose as a
+  supported self-hosted deployment shape, which is the premise the Compose spawner here relies on.
+- ADR-0001 — the self-hosted vs commercial-managed *business/licensing* split this serves. (The
+  mapping of self-hosted→Compose and managed→Kubernetes is ADR-0009's deployment decision, not
+  ADR-0001's; ADR-0001 only requires that both coexist under one architecture.)
 - `docs/architecture/notebooks.md` — the design overview, updated for the dual-spawner deployment.

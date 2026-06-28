@@ -10,7 +10,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
-- **Companions:** ADR-0003 (tenant→schema resolution), ADR-0004 (API authentication & CORS)
+- **Companions:** ADR-0003 (tenant→schema resolution), ADR-0004 (API authentication, sessions & transport)
 - **Related (IndustryGrow):** ADR-0004 rev 1 (gateway host hardening), ADR-0007 (PKI and secure-element identity)
 
 ## Context and problem
@@ -109,4 +109,4 @@ So ingestion authentication is really **two different trust domains wearing one 
 - IndustryGrow ADR-0004 rev 1 — gateway host hardening and stateless-edge operation (the device whose data IndustryFlow ingests).
 - IndustryGrow ADR-0007 — PKI and secure-element identity (the device-side counterpart to IndustryFlow's CA).
 - ADR-0003 — tenant→schema resolution, consumer of the verified identity decided here.
-- ADR-0004 — API authentication & CORS, the JWT trust domain this ADR leaves in place.
+- ADR-0004 — API authentication, sessions & transport, the JWT trust domain this ADR leaves in place.

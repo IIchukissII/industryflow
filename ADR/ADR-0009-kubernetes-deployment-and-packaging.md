@@ -3,20 +3,24 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0009: Deployment and orchestration — Kubernetes, packaged with Helm
+# ADR-0009: Deployment and orchestration — Kubernetes, packaged with Helm (rev 1)
 
 - **ID:** ADR-0009
 - **Status:** Accepted
-- **Date:** 2026-06-26 (accepted 2026-06-27)
+- **Date:** 2026-06-28
 - **Project:** IndustryFlow
-- **Parent:** ADR-0001
+- **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0002 (ingestion mTLS edge), ADR-0004 (API HTTPS edge), ADR-0006 (durable Spark checkpoints)
+- **Related:** ADR-0018 (spawner portability — establishes single-host Compose as a first-class self-hosted target), ADR-0016 (observability stack deferred to here)
+- **Supersedes:** ADR-0009 rev 0 (2026-06-27 — treated `docker-compose.yml` as a local-development convenience only and rejected Compose as a deployment path; rev 1 admits single-host Compose as a supported self-hosted deployment target, reconciling this ADR with ADR-0018)
 
 ## Context and problem
 
 IndustryFlow ships today as a single `docker-compose.yml` of ~20 containers. Compose is a fine local-development tool, but it cannot deliver what ADR-0001 commits the project to: a **commercial-managed** offering running alongside **self-hosted** deployments. Compose has no rolling updates, no horizontal autoscaling, no self-healing, no multi-node scheduling, and no standard story for resource limits (the review found none set) or for the TLS edge that ADR-0002 (device mTLS) and ADR-0004 (browser HTTPS) both assume. A managed multi-tenant service needs an orchestrator; the natural and ubiquitous one is Kubernetes.
 
-Moving to Kubernetes raises immediate questions the project has not decided: how the manifests are packaged and parameterized per environment; how the stateful infrastructure (TimescaleDB, Kafka, Redis, MinIO, MLflow) is run when the same chart must serve both a self-hoster who wants everything in-cluster and a managed deployment that points at external managed datastores; and where the TLS edge lives. This ADR records those decisions. It does not retire `docker-compose.yml` as a local-dev convenience; it adds the deployment path the managed/self-hosted split requires.
+Moving to Kubernetes raises immediate questions the project has not decided: how the manifests are packaged and parameterized per environment; how the stateful infrastructure (TimescaleDB, Kafka, Redis, MinIO, MLflow) is run when the same chart must serve both a self-hoster who wants everything in-cluster and a managed deployment that points at external managed datastores; and where the TLS edge lives. This ADR records those decisions. It does not retire `docker-compose.yml`; it adds the Kubernetes deployment path the *managed* offering and *scaled* self-hosting require.
+
+**Revision 1 (2026-06-28).** Rev 0 framed Compose as a local-development convenience only and rejected it as a deployment path, with self-hosting equated to in-cluster Helm. That was too strong: a small self-hoster running a single host is a real, supported deployment shape, and the platform in fact runs that way today (the notebook hub's Compose spawner in ADR-0018 is built on this premise, and ADR-0017 records "the live deployment is docker-compose"). Rev 1 therefore recognizes **two self-hosted shapes** — single-host Compose for small/test deployments, and in-cluster Helm for scaled self-hosting — while the *managed* offering remains Kubernetes/Helm. Kubernetes is still the target for everything Compose structurally cannot do (rolling updates, autoscaling, self-healing, multi-node scheduling, managed-multi-tenancy); what changes is that Compose is no longer *only* a dev tool. Decision 6 and Alternative A below carry the revised stance.
 
 ## Decision drivers
 
@@ -36,13 +40,13 @@ Moving to Kubernetes raises immediate questions the project has not decided: how
 
 4. **Configuration is a ConfigMap; secrets are a Kubernetes Secret injected externally.** Non-secret configuration (hosts, ports, topic names) is a ConfigMap; secrets (DB passwords, JWT secret, MinIO keys) are a Secret whose values are supplied by a secrets backend (SealedSecrets/Vault/CSI) in real deployments and are never committed to the chart. The chart ships placeholders, not values.
 
-5. **A single Ingress is the TLS edge.** The Ingress terminates HTTPS for the API and frontend with a publicly-trusted certificate (ADR-0004) and routes the device-ingestion path through the mTLS termination decided in ADR-0002. The reverse proxy those ADRs describe is realized as the Ingress (and its controller), not as per-service TLS.
+5. **A single Ingress is the TLS edge.** The Ingress terminates HTTPS for the API and frontend with the edge certificate of ADR-0004 dec 8 — a publicly-trusted ACME certificate for the managed deployment, or an internal CA (cert-manager) for in-cluster self-hosting — and routes the device-ingestion path through the mTLS termination decided in ADR-0002. The reverse proxy those ADRs describe is realized as the Ingress (and its controller), not as per-service TLS.
 
-6. **`docker-compose.yml` remains the local-development path; Helm is for shared and managed deployments.** The two are not kept in lockstep feature-for-feature; compose is the developer convenience, Helm is the deployment artifact. Where a value is authoritative it lives in one place per ADR-0000 (e.g. topic names in configuration consumed by both), not copied between them.
+6. **`docker-compose.yml` is the local-development path *and* a supported single-host self-hosted deployment; Helm/Kubernetes is for scaled self-hosting and the managed offering.** *(rev 1 — rev 0 read "compose is the developer convenience, not a deployment path".)* Compose targets a developer laptop and a small/test single-host self-hoster (the shape ADR-0018's notebook spawner assumes); Helm targets multi-node self-hosting and managed multi-tenancy. The two are not kept in lockstep feature-for-feature, and the orchestration primitives of decisions 1–5 (rolling updates, autoscaling, the Ingress TLS edge, StatefulSets) are Kubernetes-only — a Compose deployment forgoes them by design. Where a value is authoritative it lives in one place per ADR-0000 (e.g. topic names in configuration consumed by both), not copied between them.
 
 ## Alternatives considered
 
-**A. Keep docker-compose as the only deployment mechanism.** *Rejected:* it cannot provide rolling updates, autoscaling, self-healing, or multi-node scheduling, and has no managed-multi-tenant story — exactly what ADR-0001 commits to. Compose stays for local dev (decision 6), not as the deployment path.
+**A. Keep docker-compose as the *only* deployment mechanism.** *Rejected:* it cannot provide rolling updates, autoscaling, self-healing, or multi-node scheduling, and has no managed-multi-tenant story — exactly what ADR-0001's managed offering commits to. Kubernetes/Helm is required for the managed offering and for scaled self-hosting. *(rev 1: this rejects Compose as the only mechanism, not Compose as a deployment shape — single-host Compose is a supported self-hosted target per decision 6 and ADR-0018. Rev 0 over-stated this as "Compose is not the deployment path.")*
 
 **B. Package with raw manifests or Kustomize instead of Helm.** *Rejected:* raw manifests cannot parameterize per environment, and Kustomize overlays express environment differences but not cleanly the *optional in-cluster-vs-external dependency* toggle that decision 3 needs. Helm's conditionals and values fit the self-hosted/managed split directly.
 
