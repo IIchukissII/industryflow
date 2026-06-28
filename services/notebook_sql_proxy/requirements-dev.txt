@@ -7,4 +7,4 @@
 # server cert for the upstream-TLS integration test (a fake Postgres-TLS server, no real DB).
 pytest==7.4.3
 pytest-asyncio==0.21.1
-trustme==1.1.0
+trustme==1.2.1
