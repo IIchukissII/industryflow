@@ -83,6 +83,7 @@ export default function AppShell({ user, title, wsConnected, lastUpdate, childre
           ))}
           <div className="nav-group">
             <div className="nav-group-label eyebrow">System</div>
+            <NavItem href="/help" label="Help" icon="help" active={isActive({ href: '/help' })} />
             <NavItem href="/settings" label="Settings" icon="gear" active={isActive({ href: '/settings' })} />
             {user && user.is_superuser && (
               <NavItem href="/admin" label="Admin" icon="users" active={isActive({ href: '/admin' })} />
