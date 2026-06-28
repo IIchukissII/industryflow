@@ -238,6 +238,11 @@ services:
       - "5000:5000"
     environment:
       BACKEND_STORE_URI: postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow?sslmode=verify-full&sslrootcert=/etc/ssl/industryflow/ca.crt
+      # psycopg2 does not always honour the URI's sslrootcert query param (it then falls back to
+      # ~/.postgresql/root.crt and fails against the verify-full DB, ADR-0017). The libpq env vars
+      # are always honoured, so set them explicitly to the mounted internal-CA cert.
+      PGSSLMODE: ${DB_SSLMODE:-verify-full}
+      PGSSLROOTCERT: /etc/ssl/industryflow/ca.crt
       MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
       AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
