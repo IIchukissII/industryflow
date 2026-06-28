@@ -26,12 +26,97 @@ from __future__ import annotations
 import asyncio
 import os
 import secrets
+import ssl
 import struct
 from typing import Dict, Optional, Tuple
 
 import wire
 from binding import SqlBinding
 from proxy import serve_connection
+
+# Upstream TLS modes (a subset of libpq's sslmode). The default is verify-full, matching the
+# hardened DB ADR-0017 enforces: encrypt AND verify the server cert against the internal CA AND
+# check the hostname. "require" encrypts without verifying; "disable" is plaintext (dev only).
+_TLS_REQUIRED = {"require", "verify-ca", "verify-full"}
+
+
+def build_upstream_ssl_context(sslmode: str, sslrootcert: Optional[str]) -> Optional[ssl.SSLContext]:
+    """Build the SSLContext for the proxy → TimescaleDB hop, or None for ``sslmode=disable``.
+
+    verify-full/verify-ca verify the server certificate against ``sslrootcert`` (the internal CA,
+    ADR-0017); verify-full additionally checks the hostname. require encrypts only. Unknown modes
+    are treated as verify-full (fail-safe toward stronger verification).
+    """
+    if sslmode == "disable":
+        return None
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    if sslmode == "require":
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    # verify-ca / verify-full (default): trust only the supplied CA.
+    ctx.check_hostname = sslmode != "verify-ca"
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    if sslrootcert:
+        ctx.load_verify_locations(cafile=sslrootcert)
+    return ctx
+
+
+async def open_upstream(
+    host: str,
+    port: int,
+    ssl_context: Optional[ssl.SSLContext],
+    *,
+    require_tls: bool,
+) -> Tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Open the upstream connection, negotiating Postgres TLS when a context is supplied.
+
+    Postgres TLS is in-band: the client sends an SSLRequest, the server replies a single byte —
+    ``S`` (willing) or ``N`` (not) — and only on ``S`` is the socket upgraded *before* the
+    StartupMessage. If the server declines and TLS is required (verify-*/require), we refuse
+    rather than fall back to plaintext.
+    """
+    reader, writer = await asyncio.open_connection(host, port)
+    if ssl_context is None:
+        return reader, writer
+    try:
+        writer.write(wire.build_ssl_request())
+        await writer.drain()
+        response = await reader.readexactly(1)
+        if response == b"S":
+            await _upgrade_to_tls(reader, writer, ssl_context, server_hostname=host)
+            return reader, writer
+        if response == b"N":
+            if require_tls:
+                raise ConnectionError("upstream refused TLS but sslmode requires it")
+            return reader, writer
+        raise wire.ProtocolError(f"unexpected SSLRequest reply: {response!r}")
+    except BaseException:
+        # Never leak the raw socket on a failed negotiation (a refused-TLS error, a handshake
+        # failure, or cancellation) — close it before propagating.
+        with _suppress():
+            writer.close()
+        raise
+
+
+async def _upgrade_to_tls(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    ssl_context: ssl.SSLContext,
+    *,
+    server_hostname: str,
+) -> None:
+    """Upgrade an open StreamReader/Writer pair to TLS in place (asyncio start_tls)."""
+    loop = asyncio.get_event_loop()
+    transport = writer.transport
+    protocol = transport.get_protocol()
+    new_transport = await loop.start_tls(
+        transport, protocol, ssl_context, server_hostname=server_hostname
+    )
+    # start_tls keeps feeding the same StreamReader through `protocol`; repoint the writer at the
+    # TLS transport so subsequent writes are encrypted.
+    writer._transport = new_transport  # noqa: SLF001 - the documented asyncio upgrade pattern
+    reader._transport = new_transport  # noqa: SLF001
 
 # The kernel↔proxy hop is pod-internal (the proxy sits beside the hub on the pod network / the
 # compose bridge); TLS for it is the deployment's NetworkPolicy/edge concern, not negotiated here.
@@ -115,18 +200,26 @@ class PostgresBackend:
         user: str,
         password: str,
         database: str,
+        ssl_context: Optional[ssl.SSLContext] = None,
+        require_tls: bool = True,
     ) -> None:
         self._binding = binding
         self._client_reader = client_reader
         self._client_writer = client_writer
         self._host, self._port = host, port
         self._user, self._password, self._database = user, password, database
+        self._ssl_context = ssl_context
+        self._require_tls = require_tls
         self._up_reader: Optional[asyncio.StreamReader] = None
         self._up_writer: Optional[asyncio.StreamWriter] = None
         self._params: Dict[str, bytes] = {}
 
     async def connect_privileged(self) -> None:
-        self._up_reader, self._up_writer = await asyncio.open_connection(self._host, self._port)
+        # TLS is negotiated (SSLRequest) before the StartupMessage, so credentials and the
+        # subsequent SCRAM exchange never cross the network in the clear (ADR-0017).
+        self._up_reader, self._up_writer = await open_upstream(
+            self._host, self._port, self._ssl_context, require_tls=self._require_tls
+        )
         self._up_writer.write(
             wire.build_startup_message({"user": self._user, "database": self._database})
         )
@@ -271,10 +364,18 @@ async def main() -> None:  # pragma: no cover - cluster-bound entry point
         password=os.environ["SQL_PROXY_DB_PASSWORD"],
         database=os.environ.get("SQL_PROXY_DB_NAME", "industryflow"),
     )
+    # Upstream TLS (ADR-0017): verify-full by default, against the internal CA mounted as the
+    # standard DB client root. Set SQL_PROXY_DB_SSLMODE=disable only for a dev DB without certs.
+    sslmode = os.environ.get("SQL_PROXY_DB_SSLMODE", "verify-full")
+    ssl_context = build_upstream_ssl_context(sslmode, os.environ.get("SQL_PROXY_DB_SSLROOTCERT"))
+    require_tls = sslmode in _TLS_REQUIRED
     store = aioredis.from_url(redis_url)
 
     def backend_factory(binding, client_reader, client_writer):
-        return PostgresBackend(binding, client_reader, client_writer, **db)
+        return PostgresBackend(
+            binding, client_reader, client_writer,
+            ssl_context=ssl_context, require_tls=require_tls, **db,
+        )
 
     async def on_connect(reader, writer):
         await handle_client(reader, writer, store.get, backend_factory)

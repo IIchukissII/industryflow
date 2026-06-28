@@ -96,6 +96,12 @@ def parse_startup_packet(data: bytes) -> Tuple[int, Dict[str, str]]:
     return code, params
 
 
+def build_ssl_request() -> bytes:
+    """The SSLRequest packet: ``Int32 len=8 | Int32 code``. Sent before the StartupMessage to ask
+    the server to upgrade the connection to TLS (the proxy → TimescaleDB hop, ADR-0017)."""
+    return struct.pack("!II", 8, SSL_REQUEST_CODE)
+
+
 def build_startup_message(params: Dict[str, str]) -> bytes:
     """Build a StartupMessage (used by the proxy to open the *upstream* connection)."""
     body = struct.pack("!I", PROTOCOL_VERSION_3)

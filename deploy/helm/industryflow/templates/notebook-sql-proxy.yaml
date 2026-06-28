@@ -83,6 +83,33 @@ spec:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-sql-proxy") }}
                   key: NOTEBOOK_SQL_PROXY_DB_PASSWORD
+            # Upstream TLS to TimescaleDB (ADR-0017): verify the server cert against the same
+            # internal CA every DB client trusts, mounted below at tls.db.mountPath.
+            {{- if .Values.tls.db.enabled }}
+            - name: SQL_PROXY_DB_SSLMODE
+              value: {{ .Values.tls.db.sslmode | quote }}
+            - name: SQL_PROXY_DB_SSLROOTCERT
+              value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
+            {{- else }}
+            - name: SQL_PROXY_DB_SSLMODE
+              value: "disable"
+            {{- end }}
+          {{- if .Values.tls.db.enabled }}
+          volumeMounts:
+            - name: db-ca
+              mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
+              subPath: ca.crt
+              readOnly: true
+          {{- end }}
           resources:
             {{- toYaml .Values.notebookHub.sqlProxy.resources | nindent 12 }}
+      {{- if .Values.tls.db.enabled }}
+      volumes:
+        - name: db-ca
+          secret:
+            secretName: {{ .Values.tls.db.secretName | quote }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+      {{- end }}
 {{- end }}

@@ -28,23 +28,27 @@ and a cross-tenant query fails at the GRANT level.
 - **`server.py`** — the wire entry point. `authenticate_client` runs the kernel-facing handshake
   (decline SSL on the pod-internal hop, read the StartupMessage, request a cleartext password,
   extract the capability **handle**) and feeds it to `proxy.serve_connection`. `PostgresBackend`
-  opens the upstream connection, assumes the tenant role, completes the kernel handshake, and
-  relays bytes both ways.
-- **`tests/`** — run in the `unit-tests` CI workflow.
+  opens the upstream connection — **TLS to the hardened DB** (`build_upstream_ssl_context` /
+  `open_upstream`: SSLRequest negotiation + `verify-full` against the internal CA, ADR-0017) —
+  assumes the tenant role, completes the kernel handshake, and relays bytes both ways.
+- **`tests/`** — run in the `unit-tests` CI workflow, incl. `test_tls_integration.py` (a fake
+  Postgres-TLS server with a throwaway trustme cert — no real DB needed).
 
 ## Status & boundary
 
 **Verified (unit-tested, no cluster):** the binding policy, the connection orchestration, the
-wire codec, the SCRAM-SHA-256 client (RFC 7677 vector), and the **frontend handshake** — the
-kernel-facing auth that extracts the capability handle, driven over in-memory pipes, including
-the deny path (a refused handle gets a `FATAL` `ErrorResponse` and **no backend is opened**).
+wire codec, the SCRAM-SHA-256 client (RFC 7677 vector), the **frontend handshake** (kernel-facing
+auth extracting the capability handle, incl. the deny path → `FATAL` `ErrorResponse`, **no backend
+opened**), and the **upstream-TLS handshake** — against a fake Postgres-TLS server: `verify-full`
+connects and sends the StartupMessage encrypted, an untrusted server cert is rejected, and a
+server that declines TLS is refused.
 
-**NOT cluster-validated:** `PostgresBackend` — the live upstream connection and the byte relay.
-The code is written (upstream SCRAM auth, `SET ROLE` setup over the simple-query protocol,
-bidirectional pipe), but it has not run against a real Postgres. The privileged login role must
-be a member of every `tenant_reader_<uuid>` with `NOINHERIT` (ADR-0015 dec 5). Completing this —
-the end-to-end integration test (valid handle reads its tenant read-only; cross-tenant denied;
-revoked/expired refused) and wiring the proxy into Helm/compose — is tracked in **issue #19**.
+**NOT cluster-validated:** the live `PostgresBackend` relay against a **real Postgres** — the
+upstream SCRAM exchange, the `SET ROLE` setup, and the bidirectional byte pipe end-to-end. The
+privileged login role must be a member of every `tenant_reader_<uuid>` with `NOINHERIT` (ADR-0015
+dec 5; provisioned by `13-notebook-sql-proxy-role.sh`). The remaining end-to-end integration test
+(valid handle reads its tenant read-only; cross-tenant denied; revoked/expired refused) is tracked
+in **issue #19**.
 
 ## Develop
 

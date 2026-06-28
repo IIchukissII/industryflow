@@ -12,6 +12,7 @@ integration test, not here.
 import asyncio
 import json
 import os
+import ssl
 import sys
 import uuid
 
@@ -22,6 +23,28 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import binding as b  # noqa: E402
 import server  # noqa: E402
 import wire  # noqa: E402
+
+
+def test_ssl_context_disable_is_none():
+    assert server.build_upstream_ssl_context("disable", None) is None
+
+
+def test_ssl_context_require_encrypts_without_verifying():
+    ctx = server.build_upstream_ssl_context("require", None)
+    assert ctx.verify_mode == ssl.CERT_NONE
+    assert ctx.check_hostname is False
+
+
+def test_ssl_context_verify_full_checks_cert_and_hostname():
+    ctx = server.build_upstream_ssl_context("verify-full", None)
+    assert ctx.verify_mode == ssl.CERT_REQUIRED
+    assert ctx.check_hostname is True
+
+
+def test_ssl_context_verify_ca_checks_cert_not_hostname():
+    ctx = server.build_upstream_ssl_context("verify-ca", None)
+    assert ctx.verify_mode == ssl.CERT_REQUIRED
+    assert ctx.check_hostname is False
 
 
 async def _pipe_pair():

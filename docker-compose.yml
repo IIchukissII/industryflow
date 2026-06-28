@@ -702,8 +702,9 @@ services:
   # connects to TimescaleDB as the privileged `notebook_sql_proxy` role, SET ROLEs into that
   # tenant's read-only role, and relays. The kernel never holds a DB password. Not exposed on a
   # host port — only the spawned kernels (same network) reach it at `notebook-sql-proxy:6432`.
-  # NOTE: the live upstream relay is not yet cluster-validated (see services/notebook_sql_proxy
-  # README / issue #19); upstream TLS to the hardened DB (ADR-0017) is part of that work.
+  # The proxy verifies the DB server cert against the internal CA (verify-full, ADR-0017) — same
+  # CA mount as every other DB client. NOTE: the live end-to-end relay against a real Postgres is
+  # not yet cluster-validated (see services/notebook_sql_proxy README / issue #19).
   notebook-sql-proxy:
     profiles: ["notebooks"]
     build:
@@ -720,6 +721,12 @@ services:
       SQL_PROXY_DB_USER: notebook_sql_proxy
       SQL_PROXY_DB_PASSWORD: ${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}
       SQL_PROXY_DB_NAME: ${DB_NAME}
+      # Upstream TLS to the hardened DB (ADR-0017): verify the server cert against the same
+      # internal CA every DB client trusts. Set DB_SSLMODE=disable for a dev DB without certs.
+      SQL_PROXY_DB_SSLMODE: ${DB_SSLMODE:-verify-full}
+      SQL_PROXY_DB_SSLROOTCERT: /etc/ssl/industryflow/ca.crt
+    volumes:
+      - *ca-mount
     depends_on:
       - redis
       - timescaledb
