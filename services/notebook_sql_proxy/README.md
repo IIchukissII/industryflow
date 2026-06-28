@@ -19,17 +19,32 @@ and a cross-tenant query fails at the GRANT level.
 - **`proxy.py`** (tested orchestration) — authorize a connection, bind it to its tenant, relay;
   written against a `Backend` protocol so the policy is testable with a fake backend. On a denied
   handle **no backend is opened** — the privileged principal is never used for an unresolved handle.
+- **`wire.py`** (pure, tested) — the PostgreSQL v3 message codec: parse the StartupMessage /
+  SSLRequest, build the `Authentication*` messages, read the PasswordMessage, build
+  `ErrorResponse` / `ReadyForQuery` / `Query`, and frame regular messages.
+- **`scram.py`** (pure, tested) — the SCRAM-SHA-256 client used to authenticate the **upstream**
+  privileged connection (`scram-sha-256` is the ADR-0017 method). Validated against the RFC 7677
+  test vector, so the crypto is correct independent of a live database.
+- **`server.py`** — the wire entry point. `authenticate_client` runs the kernel-facing handshake
+  (decline SSL on the pod-internal hop, read the StartupMessage, request a cleartext password,
+  extract the capability **handle**) and feeds it to `proxy.serve_connection`. `PostgresBackend`
+  opens the upstream connection, assumes the tenant role, completes the kernel handshake, and
+  relays bytes both ways.
 - **`tests/`** — run in the `unit-tests` CI workflow.
 
 ## Status & boundary
 
-**Verified:** the binding policy and the connection orchestration (against a fake backend/store).
+**Verified (unit-tested, no cluster):** the binding policy, the connection orchestration, the
+wire codec, the SCRAM-SHA-256 client (RFC 7677 vector), and the **frontend handshake** — the
+kernel-facing auth that extracts the capability handle, driven over in-memory pipes, including
+the deny path (a refused handle gets a `FATAL` `ErrorResponse` and **no backend is opened**).
 
-**NOT implemented / cluster-bound:** the real `Backend` — the Postgres wire. A production entry
-point must read the handle from the client's startup/password message, hold the privileged
-credential (a login role that is a member of every `tenant_reader_<uuid>`, `NOINHERIT`), open
-the backend, run the setup statements, and relay bytes. That needs integration testing against a
-real Postgres and is intentionally left out here.
+**NOT cluster-validated:** `PostgresBackend` — the live upstream connection and the byte relay.
+The code is written (upstream SCRAM auth, `SET ROLE` setup over the simple-query protocol,
+bidirectional pipe), but it has not run against a real Postgres. The privileged login role must
+be a member of every `tenant_reader_<uuid>` with `NOINHERIT` (ADR-0015 dec 5). Completing this —
+the end-to-end integration test (valid handle reads its tenant read-only; cross-tenant denied;
+revoked/expired refused) and wiring the proxy into Helm/compose — is tracked in **issue #19**.
 
 ## Develop
 
