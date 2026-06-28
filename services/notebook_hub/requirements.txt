@@ -10,4 +10,4 @@ jupyterhub==4.1.6
 jupyterhub-kubespawner==6.2.0
 dockerspawner==13.0.0
 # Capability store (ADR-0015): minted handles + bindings live in the shared Redis.
-redis==5.0.8
+redis==8.0.1
