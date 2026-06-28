@@ -50,9 +50,13 @@ async def test_absent_empty_malformed_denied():
     assert await p.resolve_tracking_binding(store.get, "bad") is None
 
 
-def test_tenant_prefix_from_uuid():
+def test_name_prefix_is_slash_free_artifact_prefix_is_path():
     cid = "0b2f503a-6e59-4f4f-b0cd-b82547a20cf2"
-    assert p.tenant_prefix(cid) == "tenant_0b2f503a_6e59_4f4f_b0cd_b82547a20cf2/"
+    token = "tenant_0b2f503a_6e59_4f4f_b0cd_b82547a20cf2"
+    # Names end in '.' (MLflow forbids '/' and ':' in registered-model names); artifact keys use '/'.
+    assert p.tenant_prefix(cid) == token + "."
+    assert "/" not in p.tenant_prefix(cid)
+    assert p.artifact_prefix(cid) == token + "/"
 
 
 def test_tenant_prefix_rejects_non_uuid():

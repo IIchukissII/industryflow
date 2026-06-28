@@ -67,10 +67,17 @@ async def resolve_tracking_binding(
     return TrackingBinding(user=record.get("user", ""), company_id=company_id)
 
 
-def tenant_prefix(company_id: str) -> str:
-    """The per-tenant namespace prefix, ``tenant_<uuid>/`` (UUID-validated, ADR-0003)."""
+def _tenant_token(company_id: str) -> str:
+    """The per-tenant base token ``tenant_<uuid>`` (UUID-validated, ADR-0003)."""
     canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}/"
+    return f"tenant_{canonical.replace('-', '_')}"
+
+
+def tenant_prefix(company_id: str) -> str:
+    """The per-tenant prefix for experiment + registered-model **names**. Ends in ``.`` rather
+    than ``/`` because MLflow forbids ``/`` and ``:`` in registered-model names (experiments allow
+    both, but one prefix must serve both name spaces)."""
+    return _tenant_token(company_id) + "."
 
 
 # --------------------------------------------------------------------------- names
@@ -102,8 +109,9 @@ def unqualify_name(company_id: str, qualified: str) -> Optional[str]:
 # --------------------------------------------------------------------------- artifacts
 
 def artifact_prefix(company_id: str) -> str:
-    """The object-store key prefix for a tenant's artifacts (decision 5/6)."""
-    return tenant_prefix(company_id)
+    """The object-store key prefix for a tenant's artifacts (decision 5/6). Uses ``/`` — it is a
+    storage path, not an MLflow name, so the ``/``-restriction does not apply."""
+    return _tenant_token(company_id) + "/"
 
 
 def owns_artifact_key(company_id: str, key: str) -> bool:
