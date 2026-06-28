@@ -139,6 +139,10 @@ async def bind_identity_and_profile(spawner):
             store, user=who.user, company_id=who.company_id,
             audience=cap.AUDIENCE_SQL, ttl_seconds=CAPABILITY_TTL_SECONDS,
         )
+        # Where the kernel reaches the SQL access proxy (ADR-0015); the capability above is the
+        # password it presents there. Only authoring kernels get SQL, so only they get the URL.
+        if os.environ.get("INDUSTRYFLOW_SQL_PROXY_URL"):
+            spawner.environment["INDUSTRYFLOW_SQL_PROXY_URL"] = os.environ["INDUSTRYFLOW_SQL_PROXY_URL"]
     # The blessed data path the client uses (ADR-0011 dec 4): the gateway origin, reachable from
     # the single-user environment. Identity-only; the capability above is what authorises it.
     if os.environ.get("INDUSTRYFLOW_API_URL"):
