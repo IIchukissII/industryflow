@@ -25,13 +25,17 @@ from __future__ import annotations
 import os
 from typing import Any, Awaitable, Callable, Optional, Protocol, Tuple
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 
 import policy
 import scoping
 
 _MLFLOW_PREFIX = "/api/2.0/mlflow/"
+# MLflow's proxied-artifact API. With the server's default-artifact-root set to `mlflow-artifacts:/`,
+# the client uploads/downloads/lists artifacts here instead of touching the object store directly —
+# so no object-store credential is ever in the kernel (ADR-0019 dec 1).
+_ARTIFACT_PREFIX = "/api/2.0/mlflow-artifacts/artifacts"
 
 
 class Upstream(Protocol):
@@ -40,10 +44,14 @@ class Upstream(Protocol):
     async def call(self, method: str, endpoint: str, *, params: dict, body: Optional[dict]) -> Tuple[int, Any]: ...
 
 
-class ArtifactSigner(Protocol):
-    """Mints a tenant-scoped, single-object, short-TTL pre-signed URL (ADR-0019 dec 6)."""
+class ArtifactStore(Protocol):
+    """The tenant-scoped object store the gateway owns for artifacts (ADR-0019 dec 5-6). The gateway
+    forces every key under the tenant prefix, so bytes go direct (pre-signed) and a tenant can never
+    address another's artifacts."""
 
     def presign(self, method: str, key: str) -> str: ...
+    def list_files(self, prefix: str) -> list: ...      # [{"path","is_dir","file_size"}], paths relative to prefix
+    def delete(self, key: str) -> None: ...
 
 
 StoreGet = Callable[[str], Awaitable[Optional[object]]]
@@ -58,7 +66,7 @@ _RUN_ID_ENDPOINTS = {
 }
 
 
-def build_app(store_get: StoreGet, upstream: Upstream, signer: ArtifactSigner) -> FastAPI:
+def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore) -> FastAPI:
     app = FastAPI(title="IndustryFlow notebook tracking gateway")
 
     async def tenant(request: Request) -> policy.TrackingBinding:
@@ -74,15 +82,32 @@ def build_app(store_get: StoreGet, upstream: Upstream, signer: ArtifactSigner) -
     async def health():
         return {"status": "ok"}
 
+    # --- artifacts: bytes go direct kernel↔store via a tenant-scoped pre-signed URL (dec 6) ---
+
+    @app.api_route(_ARTIFACT_PREFIX + "/{artifact_path:path}", methods=["GET", "PUT", "DELETE"])
+    async def artifact_object(artifact_path: str, request: Request,
+                              binding: policy.TrackingBinding = Depends(tenant)):
+        key = policy.scope_artifact_key(binding.company_id, artifact_path)  # force under tenant prefix
+        if request.method == "DELETE":
+            artifacts.delete(key)
+            return JSONResponse({})
+        # PUT (upload) / GET (download): 307 to a single-object pre-signed URL — requests/MLflow
+        # follows it, re-sending the body for PUT, so the gateway is never in the byte path.
+        verb = "PUT" if request.method == "PUT" else "GET"
+        return RedirectResponse(artifacts.presign(verb, key), status_code=307)
+
+    @app.get(_ARTIFACT_PREFIX)
+    async def artifact_list(request: Request, binding: policy.TrackingBinding = Depends(tenant)):
+        prefix = policy.scope_artifact_key(binding.company_id, request.query_params.get("path", ""))
+        return JSONResponse({"files": artifacts.list_files(prefix)})
+
+    # --- tracking/registry metadata: tenant-namespaced, proxied to MLflow ---
+
     @app.api_route(_MLFLOW_PREFIX + "{endpoint:path}", methods=["GET", "POST", "DELETE"])
     async def proxy(endpoint: str, request: Request, binding: policy.TrackingBinding = Depends(tenant)):
         cid = binding.company_id
         params = dict(request.query_params)
         body = await _json_body(request)
-
-        # Artifacts (decision 6): hand back a pre-signed URL instead of proxying bytes.
-        if endpoint.startswith("artifacts"):
-            return _artifact_url(signer, cid, request.method, params)
 
         # Validate any referenced ids belong to the tenant (the body has no name to scope).
         await _ensure_owns(upstream, cid, endpoint, params, body)
@@ -132,13 +157,6 @@ async def _assert_experiment_owned(upstream: Upstream, company_id: str, experime
         raise HTTPException(status_code=403, detail="cross-tenant or unknown experiment")
 
 
-def _artifact_url(signer: ArtifactSigner, company_id: str, method: str, params: dict) -> Response:
-    key = params.get("path") or params.get("key") or ""
-    scoped = policy.scope_artifact_key(company_id, key)
-    verb = "GET" if method == "GET" else "PUT"
-    return JSONResponse({"url": signer.presign(verb, scoped), "key": scoped, "method": verb})
-
-
 def _as_list(v) -> list:
     if v is None:
         return []
@@ -173,12 +191,36 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
             except ValueError:
                 return r.status_code, None
 
-    class _S3Signer:
+    class _S3Store:
         def presign(self, method, key):
             op = "get_object" if method == "GET" else "put_object"
+            # The endpoint MLflow's client reaches us on (TRACKING_PUBLIC_URL) is the host the
+            # pre-signed URL must point at; default to the S3 endpoint for in-cluster use.
             return s3.generate_presigned_url(op, Params={"Bucket": bucket, "Key": key}, ExpiresIn=presign_ttl)
 
-    app = build_app(store.get, _HttpUpstream(), _S3Signer())
+        def list_files(self, prefix):
+            prefix = prefix.rstrip("/") + "/" if prefix else ""
+            out, token = [], None
+            while True:
+                kw = {"Bucket": bucket, "Prefix": prefix, "Delimiter": "/"}
+                if token:
+                    kw["ContinuationToken"] = token
+                resp = s3.list_objects_v2(**kw)
+                for cp in resp.get("CommonPrefixes", []):
+                    out.append({"path": cp["Prefix"][len(prefix):].rstrip("/"), "is_dir": True, "file_size": None})
+                for obj in resp.get("Contents", []):
+                    rel = obj["Key"][len(prefix):]
+                    if rel:
+                        out.append({"path": rel, "is_dir": False, "file_size": obj["Size"]})
+                if not resp.get("IsTruncated"):
+                    break
+                token = resp.get("NextContinuationToken")
+            return out
+
+        def delete(self, key):
+            s3.delete_object(Bucket=bucket, Key=key)
+
+    app = build_app(store.get, _HttpUpstream(), _S3Store())
     uvicorn.run(app, host=os.environ.get("TRACKING_HOST", "0.0.0.0"), port=int(os.environ.get("TRACKING_PORT", "5050")))
 
 
