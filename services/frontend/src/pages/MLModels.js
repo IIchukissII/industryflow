@@ -2,647 +2,461 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../components/Icon';
-import './MLModels.css';
 import authFetch from '../services/http';
+import './MLModels.css';
+
+// The registry shows two kinds of tenant model side by side, normalised to one row shape:
+//   • notebook  — MLflow registered models a data scientist authored, read through the safe
+//                 tenant-scoped /api/registered-models path (names already stripped to plain).
+//   • platform  — the built-in anomaly detectors in /api/models, used by the alerting pipeline.
+const SOURCE_LABEL = { notebook: 'Notebook', platform: 'Platform' };
+
+// Headline metric: the one number worth showing in the table. Prefer well-known keys, else the
+// first metric the run logged — so every model still shows *something* instrument-like.
+const PRIMARY_METRIC_ORDER = ['f1', 'f1_score', 'accuracy', 'auc', 'auc_roc', 'r2', 'rmse', 'mae', 'mape'];
+
+function fmtMetric(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = Number(v);
+  if (Number.isNaN(n)) return String(v);
+  if (Number.isInteger(n)) return String(n);
+  return Math.abs(n) >= 1000 ? n.toFixed(0) : n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function fmtDate(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' });
+}
+
+function pickPrimary(metrics) {
+  const keys = Object.keys(metrics || {});
+  if (!keys.length) return null;
+  const lower = Object.fromEntries(keys.map((k) => [k.toLowerCase(), k]));
+  for (const want of PRIMARY_METRIC_ORDER) {
+    if (lower[want]) return { label: want.replace(/_/g, ' '), value: metrics[lower[want]] };
+  }
+  return { label: keys[0].replace(/_/g, ' '), value: metrics[keys[0]] };
+}
+
+// status/stage → which signal dot + pill the row wears.
+function statusTone(status) {
+  const s = (status || '').toLowerCase();
+  if (s === 'production' || s === 'active') return { dot: 'ok', pill: 'badge-live' };
+  if (s === 'staging') return { dot: 'pending', pill: 'badge-warn' };
+  if (s === 'archived' || s === 'none' || s === '') return { dot: '', pill: '' };
+  return { dot: 'pending', pill: '' };
+}
+
+function normalizeNotebook(m) {
+  return {
+    key: `notebook:${m.name}`,
+    name: m.name,
+    source: 'notebook',
+    version: m.latest_version ? `v${m.latest_version}` : '—',
+    status: m.stage || 'None',
+    updated: m.last_updated_timestamp || m.creation_timestamp || null,
+    description: m.description || '',
+    editable: true,
+    metrics: m.metrics || {},
+    primary: pickPrimary(m.metrics),
+    runId: m.run_id || null,
+    raw: m,
+  };
+}
+
+function normalizePlatform(m) {
+  const metrics = {};
+  ['accuracy', 'precision_score', 'recall', 'f1_score', 'auc_roc'].forEach((k) => {
+    if (m[k] !== null && m[k] !== undefined) metrics[k.replace('_score', '')] = m[k];
+  });
+  const updated = m.deployed_at || m.training_date || m.created_at || null;
+  return {
+    key: `platform:${m.model_id || m.name}`,
+    id: m.model_id,
+    name: m.name || m.model_name,
+    source: 'platform',
+    version: m.version ? `v${m.version}` : '—',
+    status: m.status || 'unknown',
+    updated: updated ? Date.parse(updated) : null,
+    description: m.description || '',
+    editable: false,
+    type: m.model_type,
+    equipment: m.equipment_type,
+    metrics,
+    primary: pickPrimary(metrics),
+    runId: m.mlflow_run_id || null,
+    raw: m,
+  };
+}
 
 function MLModels() {
-  const [user, setUser] = useState(null);
-  const [connected, setConnected] = useState(false);
-  const [activeTab, setActiveTab] = useState('models');
   const [models, setModels] = useState([]);
-  const [featureConfigs, setFeatureConfigs] = useState({});
-  const [experiments, setExperiments] = useState([]);
-  const [selectedExperiment, setSelectedExperiment] = useState(null);
-  const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [mlHealth, setMlHealth] = useState(null);
-  const [showTrainingModal, setShowTrainingModal] = useState(false);
-  const [trainingConfig, setTrainingConfig] = useState({
-    sensor_id: 'all_sensors',
-    sensor_type: 'multivariate',
-    contamination: 0.1,
-    n_estimators: 100,
-    lookback_days: 30,
-    description: ''
-  });
-  useEffect(() => {
-    const userData = localStorage.getItem('user');
-    if (userData) {
-      setUser(JSON.parse(userData));
-    }
+  const [error, setError] = useState(null);
+  const [selected, setSelected] = useState(null); // the row whose drawer is open
+  const [detail, setDetail] = useState(null); // fetched detail for the selected notebook model
+  const [filter, setFilter] = useState('all'); // all | notebook | platform
 
-    // Check API connection
-    fetch('/health')
-      .then(res => res.json())
-      .then(() => setConnected(true))
-      .catch(() => setConnected(false));
-
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
-
+    setError(null);
     try {
-      const healthRes = await fetch('/health');
-      const healthData = await healthRes.json();
-      setMlHealth(healthData);
-
-      const modelsRes = await authFetch('/api/models');
-      const modelsData = await modelsRes.json();
-      const modelsList = modelsData.models || [];
-      setModels(modelsList);
-
-      // Fetch feature configs for models that have them
-      await fetchFeatureConfigs(modelsList);
-
-      const expRes = await authFetch('/api/mlflow/experiments');
-      const expData = await expRes.json();
-      setExperiments(expData.experiments || []);
-
-    } catch (error) {
-      console.error('Error fetching ML data:', error);
+      const [nbRes, plRes] = await Promise.allSettled([
+        authFetch('/api/registered-models'),
+        authFetch('/api/models'),
+      ]);
+      const out = [];
+      if (nbRes.status === 'fulfilled' && nbRes.value.ok) {
+        const d = await nbRes.value.json();
+        (d.models || []).forEach((m) => out.push(normalizeNotebook(m)));
+      }
+      if (plRes.status === 'fulfilled' && plRes.value.ok) {
+        const d = await plRes.value.json();
+        (d.models || []).forEach((m) => out.push(normalizePlatform(m)));
+      }
+      out.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+      setModels(out);
+      if (!out.length && nbRes.status === 'rejected' && plRes.status === 'rejected') {
+        setError('Could not reach the model registry.');
+      }
+    } catch (e) {
+      setError('Could not load models.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchFeatureConfigs = async (models) => {
-    const configs = {};
+  useEffect(() => { load(); }, [load]);
 
-    for (const model of models) {
-      if (model.feature_config_id) {
-        try {
-          const res = await authFetch(`/api/feature-configs/${model.feature_config_id}`);
-          if (res.ok) {
-            const data = await res.json();
-            configs[model.feature_config_id] = data;
-          }
-        } catch (error) {
-          console.error(`Error fetching feature config ${model.feature_config_id}:`, error);
-        }
-      }
-    }
-
-    setFeatureConfigs(configs);
-  };
-
-  const fetchRuns = async (experimentId) => {
+  // When a notebook model is opened, pull its full version history + per-version run metrics.
+  const openRow = useCallback(async (row) => {
+    setSelected(row);
+    setDetail(null);
+    if (row.source !== 'notebook') return;
     try {
-      const res = await authFetch(`/api/mlflow/experiments/${experimentId}/runs`);
-      const data = await res.json();
-      setRuns(data.runs || []);
-      setSelectedExperiment(experimentId);
-    } catch (error) {
-      console.error('Error fetching runs:', error);
-    }
-  };
+      const res = await authFetch(`/api/registered-models/${encodeURIComponent(row.name)}`);
+      if (res.ok) setDetail(await res.json());
+    } catch (e) { /* drawer still renders summary without history */ }
+  }, []);
 
-  const changeModelStatus = async (modelId, newStatus) => {
-    try {
-      const res = await authFetch(`/api/models/${modelId}/deploy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model_id: modelId,
-          environment: newStatus
-        })
-      });
+  const counts = useMemo(() => ({
+    all: models.length,
+    notebook: models.filter((m) => m.source === 'notebook').length,
+    platform: models.filter((m) => m.source === 'platform').length,
+    deployed: models.filter((m) => statusTone(m.status).dot === 'ok').length,
+  }), [models]);
 
-      if (res.ok) {
-        alert(`Model status changed to ${newStatus}`);
-        fetchData();
-      } else {
-        const error = await res.json();
-        alert(`Failed to change status: ${error.detail}`);
-      }
-    } catch (error) {
-      console.error('Error changing model status:', error);
-      alert('Error changing model status');
-    }
-  };
-
-  const handleTrainingSubmit = async (e) => {
-    e.preventDefault();
-    
-    const userData = JSON.parse(localStorage.getItem('user'));
-
-    if (!userData || !userData.company_id) {
-      alert('Unable to get company information. Please log in again.');
-      return;
-    }
-
-    try {
-      const res = await authFetch('/api/training/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          config: {
-            company_id: userData.company_id,
-            sensor_id: trainingConfig.sensor_id,
-            sensor_type: trainingConfig.sensor_type,
-            contamination: parseFloat(trainingConfig.contamination),
-            n_estimators: parseInt(trainingConfig.n_estimators),
-            lookback_days: parseInt(trainingConfig.lookback_days)
-          },
-          description: trainingConfig.description || 'Training started from UI'
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        alert(`Training started successfully!\n\nJob ID: ${data.job_id}\nStatus: ${data.status}\n\nCheck back in a few minutes to see the new model.`);
-        setShowTrainingModal(false);
-        
-        // Reset form
-        setTrainingConfig({
-          sensor_id: 'all_sensors',
-          sensor_type: 'multivariate',
-          contamination: 0.1,
-          n_estimators: 100,
-          lookback_days: 30,
-          description: ''
-        });
-        
-        // Refresh models list after a delay
-        setTimeout(() => {
-          fetchData();
-        }, 2000);
-      } else if (res.status === 501) {
-        const info = await res.json();
-        alert(info.detail || 'Automated training is not yet available.');
-        setShowTrainingModal(false);
-      } else {
-        const error = await res.json();
-        alert(`Training failed: ${error.detail || JSON.stringify(error)}`);
-      }
-    } catch (error) {
-      console.error('Error starting training:', error);
-      alert('Error starting training: ' + error.message);
-    }
-  };
-
-
-
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleString();
-  };
-
-  const formatMetric = (value) => {
-    if (value === null || value === undefined) return 'N/A';
-    return typeof value === 'number' ? value.toFixed(4) : value;
-  };
-
-  const renderMetadataTable = (metadata, model) => {
-    if (!metadata) return null;
-
-    const rows = [];
-
-    if (metadata.mlflow) {
-      rows.push({ section: 'MLflow', key: 'Run ID', value: metadata.mlflow.run_id });
-      rows.push({ section: 'MLflow', key: 'Model URI', value: metadata.mlflow.model_uri });
-      rows.push({ section: 'MLflow', key: 'Experiment ID', value: metadata.mlflow.experiment_id });
-    }
-
-    if (metadata.sensor_id) rows.push({ section: 'Sensor', key: 'Sensor ID', value: metadata.sensor_id });
-    if (metadata.sensor_type) rows.push({ section: 'Sensor', key: 'Type', value: metadata.sensor_type });
-    if (metadata.feature_count) rows.push({ section: 'Sensor', key: 'Features', value: metadata.feature_count });
-    if (metadata.training_samples) rows.push({ section: 'Training', key: 'Samples', value: metadata.training_samples.toLocaleString() });
-
-    // Add feature engineering information
-    if (model && model.feature_config_id && featureConfigs[model.feature_config_id]) {
-      const config = featureConfigs[model.feature_config_id];
-      rows.push({ section: 'Feature Engineering', key: 'Config Name', value: config.name });
-      rows.push({ section: 'Feature Engineering', key: 'Equipment Type', value: config.equipment_type });
-      rows.push({ section: 'Feature Engineering', key: 'Base Sensors', value: config.base_sensors?.length || 0 });
-      rows.push({ section: 'Feature Engineering', key: 'Total Features', value: config.transformations?.length || 0 });
-      rows.push({ section: 'Feature Engineering', key: 'Version', value: config.version || 'N/A' });
-
-      // Count transformation types
-      if (config.transformations && config.transformations.length > 0) {
-        const typeCounts = {};
-        config.transformations.forEach(t => {
-          typeCounts[t.type] = (typeCounts[t.type] || 0) + 1;
-        });
-        Object.entries(typeCounts).forEach(([type, count]) => {
-          rows.push({
-            section: 'Feature Engineering',
-            key: `${type.charAt(0).toUpperCase() + type.slice(1)} Transforms`,
-            value: count
-          });
-        });
-      }
-    }
-
-    if (metadata.hyperparameters) {
-      Object.entries(metadata.hyperparameters).forEach(([key, value]) => {
-        rows.push({
-          section: 'Hyperparameters',
-          key: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-          value: typeof value === 'number' ? value : String(value)
-        });
-      });
-    }
-
-    let currentSection = '';
-
-    return (
-      <table className="metadata-table">
-        <tbody>
-          {rows.map((row, idx) => {
-            const showSection = row.section !== currentSection;
-            currentSection = row.section;
-            return (
-              <React.Fragment key={idx}>
-                {showSection && (
-                  <tr className="section-header">
-                    <td colSpan="2">{row.section}</td>
-                  </tr>
-                )}
-                <tr>
-                  <td className="metadata-key">{row.key}</td>
-                  <td className="metadata-value">{row.value}</td>
-                </tr>
-              </React.Fragment>
-            );
-          })}
-        </tbody>
-      </table>
-    );
-  };
+  const shown = filter === 'all' ? models : models.filter((m) => m.source === filter);
 
   return (
-    <div className="App">
-
-      <div className="ml-models-container">
-        <div className="ml-header">
-          <div>
-            <h1>ML Model Management</h1>
-            <p className="ml-subtitle">Train, deploy, and monitor machine learning models for anomaly detection</p>
-          </div>
-          <button className="btn-primary" onClick={() => setShowTrainingModal(true)}>
-            <Icon name="play" size={14} /> Start Training
-          </button>
+    <>
+      <div className="page-head">
+        <div>
+          <div className="eyebrow">Model registry</div>
+          <h1>Models</h1>
+          <div className="sub">Trained models across your tenant — notebook-authored and platform detectors.</div>
         </div>
+        <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
+          <Icon name="refresh" size={14} /> {loading ? 'Loading…' : 'Refresh'}
+        </button>
+      </div>
 
-        {mlHealth && (
-          <div className="ml-health-card">
-            <h3>MLflow System Status</h3>
-            <div className="health-stats">
-              <div className="health-stat">
-                <span className="stat-label">Status:</span>
-                <span className={`stat-value ${mlHealth.status === 'healthy' ? 'healthy' : 'error'}`}>
-                  {mlHealth.status}
-                </span>
-              </div>
-              <div className="health-stat">
-                <span className="stat-label">Models in Storage:</span>
-                <span className="stat-value">{mlHealth.model_count}</span>
-              </div>
-              <div className="health-stat">
-                <span className="stat-label">MLflow URI:</span>
-                <span className="stat-value">{mlHealth.mlflow_uri}</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="ml-tabs">
-          <button
-            className={`ml-tab ${activeTab === 'models' ? 'active' : ''}`}
-            onClick={() => setActiveTab('models')}
-          >
-            Deployed Models ({models.length})
-          </button>
-          <button
-            className={`ml-tab ${activeTab === 'experiments' ? 'active' : ''}`}
-            onClick={() => setActiveTab('experiments')}
-          >
-            Experiments ({experiments.length})
-          </button>
+      <div className="kpi-row mdl-kpis">
+        <div className="kpi">
+          <div className="kpi-label">Total models</div>
+          <div className="kpi-value">{counts.all}</div>
+          <div className="kpi-foot">in the registry</div>
         </div>
-
-        <div className="ml-tab-content">
-          {loading ? (
-            <div className="ml-loading">Loading...</div>
-          ) : activeTab === 'models' ? (
-            <div className="models-section">
-              {models.length === 0 ? (
-                <div className="empty-state">
-                  <p>No models deployed yet</p>
-                  <button className="btn-secondary" onClick={() => setShowTrainingModal(true)}>
-                    Train your first model
-                  </button>
-                </div>
-              ) : (
-                <div className="models-grid">
-                  {models.map(model => (
-                    <div key={model.model_id} className="model-card">
-                      <div className="model-header">
-                        <h3>{model.name}</h3>
-                        <span className={`status-badge ${model.status}`}>
-                          {model.status}
-                        </span>
-                      </div>
-                      
-                      <p className="model-description">{model.description}</p>
-                      
-                      <div className="model-meta">
-                        <div className="meta-item">
-                          <span className="meta-label">Type:</span>
-                          <span className="meta-value">{model.model_type}</span>
-                        </div>
-                        <div className="meta-item">
-                          <span className="meta-label">Version:</span>
-                          <span className="meta-value">v{model.version}</span>
-                        </div>
-                        {model.equipment_type && (
-                          <div className="meta-item">
-                            <span className="meta-label">Equipment:</span>
-                            <span className="meta-value">{model.equipment_type}</span>
-                          </div>
-                        )}
-                        <div className="meta-item">
-                          <span className="meta-label">Trained:</span>
-                          <span className="meta-value">
-                            {model.training_date ? formatDate(model.training_date) : 'N/A'}
-                          </span>
-                        </div>
-                        {model.feature_config_id && featureConfigs[model.feature_config_id] && (
-                          <div className="meta-item" style={{ gridColumn: '1 / -1' }}>
-                            <span className="meta-label">Feature Config:</span>
-                            <span className="meta-value" style={{ fontWeight: '500', color: '#4CAF50' }}>
-                              {featureConfigs[model.feature_config_id].name}
-                            </span>
-                            <span style={{ fontSize: '11px', color: '#787b86', marginLeft: '8px' }}>
-                              ({featureConfigs[model.feature_config_id].transformations?.length || 0} features)
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="model-metrics">
-                        <h4>Performance Metrics</h4>
-                        <div className="metrics-grid">
-                          <div className="metric">
-                            <span className="metric-label">Accuracy</span>
-                            <span className="metric-value">
-                              {formatMetric(model.accuracy)}
-                            </span>
-                          </div>
-                          <div className="metric">
-                            <span className="metric-label">Precision</span>
-                            <span className="metric-value">
-                              {formatMetric(model.precision_score)}
-                            </span>
-                          </div>
-                          <div className="metric">
-                            <span className="metric-label">Recall</span>
-                            <span className="metric-value">
-                              {formatMetric(model.recall)}
-                            </span>
-                          </div>
-                          <div className="metric">
-                            <span className="metric-label">F1 Score</span>
-                            <span className="metric-value">
-                              {formatMetric(model.f1_score)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="model-actions">
-                        <label style={{ color: '#787b86', fontSize: '12px', marginBottom: '5px', display: 'block' }}>
-                          Change Status:
-                        </label>
-                        <select
-                          value={model.status}
-                          onChange={(e) => changeModelStatus(model.model_id, e.target.value)}
-                          style={{
-                            background: '#1e222d',
-                            border: '1px solid #2a2e39',
-                            color: '#d1d4dc',
-                            padding: '8px 12px',
-                            borderRadius: '4px',
-                            width: '100%',
-                            cursor: 'pointer',
-                            fontSize: '13px'
-                          }}
-                        >
-                          <option value="active">Active</option>
-                          <option value="production">Production</option>
-                          <option value="staging">Staging</option>
-                          <option value="archived">Archived</option>
-                        </select>
-                      </div>
-
-                      {model.model_metadata && (
-                        <div className="model-details">
-                          <details>
-                            <summary>Training Configuration & Feature Engineering</summary>
-                            <div className="metadata-container">
-                              {renderMetadataTable(model.model_metadata, model)}
-                            </div>
-                          </details>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="experiments-section">
-              {experiments.length === 0 ? (
-                <div className="empty-state">
-                  <p>No experiments found</p>
-                </div>
-              ) : (
-                <div>
-                  <div className="experiments-list">
-                    {experiments.map(exp => (
-                      <div
-                        key={exp.experiment_id}
-                        className={`experiment-card ${selectedExperiment === exp.experiment_id ? 'selected' : ''}`}
-                        onClick={() => fetchRuns(exp.experiment_id)}
-                      >
-                        <h3>{exp.name}</h3>
-                        <div className="experiment-meta">
-                          <span>ID: {exp.experiment_id}</span>
-                          <span>Stage: {exp.lifecycle_stage}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {selectedExperiment && runs.length > 0 && (
-                    <div className="runs-section">
-                      <h3>Training Runs</h3>
-                      <div className="runs-list">
-                        {runs.map(run => (
-                          <div key={run.run_id} className="run-card">
-                            <div className="run-header">
-                              <div>
-                                <h4>{run.tags?.['mlflow.runName'] || run.run_id}</h4>
-                                <span className={`run-status ${run.status.toLowerCase()}`}>
-                                  {run.status}
-                                </span>
-                              </div>
-                              <div className="run-times">
-                                <div>Started: {formatDate(run.start_time)}</div>
-                                <div>Ended: {formatDate(run.end_time)}</div>
-                              </div>
-                            </div>
-
-                            {run.metrics && (
-                              <div className="run-metrics">
-                                <h5>Metrics</h5>
-                                <div className="metrics-grid">
-                                  {Object.entries(run.metrics)
-                                    .filter(([key]) => key.includes('test_'))
-                                    .map(([key, value]) => (
-                                      <div key={key} className="metric">
-                                        <span className="metric-label">
-                                          {key.replace('test_', '').replace('_', ' ')}
-                                        </span>
-                                        <span className="metric-value">
-                                          {formatMetric(value)}
-                                        </span>
-                                      </div>
-                                    ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {run.params && (
-                              <div className="run-params">
-                                <details>
-                                  <summary>Parameters ({Object.keys(run.params).length})</summary>
-                                  <div className="params-grid">
-                                    {Object.entries(run.params).map(([key, value]) => (
-                                      <div key={key} className="param">
-                                        <span className="param-label">{key}:</span>
-                                        <span className="param-value">{value}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </details>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+        <div className="kpi" style={{ '--accent': 'var(--signal)' }}>
+          <div className="kpi-label">Notebook</div>
+          <div className="kpi-value">{counts.notebook}</div>
+          <div className="kpi-foot">authored in notebooks</div>
+        </div>
+        <div className="kpi" style={{ '--accent': 'var(--warn)' }}>
+          <div className="kpi-label">Platform</div>
+          <div className="kpi-value">{counts.platform}</div>
+          <div className="kpi-foot">built-in detectors</div>
+        </div>
+        <div className="kpi" style={{ '--accent': 'var(--live)' }}>
+          <div className="kpi-label">In production</div>
+          <div className="kpi-value">{counts.deployed}</div>
+          <div className="kpi-foot">serving live</div>
         </div>
       </div>
 
-      {/* Training Configuration Modal */}
-      {showTrainingModal && (
-        <div className="modal-overlay" onClick={() => setShowTrainingModal(false)}>
-          <div className="modal-content training-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Configure Model Training</h2>
-              <button className="modal-close" onClick={() => setShowTrainingModal(false)}>×</button>
-            </div>
-            
-            <form onSubmit={handleTrainingSubmit}>
-              <div className="form-group">
-                <label>Sensor ID</label>
-                <input
-                  type="text"
-                  value={trainingConfig.sensor_id}
-                  onChange={(e) => setTrainingConfig({...trainingConfig, sensor_id: e.target.value})}
-                  placeholder="all_sensors or specific sensor ID"
-                  required
-                />
-                <small>Use 'all_sensors' for multivariate model or specific sensor ID</small>
-              </div>
-
-              <div className="form-group">
-                <label>Sensor Type</label>
-                <select
-                  value={trainingConfig.sensor_type}
-                  onChange={(e) => setTrainingConfig({...trainingConfig, sensor_type: e.target.value})}
-                  required
-                >
-                  <option value="multivariate">Multivariate</option>
-                  <option value="temperature">Temperature</option>
-                  <option value="pressure">Pressure</option>
-                  <option value="vibration">Vibration</option>
-                  <option value="flow">Flow</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label>Lookback Window (days)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="365"
-                  value={trainingConfig.lookback_days}
-                  onChange={(e) => setTrainingConfig({...trainingConfig, lookback_days: e.target.value})}
-                  required
-                />
-                <small>Number of days of historical data to use for training</small>
-              </div>
-
-              <div className="form-group">
-                <label>Contamination Rate</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  max="0.5"
-                  value={trainingConfig.contamination}
-                  onChange={(e) => setTrainingConfig({...trainingConfig, contamination: e.target.value})}
-                  required
-                />
-                <small>Expected proportion of anomalies (0.01-0.5, typical: 0.1)</small>
-              </div>
-
-              <div className="form-group">
-                <label>Number of Estimators</label>
-                <input
-                  type="number"
-                  min="50"
-                  max="500"
-                  step="50"
-                  value={trainingConfig.n_estimators}
-                  onChange={(e) => setTrainingConfig({...trainingConfig, n_estimators: e.target.value})}
-                  required
-                />
-                <small>Number of trees in the Isolation Forest (typical: 100)</small>
-              </div>
-
-              <div className="form-group">
-                <label>Description (optional)</label>
-                <textarea
-                  value={trainingConfig.description}
-                  onChange={(e) => setTrainingConfig({...trainingConfig, description: e.target.value})}
-                  placeholder="Brief description of this training run..."
-                  rows="3"
-                />
-              </div>
-
-              <div className="form-actions">
-                <button type="button" className="btn-secondary" onClick={() => setShowTrainingModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary">
-                  Start Training
-                </button>
-              </div>
-            </form>
+      <section className="panel mdl-panel" style={{ padding: 0 }}>
+        <div className="panel-head">
+          <h2>Registry</h2>
+          <div className="mdl-filters" role="tablist" aria-label="Filter by source">
+            {['all', 'notebook', 'platform'].map((f) => (
+              <button
+                key={f}
+                role="tab"
+                aria-selected={filter === f}
+                className={`mdl-filter${filter === f ? ' active' : ''}`}
+                onClick={() => setFilter(f)}
+              >
+                {f === 'all' ? 'All' : SOURCE_LABEL[f]} <span className="mdl-filter-n">{counts[f]}</span>
+              </button>
+            ))}
           </div>
         </div>
+
+        {loading ? (
+          <div className="mdl-empty"><span className="sdot pending" /> Loading registry…</div>
+        ) : error ? (
+          <div className="mdl-empty"><Icon name="alert" size={22} color="var(--crit)" /><p>{error}</p></div>
+        ) : !shown.length ? (
+          <div className="mdl-empty">
+            <Icon name="cpu" size={26} color="var(--faint)" />
+            <p>No models here yet.</p>
+            <span className="mdl-empty-hint">Register a model from a notebook, or train a platform detector.</span>
+          </div>
+        ) : (
+          <div className="mdl-table-wrap">
+            <table className="data-table mdl-table">
+              <thead>
+                <tr>
+                  <th>Model</th><th>Source</th><th>Version</th><th>Stage</th>
+                  <th className="mdl-num">Key metric</th><th>Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((m) => {
+                  const tone = statusTone(m.status);
+                  const active = selected && selected.key === m.key;
+                  return (
+                    <tr
+                      key={m.key}
+                      className={`mdl-row${active ? ' active' : ''}`}
+                      onClick={() => openRow(m)}
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === 'Enter') openRow(m); }}
+                    >
+                      <td className="mdl-name">{m.name}</td>
+                      <td><span className={`badge mdl-src-${m.source}`}>{SOURCE_LABEL[m.source]}</span></td>
+                      <td className="mono mdl-dim">{m.version}</td>
+                      <td>
+                        <span className="mdl-stage">
+                          {tone.dot && <span className={`sdot ${tone.dot}`} />}
+                          {m.status}
+                        </span>
+                      </td>
+                      <td className="mdl-num">
+                        {m.primary
+                          ? <span className="mono"><i className="mdl-mlabel">{m.primary.label}</i> {fmtMetric(m.primary.value)}</span>
+                          : <span className="mdl-dim">—</span>}
+                      </td>
+                      <td className="mono mdl-dim">{fmtDate(m.updated)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {selected && (
+        <ModelDrawer
+          row={selected}
+          detail={detail}
+          onClose={() => setSelected(null)}
+          onSaved={(desc) => {
+            setModels((ms) => ms.map((m) => (m.key === selected.key ? { ...m, description: desc } : m)));
+            setSelected((s) => ({ ...s, description: desc }));
+          }}
+          onStatusChanged={(status) => {
+            setModels((ms) => ms.map((m) => (m.key === selected.key ? { ...m, status } : m)));
+            setSelected((s) => ({ ...s, status }));
+          }}
+        />
       )}
+    </>
+  );
+}
+
+const PLATFORM_STATUSES = ['production', 'active', 'staging', 'archived'];
+
+function ModelDrawer({ row, detail, onClose, onSaved, onStatusChanged }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(row.description || '');
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+
+  useEffect(() => { setDraft(row.description || ''); setEditing(false); setSaveErr(null); }, [row.key, row.description]);
+
+  // Esc closes the drawer.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const saveDescription = async () => {
+    setSaving(true);
+    setSaveErr(null);
+    try {
+      const res = await authFetch(`/api/registered-models/${encodeURIComponent(row.name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: draft }),
+      });
+      if (!res.ok) throw new Error();
+      onSaved(draft);
+      setEditing(false);
+    } catch (e) {
+      setSaveErr('Could not save. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Platform detectors can be promoted/retired from here — the status gates whether the alerting
+  // pipeline serves them (production/active = live).
+  const changeStatus = async (status) => {
+    setStatusBusy(true);
+    try {
+      const res = await authFetch(`/api/models/${row.id}/deploy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_id: row.id, environment: status }),
+      });
+      if (res.ok) onStatusChanged(status);
+    } catch (e) { /* leave the select on its prior value */ } finally {
+      setStatusBusy(false);
+    }
+  };
+
+  const tone = statusTone(row.status);
+  const metricEntries = Object.entries(row.metrics || {});
+  const versions = detail?.versions || null;
+
+  return (
+    <div className="mdl-scrim" onClick={onClose}>
+      <aside className="mdl-drawer" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`${row.name} details`}>
+        <div className="mdl-drawer-head">
+          <div>
+            <div className="eyebrow">{SOURCE_LABEL[row.source]} model</div>
+            <h2 className="mdl-drawer-title">{row.name}</h2>
+            <div className="mdl-drawer-meta mono">
+              {row.version}
+              <span className="mdl-sep">·</span>
+              <span className="mdl-stage">{tone.dot && <span className={`sdot ${tone.dot}`} />}{row.status}</span>
+              {row.type && <><span className="mdl-sep">·</span>{row.type}</>}
+            </div>
+          </div>
+          <button className="icon-btn mdl-close" onClick={onClose} title="Close" aria-label="Close">×</button>
+        </div>
+
+        <div className="mdl-drawer-body">
+          {/* Description — editable for notebook models, read-only for platform detectors. */}
+          <section className="mdl-block">
+            <div className="mdl-block-head">
+              <span className="eyebrow">Description</span>
+              {row.editable && !editing && (
+                <button className="mdl-link" onClick={() => setEditing(true)}>Edit</button>
+              )}
+            </div>
+            {editing ? (
+              <div className="mdl-edit">
+                <textarea
+                  className="mdl-textarea"
+                  value={draft}
+                  rows={4}
+                  placeholder="What this model predicts, how it was trained, when to retrain…"
+                  onChange={(e) => setDraft(e.target.value)}
+                />
+                {saveErr && <div className="mdl-err">{saveErr}</div>}
+                <div className="mdl-edit-actions">
+                  <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(false); setDraft(row.description || ''); }} disabled={saving}>Cancel</button>
+                  <button className="btn btn-primary btn-sm" onClick={saveDescription} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+                </div>
+              </div>
+            ) : (
+              <p className={`mdl-desc${row.description ? '' : ' faint'}`}>
+                {row.description || (row.editable ? 'No description yet — add one to explain what this model does.' : 'No description.')}
+              </p>
+            )}
+          </section>
+
+          {/* Metrics — the latest version's run metrics, as instrument readouts. */}
+          <section className="mdl-block">
+            <span className="eyebrow">Metrics</span>
+            {metricEntries.length ? (
+              <div className="mdl-metrics">
+                {metricEntries.map(([k, v]) => (
+                  <div className="mdl-metric" key={k}>
+                    <span className="mdl-metric-label">{k.replace(/_/g, ' ')}</span>
+                    <span className="mdl-metric-value mono">{fmtMetric(v)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="mdl-desc faint">No metrics logged for this model.</p>}
+          </section>
+
+          {/* Source lineage. */}
+          {row.runId && (
+            <section className="mdl-block">
+              <span className="eyebrow">Source run</span>
+              <p className="mono mdl-runid">{row.runId}</p>
+            </section>
+          )}
+
+          {/* Version history — notebook models carry their full lineage. */}
+          {row.source === 'notebook' && (
+            <section className="mdl-block">
+              <span className="eyebrow">Versions</span>
+              {versions === null ? (
+                <p className="mdl-desc faint">Loading history…</p>
+              ) : !versions.length ? (
+                <p className="mdl-desc faint">No versions.</p>
+              ) : (
+                <table className="data-table mdl-versions">
+                  <thead><tr><th>Ver</th><th>Stage</th><th>Status</th><th>Created</th></tr></thead>
+                  <tbody>
+                    {versions.map((v) => {
+                      const t = statusTone(v.current_stage);
+                      return (
+                        <tr key={v.version}>
+                          <td className="mono">v{v.version}</td>
+                          <td><span className="mdl-stage">{t.dot && <span className={`sdot ${t.dot}`} />}{v.current_stage || 'None'}</span></td>
+                          <td className="mono mdl-dim">{v.status || '—'}</td>
+                          <td className="mono mdl-dim">{fmtDate(v.creation_timestamp)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </section>
+          )}
+
+          {/* Platform detectors: equipment binding + a deploy control that gates live serving. */}
+          {row.source === 'platform' && (
+            <section className="mdl-block">
+              <span className="eyebrow">Deployment</span>
+              {row.equipment && <p className="mdl-desc" style={{ marginBottom: 12 }}>Equipment type: {row.equipment}</p>}
+              <label className="mdl-status-ctl">
+                <span className="mdl-status-label">Status</span>
+                <select
+                  className="mdl-select"
+                  value={PLATFORM_STATUSES.includes((row.status || '').toLowerCase()) ? row.status.toLowerCase() : 'active'}
+                  disabled={statusBusy || !row.id}
+                  onChange={(e) => changeStatus(e.target.value)}
+                >
+                  {PLATFORM_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
+            </section>
+          )}
+        </div>
+      </aside>
     </div>
   );
 }
