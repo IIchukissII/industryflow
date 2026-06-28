@@ -10,7 +10,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-06-27
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
-- **Companions:** ADR-0004 (API transport TLS — same internal CA), ADR-0007 (PKI / internal CA), ADR-0003 (per-tenant schemas), production-readiness item 4
+- **Companions:** ADR-0004 (API edge TLS — in the self-hosted deployment its edge cert shares the internal CA this DB cert uses), ADR-0007 (device PKI — referenced for the signing pattern; its device CA is a *separate* root, not this one), ADR-0003 (per-tenant schemas), production-readiness item 4
 
 ## Context and problem
 
@@ -27,8 +27,13 @@ hashing is also deprecated in favour of SCRAM.
 
 - **System of record.** DB traffic carries credentials and all tenant data; best practice for
   it is encryption **and** server authentication, not encryption alone.
-- **An internal CA already exists** (ADR-0007 / `gen-internal-ca.sh`). Reusing it for the DB
-  cert means clients trust one root for both the API edge and the database.
+- **An internal CA already exists** — `scripts/gen-internal-ca.sh` generates the internal CA and
+  server cert for the **frontend TLS edge** in the self-hosted/compose deployment (the
+  internal-CA path ADR-0004 dec 8 decides for the self-hosted edge, as distinct from the
+  public ACME cert used by the managed edge). Reusing that same internal root for the DB server
+  cert means self-hosted clients trust **one internal CA for both the API edge and the
+  database**. This is *not* ADR-0007's device CA: that is a separate client-auth root that signs
+  CSRs and never holds a server private key; it is referenced here only as the PKI precedent.
 - **The change is cross-cutting and breaking if rushed.** `ssl=on` needs a DB restart, four
   client drivers must opt in (asyncpg ×, SQLAlchemy+asyncpg, psycopg2, libpq/env), and
   flipping `pg_hba` to `hostssl` rejects any client still on plaintext — so it must roll out
@@ -89,13 +94,19 @@ hashing is also deprecated in favour of SCRAM.
 
 ## Consequences
 
+### Positive
+
 - All service→DB traffic is encrypted and the server is authenticated; credentials never cross
   the network in the clear, and SCRAM replaces md5.
+- Both deployment models share one mechanism: the same canonical `pg_hba.conf` (via the chart's
+  `files/db-config` symlink) and the same in-container key-permission fix.
+
+### Negative
+
 - Every client carries the CA (`sslrootcert`) and a `DB_SSLMODE` setting; cert rotation is via
   the internal CA (reissue `db.crt`, restart the DB).
 - A failed cert/permission/rotation breaks DB connectivity, so changes are staged and validated.
-- k8s adds an initContainer for key perms; both deployment models share one mechanism (the same
-  canonical `pg_hba.conf` via the chart's `files/db-config` symlink).
+- k8s adds an initContainer for key perms.
 - The Helm chart now requires a DB-cert Secret (cert-manager or operator-supplied); a plain
   `helm install` without it leaves the DB + clients pending — surfaced in `NOTES.txt`.
 - The compose path is enforced and validated live; the Helm path is render-validated only (no
@@ -103,7 +114,9 @@ hashing is also deprecated in favour of SCRAM.
 
 ## References
 
-- ADR-0007 — the internal CA this reuses. ADR-0004 — API transport (same CA).
+- ADR-0004 — the API/frontend TLS edge whose self-hosted internal CA (`gen-internal-ca.sh`)
+  this DB server cert shares; the managed edge instead uses a public ACME cert. ADR-0007 — the
+  *device* CA; a separate root, referenced for the signing pattern, not reused here.
 - `scripts/gen-internal-ca.sh` — issues the DB server cert (compose); the Helm equivalent is
   `templates/db-tls-certificate.yaml` (cert-manager) under `tls.db` in `values.yaml`.
 - `docs/operations/production-readiness.md` — item 4 (the remaining "DB TLS").

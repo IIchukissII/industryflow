@@ -44,7 +44,7 @@ This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0
 
 6. **Revocation is supported and checked at verification.** The CA publishes revocation status (a CRL and/or OCSP), and the terminating reverse proxy (ADR-0002) checks revocation when it verifies a client certificate. A decommissioned or compromised device is revoked and loses access without waiting for its certificate to expire.
 
-7. **The device CA is separate from the browser-facing server certificate.** The proxy presents the public ACME server certificate (ADR-0004) to browsers and verifies device client certificates against this device CA. The two chains are distinct: one authenticates us to browsers, the other authenticates devices to us. Neither is used for the other's purpose.
+7. **The device CA is separate from the browser-facing server certificate.** The proxy presents the browser-facing server certificate (ADR-0004 dec 8 — public ACME when managed, an internal CA when self-hosted) to browsers and verifies device client certificates against this device CA. The two chains are distinct: one authenticates us to browsers, the other authenticates devices to us. Neither is used for the other's purpose.
 
 ## Alternatives considered
 
