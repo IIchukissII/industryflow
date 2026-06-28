@@ -56,3 +56,21 @@ def test_round_trip_create_then_get():
     # MLflow would store req["name"]; a later get returns it, which we strip back to plain.
     resp = scoping.scope_response("experiments/get-by-name", {"experiment": {"name": req["name"]}}, CID)
     assert resp["experiment"]["name"] == "exp"
+
+
+def test_registered_model_description_passes_through_untouched():
+    # The model `description` is user-facing free text, not a namespaced name — scoping must
+    # qualify only the name and leave the description verbatim on the way in and out, so a tenant
+    # can read back exactly what they wrote (the frontend Models page surfaces/edits it).
+    desc = "VPD anomaly detector — retrained 2026-06."
+    req = scoping.scope_request("registered-models/create", {"name": "vpd", "description": desc}, CID)
+    assert req["name"] == PREFIX + "vpd"
+    assert req["description"] == desc  # untouched
+
+    resp = scoping.scope_response(
+        "registered-models/get",
+        {"registered_model": {"name": req["name"], "description": desc}},
+        CID,
+    )
+    assert resp["registered_model"]["name"] == "vpd"   # stripped to plain
+    assert resp["registered_model"]["description"] == desc  # untouched

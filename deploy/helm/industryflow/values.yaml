@@ -125,7 +125,8 @@ apps:
     image: industryflow-ml-service-api
     digest: ""
     # MINIO_* are also exposed as AWS_* (the MLflow client loads model artifacts from MinIO).
-    secretKeys: [ML_SERVICE_DB_PASSWORD, MLFLOW_DB_PASSWORD, JWT_SECRET_KEY, INTERNAL_SERVICE_TOKEN, MINIO_ACCESS_KEY, MINIO_SECRET_KEY]
+    # No MLFLOW_DB_*: ml-service reaches MLflow over its REST API, never the MLflow DB directly.
+    secretKeys: [ML_SERVICE_DB_PASSWORD, JWT_SECRET_KEY, INTERNAL_SERVICE_TOKEN, MINIO_ACCESS_KEY, MINIO_SECRET_KEY]
     metrics: true
     hpa:
       enabled: false

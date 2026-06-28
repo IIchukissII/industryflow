@@ -65,7 +65,8 @@ containment use the Kubernetes profile.
 | 2 | Hub SSO + per-user spawner logic + runtime | **compose (DockerSpawner) live-validated; k8s (KubeSpawner) renders, not cluster-run** |
 | 3 | Role-matched single-user images (authoring DS + analytics Voila) | **done** (both built & box-validated, non-root) |
 | 4 | Capability minting + the SQL access proxy | **done** — wire backend + `verify-full` TLS + client SQL helper, **live-validated on the box** |
-| 5 | Experiment-tracking gateway (ADR-0013) | planned |
+| 5 | Experiment-tracking gateway (ADR-0013/0019) | **done** — kernel→gateway tracking capability, tenant-namespaced experiments/models/artifacts, per-object pre-signed artifact URLs, **box-validated** |
+| 6 | Tenant-scoped model browsing in the app | **done** — session-authed `/api/registered-models` read-path (prefix-stripped, source-run metrics) + redesigned Models page; experiment/run browsing still owed |
 
 The design is decision-complete (ADR-0011→0015). Every piece except the Kubernetes hub runtime is
 built **and validated on the live compose box**; only the KubeSpawner profile still needs a

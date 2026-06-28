@@ -13,7 +13,7 @@ from config import get_settings
 from routers import (
     health, measurements, aggregations, websocket, cache,
     training_data, alerts_history, companies,
-    equipment, alert_rules, ml_models, auth_tokens, auth_verify
+    equipment, alert_rules, auth_tokens, auth_verify
 )
 from database import init_db_pool, close_db_pool, create_user_table
 from messaging.redis_client import redis_client
@@ -130,7 +130,6 @@ app.include_router(cache.router)
 app.include_router(training_data.router)
 app.include_router(alerts_history.router)
 app.include_router(alert_rules.router)
-app.include_router(ml_models.router)
 
 # Admin endpoints
 app.include_router(companies.router)
@@ -161,7 +160,6 @@ async def root():
             "training_data": "/api/training-data/equipment/{equipment_id}",
             "alerts": "/api/alerts",
             "alert_rules": "/api/alert-rules",
-            "ml_models": "/api/ml-models",
             "companies": "/api/companies",
             "equipment": "/api/equipment"
         }

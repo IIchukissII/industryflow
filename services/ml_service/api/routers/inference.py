@@ -8,7 +8,7 @@ Real-time ML inference endpoint for anomaly detection in sensor data
 """
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any
 import logging
 import mlflow
 import mlflow.pyfunc
@@ -261,48 +261,3 @@ async def predict(
             status_code=500,
             detail=f"Inference failed: {str(e)}"
         )
-
-
-@router.post("/batch-predict")
-async def batch_predict(
-    model_id: str,
-    sensor_data_list: List[Dict[str, Any]],
-    request: Request,
-    company_id: str = Depends(get_company_id_dependency),
-    threshold: float = 0.85
-):
-    """
-    Run ML inference on batch of sensor data
-    More efficient for multiple predictions with same model
-    """
-    repository = request.app.state.ml_repository
-
-    # Get model metadata
-    model_data = await repository.get_model_by_id(
-        company_id=company_id,
-        model_id=model_id
-    )
-
-    if not model_data:
-        raise HTTPException(status_code=404, detail="Model not found")
-
-    if model_data.get('status') not in ['production', 'active']:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Model status is '{model_data.get('status')}'. Only 'production' or 'active' models can be used."
-        )
-
-    mlflow_run_id = model_data.get('mlflow_run_id')
-    if not mlflow_run_id:
-        raise HTTPException(status_code=400, detail="Model has no MLflow run_id")
-
-    # TODO: Phase 2-3 — flexible feature engineering for batch predictions. Until then this
-    # endpoint is explicitly unimplemented. (The previous stub had unreachable prediction code
-    # after this raise, and an `except Exception` that would have swallowed this 501 into a 500.)
-    raise HTTPException(
-        status_code=501,
-        detail="Batch inference not yet implemented. "
-               "Feature engineering system is being redesigned for flexibility. "
-               "Phase 1 (Feature Store) is complete. "
-               "Phase 2-3 will implement configuration-driven feature engineering."
-    )

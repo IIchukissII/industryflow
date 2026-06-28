@@ -40,12 +40,7 @@ class Config:
     DB_NAME: str = os.getenv('DB_NAME')
     ML_SERVICE_DB_USER: str = os.getenv('ML_SERVICE_DB_USER')
     ML_SERVICE_DB_PASSWORD: str = os.getenv('ML_SERVICE_DB_PASSWORD')
-    
-    # MLflow Database (separate connection)
-    MLFLOW_DB_NAME: str = os.getenv('MLFLOW_DB_NAME', 'mlflow')
-    MLFLOW_DB_USER: str = os.getenv('MLFLOW_DB_USER')
-    MLFLOW_DB_PASSWORD: str = os.getenv('MLFLOW_DB_PASSWORD')
-    
+
     # JWT Configuration
     JWT_SECRET_KEY: str = os.getenv('JWT_SECRET_KEY')
     JWT_ALGORITHM: str = os.getenv('JWT_ALGORITHM', 'HS256')
@@ -70,7 +65,6 @@ class Config:
         required = [
             'DB_HOST', 'DB_PORT', 'DB_NAME',
             'ML_SERVICE_DB_USER', 'ML_SERVICE_DB_PASSWORD',
-            'MLFLOW_DB_USER', 'MLFLOW_DB_PASSWORD',
             'JWT_SECRET_KEY', 'MLFLOW_TRACKING_URI'
         ]
         
@@ -86,7 +80,6 @@ class Config:
         
         logger.info("Configuration validated successfully")
         logger.info(f"Database: {cls.ML_SERVICE_DB_USER}@{cls.DB_HOST}:{cls.DB_PORT}/{cls.DB_NAME}")
-        logger.info(f"MLflow DB: {cls.MLFLOW_DB_USER}@{cls.DB_HOST}:{cls.DB_PORT}/{cls.MLFLOW_DB_NAME}")
         logger.info(f"MLflow Tracking URI: {cls.MLFLOW_TRACKING_URI}")
 
 
