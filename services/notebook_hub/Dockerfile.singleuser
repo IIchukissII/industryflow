@@ -22,9 +22,10 @@ RUN pip install --no-cache-dir \
     jupyterhub==4.1.6 \
     jupyterlab==4.0.9
 
-# The tenant-scoped client + its deps (requests, pandas) from the build context (clients/python).
+# The tenant-scoped client + its deps from the build context (clients/python). The [sql] extra
+# adds psycopg so an authoring kernel can reach the SQL proxy with its capability (ADR-0015).
 COPY . /tmp/industryflow-client
-RUN pip install --no-cache-dir /tmp/industryflow-client && rm -rf /tmp/industryflow-client
+RUN pip install --no-cache-dir "/tmp/industryflow-client[sql]" && rm -rf /tmp/industryflow-client
 
 USER ${NB_UID}
 WORKDIR /home/${NB_USER}
