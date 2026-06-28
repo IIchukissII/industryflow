@@ -18,6 +18,7 @@ import Equipment from './pages/Equipment';
 import Settings from './pages/Settings';
 import MLModels from './pages/MLModels';
 import Notebooks from './pages/Notebooks';
+import Help from './pages/Help';
 import Login from './pages/Login';
 
 function ProtectedRoute({ children, user }) {
@@ -288,6 +289,11 @@ function App() {
         <Route path="/notebooks" element={
           <ProtectedRoute user={user}>
             <Notebooks user={user} />
+          </ProtectedRoute>
+        } />
+        <Route path="/help" element={
+          <ProtectedRoute user={user}>
+            <AppShell user={user} title="Help"><Help user={user} /></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/settings" element={
