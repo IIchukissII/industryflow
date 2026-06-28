@@ -33,12 +33,14 @@ jobs:
           - { service: ml_service,          path: services/ml_service/tests, args: "-m 'not redis'" }
           # Pure FK-resilience filter test only; test_spark_service.py is a live-DB harness.
           - { service: spark_jobs,          path: services/spark_jobs/tests/test_upsert_filter.py }
+          # The notebook client is packaged (pyproject extras), so it overrides the install.
+          - { service: python_client,       path: clients/python/tests, install: "pip install -e 'clients/python[dev]'" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r services/${{ matrix.service }}/requirements-dev.txt
+        run: ${{ matrix.install && matrix.install || format('pip install -r services/{0}/requirements-dev.txt', matrix.service) }}
       - name: Run tests
         run: pytest ${{ matrix.path }} ${{ matrix.args }} -v
