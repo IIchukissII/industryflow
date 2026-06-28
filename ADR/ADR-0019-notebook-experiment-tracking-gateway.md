@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0019: Notebook experiment-tracking gateway and the tracking capability
 
 - **ID:** ADR-0019
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-28
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
