@@ -17,14 +17,12 @@ from config import normalize_company_id_to_schema
 try:
     from .models import (
         AlertRule, AlertRuleCreate, AlertRuleUpdate,
-        MLModelCreate,
         Alert, AlertCreate,
         DetectionType, DetectionModeSwitch
     )
 except ImportError:
     from models import (
         AlertRule, AlertRuleCreate, AlertRuleUpdate,
-        MLModelCreate,
         Alert, AlertCreate,
         DetectionType, DetectionModeSwitch
     )
