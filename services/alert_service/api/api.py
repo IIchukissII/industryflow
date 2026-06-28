@@ -16,7 +16,6 @@ from config import Config, db_ssl_context
 
 # Import routers
 from routers.alert_rules_router import router as alert_rules_router
-from routers.ml_models_router import router as ml_models_router
 from routers.alerts_history_router import router as alerts_history_router
 
 # Database connection pool (global)
@@ -78,7 +77,6 @@ Instrumentator().instrument(app).expose(app)
 
 # Include routers
 app.include_router(alert_rules_router)
-app.include_router(ml_models_router)
 app.include_router(alerts_history_router)
 
 

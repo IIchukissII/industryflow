@@ -4,8 +4,9 @@
 
 """
 MLOps FastAPI Service - Main Application
-Provides model management and MLflow integration endpoints
-Schema-per-tenant architecture with dual database connections
+Provides model-registry, feature-config, and inference endpoints with schema-per-tenant
+isolation. Experiment/registered-model reads moved to the ADR-0019 tracking gateway (which
+enforces real per-tenant namespacing); this service no longer proxies MLflow's shared DB.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,8 +22,11 @@ ACCESS_COOKIE = "if_access"
 CSRF_COOKIE = "if_csrf"
 
 import config
-from repository import MLRepository, MLflowRepository
-from routers import health_router, models_router, mlflow_router, inference_router, feature_configs_router, training_router
+from repository import MLRepository
+from routers import (
+    health_router, models_router, registered_models_router,
+    inference_router, feature_configs_router,
+)
 from feature_engineering import init_feature_store
 
 # Configure logging
@@ -83,10 +87,9 @@ Instrumentator().instrument(app).expose(app)
 
 app.include_router(health_router)
 app.include_router(models_router)
-app.include_router(mlflow_router)
+app.include_router(registered_models_router)
 app.include_router(inference_router)
 app.include_router(feature_configs_router)
-app.include_router(training_router)
 
 
 # ============================================================================
@@ -130,29 +133,10 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to create database pool: {e}")
         raise
-    
-    # Create connection pool for mlflow database
-    try:
-        app.state.mlflow_pool = await asyncpg.create_pool(
-            host=config.config.DB_HOST,
-            port=int(config.config.DB_PORT),
-            database=config.config.MLFLOW_DB_NAME,
-            user=config.config.MLFLOW_DB_USER,
-            password=config.config.MLFLOW_DB_PASSWORD,
-            min_size=2,
-            max_size=4,
-            command_timeout=60,
-            ssl=config.db_ssl_context(),
-        )
-        logger.info(f"MLflow pool created: {config.config.MLFLOW_DB_USER}@{config.config.DB_HOST}/{config.config.MLFLOW_DB_NAME}")
-    except Exception as e:
-        logger.error(f"Failed to create MLflow database pool: {e}")
-        raise
-    
-    # Create repository instances
+
+    # Create repository instance
     app.state.ml_repository = MLRepository(app.state.db_pool)
-    app.state.mlflow_repository = MLflowRepository(app.state.mlflow_pool)
-    logger.info("Repositories initialized")
+    logger.info("Repository initialized")
 
     # Initialize Feature Store
     try:
@@ -184,14 +168,10 @@ async def shutdown_event():
         await app.state.feature_store.close()
         logger.info("Feature Store closed")
 
-    # Close database pools
+    # Close database pool
     if hasattr(app.state, 'db_pool'):
         await app.state.db_pool.close()
         logger.info("Database pool closed")
-
-    if hasattr(app.state, 'mlflow_pool'):
-        await app.state.mlflow_pool.close()
-        logger.info("MLflow pool closed")
 
     logger.info("Shutdown complete")
 
