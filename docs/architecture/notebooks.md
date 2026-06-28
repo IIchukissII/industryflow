@@ -105,8 +105,11 @@ The compose profile runs on the platform's primary live deployment and is **work
 - `notebook-hub` (JupyterHub + **DockerSpawner**, hub-managed chp) + `notebook-sso` (nginx
   `auth_request` → api-gateway `/auth/verify` → `X-IF-*` → hub), under the opt-in `notebooks`
   compose profile. The pluggable spawner is selected by `NOTEBOOK_SPAWNER` (`docker` here).
-- A **non-root single-user image** (`services/notebook_hub/Dockerfile.singleuser`, built from
-  `clients/python`) shipping the `industryflow` client.
+- Two **non-root single-user images** selected by role profile (ADR-0011 dec 5), built from
+  `clients/python` and shipping the `industryflow` client: `Dockerfile.authoring` (JupyterLab + a
+  lean DS stack + the `[sql]` extra for the proxy) and `Dockerfile.analytics` (Voila read-only
+  dashboards, data-API path only). The hub picks the image per profile and lands analytics on
+  `/voila`.
 - The hub reaches the Docker socket via a **supplementary group** (`DOCKER_GID`), not as root.
 - Run it: `docker compose --profile notebooks build` then
   `docker compose --profile notebooks up -d notebook-hub notebook-sso` → `https://<host>:8888`

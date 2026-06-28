@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Authoring single-user image (ADR-0011 dec 5 — data-scientist profile; ADR-0018).
+# NON-ROOT by mandate (ADR-0018 dec 3): runs as uid 1000, never --allow-root. It ships the
+# blessed tenant-scoped `industryflow` client with the [sql] extra (ADR-0015) and a lean data-
+# science stack, but nothing that grants ambient data access — the kernel's only credentials are
+# the capability handles the hub injects at spawn.
+#
+# BUILD CONTEXT = clients/python (so the client is pip-installable from its pyproject):
+#   docker build -f services/notebook_hub/Dockerfile.authoring clients/python
+FROM python:3.12-slim
+
+ARG NB_UID=1000
+ARG NB_USER=jovyan
+# libgomp1 is the OpenMP runtime xgboost loads at import.
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid ${NB_UID} --shell /bin/bash ${NB_USER}
+
+# Notebook runtime: jupyterhub-singleuser (registers the server with the hub) + JupyterLab.
+RUN pip install --no-cache-dir \
+    jupyterhub==4.1.6 \
+    jupyterlab==4.0.9
+
+# Lean data-science stack (no deep learning): arrays/frames, classic ML, stats, plotting.
+RUN pip install --no-cache-dir \
+    numpy==1.26.4 \
+    pandas==2.2.2 \
+    scipy==1.13.1 \
+    scikit-learn==1.5.1 \
+    statsmodels==0.14.2 \
+    xgboost==2.1.1 \
+    matplotlib==3.9.1 \
+    plotly==5.23.0
+
+# The tenant-scoped client + the [sql] extra (psycopg) so the kernel can reach the SQL proxy with
+# its capability (ADR-0015). Built from the context (clients/python).
+COPY . /tmp/industryflow-client
+RUN pip install --no-cache-dir "/tmp/industryflow-client[sql]" && rm -rf /tmp/industryflow-client
+
+USER ${NB_UID}
+WORKDIR /home/${NB_USER}
+ENV HOME=/home/${NB_USER}
+# DockerSpawner/KubeSpawner override the command, but default it so the image is runnable alone.
+CMD ["jupyterhub-singleuser"]

@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Analytics single-user image (ADR-0011 dec 5 — operator profile; ADR-0018).
+# NON-ROOT (ADR-0018 dec 3): uid 1000. This profile is *read-only, rendered dashboards — no
+# free-form code* (ADR-0011 dec 5): it ships **Voila** (which executes a notebook server-side and
+# shows only its outputs/widgets, never an editable code surface) instead of JupyterLab. The hub
+# lands analytics users on `/voila` (jupyterhub_config.py). Data reaches the dashboards through
+# the tenant-scoped API path only (ADR-0011 dec 4); this profile gets NO SQL capability, so the
+# client is installed without the [sql] extra.
+#
+# BUILD CONTEXT = clients/python (so the client is pip-installable from its pyproject):
+#   docker build -f services/notebook_hub/Dockerfile.analytics clients/python
+FROM python:3.12-slim
+
+ARG NB_UID=1000
+ARG NB_USER=jovyan
+RUN useradd --create-home --uid ${NB_UID} --shell /bin/bash ${NB_USER}
+
+# Notebook runtime: jupyterhub-singleuser registers the server with the hub; Voila renders
+# notebooks as read-only dashboards (a jupyter-server extension, reached at /voila). No JupyterLab.
+RUN pip install --no-cache-dir \
+    jupyterhub==4.1.6 \
+    voila==0.5.7
+
+# Visualisation stack for dashboards (no ML/training libs — operators don't author models).
+RUN pip install --no-cache-dir \
+    numpy==1.26.4 \
+    pandas==2.2.2 \
+    matplotlib==3.9.1 \
+    plotly==5.23.0
+
+# The tenant-scoped client (data-API path only — no [sql] extra for this profile).
+COPY . /tmp/industryflow-client
+RUN pip install --no-cache-dir /tmp/industryflow-client && rm -rf /tmp/industryflow-client
+
+USER ${NB_UID}
+WORKDIR /home/${NB_USER}
+ENV HOME=/home/${NB_USER}
+# Runnable alone; the hub overrides the command and sets default_url=/voila for this profile.
+CMD ["jupyterhub-singleuser"]

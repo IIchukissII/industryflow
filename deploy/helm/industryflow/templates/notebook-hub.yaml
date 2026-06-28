@@ -106,6 +106,11 @@ spec:
             # DockerSpawner for the compose profile; this selects KubeSpawner here.
             - name: NOTEBOOK_SPAWNER
               value: "kube"
+            # Per-profile single-user images (ADR-0011 dec 5): the spawn hook picks one by role.
+            - name: NOTEBOOK_IMAGE_AUTHORING
+              value: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.singleUser.authoring.image "tag" .Values.image.tag "digest" .Values.notebookHub.singleUser.authoring.digest) | quote }}
+            - name: NOTEBOOK_IMAGE_ANALYTICS
+              value: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.singleUser.analytics.image "tag" .Values.image.tag "digest" .Values.notebookHub.singleUser.analytics.digest) | quote }}
             # Capability store (ADR-0015) — the same Redis the rest of the platform uses.
             - name: REDIS_URL
               value: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
