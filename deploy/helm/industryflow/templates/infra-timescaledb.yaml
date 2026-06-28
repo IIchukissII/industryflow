@@ -116,7 +116,10 @@ spec:
                   key: DB_PASSWORD
             {{- /* Per-service role passwords consumed by 00-create-roles.sh at first init. */}}
             {{- $tsSecret := include "industryflow.workloadSecretName" (dict "ctx" . "workload" "timescaledb") }}
-            {{- range $key := list "API_GATEWAY_DB_PASSWORD" "SPARK_STREAMING_DB_PASSWORD" "ALERT_SERVICE_DB_PASSWORD" "ML_SERVICE_DB_PASSWORD" "MLFLOW_DB_PASSWORD" "METRICS_DB_PASSWORD" }}
+            {{- $roleKeys := list "API_GATEWAY_DB_PASSWORD" "SPARK_STREAMING_DB_PASSWORD" "ALERT_SERVICE_DB_PASSWORD" "ML_SERVICE_DB_PASSWORD" "MLFLOW_DB_PASSWORD" "METRICS_DB_PASSWORD" }}
+            {{- /* The notebook SQL proxy role (ADR-0015) is created at init from this password. */}}
+            {{- if .Values.notebookHub.enabled }}{{ $roleKeys = append $roleKeys "NOTEBOOK_SQL_PROXY_DB_PASSWORD" }}{{- end }}
+            {{- range $key := $roleKeys }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:

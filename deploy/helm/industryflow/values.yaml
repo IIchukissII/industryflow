@@ -462,6 +462,9 @@ secrets:
     # Encrypts auth_state (the verified tenant/role the hub carries to spawn); required by
     # enable_auth_state. Generate: openssl rand -hex 32.
     JUPYTERHUB_CRYPT_KEY: "CHANGE_ME"
+    # Password for the privileged notebook_sql_proxy DB role (ADR-0015). Consumed by
+    # 13-notebook-sql-proxy-role.sh at DB init and by the SQL proxy to log in. notebookHub only.
+    NOTEBOOK_SQL_PROXY_DB_PASSWORD: "CHANGE_ME"
 
 # ---------------------------------------------------------------------------
 # Ingress — the single TLS edge (ADR-0002 mTLS device path, ADR-0004 HTTPS).
@@ -523,3 +526,13 @@ notebookHub:
     # api-gateway endpoint that validates the session cookie and returns the verified identity
     # in X-IF-* response headers (implemented; ADR-0014 handoff contract).
     verifyPath: /auth/verify
+  # SQL access proxy (ADR-0015): authoring kernels connect with a Postgres driver using their SQL
+  # capability handle as the password; the proxy logs in as the privileged notebook_sql_proxy role
+  # and SET ROLEs into the tenant reader. The live relay is not yet cluster-validated (issue #19).
+  sqlProxy:
+    image: industryflow-notebook-sql-proxy
+    digest: ""
+    port: 6432
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { cpu: 250m, memory: 128Mi }
