@@ -5,4 +5,4 @@
 # Runtime deps for the SQL proxy (ADR-0015). The proxy is a transparent Postgres-wire relay
 # (wire.py / scram.py / server.py), so it needs no Postgres driver — only the shared store client
 # to resolve capability handles. The live relay is not yet cluster-validated (see README / #19).
-redis==5.0.8
+redis==8.0.1
