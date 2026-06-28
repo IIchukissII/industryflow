@@ -128,6 +128,10 @@ spec:
                   key: JUPYTERHUB_CRYPT_KEY
             - name: CONFIGPROXY_API_URL
               value: "http://{{ $proxySvc }}:8001"
+            # Where authoring kernels reach the SQL access proxy (ADR-0015); forwarded to authoring
+            # spawns only. The kernel presents its SQL capability handle as the password.
+            - name: INDUSTRYFLOW_SQL_PROXY_URL
+              value: {{ printf "postgresql://%s-notebook-sql-proxy:%v/%s" $fullname .Values.notebookHub.sqlProxy.port .Values.infra.timescaledb.database | quote }}
           resources:
             {{- toYaml .Values.notebookHub.hub.resources | nindent 12 }}
 ---

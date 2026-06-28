@@ -101,9 +101,9 @@ spec:
 {{- if and .Values.networkPolicy.enabled .Values.notebookHub.enabled }}
 ---
 # Notebook single-user pods run untrusted, user-authored code (ADR-0011). Their egress is
-# restricted to the tenant-scoped data API and DNS only — no lateral reach to other services
-# or tenants (ADR-0011 dec 7). The SQL proxy and the experiment-tracking gateway are added
-# here when those phases land. The pods carry these labels from the spawner (identity.py).
+# restricted to the tenant-scoped data API, the SQL proxy, and DNS only — no lateral reach to
+# other services or tenants (ADR-0011 dec 7). The experiment-tracking gateway is added here when
+# that phase lands. The pods carry these labels from the spawner (identity.py).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -132,4 +132,52 @@ spec:
       ports:
         - protocol: TCP
           port: {{ (index .Values.apps "api-gateway").port }}
+    # The SQL access proxy only (ADR-0015) — never TimescaleDB directly. The kernel authenticates
+    # with its SQL capability handle; tenant scoping is enforced by the proxy's SET ROLE, not here.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: notebook-sql-proxy
+      ports:
+        - protocol: TCP
+          port: {{ .Values.notebookHub.sqlProxy.port }}
+---
+# The SQL proxy reaches only TimescaleDB (privileged login) and Redis (capability lookup), plus
+# DNS. It is the sole bridge between untrusted kernels and the database (ADR-0015).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "industryflow.fullname" . }}-notebook-sql-proxy-egress
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-sql-proxy
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if .Values.infra.timescaledb.inCluster }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: timescaledb
+      ports:
+        - protocol: TCP
+          port: {{ .Values.infra.timescaledb.port }}
+    {{- end }}
+    {{- if .Values.infra.redis.inCluster }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: {{ .Values.infra.redis.port }}
+    {{- end }}
 {{- end }}

@@ -130,7 +130,9 @@ services:
       ALERT_SERVICE_DB_PASSWORD: ${ALERT_SERVICE_DB_PASSWORD}
       ML_SERVICE_DB_PASSWORD: ${ML_SERVICE_DB_PASSWORD}
       MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD}
-      
+      # Notebook SQL proxy privileged role (ADR-0015) — created only when set (notebooks profile).
+      NOTEBOOK_SQL_PROXY_DB_PASSWORD: ${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}
+
       # Postgres configuration - HIGH THROUGHPUT
       POSTGRES_SHARED_BUFFERS: 512MB
       POSTGRES_EFFECTIVE_CACHE_SIZE: 2GB
@@ -677,6 +679,9 @@ services:
       JUPYTERHUB_CRYPT_KEY: ${JUPYTERHUB_CRYPT_KEY}
       # The blessed tenant-scoped data path the kernel's client calls (ADR-0011 dec 4).
       INDUSTRYFLOW_API_URL: ${INDUSTRYFLOW_API_URL:-http://api-gateway:8000}
+      # Where authoring kernels reach the SQL access proxy (ADR-0015); the kernel authenticates
+      # with its SQL capability handle as the password. Forwarded to authoring spawns only.
+      INDUSTRYFLOW_SQL_PROXY_URL: ${INDUSTRYFLOW_SQL_PROXY_URL:-postgresql://notebook-sql-proxy:6432/${DB_NAME}}
     volumes:
       # DockerSpawner talks to the Docker daemon to spawn per-user containers.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -688,6 +693,43 @@ services:
     depends_on:
       - redis
       - api-gateway
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # SQL access proxy (ADR-0015): authoring kernels connect with a normal Postgres driver, using
+  # their opaque SQL capability handle as the password. The proxy resolves the handle to a tenant,
+  # connects to TimescaleDB as the privileged `notebook_sql_proxy` role, SET ROLEs into that
+  # tenant's read-only role, and relays. The kernel never holds a DB password. Not exposed on a
+  # host port — only the spawned kernels (same network) reach it at `notebook-sql-proxy:6432`.
+  # The proxy verifies the DB server cert against the internal CA (verify-full, ADR-0017) — same
+  # CA mount as every other DB client. NOTE: the live end-to-end relay against a real Postgres is
+  # not yet cluster-validated (see services/notebook_sql_proxy README / issue #19).
+  notebook-sql-proxy:
+    profiles: ["notebooks"]
+    build:
+      context: ./services/notebook_sql_proxy
+      dockerfile: Dockerfile
+    image: industryflow-notebook-sql-proxy
+    container_name: industryflow-notebook-sql-proxy
+    environment:
+      SQL_PROXY_HOST: 0.0.0.0
+      SQL_PROXY_PORT: "6432"
+      SQL_PROXY_REDIS_URL: redis://redis:6379/0
+      SQL_PROXY_DB_HOST: timescaledb
+      SQL_PROXY_DB_PORT: "5432"
+      SQL_PROXY_DB_USER: notebook_sql_proxy
+      SQL_PROXY_DB_PASSWORD: ${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}
+      SQL_PROXY_DB_NAME: ${DB_NAME}
+      # Upstream TLS to the hardened DB (ADR-0017): verify the server cert against the same
+      # internal CA every DB client trusts. Set DB_SSLMODE=disable for a dev DB without certs.
+      SQL_PROXY_DB_SSLMODE: ${DB_SSLMODE:-verify-full}
+      SQL_PROXY_DB_SSLROOTCERT: /etc/ssl/industryflow/ca.crt
+    volumes:
+      - *ca-mount
+    depends_on:
+      - redis
+      - timescaledb
     networks:
       - industryflow-network
     restart: unless-stopped

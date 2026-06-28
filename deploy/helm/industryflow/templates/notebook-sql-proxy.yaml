@@ -1,0 +1,115 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Notebook SQL access proxy (ADR-0015). REFERENCE — renders via `helm template` but the live
+# upstream relay is NOT cluster-validated (see services/notebook_sql_proxy README / issue #19).
+# Authoring kernels connect with a normal Postgres driver, presenting their SQL capability handle
+# as the password; the proxy resolves it, logs in to TimescaleDB as the privileged
+# `notebook_sql_proxy` role (NOINHERIT), SET ROLEs into the tenant's read-only role, and relays.
+# The single-user egress NetworkPolicy (networkpolicy.yaml) permits the kernel→proxy hop.
+{{- if .Values.notebookHub.enabled }}
+{{- $fullname := include "industryflow.fullname" . }}
+{{- $svc := printf "%s-notebook-sql-proxy" $fullname }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-sql-proxy
+spec:
+  selector:
+    app.kubernetes.io/name: notebook-sql-proxy
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: pgwire
+      port: {{ .Values.notebookHub.sqlProxy.port }}
+      targetPort: pgwire
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $svc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-sql-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-sql-proxy
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notebook-sql-proxy
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: sql-proxy
+          image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.sqlProxy.image "tag" .Values.image.tag "digest" .Values.notebookHub.sqlProxy.digest) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: pgwire
+              containerPort: {{ .Values.notebookHub.sqlProxy.port }}
+          env:
+            - name: SQL_PROXY_HOST
+              value: "0.0.0.0"
+            - name: SQL_PROXY_PORT
+              value: {{ .Values.notebookHub.sqlProxy.port | quote }}
+            - name: SQL_PROXY_REDIS_URL
+              value: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
+            - name: SQL_PROXY_DB_HOST
+              value: {{ include "industryflow.dbHost" . | quote }}
+            - name: SQL_PROXY_DB_PORT
+              value: {{ .Values.infra.timescaledb.port | quote }}
+            - name: SQL_PROXY_DB_NAME
+              value: {{ .Values.infra.timescaledb.database | quote }}
+            # The privileged login role created by 13-notebook-sql-proxy-role.sh.
+            - name: SQL_PROXY_DB_USER
+              value: "notebook_sql_proxy"
+            - name: SQL_PROXY_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-sql-proxy") }}
+                  key: NOTEBOOK_SQL_PROXY_DB_PASSWORD
+            # Upstream TLS to TimescaleDB (ADR-0017): verify the server cert against the same
+            # internal CA every DB client trusts, mounted below at tls.db.mountPath.
+            {{- if .Values.tls.db.enabled }}
+            - name: SQL_PROXY_DB_SSLMODE
+              value: {{ .Values.tls.db.sslmode | quote }}
+            - name: SQL_PROXY_DB_SSLROOTCERT
+              value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
+            {{- else }}
+            - name: SQL_PROXY_DB_SSLMODE
+              value: "disable"
+            {{- end }}
+          {{- if .Values.tls.db.enabled }}
+          volumeMounts:
+            - name: db-ca
+              mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
+              subPath: ca.crt
+              readOnly: true
+          {{- end }}
+          resources:
+            {{- toYaml .Values.notebookHub.sqlProxy.resources | nindent 12 }}
+      {{- if .Values.tls.db.enabled }}
+      volumes:
+        - name: db-ca
+          secret:
+            secretName: {{ .Values.tls.db.secretName | quote }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+      {{- end }}
+{{- end }}

@@ -79,6 +79,12 @@ BEGIN
     -- Future tables added to this schema by the creating role are granted SELECT too.
     EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT SELECT ON TABLES TO %I', v_schema_name, v_reader_role);
 
+    -- The notebook SQL proxy (ADR-0015) SET ROLEs into this reader; grant it membership when the
+    -- proxy role exists (the `notebooks` profile created it via 13-notebook-sql-proxy-role.sh).
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'notebook_sql_proxy') THEN
+        EXECUTE format('GRANT %I TO notebook_sql_proxy', v_reader_role);
+    END IF;
+
     -- Update companies table with schema name
     UPDATE public.companies 
     SET schema_name = v_schema_name 
