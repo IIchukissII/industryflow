@@ -65,15 +65,24 @@ def reader_role(company_id: str) -> str:
     return f"tenant_reader_{canonical.replace('-', '_')}"
 
 
+def tenant_schema(company_id: str) -> str:
+    """The tenant's schema (ADR-0003). UUID-validated, same derivation as the reader role."""
+    canonical = str(uuid.UUID(str(company_id)))
+    return f"tenant_{canonical.replace('-', '_')}"
+
+
 def session_setup_statements(binding: SqlBinding) -> list[str]:
     """The statements the proxy runs on the backend before relaying the kernel's queries.
 
     SET ROLE assumes the single-tenant read-only role (so cross-tenant access fails at the
-    GRANT level, ADR-0011); the read-only transaction default is belt-and-suspenders.
+    GRANT level, ADR-0011); search_path points at the tenant's schema so unqualified table names
+    resolve to it (the reader can see no other schema anyway — ergonomics, not a trust boundary);
+    the read-only transaction default is belt-and-suspenders.
     """
     role = reader_role(binding.company_id)
-    # role is derived from a validated UUID, so this identifier cannot carry injection.
-    statements = [f'SET ROLE "{role}"']
+    schema = tenant_schema(binding.company_id)
+    # role and schema are derived from a validated UUID, so neither identifier can carry injection.
+    statements = [f'SET ROLE "{role}"', f'SET search_path TO "{schema}"']
     if binding.read_only:
         statements.append("SET default_transaction_read_only = on")
     return statements
