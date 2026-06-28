@@ -78,6 +78,59 @@ def _read_one(buf: bytes):
     return wire.split_message(bytes(buf))
 
 
+class _CaptureWriter:
+    """A StreamWriter stand-in that records everything written (for relay-ordering assertions)."""
+
+    def __init__(self):
+        self.buffer = bytearray()
+        self._closing = False
+
+    def write(self, data):
+        self.buffer.extend(data)
+
+    async def drain(self):
+        pass
+
+    def is_closing(self):
+        return self._closing
+
+    def close(self):
+        self._closing = True
+
+
+@pytest.mark.asyncio
+async def test_relay_sends_parameterstatus_after_auth_ok():
+    """Regression: buffered upstream ParameterStatus must be replayed to the kernel AFTER
+    AuthenticationOk, never before — else the client reads a type-'S' message where it expects
+    the auth reply ("expected authentication request from server, but received S")."""
+    cid = str(uuid.uuid4())
+    backend = server.PostgresBackend(
+        b.SqlBinding(user="u", company_id=cid),
+        _eof_reader(), _CaptureWriter(),
+        host="h", port=1, user="x", password="p", database="d",
+    )
+    # Simulate what connect_privileged buffers: an upstream ParameterStatus, then a closed link.
+    backend._startup_params = bytearray(wire.build_message(wire.MSG_PARAMETER_STATUS, b"server_version\x0015\x00"))
+    backend._up_reader = _eof_reader()
+    backend._up_writer = _CaptureWriter()
+
+    await backend.relay()
+
+    types = []
+    rest = bytes(backend._client_writer.buffer)
+    while rest:
+        t, _payload, rest = wire.split_message(rest)
+        types.append(t)
+    # AuthenticationOk, then ParameterStatus, then ReadyForQuery — in that exact order.
+    assert types == [wire.MSG_AUTHENTICATION, wire.MSG_PARAMETER_STATUS, wire.MSG_READY_FOR_QUERY]
+
+
+def _eof_reader():
+    r = asyncio.StreamReader()
+    r.feed_eof()
+    return r
+
+
 @pytest.mark.asyncio
 async def test_authenticate_client_extracts_handle():
     reader, writer, transport = await _pipe_pair()
