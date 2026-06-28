@@ -168,6 +168,16 @@ async def bind_identity_and_profile(spawner):
         # password it presents there. Only authoring kernels get SQL, so only they get the URL.
         if os.environ.get("INDUSTRYFLOW_SQL_PROXY_URL"):
             spawner.environment["INDUSTRYFLOW_SQL_PROXY_URL"] = os.environ["INDUSTRYFLOW_SQL_PROXY_URL"]
+        # Experiment tracking (ADR-0019): a tracking-audience capability the kernel presents to the
+        # tracking gateway as its MLflow bearer token. Authoring-only — operators author no models.
+        if os.environ.get("INDUSTRYFLOW_TRACKING_URL"):
+            spawner.environment["INDUSTRYFLOW_TRACKING_CAPABILITY"] = cap.mint(
+                store, user=who.user, company_id=who.company_id,
+                audience=cap.AUDIENCE_TRACKING, ttl_seconds=CAPABILITY_TTL_SECONDS,
+            )
+            # MLflow reads these: the gateway endpoint + the capability as MLFLOW_TRACKING_TOKEN.
+            spawner.environment["MLFLOW_TRACKING_URI"] = os.environ["INDUSTRYFLOW_TRACKING_URL"]
+            spawner.environment["MLFLOW_TRACKING_TOKEN"] = spawner.environment["INDUSTRYFLOW_TRACKING_CAPABILITY"]
     # The blessed data path the client uses (ADR-0011 dec 4): the gateway origin, reachable from
     # the single-user environment. Identity-only; the capability above is what authorises it.
     if os.environ.get("INDUSTRYFLOW_API_URL"):
