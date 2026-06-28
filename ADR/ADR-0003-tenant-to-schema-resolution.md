@@ -10,7 +10,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
-- **Companions:** ADR-0002 (ingestion authentication & device identity), ADR-0004 (API authentication & CORS)
+- **Companions:** ADR-0002 (ingestion authentication & device identity), ADR-0004 (API authentication, sessions & transport)
 
 ## Context and problem
 
@@ -91,4 +91,4 @@ These are three symptoms of one missing decision. There is no single, recorded a
 
 - IndustryFlow review (2026-06-26), findings X1 (`search_path` injection), X2 (per-request tenant-schema scan), X4 (pooled-connection `search_path` leak) — internal report.
 - ADR-0002 — ingestion authentication & device identity; sources the verified tenant identity for the ingestion path that this ADR generalizes.
-- ADR-0004 — API authentication & CORS; owns the JWT claim that decision 2 relies on.
+- ADR-0004 — API authentication, sessions & transport; owns the JWT claim that decision 2 relies on.

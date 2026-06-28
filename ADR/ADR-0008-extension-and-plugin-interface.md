@@ -9,8 +9,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
-- **Parent:** ADR-0001
+- **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0003 (tenant→schema resolution)
+- **Refined by:** ADR-0010 (the in-process registry and feature-transform contract that realizes this interface)
 - **Related (IndustryGrow):** ADR-0001 (the reference extension; contributes the production_unit entity, cultivation-domain types, and plugin interfaces)
 
 ## Context and problem

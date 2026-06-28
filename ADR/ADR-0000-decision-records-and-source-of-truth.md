@@ -73,13 +73,14 @@ This ADR establishes the discipline the project currently lacks and makes it the
 
 ## Deferred decisions
 
-- **ADR-0001 framing.** The project's scope, licensing posture (the repository is MIT today), intended audience, and relationship to IndustryGrow are a framing decision to be recorded in ADR-0001, not here.
+- **ADR-0001 framing.** The project's scope, licensing posture, intended audience, and relationship to IndustryGrow are a framing decision to be recorded in ADR-0001, not here. (ADR-0001 has since been accepted and relicensed the project to AGPL-3.0-or-later; this ADR does not restate the licence to avoid the very duplication it forbids.)
 - **ADR template.** A skeleton enforcing the section structure shared across ADRs is implied but not yet written.
 - **Cross-reference and duplication tooling.** A linter that flags a value duplicated across README / compose / `.env.example`, or a checker that validates references resolve, is desirable but unspecified.
 - **The authoritative-home registry.** A concise map of which artifact owns which class of fact (ports/topics → `.env.example`, schema → SQL init scripts, rationale → ADR) could be maintained, but its location and format are open.
 
 ## References
 
+- [`GLOSSARY.md`](GLOSSARY.md) — the single authoritative definition of each cross-cutting term, applying this ADR's single-source discipline to vocabulary.
 - M. Nygard, "Documenting Architecture Decisions" (2011) — the ADR practice this record formalizes for the project.
 - MADR (Markdown Any Decision Records) — format lineage for the ADR structure in use.
 - IndustryGrow ADR-0000 — the sibling project's governance root, from which this discipline is adopted.
