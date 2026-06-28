@@ -11,6 +11,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0011 (embedded notebooks), ADR-0012 (per-session credential delivery), ADR-0003 (tenant→schema resolution), ADR-0004 (API authentication, sessions and transport)
+- **Refined by:** ADR-0019 (the experiment-tracking gateway mechanism that realizes this ADR's decisions and resolves its deferred artifact-access sub-decision)
 
 ## Context and problem
 
