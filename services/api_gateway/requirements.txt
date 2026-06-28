@@ -9,7 +9,7 @@ sqlalchemy[asyncio]==2.0.51
 pydantic==2.13.4
 pydantic-settings==2.14.2
 aioredis==2.0.1
-redis==5.0.1
+redis==8.0.1
 
 # FastAPI Users - Authentication
 fastapi-users[sqlalchemy]==14.0.1
