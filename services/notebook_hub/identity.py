@@ -81,6 +81,25 @@ def select_profile(role: str, authoring_roles: frozenset[str] = DEFAULT_AUTHORIN
     return PROFILE_AUTHORING if role in authoring_roles else PROFILE_ANALYTICS
 
 
+# Per-profile single-user images (ADR-0011 dec 5): the authoring profile gets the JupyterLab + DS
+# image; the analytics profile gets the Voila read-only renderer. Env names the deployment sets.
+ANALYTICS_IMAGE_ENV = "NOTEBOOK_IMAGE_ANALYTICS"
+AUTHORING_IMAGE_ENV = "NOTEBOOK_IMAGE_AUTHORING"
+_PROFILE_IMAGE_ENV = {PROFILE_ANALYTICS: ANALYTICS_IMAGE_ENV, PROFILE_AUTHORING: AUTHORING_IMAGE_ENV}
+
+
+def image_for_profile(profile: str, env: Mapping[str, str]) -> str:
+    """The single-user image for a profile: its per-profile env var, else the legacy single
+    ``NOTEBOOK_IMAGE`` (back-compat / a one-image dev setup). Raises if neither is set."""
+    image = env.get(_PROFILE_IMAGE_ENV[profile]) or env.get("NOTEBOOK_IMAGE")
+    if not image:
+        raise KeyError(
+            f"no image configured for the {profile} profile "
+            f"(set {_PROFILE_IMAGE_ENV[profile]} or NOTEBOOK_IMAGE)"
+        )
+    return image
+
+
 def pod_labels(identity: Identity) -> dict[str, str]:
     """Labels for the single-user pod — used by NetworkPolicy targeting and attribution.
 

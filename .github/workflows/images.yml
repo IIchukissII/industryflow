@@ -49,7 +49,8 @@ jobs:
           - { name: mlflow,                 context: infrastructure/mlflow,     file: infrastructure/mlflow/Dockerfile }
           - { name: notebook-hub,           context: services/notebook_hub,     file: services/notebook_hub/Dockerfile }
           - { name: notebook-sql-proxy,     context: services/notebook_sql_proxy, file: services/notebook_sql_proxy/Dockerfile }
-          - { name: notebook-singleuser,    context: clients/python,            file: services/notebook_hub/Dockerfile.singleuser }
+          - { name: notebook-authoring,     context: clients/python,            file: services/notebook_hub/Dockerfile.authoring }
+          - { name: notebook-analytics,     context: clients/python,            file: services/notebook_hub/Dockerfile.analytics }
           - { name: db-backup,              context: infrastructure/backup,     file: infrastructure/backup/Dockerfile }
     steps:
       - uses: actions/checkout@v4

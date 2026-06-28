@@ -63,12 +63,13 @@ containment use the Kubernetes profile.
 |-------|-------|-------|
 | 1 | Per-tenant read-only DB role + tenant-scoped data path | **done** (DB-proven in CI) |
 | 2 | Hub SSO + per-user spawner logic + runtime | **compose (DockerSpawner) live-validated; k8s (KubeSpawner) renders, not cluster-run** |
-| 3 | Operator read-only surface (rendered dashboards) | planned |
-| 4 | Capability minting + the SQL access proxy | **API capability live (notebook → data API); SQL-proxy wire backend pending** |
+| 3 | Role-matched single-user images (authoring DS + analytics Voila) | **done** (both built & box-validated, non-root) |
+| 4 | Capability minting + the SQL access proxy | **done** — wire backend + `verify-full` TLS + client SQL helper, **live-validated on the box** |
 | 5 | Experiment-tracking gateway (ADR-0013) | planned |
 
-The design is decision-complete (ADR-0011→0015). Every cluster-independent piece is built and
-covered by tests; what remains needs a running cluster to validate.
+The design is decision-complete (ADR-0011→0015). Every piece except the Kubernetes hub runtime is
+built **and validated on the live compose box**; only the KubeSpawner profile still needs a
+running cluster.
 
 ## Built and tested in-process
 
@@ -93,10 +94,14 @@ covered by tests; what remains needs a running cluster to validate.
   verifier-side `capability_auth.py` in api_gateway and `binding.py` in the SQL proxy): opaque
   handles backed by a short-lived store entry, single-tenant, read-only, audience-bound
   (API vs SQL, not interchangeable), revoked by deleting the entry.
-- **SQL proxy policy + orchestration** (`services/notebook_sql_proxy`): resolve an SQL handle →
-  tenant, `SET ROLE` into the reader role, relay; a denied handle opens no backend.
-- **Client** (`clients/python/industryflow`): loads tenant data into pandas DataFrames, sending
-  the handle in `X-IF-Capability`; holds no DB/object-store credential.
+- **SQL proxy** (`services/notebook_sql_proxy`): the full Postgres-wire proxy — resolve an SQL
+  handle → tenant, connect upstream over **`verify-full` TLS** (ADR-0017), `SET ROLE` into the
+  reader role + `search_path` to its schema, relay; a denied handle opens no backend. The wire
+  codec and the SCRAM-SHA-256 client (RFC 7677 vector) are unit-tested; **live-validated on the
+  box** (read-only, single-tenant, bogus/API-audience handles refused).
+- **Client** (`clients/python/industryflow`): `IndustryFlowClient` loads tenant data via the data
+  API (`X-IF-Capability`); `IndustryFlowSQL` / `sql_query` run tenant SQL through the proxy with
+  the SQL capability as the password (the `[sql]` extra). Holds no DB/object-store credential.
 
 ## Compose / DockerSpawner profile — BUILT & live-validated (ADR-0018)
 
@@ -105,8 +110,11 @@ The compose profile runs on the platform's primary live deployment and is **work
 - `notebook-hub` (JupyterHub + **DockerSpawner**, hub-managed chp) + `notebook-sso` (nginx
   `auth_request` → api-gateway `/auth/verify` → `X-IF-*` → hub), under the opt-in `notebooks`
   compose profile. The pluggable spawner is selected by `NOTEBOOK_SPAWNER` (`docker` here).
-- A **non-root single-user image** (`services/notebook_hub/Dockerfile.singleuser`, built from
-  `clients/python`) shipping the `industryflow` client.
+- Two **non-root single-user images** selected by role profile (ADR-0011 dec 5), built from
+  `clients/python` and shipping the `industryflow` client: `Dockerfile.authoring` (JupyterLab + a
+  lean DS stack + the `[sql]` extra for the proxy) and `Dockerfile.analytics` (Voila read-only
+  dashboards, data-API path only). The hub picks the image per profile and lands analytics on
+  `/voila`.
 - The hub reaches the Docker socket via a **supplementary group** (`DOCKER_GID`), not as root.
 - Run it: `docker compose --profile notebooks build` then
   `docker compose --profile notebooks up -d notebook-hub notebook-sso` → `https://<host>:8888`
@@ -117,13 +125,38 @@ tenant-bound notebook whose only data credentials are capability handles; the ke
 tenant's data via the data API. This **retires the legacy root, auth-disabled, shared-credential
 `jupyter` shim** (ADR-0011 alt A, ADR-0018 dec 5).
 
+## Embedding in the frontend
+
+The notebook surface is meant to be **embedded in the platform UI** (operators land on an
+`/analytics` view, data scientists on `/experiments`), not a separate site. The mechanism already
+exists end-to-end:
+
+- **Single sign-on** — the `notebook-sso` reverse proxy validates the platform session cookie via
+  `GET /auth/verify` and forwards the verified identity to the hub (ADR-0014). A logged-in user
+  reaches the hub with **no second login**, so the frontend can embed it directly (an `<iframe>`,
+  or a routed view) pointing at the SSO endpoint.
+- **What embedding needs** (the remaining work, all configuration, no new trust decisions):
+  - **Single-origin routing** — serve the notebook SSO proxy under the *main* front door (e.g.
+    `app.<host>/notebooks/…`) instead of the dedicated `:8888` port, so the session cookie is
+    sent in the embedded context and origins match. This is the ADR-0014 refinement already
+    flagged below.
+  - **Frame-ancestors** — Jupyter/JupyterHub default to `X-Frame-Options: SAMEORIGIN`, which
+    blocks cross-origin framing; with single-origin routing it is same-origin, or set a
+    `Content-Security-Policy: frame-ancestors` for the app origin on the hub/single-user servers.
+  - **Cookie attributes** — the `if_access` cookie must reach the embedded frame: same-site under
+    single-origin routing (preferred), else `SameSite=None; Secure`.
+
+So: **yes — binding notebooks into the frontend is supported by design**; what's left is the
+single-origin routing + the two framing/cookie settings above, plus the `/analytics` and
+`/experiments` pages themselves (deferred work below).
+
 ## Still to build
 
 Shared by both profiles (built once, reused under either spawner):
 
-- The **SQL proxy's Postgres-wire backend** (read the handle from the startup message, hold the
-  privileged principal, relay bytes) — currently policy/orchestration only.
-- Richer **notebook images** (operator Voila read-only surface; heavier DS libraries on authoring).
+- Curated **dashboard content** for the analytics (Voila) profile, and tightening it to
+  render-only (the image ships Voila and the hub lands on `/voila`; locking the server API surface
+  is a hardening follow-up).
 
 **Kubernetes / KubeSpawner profile** (cluster-bound — needs a running cluster to validate):
 

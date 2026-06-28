@@ -81,3 +81,24 @@ def test_pod_environment_carries_identity_not_credentials():
     # No data credential is ever placed in the environment (ADR-0012 dec 5).
     joined = " ".join(k.lower() for k in env).replace("_", "")
     assert "password" not in joined and "token" not in joined and "secret" not in joined
+
+
+def test_image_for_profile_uses_per_profile_env():
+    env = {
+        ident.AUTHORING_IMAGE_ENV: "if-authoring:1",
+        ident.ANALYTICS_IMAGE_ENV: "if-analytics:1",
+    }
+    assert ident.image_for_profile(ident.PROFILE_AUTHORING, env) == "if-authoring:1"
+    assert ident.image_for_profile(ident.PROFILE_ANALYTICS, env) == "if-analytics:1"
+
+
+def test_image_for_profile_falls_back_to_single_image():
+    # A one-image dev setup (legacy NOTEBOOK_IMAGE) serves both profiles.
+    env = {"NOTEBOOK_IMAGE": "if-notebook:dev"}
+    assert ident.image_for_profile(ident.PROFILE_AUTHORING, env) == "if-notebook:dev"
+    assert ident.image_for_profile(ident.PROFILE_ANALYTICS, env) == "if-notebook:dev"
+
+
+def test_image_for_profile_requires_some_image():
+    with pytest.raises(KeyError):
+        ident.image_for_profile(ident.PROFILE_AUTHORING, {})

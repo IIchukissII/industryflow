@@ -650,14 +650,24 @@ services:
   #                      docker compose --profile notebooks up -d notebook-hub notebook-sso
   # ==========================================================================
 
-  # Build-only: the per-user notebook image the hub spawns. Never started directly (DockerSpawner
-  # runs per-user copies); the `command` makes an accidental `up` a no-op.
-  notebook-singleuser:
+  # Build-only: the two per-user images the hub spawns by role profile (ADR-0011 dec 5) — authoring
+  # (JupyterLab + DS stack) and analytics (Voila read-only dashboards). Never started directly
+  # (DockerSpawner runs per-user copies); `command: true` makes an accidental `up` a no-op.
+  notebook-authoring:
     profiles: ["notebooks"]
     build:
       context: ./clients/python
-      dockerfile: ../../services/notebook_hub/Dockerfile.singleuser
-    image: industryflow-notebook-singleuser
+      dockerfile: ../../services/notebook_hub/Dockerfile.authoring
+    image: industryflow-notebook-authoring
+    command: ["true"]
+    restart: "no"
+
+  notebook-analytics:
+    profiles: ["notebooks"]
+    build:
+      context: ./clients/python
+      dockerfile: ../../services/notebook_hub/Dockerfile.analytics
+    image: industryflow-notebook-analytics
     command: ["true"]
     restart: "no"
 
@@ -670,7 +680,9 @@ services:
     container_name: industryflow-notebook-hub
     environment:
       NOTEBOOK_SPAWNER: docker
-      NOTEBOOK_IMAGE: industryflow-notebook-singleuser
+      # Per-profile images (ADR-0011 dec 5): the hook picks one by the user's role profile.
+      NOTEBOOK_IMAGE_AUTHORING: industryflow-notebook-authoring
+      NOTEBOOK_IMAGE_ANALYTICS: industryflow-notebook-analytics
       NOTEBOOK_NETWORK: industryflow-network
       HUB_CONNECT_IP: notebook-hub
       REDIS_URL: redis://redis:6379/0
