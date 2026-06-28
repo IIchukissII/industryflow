@@ -246,13 +246,22 @@ services:
       MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
       AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
-    command: >
-      mlflow server
-      --backend-store-uri postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow?sslmode=verify-full&sslrootcert=/etc/ssl/industryflow/ca.crt
-      --default-artifact-root s3://mlflow
-      --host 0.0.0.0
-      --port 5000
-      --allowed-hosts '*'
+    # List form (not a folded scalar): the `&` in a URI query string truncates a `command: >`
+    # block, which silently dropped --host/--port and left MLflow bound to localhost. TLS to the
+    # DB is supplied by PGSSLMODE/PGSSLROOTCERT above, so the URI needs no query params.
+    command:
+      - mlflow
+      - server
+      - --backend-store-uri
+      - postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow
+      - --default-artifact-root
+      - s3://mlflow
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --allowed-hosts
+      - "*"
     depends_on:
       timescaledb:
         condition: service_healthy
