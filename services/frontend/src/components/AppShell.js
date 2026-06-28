@@ -17,6 +17,12 @@ const NAV = [
     ],
   },
   {
+    group: 'Analyze',
+    items: [
+      { href: '/notebooks', label: 'Notebooks', icon: 'activity' },
+    ],
+  },
+  {
     group: 'Configure',
     items: [
       { href: '/alert-rules', label: 'Alert Rules', icon: 'sliders' },

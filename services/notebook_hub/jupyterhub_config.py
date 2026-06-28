@@ -36,6 +36,24 @@ CAPABILITY_TTL_SECONDS = int(os.environ.get("NOTEBOOK_CAPABILITY_TTL_SECONDS", "
 
 c = get_config()  # noqa: F821  (provided by JupyterHub at load time)
 
+# Mount the hub under a path prefix so it can be embedded same-origin in the platform UI
+# (ADR-0014 single-origin): the frontend reverse-proxies <app>/jupyter/ → SSO proxy → hub, so the
+# session cookie is first-party and the iframe is same-origin. Defaults to "/" for a standalone
+# deployment. JupyterHub propagates base_url to chp and every single-user server.
+c.JupyterHub.base_url = os.environ.get("NOTEBOOK_BASE_URL", "/")
+
+# Allow the platform UI to embed the notebook same-origin (ADR-0014). The hub and each single-user
+# server default to `Content-Security-Policy: frame-ancestors 'none'`, which blocks framing even
+# from the same origin — so the /notebooks iframe would be refused. Relax it to `'self'`: the embed
+# is same-origin (same host), and no cross-origin site may frame it. Set on the hub and propagated
+# to every spawned server.
+_FRAME_CSP = "frame-ancestors 'self'"
+c.JupyterHub.tornado_settings = {"headers": {"Content-Security-Policy": _FRAME_CSP}}
+c.Spawner.args = [
+    "--ServerApp.tornado_settings="
+    + "{'headers': {'Content-Security-Policy': \"" + _FRAME_CSP + "\"}}"
+]
+
 # ---------------------------------------------------------------------------
 # Authentication — trust the verified identity the proxy forwards (ADR-0014)
 # ---------------------------------------------------------------------------
