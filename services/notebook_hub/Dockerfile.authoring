@@ -50,6 +50,10 @@ RUN pip install --no-cache-dir "/tmp/industryflow-client[sql]" && rm -rf /tmp/in
 COPY examples/getting-started.ipynb /home/${NB_USER}/examples/getting-started.ipynb
 RUN chmod 0444 /home/${NB_USER}/examples/getting-started.ipynb
 
+# Durable per-user work dir (ADR-0020): owned by the non-root uid so a freshly-provisioned named
+# volume / PVC mounted here initialises writable. Notebooks saved here survive restarts.
+RUN mkdir -p /home/${NB_USER}/work && chown ${NB_UID}:${NB_UID} /home/${NB_USER}/work
+
 USER ${NB_UID}
 WORKDIR /home/${NB_USER}
 ENV HOME=/home/${NB_USER}
