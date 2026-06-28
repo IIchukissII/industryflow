@@ -24,7 +24,9 @@ RUN pip install --no-cache-dir \
     jupyterhub==4.1.6 \
     jupyterlab==4.0.9
 
-# Lean data-science stack (no deep learning): arrays/frames, classic ML, stats, plotting.
+# Lean data-science stack (no deep learning): arrays/frames, classic ML, stats, plotting, plus the
+# MLflow client (skinny — no server/UI) so a kernel can track experiments and register models
+# through the tracking gateway (ADR-0019). MLFLOW_TRACKING_URI/TOKEN are injected by the hub.
 RUN pip install --no-cache-dir \
     numpy==1.26.4 \
     pandas==2.2.2 \
@@ -33,7 +35,8 @@ RUN pip install --no-cache-dir \
     statsmodels==0.14.2 \
     xgboost==2.1.1 \
     matplotlib==3.9.1 \
-    plotly==5.23.0
+    plotly==5.23.0 \
+    mlflow-skinny==3.14.0
 
 # The tenant-scoped client + the [sql] extra (psycopg) so the kernel can reach the SQL proxy with
 # its capability (ADR-0015). Built from the context (clients/python).
