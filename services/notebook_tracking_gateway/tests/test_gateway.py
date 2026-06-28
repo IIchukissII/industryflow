@@ -52,18 +52,29 @@ class FakeUpstream:
         return 200, {}
 
 
-class FakeSigner:
+class FakeStore_:
+    def __init__(self):
+        self.deleted = []
+
     def presign(self, method, key):
         return f"https://store.local/{key}?sig=fake&m={method}"
+
+    def list_files(self, prefix):
+        return [{"path": "model.pkl", "is_dir": False, "file_size": 10}]
+
+    def delete(self, key):
+        self.deleted.append(key)
 
 
 def _client(experiments=None):
     store = FakeStore({f"{policy._KEY_PREFIX}{HANDLE}": json.dumps(
         {"user": "ds", "company_id": CID, "audience": "tracking", "read_only": False})})
     up = FakeUpstream(experiments or {})
-    app = gateway.build_app(store.get, up, FakeSigner())
+    art = FakeStore_()
+    app = gateway.build_app(store.get, up, art)
     c = TestClient(app)
     c.up = up
+    c.art = art
     return c
 
 
@@ -112,10 +123,35 @@ def test_run_create_in_foreign_experiment_refused():
     assert r.status_code == 403
 
 
-def test_artifact_returns_tenant_scoped_presigned_url():
+def test_artifact_put_redirects_to_tenant_scoped_presigned_url():
     c = _client()
-    r = c.get("/api/2.0/mlflow/artifacts?path=models/m.pkl", headers=_auth())
-    body = r.json()
-    assert body["key"] == policy.artifact_prefix(CID) + "models/m.pkl"
-    assert body["method"] == "GET"
-    assert body["url"].startswith("https://store.local/" + policy.artifact_prefix(CID))
+    scoped = policy.artifact_prefix(CID) + "5/run1/artifacts/model.pkl"
+    r = c.put("/api/2.0/mlflow-artifacts/artifacts/5/run1/artifacts/model.pkl",
+              headers=_auth(), content=b"bytes", follow_redirects=False)
+    assert r.status_code == 307
+    assert r.headers["location"] == f"https://store.local/{scoped}?sig=fake&m=PUT"
+
+
+def test_artifact_get_redirects_presigned():
+    c = _client()
+    r = c.get("/api/2.0/mlflow-artifacts/artifacts/5/run1/artifacts/model.pkl",
+              headers=_auth(), follow_redirects=False)
+    assert r.status_code == 307 and "m=GET" in r.headers["location"]
+
+
+def test_artifact_list_is_tenant_scoped():
+    c = _client()
+    r = c.get("/api/2.0/mlflow-artifacts/artifacts?path=5/run1/artifacts", headers=_auth())
+    assert r.json() == {"files": [{"path": "model.pkl", "is_dir": False, "file_size": 10}]}
+
+
+def test_artifact_delete_scopes_key():
+    c = _client()
+    r = c.delete("/api/2.0/mlflow-artifacts/artifacts/5/run1/artifacts/old.pkl", headers=_auth())
+    assert r.status_code == 200
+    assert c.art.deleted == [policy.artifact_prefix(CID) + "5/run1/artifacts/old.pkl"]
+
+
+def test_artifact_requires_bearer():
+    c = _client()
+    assert c.get("/api/2.0/mlflow-artifacts/artifacts/x", follow_redirects=False).status_code == 401

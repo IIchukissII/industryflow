@@ -254,7 +254,12 @@ services:
       - server
       - --backend-store-uri
       - postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow
+      # Hand clients the `mlflow-artifacts:` scheme, not `s3://`, so they upload/download via the
+      # tracking URI (the gateway, ADR-0019) and never need object-store credentials. The gateway
+      # owns the tenant-scoped storage; --artifacts-destination keeps MLflow's own serving valid.
       - --default-artifact-root
+      - mlflow-artifacts:/
+      - --artifacts-destination
       - s3://mlflow
       - --host
       - 0.0.0.0

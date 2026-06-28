@@ -36,7 +36,8 @@ RUN pip install --no-cache-dir \
     xgboost==2.1.1 \
     matplotlib==3.9.1 \
     plotly==5.23.0 \
-    mlflow-skinny==3.14.0
+    mlflow-skinny==3.14.0 \
+    skops==0.11.0
 
 # The tenant-scoped client + the [sql] extra (psycopg) so the kernel can reach the SQL proxy with
 # its capability (ADR-0015). Built from the context (clients/python).
