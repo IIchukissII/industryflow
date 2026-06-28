@@ -17,4 +17,4 @@ python-snappy>=0.7.0
 cryptography>=42.0.0
 
 # Prometheus /metrics (request rate/latency/in-flight) — item 7 observability
-prometheus-fastapi-instrumentator==6.1.0
+prometheus-fastapi-instrumentator==8.0.2
