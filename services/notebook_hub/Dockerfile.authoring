@@ -44,6 +44,12 @@ RUN pip install --no-cache-dir \
 COPY . /tmp/industryflow-client
 RUN pip install --no-cache-dir "/tmp/industryflow-client[sql]" && rm -rf /tmp/industryflow-client
 
+# Ship a read-only worked example into the workspace (ADR-0011): read your data -> features ->
+# train -> register a model. Owned by root + mode 0444 so it is an immutable reference — a data
+# scientist runs it, then File -> Save Notebook As to adapt their own copy. Their home stays theirs.
+COPY examples/getting-started.ipynb /home/${NB_USER}/examples/getting-started.ipynb
+RUN chmod 0444 /home/${NB_USER}/examples/getting-started.ipynb
+
 USER ${NB_UID}
 WORKDIR /home/${NB_USER}
 ENV HOME=/home/${NB_USER}
