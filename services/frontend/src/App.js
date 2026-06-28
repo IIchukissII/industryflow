@@ -17,6 +17,7 @@ import AdminPanel from './pages/AdminPanel';
 import Equipment from './pages/Equipment';
 import Settings from './pages/Settings';
 import MLModels from './pages/MLModels';
+import Notebooks from './pages/Notebooks';
 import Login from './pages/Login';
 
 function ProtectedRoute({ children, user }) {
@@ -282,6 +283,11 @@ function App() {
         <Route path="/ml-models" element={
           <ProtectedRoute user={user}>
             <AppShell user={user} title="Models"><MLModels /></AppShell>
+          </ProtectedRoute>
+        } />
+        <Route path="/notebooks" element={
+          <ProtectedRoute user={user}>
+            <Notebooks user={user} />
           </ProtectedRoute>
         } />
         <Route path="/settings" element={

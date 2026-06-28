@@ -685,6 +685,9 @@ services:
       NOTEBOOK_IMAGE_ANALYTICS: industryflow-notebook-analytics
       NOTEBOOK_NETWORK: industryflow-network
       HUB_CONNECT_IP: notebook-hub
+      # Mount the hub under a path prefix so the frontend can embed it same-origin (ADR-0014):
+      # <app>/jupyter/ → notebook-sso → hub. JupyterHub propagates this to chp + single-user servers.
+      NOTEBOOK_BASE_URL: ${NOTEBOOK_BASE_URL:-/jupyter/}
       REDIS_URL: redis://redis:6379/0
       # Required for enable_auth_state — the hub encrypts the verified tenant/role it carries from
       # the SSO handoff to the spawn hook (ADR-0014). Generate: openssl rand -hex 32.
@@ -748,17 +751,15 @@ services:
 
   # SSO reverse proxy (ADR-0014): the hub's only entry point. Validates the platform session via
   # api-gateway /auth/verify and forwards the verified identity, overwriting client-supplied values.
+  # Plain HTTP on the internal network only — the frontend edge terminates TLS and reverse-proxies
+  # <app>/jupyter/ here (single-origin, ADR-0014), so notebooks are embeddable in the platform UI.
+  # No host port and no cert: it is never reached directly, only through the frontend.
   notebook-sso:
     profiles: ["notebooks"]
     image: nginx:1.27-alpine
     container_name: industryflow-notebook-sso
-    # HTTPS edge for notebooks (the platform is https-only; the session cookie is Secure).
-    ports:
-      - "${NOTEBOOK_PORT:-8888}:8443"
     volumes:
       - ./services/notebook_hub/sso-nginx.conf:/etc/nginx/nginx.conf:ro
-      # Internal-CA server cert (tls.crt/tls.key) — the same one the frontend/edge serve.
-      - "${TLS_CERT_DIR:-frontend-certs}:/etc/nginx/certs:ro"
     depends_on:
       - notebook-hub
       - api-gateway

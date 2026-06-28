@@ -36,6 +36,12 @@ CAPABILITY_TTL_SECONDS = int(os.environ.get("NOTEBOOK_CAPABILITY_TTL_SECONDS", "
 
 c = get_config()  # noqa: F821  (provided by JupyterHub at load time)
 
+# Mount the hub under a path prefix so it can be embedded same-origin in the platform UI
+# (ADR-0014 single-origin): the frontend reverse-proxies <app>/jupyter/ → SSO proxy → hub, so the
+# session cookie is first-party and the iframe is same-origin. Defaults to "/" for a standalone
+# deployment. JupyterHub propagates base_url to chp and every single-user server.
+c.JupyterHub.base_url = os.environ.get("NOTEBOOK_BASE_URL", "/")
+
 # ---------------------------------------------------------------------------
 # Authentication — trust the verified identity the proxy forwards (ADR-0014)
 # ---------------------------------------------------------------------------
