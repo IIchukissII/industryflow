@@ -212,7 +212,9 @@ class PostgresBackend:
         self._require_tls = require_tls
         self._up_reader: Optional[asyncio.StreamReader] = None
         self._up_writer: Optional[asyncio.StreamWriter] = None
-        self._params: Dict[str, bytes] = {}
+        # Upstream ParameterStatus messages, buffered during startup and replayed to the kernel
+        # *after* AuthenticationOk — a client expects them only once it is authenticated.
+        self._startup_params = bytearray()
 
     async def connect_privileged(self) -> None:
         # TLS is negotiated (SSLRequest) before the StartupMessage, so credentials and the
@@ -267,17 +269,16 @@ class PostgresBackend:
         while True:
             type_byte, payload = await _read_regular_message(self._up_reader)
             if type_byte == wire.MSG_PARAMETER_STATUS:
-                self._params.setdefault(b"_order", b"")  # preserve receipt; forwarded verbatim
-                self._forward_to_client(wire.build_message(type_byte, payload))
+                # Buffer — NOT forward. A ParameterStatus is itself a type-'S' message, and the
+                # kernel is not yet authenticated (AuthenticationOk is sent in relay()); forwarding
+                # it now makes the client read 'S' where it expects the auth reply. Replayed later.
+                self._startup_params += wire.build_message(type_byte, payload)
             elif type_byte == wire.MSG_BACKEND_KEY_DATA:
                 continue  # the proxy owns cancellation; do not expose upstream keys to the kernel
             elif type_byte == wire.MSG_READY_FOR_QUERY:
                 return
             elif type_byte == wire.MSG_ERROR_RESPONSE:
                 raise ConnectionError(wire.parse_error_response(payload).get("M", "upstream error"))
-
-    def _forward_to_client(self, data: bytes) -> None:
-        self._client_writer.write(data)
 
     async def execute(self, sql: str) -> None:
         """Run one setup statement (SET ROLE / read-only) and consume its completion."""
@@ -294,9 +295,12 @@ class PostgresBackend:
 
     async def relay(self) -> None:
         """Complete the kernel handshake, then pipe bytes both ways until either side closes."""
-        # Tell the kernel it is authenticated and ready. ParameterStatus messages were already
-        # forwarded during upstream startup; we issue our own BackendKeyData-free ReadyForQuery.
+        # The kernel sees a normal startup completion: AuthenticationOk, then the upstream's
+        # ParameterStatus messages (buffered during connect), then a BackendKeyData-free
+        # ReadyForQuery. Only after this is the kernel authenticated and ready to send queries.
         self._client_writer.write(wire.build_authentication_ok())
+        if self._startup_params:
+            self._client_writer.write(bytes(self._startup_params))
         self._client_writer.write(wire.build_ready_for_query())
         await self._client_writer.drain()
 
