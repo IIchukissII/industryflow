@@ -24,7 +24,7 @@ GSSENCRequest) is special: it has **no type byte**, just ``Int32 length | Int32 
 from __future__ import annotations
 
 import struct
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 PROTOCOL_VERSION_3 = 196608  # 0x00030000 — protocol 3.0
 SSL_REQUEST_CODE = 80877103  # 1234 << 16 | 5679
