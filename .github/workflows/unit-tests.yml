@@ -36,8 +36,8 @@ jobs:
           # The notebook client is packaged (pyproject extras), so it overrides the install.
           - { service: python_client,       path: clients/python/tests, install: "pip install -e 'clients/python[dev]'" }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install dependencies
