@@ -100,14 +100,20 @@ conflict.
 
 ## Consequences
 
+### Positive
+
 - The app is observable anywhere a Prometheus-Operator-compatible stack exists, including
   managed providers, without shipping a backend.
-- Self-hosted operators install `kube-prometheus-stack` + Loki once per cluster (documented)
-  and flip `observability.serviceMonitors.enabled` / `prometheusRules.enabled` on.
-- Until the operator is installed, the exporters still run and expose metrics; only the CRs are
-  withheld (they would not have CRDs to validate against).
 - Full PITR-style dashboards/alerts can grow over time by adding dashboard ConfigMaps and rules
   without touching service definitions.
+
+### Negative
+
+- Self-hosted operators must install `kube-prometheus-stack` + Loki once per cluster (documented)
+  and flip `observability.serviceMonitors.enabled` / `prometheusRules.enabled` on — the backend
+  is not turnkey out of the chart.
+- Until the operator is installed, the custom resources are withheld (they would have no CRDs to
+  validate against); only the raw exporter metrics are available in the interim.
 
 ## References
 
