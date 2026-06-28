@@ -504,7 +504,10 @@ networkPolicy:
 # implemented at GET /auth/verify (ADR-0014 handoff contract).
 notebookHub:
   enabled: false
-  # External host for the notebooks UI (served via the SSO proxy → hub).
+  # Path prefix the hub is mounted under, embedded same-origin in the frontend (ADR-0014): the
+  # notebooks Ingress serves this prefix on the frontend's host, and the /notebooks page iframes it.
+  baseUrl: /jupyter/
+  # Legacy standalone host (unused under single-origin; kept for a dedicated-host deployment).
   host: notebooks.industryflow.local
   # Per-user images the hub spawns by role profile (ADR-0011 dec 5): authoring = JupyterLab + the
   # lean DS stack; analytics = Voila read-only dashboards. Referenced by the spawner, not run as

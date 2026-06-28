@@ -106,6 +106,10 @@ spec:
             # DockerSpawner for the compose profile; this selects KubeSpawner here.
             - name: NOTEBOOK_SPAWNER
               value: "kube"
+            # Mount the hub under a path prefix so the frontend can embed it same-origin (ADR-0014):
+            # <app-host>/jupyter/ → SSO proxy → hub. Propagates to chp + every single-user server.
+            - name: NOTEBOOK_BASE_URL
+              value: {{ .Values.notebookHub.baseUrl | quote }}
             # Per-profile single-user images (ADR-0011 dec 5): the spawn hook picks one by role.
             - name: NOTEBOOK_IMAGE_AUTHORING
               value: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.singleUser.authoring.image "tag" .Values.image.tag "digest" .Values.notebookHub.singleUser.authoring.digest) | quote }}
@@ -301,8 +305,12 @@ spec:
           configMap:
             name: {{ $ssoSvc }}
 {{- if .Values.ingress.enabled }}
+{{- $appHost := (index .Values.apps "frontend").ingress.host }}
 ---
-# Notebooks edge → SSO proxy (which performs the ADR-0014 session handoff).
+# Notebooks edge → SSO proxy (which performs the ADR-0014 session handoff). Single-origin: served
+# on the SAME host as the frontend, under the hub's base_url path, so the platform session cookie
+# is first-party and the /notebooks page can embed it without cross-origin framing. The frontend
+# Ingress owns "/" on this host; this one claims the notebook base_url prefix.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -317,14 +325,14 @@ spec:
   ingressClassName: {{ .Values.ingress.className }}
   {{- if .Values.ingress.tls.enabled }}
   tls:
-    - hosts: [{{ .Values.notebookHub.host | quote }}]
+    - hosts: [{{ $appHost | quote }}]
       secretName: {{ .Values.ingress.tls.secretName }}
   {{- end }}
   rules:
-    - host: {{ .Values.notebookHub.host }}
+    - host: {{ $appHost }}
       http:
         paths:
-          - path: /
+          - path: {{ .Values.notebookHub.baseUrl | trimSuffix "/" }}
             pathType: Prefix
             backend:
               service:
