@@ -2,6 +2,10 @@
 .env
 .venv/
 
+# MCP server config — carries the ArchDoc operator key; never commit.
+# Commit .mcp.json.example with placeholders instead.
+.mcp.json
+
 # Local dev sandbox (fake-data streamers, scratch scripts) — never committed
 /local/
 

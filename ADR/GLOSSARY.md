@@ -30,6 +30,15 @@ with a tenant column. *(ADR-0003)*
 `tenant_<…>` schema through one validated, parameterised implementation — *not* the
 scan-all-schemas, string-spliced lookup the resolution ADR replaced. *(ADR-0003)*
 
+**Trusted mediation** — the platform's single pattern for giving untrusted or tenant-facing
+code scoped access to a shared store: trusted server-side code holds the privileged principal
+and forces every operation into the caller's tenant, so the caller presents only a narrow
+capability and never the store credential. Its instances are the API gateway scoping a query
+(ADR-0003, ADR-0004), the SQL proxy scoping a database connection (ADR-0012, ADR-0015), and the
+experiment-tracking gateway scoping tracking, registry, and artifact calls (ADR-0013, ADR-0019).
+A new tenant-access path reuses this pattern rather than inventing a second exposure model.
+*(ADR-0003, ADR-0004, ADR-0012, ADR-0013)*
+
 **Device / gateway** — a field unit that produces sensor readings and authenticates *to* the
 platform as a client. On the reference deployment its private key is held in an ATECC secure
 element and never leaves the hardware. *(ADR-0002, ADR-0007)*

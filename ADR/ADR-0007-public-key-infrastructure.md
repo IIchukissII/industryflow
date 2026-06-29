@@ -15,11 +15,11 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 ## Context and problem
 
-ADR-0002 decided that device/gateway ingestion authenticates with mTLS, using client certificates issued by IndustryFlow's own certificate authority, with the tenant (`company_id`) and `device_id` carried in the certificate; it deferred the PKI itself. ADR-0004 decided that the browser-facing API is served over HTTPS with a publicly-trusted server certificate (e.g. ACME/Let's Encrypt), and explicitly noted that this server certificate is a **different** PKI concern from the device CA. Both ADRs therefore point at a PKI that has not yet been specified: who the root of trust is, how a device's identity is encoded and bound to a tenant, how a device enrolls, how long a certificate lives, and how a certificate is revoked.
+ADR-0002 decided that device/gateway ingestion authenticates with mTLS, using client certificates issued by IndustryFlow's own certificate authority, with the tenant (`company_id`) and `device_id` carried in the certificate; it deferred the PKI itself. ADR-0004 (rev 1) decided that the browser-facing API is served over HTTPS with a deployment-keyed edge server certificate (ADR-0004 dec 8: public ACME when managed, an internal CA when self-hosted), and explicitly noted that this server certificate is a **different** PKI concern from the device CA. Both ADRs therefore point at a PKI that has not yet been specified: who the root of trust is, how a device's identity is encoded and bound to a tenant, how a device enrolls, how long a certificate lives, and how a certificate is revoked.
 
 The producers this CA serves are not ordinary software clients. On the IndustryGrow gateway — the first deployment — the device's private key lives in an **ATECC secure element**: it is generated on-device and is non-exportable (IndustryGrow ADR-0007, ADR-0004 rev 1). That hardware fact constrains the PKI: the CA can never generate or hold a device's private key, because a key that exists off the device is exactly the property the secure element exists to prevent. The PKI must be built around signing certificate requests for keys it never sees.
 
-This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0002) or that the browser edge uses a public server certificate (ADR-0004); it decides the certificate authority behind the device side of that trust.
+This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0002) or that the browser edge uses ADR-0004's edge server certificate (ADR-0004 dec 8); it decides the certificate authority behind the device side of that trust.
 
 ## Decision drivers
 
@@ -28,7 +28,7 @@ This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0
 - **Tenant identity must be verifiable and unspoofable from the certificate.** ADR-0003 resolves a request's tenant from a verified identity; for devices that identity is a certificate field, so the field must be authentic and machine-parseable.
 - **Revocation must be possible.** A stolen, compromised, or decommissioned device must be able to lose access before its certificate would naturally expire.
 - **It must operate unattended.** Enrollment and renewal must work for field devices with no human at the keyboard.
-- **Client trust and server trust are separate.** The device CA authenticates clients *to* IndustryFlow; the public server certificate authenticates IndustryFlow *to* browsers. The two trust directions must not be conflated.
+- **Client trust and server trust are separate.** The device CA authenticates clients *to* IndustryFlow; the browser-facing edge certificate authenticates IndustryFlow *to* browsers. The two trust directions must not be conflated.
 
 ## Decision
 
@@ -58,7 +58,7 @@ This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0
 
 **E. No revocation; rely on short-lived certificates alone.** *Rejected:* a compromised device retains access for the remainder of its certificate's validity, which is unacceptable for theft or decommission. Short lifetimes bound exposure but do not replace the ability to cut a device off immediately.
 
-**F. Reuse the public ACME server-certificate path for device authentication.** *Rejected:* opposite trust direction. Devices are clients we authenticate, not servers a browser trusts; a publicly-trusted server certificate says nothing about which tenant a device belongs to.
+**F. Reuse the browser-facing edge server-certificate path for device authentication.** *Rejected:* opposite trust direction. Devices are clients we authenticate, not servers a browser trusts; the edge server certificate (ADR-0004 dec 8) says nothing about which tenant a device belongs to.
 
 ## Consequences
 
@@ -67,7 +67,7 @@ This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0
 - Device private keys never leave hardware, so a device credential cannot be copied off the device — the property ADR-0002 depends on.
 - The tenant a device belongs to is cryptographically vouched for by the CA and read from a verified SAN, so it cannot be spoofed by the device (closes the trust gap ADR-0003 relies on for ingestion).
 - An issuing-intermediate compromise is recoverable without re-rooting the fleet, and revocation gives immediate cutoff for theft or decommission.
-- Client trust (device CA) and server trust (public server certificate) stay cleanly separated, so neither can be misused for the other.
+- Client trust (device CA) and server trust (the browser-facing edge certificate) stay cleanly separated, so neither can be misused for the other.
 
 ### Negative
 
@@ -89,7 +89,7 @@ This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0
 ## References
 
 - ADR-0002 — ingestion authentication & device identity; establishes mTLS with certificates from this CA and the verifying reverse proxy.
-- ADR-0004 — API authentication, sessions & transport; the public server certificate that this ADR keeps distinct from the device CA.
+- ADR-0004 — API authentication, sessions & transport; the browser-facing edge server certificate (dec 8) that this ADR keeps distinct from the device CA.
 - ADR-0003 — tenant→schema resolution; consumes the verified tenant identity encoded by decision 3.
 - IndustryGrow ADR-0007 — PKI and secure-element identity; the device-side counterpart whose non-exportable-key model constrains decisions 1–2.
 - RFC 5280 (X.509 PKI), RFC 6125 (identity in certificates), RFC 7030 (EST) — standards underpinning the hierarchy, SAN identity, and enrollment choices.

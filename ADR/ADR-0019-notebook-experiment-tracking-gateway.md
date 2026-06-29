@@ -52,11 +52,13 @@ What is undecided, and what this ADR fixes: how the kernel reaches the gateway a
 
 ## Alternatives considered
 
-**A. Stand up a tracking server, backend, and bucket per tenant now.** *Rejected for now (inherits ADR-0013 dec 5 / alt A):* physical separation adds no boundary the gateway cannot already enforce, because the kernel never touches the store; it is kept as the deferred hardening path, not adopted up front.
+Alternatives **A–C are inherited unchanged from ADR-0013** (its alternatives A, B, and C) — that ADR is the single source of truth for the policy rationale behind rejecting them; they are listed here by title for completeness, not re-argued.
 
-**B. Expose MLflow directly to tenants using its own authorization plugin.** *Rejected (ADR-0013 alt B):* MLflow's open-source auth is per-user, not tenant-aware, and would put the store on the tenant-facing edge — the opposite of decision 1.
+**A. Stand up a tracking server, backend, and bucket per tenant now.** *Rejected for now — see ADR-0013 alt A / dec 5.* Kept as the deferred hardening path, not adopted up front.
 
-**C. Give the kernel the shared MLflow and object-store credentials and separate tenants by naming convention.** *Rejected (ADR-0013 alt C):* this is the status quo — broad ambient credentials inside user-authored code, cross-tenant by default — exactly what ADR-0011 dec 2 and ADR-0012 forbid, now over the tracking and artifact stores.
+**B. Expose MLflow directly to tenants using its own authorization plugin.** *Rejected — see ADR-0013 alt B.*
+
+**C. Give the kernel the shared MLflow and object-store credentials and separate tenants by naming convention.** *Rejected — see ADR-0013 alt C.* The status quo this ADR's gateway removes.
 
 **D. Hand the kernel per-session, tenant-prefix-scoped object-store *session credentials* for artifacts.** *Rejected:* a session credential is reusable for its whole lifetime across *every* object under the tenant prefix — broader than any single artifact transfer needs — and places a standing (if bounded) credential in untrusted code. Per-object pre-signed URLs (decision 6) give the same direct-transfer throughput with a far tighter grant: one object, one verb, minutes. The session-credential form is not retained even as a hardening step; it is strictly weaker than decision 6 for the same cost.
 
