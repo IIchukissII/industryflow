@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0010: Extension plugin mechanism — in-process registry and the feature-transform contract
+# ADR-0010: Extension plugin mechanism — in-process registry and the feature-transform contract (rev 1)
 
 - **ID:** ADR-0010
 - **Status:** Accepted
@@ -11,6 +11,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Project:** IndustryFlow
 - **Parent:** ADR-0008 (extension and plugin interface)
 - **Companions:** ADR-0003 (tenant→schema resolution), ADR-0001 (framing)
+- **Supersedes:** ADR-0010 (rev 0) — adds the anomaly-detector contract (decision 6), previously named only as future work
 
 ## Context and problem
 
@@ -28,6 +29,14 @@ ships inside the platform. A domain that needs a new transform today has no path
 branch to that core dispatcher — exactly what ADR-0008 decision 7 forbids. The per-tenant
 feature **configuration** already lives in the database (the config surface of ADR-0008
 decision 2 exists); what is missing is the **code-plugin contract** of decision 3.
+
+**Revision 1.** Decision 2 (rev 0) named the anomaly detector as one of the *later contracts*
+the registry pattern would template, "declared as future work, not built here." That contract
+has since been built on exactly the registry mechanism this ADR fixes. Recording it as a new
+decision (decision 6) rather than as an after-the-fact addendum keeps it inside the supersession
+discipline (ADR-0000 dec 5): a new contract is a decision, so it earns a revision, not an
+in-place note. The mechanism is unchanged from rev 0; this revision only fixes a second contract
+on it.
 
 ## Decision drivers
 
@@ -54,8 +63,8 @@ decision 2 exists); what is missing is the **code-plugin contract** of decision 
    registry instead of a hardcoded branch. The platform's own generic transforms (identity,
    polynomial, interaction, deviation, statistical, rolling_stat) are registered built-ins with
    no domain knowledge; a domain registers new transform *types* the same way, in its own module.
-   The same registry pattern is the template for later contracts (anomaly detectors, model
-   adapters), which are declared as future work, not built here.
+   The same registry pattern is the template for later contracts: the anomaly-detector
+   contract is now fixed in decision 6 (rev 1), and the model-adapter contract remains future work.
 
 3. **Contracts carry an extension-API version with a compatibility rule.** The platform exposes
    `EXTENSION_API_VERSION` (semver). An extension module may declare the version it targets; the
@@ -74,6 +83,16 @@ decision 2 exists); what is missing is the **code-plugin contract** of decision 
    the platform does not import it by default (ADR-0008 decisions 6, 7). IndustryGrow remains the
    real reference extension in its own repository.
 
+6. **The second contract is the anomaly detector *(rev 1)*.** A detector implements
+   `async (features, model, threshold, ctx: TransformContext) -> DetectionResult`, registered
+   with `@register_detector("<name>")`. The ML inference path dispatches a model record's
+   `detector` field (default `sklearn`, the generic built-in that reproduces the previous
+   scikit-learn scoring) through the registry instead of a hardcoded scorer, so a domain can
+   register a custom detector — including a model-free one — without editing the inference path.
+   The reference extension adds an illustrative `tep_rule` detector. This is the same registry
+   mechanism as decision 2, applied to the second of the contracts decision 2 named; the
+   model-adapter contract remains future work (Deferred decisions).
+
 ## Alternatives considered
 
 **A. setuptools entry points for discovery.** *Deferred, not rejected:* entry points are the
@@ -88,6 +107,13 @@ ADR-0008 alternative B (domain branches behind flags in the core) at the functio
 **C. Make every transform an out-of-process call.** *Rejected as default:* a network hop per
 feature per reading is unacceptable on the inference hot path (decision 4 / ADR-0008 alt D).
 
+**D. Keep model scoring hardcoded to scikit-learn in the inference scorer *(rev 1)*.**
+*Rejected:* it is the anomaly-detection analogue of the `if/elif` transform dispatcher decision 1
+removed — a domain that needs a different (or model-free) detector would have to edit the core
+scorer. Decision 6 dispatches the detector through the same registry, with `sklearn` as the
+generic built-in, so the default behaviour is unchanged while the core stops being the only place
+a detector can live.
+
 ## Consequences
 
 ### Positive
@@ -96,6 +122,8 @@ feature per reading is unacceptable on the inference hot path (decision 4 / ADR-
   dispatcher is never edited. The boundary ADR-0008 asserts becomes mechanically real.
 - The generic transforms are now a declared, versioned contract rather than a private `if/elif`.
 - The Tennessee-Eastman artifact leaves the core, and the reference extension proves the path.
+- The inference scorer is registry-dispatched too (decision 6): a domain ships a custom or
+  model-free detector without editing the core scorer, the same way it ships a transform.
 
 ### Negative
 
@@ -105,16 +133,6 @@ feature per reading is unacceptable on the inference hot path (decision 4 / ADR-
 - In-process plugin code runs with the service's privileges — the trust concern ADR-0008 raised
   for managed deployments is unaddressed here (deferred).
 - `EXTENSION_MODULES` is an operational trust boundary: whatever it names is imported and runs.
-
-## Added after acceptance
-
-- **Anomaly-detector contract.** The second contract, on the same registry pattern:
-  `async (features, model, threshold, ctx) -> DetectionResult` registered with
-  `@register_detector("<name>")`. The ML inference path dispatches a model record's
-  `detector` (default `sklearn`, the generic built-in that reproduces the previous
-  scikit-learn scoring) through the registry, so a domain can register a custom detector —
-  including a model-free one — without editing the inference scorer. The reference extension
-  adds an illustrative `tep_rule` detector. The model-adapter contract remains future work.
 
 ## Deferred decisions
 
