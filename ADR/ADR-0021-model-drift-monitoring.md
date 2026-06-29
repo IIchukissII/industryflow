@@ -1,13 +1,16 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-SPDX-License-Identifier: AGPL-3.0-or-later
+SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # ADR-0021 — Model drift monitoring (the `statistical` alert lane)
 
+- **ID:** ADR-0021
 - **Status:** Accepted (design; implementation deferred)
 - **Date:** 2026-06-28
-- **Relates to:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md)/[ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (model registry + tracking), the alert-rule schema's reserved `statistical` detection type
+- **Project:** IndustryFlow
+- **Parent:** ADR-0001 (framing)
+- **Companions:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md)/[ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (model registry + tracking). Realizes the alert-rule schema's reserved `statistical` detection type.
 
 ## Context and problem
 
