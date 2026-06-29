@@ -3,13 +3,14 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0000: Decision records and the single-source-of-truth discipline
+# ADR-0000: Decision records and the single-source-of-truth discipline (rev 1)
 
 - **ID:** ADR-0000
 - **Status:** Accepted
 - **Date:** 2026-06-26
 - **Project:** IndustryFlow
 - **Parent:** — (root; this ADR governs the form of all other ADRs)
+- **Supersedes:** ADR-0000 (rev 0) — extends decision 5 to permit labeled status addenda on Accepted ADRs
 
 ## Context and problem
 
@@ -18,6 +19,8 @@ IndustryFlow's reasoning is spread across many artifacts: service code in seven 
 An unrecorded rationale has two failure modes. A contributor cannot recover the *why*, so they reimplement it from a guess and the guesses diverge. And there is no authoritative home for a fact, so "where do I change the Kafka topic name / the tenant-schema rule / the CORS policy?" has several answers and none is correct. Both failures are the same underlying problem: a fact or a decision that lives in more than one place has more than one place to go wrong, and the review of "is this duplicated?" cannot be made mechanical.
 
 This ADR establishes the discipline the project currently lacks and makes it the explicit root of the decision record. It is deliberately the lowest-numbered ADR because it governs the form of every other ADR rather than any technical subsystem. The practice is adopted from the sibling project IndustryGrow, which is built on IndustryFlow and already runs its architecture this way; IndustryFlow is the underlying platform and should hold its own decisions to the same standard rather than inheriting them second-hand.
+
+**Revision 1.** Practice since acceptance surfaced a gap in decision 5. Several Accepted ADRs (e.g. ADR-0009 and ADR-0019) grew short, clearly-labeled sections recording what was *resolved or implemented* after acceptance — outcomes and resolved deferrals, not new decisions — which decision 5 as written sanctioned only on a still-Proposed draft. The converse also occurred: ADR-0010 grew an after-the-fact *anomaly-detector contract*, which is a new decision rather than a status note, and was therefore taken to a revision (ADR-0010 rev 1) rather than left as an addendum. Forcing full supersession ceremony onto every post-acceptance status note discourages the very act of keeping the record current, while leaving the practice unaddressed lets a genuine new decision blur into a silent in-place edit. This revision draws the line explicitly: a labeled status addendum that changes no recorded decision is allowed on an Accepted ADR; anything that adds or alters a *decision* still takes a revision.
 
 ## Decision drivers
 
@@ -37,7 +40,7 @@ This ADR establishes the discipline the project currently lacks and makes it the
 
 4. **Downstream artifacts must never silently override an ADR decision.** If a service or config needs to diverge from a recorded decision, the divergence is resolved by amending the ADR, not by quietly changing the code. A silent override — the README claiming a deployment shape the code does not implement — is the canonical anti-pattern this discipline exists to forbid.
 
-5. **A revision is a supersession, not a silent edit.** A substantive change to a decision already on record produces a new revision: the title gains `(rev N)`, the metadata gains a `Supersedes:` line, and the reason is woven into *Context and problem* and *Alternatives considered*. A clarifying addition that changes no existing decision may be made in place on a still-Proposed draft without a revision bump.
+5. **A revision is a supersession, not a silent edit.** A substantive change to a decision already on record produces a new revision: the title gains `(rev N)`, the metadata gains a `Supersedes:` line, and the reason is woven into *Context and problem* and *Alternatives considered*. A clarifying addition that changes no existing decision may be made in place on a still-Proposed draft without a revision bump. On an **Accepted** ADR, a clearly-labeled status addendum — a *Resolved since acceptance* or *Added after acceptance* note that records an outcome, resolves a previously deferred item, or reports what implementation settled — may likewise be added in place, **provided it changes no decision already recorded**; introducing a new decision or altering an existing one still requires a revision (or a new ADR).
 
 6. **The governance root is not mirrored into the ADRs it governs.** This ADR applies to every ADR by being the root; individual ADRs do not back-reference it in their metadata. Enumerating "governed by ADR-0000" in each ADR would be exactly the mirroring this ADR forbids. The relationship is inherited, not copied.
 
@@ -54,6 +57,8 @@ This ADR establishes the discipline the project currently lacks and makes it the
 **C. Keep decisions in code comments and commit messages.** *Rejected:* comments are scoped to one file and one service, so a cross-cutting decision (multi-tenancy, delivery semantics) has no single home and gets re-explained per service — the copy-paste-the-decision failure already in the codebase. Commit messages are not discoverable as a body of current decisions.
 
 **D. Inherit IndustryGrow's ADRs by reference instead of keeping our own.** *Rejected:* IndustryGrow's ADRs decide IndustryGrow's concerns and treat IndustryFlow as a given. IndustryFlow's internal decisions (schema-per-tenant, Kafka→Spark→TimescaleDB, the auth model) are not recorded there and must not depend on another project's repository for their source of truth.
+
+**E. Require a revision bump for any post-acceptance edit, including implementation-status notes *(rev 1)*.** *Rejected:* it would attach full supersession ceremony (rev title, `Supersedes:`, narrative rationale) to merely recording that a deferred item was resolved or that code settled an implementation detail — friction heavy enough to discourage keeping the record current, which is the opposite of this ADR's aim. Decision 5 instead admits labeled status addenda that change no decision, and reserves revisions for changes to the decisions themselves.
 
 ## Consequences
 

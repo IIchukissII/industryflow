@@ -83,7 +83,7 @@ These are not seven unrelated bugs; they are the consequence of never deciding h
 
 **F. Require a publicly-trusted ACME certificate for every deployment *(rev 1)*.** *Rejected:* a self-hosted single-host deployment serves an internal hostname (`industryflow.local`) that no public CA will issue a certificate for; mandating ACME would make self-hosting impossible without a public DNS name the operator may not have. Decision 8 keys the issuer to the deployment shape instead, with ACME as the managed default and the internal CA as the self-hosted default.
 
-**G. Issue the self-hosted edge certificate from a fresh, edge-only internal CA, separate from the database CA *(rev 1)*.** *Rejected:* it would create two internal roots a self-hoster must install and rotate where one suffices. ADR-0017 already issues the DB cert from `gen-internal-ca.sh`; reusing that single internal root for the edge means clients trust one CA for both surfaces, which is simpler to operate without weakening isolation (both are server certs in the same self-hosted trust domain).
+**G. Issue the self-hosted edge certificate from a fresh, edge-only internal CA, separate from the database CA *(rev 1)*.** *Rejected:* it would create two internal roots a self-hoster must install and rotate where one suffices. The edge and the database instead share the single internal root of the self-hosted trust domain — see ADR-0017 for the rationale of why one internal root serving both is the right trade-off.
 
 ## Consequences
 

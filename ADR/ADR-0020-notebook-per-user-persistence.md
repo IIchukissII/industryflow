@@ -1,14 +1,16 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-SPDX-License-Identifier: AGPL-3.0-or-later
+SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # ADR-0020 — Notebook per-user work persistence (durable storage, ephemeral compute)
 
+- **ID:** ADR-0020
 - **Status:** Accepted
 - **Date:** 2026-06-28
-- **Refines:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (resolves its deferred "where authored notebooks live")
-- **Consistent with:** [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner parity), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-access.md) (ephemeral capabilities)
+- **Project:** IndustryFlow
+- **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (embedded notebooks — resolves its deferred "where authored notebooks live")
+- **Companions:** [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner parity), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (ephemeral capabilities)
 
 ## Context and problem
 
