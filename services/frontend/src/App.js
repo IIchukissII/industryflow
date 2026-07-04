@@ -30,7 +30,7 @@ function ProtectedRoute({ children, user }) {
 
 function Dashboard({ user }) {
   const [sensors, setSensors] = useState({});
-  const [connected, setConnected] = useState(false);
+  const [, setConnected] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
@@ -89,6 +89,10 @@ function Dashboard({ user }) {
     return () => {
       websocketService.disconnect();
     };
+    // Mount-only: seeds the initial equipment/sensor selection and opens the WS once.
+    // selectedEquipment/selectedSensor are read only to pick defaults, deliberately not
+    // a re-run trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const groupByEquipment = () => {

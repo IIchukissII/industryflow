@@ -2,222 +2,247 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart } from 'lightweight-charts';
 import { getMeasurements, getCombinedAggregations } from '../services/api';
+import websocketService from '../services/websocket';
 import ChartControls from './ChartControls';
+import './SensorChart.css';
+
+// One accessible series colour on the dark chart surface (#131722). A single series needs no
+// legend box — the header names it — so this is the only categorical hue in play.
+const SURFACE = '#131722';
+const SERIES = '#4c9aff';
+const UP = '#26a69a';
+const DOWN = '#ef5350';
+
+// Live tick appending only makes sense for the raw, single-value forms; aggregated buckets and
+// candlestick OHLC are reloaded on a gentle timer instead of poked per reading.
+const isRaw = (timeframe) => timeframe === 'raw';
+const supportsLiveTick = (timeframe, chartType) =>
+  isRaw(timeframe) && (chartType === 'line' || chartType === 'area');
+
+const fmt = (v) =>
+  v == null || Number.isNaN(v)
+    ? '—'
+    : Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+
+const fmtTime = (t) =>
+  t == null ? '' : new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+const dedupeAscending = (rows) => {
+  rows.sort((a, b) => a.time - b.time);
+  const out = [];
+  for (const r of rows) {
+    if (out.length && out[out.length - 1].time === r.time) out[out.length - 1] = r; // last wins per ts
+    else out.push(r);
+  }
+  return out;
+};
 
 const SensorChart = ({ sensorId }) => {
-  const chartContainerRef = useRef(null);
+  const containerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
+  const seriesKeyRef = useRef(null); // `${chartType}|${timeframe}` — series identity
 
   const [selectedTimeframe, setSelectedTimeframe] = useState('raw');
   const [selectedChartType, setSelectedChartType] = useState('line');
   const [selectedTimeRange, setSelectedTimeRange] = useState('100');
 
-  // Initialize chart
-  useEffect(() => {
-    if (!chartContainerRef.current) return;
+  const [status, setStatus] = useState('loading'); // loading | ready | empty | error
+  const [meta, setMeta] = useState({ name: null, unit: '' });
+  const [latest, setLatest] = useState(null); // { value, time } — most recent point
+  const [hover, setHover] = useState(null);    // { value, time } under the crosshair
+  const [live, setLive] = useState(false);     // a WS tick landed recently
 
-    const chart = createChart(chartContainerRef.current, {
-      width: chartContainerRef.current.clientWidth,
-      height: 400,
-      layout: {
-        background: { color: '#131722' },
-        textColor: '#d1d4dc',
-      },
-      grid: {
-        vertLines: { color: '#1e222d' },
-        horzLines: { color: '#1e222d' },
-      },
-      timeScale: {
-        timeVisible: true,
-        secondsVisible: true,
-        borderColor: '#2a2e39',
-      },
-      rightPriceScale: {
-        borderColor: '#2a2e39',
+  // effective chart type (candlestick needs OHLC, so it degrades to line on raw)
+  const chartType =
+    selectedChartType === 'candlestick' && isRaw(selectedTimeframe) ? 'line' : selectedChartType;
+
+  // --- chart lifecycle: created ONCE, sized by a ResizeObserver ----------------------------
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const chart = createChart(el, {
+      width: el.clientWidth,
+      height: 380,
+      layout: { background: { color: SURFACE }, textColor: '#a7abb6', fontSize: 11 },
+      grid: { vertLines: { color: '#1c2030' }, horzLines: { color: '#1c2030' } },
+      timeScale: { timeVisible: true, secondsVisible: true, borderColor: '#2a2e39' },
+      rightPriceScale: { borderColor: '#2a2e39' },
+      crosshair: {
+        mode: 1,
+        vertLine: { color: '#3a4256', width: 1, style: 3, labelBackgroundColor: '#2a2e39' },
+        horzLine: { color: '#3a4256', width: 1, style: 3, labelBackgroundColor: '#2a2e39' },
       },
     });
-
     chartRef.current = chart;
 
-    // Handle window resize
-    const handleResize = () => {
-      if (chartContainerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-        });
+    chart.subscribeCrosshairMove((param) => {
+      const s = seriesRef.current;
+      if (!param.time || !s || !param.seriesData.get(s)) {
+        setHover(null);
+        return;
       }
-    };
+      const d = param.seriesData.get(s);
+      const value = d.value != null ? d.value : d.close; // line/area vs candlestick
+      setHover({ time: param.time, value });
+    });
 
-    window.addEventListener('resize', handleResize);
+    const ro = new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth }));
+    ro.observe(el);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      if (chartRef.current) {
-        chartRef.current.remove();
-      }
+      ro.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+      seriesKeyRef.current = null;
     };
   }, []);
 
-  // Create appropriate series based on chart type
- const createSeries = (chartType) => {
-  if (!chartRef.current) return null;
-  
-  // Candlestick only works with aggregated data (needs OHLC)
-  if (chartType === 'candlestick' && selectedTimeframe === 'raw') {
-    chartType = 'line';
-  }
+  // ensure the right series exists for the current type/timeframe; returns it
+  const ensureSeries = useCallback((type) => {
+    const chart = chartRef.current;
+    if (!chart) return null;
+    const key = `${type}|${selectedTimeframe}`;
+    if (seriesRef.current && seriesKeyRef.current === key) return seriesRef.current;
 
-  // Remove old series if exists
-  if (seriesRef.current) {
-    try {
-      chartRef.current.removeSeries(seriesRef.current);
-    } catch (error) {
-      console.log('Could not remove series, creating new one');
+    if (seriesRef.current) {
+      try { chart.removeSeries(seriesRef.current); } catch { /* already gone */ }
+      seriesRef.current = null;
     }
-    seriesRef.current = null;
-  }
 
-  let series;
-  const seriesOptions = {
-    color: '#2962ff',
-    lineWidth: 2,
-  };
-
-  switch (chartType) {
-    case 'area':
-      series = chartRef.current.addAreaSeries({
-        ...seriesOptions,
-        topColor: 'rgba(41, 98, 255, 0.4)',
-        bottomColor: 'rgba(41, 98, 255, 0.0)',
+    let series;
+    if (type === 'area') {
+      series = chart.addAreaSeries({
+        lineColor: SERIES, lineWidth: 2,
+        topColor: 'rgba(76,154,255,0.28)', bottomColor: 'rgba(76,154,255,0.0)',
+        priceLineVisible: false,
       });
-      break;
-    case 'candlestick':
-      series = chartRef.current.addCandlestickSeries({
-        upColor: '#26a69a',
-        downColor: '#ef5350',
-        borderVisible: false,
-        wickUpColor: '#26a69a',
-        wickDownColor: '#ef5350',
+    } else if (type === 'candlestick') {
+      series = chart.addCandlestickSeries({
+        upColor: UP, downColor: DOWN, borderVisible: false, wickUpColor: UP, wickDownColor: DOWN,
       });
-      break;
-    case 'line':
-    default:
-      series = chartRef.current.addLineSeries(seriesOptions);
-      break;
-  }
+    } else {
+      series = chart.addLineSeries({ color: SERIES, lineWidth: 2, priceLineVisible: false });
+    }
+    seriesRef.current = series;
+    seriesKeyRef.current = key;
+    return series;
+  }, [selectedTimeframe]);
 
-  seriesRef.current = series;
-  return series;
-};
-
-  // Fetch and update chart data
+  // --- historical load: on sensor / timeframe / type / range change ------------------------
   useEffect(() => {
-    const fetchData = async () => {
+    if (!sensorId) return;
+    let cancelled = false;
+
+    const load = async () => {
+      setStatus((s) => (s === 'ready' ? s : 'loading'));
       try {
-        const series = createSeries(selectedChartType);
-        if (!series) return;
-
-        let chartData = [];
-
-        if (selectedTimeframe === 'raw') {
-          // Fetch raw data
-          const data = await getMeasurements(sensorId, parseInt(selectedTimeRange));
-
-          chartData = data
-            .map(item => ({
-              time: new Date(item.time).getTime() / 1000,
-              value: item.value,
-            }))
-            .sort((a, b) => a.time - b.time)
-            .filter((item, index, array) => 
-              index === 0 || item.time !== array[index - 1].time
-            )
-            .sort((a, b) => a.time - b.time);
-
-        } else {
-          // Fetch aggregated data
-          const combined = await getCombinedAggregations(
-            sensorId,
-            parseInt(selectedTimeRange)
+        let data = [];
+        if (isRaw(selectedTimeframe)) {
+          const rows = await getMeasurements(sensorId, parseInt(selectedTimeRange, 10));
+          data = dedupeAscending(
+            (rows || []).map((r) => ({ time: new Date(r.time).getTime() / 1000, value: r.value }))
           );
-
-          const aggregations = combined.timeframes[selectedTimeframe]?.data || [];
-
-          if (selectedChartType === 'candlestick') {
-            // Candlestick format: open, high, low, close
-            const rawData = aggregations
-              .map(item => ({
-                time: new Date(item.time).getTime() / 1000,
-                open: item.avg_value,
-                high: item.max_value,
-                low: item.min_value,
-                close: item.avg_value,
-              }))
-              .sort((a, b) => a.time - b.time);
-
-            // Remove duplicates - keep only first occurrence of each timestamp
-            const seen = new Set();
-            chartData = rawData.filter(item => {
-              if (seen.has(item.time)) {
-                return false;
-              }
-              seen.add(item.time);
-              return true;
-            });
-
-          } else {
-            // Line/Area format: use average value
-            const rawData = aggregations
-              .map(item => ({
-                time: new Date(item.time).getTime() / 1000,
-                value: item.avg_value,
-              }))
-              .sort((a, b) => a.time - b.time);
-
-            // Remove duplicates - keep only first occurrence of each timestamp
-            const seen = new Set();
-            chartData = rawData.filter(item => {
-              if (seen.has(item.time)) {
-                return false;
-              }
-              seen.add(item.time);
-              return true;
-            });
-          }
+        } else {
+          const combined = await getCombinedAggregations(sensorId, parseInt(selectedTimeRange, 10));
+          const agg = combined?.timeframes?.[selectedTimeframe]?.data || [];
+          data = dedupeAscending(
+            chartType === 'candlestick'
+              ? agg.map((i) => ({
+                  time: new Date(i.time).getTime() / 1000,
+                  open: i.avg_value, high: i.max_value, low: i.min_value, close: i.avg_value,
+                }))
+              : agg.map((i) => ({ time: new Date(i.time).getTime() / 1000, value: i.avg_value }))
+          );
         }
-        series.setData(chartData);
-        chartRef.current.timeScale().fitContent();
+        if (cancelled) return;
 
-      } catch (error) {
-        console.error('Error fetching chart data:', error);
+        const series = ensureSeries(chartType);
+        if (!series) return;
+        series.setData(data);
+        chartRef.current.timeScale().fitContent(); // fit ONLY on a query change, never per tick
+
+        if (data.length) {
+          const last = data[data.length - 1];
+          setLatest({ value: last.value != null ? last.value : last.close, time: last.time });
+          setStatus('ready');
+        } else {
+          setLatest(null);
+          setStatus('empty');
+        }
+      } catch (err) {
+        if (!cancelled) { console.error('Chart load failed:', err); setStatus('error'); }
       }
     };
 
-    if (sensorId) {
-      fetchData();
-      const interval = setInterval(fetchData, 10000); // Refresh every 10 seconds
-      return () => clearInterval(interval);
+    load();
+    // aggregated views can't be poked per-tick; refresh them gently (no series churn, no re-fit)
+    let timer = null;
+    if (!supportsLiveTick(selectedTimeframe, chartType)) {
+      timer = setInterval(load, 30000);
     }
-  }, [sensorId, selectedTimeframe, selectedChartType, selectedTimeRange]);
+    return () => { cancelled = true; if (timer) clearInterval(timer); };
+  }, [sensorId, selectedTimeframe, chartType, selectedTimeRange, ensureSeries]);
+
+  // --- live updates: append this sensor's WS ticks incrementally (no redraw) ----------------
+  useEffect(() => {
+    if (!sensorId) return;
+    const unsub = websocketService.subscribe((msg) => {
+      if (msg?.type !== 'sensor_update' || !msg.sensors) return;
+      const entry = msg.sensors[sensorId];
+      if (!entry) return;
+
+      // name/unit come enriched on the stream; keep the header fresh + mark live
+      setMeta((m) =>
+        m.name === (entry.sensor_name || null) && m.unit === (entry.unit || '')
+          ? m
+          : { name: entry.sensor_name || m.name, unit: entry.unit || m.unit });
+      setLive(true);
+
+      if (entry.value == null || !supportsLiveTick(selectedTimeframe, chartType)) return;
+      const point = { time: Math.floor(msg.timestamp), value: entry.value };
+      const series = seriesRef.current;
+      if (series) {
+        try { series.update(point); } catch { /* out-of-order tick — ignore */ }
+        setLatest(point);
+      }
+    });
+    return unsub;
+  }, [sensorId, selectedTimeframe, chartType]);
+
+  // clear the "live" pulse if ticks stop arriving
+  useEffect(() => {
+    if (!live) return;
+    const t = setTimeout(() => setLive(false), 5000);
+    return () => clearTimeout(t);
+  }, [live, latest]);
 
   if (!sensorId) {
-    return (
-      <div style={{
-        padding: '40px',
-        textAlign: 'center',
-        color: '#787b86'
-      }}>
-        Select a sensor to view chart
-      </div>
-    );
+    return <div className="sensor-chart__placeholder">Select a sensor to view its chart</div>;
   }
 
+  const shown = hover || latest;
+  const title = meta.name || `Sensor ${sensorId.slice(0, 8)}`;
+
   return (
-    <div>
+    <div className="sensor-chart">
+      <div className="sensor-chart__head">
+        <div className="sensor-chart__id">
+          <span className={`sensor-chart__dot ${live ? 'is-live' : ''}`} />
+          <span className="sensor-chart__name" title={title}>{title}</span>
+        </div>
+        <div className="sensor-chart__readout">
+          <span className="sensor-chart__value">{fmt(shown?.value)}</span>
+          <span className="sensor-chart__unit">{meta.unit}</span>
+          <span className="sensor-chart__ts">{shown?.time ? fmtTime(shown.time) : ''}</span>
+        </div>
+      </div>
+
       <ChartControls
         selectedTimeframe={selectedTimeframe}
         onTimeframeChange={setSelectedTimeframe}
@@ -226,7 +251,17 @@ const SensorChart = ({ sensorId }) => {
         selectedTimeRange={selectedTimeRange}
         onTimeRangeChange={setSelectedTimeRange}
       />
-      <div ref={chartContainerRef} />
+
+      <div className="sensor-chart__canvas-wrap">
+        <div ref={containerRef} className="sensor-chart__canvas" />
+        {status !== 'ready' && (
+          <div className="sensor-chart__overlay">
+            {status === 'loading' && <span className="sensor-chart__spinner" aria-label="Loading" />}
+            {status === 'empty' && <span>No data in this range yet</span>}
+            {status === 'error' && <span className="sensor-chart__err">Couldn’t load chart data — retrying…</span>}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
