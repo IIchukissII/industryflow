@@ -12,7 +12,7 @@
 #
 # BUILD CONTEXT = clients/python (so the client is pip-installable from its pyproject):
 #   docker build -f services/notebook_hub/Dockerfile.analytics clients/python
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 ARG NB_UID=1000
 ARG NB_USER=jovyan

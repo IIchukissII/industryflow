@@ -25,7 +25,7 @@ RUN npm run build
 # ---- serve stage ----
 # Unprivileged nginx: runs as uid 101 and listens on high ports (8080/8443), so the edge
 # needs no root and no NET_BIND_SERVICE. apk/copy/chown need root; we drop back to 101 at the end.
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 USER root
 RUN apk add --no-cache openssl
 COPY nginx.conf /etc/nginx/conf.d/default.conf
