@@ -15,8 +15,8 @@ function Equipment() {
   const [showModal, setShowModal] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [editingEquipment, setEditingEquipment] = useState(null);
-  const [user, setUser] = useState(null);
-  const [connected, setConnected] = useState(false);
+  const [, setUser] = useState(null);
+  const [, setConnected] = useState(false);
 
   useEffect(() => {
     // Get user from localStorage

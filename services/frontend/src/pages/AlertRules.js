@@ -12,8 +12,8 @@ function AlertRules() {
   const [loading, setLoading] = useState(true);
   const [editingRule, setEditingRule] = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const [user, setUser] = useState(null);
-  const [connected, setConnected] = useState(false);
+  const [, setUser] = useState(null);
+  const [, setConnected] = useState(false);
   useEffect(() => {
     // Get user from localStorage
     const userData = localStorage.getItem('user');

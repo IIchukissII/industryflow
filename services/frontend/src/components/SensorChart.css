@@ -1,0 +1,114 @@
+/*
+ * SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+.sensor-chart {
+  background: #131722;
+  border: 1px solid #232733;
+  border-radius: 8px;
+  padding: 14px 16px 16px;
+}
+
+/* header: identity on the left, live value readout on the right */
+.sensor-chart__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sensor-chart__id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sensor-chart__name {
+  color: #d1d4dc;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* live indicator: recessive grey, turns green and pulses while ticks arrive */
+.sensor-chart__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3a4256;
+  flex: none;
+}
+.sensor-chart__dot.is-live {
+  background: #26a69a;
+  box-shadow: 0 0 0 0 rgba(38, 166, 154, 0.6);
+  animation: sensor-chart-pulse 1.8s ease-out infinite;
+}
+@keyframes sensor-chart-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(38, 166, 154, 0.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(38, 166, 154, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(38, 166, 154, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sensor-chart__dot.is-live { animation: none; }
+}
+
+/* value readout — the hovered point if crosshairing, else the latest reading */
+.sensor-chart__readout {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.sensor-chart__value {
+  color: #4c9aff;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+.sensor-chart__unit { color: #a7abb6; font-size: 12px; }
+.sensor-chart__ts   { color: #6b7280; font-size: 11px; margin-left: 4px; }
+
+/* canvas + state overlay */
+.sensor-chart__canvas-wrap { position: relative; }
+.sensor-chart__canvas { width: 100%; }
+
+.sensor-chart__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #787b86;
+  font-size: 13px;
+  background: rgba(19, 23, 34, 0.55);
+  pointer-events: none;
+}
+.sensor-chart__err { color: #ffa726; }
+
+.sensor-chart__spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid #2a2e39;
+  border-top-color: #4c9aff;
+  border-radius: 50%;
+  animation: sensor-chart-spin 0.8s linear infinite;
+}
+@keyframes sensor-chart-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .sensor-chart__spinner { animation-duration: 2s; }
+}
+
+.sensor-chart__placeholder {
+  padding: 40px;
+  text-align: center;
+  color: #787b86;
+  background: #131722;
+  border: 1px solid #232733;
+  border-radius: 8px;
+}
