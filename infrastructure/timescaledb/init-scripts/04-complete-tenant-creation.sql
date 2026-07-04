@@ -51,6 +51,8 @@ BEGIN
     PERFORM add_ml_tables_to_schema(v_schema_name);
     PERFORM add_feature_engineering_tables_to_schema(v_schema_name);
     PERFORM add_feature_config_columns_to_ml_models(v_schema_name);
+    -- ADR-0021: the drift reference-profile column (defined in 14-*, resolved at call time).
+    PERFORM add_reference_profile_columns_to_ml_models(v_schema_name);
 
     -- Grant table permissions
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO api_gateway_user', v_schema_name);
