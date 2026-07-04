@@ -558,6 +558,12 @@ services:
       RULE_RELOAD_INTERVAL: ${RULE_RELOAD_INTERVAL:-60}
       ALERT_COOLDOWN_SECONDS: ${ALERT_COOLDOWN_SECONDS:-300}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      ML_SERVICE_URL: ${ML_SERVICE_URL:-http://ml-service-api:8002}
+      # Model-drift monitoring (ADR-0021): scheduled evaluator cadence + trailing window +
+      # drifted-feature-share threshold. Windowed/periodic, independent of the per-reading path.
+      DRIFT_EVAL_INTERVAL: ${DRIFT_EVAL_INTERVAL:-3600}
+      DRIFT_WINDOW_MINUTES: ${DRIFT_WINDOW_MINUTES:-1440}
+      DRIFT_SHARE_THRESHOLD: ${DRIFT_SHARE_THRESHOLD:-0.5}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       timescaledb:
@@ -636,6 +642,8 @@ services:
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       MODEL_DIR: /app/models
+      # Warm model cache size (ADR-0021): loaded MLflow models reused across inference + drift.
+      MODEL_CACHE_SIZE: ${MODEL_CACHE_SIZE:-8}
       # Extension plugin modules to import at startup (ADR-0010); empty = generic built-ins.
       EXTENSION_MODULES: ${EXTENSION_MODULES:-}
       # MinIO/S3 credentials for loading models from MLflow
