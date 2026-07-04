@@ -88,7 +88,7 @@ IndustryFlow uses a comprehensive monitoring stack built on industry-standard to
 - Retention: 30 days
 - Storage: `/prometheus-data` volume
 
-**Scraped Targets** (9 total):
+**Scraped Targets** (13 total):
 1. **prometheus** (self-monitoring)
 2. **cadvisor** - Container metrics
 3. **node-exporter** - System metrics
@@ -97,7 +97,11 @@ IndustryFlow uses a comprehensive monitoring stack built on industry-standard to
 6. **api-gateway** - API service metrics
 7. **alert-service** - Alert service metrics
 8. **ml-service** - ML service metrics
-9. **kafka** - Kafka cluster metrics
+9. **ingestion-service** - Ingestion service metrics
+10. **kafka** - Kafka cluster metrics
+11. **spark-driver** - Spark streaming driver metrics
+12. **spark-executors** - Spark aggregations/executor metrics
+13. **spark-master** - Spark master metrics
 
 **Access**: http://localhost:9090
 
