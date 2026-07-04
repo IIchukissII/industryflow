@@ -422,6 +422,14 @@ config:
   ENVIRONMENT: production
   # Extension plugin modules the ML service loads at startup (ADR-0008/0010); empty = built-ins.
   EXTENSION_MODULES: ""
+  # Model-drift monitoring (ADR-0021): the alert worker's scheduled evaluator cadence, trailing
+  # window, and default drifted-feature-share threshold. (ML_SERVICE_URL is set release-scoped in
+  # the ConfigMap template, not here, so it tracks the fullname.)
+  DRIFT_EVAL_INTERVAL: "3600"
+  DRIFT_WINDOW_MINUTES: "1440"
+  DRIFT_SHARE_THRESHOLD: "0.5"
+  # Warm model cache size in the ML service (loaded MLflow models reused by inference + drift).
+  MODEL_CACHE_SIZE: "8"
 
 # ---------------------------------------------------------------------------
 # Secrets. NEVER commit real values — these are placeholders. In real

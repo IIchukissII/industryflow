@@ -17,6 +17,10 @@ data:
   REDIS_URL: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
   MLFLOW_TRACKING_URI: {{ include "industryflow.mlflowUri" . | quote }}
   MLFLOW_S3_ENDPOINT_URL: {{ include "industryflow.minioEndpoint" . | quote }}
+  # ML service URL the alert worker calls for ML inference + drift evaluation (ADR-0021).
+  # Release-scoped so it matches the in-cluster Service DNS (the app default 'ml-service-api'
+  # only resolves under compose, not here).
+  ML_SERVICE_URL: {{ printf "http://%s-ml-service-api:%v" (include "industryflow.fullname" .) 8002 | quote }}
   # Spark S3A checkpoint endpoint (ADR-0006). Used only when CHECKPOINT_LOCATION is an s3a:// URI
   # (the scale-out path); the default local mode ignores it.
   MINIO_ENDPOINT: {{ include "industryflow.minioEndpoint" . | quote }}
