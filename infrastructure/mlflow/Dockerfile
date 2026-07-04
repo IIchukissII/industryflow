@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # Install MLflow 2.8.1 and dependencies
 RUN pip install --no-cache-dir \

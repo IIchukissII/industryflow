@@ -5,7 +5,7 @@
 # Spark worker image. The streaming/aggregation jobs write to TimescaleDB via psycopg2 inside
 # foreachPartition — which runs in the EXECUTOR, i.e. this worker container. The base
 # apache/spark image has no psycopg2, so executors fail with ModuleNotFoundError; install it here.
-FROM apache/spark:3.5.0
+FROM apache/spark:4.1.2
 
 USER root
 RUN pip3 install --no-cache-dir psycopg2-binary==2.9.9
