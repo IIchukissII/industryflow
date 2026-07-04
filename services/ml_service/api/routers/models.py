@@ -87,6 +87,9 @@ class ModelCreateRequest(BaseModel):
     training_duration_seconds: Optional[int] = None
     mlflow_run_id: Optional[str] = None
     mlflow_experiment_id: Optional[str] = None
+    # ADR-0021: compact training-window distribution snapshot the drift evaluator
+    # compares recent data against. Absent → the model reports "drift unavailable".
+    reference_profile: Optional[Dict[str, Any]] = None
 
 
 class ModelDeployRequest(BaseModel):

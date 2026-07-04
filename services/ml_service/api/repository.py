@@ -165,11 +165,12 @@ class MLRepository:
                 'training_samples': 'training_samples',
                 'training_start_date': 'training_start_date',
                 'training_end_date': 'training_end_date',
-                'training_duration_seconds': 'training_duration_seconds'
+                'training_duration_seconds': 'training_duration_seconds',
+                'reference_profile': 'reference_profile'  # ADR-0021 drift baseline
             }
 
             # JSONB fields that need serialization (note: feature_names and sensor_ids are arrays, not JSONB)
-            jsonb_fields = {'training_metrics', 'hyperparameters'}
+            jsonb_fields = {'training_metrics', 'hyperparameters', 'reference_profile'}
 
             for key, db_field in field_mapping.items():
                 if key in model_data and model_data[key] is not None:
