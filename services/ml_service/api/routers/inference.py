@@ -17,6 +17,7 @@ import hmac
 import uuid
 
 import auth
+import model_cache
 from feature_engineering import FeatureEngineeringEngine
 from extensions import get_detector, DetectorContext
 
@@ -132,13 +133,22 @@ async def _resolve_company_id(request: Request, request_data: InferenceRequest) 
 # Helper Functions
 # ============================================================================
 
+def _load_model_uncached(mlflow_run_id: str):
+    """Cold-load a model from MLflow (the slow path behind the warm cache)."""
+    model_uri = f"runs:/{mlflow_run_id}/model"
+    model = mlflow.pyfunc.load_model(model_uri)
+    logger.info(f"Model loaded from MLflow: {model_uri}")
+    return model
+
+
 def load_model_from_mlflow(mlflow_run_id: str):
-    """Load model from MLflow using run_id"""
+    """Load a model by run_id, warm from the process-local cache when already loaded.
+
+    The anomaly detector and the drift evaluator both score with the same models
+    repeatedly; the cache avoids a cold MLflow fetch on every call (see model_cache).
+    """
     try:
-        model_uri = f"runs:/{mlflow_run_id}/model"
-        model = mlflow.pyfunc.load_model(model_uri)
-        logger.info(f"Model loaded from MLflow: {model_uri}")
-        return model
+        return model_cache.get_or_load(mlflow_run_id, _load_model_uncached)
     except Exception as e:
         logger.error(f"Failed to load model from MLflow: {e}")
         raise

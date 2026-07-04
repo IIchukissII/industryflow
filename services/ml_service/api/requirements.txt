@@ -29,6 +29,13 @@ numpy==1.26.4
 scikit-learn==1.9.0
 xgboost==2.0.3
 
+# Model-drift detection (ADR-0021): evidently computes the data/prediction drift score in
+# the /api/drift endpoint; pandas frames the reference sample + current window. Matches the
+# version already declared in the parent requirements.txt. Verified to resolve against the
+# pinned fastapi 0.115 (evidently 0.7.21 does not force a fastapi upgrade).
+pandas==2.1.3
+evidently==0.7.21
+
 # Feature Store
 redis[asyncio]==5.0.1
 
