@@ -9,6 +9,6 @@
 # numpy is only an indirect import here (the package __init__ loads the engine), so the dev
 # pin just needs to install on the CI interpreter (py3.12) — it isn't exercised by these tests.
 redis==5.0.1
-numpy>=1.26.0
+numpy>=1.26.4
 pytest==7.4.3
 pytest-asyncio==0.21.1
