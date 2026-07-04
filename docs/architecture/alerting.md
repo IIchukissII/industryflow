@@ -17,13 +17,22 @@ authoritative; this is the shape.
 
 ## Rule types
 
-- **Threshold / statistical** — evaluated directly from the reading (e.g. value over a limit,
-  or deviation from a rolling baseline).
-- **ML-based** — the worker calls the ML service's `/api/inference/predict`
+- **Threshold** — evaluated directly from the reading (value over/under a limit or outside a
+  range), per-event.
+- **ML-based** — per-event; the worker calls the ML service's `/api/inference/predict`
   ([inference](ml-and-features.md)) and raises an alert when the returned anomaly score crosses
   the rule's threshold. These service-to-service calls authenticate with the shared
   `INTERNAL_SERVICE_TOKEN` (the worker has no user session), and the worker fails closed if it
   is unset.
+- **Statistical (model drift)** — **windowed and periodic, not per-event**
+  (**[ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md)**). A scheduled evaluator in the
+  worker asks the ML service `/api/drift/evaluate` whether a model's recent input (and its own
+  output) distribution has moved away from the training baseline, and raises an alert when the
+  drifted-feature share crosses the rule's threshold. A drift alert means *"the world has moved
+  — investigate / consider retraining"*, not *"the model is wrong"*. See
+  [ML & feature engineering → Model drift](ml-and-features.md). Same delegation pattern and
+  `INTERNAL_SERVICE_TOKEN` as ML rules; a `statistical` rule binds a `model_id` and a drift
+  threshold, and reaching the per-reading path is a no-op (drift is the wrong timescale for it).
 
 ## Delivery & idempotency
 
