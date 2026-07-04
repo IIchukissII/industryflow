@@ -25,7 +25,7 @@ import config
 from repository import MLRepository
 from routers import (
     health_router, models_router, registered_models_router,
-    inference_router, feature_configs_router,
+    inference_router, feature_configs_router, drift_router,
 )
 from feature_engineering import init_feature_store
 
@@ -90,6 +90,7 @@ app.include_router(models_router)
 app.include_router(registered_models_router)
 app.include_router(inference_router)
 app.include_router(feature_configs_router)
+app.include_router(drift_router)
 
 
 # ============================================================================
