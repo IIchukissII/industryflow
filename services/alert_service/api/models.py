@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from uuid import UUID
 from enum import Enum
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 import uuid
 
 # ============================================================================
@@ -114,6 +114,22 @@ class AlertRuleBase(SafeBaseModel):
         """At least one target (pattern or sensor_id) must be specified"""
         # This will be validated in the repository layer
         return v
+
+    @model_validator(mode='after')
+    def validate_detection_requirements(self):
+        """A model-bound rule needs a model to evaluate.
+
+        ML and statistical (drift, ADR-0021) rules are both scored against a model, so
+        model_id is required — otherwise the evaluator would silently skip the rule. For a
+        statistical rule, `threshold` is the drift-share threshold (0..1); when omitted the
+        drift evaluator falls back to the service default.
+        """
+        if self.detection_type in (DetectionType.ML, DetectionType.STATISTICAL) and self.model_id is None:
+            raise ValueError(f"{self.detection_type.value} rules require a model_id")
+        if self.detection_type == DetectionType.STATISTICAL and self.threshold is not None:
+            if not (0.0 <= self.threshold <= 1.0):
+                raise ValueError("statistical (drift) threshold must be a share in [0.0, 1.0]")
+        return self
 
 
 class AlertRuleCreate(AlertRuleBase):

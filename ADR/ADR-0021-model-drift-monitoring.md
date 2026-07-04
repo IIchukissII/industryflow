@@ -6,8 +6,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0021 — Model drift monitoring (the `statistical` alert lane)
 
 - **ID:** ADR-0021
-- **Status:** Accepted (design; implementation deferred)
-- **Date:** 2026-06-28
+- **Status:** Accepted (implemented; live cluster validation pending) — rev 1
+- **Date:** 2026-06-28 (rev 1: 2026-07-04)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md)/[ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (model registry + tracking). Realizes the alert-rule schema's reserved `statistical` detection type.
@@ -73,6 +73,28 @@ So this is mostly *wiring foundations that already exist*, not new infrastructur
 - **Drift method + thresholds + cadence.** Which `evidently` tests/metrics, default thresholds, evaluation window, and schedule — configuration, not architecture.
 - **Models-page drift indicator.** Surfacing the same signal in the Models UI beside metrics/versions.
 - **Compute backend.** Whether the ml-service endpoint computes inline or offloads heavy windows to Spark.
+
+## Implementation status (rev 1)
+
+Implemented behind this decision (unit-tested; live cluster validation pending, tracked with
+the notebook cluster work in issue #19):
+
+- **Reference profile** — `reference_profile JSONB` on `ml_models` (migration
+  `14-model-drift-reference-profile.sql`); a pure capture helper builds a compact,
+  down-sampled evidently-consumable sample at registration (`ml_service/api/drift/`).
+- **Compute** — `POST /api/drift/evaluate` scores data + prediction drift with `evidently`
+  over the reference sample vs a trailing tenant window; `evidently`/`pandas` added to the ml
+  API image (verified against the pinned `fastapi`). Loaded models are served from a warm
+  cache shared with the anomaly detector.
+- **Decision + sink** — a scheduled evaluator in the alert worker delegates the compute and
+  fires `statistical` alerts through the existing sink; the `statistical` lane needed no
+  schema change. Per-reading statistical evaluation is a deliberate no-op.
+- **Config surface** — the alert-rule API validates that a `statistical` rule binds a model
+  and an in-range drift threshold; cadence/window are service config.
+
+Note on the compute engine: the reference profile is stored as an evidently-consumable
+**sample** (not raw training rows nor a bare histogram), so `evidently` computes the score
+directly — the decision-3 engine, unchanged.
 
 ## References
 - Reserved `statistical` detection type: `infrastructure/timescaledb/init-scripts/02-tenant-alert-tables.sql`.
