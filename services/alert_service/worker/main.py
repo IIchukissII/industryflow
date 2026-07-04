@@ -36,6 +36,7 @@ class AlertService:
         self.running = False
         self.reload_task = None
         self.ml_eval_task = None
+        self.drift_eval_task = None
         self.consume_task = None
     
     async def initialize(self):
@@ -157,6 +158,42 @@ class AlertService:
                 logger.error(f"Error during ML evaluation: {e}", exc_info=True)
                 await asyncio.sleep(10)
     
+    async def _periodic_drift_evaluation(self):
+        """Periodically evaluate model-drift ('statistical') rules (ADR-0021 dec 5).
+
+        Windowed and periodic, independent of the per-reading anomaly path: each cycle asks
+        ml-service to score drift for every tenant's drift rules over a trailing window, and
+        fires a statistical alert when a rule's threshold is crossed. Cadence is coarse
+        (hourly by default) because drift moves on a slow timescale.
+        """
+        # Small startup delay so rules are loaded before the first pass.
+        await asyncio.sleep(30)
+        logger.info(f"Drift evaluation task started (interval {config.DRIFT_EVAL_INTERVAL}s, "
+                    f"window {config.DRIFT_WINDOW_MINUTES}m)")
+
+        while self.running:
+            try:
+                companies = list(self.rules_engine.tenant_rules.keys())
+                for company_id in companies:
+                    try:
+                        alerts = await self.rules_engine.evaluate_drift_rules(
+                            company_id=company_id,
+                            window_minutes=config.DRIFT_WINDOW_MINUTES,
+                            default_share_threshold=config.DRIFT_SHARE_THRESHOLD,
+                        )
+                        if alerts:
+                            logger.info(f"Generated {len(alerts)} drift alert(s) for tenant {company_id}")
+                    except Exception as e:
+                        logger.error(f"Failed drift evaluation for tenant {company_id}: {e}")
+
+                await asyncio.sleep(config.DRIFT_EVAL_INTERVAL)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error during drift evaluation: {e}", exc_info=True)
+                await asyncio.sleep(config.DRIFT_EVAL_INTERVAL)
+
     async def run(self):
         """Main service loop"""
         self.running = True
@@ -167,6 +204,9 @@ class AlertService:
         # Start periodic ML evaluation task
         self.ml_eval_task = asyncio.create_task(self._periodic_ml_evaluation())
 
+        # Start periodic drift evaluation task (ADR-0021)
+        self.drift_eval_task = asyncio.create_task(self._periodic_drift_evaluation())
+
         # Start Kafka consumer task
         self.consume_task = asyncio.create_task(
             self.kafka_consumer.consume_messages()
@@ -175,17 +215,19 @@ class AlertService:
         logger.info("Alert Detection Service is running")
         logger.info(f"Rule reload interval: {config.RULE_RELOAD_INTERVAL}s")
         logger.info("ML evaluation interval: 10s")
+        logger.info(f"Drift evaluation interval: {config.DRIFT_EVAL_INTERVAL}s")
 
         # Wait for tasks
         results = await asyncio.gather(
             self.reload_task,
             self.ml_eval_task,
+            self.drift_eval_task,
             self.consume_task,
             return_exceptions=True
         )
 
         # Log any exceptions
-        task_names = ["reload_task", "ml_eval_task", "consume_task"]
+        task_names = ["reload_task", "ml_eval_task", "drift_eval_task", "consume_task"]
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 logger.error(f"{task_names[i]} failed with exception: {result}", exc_info=result)
@@ -200,6 +242,8 @@ class AlertService:
             self.reload_task.cancel()
         if self.ml_eval_task:
             self.ml_eval_task.cancel()
+        if self.drift_eval_task:
+            self.drift_eval_task.cancel()
         if self.consume_task:
             self.consume_task.cancel()
         

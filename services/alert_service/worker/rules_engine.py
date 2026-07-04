@@ -514,7 +514,144 @@ class RulesEngine:
         rule: Dict,
         company_id: str
     ) -> Optional[Dict]:
-        """Evaluate statistical-based rule (placeholder for now)"""
-        # TODO: Implement statistical evaluation (z-score, moving average, etc.)
-        logger.debug(f"Statistical evaluation not yet implemented for rule {rule['rule_id']}")
+        """Statistical rules are NOT evaluated per-event.
+
+        The 'statistical' lane is model drift (ADR-0021), which is windowed and periodic —
+        the wrong timescale for the per-reading path. It is evaluated by the scheduled
+        evaluate_drift_rules() below, driven by the worker's periodic drift loop, and shares
+        only the alert sink with this path. So a statistical rule reaching the per-event
+        dispatch is a no-op here by design.
+        """
         return None
+
+    async def evaluate_drift_rules(
+        self,
+        company_id: str,
+        window_minutes: int,
+        default_share_threshold: float = 0.5,
+    ) -> List[Dict]:
+        """Evaluate all of a tenant's model-drift ('statistical') rules on a schedule.
+
+        Windowed and periodic (ADR-0021 dec 5): for each enabled drift rule bound to a
+        model, delegate the statistical compute to ml-service /api/drift/evaluate (mirroring
+        how the real-time ml rules delegate to /api/inference), apply the rule's drift
+        threshold, and fire a statistical alert into the shared alert sink.
+        """
+        rules = self.tenant_rules.get(company_id, [])
+        drift_rules = [
+            rule for rule in rules
+            if rule.get('enabled')
+            and rule.get('detection_type') == 'statistical'
+            and rule.get('model_id')
+        ]
+        if not drift_rules:
+            return []
+
+        triggered_alerts: List[Dict] = []
+        for rule in drift_rules:
+            try:
+                alert = await self._evaluate_drift(
+                    rule, company_id, window_minutes, default_share_threshold
+                )
+                if alert and self._should_emit(alert):
+                    triggered_alerts.append(alert)
+                    await self.alert_repo.save_alert(alert)
+                    logger.info(f"Drift alert triggered: {alert['message']}")
+            except Exception as e:
+                logger.error(f"Failed to evaluate drift rule {rule.get('rule_id')}: {e}", exc_info=True)
+                continue
+
+        return triggered_alerts
+
+    async def _evaluate_drift(
+        self,
+        rule: Dict,
+        company_id: str,
+        window_minutes: int,
+        default_share_threshold: float,
+    ) -> Optional[Dict]:
+        """Score one drift rule via ml-service and build a statistical alert if over threshold."""
+        model_id = rule.get('model_id')
+
+        # The rule's drift threshold (share of drifted features). Falls back to the
+        # service default when the rule does not pin one.
+        threshold = rule.get('threshold')
+        if threshold is None:
+            threshold = default_share_threshold
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                drift_url = f"{ML_SERVICE_URL}/api/drift/evaluate"
+                payload = {
+                    "model_id": str(model_id),
+                    "company_id": company_id,
+                    "window_minutes": window_minutes,
+                    "drift_share_threshold": threshold,
+                }
+                headers = {}
+                internal_token = os.getenv("INTERNAL_SERVICE_TOKEN")
+                if internal_token:
+                    headers["X-Internal-Service-Token"] = internal_token
+
+                # Drift compute (windowed read + evidently) is heavier than per-event
+                # inference; allow a longer budget than the 10s inference timeout.
+                async with session.post(
+                    drift_url, json=payload, headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as response:
+                    if response.status == 404:
+                        logger.warning(f"Model {model_id} not found for drift evaluation")
+                        return None
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"Drift evaluation failed: {response.status} - {error_text}")
+                        return None
+                    result = await response.json()
+        except aiohttp.ClientError as e:
+            logger.error(f"Failed to connect to ML service for drift: {e}")
+            return None
+
+        status = result.get('status')
+        if status != 'ok':
+            # unavailable (no reference profile) / insufficient_data / error — nothing to fire.
+            logger.info(f"Drift not evaluable for model {model_id}: {status} ({result.get('reason')})")
+            return None
+
+        data_drift = result.get('data_drift', {})
+        share = data_drift.get('drift_share')
+        prediction_drift = result.get('prediction_drift') or {}
+
+        data_drifted = share is not None and share > threshold
+        pred_drifted = bool(prediction_drift.get('drifted'))
+
+        if not (data_drifted or pred_drifted):
+            return None
+
+        # Copy per ADR-0021: a drift alert means "distribution changed — investigate /
+        # consider retraining", NOT "the model is wrong" (avoid alarm fatigue).
+        share_txt = f"{share:.2f}" if share is not None else "n/a"
+        message = (
+            f"Model drift: {rule['name']} — input drift share {share_txt} vs threshold "
+            f"{threshold:.2f}. Distribution has shifted from training; consider retraining "
+            f"(this flags change, not a model-correctness failure)."
+        )
+        if pred_drifted:
+            message += " Prediction-output drift also detected."
+
+        alert = {
+            'company_id': company_id,
+            'rule_id': str(rule['rule_id']),
+            'sensor_id': str(rule['sensor_id']) if rule.get('sensor_id') else None,
+            'equipment_id': str(rule['equipment_id']) if rule.get('equipment_id') else None,
+            'site_id': rule.get('site_id'),
+            'triggered_at': datetime.now(timezone.utc),
+            'detection_type': 'statistical',
+            'actual_value': share,
+            'anomaly_score': share,
+            'model_id': str(model_id),
+            'threshold_value': threshold,
+            'condition': 'drift',
+            'severity': rule.get('severity', 'medium'),
+            'message': message,
+        }
+        return alert

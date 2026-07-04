@@ -51,6 +51,18 @@ class AlertServiceConfig:
     # Service Settings
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     RULE_RELOAD_INTERVAL = int(os.getenv('RULE_RELOAD_INTERVAL', '60'))
+
+    # ML service (service-to-service). Used by the real-time ml rules (inference) and the
+    # scheduled drift evaluator (ADR-0021). INTERNAL_SERVICE_TOKEN authenticates the call so
+    # ml-service trusts the company_id in the body; unset => the internal path fails closed.
+    ML_SERVICE_URL = os.getenv('ML_SERVICE_URL', 'http://ml-service-api:8002')
+    INTERNAL_SERVICE_TOKEN = os.getenv('INTERNAL_SERVICE_TOKEN')
+
+    # Model-drift evaluation (ADR-0021 decision 5): windowed + periodic, independent of the
+    # per-reading anomaly path. Cadence and window are configuration, not architecture.
+    DRIFT_EVAL_INTERVAL = int(os.getenv('DRIFT_EVAL_INTERVAL', '3600'))   # hourly
+    DRIFT_WINDOW_MINUTES = int(os.getenv('DRIFT_WINDOW_MINUTES', '1440'))  # trailing 24h
+    DRIFT_SHARE_THRESHOLD = float(os.getenv('DRIFT_SHARE_THRESHOLD', '0.5'))
     
     @property
     def database_url(self):
