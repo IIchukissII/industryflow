@@ -14,7 +14,7 @@ aiokafka==0.14.0
 python-snappy>=0.7.0
 
 # X.509 parsing of the verified device certificate forwarded by the mTLS edge (ADR-0002)
-cryptography>=42.0.0
+cryptography>=49.0.0
 
 # Prometheus /metrics (request rate/latency/in-flight) — item 7 observability
 prometheus-fastapi-instrumentator==6.1.0
