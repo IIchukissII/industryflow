@@ -125,6 +125,7 @@ function AlertRules() {
     const colors = {
       threshold: '#26a69a',
       ml_model: '#2962ff',
+      statistical: '#f5a623',
       hybrid: '#9c27b0',
       disabled: '#787b86'
     };
@@ -256,6 +257,9 @@ function AlertRules() {
                       {rule.detection_type === 'ml_model' && (
                         <span style={{ fontSize: '12px' }}>ML Score {rule.threshold || 0.85}</span>
                       )}
+                      {rule.detection_type === 'statistical' && (
+                        <span style={{ fontSize: '12px' }}>Drift share {rule.threshold ?? 'default'}</span>
+                      )}
                     </td>
                     <td>
                       <SeverityBadge severity={rule.severity} />
@@ -318,6 +322,7 @@ function EditRuleModal({ rule, onClose, onSave }) {
     threshold: rule?.threshold || '',
     threshold_min: rule?.threshold_min || '',
     threshold_max: rule?.threshold_max || '',
+    model_id: rule?.model_id || '',
     severity: rule?.severity || 'warning',
     priority: rule?.priority || 0,
     enabled: rule?.enabled !== false,
@@ -329,6 +334,7 @@ function EditRuleModal({ rule, onClose, onSave }) {
   );
   const [sensors, setSensors] = useState([]);
   const [equipment, setEquipment] = useState([]);
+  const [models, setModels] = useState([]);
   const [loadingData, setLoadingData] = useState(false);
 
   useEffect(() => {
@@ -355,6 +361,13 @@ function EditRuleModal({ rule, onClose, onSave }) {
       if (equipmentResponse.ok) {
         const equipmentData = await equipmentResponse.json();
         setEquipment(equipmentData);
+      }
+
+      // Fetch models — the target a drift (statistical) rule watches.
+      const modelsResponse = await authFetch('/api/models');
+      if (modelsResponse.ok) {
+        const modelsData = await modelsResponse.json();
+        setModels(modelsData.models || []);
       }
     } catch (error) {
       console.error('Error fetching sensors/equipment:', error);
@@ -393,6 +406,20 @@ function EditRuleModal({ rule, onClose, onSave }) {
         payload.threshold_min = parseFloat(formData.threshold_min);
         payload.threshold_max = parseFloat(formData.threshold_max);
       } else {
+        payload.threshold = parseFloat(formData.threshold);
+      }
+    }
+
+    if (formData.detection_type === 'statistical') {
+      // Model-drift rule (ADR-0021): bind the model to watch and, optionally, the
+      // drifted-feature share (0–1) that trips the alert. Left blank, the evaluator
+      // applies the service default.
+      if (!formData.model_id) {
+        alert('Select the model this drift rule watches');
+        return;
+      }
+      payload.model_id = formData.model_id;
+      if (formData.threshold !== '' && formData.threshold !== null) {
         payload.threshold = parseFloat(formData.threshold);
       }
     }
@@ -531,10 +558,58 @@ function EditRuleModal({ rule, onClose, onSave }) {
             >
               <option value="threshold">Threshold</option>
               <option value="ml_model">ML Model</option>
+              <option value="statistical">Statistical (Model Drift)</option>
               <option value="hybrid">Hybrid</option>
               <option value="disabled">Disabled</option>
             </select>
           </div>
+
+          {formData.detection_type === 'statistical' && (
+            <>
+              <div className="form-group">
+                <label>Model to Watch</label>
+                {loadingData ? (
+                  <p style={{ color: '#787b86', fontSize: '12px' }}>Loading models...</p>
+                ) : (
+                  <select
+                    value={formData.model_id}
+                    onChange={(e) => setFormData({ ...formData, model_id: e.target.value })}
+                    required
+                  >
+                    <option value="">-- Select a model --</option>
+                    {models.map(model => (
+                      <option key={model.model_id} value={model.model_id}>
+                        {model.model_name || model.name} ({model.status})
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {models.length === 0 && !loadingData && (
+                  <small style={{ color: '#ffa726', fontSize: '11px', marginTop: '4px', display: 'block' }}>
+                    No models found. Register a model before adding a drift rule.
+                  </small>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label>Drift Threshold</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="1"
+                  value={formData.threshold}
+                  onChange={(e) => setFormData({ ...formData, threshold: e.target.value })}
+                  placeholder="0.30"
+                />
+                <small style={{ color: '#787b86', fontSize: '11px', marginTop: '4px', display: 'block' }}>
+                  Alert when the share of drifted features (0–1) exceeds this. A drift alert
+                  means the live data has moved from the model's training baseline — investigate
+                  or consider retraining. Leave blank for the service default.
+                </small>
+              </div>
+            </>
+          )}
 
           {formData.detection_type === 'threshold' && (
             <>
