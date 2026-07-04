@@ -8,6 +8,13 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 **Real-time industrial IoT platform for sensor-data processing, anomaly detection, and predictive maintenance.**
 
+[![Unit tests](https://github.com/IIchukissII/industryflow/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/IIchukissII/industryflow/actions/workflows/unit-tests.yml)
+[![DB tenant isolation](https://github.com/IIchukissII/industryflow/actions/workflows/db-tenant-isolation.yml/badge.svg)](https://github.com/IIchukissII/industryflow/actions/workflows/db-tenant-isolation.yml)
+[![Helm](https://github.com/IIchukissII/industryflow/actions/workflows/helm.yml/badge.svg)](https://github.com/IIchukissII/industryflow/actions/workflows/helm.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)
+![React 18](https://img.shields.io/badge/react-18-61dafb.svg)
+
 <table>
 <tr>
 <td width="300">
@@ -37,7 +44,7 @@ core at the centre, where every sensor stream converges.
 - **Multi-tenant** — schema-per-tenant isolation; tenants are provisioned at runtime, never hardcoded
 - **ML-powered anomaly detection** — pluggable detectors over engineered features
 - **Time-series storage** — TimescaleDB hypertables with compression
-- **Configurable alerting** — threshold and ML-based rules
+- **Configurable alerting** — threshold, ML-based, and statistical model-drift rules (ADR-0021)
 - **Secure by design** — HTTPS everywhere, httpOnly-cookie + CSRF browser auth, and
   **device ingestion over mutual TLS** with an internal device CA
 - **Extensible** — domains add feature transforms and anomaly detectors as plugins without forking the core
@@ -72,7 +79,7 @@ Full index: **[docs/](docs/README.md)**.
 - **[API Reference](docs/api/README.md)** — per-service API documentation
 - **[Deployment](deploy/helm/industryflow/)** — the Helm chart for Kubernetes (ADR-0009)
 - **[Extensions](docs/operations/extensions.md)** — the plugin contracts for domain feature transforms & detectors (ADR-0008/0010)
-- **[Architecture Decision Records](ADR/)** — the platform's design decisions (ADR-0000 … ADR-0018)
+- **[Architecture Decision Records](ADR/)** — the platform's design decisions (ADR-0000 … ADR-0021)
 
 Interactive API docs are served at `http://localhost:8000/docs` when the stack is running.
 

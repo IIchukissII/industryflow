@@ -22,7 +22,7 @@ taken from the request body.
 |---------|------|---------|-----------------|
 | **API Gateway** | 8000 | `/docs` | Auth (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/users/*`), sensor measurements & aggregations, equipment, companies, alert rules & history, cache, and the sensor websocket (`/ws/sensors`). The browser's single same-origin entry point. |
 | **Alert Service** | 8001 | `/docs` | Alert-rule CRUD and alert history for the tenant. The detection worker is a separate Kafka consumer with no HTTP API. |
-| **ML Service** | 8002 | `/docs` | Models, MLflow experiments/runs, feature configs, and real-time inference (`/api/inference/predict`). Inference engineers features and scores them through the [extension](../operations/extensions.md) registry. |
+| **ML Service** | 8002 | `/docs` | Models (incl. the tenant-scoped registered-models read path, `/api/registered-models`), feature configs, real-time inference (`/api/inference/predict`), and model-drift evaluation (`/api/drift/evaluate`, ADR-0021). Inference engineers features and scores them through the [extension](../operations/extensions.md) registry. |
 | **Ingestion** | via mTLS edge | — | Device sensor ingestion. Reached only through the mutual-TLS edge; the tenant comes from the verified device certificate. See **[device-mtls.md](../operations/device-mtls.md)**. Not a browser/JWT API. |
 
 ## Conventions

@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # TLS & the internal CA
 
 All external traffic is served over HTTPS, terminated at the frontend nginx (the TLS
-edge — see **[ADR-0004](../../ADR/ADR-0004-api-authentication-and-cors.md)**). Out of the
+edge — see **[ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md)**). Out of the
 box the edge generates a **self-signed** certificate so the stack works immediately, at
 the cost of a browser "not trusted" warning.
 

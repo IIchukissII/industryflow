@@ -27,7 +27,7 @@ the engine. Window statistics (e.g. deviation from a rolling mean) come from a R
 ## Models & MLflow
 
 Models are tracked in **MLflow** (experiments, runs, metrics) with artifacts in MinIO/S3. The
-ML service exposes models, experiments/runs, and feature configs, and records each model's
+ML service exposes models (including a tenant-scoped registered-models read path) and feature configs, and records each model's
 `feature_config_id` so inference knows how to engineer its inputs. (Automated end-to-end
 training from the UI is not yet wired — models are produced via the MLflow/notebook workflow.)
 At registration a model may also carry a **`reference_profile`** — a compact, tenant-scoped
