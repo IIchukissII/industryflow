@@ -30,6 +30,9 @@ Models are tracked in **MLflow** (experiments, runs, metrics) with artifacts in 
 ML service exposes models, experiments/runs, and feature configs, and records each model's
 `feature_config_id` so inference knows how to engineer its inputs. (Automated end-to-end
 training from the UI is not yet wired — models are produced via the MLflow/notebook workflow.)
+At registration a model may also carry a **`reference_profile`** — a compact, tenant-scoped
+sample of its training-window distribution — which is the baseline for drift monitoring below
+(**[ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md)**).
 
 ## Inference
 
@@ -49,3 +52,30 @@ The alert detection worker calls inference for ML-based rules using the shared
 `INTERNAL_SERVICE_TOKEN` (it has no human to log in); see
 **[authentication.md](../operations/authentication.md)** and
 **[alerting.md](alerting.md)**.
+
+Loaded models are held in a **process-local warm cache** keyed by MLflow run_id, so the
+anomaly detector and the drift evaluator reuse a warm model instead of cold-loading from
+MLflow on every call (bounded LRU, `MODEL_CACHE_SIZE`).
+
+## Model drift monitoring
+
+A deployed model silently decays as equipment ages and conditions change: the live data drifts
+from what it was trained on and its judgments quietly stop meaning what they did. Drift is a
+different question from real-time anomaly detection — *"has the world moved away from this
+model's training distribution?"* — **windowed and statistical, not per-event**
+(**[ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md)**).
+
+- **Baseline.** At registration a model stores a `reference_profile`: a compact,
+  deterministically down-sampled, tenant-scoped sample of its training-window columns
+  (optionally including the model's own output scores). A model without one reports *drift
+  unavailable* until retrained — honest, rather than guessing a baseline.
+- **Compute.** `POST /api/drift/evaluate` reads a trailing window of the tenant's recent data,
+  compares it against the reference with **`evidently`**, and returns **data drift** (input
+  distributions) and **prediction drift** (the model's output distribution). The primary scalar
+  is the drifted-feature *share*.
+- **Ownership.** The **alert service owns detection** (one home for threshold/ml/statistical)
+  and delegates the statistical compute here — exactly as the real-time ml rules delegate to
+  `/api/inference`. The drift signal surfaces through the reserved `statistical` alert lane; see
+  **[alerting.md](alerting.md)**.
+- **Label-free.** v1 needs no ground truth. Performance/concept drift (operator labels) and a
+  closed-loop retrain trigger are deferred (ADR-0021).
