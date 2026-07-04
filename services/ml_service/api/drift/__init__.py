@@ -13,8 +13,16 @@ from .reference_profile import (
     REFERENCE_PROFILE_VERSION,
     build_reference_profile,
 )
+from .score import (
+    DEFAULT_DRIFT_SHARE_THRESHOLD,
+    MIN_ROWS,
+    compute_drift,
+)
 
 __all__ = [
     "REFERENCE_PROFILE_VERSION",
     "build_reference_profile",
+    "DEFAULT_DRIFT_SHARE_THRESHOLD",
+    "MIN_ROWS",
+    "compute_drift",
 ]
