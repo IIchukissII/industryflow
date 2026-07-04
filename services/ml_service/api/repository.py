@@ -58,6 +58,7 @@ def _format_model_row(row: dict, company_id: str) -> Dict[str, Any]:
         'training_samples': row.get('training_samples'),
         'training_start_date': row.get('training_start_date'),
         'training_end_date': row.get('training_end_date'),
+        'reference_profile': json.loads(row['reference_profile']) if isinstance(row.get('reference_profile'), str) else row.get('reference_profile'),
         'status': row['status'],
         'deployed_at': row.get('deployed_at'),
         'deprecated_at': row.get('deprecated_at'),
@@ -230,6 +231,7 @@ class MLRepository:
                     training_metrics, hyperparameters, feature_names, feature_config_id, sensor_ids,
                     accuracy, precision_score, recall, f1_score, auc_roc,
                     training_samples, training_start_date, training_end_date,
+                    reference_profile,
                     status, deployed_at, deprecated_at, created_at, updated_at
                 FROM ml_models
                 WHERE model_id = $1
@@ -241,6 +243,45 @@ class MLRepository:
                 return None
 
             return _format_model_row(dict(row), company_id)
+
+    async def read_sensor_window(
+        self,
+        company_id: str,
+        sensor_ids: List[str],
+        start,
+        end,
+    ) -> Dict[str, List[float]]:
+        """Read a trailing window of raw sensor values, grouped by sensor name (ADR-0021).
+
+        Returns ``{sensor_name: [values...]}`` for the drift evaluator to compare against
+        the model's reference profile. Tenant-scoped via search_path (ADR-0003); the drift
+        endpoint reads only its own tenant's data.
+        """
+        if not sensor_ids:
+            return {}
+
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            rows = await conn.fetch(
+                """
+                SELECT s.sensor_name AS sensor_name, m.value AS value
+                FROM sensor_measurements m
+                JOIN sensors s ON s.sensor_id = m.sensor_id
+                WHERE m.sensor_id = ANY($1::uuid[])
+                  AND m.time >= $2
+                  AND m.time < $3
+                ORDER BY m.time
+                """,
+                sensor_ids, start, end,
+            )
+
+        window: Dict[str, List[float]] = {}
+        for row in rows:
+            window.setdefault(row['sensor_name'], []).append(row['value'])
+        return window
     
     async def update_model_status(
         self,
