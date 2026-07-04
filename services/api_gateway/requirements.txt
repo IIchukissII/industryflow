@@ -12,10 +12,10 @@ sqlalchemy[asyncio]==2.0.51
 pydantic==2.13.4
 pydantic-settings==2.14.2
 aioredis==2.0.1
-redis==5.0.1
+redis==8.0.1
 
 # FastAPI Users - Authentication
-fastapi-users[sqlalchemy]==14.0.1
+fastapi-users[sqlalchemy]==15.0.5
 python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 
@@ -24,4 +24,4 @@ python-snappy>=0.7.0
 aiokafka>=0.8.0
 
 # Prometheus metrics
-prometheus-fastapi-instrumentator==6.1.0
+prometheus-fastapi-instrumentator==8.0.2
