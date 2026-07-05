@@ -53,6 +53,9 @@ still *correct*. That needs a human verdict (**[ADR-0022](../../ADR/ADR-0022-con
   when a model shows **both** sustained drift **and** label-derived precision decay — model-scoped
   cooldown so it doesn't repeat every cycle. It *recommends* retraining (manual/notebook); it does
   not train, since no training service exists. Tunable via the `RETRAIN_*` config.
+- **Operator UI.** The Alert History page carries a per-alert three-way label control (Real /
+  False / Unsure) and a "Precision (labelled)" KPI, alongside the acknowledge action — so labelling
+  and the resulting precision live where operators already triage alerts.
 
 ## Delivery & idempotency
 

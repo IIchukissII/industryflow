@@ -6,8 +6,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0022 — Concept-drift operator feedback (alert labels, precision-over-time, retrain recommendation)
 
 - **ID:** ADR-0022
-- **Status:** Accepted (slice 1 — the label store — implemented; precision-over-time and the retrain recommendation follow) — rev 1
-- **Date:** 2026-07-05
+- **Status:** Accepted (implemented — label store + precision-over-time + retrain recommendation + operator UI; box-validated) — rev 2
+- **Date:** 2026-07-05 (rev 2: 2026-07-05)
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring.md) (model drift monitoring — realizes its top deferred decision)
 - **Companions:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md)/[ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (model registry + tracking).
@@ -68,18 +68,18 @@ So the undecided shape is: what an operator labels, where the label lives (given
 
 - **Recall / false-negative ground truth.** A mechanism to observe missed events (e.g. post-hoc incident reconciliation) that would make recall real. Needed before any "model accuracy" claim.
 - **Automated retrain execution.** A training service the recommendation could invoke — its own ADR (registry write, MLflow run creation, the tenant data/training path, reference-profile emission).
-- **Frontend labelling UI.** Wiring the AlertHistory page to call the label endpoint and show verdicts/precision trends; the endpoint ships here, the UI is a follow-on slice.
 - **Recommendation thresholds + cadence.** How much sustained drift and how much precision decay trigger a recommendation, and how often the evaluator runs — configuration, tuned after the label store has real data.
 
-## Implementation status (rev 1)
+## Implementation status (rev 2)
 
-All three slices implemented across a PR stack; unit/DB-test covered, live cluster validation pending (tracked with the notebook cluster work in issue #19):
+All slices implemented and **box-validated** on the live compose stack (label + label-metrics exercised end-to-end over HTTP; the retrain evaluator runs on the drift schedule):
 
 - **Slice 1 — label store.** `alert_labels` per-tenant table (migration `15-alert-labels.sql`), wired into `create_tenant_schema()` and backfilled onto existing tenants; verdict `CHECK`-constrained, denormalized rule/model/detection/severity, one re-labelable verdict per alert. `PATCH /api/alerts/{alert_id}/label` (mirrors acknowledge) + the label surfaced on the alert read path.
 - **Slice 2 — precision over time (dec 3).** `GET /api/alerts/label-metrics` buckets labels by time and returns precision + false-positive rate, per bucket and overall, scoped by model/rule. Recall is deliberately absent (a `note` says so); `unsure` is excluded from the denominator.
 - **Slice 3 — retrain recommendation (dec 4).** A scheduled evaluator in the alert worker (sibling of the drift evaluator, same cadence) raises a distinct high-severity `statistical` alert (`condition='retrain_recommended'`) when a model shows BOTH sustained drift (recent drift alerts) AND label-derived precision decay — model-scoped cooldown so it does not repeat every cycle. It recommends; it does not train (no training service — dec 4).
+- **Slice 4 — operator UI.** The Alert History page has a per-alert three-way label control (Real / False / Unsure → `PATCH …/label`) and a "Precision (labelled)" KPI reading `label-metrics`; the same page also wires the acknowledge action. Distinct from acknowledge; worded, not colour-only.
 
-Still open (not built): the frontend labelling UI (wire AlertHistory to `PATCH …/label` and show precision trends), and the surfaced retrain flag beside the model on the Models page (the recommendation lands in alert history today).
+Still open (not built): the surfaced retrain flag beside the model on the Models page (the recommendation lands in alert history today).
 
 ## References
 - ADR-0021 (model drift monitoring) — parent; this realizes its deferred operator-feedback decision.
