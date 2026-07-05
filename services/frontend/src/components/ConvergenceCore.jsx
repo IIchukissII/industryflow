@@ -19,7 +19,14 @@ function fmt(v) {
   return Math.abs(n) >= 1000 ? n.toFixed(0) : n.toFixed(2);
 }
 
-export default function ConvergenceCore({ sensors, selectedSensor, onSelect, wsConnected }) {
+const STATUS_LABEL = { warn: 'Warning', crit: 'Critical' };
+
+// A node's health: an active alert on that sensor (crit/warn), else "good" if it's reporting.
+function statusOf(id, sensors, statusBySensor) {
+  return statusBySensor[id] || (sensors[id] && sensors[id].value != null ? 'good' : null);
+}
+
+export default function ConvergenceCore({ sensors, selectedSensor, onSelect, wsConnected, statusBySensor = {} }) {
   const [hovered, setHovered] = useState(null);
   const [pulses, setPulses] = useState([]);
   const prev = useRef({});
@@ -72,6 +79,7 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, wsC
   // The core reads whatever you point at, else the current selection, else the whole field.
   const focusId = hovered || selectedSensor;
   const focus = focusId ? sensors[focusId] : null;
+  const focusStatus = focusId ? statusOf(focusId, sensors, statusBySensor) : null;
   const count = nodes.length;
 
   return (
@@ -109,16 +117,17 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, wsC
 
           {nodes.map((n) => {
             const on = n.id === focusId;
+            const st = statusOf(n.id, sensors, statusBySensor);
             return (
               <g key={n.id} transform={`rotate(${n.theta})`}>
                 <circle
-                  className={`conv-node${on ? ' on' : ''}${n.id === selectedSensor ? ' sel' : ''}`}
+                  className={`conv-node${st ? ` st-${st}` : ''}${on ? ' on' : ''}${n.id === selectedSensor ? ' sel' : ''}`}
                   cx={R_NODE} cy="0" r={on ? 8 : 5.5}
                   onMouseEnter={() => setHovered(n.id)}
                   onMouseLeave={() => setHovered((h) => (h === n.id ? null : h))}
                   onClick={() => onSelect(n.id)}
                 >
-                  <title>{n.s.sensor_name || n.id}</title>
+                  <title>{`${n.s.sensor_name || n.id}${st && st !== 'good' ? ` — ${STATUS_LABEL[st]}` : ''}`}</title>
                 </circle>
               </g>
             );
@@ -136,6 +145,9 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, wsC
             <div className="conv-core-val">{fmt(focus.value)}<span className="conv-core-unit">{focus.unit || ''}</span></div>
             <div className="conv-core-name">{focus.sensor_name || focusId}</div>
             <div className="conv-core-eq">{focus.equipment_name || ''}</div>
+            {focusStatus && focusStatus !== 'good' && (
+              <div className={`conv-core-pill st-${focusStatus}`}>{STATUS_LABEL[focusStatus]}</div>
+            )}
           </>
         ) : (
           <>
