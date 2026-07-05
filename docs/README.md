@@ -13,4 +13,4 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 | **API reference** | [api/](api/README.md) — services map; the live Swagger UI is authoritative |
 | **Deployment** | [../deploy/helm/industryflow/](../deploy/helm/industryflow/) — the Helm chart for Kubernetes (ADR-0009); [../deploy/observability/](../deploy/observability/README.md) — cluster monitoring stack (ADR-0016) |
 | **Extensions** | [operations/extensions.md](operations/extensions.md) — the plugin contracts for feature transforms & detectors (ADR-0008/0010) |
-| **Decisions** | [../ADR/](../ADR/) — Architecture Decision Records (ADR-0000 … ADR-0021, plus a [GLOSSARY](../ADR/GLOSSARY.md)); [ADR-0000](../ADR/ADR-0000-decision-records-and-source-of-truth.md) defines what is authoritative |
+| **Decisions** | [../ADR/](../ADR/) — Architecture Decision Records (ADR-0000 … ADR-0022, plus a [GLOSSARY](../ADR/GLOSSARY.md)); [ADR-0000](../ADR/ADR-0000-decision-records-and-source-of-truth.md) defines what is authoritative |
