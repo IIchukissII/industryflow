@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../components/Icon';
 import authFetch from '../services/http';
+import { fmtMetric, pickPrimary } from '../utils/metrics';
 import './MLModels.css';
 
 // The registry shows two kinds of tenant model side by side, normalised to one row shape:
@@ -13,33 +14,11 @@ import './MLModels.css';
 //   • platform  — the built-in anomaly detectors in /api/models, used by the alerting pipeline.
 const SOURCE_LABEL = { notebook: 'Notebook', platform: 'Platform' };
 
-// Headline metric: the one number worth showing in the table. Prefer well-known keys, else the
-// first metric the run logged — so every model still shows *something* instrument-like.
-const PRIMARY_METRIC_ORDER = ['f1', 'f1_score', 'accuracy', 'auc', 'auc_roc', 'r2', 'rmse', 'mae', 'mape'];
-
-function fmtMetric(v) {
-  if (v === null || v === undefined || v === '') return '—';
-  const n = Number(v);
-  if (Number.isNaN(n)) return String(v);
-  if (Number.isInteger(n)) return String(n);
-  return Math.abs(n) >= 1000 ? n.toFixed(0) : n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
-}
-
 function fmtDate(ms) {
   if (!ms) return '—';
   const d = new Date(ms);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' });
-}
-
-function pickPrimary(metrics) {
-  const keys = Object.keys(metrics || {});
-  if (!keys.length) return null;
-  const lower = Object.fromEntries(keys.map((k) => [k.toLowerCase(), k]));
-  for (const want of PRIMARY_METRIC_ORDER) {
-    if (lower[want]) return { label: want.replace(/_/g, ' '), value: metrics[lower[want]] };
-  }
-  return { label: keys[0].replace(/_/g, ' '), value: metrics[keys[0]] };
 }
 
 // status/stage → which signal dot + pill the row wears.

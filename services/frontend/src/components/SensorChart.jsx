@@ -7,6 +7,7 @@ import { createChart, LineSeries, AreaSeries, CandlestickSeries } from 'lightwei
 import { getMeasurements, getCombinedAggregations } from '../services/api';
 import websocketService from '../services/websocket';
 import ChartControls from './ChartControls';
+import { dedupeAscending } from '../utils/series';
 import './SensorChart.css';
 
 // One accessible series colour on the dark chart surface (#131722). A single series needs no
@@ -30,15 +31,6 @@ const fmt = (v) =>
 const fmtTime = (t) =>
   t == null ? '' : new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-const dedupeAscending = (rows) => {
-  rows.sort((a, b) => a.time - b.time);
-  const out = [];
-  for (const r of rows) {
-    if (out.length && out[out.length - 1].time === r.time) out[out.length - 1] = r; // last wins per ts
-    else out.push(r);
-  }
-  return out;
-};
 
 const SensorChart = ({ sensorId }) => {
   const containerRef = useRef(null);
