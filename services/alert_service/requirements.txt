@@ -10,7 +10,7 @@ python-snappy==0.7.3
 asyncpg>=0.31.0
 
 # Feature Store (Redis)
-redis[asyncio]==5.0.1
+redis[asyncio]==8.0.1
 
 # HTTP client for ML inference
 aiohttp>=3.9.0
