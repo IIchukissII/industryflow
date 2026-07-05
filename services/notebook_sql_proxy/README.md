@@ -45,13 +45,13 @@ opened**), and the **upstream-TLS handshake** — against a fake Postgres-TLS se
 connects and sends the StartupMessage encrypted, an untrusted server cert is rejected, and a
 server that declines TLS is refused.
 
-**NOT cluster-validated:** the live `PostgresBackend` relay against a **real Postgres** — the
-upstream SCRAM exchange, the `SET ROLE` setup, and the bidirectional byte pipe end-to-end. The
-privileged login role must be a member of every `tenant_reader_<uuid>` with `NOINHERIT` (ADR-0015
-dec 5; provisioned by `13-notebook-sql-proxy-role.sh`). The end-to-end proof
-(`test_sql_proxy_integration.py` — valid handle reads its tenant read-only; cross-tenant denied;
-revoked/expired refused; wrong-audience refused) is **written** but awaits a live run on a real
-notebooks-profile stack; this is the remaining work in **issue #19**.
+**Box-validated (issue #19 CLOSED, 2026-07-05):** the live `PostgresBackend` relay against a
+**real Postgres** — the upstream SCRAM exchange, the `SET ROLE` setup, and the bidirectional byte
+pipe end-to-end. `test_sql_proxy_integration.py` ran **5/5 green** against the live notebooks-profile
+stack: a valid handle reads its tenant, read-only is enforced, cross-tenant is denied at the GRANT
+boundary through the proxy, and revoked / wrong-audience handles are refused. The privileged login
+role must be a member of every `tenant_reader_<uuid>` with `NOINHERIT` (ADR-0015 dec 5; provisioned
+by `13-notebook-sql-proxy-role.sh` and granted to new tenants by `create_tenant_schema`).
 
 ## Develop
 

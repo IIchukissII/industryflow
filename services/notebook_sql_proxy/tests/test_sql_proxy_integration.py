@@ -162,7 +162,11 @@ def test_valid_handle_is_read_only(stack):
     conn = _proxy_connect(handle)
     try:
         cur = conn.cursor()
-        with pytest.raises(errors.InsufficientPrivilege):
+        # The proxy enforces read-only two ways (belt and suspenders): it SETs the session
+        # default_transaction_read_only = on AND assumes a reader role with no write GRANT. So a
+        # write is refused as either a ReadOnlySqlTransaction (the transaction guard trips first)
+        # or InsufficientPrivilege (the GRANT) — accept both; the point is it is refused.
+        with pytest.raises((errors.ReadOnlySqlTransaction, errors.InsufficientPrivilege)):
             cur.execute(
                 "INSERT INTO equipment (equipment_type, name, sensor_count) "
                 "VALUES ('valve', 'unit-2', 1)"
