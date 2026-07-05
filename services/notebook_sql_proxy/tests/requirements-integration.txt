@@ -5,4 +5,4 @@
 # The unit suite does NOT need these — the integration test importorskips them and skips when a
 # live stack is absent, so unit CI stays driver-free (requirements.txt is redis-only by design).
 psycopg2-binary==2.9.9
-redis==5.0.8
+redis==8.0.1
