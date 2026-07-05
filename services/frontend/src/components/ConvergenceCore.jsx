@@ -8,10 +8,11 @@ import './ConvergenceCore.css';
 // The Core, alive with real data: every reporting sensor is a node on the ring, grouped by
 // equipment; each new reading sends a gold pulse converging inward to the luminous centre.
 // Point at any node (or select it) and the core shows its live value — the many resolved to one.
-const VB = 620;
+const VB = 700; // extra margin (vs the 250 ring) leaves room for equipment labels
 const C = VB / 2;
 const R_NODE = 250; // ring radius
 const R_CORE = 72; // core radius
+const R_LABEL = 272; // equipment labels sit just outside the ring
 
 function fmt(v) {
   if (v === null || v === undefined || Number.isNaN(Number(v))) return '—';
@@ -33,7 +34,7 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, wsC
   const seq = useRef(0);
 
   // Positions: sensors placed around the ring, grouped by equipment with a small gap per group.
-  const { nodes, byId } = useMemo(() => {
+  const { nodes, byId, groupArcs } = useMemo(() => {
     const entries = Object.entries(sensors || {});
     const groups = new Map();
     entries.forEach(([id, s]) => {
@@ -44,22 +45,42 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, wsC
     const total = entries.length;
     const out = [];
     const map = {};
+    const arcs = [];
     if (total) {
       const gap = Math.min(8, 90 / total); // degrees between groups
       const per = (360 - gap * groups.size) / total;
       let angle = -90;
-      groups.forEach((list) => {
+      groups.forEach((list, name) => {
+        const ids = [];
+        let firstTheta = null;
+        let lastTheta = null;
         list.forEach(([id, s]) => {
-          const node = { id, s, theta: angle + per / 2 };
+          const theta = angle + per / 2;
+          const node = { id, s, theta };
           out.push(node);
           map[id] = node;
+          ids.push(id);
+          if (firstTheta === null) firstTheta = theta;
+          lastTheta = theta;
           angle += per;
         });
+        arcs.push({ name, ids, mid: (firstTheta + lastTheta) / 2 });
         angle += gap;
       });
     }
-    return { nodes: out, byId: map };
+    return { nodes: out, byId: map, groupArcs: arcs };
   }, [sensors]);
+
+  // Worst health across an equipment group — drives the arc label's colour.
+  const groupStatus = (ids) => {
+    let worst = 'good';
+    for (let i = 0; i < ids.length; i += 1) {
+      const s = statusOf(ids[i], sensors, statusBySensor);
+      if (s === 'crit') return 'crit';
+      if (s === 'warn') worst = 'warn';
+    }
+    return worst;
+  };
 
   // Emit an inward pulse on every stream whose value changed since the last frame of data.
   useEffect(() => {
@@ -98,6 +119,24 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, wsC
           <circle className="conv-strata" r={R_NODE} strokeWidth="1.3" opacity="0.4" />
           <circle className="conv-strata" r="180" strokeWidth="1" opacity="0.26" strokeDasharray="3 10" />
           <circle className="conv-strata" r="120" strokeWidth="1.2" opacity="0.18" />
+
+          {/* equipment arc labels — coloured by the group's worst health so a troubled machine
+              is legible without hovering */}
+          {groupArcs.map((g) => {
+            const rad = (g.mid * Math.PI) / 180;
+            const cos = Math.cos(rad);
+            const anchor = cos > 0.25 ? 'start' : cos < -0.25 ? 'end' : 'middle';
+            return (
+              <text
+                key={g.name}
+                className={`conv-eqlabel st-${groupStatus(g.ids)}`}
+                x={cos * R_LABEL} y={Math.sin(rad) * R_LABEL}
+                textAnchor={anchor} dominantBaseline="middle"
+              >
+                {g.name.length > 20 ? `${g.name.slice(0, 19)}…` : g.name}
+              </text>
+            );
+          })}
 
           {nodes.map((n) => {
             const on = n.id === focusId;
