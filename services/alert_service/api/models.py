@@ -179,8 +179,7 @@ class AlertRule(AlertRuleBase):
             return str(v)
         return v
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # ============================================================================
 # ML Model Models
@@ -223,8 +222,7 @@ class MLModel(MLModelBase):
     created_at: datetime
     created_by: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # ============================================================================
 # Alert Models
@@ -286,8 +284,7 @@ class Alert(AlertBase):
             return str(v)
         return v
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AlertAcknowledge(SafeBaseModel):
