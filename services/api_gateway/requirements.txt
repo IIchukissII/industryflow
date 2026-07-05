@@ -24,4 +24,4 @@ python-snappy>=0.7.0
 aiokafka>=0.8.0
 
 # Prometheus metrics
-prometheus-fastapi-instrumentator==6.1.0
+prometheus-fastapi-instrumentator==7.0.0

@@ -40,4 +40,4 @@ evidently==0.7.21
 redis[asyncio]==5.0.1
 
 # Prometheus metrics
-prometheus-fastapi-instrumentator==6.1.0
+prometheus-fastapi-instrumentator==7.0.0
