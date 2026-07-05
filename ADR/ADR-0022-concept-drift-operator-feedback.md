@@ -73,12 +73,13 @@ So the undecided shape is: what an operator labels, where the label lives (given
 
 ## Implementation status (rev 1)
 
-Slice 1 (this decision's foundation) implemented; unit/DB-test covered, live cluster validation pending (tracked with the notebook cluster work in issue #19):
+All three slices implemented across a PR stack; unit/DB-test covered, live cluster validation pending (tracked with the notebook cluster work in issue #19):
 
-- **Label store** — `alert_labels` per-tenant table (migration `15-alert-labels.sql`), wired into `create_tenant_schema()` and backfilled onto existing tenants; verdict `CHECK`-constrained, denormalized rule/model/detection/severity, one re-labelable verdict per alert.
-- **Label write + read** — `PATCH /api/alerts/{alert_id}/label` (mirrors acknowledge; validates the verdict, 404s on an unknown alert, upserts, records the operator) and the label (verdict/labeled_by/labeled_at) surfaced on the alert read path via a `LEFT JOIN`.
+- **Slice 1 — label store.** `alert_labels` per-tenant table (migration `15-alert-labels.sql`), wired into `create_tenant_schema()` and backfilled onto existing tenants; verdict `CHECK`-constrained, denormalized rule/model/detection/severity, one re-labelable verdict per alert. `PATCH /api/alerts/{alert_id}/label` (mirrors acknowledge) + the label surfaced on the alert read path.
+- **Slice 2 — precision over time (dec 3).** `GET /api/alerts/label-metrics` buckets labels by time and returns precision + false-positive rate, per bucket and overall, scoped by model/rule. Recall is deliberately absent (a `note` says so); `unsure` is excluded from the denominator.
+- **Slice 3 — retrain recommendation (dec 4).** A scheduled evaluator in the alert worker (sibling of the drift evaluator, same cadence) raises a distinct high-severity `statistical` alert (`condition='retrain_recommended'`) when a model shows BOTH sustained drift (recent drift alerts) AND label-derived precision decay — model-scoped cooldown so it does not repeat every cycle. It recommends; it does not train (no training service — dec 4).
 
-Following slices (decisions 3–4): precision/FP-rate-over-time read endpoint (C2) and the retrain-recommendation evaluator + surfaced flag (C3).
+Still open (not built): the frontend labelling UI (wire AlertHistory to `PATCH …/label` and show precision trends), and the surfaced retrain flag beside the model on the Models page (the recommendation lands in alert history today).
 
 ## References
 - ADR-0021 (model drift monitoring) — parent; this realizes its deferred operator-feedback decision.

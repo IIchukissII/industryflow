@@ -18,6 +18,37 @@ logger = logging.getLogger(__name__)
 ML_SERVICE_URL = os.getenv('ML_SERVICE_URL', 'http://ml-service-api:8002')
 
 
+def should_recommend_retrain(
+    tp: int,
+    fp: int,
+    recent_drift_alerts: int,
+    *,
+    precision_floor: float,
+    min_labels: int,
+    min_drift_alerts: int,
+) -> Optional[float]:
+    """Decide whether to recommend retraining, from operator-label + drift signals (ADR-0022 dec 4).
+
+    The recommendation requires BOTH conditions together — sustained drift AND label-derived
+    precision decay — so neither a drift blip alone nor a couple of bad labels alone triggers it.
+    Returns the measured precision when a retrain should be recommended, else None:
+
+      * not enough decided labels (tp + fp < min_labels) → None (insufficient evidence);
+      * drift not sustained (recent_drift_alerts < min_drift_alerts) → None;
+      * precision still at/above the floor → None (the model is still performing);
+      * otherwise → the precision (< floor), i.e. recommend.
+    """
+    decided = tp + fp
+    if decided < min_labels:
+        return None
+    if recent_drift_alerts < min_drift_alerts:
+        return None
+    precision = tp / decided
+    if precision >= precision_floor:
+        return None
+    return precision
+
+
 class RulesEngine:
     """Evaluates sensor data against alert rules with schema-per-tenant"""
 
@@ -34,6 +65,9 @@ class RulesEngine:
         # Alert dedup/cooldown state: {(company_id, rule_id, sensor_id, equipment_id): last_fired}
         self._last_emit = {}
         self._cooldown_seconds = float(os.getenv("ALERT_COOLDOWN_SECONDS", "300"))
+        # Retrain-recommendation dedup, keyed per model with its own (long) cooldown so a
+        # persistently-decayed model doesn't re-recommend every drift cycle (ADR-0022 dec 4).
+        self._last_retrain_emit = {}
 
         # Log loaded rules
         total = sum(len(rules) for rules in tenant_rules.values())
@@ -655,3 +689,108 @@ class RulesEngine:
             'message': message,
         }
         return alert
+
+    def _should_emit_retrain(self, company_id: str, model_id: str, cooldown_seconds: float) -> bool:
+        """Model-scoped cooldown for retrain recommendations (separate from the per-alert one).
+
+        A decayed model stays decayed until someone retrains it, so without a long cooldown it
+        would re-recommend every drift cycle. Keyed per model, so multiple drift rules on one
+        model recommend at most once per window.
+        """
+        key = (company_id, model_id)
+        now = datetime.now(timezone.utc)
+        last = self._last_retrain_emit.get(key)
+        if last is not None and (now - last).total_seconds() < cooldown_seconds:
+            return False
+        self._last_retrain_emit[key] = now
+        return True
+
+    async def evaluate_retrain_recommendations(
+        self,
+        company_id: str,
+        *,
+        precision_floor: float,
+        min_labels: int,
+        min_drift_alerts: int,
+        precision_window_days: int,
+        drift_lookback_hours: int,
+        cooldown_seconds: float,
+        severity: str = 'high',
+    ) -> List[Dict]:
+        """Raise a retrain *recommendation* for models with sustained drift AND precision decay.
+
+        The honest closed loop (ADR-0022 dec 4): this does NOT train anything — no training
+        service exists. It fires a distinct high-severity 'statistical' alert (condition
+        'retrain_recommended') telling an operator to retrain via the notebook flow, only when
+        the operator-labelled precision has fallen below the floor AND drift has been sustained.
+        Runs on the drift schedule, right after the drift pass, per tenant.
+        """
+        rules = self.tenant_rules.get(company_id, [])
+        drift_rules = [
+            rule for rule in rules
+            if rule.get('enabled')
+            and rule.get('detection_type') == 'statistical'
+            and rule.get('model_id')
+        ]
+        if not drift_rules:
+            return []
+
+        triggered: List[Dict] = []
+        seen_models = set()
+        for rule in drift_rules:
+            model_id = str(rule['model_id'])
+            if model_id in seen_models:  # recommend once per model, not once per rule
+                continue
+            seen_models.add(model_id)
+            try:
+                signals = await self.alert_repo.get_retrain_signals(
+                    model_id, company_id, precision_window_days, drift_lookback_hours,
+                )
+                precision = should_recommend_retrain(
+                    signals['tp'], signals['fp'], signals['recent_drift_alerts'],
+                    precision_floor=precision_floor, min_labels=min_labels,
+                    min_drift_alerts=min_drift_alerts,
+                )
+                if precision is None:
+                    continue
+                if not self._should_emit_retrain(company_id, model_id, cooldown_seconds):
+                    continue
+                alert = self._build_retrain_alert(rule, company_id, precision, signals, severity)
+                await self.alert_repo.save_alert(alert)
+                triggered.append(alert)
+                logger.info(f"Retrain recommendation: {alert['message']}")
+            except Exception as e:
+                logger.error(
+                    f"Failed retrain recommendation for model {model_id}: {e}", exc_info=True,
+                )
+                continue
+
+        return triggered
+
+    def _build_retrain_alert(
+        self, rule: Dict, company_id: str, precision: float, signals: Dict, severity: str,
+    ) -> Dict:
+        """Build the retrain-recommendation alert (a distinct 'statistical' condition)."""
+        decided = signals['tp'] + signals['fp']
+        message = (
+            f"Retrain recommended: {rule['name']} — operator-labelled precision "
+            f"{precision:.2f} over {decided} label(s), with {signals['recent_drift_alerts']} "
+            f"recent drift alert(s). Sustained drift together with falling precision suggests "
+            f"the model has decayed; retrain it (manual/notebook flow)."
+        )
+        return {
+            'company_id': company_id,
+            'rule_id': str(rule['rule_id']),
+            'sensor_id': str(rule['sensor_id']) if rule.get('sensor_id') else None,
+            'equipment_id': str(rule['equipment_id']) if rule.get('equipment_id') else None,
+            'site_id': rule.get('site_id'),
+            'triggered_at': datetime.now(timezone.utc),
+            'detection_type': 'statistical',
+            'actual_value': precision,
+            'anomaly_score': precision,
+            'model_id': str(rule['model_id']),
+            'threshold_value': None,  # the precision floor is service config, not a rule threshold
+            'condition': 'retrain_recommended',
+            'severity': severity,
+            'message': message,
+        }
