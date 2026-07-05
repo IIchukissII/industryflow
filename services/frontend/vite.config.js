@@ -12,6 +12,9 @@ import react from '@vitejs/plugin-react';
 // local gateway so cookies/CSRF stay first-party.
 export default defineConfig({
   plugins: [react()],
+  // Use the automatic JSX runtime everywhere (incl. the vitest transform) so components that
+  // don't import React (React 17+ / the new transform) render in tests too.
+  esbuild: { jsx: 'automatic' },
   build: {
     outDir: 'build',
     // CRA emitted source maps off by default in prod; keep the bundle lean.
