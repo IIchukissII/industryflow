@@ -32,7 +32,9 @@ and a cross-tenant query fails at the GRANT level.
   `open_upstream`: SSLRequest negotiation + `verify-full` against the internal CA, ADR-0017) —
   assumes the tenant role, completes the kernel handshake, and relays bytes both ways.
 - **`tests/`** — run in the `unit-tests` CI workflow, incl. `test_tls_integration.py` (a fake
-  Postgres-TLS server with a throwaway trustme cert — no real DB needed).
+  Postgres-TLS server with a throwaway trustme cert — no real DB needed). `test_sql_proxy_integration.py`
+  is the live end-to-end proof (issue #19); it **skips** unless a real notebooks-profile stack is
+  reachable, so it is inert in the unit run.
 
 ## Status & boundary
 
@@ -46,9 +48,10 @@ server that declines TLS is refused.
 **NOT cluster-validated:** the live `PostgresBackend` relay against a **real Postgres** — the
 upstream SCRAM exchange, the `SET ROLE` setup, and the bidirectional byte pipe end-to-end. The
 privileged login role must be a member of every `tenant_reader_<uuid>` with `NOINHERIT` (ADR-0015
-dec 5; provisioned by `13-notebook-sql-proxy-role.sh`). The remaining end-to-end integration test
-(valid handle reads its tenant read-only; cross-tenant denied; revoked/expired refused) is tracked
-in **issue #19**.
+dec 5; provisioned by `13-notebook-sql-proxy-role.sh`). The end-to-end proof
+(`test_sql_proxy_integration.py` — valid handle reads its tenant read-only; cross-tenant denied;
+revoked/expired refused; wrong-audience refused) is **written** but awaits a live run on a real
+notebooks-profile stack; this is the remaining work in **issue #19**.
 
 ## Develop
 
@@ -56,3 +59,25 @@ in **issue #19**.
 pip install -r requirements-dev.txt
 pytest tests/
 ```
+
+## Run the end-to-end proof (issue #19)
+
+The live proof drives the real relay and needs a running **notebooks-profile** stack: TimescaleDB
+with the init scripts **and** the `notebook_sql_proxy` privileged role (set
+`NOTEBOOK_SQL_PROXY_DB_PASSWORD` so `13-notebook-sql-proxy-role.sh` creates it), Redis, and this
+proxy on `:6432`. It provisions two throwaway tenants, mints capability handles into Redis, and
+connects a Postgres client **through the proxy** (the handle in place of the password).
+
+```bash
+# bring up the notebooks profile (timescaledb + redis + notebook-sql-proxy)
+docker compose --profile notebooks up -d --wait timescaledb redis notebook-sql-proxy
+
+pip install -r requirements-dev.txt -r tests/requirements-integration.txt
+PGHOST=localhost PGPASSWORD=<db-password> \
+  PROXY_HOST=localhost PROXY_PORT=6432 \
+  SQL_PROXY_REDIS_URL=redis://localhost:6379/0 \
+  pytest tests/test_sql_proxy_integration.py -v
+```
+
+It **skips** (never fails) when the DB, Redis, the proxy role, or the proxy port is unreachable, so
+it is safe to leave in the default `pytest tests/` run.
