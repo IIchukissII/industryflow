@@ -12,7 +12,7 @@ joblib==1.5.3
 # Database
 asyncpg==0.31.0
 psycopg2-binary==2.9.12
-redis[asyncio]==5.0.1
+redis[asyncio]==8.0.1
 
 # Data Processing
 pyarrow==14.0.1
