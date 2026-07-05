@@ -428,6 +428,18 @@ config:
   DRIFT_EVAL_INTERVAL: "3600"
   DRIFT_WINDOW_MINUTES: "1440"
   DRIFT_SHARE_THRESHOLD: "0.5"
+  # Retrain recommendation (ADR-0022 dec 4): the alert worker recommends retraining (it does not
+  # train — no training service) when a model shows sustained drift AND label-derived precision
+  # decay. Evaluated on the drift schedule above. A recommendation is raised at most once per
+  # model per RETRAIN_RECO_COOLDOWN_SECONDS.
+  RETRAIN_RECO_ENABLED: "true"
+  RETRAIN_PRECISION_FLOOR: "0.6"
+  RETRAIN_MIN_LABELS: "10"
+  RETRAIN_MIN_DRIFT_ALERTS: "2"
+  RETRAIN_PRECISION_WINDOW_DAYS: "30"
+  RETRAIN_DRIFT_LOOKBACK_HOURS: "72"
+  RETRAIN_RECO_COOLDOWN_SECONDS: "86400"
+  RETRAIN_RECO_SEVERITY: "high"
   # Warm model cache size in the ML service (loaded MLflow models reused by inference + drift).
   MODEL_CACHE_SIZE: "8"
 
