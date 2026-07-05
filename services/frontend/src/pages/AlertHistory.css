@@ -611,3 +611,28 @@
     flex: 1;
   }
 }
+
+/* ---- operator label control (ADR-0022) ----------------------------------- */
+/* Three-way "was this alert real?" control on each alert row. Uses the shared status
+   tokens; the active verdict is highlighted so it doubles as the verdict readout. */
+.alh-label { display: inline-flex; gap: 3px; }
+.alh-verdict {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 3px 7px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.alh-verdict:hover:not(:disabled) { color: var(--text); border-color: var(--muted); }
+.alh-verdict:disabled { opacity: 0.5; cursor: default; }
+.alh-verdict:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.alh-verdict-ok.active    { color: var(--live); border-color: rgba(45, 212, 191, 0.45); background: rgba(45, 212, 191, 0.10); }
+.alh-verdict-bad.active   { color: var(--crit); border-color: rgba(244, 73, 109, 0.45); background: rgba(244, 73, 109, 0.10); }
+.alh-verdict-muted.active { color: var(--text); border-color: var(--muted); background: var(--panel-2); }
