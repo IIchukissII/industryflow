@@ -25,6 +25,13 @@ export default function Starfield({ className = '' }) {
       stars = [];
       const n = Math.round((W * H) / 2400);
       for (let i = 0; i < n; i += 1) {
+        // colour drawn from the palette — the raw data as kinds of signal: mostly warm-white,
+        // some gold (the Self), the odd azure (reason), a rare cinnabar (the critical).
+        const roll = Math.random();
+        const rgb = roll < 0.70 ? '224,222,214'
+          : roll < 0.84 ? '207,169,78'
+            : roll < 0.94 ? '74,144,217'
+              : '224,71,47';
         stars.push({
           x: Math.random() * W,
           y: Math.random() * H,
@@ -32,7 +39,7 @@ export default function Starfield({ className = '' }) {
           base: Math.random() * 0.4 + 0.14,
           ph: Math.random() * 6.283,
           sp: Math.random() * 0.6 + 0.3, // slow: ~8–26s blink period
-          gold: Math.random() < 0.13,
+          rgb,
         });
       }
     };
@@ -59,7 +66,7 @@ export default function Starfield({ className = '' }) {
         const a = s.base * tw * fade;
         ctx.beginPath();
         ctx.arc(s.x, s.y, s.r, 0, 6.2832);
-        ctx.fillStyle = s.gold ? `rgba(207,169,78,${a})` : `rgba(224,222,214,${a})`;
+        ctx.fillStyle = `rgba(${s.rgb},${a})`;
         ctx.fill();
       }
       if (!reduce) raf = requestAnimationFrame(draw);
