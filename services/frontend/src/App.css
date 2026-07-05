@@ -52,3 +52,9 @@
   .dash-selectors { flex-direction: column; }
   .dash-selectors select { width: 100%; }
 }
+
+/* code-split route/chart fallback */
+.app-fallback {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: 60vh; color: var(--muted);
+}

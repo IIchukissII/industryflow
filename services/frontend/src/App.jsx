@@ -2,24 +2,32 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import './App.css';
 import { getLatestSensors } from './services/api';
 import { API_URL } from './config';
 import websocketService from './services/websocket';
-import SensorChart from './components/SensorChart';
 import AppShell from './components/AppShell';
 import Icon from './components/Icon';
-import AlertRules from './pages/AlertRules';
-import AlertHistory from './pages/AlertHistory';
-import AdminPanel from './pages/AdminPanel';
-import Equipment from './pages/Equipment';
-import Settings from './pages/Settings';
-import MLModels from './pages/MLModels';
-import Notebooks from './pages/Notebooks';
-import Help from './pages/Help';
-import Login from './pages/Login';
+
+// Route pages + the chart are code-split: each becomes its own chunk, loaded on demand, so the
+// initial bundle is the shell + dashboard skeleton rather than one big blob. lightweight-charts
+// (the heaviest dep) ships only in the SensorChart chunk, fetched when a chart is first shown.
+const SensorChart = lazy(() => import('./components/SensorChart'));
+const AlertRules = lazy(() => import('./pages/AlertRules'));
+const AlertHistory = lazy(() => import('./pages/AlertHistory'));
+const AdminPanel = lazy(() => import('./pages/AdminPanel'));
+const Equipment = lazy(() => import('./pages/Equipment'));
+const Settings = lazy(() => import('./pages/Settings'));
+const MLModels = lazy(() => import('./pages/MLModels'));
+const Notebooks = lazy(() => import('./pages/Notebooks'));
+const Help = lazy(() => import('./pages/Help'));
+const Login = lazy(() => import('./pages/Login'));
+
+function PageFallback() {
+  return <div className="app-fallback"><span className="sdot pending" /> Loading…</div>;
+}
 
 function ProtectedRoute({ children, user }) {
   if (!user) {
@@ -184,10 +192,12 @@ function Dashboard({ user }) {
           </div>
           <div style={{ padding: '18px' }}>
             {selectedSensor ? (
-              <SensorChart
-                sensorId={selectedSensor}
-                title={`${sensors[selectedSensor]?.sensor_name || selectedSensor} — historical`}
-              />
+              <Suspense fallback={<div className="dash-empty"><span className="sdot pending" /> Loading chart…</div>}>
+                <SensorChart
+                  sensorId={selectedSensor}
+                  title={`${sensors[selectedSensor]?.sensor_name || selectedSensor} — historical`}
+                />
+              </Suspense>
             ) : (
               <div className="dash-empty">
                 <Icon name="activity" size={26} color="var(--faint)" />
@@ -261,6 +271,7 @@ function App() {
 
   return (
     <Router>
+      <Suspense fallback={<PageFallback />}>
       <Routes>
         <Route path="/login" element={
           user ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />
@@ -311,6 +322,7 @@ function App() {
           </ProtectedRoute>
         } />
       </Routes>
+      </Suspense>
     </Router>
   );
 }
