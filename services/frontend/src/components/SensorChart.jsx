@@ -13,7 +13,7 @@ import './SensorChart.css';
 // One accessible series colour on the dark chart surface (#131722). A single series needs no
 // legend box — the header names it — so this is the only categorical hue in play.
 const SURFACE = '#131722';
-const SERIES = '#4c9aff';
+const SERIES = '#cfa94e';
 const UP = '#26a69a';
 const DOWN = '#ef5350';
 
@@ -112,7 +112,7 @@ const SensorChart = ({ sensorId }) => {
     if (type === 'area') {
       series = chart.addSeries(AreaSeries, {
         lineColor: SERIES, lineWidth: 2,
-        topColor: 'rgba(76,154,255,0.28)', bottomColor: 'rgba(76,154,255,0.0)',
+        topColor: 'rgba(207,169,78,0.26)', bottomColor: 'rgba(207,169,78,0.0)',
         priceLineVisible: false,
       });
     } else if (type === 'candlestick') {

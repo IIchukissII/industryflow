@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './Login.css';
 import api from '../services/api';
+import Mandala from '../components/Mandala';
 
 function Login({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -50,7 +51,7 @@ function Login({ onLogin }) {
         <div className="login-strata" aria-hidden="true" />
         <a href="/" className="login-brand">
           <img src="/logo-mark.svg" alt="" width="32" height="32" />
-          <span>IndustryFlow</span>
+          <span>Industry<span className="wm-accent">Flow</span></span>
         </a>
         <div className="login-hero-body">
           <div className="eyebrow">Industrial IoT · Control plane</div>
@@ -70,7 +71,7 @@ function Login({ onLogin }) {
 
       <main className="login-panel">
         <div className="login-card">
-          <img className="login-mark" src="/logo-mark.svg" alt="" width="40" height="40" />
+          <Mandala className="login-mandala" size={104} />
           <h1>Sign in</h1>
           <p className="login-sub">Access your IndustryFlow workspace.</p>
 
