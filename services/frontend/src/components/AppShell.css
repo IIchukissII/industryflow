@@ -26,7 +26,9 @@
 
 .nav { flex: 1; overflow-y: auto; padding: 16px 12px; }
 .nav-group { margin-bottom: 18px; }
-.nav-group-label { padding: 0 10px 8px; }
+/* the mandala-stratum headers stay quiet (the names carry the architecture; gold is reserved
+   for the active item, not spent on every label) */
+.nav-group-label { padding: 0 10px 8px; color: var(--faint); }
 
 .nav-item {
   display: flex; align-items: center; gap: 11px;

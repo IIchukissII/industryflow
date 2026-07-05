@@ -132,11 +132,11 @@ function Dashboard({ user }) {
   };
 
   return (
-    <AppShell user={user} title="Overview" wsConnected={wsConnected} lastUpdate={lastUpdate}>
+    <AppShell user={user} title="Core" wsConnected={wsConnected} lastUpdate={lastUpdate}>
       <div className="page-head">
         <div>
-          <div className="eyebrow">Live telemetry</div>
-          <h1>Overview</h1>
+          <div className="eyebrow">Live telemetry · every stream, converged</div>
+          <h1>Core</h1>
           <div className="sub">Real-time sensor stream across your monitored equipment.</div>
         </div>
         <span className={`badge ${wsConnected ? 'badge-live' : 'badge-warn'}`}>
