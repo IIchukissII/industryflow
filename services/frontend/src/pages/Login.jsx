@@ -48,23 +48,20 @@ function Login({ onLogin }) {
   return (
     <div className="login">
       <aside className="login-hero">
-        <div className="login-strata" aria-hidden="true" />
         <a href="/" className="login-brand">
           <img src="/logo-mark.svg" alt="" width="32" height="32" />
           <span>Industry<span className="wm-accent">Flow</span></span>
         </a>
+        <div className="login-hero-figure" aria-hidden="true">
+          <Mandala size={360} className="login-hero-mandala" />
+        </div>
         <div className="login-hero-body">
           <div className="eyebrow">Industrial IoT · Control plane</div>
-          <h2 className="login-tagline">Every signal from the floor, on one ground.</h2>
+          <h2 className="login-tagline">The still centre in the turning world.</h2>
           <p className="login-lede">
-            Stream sensor telemetry, catch anomalies, and act on alerts across every
-            tenant — in real time.
+            Every sensor stream converges inward — flux resolved into meaning at a
+            luminous core, in real time.
           </p>
-          <ul className="login-points">
-            <li><span className="mono">wss://</span> live channel streaming</li>
-            <li><span className="mono">schema-per-tenant</span> isolation</li>
-            <li><span className="mono">ml</span> anomaly detection</li>
-          </ul>
         </div>
         <div className="login-hero-foot mono">tenant-isolated · TLS edge</div>
       </aside>
