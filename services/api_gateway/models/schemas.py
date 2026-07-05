@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from uuid import UUID
 from datetime import datetime
 from typing import Optional, List
@@ -19,8 +19,7 @@ class SensorMeasurement(BaseModel):
     unit: Optional[str] = None
     quality_code: Optional[int] = 1  # Changed to Optional to handle NULL values
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SensorAggregation(BaseModel):
@@ -36,8 +35,7 @@ class SensorAggregation(BaseModel):
     count_values: int
     unit: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SensorDataRequest(BaseModel):
@@ -64,8 +62,7 @@ class TrainingDataPoint(BaseModel):
     quality_code: int
     unit: Optional[str] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class TrainingDataResponse(BaseModel):
     """Response containing training data"""

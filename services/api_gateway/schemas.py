@@ -6,7 +6,7 @@
 import uuid
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from fastapi_users import schemas
 
 
@@ -54,18 +54,17 @@ class SensorDataInput(BaseModel):
     unit: Optional[str] = Field(None, max_length=20, description="Unit of measurement")
     quality_code: Optional[int] = Field(None, ge=0, le=2, description="0=good, 1=uncertain, 2=bad")
 
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "timestamp": "2025-10-11T10:30:00Z",
-                "sensor_id": "2e9bf157-d0f0-4618-9286-c792ee54c127",
-                "equipment_id": "ef9791ba-4fba-4d78-ab76-eb7094933f99",
-                "site_id": "factory_north",
-                "value": 75.5,
-                "unit": "°C",
-                "quality_code": 0
-            }
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "timestamp": "2025-10-11T10:30:00Z",
+            "sensor_id": "2e9bf157-d0f0-4618-9286-c792ee54c127",
+            "equipment_id": "ef9791ba-4fba-4d78-ab76-eb7094933f99",
+            "site_id": "factory_north",
+            "value": 75.5,
+            "unit": "°C",
+            "quality_code": 0
         }
+    })
 
 
 class SensorDataResponse(BaseModel):
