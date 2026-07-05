@@ -124,8 +124,8 @@ function AlertRules() {
   const DetectionBadge = ({ type }) => {
     const colors = {
       threshold: '#26a69a',
-      ml_model: '#2962ff',
-      statistical: '#f5a623',
+      ml_model: 'var(--signal)',
+      statistical: '#b98b32',
       hybrid: '#9c27b0',
       disabled: '#787b86'
     };
@@ -146,9 +146,9 @@ function AlertRules() {
 
   const SeverityBadge = ({ severity }) => {
     const colors = {
-      critical: '#ef5350',
-      warning: '#ffa726',
-      info: '#42a5f5'
+      critical: 'var(--crit)',
+      warning: 'var(--warn)',
+      info: 'var(--signal)'
     };
     return (
       <span style={{

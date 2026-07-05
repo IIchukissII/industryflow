@@ -123,7 +123,7 @@ label { color: var(--muted); font-size: 12px; }
 .badge-live { color: var(--live); border-color: rgba(45, 212, 191, 0.35); background: rgba(45, 212, 191, 0.08); }
 .badge-warn { color: var(--warn); border-color: rgba(245, 166, 35, 0.35); background: rgba(245, 166, 35, 0.08); }
 .badge-crit { color: var(--crit); border-color: rgba(244, 73, 109, 0.35); background: rgba(244, 73, 109, 0.08); }
-.badge-signal { color: var(--signal); border-color: rgba(59, 130, 246, 0.35); background: var(--signal-soft); }
+.badge-signal { color: var(--signal); border-color: rgba(74, 144, 217, 0.35); background: var(--signal-soft); }
 
 /* status dot */
 .sdot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--faint); flex-shrink: 0; }

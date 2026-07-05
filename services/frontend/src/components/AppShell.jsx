@@ -69,7 +69,7 @@ export default function AppShell({ user, title, wsConnected, lastUpdate, childre
       <aside className="rail">
         <a href="/" className="brand">
           <img src="/logo-mark.svg" alt="" width="30" height="30" />
-          <span className="brand-name">IndustryFlow</span>
+          <span className="brand-name">Industry<span className="wm-accent">Flow</span></span>
         </a>
 
         <nav className="nav">

@@ -1,0 +1,28 @@
+/*
+ * SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+.mdl { display: block; }
+.mdl-strata { fill: none; stroke: var(--muted); }
+.mdl-node { fill: var(--panel-2); stroke: var(--faint); stroke-width: 1.5; }
+.mdl-stream { stroke: var(--muted); stroke-width: 1; opacity: 0.28; }
+.mdl-pulse { fill: var(--gold-glow); opacity: 0; animation: mdlFlowIn 3.6s cubic-bezier(0.45, 0, 0.5, 1) infinite; }
+.mdl-coreglow { transform-box: fill-box; transform-origin: center; animation: mdlBreathe 3.6s ease-in-out infinite; }
+
+@keyframes mdlFlowIn {
+  0%   { cx: 154px; opacity: 0; }
+  16%  { opacity: 1; }
+  86%  { opacity: 1; }
+  100% { cx: 34px; opacity: 0; }
+}
+@keyframes mdlBreathe {
+  0%, 100% { transform: scale(1);    opacity: 0.9; }
+  50%      { transform: scale(1.07); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mdl-pulse { animation: none; opacity: 0; }
+  .mdl-coreglow { animation: none; }
+}

@@ -25,7 +25,7 @@
 }
 
 .btn-primary {
-  background: #2962ff;
+  background: var(--signal);
   color: white;
   border: none;
   padding: 10px 20px;
@@ -64,8 +64,8 @@
 }
 
 .tab.active {
-  color: #2962ff;
-  border-bottom-color: #2962ff;
+  color: var(--signal);
+  border-bottom-color: var(--signal);
 }
 
 .tab-content {
@@ -123,8 +123,8 @@
 }
 
 .btn-action:hover {
-  border-color: #2962ff;
-  color: #2962ff;
+  border-color: var(--signal);
+  color: var(--signal);
 }
 
 /* Add to the end of AlertRules.css */
@@ -188,7 +188,7 @@
 .form-group input:focus,
 .form-group select:focus {
   outline: none;
-  border-color: #2962ff;
+  border-color: var(--signal);
 }
 
 .form-group input[type="checkbox"] {
@@ -216,6 +216,6 @@
 }
 
 .btn-secondary:hover {
-  border-color: #2962ff;
-  color: #2962ff;
+  border-color: var(--signal);
+  color: var(--signal);
 }

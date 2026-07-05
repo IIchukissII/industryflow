@@ -3,14 +3,16 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * IndustryFlow design tokens + base. The product reads like a live control-room console:
- * a technical type system (Space Grotesk display / IBM Plex Sans UI / IBM Plex Mono for
- * every numeric readout) over a graphite + signal-blue palette.
+ * IndustryFlow design tokens + base. The design draws on the mark itself — the Self, the
+ * mandala, the many made one at a luminous core. A graphite "ground" (nigredo) holds one
+ * reconciled accent: the gold of the Self. Type stages the same union — a warm optical serif
+ * (Fraunces) for the human voice, IBM Plex Mono for the machine. Status borrows the alchemical
+ * stages: citrinitas (amber) → rubedo (cinnabar). All accents contrast-checked on the ground.
  */
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
 :root {
-  /* surfaces — strata of the ground, darkest at the base */
+  /* surfaces — strata of the ground, darkest at the base (nigredo) */
   --bg: #090c16;
   --panel: #11151f;
   --panel-2: #161b27;
@@ -18,21 +20,29 @@
   --line: #232c3b;
   --line-soft: #1a2130;
 
-  /* text */
-  --text: #e7ecf3;
-  --muted: #8b97a8;
-  --faint: #5b6573;
+  /* text — the core, a warm luminous white (albedo), not LED-cold */
+  --text: #f2efe9;
+  --muted: #9aa0ac;
+  --faint: #6a7382;
 
-  /* signal + status */
-  --signal: #3b82f6;
-  --signal-strong: #2563eb;
-  --signal-soft: rgba(59, 130, 246, 0.14);
+  /* the gold of the Self — the one accent */
+  --gold: #cfa94e;
+  --gold-glow: #e6c67c;
+  --gold-strong: #b98b32;
+  --gold-soft: rgba(207, 169, 78, 0.13);
+
+  /* reason — structure, links, focus (azure, demoted from the star) */
+  --signal: #4a90d9;
+  --signal-strong: #3f7fc9;
+  --signal-soft: rgba(74, 144, 217, 0.14);
+
+  /* status as alchemical process — reserved, never the accent */
   --live: #2dd4bf;
-  --warn: #f5a623;
-  --crit: #f4496d;
+  --warn: #f2a63d;   /* citrinitas */
+  --crit: #e0472f;   /* rubedo */
 
-  /* type */
-  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  /* type — the human voice (Fraunces) and the machine (Plex Mono), reconciled */
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
   --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
 
@@ -66,12 +76,16 @@ body {
 h1, h2, h3, h4 {
   font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  font-optical-sizing: auto;
+  letter-spacing: -0.005em;
   color: var(--text);
   margin: 0;
 }
 
 a { color: inherit; }
+
+/* the wordmark's second half carries the gold of the Self */
+.wm-accent { color: var(--gold); }
 
 /* numeric / telemetry readouts read as instrument values */
 .mono, .num {
@@ -80,14 +94,14 @@ a { color: inherit; }
   letter-spacing: -0.01em;
 }
 
-/* eyebrow / section label */
+/* eyebrow / section label — the gold thread that marks a beginning */
 .eyebrow {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: var(--gold);
 }
 
 :focus-visible {

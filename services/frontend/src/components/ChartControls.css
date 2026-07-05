@@ -55,9 +55,9 @@
 }
 
 .button-group button.active {
-  background: #2962ff;
+  background: var(--signal);
   color: #ffffff;
-  border-color: #2962ff;
+  border-color: var(--signal);
 }
 
 .button-group button:disabled {

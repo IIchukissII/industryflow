@@ -11,7 +11,7 @@
   position: fixed; inset: 0 auto 0 0; width: var(--sidebar-w); z-index: 40;
   display: flex; flex-direction: column;
   background:
-    radial-gradient(120% 60% at 18px 22px, rgba(59, 130, 246, 0.10), transparent 60%),
+    radial-gradient(120% 60% at 18px 22px, rgba(207, 169, 78, 0.09), transparent 60%),
     var(--panel);
   border-right: 1px solid var(--line-soft);
 }
@@ -21,7 +21,8 @@
   height: var(--topbar-h); padding: 0 18px; text-decoration: none;
   border-bottom: 1px solid var(--line-soft);
 }
-.brand-name { font-family: var(--font-display); font-weight: 600; font-size: 17px; letter-spacing: -0.01em; color: var(--text); }
+.brand-name { font-family: var(--font-display); font-weight: 600; font-size: 18px; letter-spacing: -0.005em; color: var(--text); }
+.brand-name .wm-accent { color: var(--gold); }
 
 .nav { flex: 1; overflow-y: auto; padding: 16px 12px; }
 .nav-group { margin-bottom: 18px; }
@@ -34,12 +35,12 @@
   position: relative; transition: background 0.15s, color 0.15s;
 }
 .nav-item:hover { color: var(--text); background: var(--panel-2); }
-.nav-item.active { color: var(--text); background: var(--signal-soft); }
+.nav-item.active { color: var(--text); background: var(--gold-soft); }
 .nav-item.active::before {
   content: ''; position: absolute; left: -12px; top: 7px; bottom: 7px; width: 3px;
-  border-radius: 0 3px 3px 0; background: var(--signal);
+  border-radius: 0 3px 3px 0; background: var(--gold);
 }
-.nav-item.active svg { color: var(--signal); }
+.nav-item.active svg { color: var(--gold); }
 
 .rail-foot {
   display: flex; align-items: center; gap: 10px;
