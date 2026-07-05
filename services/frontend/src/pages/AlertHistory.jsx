@@ -57,6 +57,26 @@ function LabelControl({ alert, onLabel }) {
   );
 }
 
+// A tiny precision-over-time sparkline for the KPI. Plots only buckets with a defined precision
+// (a bucket with no decisive labels is a gap, not a zero); the y-axis is fixed 0..1 so the line's
+// height is comparable across renders. Returns null when there's not enough of a trend to draw.
+function PrecisionSparkline({ series }) {
+  const pts = (series || []).filter((b) => b.precision != null).map((b) => b.precision);
+  if (pts.length < 2) return null;
+  const w = 132, h = 26, pad = 2;
+  const step = (w - pad * 2) / (pts.length - 1);
+  const y = (v) => h - pad - v * (h - pad * 2);
+  const d = pts.map((v, i) => `${i === 0 ? 'M' : 'L'}${(pad + i * step).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const last = pts[pts.length - 1];
+  return (
+    <svg className="alh-spark" width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img"
+      aria-label={`Precision trend, latest ${Math.round(last * 100)} percent`}>
+      <path d={d} fill="none" stroke="var(--live)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={(pad + (pts.length - 1) * step).toFixed(1)} cy={y(last).toFixed(1)} r="2" fill="var(--live)" />
+    </svg>
+  );
+}
+
 function AlertHistory() {
   const [alerts, setAlerts] = useState([]);
   const [alertRules, setAlertRules] = useState([]);
@@ -215,6 +235,7 @@ function AlertHistory() {
           <div className="kpi-value">
             {metrics?.overall?.precision != null ? `${Math.round(metrics.overall.precision * 100)}%` : '—'}
           </div>
+          <PrecisionSparkline series={metrics?.series} />
           <div className="kpi-foot">
             {metrics?.overall?.labeled_total ? `${metrics.overall.labeled_total} labelled · 30d` : 'label alerts below to measure'}
           </div>
