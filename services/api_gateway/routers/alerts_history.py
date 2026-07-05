@@ -29,6 +29,18 @@ class Severity(str, Enum):
     critical = "critical"
 
 
+class Verdict(str, Enum):
+    """Operator correctness verdict on a fired alert (ADR-0022 decision 1)."""
+    true_positive = "true_positive"
+    false_positive = "false_positive"
+    unsure = "unsure"
+
+
+class LabelRequest(BaseModel):
+    verdict: Verdict
+    note: Optional[str] = None
+
+
 class AlertResponse(BaseModel):
     alert_id: str
     rule_id: str
@@ -46,6 +58,10 @@ class AlertResponse(BaseModel):
     acknowledged: bool
     acknowledged_at: Optional[datetime]
     acknowledged_by: Optional[str]
+    # Operator feedback (ADR-0022) — null until an operator labels the alert.
+    label_verdict: Optional[str] = None
+    labeled_at: Optional[datetime] = None
+    labeled_by: Optional[str] = None
 
 
 @router.get("", response_model=List[AlertResponse])
@@ -89,10 +105,14 @@ async def list_alerts(
             a.triggered_at,
             a.acknowledged,
             a.acknowledged_at,
-            a.acknowledged_by
+            a.acknowledged_by,
+            al.verdict AS label_verdict,
+            al.labeled_at,
+            al.labeled_by
         FROM alerts a
         LEFT JOIN sensors s ON a.sensor_id = s.sensor_id
         LEFT JOIN equipment e ON a.equipment_id = e.equipment_id
+        LEFT JOIN alert_labels al ON a.alert_id = al.alert_id
         WHERE 1=1
     """
     
@@ -152,10 +172,14 @@ async def list_unacknowledged_alerts(
             a.triggered_at,
             a.acknowledged,
             a.acknowledged_at,
-            a.acknowledged_by
+            a.acknowledged_by,
+            al.verdict AS label_verdict,
+            al.labeled_at,
+            al.labeled_by
         FROM alerts a
         LEFT JOIN sensors s ON a.sensor_id = s.sensor_id
         LEFT JOIN equipment e ON a.equipment_id = e.equipment_id
+        LEFT JOIN alert_labels al ON a.alert_id = al.alert_id
         WHERE a.acknowledged = FALSE
         ORDER BY a.triggered_at DESC
         LIMIT :limit
@@ -197,10 +221,14 @@ async def list_critical_alerts(
             a.triggered_at,
             a.acknowledged,
             a.acknowledged_at,
-            a.acknowledged_by
+            a.acknowledged_by,
+            al.verdict AS label_verdict,
+            al.labeled_at,
+            al.labeled_by
         FROM alerts a
         LEFT JOIN sensors s ON a.sensor_id = s.sensor_id
         LEFT JOIN equipment e ON a.equipment_id = e.equipment_id
+        LEFT JOIN alert_labels al ON a.alert_id = al.alert_id
         WHERE a.severity = 'critical'
         ORDER BY a.triggered_at DESC
         LIMIT :limit
@@ -243,8 +271,68 @@ async def acknowledge_alert(
         raise HTTPException(status_code=404, detail="Alert not found")
     
     await db.commit()
-    
+
     return {
         "message": "Alert acknowledged successfully",
         "alert": dict(row._mapping)
+    }
+
+
+@router.patch("/{alert_id}/label")
+async def label_alert(
+        alert_id: UUID,
+        body: LabelRequest,
+        db: AsyncSession = Depends(get_db_with_tenant),
+        current_user: User = Depends(get_current_user_with_company)
+):
+    """Record an operator's correctness verdict on a fired alert (ADR-0022 decision 1).
+
+    Distinct from acknowledge: acknowledge is "seen", this is "was it real?". The verdict
+    lands in the separate alert_labels table (not on the alerts hypertable) so it outlives
+    the alert's 90-day retention, denormalizing the alert's rule/model/detection/severity so
+    it stays meaningful after the alert ages out. One re-labelable verdict per alert.
+    """
+    # Resolve the alert first so we can denormalize its fields onto the label — and 404 if the
+    # operator is labelling something that isn't there.
+    alert_row = (await db.execute(text("""
+        SELECT triggered_at, rule_id, model_id, detection_type, severity
+        FROM alerts
+        WHERE alert_id = :alert_id
+    """), {"alert_id": alert_id})).fetchone()
+
+    if not alert_row:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    alert = dict(alert_row._mapping)
+
+    result = await db.execute(text("""
+        INSERT INTO alert_labels
+            (alert_id, triggered_at, verdict, note, rule_id, model_id,
+             detection_type, severity, labeled_by, labeled_at)
+        VALUES
+            (:alert_id, :triggered_at, :verdict, :note, :rule_id, :model_id,
+             :detection_type, :severity, :labeled_by, NOW())
+        ON CONFLICT (alert_id) DO UPDATE SET
+            verdict = EXCLUDED.verdict,
+            note = EXCLUDED.note,
+            labeled_by = EXCLUDED.labeled_by,
+            labeled_at = NOW()
+        RETURNING *
+    """), {
+        "alert_id": alert_id,
+        "triggered_at": alert["triggered_at"],
+        "verdict": body.verdict.value,
+        "note": body.note,
+        "rule_id": alert["rule_id"],
+        "model_id": alert["model_id"],
+        "detection_type": alert["detection_type"],
+        "severity": alert["severity"],
+        "labeled_by": str(current_user.id),
+    })
+
+    await db.commit()
+
+    return {
+        "message": "Alert labelled successfully",
+        "label": dict(result.fetchone()._mapping),
     }
