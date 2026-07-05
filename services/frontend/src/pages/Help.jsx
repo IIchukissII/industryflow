@@ -27,7 +27,7 @@ const SECTIONS = [
     title: 'Monitoring & alerts',
     lead: 'The platform streams sensor readings as they arrive and watches them for trouble.',
     blocks: [
-      { term: 'The Overview', def: 'The home screen shows live readings for every reporting sensor, grouped by equipment, and plots any channel’s recent history. The stream indicator turns green when data is flowing.' },
+      { term: 'The Core', def: 'The home screen — the centre where every stream converges. Shows live readings for every reporting sensor, grouped by equipment, and plots any channel’s recent history. The stream indicator turns green when data is flowing.' },
       { term: 'Equipment and sensors', def: 'Configure → Equipment lists your monitored units and their sensors. Open a unit to see and adjust its channels.' },
       { term: 'Alert rules', def: 'Configure → Alert Rules is where you set the conditions that raise an alert — a simple threshold, such as temperature above a limit, or a model-based check that flags anomalies.' },
       { term: 'Alert history', def: 'Monitor → Alerts is the record of everything that fired, newest first, so you can see what happened and when.' },
