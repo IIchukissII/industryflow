@@ -5,7 +5,7 @@
 # Held at 0.115.x: fastapi 0.138 wraps included routers in _IncludedRouter objects with
 # no .path, which prometheus-fastapi-instrumentator 6.1.0 cannot introspect (every
 # request, including /health, 500s). Same combo api-gateway/ml-service run.
-fastapi==0.139.0
+fastapi==0.115.0
 uvicorn[standard]==0.50.0
 pydantic==2.13.4
 
