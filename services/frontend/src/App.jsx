@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import './App.css';
 import { getLatestSensors } from './services/api';
 import { API_URL } from './config';
@@ -46,6 +46,7 @@ function Dashboard({ user }) {
   const [selectedEquipment, setSelectedEquipment] = useState(null);
   const [selectedSensor, setSelectedSensor] = useState(null);
   const [alertStatus, setAlertStatus] = useState({}); // sensor_id -> 'crit' | 'warn', from active alerts
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetch(`${API_URL}/health`)
@@ -222,6 +223,7 @@ function Dashboard({ user }) {
               sensors={sensors}
               selectedSensor={selectedSensor}
               onSelect={selectSensor}
+              onOpenAlerts={(id) => navigate(`/alerts?sensor=${encodeURIComponent(id)}`)}
               wsConnected={wsConnected}
               statusBySensor={alertStatus}
             />
