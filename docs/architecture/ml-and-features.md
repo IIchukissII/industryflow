@@ -77,5 +77,12 @@ model's training distribution?"* — **windowed and statistical, not per-event**
   and delegates the statistical compute here — exactly as the real-time ml rules delegate to
   `/api/inference`. The drift signal surfaces through the reserved `statistical` alert lane; see
   **[alerting.md](alerting.md)**.
-- **Label-free.** v1 needs no ground truth. Performance/concept drift (operator labels) and a
-  closed-loop retrain trigger are deferred (ADR-0021).
+- **Label-free first, then operator feedback.** v1 needs no ground truth. Performance/concept
+  drift is added by **[ADR-0022](../../ADR/ADR-0022-concept-drift-operator-feedback.md)**:
+  operators label fired alerts *real / false / unsure* (a durable per-tenant `alert_labels`
+  store, separate from the 90-day alerts hypertable), from which the platform derives
+  **precision + false-positive rate over time** (`GET /api/alerts/label-metrics`) and raises a
+  **retrain *recommendation*** when a model shows sustained drift **and** precision decay.
+  Recall is not derivable from fired-alert labels (no false-negative signal), and the loop
+  *recommends* — it does not train, since retraining is manual/notebook today. See
+  **[alerting.md](alerting.md)**.
