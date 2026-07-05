@@ -400,6 +400,11 @@ function ModelDrawer({ row, detail, onClose, onSaved, onStatusChanged }) {
             ) : <p className="mdl-desc faint">No metrics logged for this model.</p>}
           </section>
 
+          {/* Data drift — platform detectors carry a reference profile, so we can compare recent
+              readings against the training baseline on demand (ADR-0021). Heavy compute, so it's
+              never auto-run: the operator asks for it. */}
+          {row.source === 'platform' && <DriftPanel row={row} />}
+
           {/* Source lineage. */}
           {row.runId && (
             <section className="mdl-block">
@@ -458,6 +463,166 @@ function ModelDrawer({ row, detail, onClose, onSaved, onStatusChanged }) {
         </div>
       </aside>
     </div>
+  );
+}
+
+// Trailing window → a human label ("last 24h") for the drift readout.
+function fmtWindow(minutes) {
+  if (!minutes) return '';
+  if (minutes % 1440 === 0) { const d = minutes / 1440; return `last ${d} day${d > 1 ? 's' : ''}`; }
+  if (minutes % 60 === 0) { const h = minutes / 60; return `last ${h} hour${h > 1 ? 's' : ''}`; }
+  return `last ${minutes} min`;
+}
+
+// Map a drift result to the reserved status palette (tone → sdot/badge class), an icon, and a
+// label — colour is never the only signal (icon + words carry it too).
+const DRIFT_TONES = {
+  ok:   { dot: 'ok',      badge: 'badge-live', icon: 'check' },
+  warn: { dot: 'pending', badge: 'badge-warn', icon: 'alert' },
+  crit: { dot: 'bad',     badge: 'badge-crit', icon: 'alert' },
+  idle: { dot: '',        badge: '',           icon: 'help' },
+};
+
+function driftVerdict(result) {
+  const status = result?.status;
+  if (status === 'ok') {
+    const detected = !!(result.data_drift && result.data_drift.drift_detected);
+    return detected
+      ? { tone: 'warn', label: 'Drift detected' }
+      : { tone: 'ok', label: 'No drift' };
+  }
+  if (status === 'error') return { tone: 'crit', label: 'Evaluation failed' };
+  if (status === 'insufficient_data') return { tone: 'idle', label: 'Not enough data' };
+  return { tone: 'idle', label: 'Unavailable' }; // "unavailable" or any unknown status
+}
+
+// On-demand data-drift check for a platform detector. Compares recent readings against the model's
+// training baseline via /api/drift/evaluate (evidently on the ml-service). Button-triggered: the
+// windowed compute is expensive, so it runs only when the operator asks.
+function DriftPanel({ row }) {
+  const [state, setState] = useState('idle'); // idle | loading | done | error
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState(null);
+
+  // A different model opened in the drawer starts fresh.
+  useEffect(() => { setState('idle'); setResult(null); setErr(null); }, [row.id]);
+
+  const evaluate = useCallback(async () => {
+    if (!row.id) return;
+    setState('loading');
+    setErr(null);
+    try {
+      const res = await authFetch('/api/drift/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_id: row.id }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setResult(await res.json());
+      setState('done');
+    } catch (e) {
+      setErr('Could not evaluate drift. Try again.');
+      setState('error');
+    }
+  }, [row.id]);
+
+  const verdict = result ? driftVerdict(result) : null;
+  const tone = verdict ? DRIFT_TONES[verdict.tone] : null;
+  const dd = result?.data_drift || null;
+  const share = dd && typeof dd.drift_share === 'number' ? dd.drift_share : null;
+  const threshold = typeof result?.threshold === 'number' ? result.threshold : null;
+  const driftedCols = dd?.per_column
+    ? Object.entries(dd.per_column).filter(([, c]) => c && c.drifted).map(([name]) => name)
+    : [];
+  const predDrift = result?.prediction_drift;
+
+  return (
+    <section className="mdl-block">
+      <div className="mdl-block-head">
+        <span className="eyebrow">Data drift</span>
+        {state === 'done' && (
+          <button className="mdl-link" onClick={evaluate}>Re-evaluate</button>
+        )}
+      </div>
+
+      {state === 'idle' && (
+        <div className="mdl-drift-idle">
+          <p className="mdl-desc faint">
+            Compare recent readings against this model’s training baseline to check for data drift.
+          </p>
+          <button className="btn btn-secondary btn-sm" onClick={evaluate} disabled={!row.id}>
+            <Icon name="activity" size={14} /> Evaluate drift
+          </button>
+        </div>
+      )}
+
+      {state === 'loading' && (
+        <div className="mdl-drift-loading"><span className="sdot pending" /> Evaluating recent window…</div>
+      )}
+
+      {state === 'error' && (
+        <div className="mdl-drift-idle">
+          <p className="mdl-err" style={{ margin: 0 }}>{err}</p>
+          <button className="btn btn-secondary btn-sm" onClick={evaluate}>
+            <Icon name="refresh" size={14} /> Retry
+          </button>
+        </div>
+      )}
+
+      {state === 'done' && verdict && (
+        <div className="mdl-drift">
+          <div className="mdl-drift-verdict">
+            <span className={`badge ${tone.badge}`.trim()}>
+              <Icon name={tone.icon} size={12} /> {verdict.label}
+            </span>
+            {result.window_minutes ? <span className="mdl-drift-win mono">{fmtWindow(result.window_minutes)}</span> : null}
+          </div>
+
+          {result.status === 'ok' && share !== null ? (
+            <>
+              {/* Drifted-feature share: a proportion meter, filled to the drifted share, with a
+                  tick where the alert threshold sits — so the verdict is legible, not just asserted. */}
+              <div className="mdl-drift-share">
+                <div className="mdl-drift-share-top">
+                  <span className="mdl-drift-pct mono">{Math.round(share * 100)}%</span>
+                  <span className="mdl-drift-cap">
+                    {dd.n_drifted}/{dd.n_columns} feature{dd.n_columns === 1 ? '' : 's'} drifted
+                  </span>
+                </div>
+                <div className="mdl-meter" role="img"
+                  aria-label={`${Math.round(share * 100)} percent of features drifted${threshold !== null ? `, threshold ${Math.round(threshold * 100)} percent` : ''}`}>
+                  <div className={`mdl-meter-fill tone-${verdict.tone}`} style={{ width: `${Math.min(100, Math.max(2, share * 100))}%` }} />
+                  {threshold !== null && (
+                    <div className="mdl-meter-tick" style={{ left: `${Math.min(100, threshold * 100)}%` }} title={`Threshold ${Math.round(threshold * 100)}%`} />
+                  )}
+                </div>
+              </div>
+
+              {driftedCols.length > 0 && (
+                <div className="mdl-drift-cols">
+                  {driftedCols.slice(0, 8).map((c) => (
+                    <span className="mdl-drift-chip mono" key={c}>{c}</span>
+                  ))}
+                  {driftedCols.length > 8 && <span className="mdl-drift-chip mono faint">+{driftedCols.length - 8}</span>}
+                </div>
+              )}
+
+              {predDrift && predDrift.drifted && (
+                <p className="mdl-drift-pred">
+                  <Icon name="alert" size={12} color="var(--warn)" /> Prediction drift on{' '}
+                  <span className="mono">{predDrift.column}</span>
+                </p>
+              )}
+            </>
+          ) : (
+            // unavailable / insufficient_data / error — honest note, not a fake zero.
+            <p className="mdl-desc faint" style={{ marginTop: 0 }}>
+              {result.reason || 'No drift signal is available for this model.'}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
