@@ -109,6 +109,8 @@ class AlertResponse(BaseModel):
     actual_value: Optional[float]
     threshold_value: Optional[float]
     anomaly_score: Optional[float]
+    model_id: Optional[str]      # set for ml/statistical alerts (incl. drift + retrain recommendations)
+    condition: Optional[str]     # e.g. 'drift', 'retrain_recommended' (ADR-0021/0022)
     triggered_at: datetime
     acknowledged: bool
     acknowledged_at: Optional[datetime]
@@ -157,6 +159,8 @@ async def list_alerts(
             a.actual_value,
             a.threshold_value,
             a.anomaly_score,
+            a.model_id::text,
+            a.condition,
             a.triggered_at,
             a.acknowledged,
             a.acknowledged_at,
@@ -224,6 +228,8 @@ async def list_unacknowledged_alerts(
             a.actual_value,
             a.threshold_value,
             a.anomaly_score,
+            a.model_id::text,
+            a.condition,
             a.triggered_at,
             a.acknowledged,
             a.acknowledged_at,
@@ -273,6 +279,8 @@ async def list_critical_alerts(
             a.actual_value,
             a.threshold_value,
             a.anomaly_score,
+            a.model_id::text,
+            a.condition,
             a.triggered_at,
             a.acknowledged,
             a.acknowledged_at,
