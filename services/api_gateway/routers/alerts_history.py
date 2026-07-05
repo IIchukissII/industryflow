@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import List, Optional
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timedelta
 from pydantic import BaseModel
 from enum import Enum
 
@@ -47,7 +47,9 @@ class Bucket(str, Enum):
     week = "week"
 
 
-_BUCKET_INTERVAL = {"day": "1 day", "week": "7 days"}
+# asyncpg (the gateway's driver) binds an interval param from a timedelta, not a string — a
+# string reaches the CAST as text and errors ("'str' object has no attribute 'days'").
+_BUCKET_INTERVAL = {"day": timedelta(days=1), "week": timedelta(days=7)}
 
 
 def _precision(tp: int, fp: int) -> Optional[float]:
@@ -422,7 +424,7 @@ async def alert_label_metrics(
 
     query = f"""
         SELECT
-            time_bucket(CAST(:interval AS interval), labeled_at) AS bucket,
+            time_bucket(:interval, labeled_at) AS bucket,
             count(*) FILTER (WHERE verdict = 'true_positive')  AS tp,
             count(*) FILTER (WHERE verdict = 'false_positive') AS fp,
             count(*) FILTER (WHERE verdict = 'unsure')         AS unsure
