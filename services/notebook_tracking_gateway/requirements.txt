@@ -5,7 +5,7 @@
 # Tracking gateway runtime (ADR-0019): FastAPI app, httpx to MLflow, boto3 for artifact
 # pre-signing, the shared store for capability resolution. The live MLflow/S3 path is
 # cluster-validated (see README / issue #19).
-fastapi==0.115.0
+fastapi==0.139.0
 uvicorn==0.50.0
 httpx==0.28.1
 redis==5.0.8
