@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Dashboard (Overview) layout. Chrome lives in AppShell; shared primitives in
+ * Dashboard (Core) layout. Chrome lives in AppShell; shared primitives in
  * styles/components.css. This file owns the chart + live-readout composition.
  */
 

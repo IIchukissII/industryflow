@@ -7,23 +7,25 @@ import './AppShell.css';
 import api from '../services/api';
 import Icon from './Icon';
 
+// Navigation mirrors the mandala's anatomy: the Core (where streams converge and surface),
+// the Ground (the sources and their interpretation), the Watch (what guards the Core).
 const NAV = [
   {
-    group: 'Monitor',
+    group: 'The Core',
     items: [
-      { href: '/', label: 'Overview', icon: 'grid', exact: true },
+      { href: '/', label: 'Core', icon: 'grid', exact: true },
       { href: '/alerts', label: 'Alerts', icon: 'bell' },
-      { href: '/equipment', label: 'Equipment', icon: 'box' },
     ],
   },
   {
-    group: 'Analyze',
+    group: 'The Ground',
     items: [
+      { href: '/equipment', label: 'Equipment', icon: 'box' },
       { href: '/notebooks', label: 'Notebooks', icon: 'activity' },
     ],
   },
   {
-    group: 'Configure',
+    group: 'The Watch',
     items: [
       { href: '/alert-rules', label: 'Alert Rules', icon: 'sliders' },
       { href: '/ml-models', label: 'Models', icon: 'cpu' },
