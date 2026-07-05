@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Extra deps for the live end-to-end proof (test_sql_proxy_integration.py, issue #19) only.
+# The unit suite does NOT need these — the integration test importorskips them and skips when a
+# live stack is absent, so unit CI stays driver-free (requirements.txt is redis-only by design).
+psycopg2-binary==2.9.9
+redis==5.0.8
