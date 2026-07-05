@@ -100,14 +100,16 @@ function MLModels() {
   const [selected, setSelected] = useState(null); // the row whose drawer is open
   const [detail, setDetail] = useState(null); // fetched detail for the selected notebook model
   const [filter, setFilter] = useState('all'); // all | notebook | platform
+  const [retrainModels, setRetrainModels] = useState(() => new Set()); // model_ids with a live retrain rec (ADR-0022)
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [nbRes, plRes] = await Promise.allSettled([
+      const [nbRes, plRes, alRes] = await Promise.allSettled([
         authFetch('/api/registered-models'),
         authFetch('/api/models'),
+        authFetch('/api/alerts?severity=high&limit=1000'), // for the retrain-recommended signal
       ]);
       const out = [];
       if (nbRes.status === 'fulfilled' && nbRes.value.ok) {
@@ -117,6 +119,17 @@ function MLModels() {
       if (plRes.status === 'fulfilled' && plRes.value.ok) {
         const d = await plRes.value.json();
         (d.models || []).forEach((m) => out.push(normalizePlatform(m)));
+      }
+      // Models the alert worker has recently recommended retraining (ADR-0022): a distinct
+      // 'retrain_recommended' statistical alert carries the model_id. An acknowledged one is
+      // treated as handled, so it drops off.
+      if (alRes.status === 'fulfilled' && alRes.value.ok) {
+        const alerts = await alRes.value.json();
+        setRetrainModels(new Set(
+          (alerts || [])
+            .filter((a) => a.condition === 'retrain_recommended' && a.model_id && !a.acknowledged)
+            .map((a) => a.model_id)
+        ));
       }
       out.sort((a, b) => (b.updated || 0) - (a.updated || 0));
       setModels(out);
@@ -237,7 +250,14 @@ function MLModels() {
                       tabIndex={0}
                       onKeyDown={(e) => { if (e.key === 'Enter') openRow(m); }}
                     >
-                      <td className="mdl-name">{m.name}</td>
+                      <td className="mdl-name">
+                        {m.name}
+                        {m.id && retrainModels.has(m.id) && (
+                          <span className="badge badge-warn mdl-retrain" title="The alert worker recommends retraining this model (sustained drift + precision decay)">
+                            <Icon name="refresh" size={11} /> retrain
+                          </span>
+                        )}
+                      </td>
                       <td><span className={`badge mdl-src-${m.source}`}>{SOURCE_LABEL[m.source]}</span></td>
                       <td className="mono mdl-dim">{m.version}</td>
                       <td>
@@ -265,6 +285,7 @@ function MLModels() {
         <ModelDrawer
           row={selected}
           detail={detail}
+          retrainRecommended={!!(selected.id && retrainModels.has(selected.id))}
           onClose={() => setSelected(null)}
           onSaved={(desc) => {
             setModels((ms) => ms.map((m) => (m.key === selected.key ? { ...m, description: desc } : m)));
@@ -282,7 +303,7 @@ function MLModels() {
 
 const PLATFORM_STATUSES = ['production', 'active', 'staging', 'archived'];
 
-function ModelDrawer({ row, detail, onClose, onSaved, onStatusChanged }) {
+function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStatusChanged }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(row.description || '');
   const [saving, setSaving] = useState(false);
@@ -355,6 +376,17 @@ function ModelDrawer({ row, detail, onClose, onSaved, onStatusChanged }) {
         </div>
 
         <div className="mdl-drawer-body">
+          {/* Retrain recommendation (ADR-0022) — sustained drift + label-derived precision decay. */}
+          {retrainRecommended && (
+            <div className="mdl-retrain-notice">
+              <Icon name="alert" size={16} color="var(--warn)" />
+              <div>
+                <strong>Retrain recommended</strong>
+                <p>Sustained drift together with falling operator-labelled precision suggests this model has decayed. Retrain it via the notebook flow.</p>
+              </div>
+            </div>
+          )}
+
           {/* Description — editable for notebook models, read-only for platform detectors. */}
           <section className="mdl-block">
             <div className="mdl-block-head">
