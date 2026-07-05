@@ -38,6 +38,6 @@ Point the dev server at a running gateway by editing the `server.proxy` targets 
 
 ## Build & serve (container)
 
-The multi-stage `Dockerfile` runs `npm ci && npm run build` on `node:20-alpine`, then copies
+The multi-stage `Dockerfile` runs `npm ci && npm run build` on `node:22-alpine`, then copies
 `build/` into `nginxinc/nginx-unprivileged`. `nginx.conf` reverse-proxies the API prefixes to the
 gateway/ml-service and serves the SPA (`try_files … /index.html`).
