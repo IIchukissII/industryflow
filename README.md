@@ -13,7 +13,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 [![Helm](https://github.com/IIchukissII/industryflow/actions/workflows/helm.yml/badge.svg)](https://github.com/IIchukissII/industryflow/actions/workflows/helm.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 ![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)
-![React 18](https://img.shields.io/badge/react-18-61dafb.svg)
+![React 19](https://img.shields.io/badge/react-19-61dafb.svg)
 
 <table>
 <tr>
@@ -86,7 +86,7 @@ Interactive API docs are served at `http://localhost:8000/docs` when the stack i
 ## Technology
 
 Python 3.11 · FastAPI · Apache Spark 3.5 · Apache Kafka · MLflow · PostgreSQL 15 + TimescaleDB ·
-Redis · MinIO · React 18 (Vite) · Prometheus / Grafana / Loki.
+Redis · MinIO · React 19 (Vite) · Prometheus / Grafana / Loki.
 
 ## Contributing
 
