@@ -98,7 +98,7 @@ class PrecisionMetrics(BaseModel):
 
 class AlertResponse(BaseModel):
     alert_id: str
-    rule_id: str
+    rule_id: Optional[str]  # nullable: not every alert is bound to a rule (a NULL must not 500 the list)
     sensor_id: Optional[str]
     equipment_id: Optional[str]
     sensor_name: Optional[str]
