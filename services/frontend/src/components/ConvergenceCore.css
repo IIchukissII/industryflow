@@ -14,6 +14,14 @@
 .conv-svg { width: 100%; height: 100%; display: block; overflow: visible; }
 
 .conv-strata { fill: none; stroke: var(--muted); }
+
+/* equipment arc labels — quiet by default, glowing amber/cinnabar when the group is troubled */
+.conv-eqlabel {
+  font-family: var(--font-mono); font-size: 15px; letter-spacing: 0.05em;
+  text-transform: uppercase; fill: var(--faint); pointer-events: none;
+}
+.conv-eqlabel.st-warn { fill: var(--warn); }
+.conv-eqlabel.st-crit { fill: var(--crit); }
 .conv-stream { stroke: var(--muted); stroke-width: 1; opacity: 0.13; transition: opacity 0.2s, stroke 0.2s; }
 .conv-stream.on { stroke: var(--gold); opacity: 0.5; }
 
