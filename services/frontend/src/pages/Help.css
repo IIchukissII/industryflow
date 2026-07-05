@@ -88,7 +88,7 @@
   margin-top: 20px;
   padding: 14px 16px;
   background: var(--signal-soft);
-  border: 1px solid rgba(59, 130, 246, 0.28);
+  border: 1px solid rgba(74, 144, 217, 0.28);
   border-radius: var(--r);
 }
 .guide-tip-mark { color: var(--signal); flex-shrink: 0; }

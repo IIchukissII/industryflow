@@ -38,7 +38,7 @@
   transition: background 0.12s, border-color 0.12s;
 }
 .readout:hover { background: var(--panel-2); }
-.readout.active { background: var(--signal-soft); border-color: rgba(59, 130, 246, 0.3); }
+.readout.active { background: var(--signal-soft); border-color: rgba(74, 144, 217, 0.3); }
 .readout-name { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .readout.active .readout-name { color: var(--text); }
 .readout-val { font-size: 14px; color: var(--live); white-space: nowrap; flex-shrink: 0; }

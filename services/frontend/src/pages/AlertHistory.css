@@ -41,7 +41,7 @@
   width: 100%; background: var(--signal); border-radius: 3px 3px 0 0; min-height: 2px;
   transition: background 0.15s, box-shadow 0.15s;
 }
-.alh-bar:not(.empty):hover { background: var(--signal-strong); box-shadow: 0 0 10px rgba(59, 130, 246, 0.35); }
+.alh-bar:not(.empty):hover { background: var(--signal-strong); box-shadow: 0 0 10px rgba(74, 144, 217, 0.35); }
 .alh-bar.empty { background: var(--line); }
 .alh-bar-label { height: 16px; font-size: 10px; color: var(--faint); margin-top: 5px; }
 

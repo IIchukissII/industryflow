@@ -56,7 +56,7 @@
 }
 
 .equipment-card:hover {
-  border-color: #2962ff;
+  border-color: var(--signal);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(41, 98, 255, 0.1);
 }
@@ -78,7 +78,7 @@
 }
 
 .equipment-badge {
-  background: #2962ff;
+  background: var(--signal);
   color: white;
   padding: 4px 12px;
   border-radius: 12px;
@@ -128,7 +128,7 @@
 
 .btn-view-details {
   flex: 1;
-  background: #2962ff;
+  background: var(--signal);
   color: white;
   border: none;
   padding: 10px 16px;
@@ -268,7 +268,7 @@
 /* Create Button */
 .btn-create {
   padding: 12px 24px;
-  background: #2962ff;
+  background: var(--signal);
   color: white;
   border: none;
   border-radius: 6px;
@@ -316,8 +316,8 @@
 
 .btn-edit {
   background: transparent;
-  color: #2962ff;
-  border-color: #2962ff;
+  color: var(--signal);
+  border-color: var(--signal);
 }
 
 .btn-edit:hover {

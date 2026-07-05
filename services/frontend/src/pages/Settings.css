@@ -115,7 +115,7 @@
 }
 
 .btn-secondary {
-  background: #2962ff;
+  background: var(--signal);
   color: #ffffff;
 }
 

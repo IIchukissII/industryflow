@@ -28,7 +28,7 @@
   transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
 .mdl-filter:hover { color: var(--text); background: var(--panel-2); }
-.mdl-filter.active { color: var(--signal); border-color: rgba(59, 130, 246, 0.35); background: var(--signal-soft); }
+.mdl-filter.active { color: var(--signal); border-color: rgba(74, 144, 217, 0.35); background: var(--signal-soft); }
 .mdl-filter-n { color: var(--faint); margin-left: 3px; }
 .mdl-filter.active .mdl-filter-n { color: var(--signal); }
 
@@ -56,7 +56,7 @@
 }
 
 /* source pills — notebook is signal, platform is the warmer instrument tone */
-.badge.mdl-src-notebook { color: var(--signal); border-color: rgba(59, 130, 246, 0.35); background: var(--signal-soft); }
+.badge.mdl-src-notebook { color: var(--signal); border-color: rgba(74, 144, 217, 0.35); background: var(--signal-soft); }
 .badge.mdl-src-platform { color: var(--warn); border-color: rgba(245, 166, 35, 0.30); background: rgba(245, 166, 35, 0.07); }
 
 .mdl-stage { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
