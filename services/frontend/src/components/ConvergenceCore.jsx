@@ -27,7 +27,7 @@ function statusOf(id, sensors, statusBySensor) {
   return statusBySensor[id] || (sensors[id] && sensors[id].value != null ? 'good' : null);
 }
 
-export default function ConvergenceCore({ sensors, selectedSensor, onSelect, wsConnected, statusBySensor = {} }) {
+export default function ConvergenceCore({ sensors, selectedSensor, onSelect, onOpenAlerts, wsConnected, statusBySensor = {} }) {
   const [hovered, setHovered] = useState(null);
   const [pulses, setPulses] = useState([]);
   const prev = useRef({});
@@ -186,6 +186,11 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, wsC
             <div className="conv-core-eq">{focus.equipment_name || ''}</div>
             {focusStatus && focusStatus !== 'good' && (
               <div className={`conv-core-pill st-${focusStatus}`}>{STATUS_LABEL[focusStatus]}</div>
+            )}
+            {onOpenAlerts && focusId === selectedSensor && (
+              <button type="button" className="conv-core-action" onClick={() => onOpenAlerts(focusId)}>
+                View alerts →
+              </button>
             )}
           </>
         ) : (
