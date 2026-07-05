@@ -28,6 +28,16 @@
 }
 .alh-select:focus { outline: none; border-color: var(--signal); box-shadow: var(--ring); }
 
+/* sensor filter chip — arrives gold from a Convergence node, click to clear */
+.alh-sensor-chip {
+  display: inline-flex; align-items: center; gap: 9px; cursor: pointer;
+  background: var(--gold-soft); color: var(--gold);
+  border: 1px solid color-mix(in srgb, var(--gold) 42%, transparent); border-radius: var(--r-sm);
+  padding: 8px 12px; font-family: var(--font-mono); font-size: 12px;
+}
+.alh-sensor-chip:hover { border-color: var(--gold); }
+.alh-sensor-chip span { color: var(--muted); }
+
 /* ---- charts row ---------------------------------------------------------- */
 .alh-charts { display: grid; grid-template-columns: 2fr 1fr; gap: var(--gap); margin-bottom: var(--gap); }
 .alh-chart { padding: 0; }
