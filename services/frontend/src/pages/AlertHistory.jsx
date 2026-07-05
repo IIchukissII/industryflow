@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Icon from '../components/Icon';
 import './AlertHistory.css';
 import authFetch from '../services/http';
@@ -85,6 +86,8 @@ function AlertHistory() {
   const [selectedRule, setSelectedRule] = useState('all');
   const [filterSeverity, setFilterSeverity] = useState('all');
   const [filterType, setFilterType] = useState('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sensorFilter = searchParams.get('sensor'); // set when arriving from a Convergence node
   const [metrics, setMetrics] = useState(null); // operator-label precision (ADR-0022)
 
   useEffect(() => {
@@ -164,8 +167,13 @@ function AlertHistory() {
     const severityMatch = filterSeverity === 'all' || alert.severity === filterSeverity;
     const typeMatch = filterType === 'all' || alert.detection_type === filterType;
     const ruleMatch = selectedRule === 'all' || alert.rule_id === selectedRule;
-    return severityMatch && typeMatch && ruleMatch;
+    const sensorMatch = !sensorFilter || alert.sensor_id === sensorFilter;
+    return severityMatch && typeMatch && ruleMatch && sensorMatch;
   });
+  // Name for the sensor chip when arriving from a Convergence node (falls back to the id).
+  const sensorFilterName = sensorFilter
+    ? (alerts.find(a => a.sensor_id === sensorFilter)?.sensor_name || `${sensorFilter.slice(0, 8)}…`)
+    : null;
 
   // Timeline: alerts per hour over the last 24h.
   const getHourlyAlertCounts = () => {
@@ -270,6 +278,23 @@ function AlertHistory() {
               <option value="statistical">Statistical (drift)</option>
             </select>
           </label>
+          {sensorFilter && (
+            <div className="alh-field">
+              <span className="alh-field-label">Sensor</span>
+              <button
+                type="button"
+                className="alh-sensor-chip"
+                title="Clear sensor filter"
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  next.delete('sensor');
+                  setSearchParams(next, { replace: true });
+                }}
+              >
+                {sensorFilterName} <span aria-hidden="true">✕</span>
+              </button>
+            </div>
+          )}
         </div>
       </section>
 
