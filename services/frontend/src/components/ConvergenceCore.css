@@ -1,0 +1,64 @@
+/*
+ * SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+.conv {
+  position: relative;
+  width: 100%;
+  max-width: 540px;
+  margin: 0 auto;
+  aspect-ratio: 1 / 1;
+}
+.conv-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+
+.conv-strata { fill: none; stroke: var(--muted); }
+.conv-stream { stroke: var(--muted); stroke-width: 1; opacity: 0.13; transition: opacity 0.2s, stroke 0.2s; }
+.conv-stream.on { stroke: var(--gold); opacity: 0.5; }
+
+.conv-node {
+  fill: var(--panel-3); stroke: var(--faint); stroke-width: 1.5;
+  cursor: pointer; transition: r 0.15s, fill 0.15s, stroke 0.15s;
+}
+.conv-node:hover { stroke: var(--gold); }
+.conv-node.on { fill: var(--gold); stroke: var(--gold-glow); }
+.conv-node.sel { stroke: var(--gold-glow); stroke-width: 2.5; }
+
+.conv-pulse { fill: var(--gold-glow); opacity: 0; animation: convFlow 1.5s cubic-bezier(0.4, 0, 0.5, 1) forwards; }
+@keyframes convFlow {
+  0%   { cx: 242px; opacity: 0; }
+  14%  { opacity: 1; }
+  86%  { opacity: 0.9; }
+  100% { cx: 78px; opacity: 0; }
+}
+.conv-coreglow { transform-box: fill-box; transform-origin: center; animation: convBreathe 4s ease-in-out infinite; }
+@keyframes convBreathe { 0%, 100% { opacity: 0.85; transform: scale(1); } 50% { opacity: 1; transform: scale(1.05); } }
+.conv-coredot { fill: #f6efe0; }
+
+/* the core readout, crisp HTML centred over the svg */
+.conv-core {
+  position: absolute; inset: 0; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 3px;
+}
+.conv-core-val {
+  font-family: var(--font-display); font-weight: 600; font-optical-sizing: auto;
+  font-size: clamp(38px, 7vw, 64px); line-height: 1; letter-spacing: -0.02em;
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+.conv-core-unit { font-family: var(--font-sans); font-weight: 500; font-size: 0.32em; color: var(--muted); margin-left: 4px; }
+.conv-core-name { font-size: 14px; color: var(--muted); max-width: 180px; }
+.conv-core-eq {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--faint);
+}
+.conv-empty {
+  position: absolute; left: 50%; bottom: 14%; transform: translateX(-50%);
+  color: var(--muted); font-size: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conv-pulse { animation: none; opacity: 0; }
+  .conv-coreglow { animation: none; }
+}

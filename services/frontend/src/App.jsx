@@ -9,6 +9,7 @@ import { getLatestSensors } from './services/api';
 import { API_URL } from './config';
 import websocketService from './services/websocket';
 import AppShell from './components/AppShell';
+import ConvergenceCore from './components/ConvergenceCore';
 import Icon from './components/Icon';
 
 // Route pages + the chart are code-split: each becomes its own chunk, loaded on demand, so the
@@ -131,6 +132,14 @@ function Dashboard({ user }) {
     if (first) setSelectedSensor(first.id);
   };
 
+  // Pin a channel from the Convergence: select it and sync the equipment so the history selectors follow.
+  const selectSensor = (id) => {
+    setSelectedSensor(id);
+    const s = sensors[id];
+    const key = s?.equipment_name || s?.equipment_id;
+    if (key) setSelectedEquipment(key);
+  };
+
   return (
     <AppShell user={user} title="Core" wsConnected={wsConnected} lastUpdate={lastUpdate}>
       <div className="page-head">
@@ -171,10 +180,29 @@ function Dashboard({ user }) {
         </div>
       </div>
 
-      <div className="dash-grid">
+      <div className="dash-core">
+        <section className="panel conv-panel">
+          <div className="panel-head">
+            <h2>Convergence</h2>
+            <span className={`badge ${wsConnected ? 'badge-live' : 'badge-warn'}`}>
+              <span className={`sdot ${wsConnected ? 'ok' : 'pending'}`} />
+              {sensorCount} live
+            </span>
+          </div>
+          <div className="conv-wrap">
+            <ConvergenceCore
+              sensors={sensors}
+              selectedSensor={selectedSensor}
+              onSelect={selectSensor}
+              wsConnected={wsConnected}
+            />
+          </div>
+          <div className="conv-hint">Point at a node to read it · click to pin the channel</div>
+        </section>
+
         <section className="panel" style={{ padding: 0 }}>
           <div className="panel-head">
-            <h2>Real-time chart</h2>
+            <h2>Channel history</h2>
             <div className="dash-selectors">
               <select value={selectedEquipment || ''} onChange={(e) => selectEquipment(e.target.value)}>
                 <option value="">Equipment…</option>
@@ -201,39 +229,11 @@ function Dashboard({ user }) {
             ) : (
               <div className="dash-empty">
                 <Icon name="activity" size={26} color="var(--faint)" />
-                <p>Select equipment and a channel to plot its history.</p>
+                <p>Point at a node in the Convergence, or pick a channel, to plot its history.</p>
               </div>
             )}
           </div>
         </section>
-
-        <aside className="panel" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
-          <div className="panel-head">
-            <h2>Live readouts</h2>
-            <span className="badge">{sensorCount}</span>
-          </div>
-          <div className="readout-list">
-            {equipmentCount === 0 && <div className="dash-empty"><p>Waiting for sensor data…</p></div>}
-            {Object.entries(equipmentGroups).map(([key, g]) => (
-              <div className="readout-group" key={g.equipmentId || key}>
-                <div className="readout-eq"><Icon name="box" size={13} /> {g.equipmentName || key}</div>
-                {g.sensors.map((s) => (
-                  <button
-                    key={s.id}
-                    className={`readout${selectedSensor === s.id ? ' active' : ''}`}
-                    onClick={() => { setSelectedEquipment(key); setSelectedSensor(s.id); }}
-                  >
-                    <span className="readout-name">{s.sensor_name || s.id}</span>
-                    <span className="readout-val mono">
-                      {s.value !== undefined ? s.value.toFixed(2) : '—'}
-                      <i>{s.unit || ''}</i>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
-        </aside>
       </div>
     </AppShell>
   );
