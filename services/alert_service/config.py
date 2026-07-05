@@ -63,6 +63,19 @@ class AlertServiceConfig:
     DRIFT_EVAL_INTERVAL = int(os.getenv('DRIFT_EVAL_INTERVAL', '3600'))   # hourly
     DRIFT_WINDOW_MINUTES = int(os.getenv('DRIFT_WINDOW_MINUTES', '1440'))  # trailing 24h
     DRIFT_SHARE_THRESHOLD = float(os.getenv('DRIFT_SHARE_THRESHOLD', '0.5'))
+
+    # Retrain recommendation (ADR-0022 dec 4): the closed loop is a *recommendation*, not
+    # automated training. Raised only when a model shows BOTH sustained drift AND label-derived
+    # precision decay — so a drift blip alone or a couple of bad labels alone won't trigger it.
+    # Evaluated on the same schedule as drift; all thresholds are configuration.
+    RETRAIN_RECO_ENABLED = os.getenv('RETRAIN_RECO_ENABLED', 'true').lower() == 'true'
+    RETRAIN_PRECISION_FLOOR = float(os.getenv('RETRAIN_PRECISION_FLOOR', '0.6'))    # below this = decayed
+    RETRAIN_MIN_LABELS = int(os.getenv('RETRAIN_MIN_LABELS', '10'))                 # min decided labels to trust precision
+    RETRAIN_MIN_DRIFT_ALERTS = int(os.getenv('RETRAIN_MIN_DRIFT_ALERTS', '2'))      # "sustained" drift
+    RETRAIN_PRECISION_WINDOW_DAYS = int(os.getenv('RETRAIN_PRECISION_WINDOW_DAYS', '30'))
+    RETRAIN_DRIFT_LOOKBACK_HOURS = int(os.getenv('RETRAIN_DRIFT_LOOKBACK_HOURS', '72'))
+    RETRAIN_RECO_COOLDOWN_SECONDS = float(os.getenv('RETRAIN_RECO_COOLDOWN_SECONDS', '86400'))  # once/day/model
+    RETRAIN_RECO_SEVERITY = os.getenv('RETRAIN_RECO_SEVERITY', 'high')
     
     @property
     def database_url(self):
