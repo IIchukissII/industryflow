@@ -121,8 +121,15 @@ async def _resolve_company_id(request: Request, request_data: InferenceRequest) 
         except (ValueError, AttributeError, TypeError):
             raise HTTPException(status_code=400, detail="company_id must be a valid UUID")
 
-    # Otherwise require a user JWT.
-    user_data = await auth.verify_jwt_token(request.headers.get("Authorization"))
+    # Otherwise require a user JWT — from the Bearer header (API/service clients) or the
+    # httpOnly if_access cookie (same-origin browser calls behind the TLS edge, e.g. the Models
+    # drift panel). Pass BOTH explicitly: verify_jwt_token is written as a FastAPI dependency, so
+    # its if_access default is a Cookie(None) marker (truthy) — calling it positionally would make
+    # the cookie branch fire on a FieldInfo and 500 instead of cleanly reading the cookie / 401ing.
+    user_data = await auth.verify_jwt_token(
+        authorization=request.headers.get("Authorization"),
+        if_access=request.cookies.get("if_access"),
+    )
     claim = user_data.get("payload", {}).get("company_id")
     if claim:
         return str(claim)
