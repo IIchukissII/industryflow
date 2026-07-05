@@ -2,7 +2,8 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { defineConfig } from 'vite';
+/// <reference types="vitest/config" />
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 // Migrated from Create React App. Output stays in build/ (not Vite's default dist/) so the
@@ -11,6 +12,9 @@ import react from '@vitejs/plugin-react';
 // local gateway so cookies/CSRF stay first-party.
 export default defineConfig({
   plugins: [react()],
+  // Use the automatic JSX runtime everywhere (incl. the vitest transform) so components that
+  // don't import React (React 17+ / the new transform) render in tests too.
+  esbuild: { jsx: 'automatic' },
   build: {
     outDir: 'build',
     // CRA emitted source maps off by default in prod; keep the bundle lean.
@@ -24,5 +28,11 @@ export default defineConfig({
       '/users': { target: 'http://localhost:8000', changeOrigin: true },
       '/ws': { target: 'ws://localhost:8000', ws: true },
     },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: './src/test/setup.js',
+    css: false,
   },
 });
