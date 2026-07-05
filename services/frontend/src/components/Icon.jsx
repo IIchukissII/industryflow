@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import React from 'react';
 
 // Minimal line-icon set (24x24, stroke = currentColor) so icons inherit the surrounding
 // text colour and stay visually consistent — replaces ad-hoc emoji glyphs across the UI.

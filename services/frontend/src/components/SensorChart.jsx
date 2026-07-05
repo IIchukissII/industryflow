@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, LineSeries, AreaSeries, CandlestickSeries } from 'lightweight-charts';
 import { getMeasurements, getCombinedAggregations } from '../services/api';
 import websocketService from '../services/websocket';
