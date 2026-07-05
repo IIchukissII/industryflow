@@ -7,7 +7,7 @@
 # wraps included routers in `_IncludedRouter` objects with no `.path`, which the 6.1.0
 # instrumentator's route-name resolver cannot introspect — it 500s every request, including
 # /health. This is the same pinned combo api-gateway runs; 0.115 sits inside mlflow's fastapi<1.
-fastapi==0.139.0
+fastapi==0.115.0
 uvicorn[standard]==0.50.0
 pydantic==2.13.4
 
@@ -40,4 +40,4 @@ evidently==0.7.21
 redis[asyncio]==5.0.1
 
 # Prometheus metrics
-prometheus-fastapi-instrumentator==7.0.0
+prometheus-fastapi-instrumentator==6.1.0
