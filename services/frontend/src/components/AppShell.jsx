@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import './AppShell.css';
 import api from '../services/api';
 import Icon from './Icon';
