@@ -41,6 +41,59 @@ class LabelRequest(BaseModel):
     note: Optional[str] = None
 
 
+class Bucket(str, Enum):
+    """Time-bucket granularity for label metrics over time."""
+    day = "day"
+    week = "week"
+
+
+_BUCKET_INTERVAL = {"day": "1 day", "week": "7 days"}
+
+
+def _precision(tp: int, fp: int) -> Optional[float]:
+    """Precision = TP / (TP + FP), or None when nothing decisive was labelled.
+
+    'unsure' verdicts are intentionally excluded from the denominator — they are neither a
+    confirmed hit nor a confirmed miss.
+    """
+    decided = tp + fp
+    return round(tp / decided, 4) if decided else None
+
+
+def _false_positive_rate(tp: int, fp: int) -> Optional[float]:
+    """FP / (TP + FP), or None when nothing decisive was labelled."""
+    decided = tp + fp
+    return round(fp / decided, 4) if decided else None
+
+
+class PrecisionBucket(BaseModel):
+    bucket: datetime
+    true_positive: int
+    false_positive: int
+    unsure: int
+    precision: Optional[float]
+
+
+class PrecisionSummary(BaseModel):
+    true_positive: int
+    false_positive: int
+    unsure: int
+    labeled_total: int
+    precision: Optional[float]
+    false_positive_rate: Optional[float]
+
+
+class PrecisionMetrics(BaseModel):
+    window_days: int
+    bucket: str
+    model_id: Optional[str]
+    rule_id: Optional[str]
+    overall: PrecisionSummary
+    series: List[PrecisionBucket]
+    # Honest scope (ADR-0022 dec 3): recall is not derivable from fired-alert labels.
+    note: str
+
+
 class AlertResponse(BaseModel):
     alert_id: str
     rule_id: str
@@ -336,3 +389,74 @@ async def label_alert(
         "message": "Alert labelled successfully",
         "label": dict(result.fetchone()._mapping),
     }
+
+
+@router.get("/label-metrics", response_model=PrecisionMetrics)
+async def alert_label_metrics(
+        model_id: Optional[str] = None,
+        rule_id: Optional[str] = None,
+        days: int = 30,
+        bucket: Bucket = Bucket.day,
+        db: AsyncSession = Depends(get_db_with_tenant),
+        current_user: User = Depends(get_current_user_with_company)
+):
+    """Precision + false-positive rate over time from operator alert labels (ADR-0022 dec 3).
+
+    Buckets the labelled fired alerts by time and reports, per bucket and overall, precision
+    = TP/(TP+FP) and the false-positive rate. Optionally scoped to one model or rule.
+
+    Recall is deliberately NOT reported: fired-alert labels carry no false-negative signal
+    (we never see the anomalies that didn't fire), so a recall number here would be a fiction
+    (ADR-0022). The response says so in `note`.
+    """
+    days = max(1, min(days, 365))
+
+    where = ["labeled_at >= NOW() - make_interval(days => :days)"]
+    params = {"days": days, "interval": _BUCKET_INTERVAL[bucket.value]}
+    if model_id:
+        where.append("model_id = :model_id")
+        params["model_id"] = model_id
+    if rule_id:
+        where.append("rule_id = :rule_id")
+        params["rule_id"] = rule_id
+
+    query = f"""
+        SELECT
+            time_bucket(CAST(:interval AS interval), labeled_at) AS bucket,
+            count(*) FILTER (WHERE verdict = 'true_positive')  AS tp,
+            count(*) FILTER (WHERE verdict = 'false_positive') AS fp,
+            count(*) FILTER (WHERE verdict = 'unsure')         AS unsure
+        FROM alert_labels
+        WHERE {" AND ".join(where)}
+        GROUP BY bucket
+        ORDER BY bucket
+    """
+
+    rows = (await db.execute(text(query), params)).fetchall()
+
+    series = []
+    tot_tp = tot_fp = tot_unsure = 0
+    for row in rows:
+        m = row._mapping
+        tp, fp, unsure = m["tp"], m["fp"], m["unsure"]
+        tot_tp += tp
+        tot_fp += fp
+        tot_unsure += unsure
+        series.append(PrecisionBucket(
+            bucket=m["bucket"], true_positive=tp, false_positive=fp, unsure=unsure,
+            precision=_precision(tp, fp),
+        ))
+
+    overall = PrecisionSummary(
+        true_positive=tot_tp, false_positive=tot_fp, unsure=tot_unsure,
+        labeled_total=tot_tp + tot_fp + tot_unsure,
+        precision=_precision(tot_tp, tot_fp),
+        false_positive_rate=_false_positive_rate(tot_tp, tot_fp),
+    )
+
+    return PrecisionMetrics(
+        window_days=days, bucket=bucket.value, model_id=model_id, rule_id=rule_id,
+        overall=overall, series=series,
+        note=("Precision and false-positive rate only; recall is not derivable from "
+              "fired-alert labels (no false-negative signal) — ADR-0022."),
+    )
