@@ -131,3 +131,6 @@
   .alh-alert { flex-direction: column; align-items: stretch; }
   .alh-alert-right { flex-wrap: wrap; }
 }
+
+/* precision-over-time sparkline in the KPI (ADR-0022) */
+.alh-spark { display: block; margin: 6px 0 2px; overflow: visible; }
