@@ -86,7 +86,7 @@ Interactive API docs are served at `http://localhost:8000/docs` when the stack i
 ## Technology
 
 Python 3.11 · FastAPI · Apache Spark 3.5 · Apache Kafka · MLflow · PostgreSQL 15 + TimescaleDB ·
-Redis · MinIO · React 18 · Prometheus / Grafana / Loki.
+Redis · MinIO · React 18 (Vite) · Prometheus / Grafana / Loki.
 
 ## Contributing
 
