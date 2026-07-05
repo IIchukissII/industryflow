@@ -49,3 +49,21 @@ jobs:
         run: npm ci
       - name: eslint
         run: npx eslint src --ext .js,.jsx
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          # Vitest runs through Vite 8, which needs node >=20.19/22.12.
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: vitest
+        run: npm test
