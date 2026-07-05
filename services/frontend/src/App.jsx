@@ -10,6 +10,7 @@ import { API_URL } from './config';
 import websocketService from './services/websocket';
 import AppShell from './components/AppShell';
 import ConvergenceCore from './components/ConvergenceCore';
+import authFetch from './services/http';
 import Icon from './components/Icon';
 
 // Route pages + the chart are code-split: each becomes its own chunk, loaded on demand, so the
@@ -44,6 +45,7 @@ function Dashboard({ user }) {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
   const [selectedSensor, setSelectedSensor] = useState(null);
+  const [alertStatus, setAlertStatus] = useState({}); // sensor_id -> 'crit' | 'warn', from active alerts
 
   useEffect(() => {
     fetch(`${API_URL}/health`)
@@ -102,6 +104,32 @@ function Dashboard({ user }) {
     // selectedEquipment/selectedSensor are read only to pick defaults, deliberately not
     // a re-run trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Poll active (unacknowledged) alerts and reduce them to a per-sensor health tint for the
+  // Convergence ring: critical → crit, high/medium → warn, worst-per-sensor wins.
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const res = await authFetch('/api/alerts?acknowledged=false&limit=500');
+        if (!res.ok) return;
+        const data = await res.json();
+        const map = {};
+        (data || []).forEach((a) => {
+          if (!a.sensor_id) return;
+          const sev = (a.severity || '').toLowerCase();
+          const st = sev === 'critical' ? 'crit'
+            : (sev === 'high' || sev === 'medium' || sev === 'warning') ? 'warn' : null;
+          if (!st) return;
+          if (st === 'crit' || map[a.sensor_id] !== 'crit') map[a.sensor_id] = st;
+        });
+        if (active) setAlertStatus(map);
+      } catch { /* best-effort; the ring just shows healthy tints */ }
+    };
+    load();
+    const iv = setInterval(load, 20000);
+    return () => { active = false; clearInterval(iv); };
   }, []);
 
   const groupByEquipment = () => {
@@ -195,6 +223,7 @@ function Dashboard({ user }) {
               selectedSensor={selectedSensor}
               onSelect={selectSensor}
               wsConnected={wsConnected}
+              statusBySensor={alertStatus}
             />
           </div>
           <div className="conv-hint">Point at a node to read it · click to pin the channel</div>
