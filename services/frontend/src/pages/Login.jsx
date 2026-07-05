@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import './Login.css';
 import api from '../services/api';
 import Mandala from '../components/Mandala';
+import Starfield from '../components/Starfield';
 
 function Login({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -48,27 +49,21 @@ function Login({ onLogin }) {
   return (
     <div className="login">
       <aside className="login-hero">
-        <a href="/" className="login-brand">
-          <img src="/logo-mark.svg" alt="" width="32" height="32" />
-          <span>Industry<span className="wm-accent">Flow</span></span>
-        </a>
-        <div className="login-hero-figure" aria-hidden="true">
-          <Mandala size={360} className="login-hero-mandala" />
-        </div>
-        <div className="login-hero-body">
-          <div className="eyebrow">Industrial IoT · Control plane</div>
-          <h2 className="login-tagline">The still centre in the turning world.</h2>
+        <Starfield className="login-stars" />
+        <div className="login-hero-stack">
+          <Mandala size={300} className="login-hero-mandala" />
+          <h1 className="login-wordmark">Industry<span className="wm-accent">Flow</span></h1>
+          <p className="login-tagline">The still centre in the turning world.</p>
           <p className="login-lede">
             Every sensor stream converges inward — flux resolved into meaning at a
-            luminous core, in real time.
+            luminous core.
           </p>
         </div>
-        <div className="login-hero-foot mono">tenant-isolated · TLS edge</div>
       </aside>
 
       <main className="login-panel">
         <div className="login-card">
-          <Mandala className="login-mandala" size={104} />
+          <div className="eyebrow">Industrial IoT · Control plane</div>
           <h1>Sign in</h1>
           <p className="login-sub">Access your IndustryFlow workspace.</p>
 
