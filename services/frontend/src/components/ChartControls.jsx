@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import React from 'react';
 import './ChartControls.css';
 
 const ChartControls = ({

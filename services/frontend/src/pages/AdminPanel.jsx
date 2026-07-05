@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import Icon from '../components/Icon';
 import { Link, Routes, Route, Navigate } from 'react-router-dom';
 import CompaniesPage from './CompaniesPage';
