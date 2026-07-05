@@ -109,7 +109,7 @@ function MLModels() {
       const [nbRes, plRes, alRes] = await Promise.allSettled([
         authFetch('/api/registered-models'),
         authFetch('/api/models'),
-        authFetch('/api/alerts?severity=high&limit=1000'), // for the retrain-recommended signal
+        authFetch('/api/alerts?condition=retrain_recommended&acknowledged=false&limit=200'), // just the live retrain recs
       ]);
       const out = [];
       if (nbRes.status === 'fulfilled' && nbRes.value.ok) {
@@ -125,11 +125,8 @@ function MLModels() {
       // treated as handled, so it drops off.
       if (alRes.status === 'fulfilled' && alRes.value.ok) {
         const alerts = await alRes.value.json();
-        setRetrainModels(new Set(
-          (alerts || [])
-            .filter((a) => a.condition === 'retrain_recommended' && a.model_id && !a.acknowledged)
-            .map((a) => a.model_id)
-        ));
+        // Server-filtered to unacknowledged retrain_recommended alerts; just collect their models.
+        setRetrainModels(new Set((alerts || []).filter((a) => a.model_id).map((a) => a.model_id)));
       }
       out.sort((a, b) => (b.updated || 0) - (a.updated || 0));
       setModels(out);

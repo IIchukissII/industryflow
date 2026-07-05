@@ -91,13 +91,13 @@ function AlertHistory() {
     fetchAlerts();
     fetchAlertRules();
     fetchMetrics();
-    const interval = setInterval(fetchAlerts, 10000);
+    const interval = setInterval(fetchAlerts, 20000);
     return () => clearInterval(interval);
   }, []);
 
   const fetchAlerts = async () => {
     try {
-      const response = await authFetch('/api/alerts?limit=1000');
+      const response = await authFetch('/api/alerts?limit=500');
       if (!response.ok) throw new Error('Failed to fetch alerts');
       const data = await response.json();
       setAlerts(data || []);
