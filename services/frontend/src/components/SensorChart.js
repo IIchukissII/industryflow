@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { createChart } from 'lightweight-charts';
+import { createChart, LineSeries, AreaSeries, CandlestickSeries } from 'lightweight-charts';
 import { getMeasurements, getCombinedAggregations } from '../services/api';
 import websocketService from '../services/websocket';
 import ChartControls from './ChartControls';
@@ -115,19 +115,20 @@ const SensorChart = ({ sensorId }) => {
       seriesRef.current = null;
     }
 
+    // v5 replaces the per-type add*Series helpers with addSeries(SeriesDefinition, options).
     let series;
     if (type === 'area') {
-      series = chart.addAreaSeries({
+      series = chart.addSeries(AreaSeries, {
         lineColor: SERIES, lineWidth: 2,
         topColor: 'rgba(76,154,255,0.28)', bottomColor: 'rgba(76,154,255,0.0)',
         priceLineVisible: false,
       });
     } else if (type === 'candlestick') {
-      series = chart.addCandlestickSeries({
+      series = chart.addSeries(CandlestickSeries, {
         upColor: UP, downColor: DOWN, borderVisible: false, wickUpColor: UP, wickDownColor: DOWN,
       });
     } else {
-      series = chart.addLineSeries({ color: SERIES, lineWidth: 2, priceLineVisible: false });
+      series = chart.addSeries(LineSeries, { color: SERIES, lineWidth: 2, priceLineVisible: false });
     }
     seriesRef.current = series;
     seriesKeyRef.current = key;

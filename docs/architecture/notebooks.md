@@ -99,8 +99,10 @@ running cluster.
 - **SQL proxy** (`services/notebook_sql_proxy`): the full Postgres-wire proxy — resolve an SQL
   handle → tenant, connect upstream over **`verify-full` TLS** (ADR-0017), `SET ROLE` into the
   reader role + `search_path` to its schema, relay; a denied handle opens no backend. The wire
-  codec and the SCRAM-SHA-256 client (RFC 7677 vector) are unit-tested; **live-validated on the
-  box** (read-only, single-tenant, bogus/API-audience handles refused).
+  codec and the SCRAM-SHA-256 client (RFC 7677 vector) are unit-tested; **box-validated
+  end-to-end** by an automated integration test (`test_sql_proxy_integration.py`, 5/5 green
+  against the live stack — own-tenant read, read-only, cross-tenant denied, revoked/API-audience
+  refused), closing that part of **issue #19**.
 - **Client** (`clients/python/industryflow`): `IndustryFlowClient` loads tenant data via the data
   API (`X-IF-Capability`); `IndustryFlowSQL` / `sql_query` run tenant SQL through the proxy with
   the SQL capability as the password (the `[sql]` extra). Holds no DB/object-store credential.

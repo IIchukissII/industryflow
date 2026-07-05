@@ -7,6 +7,45 @@ import Icon from '../components/Icon';
 import './AlertHistory.css';
 import authFetch from '../services/http';
 
+// Operator verdict vocabulary (ADR-0022): "was this alert real?" — distinct from acknowledge.
+const VERDICTS = [
+  { key: 'true_positive', label: 'Real', tone: 'ok' },
+  { key: 'false_positive', label: 'False', tone: 'bad' },
+  { key: 'unsure', label: 'Unsure', tone: 'muted' },
+];
+
+// A compact three-way label control per alert. The active verdict is highlighted, so it doubles
+// as the verdict display — colour is never the only signal (each button is also worded).
+function LabelControl({ alert, onLabel }) {
+  const [busy, setBusy] = useState(false);
+  const current = alert.label_verdict || null;
+
+  const set = async (verdict) => {
+    if (busy || verdict === current) return;
+    setBusy(true);
+    await onLabel(alert.alert_id, verdict);
+    setBusy(false);
+  };
+
+  return (
+    <div className="alh-label" role="group" aria-label="Label whether this alert was real">
+      {VERDICTS.map(v => (
+        <button
+          key={v.key}
+          type="button"
+          className={`alh-verdict alh-verdict-${v.tone}${current === v.key ? ' active' : ''}`}
+          onClick={() => set(v.key)}
+          disabled={busy}
+          aria-pressed={current === v.key}
+          title={`Mark this alert as ${v.label.toLowerCase()}`}
+        >
+          {v.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function AlertHistory() {
   const [alerts, setAlerts] = useState([]);
   const [alertRules, setAlertRules] = useState([]);
@@ -17,6 +56,7 @@ function AlertHistory() {
   const [selectedRule, setSelectedRule] = useState('all');
   const [filterSeverity, setFilterSeverity] = useState('all');
   const [filterType, setFilterType] = useState('all');
+  const [metrics, setMetrics] = useState(null); // operator-label precision (ADR-0022)
 
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
@@ -31,6 +71,7 @@ function AlertHistory() {
 
     fetchAlerts();
     fetchAlertRules();
+    fetchMetrics();
     const interval = setInterval(fetchAlerts, 10000);
     return () => clearInterval(interval);
   }, []);
@@ -56,6 +97,33 @@ function AlertHistory() {
       setAlertRules(data || []);
     } catch (err) {
       console.error('Failed to fetch alert rules:', err);
+    }
+  };
+
+  // Operator-label precision over the last 30 days (ADR-0022). Recall is intentionally absent.
+  const fetchMetrics = async () => {
+    try {
+      const response = await authFetch('/api/alerts/label-metrics?days=30');
+      if (response.ok) setMetrics(await response.json());
+    } catch (err) {
+      /* precision panel just stays empty if unavailable */
+    }
+  };
+
+  // Record an operator's correctness verdict on an alert (ADR-0022). Optimistic: reflect the
+  // verdict locally on success, then refresh precision.
+  const labelAlert = async (alertId, verdict) => {
+    try {
+      const response = await authFetch(`/api/alerts/${alertId}/label`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verdict }),
+      });
+      if (!response.ok) throw new Error('Failed to label alert');
+      setAlerts(prev => prev.map(a => (a.alert_id === alertId ? { ...a, label_verdict: verdict } : a)));
+      fetchMetrics();
+    } catch (err) {
+      console.error('Failed to label alert:', err);
     }
   };
 
@@ -167,6 +235,17 @@ function AlertHistory() {
             <div className="kpi" style={{ '--accent': 'var(--signal)' }}>
               <div className="kpi-label">Unacknowledged</div>
               <div className="kpi-value">{filteredAlerts.filter(a => !a.acknowledged).length}</div>
+            </div>
+            <div className="kpi" style={{ '--accent': 'var(--live)' }} title="Precision from operator labels over the last 30 days. Recall is not measurable from fired-alert labels (ADR-0022).">
+              <div className="kpi-label">Precision (labelled)</div>
+              <div className="kpi-value">
+                {metrics?.overall?.precision != null ? `${Math.round(metrics.overall.precision * 100)}%` : '—'}
+              </div>
+              <div className="kpi-foot">
+                {metrics?.overall?.labeled_total
+                  ? `${metrics.overall.labeled_total} labelled · 30d`
+                  : 'label alerts below to measure'}
+              </div>
             </div>
           </div>
 
@@ -359,6 +438,7 @@ function AlertHistory() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <LabelControl alert={alert} onLabel={labelAlert} />
                       <span style={{
                         padding: '4px 8px',
                         background: getSeverityColor(alert.severity),

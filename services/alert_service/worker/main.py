@@ -183,6 +183,23 @@ class AlertService:
                         )
                         if alerts:
                             logger.info(f"Generated {len(alerts)} drift alert(s) for tenant {company_id}")
+
+                        # ADR-0022 dec 4: right after the drift pass (so "sustained drift" sees
+                        # this cycle's alerts), recommend retraining for any model that also shows
+                        # label-derived precision decay. A recommendation, not automated training.
+                        if config.RETRAIN_RECO_ENABLED:
+                            recos = await self.rules_engine.evaluate_retrain_recommendations(
+                                company_id=company_id,
+                                precision_floor=config.RETRAIN_PRECISION_FLOOR,
+                                min_labels=config.RETRAIN_MIN_LABELS,
+                                min_drift_alerts=config.RETRAIN_MIN_DRIFT_ALERTS,
+                                precision_window_days=config.RETRAIN_PRECISION_WINDOW_DAYS,
+                                drift_lookback_hours=config.RETRAIN_DRIFT_LOOKBACK_HOURS,
+                                cooldown_seconds=config.RETRAIN_RECO_COOLDOWN_SECONDS,
+                                severity=config.RETRAIN_RECO_SEVERITY,
+                            )
+                            if recos:
+                                logger.info(f"Generated {len(recos)} retrain recommendation(s) for tenant {company_id}")
                     except Exception as e:
                         logger.error(f"Failed drift evaluation for tenant {company_id}: {e}")
 

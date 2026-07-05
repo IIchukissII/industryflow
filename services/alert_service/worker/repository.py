@@ -202,6 +202,56 @@ class AlertRepository:
 
             return dict(row) if row else None
 
+    async def get_retrain_signals(
+        self,
+        model_id: str,
+        company_id: str,
+        precision_window_days: int,
+        drift_lookback_hours: int,
+    ) -> Dict:
+        """Read the two signals the retrain recommendation combines (ADR-0022 dec 4).
+
+        - operator-label precision counts (tp/fp) for this model over the precision window,
+          from the durable alert_labels store (ADR-0022 slice 1);
+        - the count of recent drift alerts for this model (sustained drift) from alert history.
+
+        Both tenant-scoped via search_path. Returns {tp, fp, recent_drift_alerts}.
+        """
+        schema_name = normalize_company_id_to_schema(company_id)
+        model_uuid = uuid_module.UUID(str(model_id))
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            label_row = await conn.fetchrow(
+                """
+                SELECT
+                    count(*) FILTER (WHERE verdict = 'true_positive')  AS tp,
+                    count(*) FILTER (WHERE verdict = 'false_positive') AS fp
+                FROM alert_labels
+                WHERE model_id = $1
+                  AND labeled_at >= NOW() - make_interval(days => $2::int)
+                """,
+                model_uuid, precision_window_days,
+            )
+            recent_drift = await conn.fetchval(
+                """
+                SELECT count(*)
+                FROM alerts
+                WHERE model_id = $1
+                  AND detection_type = 'statistical'
+                  AND condition = 'drift'
+                  AND triggered_at >= NOW() - make_interval(hours => $2::int)
+                """,
+                model_uuid, drift_lookback_hours,
+            )
+
+        return {
+            "tp": (label_row["tp"] if label_row else 0) or 0,
+            "fp": (label_row["fp"] if label_row else 0) or 0,
+            "recent_drift_alerts": recent_drift or 0,
+        }
+
 
 class RuleRepository:
     """Repository for loading rules from all tenants"""
