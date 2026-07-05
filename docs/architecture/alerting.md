@@ -34,6 +34,26 @@ authoritative; this is the shape.
   `INTERNAL_SERVICE_TOKEN` as ML rules; a `statistical` rule binds a `model_id` and a drift
   threshold, and reaching the per-reading path is a no-op (drift is the wrong timescale for it).
 
+## Operator feedback & retrain recommendation (ADR-0022)
+
+Label-free drift says the input distribution moved; it can't say whether a model's alerts are
+still *correct*. That needs a human verdict (**[ADR-0022](../../ADR/ADR-0022-concept-drift-operator-feedback.md)**):
+
+- **Labels.** An operator marks a fired alert `true_positive` / `false_positive` / `unsure`
+  (`PATCH /api/alerts/{alert_id}/label` — distinct from acknowledge). Labels live in a dedicated
+  per-tenant `alert_labels` table, **not** on the alerts hypertable, so they outlive its 90-day
+  retention; the alert's rule/model/detection/severity are denormalized onto the label so it
+  stays meaningful after the alert ages out.
+- **Precision over time.** `GET /api/alerts/label-metrics` buckets the labels and returns
+  **precision = TP/(TP+FP)** and the false-positive rate, per bucket and overall, optionally
+  scoped to a model or rule. **Recall is intentionally absent** — fired-alert labels carry no
+  false-negative signal, so a recall number would be fiction.
+- **Retrain recommendation.** A scheduled evaluator in the worker (sibling of the drift
+  evaluator) raises a distinct high-severity `statistical` alert, `condition='retrain_recommended'`,
+  when a model shows **both** sustained drift **and** label-derived precision decay — model-scoped
+  cooldown so it doesn't repeat every cycle. It *recommends* retraining (manual/notebook); it does
+  not train, since no training service exists. Tunable via the `RETRAIN_*` config.
+
 ## Delivery & idempotency
 
 The worker consumes Kafka **at-least-once** (manual commits, bounded retry, dead-letter — see
