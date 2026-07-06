@@ -14,6 +14,7 @@ async def update_redis_cache():
     Runs every 2 seconds.
     """
     print("✓ Redis cache updater started (schema-per-tenant mode)")
+    zero_cycles = 0  # consecutive polls with no fresh measurements (throttles the warning below)
     
     while True:
         try:
@@ -82,8 +83,21 @@ async def update_redis_cache():
                         continue
                 
                 if total_sensors > 0:
+                    zero_cycles = 0
                     print(f"✓ Updated {total_sensors} sensors in Redis cache from {len(tenant_schemas)} tenants")
-                
+                else:
+                    # No fresh measurements anywhere in the last hour: the usual cause is the
+                    # raw-measurements writer (spark-streaming / kafka_to_timescaledb.py) being
+                    # down. Warn on the first zero poll and every ~60s thereafter, not every 2s,
+                    # so the UI going dark leaves a signal in the gateway log.
+                    if zero_cycles % 30 == 0:
+                        print(
+                            f"⚠ Cache updater: 0 fresh sensor_measurements in the last hour across "
+                            f"{len(tenant_schemas)} tenant(s) — is spark-streaming "
+                            f"(raw-measurements writer) running?"
+                        )
+                    zero_cycles += 1
+
         except Exception as e:
             print(f"✗ Cache updater error: {e}")
         
