@@ -24,6 +24,23 @@ device ──mTLS──▶ ingestion ──▶ Kafka (sensor-data-raw) ──▶
 3. **Spark aggregations** windows the stream into 1-minute / 5-minute / 1-hour rollups and
    upserts them into the aggregation hypertables.
 
+## Read side (live values)
+
+The write path above ends at TimescaleDB; the live sensor view reads back out of it:
+
+```
+sensor_measurements ─▶ api-gateway cache_updater (2s poll) ─▶ Redis (sensor:latest:*, TTL 60s) ─▶ WS /ws/sensors ─▶ UI
+```
+
+The `cache_updater` polls each tenant's `sensor_measurements` for the latest value per sensor in
+the last hour and mirrors it into Redis; the frontend streams those over the sensor WebSocket. So
+the **live UI view depends on the Spark streaming job** (pipeline step 2) writing fresh
+measurements — if that job is stopped, `sensor_measurements` goes stale, the cache empties, and
+the UI shows no data even though ingestion and Kafka are fine. The gateway logs a throttled
+warning in that state (`0 fresh sensor_measurements … is spark-streaming running?`). Note this is
+a distinct path from the aggregation rollups, which feed model **feature baselines**, not the live
+view (**[ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md)**).
+
 ## Delivery semantics (at-least-once, idempotent)
 
 The system is **at-least-once with idempotent writes**, so a retry or replay cannot create
