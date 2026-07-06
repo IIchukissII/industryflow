@@ -6,8 +6,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0023 — Stream-materialized feature engineering (one windowing substrate, the feature table as the seam)
 
 - **ID:** ADR-0023
-- **Status:** Proposed
-- **Date:** 2026-07-06
+- **Status:** Accepted (rev 1 — first realization: the rolling-mean baseline is served from the existing Spark aggregates and ml_service's Redis feature store is removed; a dedicated feature table remains deferred)
+- **Date:** 2026-07-06 (rev 1: 2026-07-06)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (schema-per-tenant routing), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (Kafka delivery semantics), [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (Spark windowing & idempotent writes), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extension/plugin mechanism).
@@ -36,7 +36,7 @@ There is no *bug* here today — `statistical` works off Redis and the aggregati
 
 1. **Stateful, windowed features compute in Spark's existing state store — not a second Redis window.** When real rolling/lag/windowed features are implemented, they are computed in the watermarked streaming layer established by ADR-0006, reusing that state store rather than introducing or extending an independent windowing mechanism.
 
-2. **A materialized feature table is the seam.** Spark *produces* engineered features into a per-tenant feature table (`tenant_<uuid>`, alongside the existing measurement/aggregate tables); training (notebooks) and inference (ml_service) *consume* from it. Production and consumption are decoupled by default and bound only by the table contract. Writes are idempotent on the natural key per ADR-0006 dec 3.
+2. **A materialized Spark table is the seam; the first realization reuses the existing aggregates.** Spark *produces* the windowed value into a per-tenant table that inference (ml_service) and training (notebooks) *consume*, decoupled and bound only by the table contract (idempotent on the natural key, ADR-0006 dec 3). **rev 1:** the first realization adds *no new table* — the rolling-mean/std baseline the `statistical` feature needs is already materialized by the aggregation job as `sensor_aggregations_*.avg_value` / `stddev_value` (ADR-0006), so that aggregate table **is** the seam for the baseline class. Inference reads it tenant-scoped: the transform's `TransformContext` is reshaped — the Redis `feature_store` handle becomes a `baseline_provider` that reads the aggregates, plus a `company_id` for tenant-schema routing (an ADR-0010 minor at extension-API 0.x: no domain transform depends on the old handle). Standing up a *dedicated* feature table (the original framing) is **deferred** to engineered features the aggregates cannot provide — building one now to hold a value the aggregates already carry would be the duplicated state driver #1 rejects.
 
 3. **Stateless, row-wise transforms stay substrate-neutral.** `identity`, `polynomial`, `interaction`, `deviation` and their kind are pure functions of a snapshot and do not require Spark; they may be computed wherever is cheapest (ingestion path, stream, or on demand). This ADR does not force them into the stream — only the stateful class benefits from the move.
 
@@ -46,7 +46,7 @@ There is no *bug* here today — `statistical` works off Redis and the aggregati
 
 6. **The ADR-0010 transform registry must hold across the Spark executor boundary.** Domain transform modules are shipped to executors (`--py-files`) and the registry is populated there, so `get_transform` resolves the same built-in and domain transforms inside Spark as it does inside ml_service. The ADR-0010 extension contract now spans the executor boundary, not just a single FastAPI process.
 
-7. **The Redis FeatureStore is demoted, not duplicated.** Once features are materialized (decision 2), Redis ceases to be a second *computation* path. It either disappears or shrinks to a low-latency *serving cache* read from the materialized table. There is one source of truth for a feature value and, at most, a cache in front of it.
+7. **The Redis FeatureStore stops being a windowing substrate.** With the baseline sourced from the Spark aggregates (decision 2), Redis ceases to be a second *computation* path: `compute_rolling_mean` becomes a read of the materialized aggregate. **rev 1:** ml_service's Redis FeatureStore is **removed outright** — its only use was that rolling-mean read. The **alert worker's** separate Redis ring (`services/alert_service/worker`) is a *latest-value snapshot join* — assembling a full multi-sensor reading from per-sensor arrivals before inference — **not** a windowing computation; it is out of this decision's scope and untouched. So Redis is not deleted platform-wide; it stops being a windowing/feature-computation substrate, which is the claim this ADR makes. A cache in front of the aggregate read is a later option, not part of rev 1.
 
 8. **Trigger and scope.** This is recorded now as direction; implementation lands when the **first real windowed feature requires it**, or when train/serve skew is observed, or when the Redis FeatureStore becomes an operational burden. Until a trigger fires there are no code changes: `rolling_stat` stays a stub and `statistical` keeps its current Redis path. This ADR is the sharp failure condition, not a build order.
 

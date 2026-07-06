@@ -21,8 +21,14 @@ Each transformation `type` is resolved through the **extension registry**
 (**[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)**). The platform ships generic
 built-ins — `identity`, `polynomial`, `interaction`, `deviation`, `statistical`,
 `rolling_stat` — and a domain registers new transform types in its own module without editing
-the engine. Window statistics (e.g. deviation from a rolling mean) come from a Redis-backed
-**feature store** keyed by equipment + sensor.
+the engine. Window statistics (e.g. deviation from a rolling mean) read their baseline from the
+**Spark-materialized aggregates** (`sensor_aggregations_*`, tenant-scoped, ADR-0006) rather than a
+separate windowing store — one windowing substrate, not two
+(**[ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md)**). When the baseline
+is unavailable (no aggregate row yet, or a read error) the transform degrades to a **neutral
+`0.0`** ("no deviation"), never the raw sensor value, so a degraded read cannot manufacture
+spurious anomalies. Which aggregate window is the baseline is per-transform configuration
+(`params.granularity`, default 1 min).
 
 ## Models & MLflow
 
@@ -40,8 +46,8 @@ sample of its training-window distribution — which is the baseline for drift m
 
 1. Resolves the tenant from the verified identity and loads the model record + its feature
    config.
-2. Engineers the feature vector from the incoming sensor data (feature store for windowed
-   stats).
+2. Engineers the feature vector from the incoming sensor data (windowed baselines read from the
+   Spark-materialized aggregates, ADR-0023).
 3. **Scores** the features through the **anomaly-detector registry**: the model record's
    `detector` (default `sklearn`, the built-in that handles IsolationForest / XGBoost /
    `predict_proba` / direct-score models) returns a 0–1 score and a threshold decision. A

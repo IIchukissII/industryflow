@@ -26,8 +26,9 @@ class FeatureEngineeringEngine:
     def __init__(
         self,
         feature_config: Dict[str, Any],
-        feature_store: Optional[Any] = None,
-        equipment_id: Optional[str] = None
+        baseline_provider: Optional[Any] = None,
+        equipment_id: Optional[str] = None,
+        company_id: Optional[str] = None
     ):
         """
         Initialize feature engineering engine with configuration
@@ -36,16 +37,19 @@ class FeatureEngineeringEngine:
             feature_config: Configuration dict from database with keys:
                 - base_sensors: List[str]
                 - transformations: List[Dict] with type, sensor(s), params
-            feature_store: Optional Feature Store instance for historical statistics
-            equipment_id: Optional equipment ID for Feature Store lookups
+            baseline_provider: Optional provider of windowed baselines from the Spark
+                aggregates (ADR-0023), used by stateful transforms
+            equipment_id: Optional equipment ID for baseline lookups
+            company_id: Optional tenant company_id, scoping baseline lookups to the tenant schema
         """
         self.base_sensors = feature_config.get('base_sensors', [])
         self.transformations = feature_config.get('transformations', [])
         self.feature_names = [t['name'] for t in self.transformations]
-        self.feature_store = feature_store
+        self.baseline_provider = baseline_provider
         self.equipment_id = equipment_id
+        self.company_id = company_id
 
-        logger.info(f"Initialized FeatureEngineeringEngine: {len(self.base_sensors)} base sensors, {len(self.transformations)} transformations, Feature Store: {feature_store is not None}")
+        logger.info(f"Initialized FeatureEngineeringEngine: {len(self.base_sensors)} base sensors, {len(self.transformations)} transformations, baseline provider: {baseline_provider is not None}")
 
     async def transform(self, sensor_data: Dict[str, float]) -> np.ndarray:
         """
@@ -82,7 +86,11 @@ class FeatureEngineeringEngine:
         if fn is None:
             logger.warning(f"Unknown transformation type: {t_type}")
             return 0.0
-        ctx = TransformContext(feature_store=self.feature_store, equipment_id=self.equipment_id)
+        ctx = TransformContext(
+            baseline_provider=self.baseline_provider,
+            equipment_id=self.equipment_id,
+            company_id=self.company_id,
+        )
         return await fn(transformation, sensor_data, ctx)
 
     def get_feature_names(self) -> List[str]:
