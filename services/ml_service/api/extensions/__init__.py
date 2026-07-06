@@ -25,9 +25,15 @@ EXTENSION_API_VERSION = "0.1.0"
 
 @dataclass
 class TransformContext:
-    """Runtime services a feature transform may use (e.g. the rolling-window feature store)."""
-    feature_store: Any = None
+    """Runtime services a feature transform may use.
+
+    ``baseline_provider`` reads a sensor's windowed baseline (mean/std) from the
+    Spark-materialized aggregates (ADR-0023); ``company_id`` scopes that read to the tenant
+    schema, ``equipment_id`` to the equipment.
+    """
+    baseline_provider: Any = None
     equipment_id: Any = None
+    company_id: Any = None
 
 
 # A transform is: async (transformation_config, sensor_data, ctx) -> float

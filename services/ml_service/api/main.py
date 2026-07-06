@@ -27,7 +27,7 @@ from routers import (
     health_router, models_router, registered_models_router,
     inference_router, feature_configs_router, drift_router,
 )
-from feature_engineering import init_feature_store
+from feature_engineering import AggregateBaselineProvider
 
 # Configure logging
 logging.basicConfig(
@@ -139,18 +139,10 @@ async def startup_event():
     app.state.ml_repository = MLRepository(app.state.db_pool)
     logger.info("Repository initialized")
 
-    # Initialize Feature Store
-    try:
-        redis_url = getattr(config.config, 'REDIS_URL', 'redis://redis:6379/0')
-        app.state.feature_store = await init_feature_store(
-            redis_url=redis_url,
-            max_window=100,
-            ttl_seconds=3600
-        )
-        logger.info(f"Feature Store initialized: {redis_url}")
-    except Exception as e:
-        logger.error(f"Failed to initialize Feature Store: {e}")
-        raise
+    # Baseline provider: reads windowed baselines (rolling mean/std) from the Spark-materialized
+    # aggregate tables (ADR-0023), replacing the Redis feature store as the windowing substrate.
+    app.state.baseline_provider = AggregateBaselineProvider(app.state.db_pool)
+    logger.info("Baseline provider initialized (Spark aggregate tables)")
 
     logger.info(f"Model directory: {MODEL_DIR}")
     logger.info(f"Existing models: {len(list(MODEL_DIR.glob('*.pkl')))}")
@@ -164,10 +156,7 @@ async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info("MLOps API shutting down...")
 
-    # Close Feature Store
-    if hasattr(app.state, 'feature_store'):
-        await app.state.feature_store.close()
-        logger.info("Feature Store closed")
+    # The baseline provider shares the DB pool (closed below); nothing to close here.
 
     # Close database pool
     if hasattr(app.state, 'db_pool'):

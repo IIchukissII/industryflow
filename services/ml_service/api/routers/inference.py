@@ -231,21 +231,22 @@ async def predict(
                 detail=f"Feature config {feature_config_id} not found"
             )
 
-        # Get Feature Store from app state
-        feature_store = getattr(request.app.state, 'feature_store', None)
+        # Baseline provider (Spark-materialized aggregates) from app state (ADR-0023)
+        baseline_provider = getattr(request.app.state, 'baseline_provider', None)
         equipment_id = request_data.sensor_data.get('equipment_id')
 
         # Create feature engineering engine
         fe_engine = FeatureEngineeringEngine(
             feature_config=feature_config,
-            feature_store=feature_store,
-            equipment_id=equipment_id
+            baseline_provider=baseline_provider,
+            equipment_id=equipment_id,
+            company_id=company_id,
         )
 
         # Transform sensor data to features (async)
         input_features = await fe_engine.transform(request_data.sensor_data)
 
-        logger.info(f"Engineered {input_features.shape[1]} features from sensor data (Feature Store: {feature_store is not None})")
+        logger.info(f"Engineered {input_features.shape[1]} features from sensor data (baseline provider: {baseline_provider is not None})")
 
         # Score the features through the anomaly-detector registry (ADR-0010). The model
         # record may name a detector (a domain may register its own); the default 'sklearn'
