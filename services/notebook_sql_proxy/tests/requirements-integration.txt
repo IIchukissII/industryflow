@@ -4,5 +4,7 @@
 # Extra deps for the live end-to-end proof (test_sql_proxy_integration.py, issue #19) only.
 # The unit suite does NOT need these — the integration test importorskips them and skips when a
 # live stack is absent, so unit CI stays driver-free (requirements.txt is redis-only by design).
-psycopg2-binary==2.9.9
+# psycopg2-binary kept in step with infrastructure/timescaledb/tests/requirements.txt so the two
+# can be co-installed into one env in db-tenant-isolation.yml without a pin collision.
+psycopg2-binary==2.9.12
 redis==8.0.1
