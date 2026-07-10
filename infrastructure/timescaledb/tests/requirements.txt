@@ -4,7 +4,9 @@
 
 # Test-only dependencies for the TimescaleDB isolation tests.
 # Install with: pip install -r requirements.txt
-pytest==7.4.3
+# pytest must be >=8.2 for pytest-asyncio 0.24.0 (they conflicted at 7.4.3, which quietly
+# broke this workflow's install from PR #161 until it was caught here).
+pytest==8.3.4
 psycopg2-binary==2.9.12
 asyncpg==0.30.0
 pytest-asyncio==0.24.0

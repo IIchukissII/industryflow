@@ -37,6 +37,13 @@ from psycopg2 import errors  # noqa: E402
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import binding as b  # noqa: E402  — reuse the proxy's own key/role derivation, don't reinvent
 
+# This is the live-stack cross-tenant isolation proof: it needs a real TimescaleDB + Redis + the
+# running proxy (the `notebooks` compose profile), so it is marked `integration` and deselected
+# from the no-DB `unit-tests` job — there it could only ever skip, reporting a false green. It runs
+# in the DB-backed `db-tenant-isolation` workflow, where a silent skip is turned into a failure by
+# the guard in conftest.py (IF_REQUIRE_LIVE_STACK). See conftest.py and the two CI workflows.
+pytestmark = pytest.mark.integration
+
 
 # --------------------------------------------------------------------------- connection helpers
 

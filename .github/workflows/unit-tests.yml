@@ -27,7 +27,10 @@ jobs:
           - { service: ingestion_service,   path: services/ingestion_service/tests }
           - { service: api_gateway,         path: services/api_gateway/tests }
           - { service: notebook_hub,        path: services/notebook_hub/tests }
-          - { service: notebook_sql_proxy,  path: services/notebook_sql_proxy/tests }
+          # The live cross-tenant isolation proof (test_sql_proxy_integration.py) is marked
+          # `integration` and excluded here — it needs a real stack and would only skip in this
+          # no-DB job (a false green). It runs in db-tenant-isolation.yml against a live stack.
+          - { service: notebook_sql_proxy,  path: services/notebook_sql_proxy/tests, args: "--ignore=services/notebook_sql_proxy/tests/test_sql_proxy_integration.py" }
           - { service: notebook_tracking_gateway, path: services/notebook_tracking_gateway/tests }
           - { service: alert_service,       path: services/alert_service/tests }
           # Redis-backed tests are marked `redis` and skipped (no server in CI).
