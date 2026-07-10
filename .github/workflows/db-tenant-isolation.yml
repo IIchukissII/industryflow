@@ -8,34 +8,45 @@
 #   * the end-to-end cross-tenant-denied proof through the running SQL proxy (ADR-0015 dec 5) —
 #     a capability handle for tenant A cannot read tenant B when relayed by the proxy.
 #
-# Triggers include the application code that ENFORCES isolation (the gateway's search_path routing
-# and the proxy relay), not just the DB init scripts — so a change that breaks the boundary in
-# code can no longer merge green while the proof sits unrun behind a path filter.
+# The scope that ENFORCES isolation (the gateway's search_path routing and the proxy relay) is
+# path-gated in the `changes` job below, not just the DB init scripts — so a change that breaks the
+# boundary in code can no longer merge green while the proof sits unrun.
+#
+# This workflow always triggers (no top-level path filter) so its gate job always reports a status,
+# letting `db-tenant-isolation-gate` be a REQUIRED check without blocking PRs that don't touch the
+# isolation surface (a path-filtered workflow that never runs leaves a required check pending
+# forever). The heavy proof still runs only when the relevant paths change; otherwise it skips and
+# the gate passes on the skip.
 name: DB tenant isolation
 
 on:
   push:
     branches: [main]
-    paths:
-      - "infrastructure/timescaledb/**"
-      - "services/notebook_sql_proxy/**"
-      - "services/api_gateway/dependencies.py"
-      - "docker-compose.yml"
-      - "docker-compose.ci-notebooks.yml"
-      - ".env.example"
-      - ".github/workflows/db-tenant-isolation.yml"
   pull_request:
-    paths:
-      - "infrastructure/timescaledb/**"
-      - "services/notebook_sql_proxy/**"
-      - "services/api_gateway/dependencies.py"
-      - "docker-compose.yml"
-      - "docker-compose.ci-notebooks.yml"
-      - ".env.example"
-      - ".github/workflows/db-tenant-isolation.yml"
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - 'infrastructure/timescaledb/**'
+              - 'services/notebook_sql_proxy/**'
+              - 'services/api_gateway/dependencies.py'
+              - 'docker-compose.yml'
+              - 'docker-compose.ci-notebooks.yml'
+              - '.env.example'
+              - '.github/workflows/db-tenant-isolation.yml'
+
   reader-role-isolation:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -113,3 +124,27 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml --profile notebooks down -v
+
+  # Stable aggregate status for branch protection. Always runs; fails only if the proof actually
+  # ran and failed. A skip (no isolation-surface changes) passes, so this required check never
+  # blocks an unrelated PR — while a broken isolation boundary still red-gates the merge.
+  db-tenant-isolation-gate:
+    name: db-tenant-isolation-gate
+    needs: [changes, reader-role-isolation]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on proof result
+        run: |
+          changes="${{ needs.changes.result }}"
+          result="${{ needs.reader-role-isolation.result }}"
+          echo "changes=$changes proof=$result (relevant=${{ needs.changes.outputs.relevant }})"
+          # Fail closed if change-detection broke — we can't prove the proof was unnecessary.
+          if [ "$changes" != "success" ]; then
+            echo "::error::change-detection job did not succeed ($changes)"; exit 1
+          fi
+          if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+            echo "::error::tenant-isolation proof did not pass"; exit 1
+          fi
+          # 'success' (proof ran and passed) or 'skipped' (no relevant changes) both pass.
+          exit 0
