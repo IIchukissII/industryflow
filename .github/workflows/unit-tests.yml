@@ -4,21 +4,38 @@
 
 # In-process unit/functional tests that need no external services (no DB, broker, or edge).
 # Database-backed proofs live in db-tenant-isolation.yml.
+#
+# This workflow always triggers (no top-level path filter) so its gate job always reports a
+# status — that is what lets `unit-tests-gate` be a REQUIRED check without blocking PRs that don't
+# touch services/ (a path-filtered workflow that never runs leaves a required check pending
+# forever). The heavy matrix is still path-gated internally via the `changes` job, so irrelevant
+# PRs skip the actual tests and the gate passes on the skip.
 name: Unit tests
 
 on:
   push:
     branches: [main]
-    paths:
-      - "services/**"
-      - ".github/workflows/unit-tests.yml"
   pull_request:
-    paths:
-      - "services/**"
-      - ".github/workflows/unit-tests.yml"
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - 'services/**'
+              - 'clients/python/**'
+              - '.github/workflows/unit-tests.yml'
+
   pytest:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -48,3 +65,27 @@ jobs:
         run: ${{ matrix.install && matrix.install || format('pip install -r services/{0}/requirements-dev.txt', matrix.service) }}
       - name: Run tests
         run: pytest ${{ matrix.path }} ${{ matrix.args }} -v
+
+  # Stable aggregate status for branch protection. Always runs; fails only if the matrix actually
+  # ran and failed. A skip (irrelevant paths) passes, so this required check never blocks an
+  # unrelated PR — while a real unit-test failure still red-gates the merge.
+  unit-tests-gate:
+    name: unit-tests-gate
+    needs: [changes, pytest]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on matrix result
+        run: |
+          changes="${{ needs.changes.result }}"
+          result="${{ needs.pytest.result }}"
+          echo "changes=$changes pytest=$result (relevant=${{ needs.changes.outputs.relevant }})"
+          # Fail closed if change-detection broke — we can't prove the tests were unnecessary.
+          if [ "$changes" != "success" ]; then
+            echo "::error::change-detection job did not succeed ($changes)"; exit 1
+          fi
+          if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+            echo "::error::unit tests did not pass"; exit 1
+          fi
+          # 'success' (tests ran and passed) or 'skipped' (no relevant changes) both pass.
+          exit 0
