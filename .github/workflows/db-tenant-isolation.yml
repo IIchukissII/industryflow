@@ -51,15 +51,24 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml \
             --profile notebooks up -d --build notebook-sql-proxy
 
-      - name: Wait for the proxy to accept connections on :6432
+      - name: Wait for the proxy to be serving on :6432
+        # A bare TCP connect is not enough: Docker's userland port-proxy binds the published host
+        # port and accepts the handshake even while the container behind it crash-loops. So also
+        # assert the container is actually running and has NOT restarted (restart: unless-stopped
+        # would otherwise hide a boot crash behind an open port).
         run: |
+          name=industryflow-notebook-sql-proxy
           for i in $(seq 1 30); do
-            if (exec 3<>/dev/tcp/127.0.0.1/6432) 2>/dev/null; then
-              echo "proxy is up (attempt $i)"; exec 3>&- 3<&-; exit 0
+            state=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)
+            restarts=$(docker inspect -f '{{.RestartCount}}' "$name" 2>/dev/null || echo 0)
+            if [ "$state" = "running" ] && [ "$restarts" = "0" ] \
+               && (exec 3<>/dev/tcp/127.0.0.1/6432) 2>/dev/null; then
+              exec 3>&- 3<&-
+              echo "proxy is serving (attempt $i)"; exit 0
             fi
-            echo "waiting for proxy... ($i/30)"; sleep 2
+            echo "waiting for proxy... ($i/30, state=$state restarts=$restarts)"; sleep 2
           done
-          echo "proxy never came up on :6432"; docker compose logs notebook-sql-proxy; exit 1
+          echo "proxy did not come up healthy on :6432"; docker compose logs notebook-sql-proxy; exit 1
 
       - uses: actions/setup-python@v6
         with:
