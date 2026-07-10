@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# CI-only overlay for the tenant-isolation proof (db-tenant-isolation.yml).
+#
+# In production the SQL proxy is deliberately NOT published on a host port — only same-network
+# kernels reach it at notebook-sql-proxy:6432 (see docker-compose.yml). The end-to-end isolation
+# test, however, runs on the CI host and drives the proxy as a Postgres client, so it needs the
+# port reachable on loopback. This overlay publishes it for CI only; it is never layered into a
+# real deployment. Loopback-bound (127.0.0.1) to match how the DB and Redis are exposed.
+services:
+  notebook-sql-proxy:
+    ports:
+      - "127.0.0.1:6432:6432"
