@@ -2,9 +2,15 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Proves the per-tenant read-only role boundary (ADR-0011 dec 3, ADR-0012 dec 4) against a
-# real database: it stands up TimescaleDB through the project's own compose (so the actual
-# init scripts run) and executes the GRANT-enforced isolation test.
+# Proves tenant isolation against a REAL stack, at two layers:
+#   * the per-tenant read-only role boundary (ADR-0011 dec 3, ADR-0012 dec 4) — the GRANT-enforced
+#     reader-role proof, run directly against TimescaleDB with the real init scripts; and
+#   * the end-to-end cross-tenant-denied proof through the running SQL proxy (ADR-0015 dec 5) —
+#     a capability handle for tenant A cannot read tenant B when relayed by the proxy.
+#
+# Triggers include the application code that ENFORCES isolation (the gateway's search_path routing
+# and the proxy relay), not just the DB init scripts — so a change that breaks the boundary in
+# code can no longer merge green while the proof sits unrun behind a path filter.
 name: DB tenant isolation
 
 on:
@@ -12,13 +18,19 @@ on:
     branches: [main]
     paths:
       - "infrastructure/timescaledb/**"
+      - "services/notebook_sql_proxy/**"
+      - "services/api_gateway/dependencies.py"
       - "docker-compose.yml"
+      - "docker-compose.ci-notebooks.yml"
       - ".env.example"
       - ".github/workflows/db-tenant-isolation.yml"
   pull_request:
     paths:
       - "infrastructure/timescaledb/**"
+      - "services/notebook_sql_proxy/**"
+      - "services/api_gateway/dependencies.py"
       - "docker-compose.yml"
+      - "docker-compose.ci-notebooks.yml"
       - ".env.example"
       - ".github/workflows/db-tenant-isolation.yml"
 
@@ -31,17 +43,43 @@ jobs:
       - name: Provide compose env
         run: cp .env.example .env
 
-      - name: Start TimescaleDB (runs init scripts)
-        run: docker compose up -d --wait timescaledb
+      - name: Start TimescaleDB + Redis (runs init scripts, incl. the notebook_sql_proxy role)
+        run: docker compose up -d --wait timescaledb redis
+
+      - name: Build + start the SQL proxy (notebooks profile, port published for CI)
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml \
+            --profile notebooks up -d --build notebook-sql-proxy
+
+      - name: Wait for the proxy to be serving on :6432
+        # A bare TCP connect is not enough: Docker's userland port-proxy binds the published host
+        # port and accepts the handshake even while the container behind it crash-loops. So also
+        # assert the container is actually running and has NOT restarted (restart: unless-stopped
+        # would otherwise hide a boot crash behind an open port).
+        run: |
+          name=industryflow-notebook-sql-proxy
+          for i in $(seq 1 30); do
+            state=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)
+            restarts=$(docker inspect -f '{{.RestartCount}}' "$name" 2>/dev/null || echo 0)
+            if [ "$state" = "running" ] && [ "$restarts" = "0" ] \
+               && (exec 3<>/dev/tcp/127.0.0.1/6432) 2>/dev/null; then
+              exec 3>&- 3<&-
+              echo "proxy is serving (attempt $i)"; exit 0
+            fi
+            echo "waiting for proxy... ($i/30, state=$state restarts=$restarts)"; sleep 2
+          done
+          echo "proxy did not come up healthy on :6432"; docker compose logs notebook-sql-proxy; exit 1
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install test dependencies
-        run: pip install -r infrastructure/timescaledb/tests/requirements.txt
+        run: |
+          pip install -r infrastructure/timescaledb/tests/requirements.txt
+          pip install -r services/notebook_sql_proxy/tests/requirements-integration.txt
 
-      - name: Run tenant-isolation proof
+      - name: Run DB reader-role isolation proof (GRANT boundary)
         env:
           PGHOST: localhost
           PGPORT: "5432"
@@ -51,10 +89,27 @@ jobs:
           export PGPASSWORD="$(grep -E '^DB_PASSWORD=' .env | cut -d= -f2-)"
           pytest infrastructure/timescaledb/tests/ -v
 
-      - name: Dump DB logs on failure
+      # The end-to-end proof through the running proxy. IF_REQUIRE_LIVE_STACK=1 makes a SKIP a
+      # FAILURE (see services/notebook_sql_proxy/tests/conftest.py): the whole point of this job is
+      # that this cross-tenant-denied assertion actually executes, so a silent skip is a red build.
+      - name: Run SQL-proxy end-to-end cross-tenant isolation proof
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGDATABASE: industryflow
+          PROXY_HOST: localhost
+          PROXY_PORT: "6432"
+          SQL_PROXY_REDIS_URL: redis://localhost:6379/0
+          IF_REQUIRE_LIVE_STACK: "1"
+        run: |
+          export PGPASSWORD="$(grep -E '^DB_PASSWORD=' .env | cut -d= -f2-)"
+          pytest services/notebook_sql_proxy/tests/test_sql_proxy_integration.py -m integration -v
+
+      - name: Dump service logs on failure
         if: failure()
-        run: docker compose logs timescaledb
+        run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml logs timescaledb redis notebook-sql-proxy
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml --profile notebooks down -v
