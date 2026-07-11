@@ -48,7 +48,10 @@ jobs:
           # `integration` and excluded here — it needs a real stack and would only skip in this
           # no-DB job (a false green). It runs in db-tenant-isolation.yml against a live stack.
           - { service: notebook_sql_proxy,  path: services/notebook_sql_proxy/tests, args: "--ignore=services/notebook_sql_proxy/tests/test_sql_proxy_integration.py" }
-          - { service: notebook_tracking_gateway, path: services/notebook_tracking_gateway/tests }
+          # The live proof (test_tracking_gateway_integration.py) is `integration` and excluded here
+          # — it needs a real MLflow + MinIO + Redis and would only skip. It runs in
+          # tracking-gateway-integration.yml against a live stack.
+          - { service: notebook_tracking_gateway, path: services/notebook_tracking_gateway/tests, args: "--ignore=services/notebook_tracking_gateway/tests/test_tracking_gateway_integration.py" }
           # The live end-to-end proof (test_cold_broker_integration.py) is marked `integration` and
           # excluded here — it needs a real broker + MinIO + Redis and would only skip in this
           # no-infra job (a false green). It runs in cold-layer-integration.yml against a live stack.
