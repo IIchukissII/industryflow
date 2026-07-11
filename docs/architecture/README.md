@@ -10,6 +10,7 @@ Lean design overviews per subsystem; see the [ADRs](../../ADR/) for the decision
 | Document | Subsystem |
 |----------|-----------|
 | [data-and-storage.md](data-and-storage.md) | Schema-per-tenant database, time-series hypertables, compression, roles |
+| [cold-layer-evolution.md](cold-layer-evolution.md) | Cold layer (ADR-0025) deferred decisions, their triggers, and the signals that detect them |
 | [stream-processing.md](stream-processing.md) | Ingestion → Kafka → Spark → TimescaleDB, with at-least-once + idempotent writes |
 | [ml-and-features.md](ml-and-features.md) | Config-driven feature engineering, MLflow models, inference, the plugin registry |
 | [alerting.md](alerting.md) | Threshold & ML-based detection, dedup/cooldown, the detection worker |
