@@ -29,7 +29,9 @@ browser ─▶ SSO proxy ──auth_request──▶ api-gateway GET /auth/verif
                 │                                       pod on k8s / container on compose (ADR-0018)
                 ▼
    kernel holds opaque capability handles only ─▶ data API (X-IF-Capability, read-only)
-                                                └▶ SQL proxy (SET ROLE tenant_reader_<uuid>)
+                                                ├▶ SQL proxy (SET ROLE tenant_reader_<uuid>)
+                                                ├▶ tracking gateway (tenant-namespaced MLflow)
+                                                └▶ cold-store broker (tenant_<uuid>/ pre-signed GETs)
 ```
 
 The kernel's only credentials are opaque, single-tenant, read-only, revocable capability
@@ -68,6 +70,7 @@ containment use the Kubernetes profile.
 | 5 | Experiment-tracking gateway (ADR-0013/0019) | **done** — kernel→gateway tracking capability, tenant-namespaced experiments/models/artifacts, per-object pre-signed artifact URLs, **box-validated** |
 | 6 | Tenant-scoped model browsing in the app | **done** — session-authed `/api/registered-models` read-path (prefix-stripped, source-run metrics) + redesigned Models page; experiment/run browsing still owed |
 | 7 | Per-user work persistence + idle reclamation (ADR-0020) | **done** — authoring `work/` on a per-user volume (Docker) / PVC (k8s); `jupyterhub-idle-culler` with a scoped token; compute stays ephemeral, capabilities re-minted per spawn |
+| 8 | Cold-layer read path (ADR-0025 dec 5) | **built** — `cold`-audience capability → `notebook_cold_broker` (read-only cold principal) → tenant-prefix-scoped pre-signed GETs; `IndustryFlowCold` client (`list_files`/`read_all`). Compose-wired; not yet box-run |
 
 The design is decision-complete (ADR-0011→0015). Every piece except the Kubernetes hub runtime is
 built **and validated on the live compose box**; only the KubeSpawner profile still needs a

@@ -27,12 +27,14 @@ from typing import Optional, Protocol
 AUDIENCE_API = "api"  # the tenant-scoped data API (ADR-0011 dec 4)
 AUDIENCE_SQL = "sql"  # the SQL access proxy (ADR-0015 dec 5)
 AUDIENCE_TRACKING = "tracking"  # the experiment-tracking gateway (ADR-0019)
+AUDIENCE_COLD = "cold"  # the cold-store broker (ADR-0025 dec 5, read side)
 
-_AUDIENCES = (AUDIENCE_API, AUDIENCE_SQL, AUDIENCE_TRACKING)
+_AUDIENCES = (AUDIENCE_API, AUDIENCE_SQL, AUDIENCE_TRACKING, AUDIENCE_COLD)
 # The data planes are read-only (ADR-0011); tracking is read-write *within the tenant namespace*
 # the gateway enforces (ADR-0019) — a kernel logs runs and registers models, but never crosses its
-# tenant. For tracking, the boundary is the namespace, not read-only-ness.
-_READ_ONLY_AUDIENCES = (AUDIENCE_API, AUDIENCE_SQL)
+# tenant. For tracking, the boundary is the namespace, not read-only-ness. The cold plane is pure
+# read: training reads long-horizon history and writes nothing (ADR-0025).
+_READ_ONLY_AUDIENCES = (AUDIENCE_API, AUDIENCE_SQL, AUDIENCE_COLD)
 
 # Store keys are namespaced so capability handles never collide with other store users.
 _KEY_PREFIX = "nbcap:"

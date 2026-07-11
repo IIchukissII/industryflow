@@ -5,7 +5,9 @@
 """IndustryFlow notebook client — the blessed, tenant-scoped data path (ADR-0011 dec 4)."""
 
 from .client import IndustryFlowClient
+from .cold import IndustryFlowCold
+from .cold import read_all as cold_read_all
 from .sql import IndustryFlowSQL
 from .sql import query as sql_query
 
-__all__ = ["IndustryFlowClient", "IndustryFlowSQL", "sql_query"]
+__all__ = ["IndustryFlowClient", "IndustryFlowSQL", "sql_query", "IndustryFlowCold", "cold_read_all"]

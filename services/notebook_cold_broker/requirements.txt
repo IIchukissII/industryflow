@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Cold-store broker runtime (ADR-0025 dec 5, read side): a FastAPI app that resolves a cold
+# capability against the shared store and mints read-only, tenant-prefix-scoped pre-signed GET
+# URLs with boto3. Read-only cousin of the tracking gateway; no httpx (no upstream proxy).
+fastapi==0.139.0
+uvicorn==0.50.0
+redis==8.0.1
+boto3==1.43.40
