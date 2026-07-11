@@ -32,6 +32,16 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.securityContext.enabled }}
+      # Non-root + seccomp (admission-policy friendly). fsGroup makes the /tmp emptyDir writable by
+      # the non-root uid so mc can keep its config there under a read-only root FS.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       containers:
         - name: minio-cold-init
           image: {{ .Values.coldExport.initImage | quote }}
@@ -40,6 +50,9 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
           env:
             # mc keeps its config + the alias here; HOME under the writable /tmp emptyDir so the
             # root FS stays read-only.
