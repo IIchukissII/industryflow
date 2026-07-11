@@ -223,6 +223,10 @@ services:
       COLD_STORE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
       COLD_STORE_ACCESS_KEY: ${COLD_STORE_ACCESS_KEY:-}
       COLD_STORE_SECRET_KEY: ${COLD_STORE_SECRET_KEY:-}
+      # Read-only cold principal the cold-store broker uses to vend pre-signed GETs (ADR-0025 read
+      # side) — separate from the write principal above and from the root keys.
+      COLD_READ_ACCESS_KEY: ${COLD_READ_ACCESS_KEY:-}
+      COLD_READ_SECRET_KEY: ${COLD_READ_SECRET_KEY:-}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -247,7 +251,23 @@ services:
           mc admin policy create local cold-export-rw /tmp/cold-rw.json || true
           mc admin user add local "$$COLD_STORE_ACCESS_KEY" "$$COLD_STORE_SECRET_KEY" || true
           mc admin policy attach local cold-export-rw --user "$$COLD_STORE_ACCESS_KEY" || true
-          echo "cold store ready: $$COLD_STORE_BUCKET (scoped user attached)"
+          echo "cold write principal ready on $$COLD_STORE_BUCKET"
+        fi
+        # Read-only cold principal for the broker: get/list on ONLY the cold bucket, NO put/delete.
+        if [ -n "$$COLD_READ_ACCESS_KEY" ] && [ -n "$$COLD_READ_SECRET_KEY" ]; then
+          cat > /tmp/cold-ro.json <<EOF
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET"]},
+            {"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET/*"]}
+          ]
+        }
+        EOF
+          mc admin policy create local cold-broker-ro /tmp/cold-ro.json || true
+          mc admin user add local "$$COLD_READ_ACCESS_KEY" "$$COLD_READ_SECRET_KEY" || true
+          mc admin policy attach local cold-broker-ro --user "$$COLD_READ_ACCESS_KEY" || true
+          echo "cold read principal ready on $$COLD_STORE_BUCKET"
         fi
         echo "buckets ready: $$SPARK_CHECKPOINT_BUCKET, mlflow, $$COLD_STORE_BUCKET"
     networks:
@@ -751,6 +771,9 @@ services:
       # Where authoring kernels reach the experiment-tracking gateway (ADR-0019); the kernel's MLflow
       # client uses its tracking capability as the bearer token. Forwarded to authoring spawns only.
       INDUSTRYFLOW_TRACKING_URL: ${INDUSTRYFLOW_TRACKING_URL:-http://notebook-tracking-gateway:5050}
+      # Where authoring kernels reach the cold-store broker (ADR-0025 read side); the kernel presents
+      # its cold capability to read long-horizon history as Parquet. Forwarded to authoring spawns only.
+      INDUSTRYFLOW_COLD_BROKER_URL: ${INDUSTRYFLOW_COLD_BROKER_URL:-http://notebook-cold-broker:5060}
     volumes:
       # DockerSpawner talks to the Docker daemon to spawn per-user containers.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -827,6 +850,33 @@ services:
     depends_on:
       - redis
       - mlflow
+      - minio
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+
+  # Cold-store broker (ADR-0025 dec 5, read side): resolves a notebook's cold capability to one
+  # tenant and vends read-only, tenant-prefix-scoped pre-signed GET URLs for the cold layer. Holds
+  # a READ-ONLY cold-bucket principal — never the root keys, never the exporter's write principal.
+  # The read-only cousin of the tracking gateway. Not host-published; reached only on the network.
+  notebook-cold-broker:
+    profiles: ["notebooks"]
+    build:
+      context: ./services/notebook_cold_broker
+      dockerfile: Dockerfile
+    image: industryflow-notebook-cold-broker
+    container_name: industryflow-notebook-cold-broker
+    environment:
+      COLD_BROKER_HOST: 0.0.0.0
+      COLD_BROKER_PORT: "5060"
+      COLD_BROKER_REDIS_URL: redis://redis:6379/0
+      COLD_STORE_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      COLD_STORE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
+      COLD_STORE_REGION: ${COLD_STORE_REGION:-us-east-1}
+      COLD_READ_ACCESS_KEY: ${COLD_READ_ACCESS_KEY:-}
+      COLD_READ_SECRET_KEY: ${COLD_READ_SECRET_KEY:-}
+    depends_on:
+      - redis
       - minio
     networks:
       - industryflow-network

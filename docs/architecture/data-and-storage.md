@@ -87,9 +87,17 @@ Isolation carries into the object store under the *existing* policy, not a new o
   and drops chunks through a `SECURITY DEFINER` function, so it never owns the table. Its
   object-store principal is **write-scoped** to the cold bucket (put/get/list), never the root
   MinIO keys.
-- **Read side (ADR-0012 / ADR-0015).** Notebooks read the cold layer through a brokered,
-  no-durable-secret, single-tenant path — the object-store twin of the SQL proxy. This read path
-  is **deferred** (a follow-up slice); today's implementation is the write path only.
+- **Read side (ADR-0012 / ADR-0015).** Notebooks read the cold layer through the
+  **cold-store broker** (`services/notebook_cold_broker/`), the object-store twin of the SQL
+  proxy. The authoring kernel holds no durable object-store credential — only a per-session
+  **cold capability** handle (`INDUSTRYFLOW_COLD_CAPABILITY`, minted by the spawner). It presents
+  that handle to the broker, which resolves it to one tenant, confines every key to that tenant's
+  `tenant_<uuid>/` prefix, and returns short-TTL, **read-only** pre-signed GET URLs so bytes flow
+  directly kernel↔object store (in parallel, column/partition-pruned). The broker holds a
+  **read-only** cold-bucket principal — distinct from the exporter's write principal and the root
+  keys. The `industryflow.IndustryFlowCold` client wraps it (`list_files` / `read_parquet` /
+  `read_all`). A data scientist on tenant A can no more read tenant B's Parquet than tenant B's
+  schema.
 
 ## Roles & grants
 

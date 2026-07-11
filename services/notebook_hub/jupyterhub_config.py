@@ -191,6 +191,16 @@ async def bind_identity_and_profile(spawner):
             # MLflow reads these: the gateway endpoint + the capability as MLFLOW_TRACKING_TOKEN.
             spawner.environment["MLFLOW_TRACKING_URI"] = os.environ["INDUSTRYFLOW_TRACKING_URL"]
             spawner.environment["MLFLOW_TRACKING_TOKEN"] = spawner.environment["INDUSTRYFLOW_TRACKING_CAPABILITY"]
+        # Cold layer (ADR-0025 dec 5, read side): a cold-audience capability the kernel presents to
+        # the cold-store broker to read long-horizon training history as Parquet. Authoring-only —
+        # operators (analytics) train no models. The broker resolves the handle to this one tenant
+        # and vends read-only, prefix-scoped pre-signed GET URLs; the kernel holds no object-store key.
+        if os.environ.get("INDUSTRYFLOW_COLD_BROKER_URL"):
+            spawner.environment["INDUSTRYFLOW_COLD_CAPABILITY"] = cap.mint(
+                store, user=who.user, company_id=who.company_id,
+                audience=cap.AUDIENCE_COLD, ttl_seconds=CAPABILITY_TTL_SECONDS,
+            )
+            spawner.environment["INDUSTRYFLOW_COLD_BROKER_URL"] = os.environ["INDUSTRYFLOW_COLD_BROKER_URL"]
     # The blessed data path the client uses (ADR-0011 dec 4): the gateway origin, reachable from
     # the single-user environment. Identity-only; the capability above is what authorises it.
     if os.environ.get("INDUSTRYFLOW_API_URL"):
