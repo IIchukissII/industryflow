@@ -62,8 +62,13 @@ spec:
               chmod 0644 /certs/db.crt /certs/ca.crt
               chmod 0600 /certs/db.key
               chown {{ .Values.tls.db.postgresUser }}:{{ .Values.tls.db.postgresUser }} /certs/db.crt /certs/db.key /certs/ca.crt
+          # Must run as root to chown the key to the postgres uid (ADR-0017); a require-run-as-non-root
+          # admission policy needs an exception for this short-lived init container.
           securityContext:
             runAsUser: 0
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 32Mi }
           volumeMounts:
             - name: db-tls-secret
               mountPath: /tls
