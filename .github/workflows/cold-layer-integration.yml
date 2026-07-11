@@ -1,0 +1,144 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Live end-to-end proofs for the cold layer (ADR-0025) against a REAL stack — the coverage the
+# fake-based unit tests cannot give (real hardware caught three such defects on the write path):
+#   * WRITE: seed a tenant with old measurements, run the exporter through its real adapters
+#     (psycopg2 + pg_hba + cold_export_user + the SECURITY DEFINER drop; pyarrow S3FileSystem to
+#     MinIO), assert export -> verify -> drop and idempotency;
+#   * READ: drive the running cold-store broker (resolve a cold capability, list, 307 -> pre-signed
+#     GET), assert own-tenant read + cross-tenant/other-audience/revoked refusal.
+#
+# Always triggers so the gate always reports a status (required-check safe); the heavy proof runs
+# only when cold-layer paths change, else skips and the gate passes on the skip.
+name: Cold layer integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - 'services/cold_export/**'
+              - 'services/notebook_cold_broker/**'
+              - 'infrastructure/timescaledb/**'
+              - 'docker-compose.yml'
+              - '.env.example'
+              - '.github/workflows/cold-layer-integration.yml'
+
+  cold-layer:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Provide compose env
+        run: cp .env.example .env
+
+      - name: Start TimescaleDB + MinIO + Redis (init scripts create cold_export_user + drop fn)
+        run: docker compose up -d --wait timescaledb minio redis
+
+      - name: Provision cold bucket + scoped principals (write + read-only)
+        run: docker compose up minio-init
+
+      - name: Build + start the cold-store broker (notebooks profile)
+        run: docker compose --profile notebooks up -d --build notebook-cold-broker
+
+      - name: Wait for the broker to be serving
+        run: |
+          name=industryflow-notebook-cold-broker
+          for i in $(seq 1 30); do
+            state=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)
+            restarts=$(docker inspect -f '{{.RestartCount}}' "$name" 2>/dev/null || echo 0)
+            if [ "$state" = "running" ] && [ "$restarts" = "0" ] \
+               && docker run --rm --network industryflow-network curlimages/curl:8.11.1 \
+                    -sf http://notebook-cold-broker:5060/health >/dev/null 2>&1; then
+              echo "broker serving (attempt $i)"; exit 0
+            fi
+            echo "waiting for broker... ($i/30, state=$state restarts=$restarts)"; sleep 2
+          done
+          echo "broker did not come up healthy"; docker compose --profile notebooks logs notebook-cold-broker; exit 1
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install cold-export integration deps
+        run: pip install -r services/cold_export/tests/requirements-integration.txt
+
+      # WRITE-PATH proof, host-side: the exporter's real adapters reach TimescaleDB (localhost:5432,
+      # sslmode=require — pg_hba is hostssl) and MinIO (localhost:9000). IF_REQUIRE_LIVE_STACK=1
+      # makes a SKIP a FAILURE — the whole point is that this actually runs.
+      - name: Run cold-export end-to-end proof (export -> verify -> drop)
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGDATABASE: industryflow
+          DB_SSLMODE: require
+          COLD_STORE_ENDPOINT: http://localhost:9000
+          COLD_STORE_BUCKET: industryflow-cold
+          IF_REQUIRE_LIVE_STACK: "1"
+        run: |
+          export PGPASSWORD="$(grep -E '^DB_PASSWORD=' .env | cut -d= -f2-)"
+          export COLD_EXPORT_DB_PASSWORD="$(grep -E '^COLD_EXPORT_DB_PASSWORD=' .env | cut -d= -f2-)"
+          export COLD_STORE_ACCESS_KEY="$(grep -E '^COLD_STORE_ACCESS_KEY=' .env | cut -d= -f2-)"
+          export COLD_STORE_SECRET_KEY="$(grep -E '^COLD_STORE_SECRET_KEY=' .env | cut -d= -f2-)"
+          pytest services/cold_export/tests/test_cold_export_integration.py -m integration -v
+
+      # READ-PATH proof, IN-NETWORK: the broker's 307 points at minio:9000, so the runner must be a
+      # container on industryflow-network (a host runner could not follow the redirect).
+      - name: Run cold-broker end-to-end proof (list + pre-signed GET + isolation)
+        run: |
+          AK="$(grep -E '^COLD_STORE_ACCESS_KEY=' .env | cut -d= -f2-)"
+          SK="$(grep -E '^COLD_STORE_SECRET_KEY=' .env | cut -d= -f2-)"
+          docker run --rm --network industryflow-network -v "$PWD:/w" -w /w \
+            -e IF_REQUIRE_LIVE_STACK=1 \
+            -e COLD_BROKER_URL=http://notebook-cold-broker:5060 \
+            -e COLD_BROKER_REDIS_URL=redis://redis:6379/0 \
+            -e COLD_STORE_ENDPOINT=http://minio:9000 \
+            -e COLD_STORE_BUCKET=industryflow-cold \
+            -e COLD_STORE_ACCESS_KEY="$AK" -e COLD_STORE_SECRET_KEY="$SK" \
+            python:3.12-slim bash -c "
+              pip install -q -r services/notebook_cold_broker/tests/requirements-integration.txt &&
+              pytest services/notebook_cold_broker/tests/test_cold_broker_integration.py -m integration -v"
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: docker compose --profile notebooks logs timescaledb minio redis minio-init notebook-cold-broker
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile notebooks down -v
+
+  cold-layer-integration-gate:
+    name: cold-layer-integration-gate
+    needs: [changes, cold-layer]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on proof result
+        run: |
+          changes="${{ needs.changes.result }}"
+          result="${{ needs.cold-layer.result }}"
+          echo "changes=$changes proof=$result (relevant=${{ needs.changes.outputs.relevant }})"
+          if [ "$changes" != "success" ]; then
+            echo "::error::change-detection job did not succeed ($changes)"; exit 1
+          fi
+          if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+            echo "::error::cold-layer integration proof did not pass"; exit 1
+          fi
+          exit 0
