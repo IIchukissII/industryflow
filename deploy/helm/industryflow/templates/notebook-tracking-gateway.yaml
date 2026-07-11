@@ -1,0 +1,101 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Experiment-tracking gateway (ADR-0019). An authoring kernel's MLflow client points
+# MLFLOW_TRACKING_URI here and sends its tracking capability as the bearer; the gateway resolves it
+# to one tenant, forces every MLflow REST call into that tenant's namespace, and returns
+# tenant-scoped, per-object pre-signed artifact URLs (no object-store credential in the kernel). It
+# holds the object-store principal for the MLflow artifact bucket. REFERENCE: renders via
+# `helm template`; the live MLflow relay + artifact pre-signing are compose/box-validated (issue #19).
+{{- if .Values.notebookHub.enabled }}
+{{- $fullname := include "industryflow.fullname" . }}
+{{- $svc := printf "%s-notebook-tracking-gateway" $fullname }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-tracking-gateway
+spec:
+  selector:
+    app.kubernetes.io/name: notebook-tracking-gateway
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.notebookHub.trackingGateway.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $svc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-tracking-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-tracking-gateway
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notebook-tracking-gateway
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.securityContext.enabled }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      containers:
+        - name: tracking-gateway
+          image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.trackingGateway.image "tag" .Values.image.tag "digest" .Values.notebookHub.trackingGateway.digest) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.notebookHub.trackingGateway.port }}
+          env:
+            - name: TRACKING_HOST
+              value: "0.0.0.0"
+            - name: TRACKING_PORT
+              value: {{ .Values.notebookHub.trackingGateway.port | quote }}
+            - name: TRACKING_PRESIGN_TTL_SECONDS
+              value: {{ .Values.notebookHub.trackingGateway.presignTtlSeconds | quote }}
+            - name: TRACKING_MLFLOW_URL
+              value: {{ include "industryflow.mlflowUri" . | quote }}
+            - name: TRACKING_REDIS_URL
+              value: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
+            - name: TRACKING_ARTIFACT_BUCKET
+              value: {{ .Values.notebookHub.trackingGateway.artifactBucket | quote }}
+            - name: TRACKING_S3_ENDPOINT_URL
+              value: {{ include "industryflow.minioEndpoint" . | quote }}
+            # The object-store principal for the MLflow artifact bucket. The kernel never sees it —
+            # bytes move via tenant-scoped pre-signed URLs (ADR-0019 dec 6).
+            - name: TRACKING_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-tracking-gateway") }}
+                  key: MINIO_ACCESS_KEY
+            - name: TRACKING_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-tracking-gateway") }}
+                  key: MINIO_SECRET_KEY
+          resources:
+            {{- toYaml .Values.notebookHub.trackingGateway.resources | nindent 12 }}
+{{- end }}
