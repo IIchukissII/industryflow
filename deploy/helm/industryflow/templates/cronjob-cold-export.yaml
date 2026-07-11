@@ -1,0 +1,134 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.coldExport.enabled }}
+{{- /*
+  Cold layer (ADR-0025): export raw sensor_measurements older than horizonDays to partitioned
+  Parquet in the object store (export -> verify -> drop), then drop the exported chunk. This is
+  the sole authority that drops raw chunks — there is no blind DB retention timer. The job is
+  idempotent and self-healing (decision 4): a failed run re-picks the same days next time. It
+  authenticates as cold_export_user (DB, least privilege) and with its write-scoped object-store
+  principal (never the root MinIO keys).
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "industryflow.fullname" . }}-cold-export
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: cold-export
+    app.kubernetes.io/component: archival
+spec:
+  schedule: {{ .Values.coldExport.schedule | quote }}
+  # One export at a time: overlapping runs would race on the same days' chunks.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cold-export
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            fsGroup: {{ .Values.securityContext.fsGroup }}
+            seccompProfile:
+              type: RuntimeDefault
+          {{- end }}
+          containers:
+            - name: cold-export
+              image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.coldExport.image "tag" .Values.image.tag "digest" .Values.coldExport.digest) | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              {{- if .Values.securityContext.enabled }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              {{- end }}
+              env:
+                - name: TIMESCALEDB_HOST
+                  value: {{ include "industryflow.dbHost" . | quote }}
+                - name: TIMESCALEDB_PORT
+                  value: {{ .Values.infra.timescaledb.port | quote }}
+                # The application database (00-create-databases.sql). Tenants are schemas within it.
+                - name: TIMESCALEDB_DB
+                  value: "industryflow"
+                - name: COLD_EXPORT_DB_USER
+                  value: "cold_export_user"
+                - name: COLD_EXPORT_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "cold-export") }}
+                      key: COLD_EXPORT_DB_PASSWORD
+                - name: COLD_STORE_ENDPOINT
+                  value: {{ .Values.coldExport.store.endpoint | default (include "industryflow.minioEndpoint" .) | quote }}
+                - name: COLD_STORE_BUCKET
+                  value: {{ .Values.coldExport.store.bucket | quote }}
+                - name: COLD_STORE_REGION
+                  value: {{ .Values.coldExport.store.region | quote }}
+                - name: COLD_STORE_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "cold-export") }}
+                      key: COLD_STORE_ACCESS_KEY
+                - name: COLD_STORE_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "cold-export") }}
+                      key: COLD_STORE_SECRET_KEY
+                - name: COLD_EXPORT_HORIZON_DAYS
+                  value: {{ .Values.coldExport.horizonDays | quote }}
+                {{- if .Values.tls.db.enabled }}
+                # TLS to the DB (ADR-0017); libpq reads sslmode/sslrootcert directly.
+                - name: DB_SSLMODE
+                  value: {{ .Values.tls.db.sslmode | quote }}
+                - name: DB_SSLROOTCERT
+                  value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
+                {{- end }}
+              {{- with .Values.coldExport.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- if or .Values.securityContext.enabled .Values.tls.db.enabled }}
+              volumeMounts:
+                {{- if .Values.securityContext.enabled }}
+                # pyarrow/boto buffering scratch under a read-only root FS.
+                - name: tmp
+                  mountPath: /tmp
+                {{- end }}
+                {{- if .Values.tls.db.enabled }}
+                - name: db-ca
+                  mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
+                  subPath: ca.crt
+                  readOnly: true
+                {{- end }}
+              {{- end }}
+          {{- if or .Values.securityContext.enabled .Values.tls.db.enabled }}
+          volumes:
+            {{- if .Values.securityContext.enabled }}
+            - name: tmp
+              emptyDir: {}
+            {{- end }}
+            {{- if .Values.tls.db.enabled }}
+            - name: db-ca
+              secret:
+                secretName: {{ .Values.tls.db.secretName | quote }}
+                items:
+                  - key: ca.crt
+                    path: ca.crt
+            {{- end }}
+          {{- end }}
+{{- end }}
