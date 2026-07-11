@@ -605,3 +605,15 @@ notebookHub:
     resources:
       requests: { cpu: 50m, memory: 64Mi }
       limits: { cpu: 250m, memory: 128Mi }
+  # Cold-store broker (ADR-0025 dec 5, read side): authoring kernels present their cold capability
+  # to read long-horizon history as Parquet. The broker holds a read-only cold-bucket principal
+  # (provisioned by the minio-cold-init Job) and vends tenant-prefix-scoped pre-signed GET URLs.
+  # Rendered only when coldExport is also enabled (there is no cold layer to read otherwise).
+  coldBroker:
+    image: industryflow-notebook-cold-broker
+    digest: ""
+    port: 5060
+    presignTtlSeconds: 300
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { cpu: 250m, memory: 256Mi }
