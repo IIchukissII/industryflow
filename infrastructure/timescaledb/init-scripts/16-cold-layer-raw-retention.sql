@@ -45,10 +45,16 @@ BEGIN
     -- drop_chunks removes only chunks entirely within (newer_than, older_than). A chunk that
     -- overlaps a still-live boundary is left in place, so an un-exported day can never be dropped
     -- — the ordering guarantee holds even if chunk boundaries are not perfectly day-aligned.
-    PERFORM drop_chunks(
+    -- drop_chunks must be schema-qualified: this function pins a hardened search_path that
+    -- excludes public (where TimescaleDB installs drop_chunks), so an unqualified call resolves
+    -- to nothing. Positional args (relation, older_than, newer_than) — the "any"-typed
+    -- older_than/newer_than don't resolve via named notation. The day window [p_start, p_end) is
+    -- (p_end as older_than, p_start as newer_than). The table name is already schema-qualified, so
+    -- its ::regclass resolves regardless of search_path.
+    PERFORM public.drop_chunks(
         format('%I.sensor_measurements', p_schema)::regclass,
-        older_than => p_end,
-        newer_than => p_start
+        p_end,
+        p_start
     );
 END;
 $$;
