@@ -53,6 +53,9 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/zookeeper/data
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
   volumeClaimTemplates:
     - metadata:
         name: data
