@@ -69,6 +69,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "minio-cold-init") }}
                   key: COLD_STORE_SECRET_KEY
+            - name: COLD_READ_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "minio-cold-init") }}
+                  key: COLD_READ_ACCESS_KEY
+            - name: COLD_READ_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "minio-cold-init") }}
+                  key: COLD_READ_SECRET_KEY
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -94,7 +104,21 @@ spec:
               mc admin policy create cold cold-export-rw /tmp/cold-rw.json || true
               mc admin user add cold "$COLD_STORE_ACCESS_KEY" "$COLD_STORE_SECRET_KEY" || true
               mc admin policy attach cold cold-export-rw --user "$COLD_STORE_ACCESS_KEY" || true
-              echo "cold store ready: bucket=$COLD_BUCKET, scoped user attached (put/get/list only)"
+              # Read-only principal for the cold-store broker (ADR-0025 dec 5): get/list only, no
+              # put/delete — the object-store twin of the SQL proxy's read-only role.
+              cat > /tmp/cold-ro.json <<EOF
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::$COLD_BUCKET"]},
+                  {"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": ["arn:aws:s3:::$COLD_BUCKET/*"]}
+                ]
+              }
+              EOF
+              mc admin policy create cold cold-broker-ro /tmp/cold-ro.json || true
+              mc admin user add cold "$COLD_READ_ACCESS_KEY" "$COLD_READ_SECRET_KEY" || true
+              mc admin policy attach cold cold-broker-ro --user "$COLD_READ_ACCESS_KEY" || true
+              echo "cold store ready: bucket=$COLD_BUCKET, write user (put/get/list) + read user (get/list) attached"
           volumeMounts:
             - name: tmp
               mountPath: /tmp

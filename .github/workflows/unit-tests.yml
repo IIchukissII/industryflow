@@ -49,6 +49,7 @@ jobs:
           # no-DB job (a false green). It runs in db-tenant-isolation.yml against a live stack.
           - { service: notebook_sql_proxy,  path: services/notebook_sql_proxy/tests, args: "--ignore=services/notebook_sql_proxy/tests/test_sql_proxy_integration.py" }
           - { service: notebook_tracking_gateway, path: services/notebook_tracking_gateway/tests }
+          - { service: notebook_cold_broker, path: services/notebook_cold_broker/tests }
           - { service: alert_service,       path: services/alert_service/tests }
           # Redis-backed tests are marked `redis` and skipped (no server in CI).
           - { service: ml_service,          path: services/ml_service/tests, args: "-m 'not redis'" }
