@@ -46,6 +46,9 @@ CREATE TRIGGER companies_updated_at_trigger
 -- exists; the role was created earlier in 00-create-roles.sh.
 GRANT SELECT ON public.companies TO api_gateway_user;
 
+-- Cold-export iterates the registry to find every tenant to archive (ADR-0025 dec 5).
+GRANT SELECT ON public.companies TO cold_export_user;
+
 DO $$
 BEGIN
     RAISE NOTICE '========================================';

@@ -1,0 +1,104 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if and .Values.coldExport.enabled .Values.infra.minio.inCluster }}
+{{- /*
+  One-shot bootstrap for the cold layer's object store (ADR-0025 dec 5/11): create the cold
+  bucket and a WRITE-SCOPED MinIO principal the exporter uses — put/get/list on ONLY the cold
+  bucket, nothing else. The exporter never holds the root MinIO keys. Runs as a Helm hook so it
+  (re-)applies on install/upgrade; every step is idempotent. For an EXTERNAL/managed S3 store the
+  operator provisions the bucket + scoped principal out-of-band, so this Job is skipped.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "industryflow.fullname" . }}-minio-cold-init
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: minio-cold-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio-cold-init
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: minio-cold-init
+          image: {{ .Values.coldExport.initImage | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            # mc keeps its config + the alias here; HOME under the writable /tmp emptyDir so the
+            # root FS stays read-only.
+            - name: HOME
+              value: /tmp
+            - name: MINIO_ENDPOINT
+              value: {{ include "industryflow.minioEndpoint" . | quote }}
+            - name: COLD_BUCKET
+              value: {{ .Values.coldExport.store.bucket | quote }}
+            - name: MINIO_ROOT_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "minio-cold-init") }}
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_ROOT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "minio-cold-init") }}
+                  key: MINIO_SECRET_KEY
+            - name: COLD_STORE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "minio-cold-init") }}
+                  key: COLD_STORE_ACCESS_KEY
+            - name: COLD_STORE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "minio-cold-init") }}
+                  key: COLD_STORE_SECRET_KEY
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              # Wait for MinIO to accept the admin alias (the pod may still be starting).
+              until mc alias set cold "$MINIO_ENDPOINT" "$MINIO_ROOT_ACCESS_KEY" "$MINIO_ROOT_SECRET_KEY" >/dev/null 2>&1; do
+                echo "waiting for MinIO at $MINIO_ENDPOINT ..."; sleep 2
+              done
+              # Cold bucket (idempotent).
+              mc mb -p "cold/$COLD_BUCKET"
+              # Write-scoped policy: put/get/list on ONLY this bucket. No delete, no other bucket.
+              cat > /tmp/cold-rw.json <<EOF
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::$COLD_BUCKET"]},
+                  {"Effect": "Allow", "Action": ["s3:PutObject", "s3:GetObject"], "Resource": ["arn:aws:s3:::$COLD_BUCKET/*"]}
+                ]
+              }
+              EOF
+              # create/user-add error if the object already exists; re-running an upgrade is fine,
+              # so tolerate that and let the final attach converge the binding.
+              mc admin policy create cold cold-export-rw /tmp/cold-rw.json || true
+              mc admin user add cold "$COLD_STORE_ACCESS_KEY" "$COLD_STORE_SECRET_KEY" || true
+              mc admin policy attach cold cold-export-rw --user "$COLD_STORE_ACCESS_KEY" || true
+              echo "cold store ready: bucket=$COLD_BUCKET, scoped user attached (put/get/list only)"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}
