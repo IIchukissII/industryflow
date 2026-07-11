@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Deps for the live end-to-end proof (test_cold_broker_integration.py): drive the running broker
+# over HTTP, mint capabilities in Redis, and seed the object store with boto3. Run inside the
+# compose network so the broker's pre-signed-URL host (minio:9000) resolves.
+pytest==8.3.4
+requests==2.32.3
+redis==8.0.1
+boto3==1.43.40

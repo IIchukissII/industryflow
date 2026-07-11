@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Deps for the live end-to-end proof (test_cold_export_integration.py): drive the real exporter
+# adapters — psycopg2 to TimescaleDB, pyarrow's S3FileSystem to MinIO — against a live stack.
+-r ../requirements.txt
+pytest==8.3.4
