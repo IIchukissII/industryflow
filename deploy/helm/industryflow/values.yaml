@@ -506,6 +506,11 @@ secrets:
     COLD_EXPORT_DB_PASSWORD: "CHANGE_ME"
     COLD_STORE_ACCESS_KEY: "CHANGE_ME"
     COLD_STORE_SECRET_KEY: "CHANGE_ME"
+    # Read side (ADR-0025 dec 5): the cold-store broker's READ-ONLY principal (get/list on the cold
+    # bucket only). Provisioned by the minio-cold-init Job; consumed by the broker when the notebook
+    # stack is deployed. Distinct from the write principal above.
+    COLD_READ_ACCESS_KEY: "CHANGE_ME"
+    COLD_READ_SECRET_KEY: "CHANGE_ME"
     JWT_SECRET_KEY: "CHANGE_ME"
     INTERNAL_SERVICE_TOKEN: "CHANGE_ME"
     MINIO_ACCESS_KEY: "CHANGE_ME"

@@ -122,6 +122,18 @@ def test_tracking_audience_is_read_write_and_distinct():
     assert cap.resolve(store, h, expected_audience=cap.AUDIENCE_API) is None
 
 
+def test_cold_audience_is_read_only_and_distinct():
+    store = FakeStore()
+    h = _mint(store, audience=cap.AUDIENCE_COLD)
+    # Cold resolves only for cold, and is read-only (training reads history, writes nothing —
+    # ADR-0025 dec 5).
+    b = cap.resolve(store, h, expected_audience=cap.AUDIENCE_COLD)
+    assert b is not None and b.audience == cap.AUDIENCE_COLD
+    assert b.read_only is True
+    assert cap.resolve(store, h, expected_audience=cap.AUDIENCE_TRACKING) is None
+    assert cap.resolve(store, h, expected_audience=cap.AUDIENCE_SQL) is None
+
+
 def test_unknown_audience_rejected():
     store = FakeStore()
     import pytest
