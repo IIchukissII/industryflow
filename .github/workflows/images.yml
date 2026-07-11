@@ -53,6 +53,7 @@ jobs:
           - { name: notebook-authoring,     context: clients/python,            file: services/notebook_hub/Dockerfile.authoring }
           - { name: notebook-analytics,     context: clients/python,            file: services/notebook_hub/Dockerfile.analytics }
           - { name: db-backup,              context: infrastructure/backup,     file: infrastructure/backup/Dockerfile }
+          - { name: cold-export,            context: services/cold_export,      file: services/cold_export/Dockerfile }
     steps:
       - uses: actions/checkout@v7
 

@@ -150,7 +150,10 @@ tenant_<normalized_uuid>
 - Compression ratios: 10-50x depending on data
 
 **Retention Policies:**
-- Raw measurements: 2 years
+- Raw measurements: owned by the cold-export job, **not** a TimescaleDB timer (ADR-0025). Script
+  16 removes any blind `add_retention_policy` on `sensor_measurements`; the exporter drops a raw
+  chunk only after a verified Parquet export (export → verify → drop). Effective horizon =
+  `COLD_EXPORT_HORIZON_DAYS` (default 30 days).
 - 1-min aggregations: 90 days
 - 5-min aggregations: 180 days
 - 1-hour aggregations: 1 year

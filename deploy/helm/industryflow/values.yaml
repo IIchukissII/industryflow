@@ -350,6 +350,33 @@ backup:
     limits: { cpu: 500m, memory: 512Mi }
 
 # ---------------------------------------------------------------------------
+# Cold layer (ADR-0025). A CronJob exports raw sensor_measurements older than the horizon to
+# partitioned Parquet in object storage (export -> verify -> drop) and then drops the exported
+# chunk. This is the SOLE authority that drops raw chunks — there is no blind DB retention timer
+# (init script 16 removed it), so the effective raw retention IS horizonDays. The exporter uses a
+# WRITE-SCOPED object-store principal (COLD_STORE_ACCESS_KEY/SECRET), never the root MinIO keys;
+# for in-cluster MinIO a one-shot Job (job-minio-cold-init.yaml) creates the cold bucket and that
+# scoped user. Point store.endpoint/bucket at a managed S3 to archive off-cluster.
+# ---------------------------------------------------------------------------
+coldExport:
+  enabled: true
+  image: industryflow-cold-export
+  digest: ""
+  schedule: "0 3 * * *"          # daily 03:00 UTC (after the 02:00 backup)
+  # Raw stays hot this long; anything older is archived to Parquet and then dropped. Irreversible
+  # past this horizon — the cold layer becomes the only copy of older-than-horizon history.
+  horizonDays: 30
+  store:
+    endpoint: ""                 # "" -> derive the in-cluster MinIO endpoint
+    bucket: industryflow-cold
+    region: us-east-1
+  # mc image for the in-cluster cold-bucket + write-scoped-user bootstrap (inCluster MinIO only).
+  initImage: minio/mc:latest
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { cpu: "1", memory: 2Gi }
+
+# ---------------------------------------------------------------------------
 # Observability integration (ADR-0009). The chart does NOT run Prometheus/Grafana/Loki —
 # those are the cluster's monitoring stack (kube-prometheus-stack + Loki; see
 # deploy/observability/). The app only EMITS the objects that stack discovers:
@@ -472,6 +499,13 @@ secrets:
     MLFLOW_DB_PASSWORD: "CHANGE_ME"
     # Read-only monitoring role used by the postgres-exporter (pg_monitor).
     METRICS_DB_PASSWORD: "CHANGE_ME"
+    # Cold-layer exporter (ADR-0025): the cold_export_user DB role password (consumed at DB init),
+    # and the WRITE-SCOPED object-store principal the exporter authenticates with. The scoped
+    # principal is distinct from the root MINIO_ACCESS_KEY/SECRET above. Only consumed when
+    # coldExport.enabled.
+    COLD_EXPORT_DB_PASSWORD: "CHANGE_ME"
+    COLD_STORE_ACCESS_KEY: "CHANGE_ME"
+    COLD_STORE_SECRET_KEY: "CHANGE_ME"
     JWT_SECRET_KEY: "CHANGE_ME"
     INTERNAL_SERVICE_TOKEN: "CHANGE_ME"
     MINIO_ACCESS_KEY: "CHANGE_ME"

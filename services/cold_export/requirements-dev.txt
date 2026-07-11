@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Test-only dependencies. The orchestration tests (tests/test_exporter.py) drive the exporter
+# against in-memory fakes — no database and no object store — so only pyarrow (for RecordBatch)
+# and pytest are needed.
+-r requirements.txt
+pytest==8.3.4

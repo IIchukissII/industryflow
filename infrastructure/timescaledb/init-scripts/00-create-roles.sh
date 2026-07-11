@@ -56,6 +56,15 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
             EXECUTE format('CREATE ROLE metrics_user WITH LOGIN PASSWORD %L', '${METRICS_DB_PASSWORD}');
         END IF;
         GRANT pg_monitor TO metrics_user;
+
+        -- Cold-layer exporter role (ADR-0025). Reads raw sensor_measurements and drops the
+        -- day's chunk after a verified Parquet export. Least privilege: it gets only SELECT on
+        -- sensor_measurements plus EXECUTE on the SECURITY DEFINER cold_export_drop_day() (both
+        -- granted per-tenant in 04 / migration 16) — never table ownership. Password may be unset
+        -- when the cold-export job is not deployed; the role is still created so grants resolve.
+        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'cold_export_user') THEN
+            EXECUTE format('CREATE ROLE cold_export_user WITH LOGIN PASSWORD %L', '${COLD_EXPORT_DB_PASSWORD}');
+        END IF;
     END \$\$;
     
     -- =============================================================================
@@ -71,13 +80,18 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     ALTER ROLE ml_service_user CONNECTION LIMIT 10;
     ALTER ROLE mlflow_user CONNECTION LIMIT 20;
     ALTER ROLE metrics_user CONNECTION LIMIT 5;
-    
+    -- Single-node daily batch (one connection at a time); a small ceiling is plenty.
+    ALTER ROLE cold_export_user CONNECTION LIMIT 5;
+
     -- Statement timeouts
     ALTER ROLE api_gateway_user SET statement_timeout = '30s';
     ALTER ROLE spark_streaming_user SET statement_timeout = '120s';
     ALTER ROLE alert_service_user SET statement_timeout = '60s';
     ALTER ROLE ml_service_user SET statement_timeout = '60s';
     ALTER ROLE mlflow_user SET statement_timeout = '30s';
+    -- Batch scans over a day of raw across a hypertable can be slow; give the exporter room
+    -- (a bounded ceiling, not disabled). It reads one day per statement.
+    ALTER ROLE cold_export_user SET statement_timeout = '3600s';
     
     -- =============================================================================
     -- PUBLIC SCHEMA PERMISSIONS
@@ -91,6 +105,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     GRANT USAGE ON SCHEMA public TO spark_streaming_user;
     GRANT USAGE ON SCHEMA public TO alert_service_user;
     GRANT USAGE ON SCHEMA public TO ml_service_user;
+    -- Cold-export enumerates tenants from public.companies (verified identity — ADR-0025 dec 5).
+    GRANT USAGE ON SCHEMA public TO cold_export_user;
 
     -- public."user" is created at runtime by api_gateway_user (fastapi-users), so it
     -- does NOT exist yet at init time. Granting SELECT on it directly here would abort
@@ -108,4 +124,5 @@ echo "✓ spark_streaming_user (50 connections)"
 echo "✓ alert_service_user (10 connections)"
 echo "✓ ml_service_user (10 connections)"
 echo "✓ mlflow_user (20 connections)"
+echo "✓ cold_export_user (5 connections, SELECT + drop-chunk only)"
 echo "=========================================="

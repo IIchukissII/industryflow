@@ -90,6 +90,15 @@ BEGIN
         EXECUTE format('GRANT %I TO notebook_sql_proxy', v_reader_role);
     END IF;
 
+    -- Cold-layer exporter (ADR-0025): least-privilege read access to raw measurements only. It
+    -- never gets INSERT/UPDATE/DELETE and never owns the table; the day's chunk is dropped through
+    -- the SECURITY DEFINER cold_export_drop_day() (defined in migration 16). Guarded on the role
+    -- existing (00-create-roles.sh creates it).
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cold_export_user') THEN
+        EXECUTE format('GRANT USAGE ON SCHEMA %I TO cold_export_user', v_schema_name);
+        EXECUTE format('GRANT SELECT ON %I.sensor_measurements TO cold_export_user', v_schema_name);
+    END IF;
+
     -- Update companies table with schema name
     UPDATE public.companies 
     SET schema_name = v_schema_name 
@@ -192,8 +201,13 @@ BEGIN
     ', p_schema_name);
     
     PERFORM add_compression_policy(format('%I.sensor_measurements', p_schema_name), INTERVAL '7 days', if_not_exists => TRUE);
-    PERFORM add_retention_policy(format('%I.sensor_measurements', p_schema_name), INTERVAL '2 years', if_not_exists => TRUE);
-    
+    -- No blind retention policy on raw measurements (ADR-0025 dec 2/3). A timer-based drop would
+    -- delete chunks regardless of whether they were archived — violating "no chunk dropped without
+    -- a verified export". Instead the cold-export job (services/cold_export) is the SOLE authority
+    -- that drops a raw chunk, and only after its Parquet export is written and verified. Effective
+    -- raw retention is the export horizon (COLD_EXPORT_HORIZON_DAYS, default 30d). Aggregate
+    -- retention below is unchanged — those tables are small and serve the hot-layer question.
+
     -- Create aggregation tables (1min, 5min, 1hour)
     PERFORM create_aggregation_tables(p_schema_name);
     
