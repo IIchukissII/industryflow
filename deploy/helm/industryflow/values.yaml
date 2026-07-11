@@ -617,3 +617,17 @@ notebookHub:
     resources:
       requests: { cpu: 50m, memory: 64Mi }
       limits: { cpu: 250m, memory: 256Mi }
+  # Experiment-tracking gateway (ADR-0019): authoring kernels point MLflow at this gateway with
+  # their tracking capability as the bearer; it scopes every MLflow call to the caller's tenant and
+  # returns tenant-scoped pre-signed artifact URLs. It holds the object-store principal for the
+  # MLflow artifact bucket (never in the kernel). Rendered with the notebook stack.
+  trackingGateway:
+    image: industryflow-notebook-tracking-gateway
+    digest: ""
+    port: 5050
+    presignTtlSeconds: 300
+    # The MLflow artifact bucket the gateway pre-signs against (matches mlflow's --artifacts-destination).
+    artifactBucket: mlflow
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { cpu: 250m, memory: 256Mi }
