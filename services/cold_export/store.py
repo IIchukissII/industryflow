@@ -43,14 +43,15 @@ class S3ColdStore:
     def __init__(self, cfg: StoreConfig):
         host, scheme = _split_endpoint(cfg.endpoint)
         self._bucket = cfg.bucket
+        # pyarrow's S3FileSystem uses path-style addressing by default when endpoint_override is
+        # set (MinIO does not do virtual-host buckets), which is exactly what we need. (The
+        # explicit force_virtual_addressing knob only exists in pyarrow >= 15; we pin 14.)
         self._fs = fs.S3FileSystem(
             access_key=cfg.access_key,
             secret_key=cfg.secret_key,
             endpoint_override=host,
             scheme=scheme,
             region=cfg.region,
-            # Path-style access: MinIO does not do virtual-host buckets.
-            force_virtual_addressing=False,
         )
 
     def _path(self, key: str) -> str:
