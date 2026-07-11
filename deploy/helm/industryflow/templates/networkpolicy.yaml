@@ -141,6 +141,68 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.notebookHub.sqlProxy.port }}
+    {{- if .Values.coldExport.enabled }}
+    # The cold-store broker (ADR-0025 dec 5): the kernel lists + requests pre-signed URLs here.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: notebook-cold-broker
+      ports:
+        - protocol: TCP
+          port: {{ .Values.notebookHub.coldBroker.port }}
+    {{- if .Values.infra.minio.inCluster }}
+    # The object store, for the pre-signed GET itself — the broker 307-redirects the kernel here so
+    # the Parquet bytes move directly (ADR-0025 dec 1). The URL is signed + prefix-scoped; the pod
+    # holds no object-store credential, so reachability alone grants nothing.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minio
+      ports:
+        - protocol: TCP
+          port: {{ .Values.infra.minio.apiPort }}
+    {{- end }}
+    {{- end }}
+---
+{{- if .Values.coldExport.enabled }}
+# The cold-store broker reaches only Redis (capability lookup) and the object store (list objects),
+# plus DNS. Pre-signing itself is an offline crypto op. It is the sole bridge between untrusted
+# kernels and the cold layer's object store (ADR-0025 dec 5).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "industryflow.fullname" . }}-notebook-cold-broker-egress
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-cold-broker
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: {{ .Values.infra.redis.port }}
+    {{- if .Values.infra.minio.inCluster }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minio
+      ports:
+        - protocol: TCP
+          port: {{ .Values.infra.minio.apiPort }}
+    {{- end }}
+{{- end }}
 ---
 # The SQL proxy reaches only TimescaleDB (privileged login) and Redis (capability lookup), plus
 # DNS. It is the sole bridge between untrusted kernels and the database (ADR-0015).

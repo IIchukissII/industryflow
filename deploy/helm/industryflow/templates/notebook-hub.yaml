@@ -141,6 +141,12 @@ spec:
             # spawns only. The kernel presents its SQL capability handle as the password.
             - name: INDUSTRYFLOW_SQL_PROXY_URL
               value: {{ printf "postgresql://%s-notebook-sql-proxy:%v/%s" $fullname .Values.notebookHub.sqlProxy.port .Values.infra.timescaledb.database | quote }}
+            {{- if .Values.coldExport.enabled }}
+            # Where authoring kernels reach the cold-store broker (ADR-0025 read side); forwarded to
+            # authoring spawns only. The kernel presents its cold capability handle as the bearer.
+            - name: INDUSTRYFLOW_COLD_BROKER_URL
+              value: {{ printf "http://%s-notebook-cold-broker:%v" $fullname .Values.notebookHub.coldBroker.port | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.notebookHub.hub.resources | nindent 12 }}
 ---

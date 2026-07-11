@@ -1,0 +1,101 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Cold-store broker (ADR-0025 dec 5, read side). Authoring kernels present their cold capability
+# handle; the broker resolves it to one tenant, confines every key to that tenant's tenant_<uuid>/
+# prefix, and returns read-only, short-TTL pre-signed GET URLs for the cold layer. It holds a
+# READ-ONLY cold-bucket principal (the minio-cold-init Job provisions it) — never the exporter's
+# write principal or the root keys. Rendered only when the notebook hub AND the cold layer are on.
+# REFERENCE: renders via `helm template`; the live pre-signing is compose/box-validated.
+{{- if and .Values.notebookHub.enabled .Values.coldExport.enabled }}
+{{- $fullname := include "industryflow.fullname" . }}
+{{- $svc := printf "%s-notebook-cold-broker" $fullname }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-cold-broker
+spec:
+  selector:
+    app.kubernetes.io/name: notebook-cold-broker
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.notebookHub.coldBroker.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $svc }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-cold-broker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-cold-broker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notebook-cold-broker
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.securityContext.enabled }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      containers:
+        - name: cold-broker
+          image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.coldBroker.image "tag" .Values.image.tag "digest" .Values.notebookHub.coldBroker.digest) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.notebookHub.coldBroker.port }}
+          env:
+            - name: COLD_BROKER_HOST
+              value: "0.0.0.0"
+            - name: COLD_BROKER_PORT
+              value: {{ .Values.notebookHub.coldBroker.port | quote }}
+            - name: COLD_BROKER_PRESIGN_TTL_SECONDS
+              value: {{ .Values.notebookHub.coldBroker.presignTtlSeconds | quote }}
+            - name: COLD_BROKER_REDIS_URL
+              value: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
+            - name: COLD_STORE_ENDPOINT
+              value: {{ .Values.coldExport.store.endpoint | default (include "industryflow.minioEndpoint" .) | quote }}
+            - name: COLD_STORE_BUCKET
+              value: {{ .Values.coldExport.store.bucket | quote }}
+            - name: COLD_STORE_REGION
+              value: {{ .Values.coldExport.store.region | quote }}
+            # READ-ONLY cold principal (the minio-cold-init Job provisions it). Distinct from the
+            # exporter's write principal and the root keys; the kernel never sees it.
+            - name: COLD_READ_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-cold-broker") }}
+                  key: COLD_READ_ACCESS_KEY
+            - name: COLD_READ_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-cold-broker") }}
+                  key: COLD_READ_SECRET_KEY
+          resources:
+            {{- toYaml .Values.notebookHub.coldBroker.resources | nindent 12 }}
+{{- end }}
