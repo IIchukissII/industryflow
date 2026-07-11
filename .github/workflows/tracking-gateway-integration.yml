@@ -1,0 +1,126 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Live end-to-end proof for the experiment-tracking gateway (ADR-0019) against a REAL stack — the
+# coverage the fake-upstream unit tests cannot give: a running gateway in front of a real MLflow +
+# MinIO + Redis. Proves tenant-namespaced experiments, cross-tenant denial, artifact round-trips
+# through tenant-scoped pre-signed URLs, and wrong-audience/no-bearer refusal.
+#
+# Always triggers so the gate always reports a status (required-check safe); the heavy proof runs
+# only when the tracking-gateway/MLflow paths change, else skips and the gate passes on the skip.
+name: Tracking gateway integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - 'services/notebook_tracking_gateway/**'
+              - 'infrastructure/timescaledb/**'
+              - 'infrastructure/mlflow/**'
+              - 'docker-compose.yml'
+              - 'docker-compose.ci-notebooks.yml'
+              - '.env.example'
+              - '.github/workflows/tracking-gateway-integration.yml'
+
+  tracking-gateway:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Provide compose env
+        run: cp .env.example .env
+
+      - name: Start TimescaleDB + MinIO + Redis
+        run: docker compose up -d --wait timescaledb minio redis
+
+      - name: Provision buckets (incl. the mlflow artifact bucket)
+        run: docker compose up minio-init
+
+      - name: "Start MLflow (CI TLS override, sslmode=require)"
+        run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml up -d mlflow
+
+      - name: Wait for MLflow to be serving
+        run: |
+          for i in $(seq 1 40); do
+            if docker run --rm --network industryflow-network curlimages/curl:8.11.1 \
+                 -sf http://mlflow:5000/health >/dev/null 2>&1; then
+              echo "mlflow serving (attempt $i)"; exit 0
+            fi
+            echo "waiting for mlflow... ($i/40)"; sleep 3
+          done
+          echo "mlflow did not come up"; docker compose logs mlflow; exit 1
+
+      - name: Build + start the tracking gateway (notebooks profile)
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml \
+            --profile notebooks up -d --build notebook-tracking-gateway
+
+      - name: Wait for the gateway to be serving
+        run: |
+          name=industryflow-notebook-tracking-gateway
+          for i in $(seq 1 30); do
+            state=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)
+            restarts=$(docker inspect -f '{{.RestartCount}}' "$name" 2>/dev/null || echo 0)
+            if [ "$state" = "running" ] && [ "$restarts" = "0" ] \
+               && docker run --rm --network industryflow-network curlimages/curl:8.11.1 \
+                    -sf http://notebook-tracking-gateway:5050/health >/dev/null 2>&1; then
+              echo "gateway serving (attempt $i)"; exit 0
+            fi
+            echo "waiting for gateway... ($i/30, state=$state restarts=$restarts)"; sleep 2
+          done
+          echo "gateway did not come up healthy"; docker compose --profile notebooks logs notebook-tracking-gateway; exit 1
+
+      # IN-NETWORK: the artifact 307 points at minio:9000, so the runner must be a container on
+      # industryflow-network. IF_REQUIRE_LIVE_STACK=1 makes a SKIP a FAILURE.
+      - name: Run tracking-gateway end-to-end proof (namespacing + isolation + artifacts)
+        run: |
+          docker run --rm --network industryflow-network -v "$PWD:/w" -w /w \
+            -e IF_REQUIRE_LIVE_STACK=1 \
+            -e TRACKING_GATEWAY_URL=http://notebook-tracking-gateway:5050 \
+            -e TRACKING_REDIS_URL=redis://redis:6379/0 \
+            python:3.12-slim bash -c "
+              pip install -q -r services/notebook_tracking_gateway/tests/requirements-integration.txt &&
+              pytest services/notebook_tracking_gateway/tests/test_tracking_gateway_integration.py -m integration -v"
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml --profile notebooks logs timescaledb minio redis mlflow notebook-tracking-gateway
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml --profile notebooks down -v
+
+  tracking-gateway-integration-gate:
+    name: tracking-gateway-integration-gate
+    needs: [changes, tracking-gateway]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on proof result
+        run: |
+          changes="${{ needs.changes.result }}"
+          result="${{ needs.tracking-gateway.result }}"
+          echo "changes=$changes proof=$result (relevant=${{ needs.changes.outputs.relevant }})"
+          if [ "$changes" != "success" ]; then
+            echo "::error::change-detection job did not succeed ($changes)"; exit 1
+          fi
+          if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+            echo "::error::tracking-gateway integration proof did not pass"; exit 1
+          fi
+          exit 0

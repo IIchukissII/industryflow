@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Deps for the live end-to-end proof (test_tracking_gateway_integration.py): drive the running
+# gateway over HTTP and mint capabilities in Redis. Run inside the compose network so the artifact
+# pre-signed-URL host (minio:9000) resolves.
+pytest==8.3.4
+requests==2.32.3
+redis==8.0.1
