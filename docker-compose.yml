@@ -132,6 +132,8 @@ services:
       MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD}
       # Notebook SQL proxy privileged role (ADR-0015) — created only when set (notebooks profile).
       NOTEBOOK_SQL_PROXY_DB_PASSWORD: ${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}
+      # Cold-layer exporter role (ADR-0025) — created at init; the exporter connects as it.
+      COLD_EXPORT_DB_PASSWORD: ${COLD_EXPORT_DB_PASSWORD:-}
 
       # Postgres configuration - HIGH THROUGHPUT
       POSTGRES_SHARED_BUFFERS: 512MB
@@ -216,6 +218,11 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       SPARK_CHECKPOINT_BUCKET: ${SPARK_CHECKPOINT_BUCKET:-spark-checkpoints}
+      # Cold layer (ADR-0025): bucket + a WRITE-SCOPED principal the exporter uses (never the root
+      # keys). Created here so the box mirrors the Helm minio-cold-init Job.
+      COLD_STORE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
+      COLD_STORE_ACCESS_KEY: ${COLD_STORE_ACCESS_KEY:-}
+      COLD_STORE_SECRET_KEY: ${COLD_STORE_SECRET_KEY:-}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -223,7 +230,26 @@ services:
         mc alias set local http://minio:9000 "$$MINIO_ACCESS_KEY" "$$MINIO_SECRET_KEY"
         mc mb -p "local/$$SPARK_CHECKPOINT_BUCKET"
         mc mb -p local/mlflow
-        echo "buckets ready: $$SPARK_CHECKPOINT_BUCKET, mlflow"
+        mc mb -p "local/$$COLD_STORE_BUCKET"
+        # Write-scoped cold-export principal: put/get/list on ONLY the cold bucket. Only set up
+        # when its keys are provided (cold-export profile); tolerate re-runs (mc create/user add
+        # error if they already exist).
+        if [ -n "$$COLD_STORE_ACCESS_KEY" ] && [ -n "$$COLD_STORE_SECRET_KEY" ]; then
+          cat > /tmp/cold-rw.json <<EOF
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET"]},
+            {"Effect": "Allow", "Action": ["s3:PutObject", "s3:GetObject"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET/*"]}
+          ]
+        }
+        EOF
+          mc admin policy create local cold-export-rw /tmp/cold-rw.json || true
+          mc admin user add local "$$COLD_STORE_ACCESS_KEY" "$$COLD_STORE_SECRET_KEY" || true
+          mc admin policy attach local cold-export-rw --user "$$COLD_STORE_ACCESS_KEY" || true
+          echo "cold store ready: $$COLD_STORE_BUCKET (scoped user attached)"
+        fi
+        echo "buckets ready: $$SPARK_CHECKPOINT_BUCKET, mlflow, $$COLD_STORE_BUCKET"
     networks:
       - industryflow-network
     restart: "no"
@@ -1030,6 +1056,39 @@ services:
       S3_PREFIX: ${BACKUP_S3_PREFIX:-timescaledb}
       DATABASES: ${BACKUP_DATABASES:-industryflow mlflow}
       RETAIN_PER_DB: ${BACKUP_RETAIN_PER_DB:-14}
+    volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
+    networks:
+      - industryflow-network
+    restart: "no"
+
+  # Cold-layer exporter (ADR-0025). Batch, on-demand in compose (`--profile cold-export up
+  # cold-export`); on k8s it is a CronJob. Exports raw sensor_measurements older than the horizon
+  # to partitioned Parquet in MinIO (export -> verify -> drop), then drops the exported chunk —
+  # the sole authority that drops raw chunks. Connects as cold_export_user and with the
+  # write-scoped MinIO principal set up by minio-init.
+  cold-export:
+    build:
+      context: ./services/cold_export
+      dockerfile: Dockerfile
+    container_name: industryflow-cold-export
+    profiles: ["cold-export"]
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *db-tls-env
+      TIMESCALEDB_HOST: ${DB_HOST}
+      TIMESCALEDB_PORT: ${DB_PORT}
+      TIMESCALEDB_DB: ${DB_NAME}
+      COLD_EXPORT_DB_USER: cold_export_user
+      COLD_EXPORT_DB_PASSWORD: ${COLD_EXPORT_DB_PASSWORD:-}
+      COLD_STORE_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      COLD_STORE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
+      COLD_STORE_REGION: ${COLD_STORE_REGION:-us-east-1}
+      COLD_STORE_ACCESS_KEY: ${COLD_STORE_ACCESS_KEY:-}
+      COLD_STORE_SECRET_KEY: ${COLD_STORE_SECRET_KEY:-}
+      COLD_EXPORT_HORIZON_DAYS: ${COLD_EXPORT_HORIZON_DAYS:-30}
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
