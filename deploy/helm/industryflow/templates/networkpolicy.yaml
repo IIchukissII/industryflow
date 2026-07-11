@@ -141,6 +141,15 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.notebookHub.sqlProxy.port }}
+    # The experiment-tracking gateway (ADR-0019): the kernel's MLflow client reaches it here to log
+    # runs/register models; tenant namespacing is enforced by the gateway, not by reachability.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: notebook-tracking-gateway
+      ports:
+        - protocol: TCP
+          port: {{ .Values.notebookHub.trackingGateway.port }}
     {{- if .Values.coldExport.enabled }}
     # The cold-store broker (ADR-0025 dec 5): the kernel lists + requests pre-signed URLs here.
     - to:
@@ -150,10 +159,12 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.notebookHub.coldBroker.port }}
+    {{- end }}
     {{- if .Values.infra.minio.inCluster }}
-    # The object store, for the pre-signed GET itself — the broker 307-redirects the kernel here so
-    # the Parquet bytes move directly (ADR-0025 dec 1). The URL is signed + prefix-scoped; the pod
-    # holds no object-store credential, so reachability alone grants nothing.
+    # The object store, for the pre-signed GET itself — both the tracking gateway (artifacts,
+    # ADR-0019) and the cold broker (Parquet, ADR-0025) 307-redirect the kernel straight here so the
+    # bytes move directly. The URLs are signed + tenant-scoped; the pod holds no object-store
+    # credential, so reachability alone grants nothing.
     - to:
         - podSelector:
             matchLabels:
@@ -162,7 +173,55 @@ spec:
         - protocol: TCP
           port: {{ .Values.infra.minio.apiPort }}
     {{- end }}
+---
+{{- if .Values.notebookHub.enabled }}
+# The tracking gateway reaches only MLflow (proxy the REST API), Redis (capability lookup) and the
+# object store (artifact list; pre-signing is offline), plus DNS. It is the sole bridge between
+# untrusted kernels and MLflow + the artifact store (ADR-0019).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "industryflow.fullname" . }}-notebook-tracking-gateway-egress
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-tracking-gateway
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: {{ .Values.infra.redis.port }}
+    {{- if .Values.infra.mlflow.inCluster }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mlflow
+      ports:
+        - protocol: TCP
+          port: {{ .Values.infra.mlflow.port }}
     {{- end }}
+    {{- if .Values.infra.minio.inCluster }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minio
+      ports:
+        - protocol: TCP
+          port: {{ .Values.infra.minio.apiPort }}
+    {{- end }}
+{{- end }}
 ---
 {{- if .Values.coldExport.enabled }}
 # The cold-store broker reaches only Redis (capability lookup) and the object store (list objects),
