@@ -50,6 +50,14 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.securityContext.enabled }}
+      # Non-root (the image runs as uid 10001) + seccomp — admission-policy friendly.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       containers:
         - name: sql-proxy
           image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.sqlProxy.image "tag" .Values.image.tag "digest" .Values.notebookHub.sqlProxy.digest) | quote }}

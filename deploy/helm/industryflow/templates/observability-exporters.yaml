@@ -74,6 +74,9 @@ spec:
           ports:
             - name: metrics
               containerPort: {{ $ex.postgres.port }}
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
           {{- if $root.Values.tls.db.enabled }}
           volumeMounts:
             - name: db-ca
@@ -146,6 +149,9 @@ spec:
           ports:
             - name: metrics
               containerPort: {{ $ex.redis.port }}
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
 ---
 apiVersion: v1
 kind: Service
@@ -201,6 +207,9 @@ spec:
           ports:
             - name: metrics
               containerPort: {{ $ex.kafka.port }}
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
 ---
 apiVersion: v1
 kind: Service
