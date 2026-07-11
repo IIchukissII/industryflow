@@ -99,6 +99,11 @@ Isolation carries into the object store under the *existing* policy, not a new o
   `read_all`). A data scientist on tenant A can no more read tenant B's Parquet than tenant B's
   schema.
 
+ADR-0025 deliberately deferred parts of the cold layer to a future trigger (a table format, a
+distributed Spark exporter, the concrete retention horizon). Those triggers, the signals that
+detect them, and what to build when they fire are tracked in
+[cold-layer-evolution.md](cold-layer-evolution.md) — build nothing until its trigger fires.
+
 ## Roles & grants
 
 Each service that touches the database connects as its own least-privilege role
