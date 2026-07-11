@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0025 — Cold layer for historical telemetry (raw measurements in an open columnar format)
 
 - **ID:** ADR-0025
-- **Status:** Accepted (build-ready — trigger-gated: the export lands when serious ML history reads begin or the hot-store raw accumulation becomes an operational/cost burden; see decision 12)
+- **Status:** Accepted — **Implemented (2026-07-11)**. Both planes are built and validated end-to-end: the write path (exporter CronJob, export → verify → drop, retention shortened to the export horizon) and the read path (cold-store broker + third capability plane). See the Implementation entry under References. (Originally recorded build-ready/trigger-gated per decision 12; the build was undertaken ahead of the natural trigger.)
 - **Date:** 2026-07-08
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
@@ -128,3 +128,8 @@ There is no *bug* here today: the hot store works, and nothing yet reads years o
 - ADR-0021 — model drift monitoring; a monthly history reader that motivates a cheap history-read path.
 - ADR-0023 — stream-materialized feature engineering; the "decouple by default, bind by contract" and "do not store derivable state" disciplines decisions 1 and 7 follow.
 - Code read (2026-07-08): `services/spark_jobs/kafka_to_timescaledb.py` (raw upsert into `sensor_measurements`); `infrastructure/timescaledb/init-scripts/04-complete-tenant-creation.sql` (hypertable, 1-day chunks, compress-after-7-days on `equipment_id`, raw retention 2 years, tiered aggregate retention); `docs/architecture/data-and-storage.md` (storage shape).
+- Implementation (2026-07-11): the design above is now built and validated end-to-end.
+  - Write path (decisions 1–4, 6, 11): `services/cold_export/exporter.py` (the export → verify → drop orchestration and idempotency invariant), `services/cold_export/source.py` (TimescaleDB adapter — day enumeration, ordered read, chunk drop), `services/cold_export/store.py` (object-store adapter — partitioned Parquet write + read-back verification), `services/cold_export/naming.py` (the single canonical `company_id → prefix` mapping, decision 5 write side), `services/cold_export/ports.py`, `services/cold_export/config.py`, `services/cold_export/main.py`.
+  - Retention + isolation SQL (decisions 2, 3, 5 write side): `infrastructure/timescaledb/init-scripts/16-cold-layer-raw-retention.sql` (the `cold_export_user` least-privilege role, the `SECURITY DEFINER cold_export_drop_day` chunk-drop, and removal of the blind raw retention policy), with the grant/removal also applied in `infrastructure/timescaledb/init-scripts/04-complete-tenant-creation.sql`, `00-create-roles.sh`, and the `pg_hba.conf`.
+  - Read path (decision 5 read side): `services/notebook_cold_broker/broker.py` (the brokered, read-only, tenant-prefix-scoped pre-signed-GET service) and `services/notebook_cold_broker/policy.py` (cold-audience handle resolution + the hyphenated `tenant_<uuid>/` prefix matching the exporter); the third audience-bound capability in `services/notebook_hub/capabilities.py` and its minting in `services/notebook_hub/jupyterhub_config.py`; the kernel client `clients/python/industryflow/cold.py`.
+  - Orchestration/infra (decisions 9–11): the k8s CronJob `deploy/helm/industryflow/templates/cronjob-cold-export.yaml`, the write-scoped + read-only MinIO principals (`deploy/helm/industryflow/templates/job-minio-cold-init.yaml`), and the compose `cold-export` profile.
