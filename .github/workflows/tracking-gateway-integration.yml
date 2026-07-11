@@ -52,7 +52,7 @@ jobs:
       - name: Provision buckets (incl. the mlflow artifact bucket)
         run: docker compose up minio-init
 
-      - name: Start MLflow (CI TLS override: sslmode=require)
+      - name: "Start MLflow (CI TLS override, sslmode=require)"
         run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml up -d mlflow
 
       - name: Wait for MLflow to be serving
