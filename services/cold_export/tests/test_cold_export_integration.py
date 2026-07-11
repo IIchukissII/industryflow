@@ -84,6 +84,14 @@ def tenant():
     try:
         cur.execute("SELECT create_tenant_schema(%s, %s)", (str(cid), f"e2e-cold-{cid}"))
         schema = cur.fetchone()[0]
+        # The exporter enumerates public.companies (verified identity, ADR-0025 dec 5), but
+        # create_tenant_schema only UPDATEs that row — it does not insert it. Register the tenant so
+        # run_export sees it (this is what the app's signup flow does).
+        cur.execute(
+            "INSERT INTO public.companies (company_id, company_name, schema_name) VALUES (%s,%s,%s) "
+            "ON CONFLICT (company_id) DO UPDATE SET schema_name = EXCLUDED.schema_name",
+            (str(cid), f"e2e-cold-{cid}", schema),
+        )
         cur.execute(f'INSERT INTO "{schema}".equipment (equipment_type, name, sensor_count) '
                     "VALUES ('pump','unit-1',1) RETURNING equipment_id")
         eqid = cur.fetchone()[0]
@@ -100,6 +108,7 @@ def tenant():
     finally:
         if schema:
             cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        cur.execute("DELETE FROM public.companies WHERE company_id = %s", (str(cid),))
         conn.close()
 
 
