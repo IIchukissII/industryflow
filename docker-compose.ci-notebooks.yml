@@ -21,3 +21,11 @@ services:
       # hostssl) without a CA file. Upstream-cert *verification* (ADR-0017) is proven separately
       # by test_tls_integration.py; it is not what this tenant-isolation proof asserts.
       SQL_PROXY_DB_SSLMODE: require
+
+  # Same CI-only TLS relaxation for MLflow (used by tracking-gateway-integration.yml): mlflow reaches
+  # the hostssl DB, but CI stages no CA into its mounted cert volume, so verify-full would fail on a
+  # missing ca.crt. PGSSLMODE=require encrypts without CA verification; mlflow's --backend-store-uri
+  # arg carries no sslmode, so this env is what libpq honours.
+  mlflow:
+    environment:
+      PGSSLMODE: require
