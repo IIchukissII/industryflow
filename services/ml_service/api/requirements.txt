@@ -27,7 +27,7 @@ boto3==1.43.40
 # ML libraries for inference
 numpy==2.3.3
 scikit-learn==1.9.0
-xgboost==2.0.3
+xgboost==3.3.0
 
 # Model-drift detection (ADR-0021): evidently computes the data/prediction drift score in
 # the /api/drift endpoint; pandas frames the reference sample + current window. pandas 2.3 is
