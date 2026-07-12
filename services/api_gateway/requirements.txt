@@ -18,7 +18,7 @@ fastapi-users[sqlalchemy]==14.0.1
 python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 
-aiokafka>=0.10.0
+aiokafka>=0.14.0
 python-snappy>=0.7.3
 aiokafka>=0.8.0
 
