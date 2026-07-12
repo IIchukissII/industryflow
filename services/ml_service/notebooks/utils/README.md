@@ -56,7 +56,7 @@ Main class for building feature configurations.
 - `add_ratio(sensor1, sensor2, name=None)` - Add ratio interaction
 - `add_difference(sensor1, sensor2, name=None)` - Add difference interaction
 - `add_product(sensor1, sensor2, name=None)` - Add product interaction
-- `add_deviation(sensor, baseline, name=None)` - Add statistical deviation
+- `add_deviation(sensor, granularity="1min", name=None)` - Add windowed statistical deviation
 - `add_custom(name, transformation)` - Add custom transformation
 - `get_feature_names()` - Get ordered list of feature names
 - `to_json(pretty=True)` - Export as JSON string
@@ -141,7 +141,7 @@ config.add_ratio("xmeas_7", "xmeas_8")  # Reactor pressure/level
 config.add_product("xmeas_9", "xmeas_10")  # Temperature * purge rate
 
 # Add deviations for anomaly detection
-config.add_deviation("xmeas_7", baseline=2630)  # Reactor pressure baseline
+config.add_deviation("xmeas_7")  # deviation from the sensor's recent 1-min window mean
 
 # Register
 feature_config_id = config.register(ML_SERVICE_URL, JWT_TOKEN)
@@ -218,12 +218,19 @@ config.add_product("flow", "pressure")
 ```
 
 ### Deviation
-Difference from baseline (for anomaly detection)
+Difference from the sensor's own recent behaviour — its mean over the most recent *closed*
+aggregate window (ADR-0023). The baseline moves with the process instead of being a fixed number,
+so the feature says "abnormal *for this sensor, lately*".
 ```python
-config.add_deviation("temperature", baseline=120.0)
-# Normal: temp=122 → Output: +2
-# Anomaly: temp=150 → Output: +30
+config.add_deviation("temperature")                      # 1-min window (default)
+config.add_deviation("temperature", granularity="1hour") # slower-moving baseline
+# Window mean 120 → temp=122 → Output: +2
+# Window mean 120 → temp=150 → Output: +30
 ```
+Training must re-derive the *same* window offline — use `add_window_features` from
+`utils.offline_baseline`, which emits this exact config alongside the columns it computes. A
+training feature computed any other way (e.g. a mean over the whole run) is train/serve skew: the
+model would be scored on a number inference never produces.
 
 ## Best Practices
 

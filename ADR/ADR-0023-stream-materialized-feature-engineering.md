@@ -6,8 +6,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0023 — Stream-materialized feature engineering (one windowing substrate, the feature table as the seam)
 
 - **ID:** ADR-0023
-- **Status:** Accepted (rev 1 — first realization: the rolling-mean baseline is served from the existing Spark aggregates and ml_service's Redis feature store is removed; a dedicated feature table remains deferred)
-- **Date:** 2026-07-06 (rev 1: 2026-07-06)
+- **Status:** Accepted (rev 2 — dec 8's train/serve-skew trigger **has fired** (issue #173); rev 2 settles what "training consumes the aggregate" means for offline data and binds the two sides to one window. Rev 1 — first realization: the rolling-mean baseline is served from the existing Spark aggregates and ml_service's Redis feature store is removed; a dedicated feature table remains deferred)
+- **Date:** 2026-07-06 (rev 1: 2026-07-06; rev 2: 2026-07-12)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (schema-per-tenant routing), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (Kafka delivery semantics), [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (Spark windowing & idempotent writes), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extension/plugin mechanism).
@@ -48,7 +48,11 @@ There is no *bug* here today — `statistical` works off Redis and the aggregati
 
 7. **The Redis FeatureStore stops being a windowing substrate.** With the baseline sourced from the Spark aggregates (decision 2), Redis ceases to be a second *computation* path: `compute_rolling_mean` becomes a read of the materialized aggregate. **rev 1:** ml_service's Redis FeatureStore is **removed outright** — its only use was that rolling-mean read. The **alert worker's** separate Redis ring (`services/alert_service/worker`) is a *latest-value snapshot join* — assembling a full multi-sensor reading from per-sensor arrivals before inference — **not** a windowing computation; it is out of this decision's scope and untouched. So Redis is not deleted platform-wide; it stops being a windowing/feature-computation substrate, which is the claim this ADR makes. A cache in front of the aggregate read is a later option, not part of rev 1.
 
-8. **Trigger and scope.** This is recorded now as direction; implementation lands when the **first real windowed feature requires it**, or when train/serve skew is observed, or when the Redis FeatureStore becomes an operational burden. Until a trigger fires there are no code changes: `rolling_stat` stays a stub and `statistical` keeps its current Redis path. This ADR is the sharp failure condition, not a build order.
+8. **Trigger and scope.** This is recorded now as direction; implementation lands when the **first real windowed feature requires it**, or when train/serve skew is observed, or when the Redis FeatureStore becomes an operational burden. Until a trigger fires there are no code changes: `rolling_stat` stays a stub and `statistical` keeps its current Redis path. This ADR is the sharp failure condition, not a build order. **rev 2:** the skew trigger **has fired** — issue #173 found the TEP reference model trained on a whole-run mean while inference served a windowed one. Decision 9 is what that trigger bought.
+
+9. **Offline training data re-derives the window; it does not invent one. (rev 2)** Decision 2 says training *consumes* the materialized aggregate, which was written for the live-DB case. Reference models train on a static CSV that cannot issue that read, so "consume" is made concrete: training **re-derives the same closed tumbling window, at the same granularity, causally** — a row is described by the most recent window that closed *before* its own, never by its own (still open at serve time) and never by the future. A whole-run or otherwise non-causal mean is **not** an acceptable training equivalent: it is not merely less accurate, it is a quantity inference cannot produce at any window size, so a model trained on it is fed a feature it has never seen. Concretely: `groupby(run).transform('mean')` is prohibited for this feature class; a trailing rolling mean is acceptable **only** where its width equals the configured granularity and it requires a full window.
+
+   The binding between the two computations is **`granularity`, carried in the feature config** and read by both sides — the serving transform routes it to `sensor_aggregations_<granularity>`, the offline re-derivation windows to the same width. Windowing differently now requires editing the config, where review can see it, rather than being the silent default it was. Correspondingly, `stat_type` is **required** and names an honest statistic (`deviation_from_window_mean`, `window_mean`, `window_std`); the pre-rev-2 name `deviation_from_run_mean` is a deprecated alias, since there is no "run" at serve time, and its old behaviour of being the *default* is removed — a feature that named no statistic silently received a deviation, which is how `_run_mean` and `_run_std` features came to be served a deviation. Training and serving may run different code, but they may not compute different quantities, and a test asserts they agree on the same data rather than merely being intended to.
 
 ## Alternatives considered
 
@@ -65,7 +69,7 @@ There is no *bug* here today — `statistical` works off Redis and the aggregati
 ### Positive
 
 - One windowing substrate: the Redis ring buffer stops being a parallel windowing engine, and stateful features reuse the Spark state store the platform already runs.
-- Train/serve skew is removed by construction — training and inference read the same materialized feature rows.
+- Train/serve skew is removed by construction — training and inference read the same materialized feature rows. **rev 2:** for *offline* training data that construction does not hold on its own — a static CSV cannot read the table, so it re-derives (dec 9) and there are two implementations of one quantity. What keeps them honest is a single shared definition plus a test that asserts the offline column and the live serving transform return the same number for the same data. "Removed by construction" is true of the live path; on the offline path it is true only because something checks.
 - `rolling_stat` becomes implementable, because there is now a stream substrate to compute it against.
 - Tenant isolation for features moves from implicit (non-colliding UUID) to explicit (stream partition key + tenant schema).
 - Feature production and consumption are decoupled behind a table contract, consistent with the platform's seam discipline.
@@ -76,6 +80,8 @@ There is no *bug* here today — `statistical` works off Redis and the aggregati
 - The ADR-0010 registry must be shipped to and populated on executors (decision 6); the extension contract now spans the Spark boundary and must be tested there, not only in-process.
 - Materialize-on-close raises feature latency versus an on-demand Python compute: a windowed feature appears when its window closes (plus watermark lag), not instantly on request — the same trade ADR-0006 dec 2 already makes for aggregates.
 - A migration exists for any feature currently served from Redis if/when it moves; the demotion of the FeatureStore (decision 7) is a change to a live read path.
+- **rev 2:** the reference models **must be retrained**. Their `_deviation` features now hold a different (and finally reproducible) quantity, and `_run_mean`/`_run_std` are replaced by `_window_mean`/`_window_std`. Existing model artifacts trained on the old columns are not merely stale, they were fitted on a feature inference never produced; their reported metrics are not evidence about the deployed system. Any downstream evaluation is invalidated with them.
+- **rev 2:** the offline re-derivation is a second implementation of the serving computation, so it is a standing skew risk of its own — the mitigation is that it is one function and one test, not that it cannot drift.
 
 ## Deferred decisions
 
