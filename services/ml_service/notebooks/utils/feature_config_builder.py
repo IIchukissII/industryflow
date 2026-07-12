@@ -8,15 +8,21 @@ Feature Configuration Builder for Jupyter Notebooks
 This utility helps data scientists easily create feature engineering configurations
 while training models in Jupyter notebooks.
 
+The builder is domain-generic: it knows how to *shape* a feature config, never what any
+particular process measures. Sensor names, equipment types and limits come from the caller
+(ADR-0001, ADR-0008). A domain's own sensor set belongs in that domain's extension — see
+`extensions/tep-reference/tep_reactor_config.json` for a worked example, loadable with
+`load_config()`.
+
 Example:
     from utils.feature_config_builder import FeatureConfigBuilder
 
-    config = FeatureConfigBuilder("TEP Anomaly Detection", "tep_reactor")
-    config.add_sensors(["xmeas_1", "xmeas_2", ..., "xmv_11"])
-    config.add_identity("xmeas_1")
-    config.add_polynomial("xmeas_7", power=2, name="xmeas_7_squared")
-    config.add_ratio("xmeas_7", "xmeas_8")
-    config.add_deviation("xmeas_1", granularity="1min")
+    config = FeatureConfigBuilder("Pump Anomaly Detection", "pump")
+    config.add_sensors(["temp_inlet", "temp_outlet", "pressure_1", "flow_rate"])
+    config.add_identity("temp_inlet")
+    config.add_polynomial("pressure_1", power=2, name="pressure_1_squared")
+    config.add_ratio("temp_outlet", "temp_inlet")
+    config.add_deviation("flow_rate", granularity="1min")
 
     # Register with ML Service
     config_id = config.register(ml_service_url, jwt_token)
@@ -410,26 +416,6 @@ def load_config(filepath: str) -> FeatureConfigBuilder:
 
 
 # Convenience functions for common patterns
-
-def create_tep_config(name: str = "TEP Binary Anomaly Detection") -> FeatureConfigBuilder:
-    """
-    Create feature config builder pre-configured for TEP process
-
-    Args:
-        name: Configuration name
-
-    Returns:
-        FeatureConfigBuilder with TEP sensors
-    """
-    config = FeatureConfigBuilder(name, "tep_reactor")
-
-    # Add all 52 TEP sensors
-    xmeas_sensors = [f"xmeas_{i}" for i in range(1, 42)]
-    xmv_sensors = [f"xmv_{i}" for i in range(1, 12)]
-    config.add_sensors(xmeas_sensors + xmv_sensors)
-
-    return config
-
 
 def batch_add_identities(config: FeatureConfigBuilder, sensors: List[str]) -> FeatureConfigBuilder:
     """
