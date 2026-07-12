@@ -7,8 +7,9 @@ Inference Router
 Real-time ML inference endpoint for anomaly detection in sensor data
 """
 from fastapi import APIRouter, HTTPException, Depends, Request
+from prometheus_client import Counter
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 import logging
 import mlflow
 import mlflow.pyfunc
@@ -27,6 +28,15 @@ router = APIRouter(prefix="/api/inference", tags=["Inference"])
 
 MLFLOW_TRACKING_URI = os.getenv('MLFLOW_TRACKING_URI', 'http://mlflow:5000')
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+
+# Degraded serving must be measurable, not just loggable (ADR-0024 dec 5 / ADR-0016): an operator
+# needs to see that scores are being produced on neutralized input, and to alert on it if the
+# switch is left off. Counts feature *slots* neutralized, so it rises with both traffic and the
+# number of stateful features in play.
+STATEFUL_NEUTRALIZED = Counter(
+    "ml_stateful_features_neutralized_total",
+    "Feature slots filled with a neutral value because the stateful-feature kill-switch is off",
+)
 
 
 # ============================================================================
@@ -48,6 +58,15 @@ class InferenceResponse(BaseModel):
     is_anomaly: bool = Field(..., description="Whether value exceeds threshold")
     threshold: float
     model_version: Optional[str] = None
+    degraded: bool = Field(
+        default=False,
+        description="True when the stateful-feature kill-switch (ADR-0024) is off and this score "
+                    "was computed with those features neutralized — the score is real but the "
+                    "input was partially degraded. Consumers should treat it as lower-confidence.",
+    )
+    neutralized_features: Optional[List[str]] = Field(
+        default=None, description="Feature slots filled with a neutral value instead of computed.",
+    )
 
 
 # ============================================================================
@@ -241,12 +260,20 @@ async def predict(
             baseline_provider=baseline_provider,
             equipment_id=equipment_id,
             company_id=company_id,
+            kill_switch=getattr(request.app.state, 'stateful_switch', None),
         )
 
         # Transform sensor data to features (async)
         input_features = await fe_engine.transform(request_data.sensor_data)
 
         logger.info(f"Engineered {input_features.shape[1]} features from sensor data (baseline provider: {baseline_provider is not None})")
+
+        # A score computed on neutralized input must not be indistinguishable from an ordinary one
+        # (ADR-0024 dec 5): trading a loud failure for a silent, confidently-wrong score is the one
+        # outcome the kill-switch must not buy. Surface it on the response and in the metric.
+        neutralized = fe_engine.neutralized_features
+        if neutralized:
+            STATEFUL_NEUTRALIZED.inc(len(neutralized))
 
         # Score the features through the anomaly-detector registry (ADR-0010). The model
         # record may name a detector (a domain may register its own); the default 'sklearn'
@@ -270,7 +297,9 @@ async def predict(
             prediction=anomaly_score,
             is_anomaly=is_anomaly,
             threshold=request_data.threshold,
-            model_version=model_data.get('model_version')
+            model_version=model_data.get('model_version'),
+            degraded=bool(neutralized),
+            neutralized_features=neutralized or None,
         )
 
     except Exception as e:
