@@ -27,7 +27,7 @@ from routers import (
     health_router, models_router, registered_models_router,
     inference_router, feature_configs_router, drift_router,
 )
-from feature_engineering import AggregateBaselineProvider
+from feature_engineering import AggregateBaselineProvider, StatefulFeatureSwitch
 
 # Configure logging
 logging.basicConfig(
@@ -143,6 +143,11 @@ async def startup_event():
     # aggregate tables (ADR-0023), replacing the Redis feature store as the windowing substrate.
     app.state.baseline_provider = AggregateBaselineProvider(app.state.db_pool)
     logger.info("Baseline provider initialized (Spark aggregate tables)")
+
+    # Stateful-feature kill-switch (ADR-0024): the operator control that neutralizes the stateful
+    # feature class — without calling it — when the aggregate substrate is degraded.
+    app.state.stateful_switch = StatefulFeatureSwitch(app.state.db_pool)
+    logger.info("Stateful-feature kill-switch initialized (public.platform_config)")
 
     logger.info(f"Model directory: {MODEL_DIR}")
     logger.info(f"Existing models: {len(list(MODEL_DIR.glob('*.pkl')))}")
