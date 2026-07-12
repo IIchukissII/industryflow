@@ -11,7 +11,6 @@ This package provides helper utilities for data scientists working in Jupyter no
 from .feature_config_builder import (
     FeatureConfigBuilder,
     load_config,
-    create_tep_config,
     batch_add_identities,
     batch_add_polynomials,
     batch_add_interactions
@@ -26,7 +25,6 @@ from .offline_baseline import (
 __all__ = [
     'FeatureConfigBuilder',
     'load_config',
-    'create_tep_config',
     'batch_add_identities',
     'batch_add_polynomials',
     'batch_add_interactions',
