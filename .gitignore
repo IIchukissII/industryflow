@@ -6,6 +6,9 @@
 # Commit .mcp.json.example with placeholders instead.
 .mcp.json
 
+# Agent instructions pointing at the ArchDoc MCP server (local setup, not project source).
+CLAUDE.md
+
 # Local dev sandbox (fake-data streamers, scratch scripts) — never committed
 /local/
 
