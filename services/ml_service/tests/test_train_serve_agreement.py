@@ -5,16 +5,17 @@
 """
 The train/serve agreement proof for the ``statistical`` feature (ADR-0023 rev 2 dec 9, issue #173).
 
-Training re-derives the windowed baseline offline (``notebooks/utils/offline_baseline``) because a
-static CSV cannot read the tenant's aggregate table; inference reads that table through
-``AggregateBaselineProvider``. Two computations, one quantity — which holds only as long as
+Training re-derives the windowed baseline offline (``notebooks/utils/offline_baseline``) because
+historical training data cannot read the tenant's aggregate table; inference reads that table
+through ``AggregateBaselineProvider``. Two computations, one quantity — which holds only as long as
 something checks. That is these tests: the offline column and the value the *actual* serving
 transform produces must be the same number for the same data, and the two sides' window definitions
 must not drift apart.
 
-The defect this guards (issue #173): training computed ``groupby('simulationRun').transform('mean')``
-— the whole-run mean, which averages samples *after* the row it describes — while serving computed a
-deviation from a recent window. The model was fed a feature it had never seen.
+The defect this guards (issue #173): training computed a mean over a whole history
+(``groupby(...).transform('mean')``), which averages samples taken *after* the row it describes,
+while serving computed a deviation from a recent closed window. The model was fed a feature it had
+never seen.
 """
 import os
 import sys
@@ -36,19 +37,24 @@ EQUIPMENT_ID = "550e8400-e29b-41d4-a716-446655440100"
 COMPANY_ID = "11111111-2222-3333-4444-555555555555"
 
 
-def _frame(n_samples=150, interval_seconds=1, runs=(1,)):
-    """A TEP-shaped frame: one row per (run, sample), timestamps at a fixed interval, runs a day
-    apart — and shuffled, exactly as the notebooks hand it to feature engineering."""
+# The serving aggregate is keyed by (equipment, sensor), so a training frame holding several
+# equipments must window per equipment — that is what GROUP_COLS expresses.
+GROUP_COLS = ["equipment_id"]
+
+
+def _frame(n_samples=150, interval_seconds=1, equipments=("eq-1",)):
+    """A training frame shaped like history: one row per (equipment, sample), timestamps at a fixed
+    interval, each equipment on its own day — and shuffled, as training frames usually arrive."""
     rows = []
-    for run in runs:
-        base = pd.Timestamp("2026-01-01") + pd.Timedelta(days=run - 1)
+    for n, equipment in enumerate(equipments):
+        base = pd.Timestamp("2026-01-01") + pd.Timedelta(days=n)
         for i in range(n_samples):
             rows.append({
-                "simulationRun": run,
+                "equipment_id": equipment,
                 "sample": i + 1,
                 "timestamp": base + pd.Timedelta(seconds=i * interval_seconds),
                 # A value that varies within and across windows, so a wrong window is a wrong number.
-                "xmeas_1": 70.0 + i * 0.1 + run,
+                "xmeas_1": 70.0 + i * 0.1 + n + 1,
             })
     return pd.DataFrame(rows).sample(frac=1, random_state=7).reset_index(drop=True)
 
@@ -62,10 +68,10 @@ class _ProviderOver:
     caller sets the current time, and the provider answers with the window before it.
     """
 
-    def __init__(self, df, now, granularity="1min", sensor="xmeas_1", run=1):
+    def __init__(self, df, now, granularity="1min", sensor="xmeas_1", equipment="eq-1"):
         width = offline_baseline.GRANULARITY_SECONDS[granularity]
         current_window = int(now.timestamp()) // width
-        window = df[(df["simulationRun"] == run)
+        window = df[(df["equipment_id"] == equipment)
                     & (offline_baseline.window_index(df["timestamp"], granularity)
                        == current_window - 1)]
         self.baseline = None if window.empty else {
@@ -160,7 +166,7 @@ async def test_offline_feature_equals_what_serving_computes(stat_type, suffix):
 
 @pytest.mark.asyncio
 async def test_cold_start_rows_agree_on_neutral():
-    """A run's first window has no closed predecessor. Training must record the same neutral the
+    """A history's first window has no closed predecessor. Training must record the same neutral the
     serving transform degrades to, or the model learns a value inference never produces."""
     df = _frame(n_samples=90)
     engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"])
@@ -183,8 +189,8 @@ async def test_cold_start_rows_agree_on_neutral():
 def test_offline_feature_is_causal():
     """No row may be described by its own window or the future.
 
-    Mutating a *later* sample must not change an earlier row's feature. The whole-run mean this
-    replaced failed exactly here — it averaged the entire run, so every row moved.
+    Mutating a *later* sample must not change an earlier row's feature. The whole-history mean this
+    replaced failed exactly here — it averaged everything, so every row moved.
     """
     df = _frame(n_samples=180)
     engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"])
@@ -201,20 +207,30 @@ def test_offline_feature_is_causal():
     )
 
 
-def test_runs_do_not_leak_into_each_other():
-    """Windowing is scoped per run, as serving scopes it per equipment: one run's samples must not
-    form another run's baseline."""
-    df = _frame(n_samples=120, runs=(1, 2))
-    engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"])
+def test_equipment_histories_do_not_leak_into_each_other():
+    """Serving keys the aggregate by equipment, so offline windowing must be scoped the same way:
+    one equipment's samples must never form another's baseline."""
+    df = _frame(n_samples=120, equipments=("eq-1", "eq-2"))
+    engineered, _ = offline_baseline.add_window_features(
+        df.copy(), ["xmeas_1"], group_cols=GROUP_COLS,
+    )
 
-    for run in (1, 2):
-        rows = engineered[engineered["simulationRun"] == run]
-        first_window_of_run = rows[
+    for equipment in ("eq-1", "eq-2"):
+        rows = engineered[engineered["equipment_id"] == equipment]
+        first_window = rows[
             offline_baseline.window_index(rows["timestamp"]) ==
             offline_baseline.window_index(rows["timestamp"]).min()
         ]
-        # If run 2 borrowed run 1's windows, its first window would have a baseline and be non-zero.
-        assert (first_window_of_run["xmeas_1_deviation"] == 0.0).all()
+        # If eq-2 borrowed eq-1's windows, its first window would have a baseline and be non-zero.
+        assert (first_window["xmeas_1_deviation"] == 0.0).all()
+
+
+def test_unknown_group_column_is_rejected():
+    """A mistyped group column would silently window the whole frame as one history — that is the
+    cross-equipment leak above, arriving quietly. Fail instead."""
+    df = _frame(n_samples=70)
+    with pytest.raises(ValueError, match="group column"):
+        offline_baseline.add_window_features(df, ["xmeas_1"], group_cols=["simulation_run"])
 
 
 def test_row_order_is_preserved():
