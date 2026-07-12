@@ -222,7 +222,7 @@ Output: tenant_550e8400_e29b_41d4_a716_446655440000
       "name": "flow_deviation_from_mean",
       "type": "statistical",
       "sensor": "xmeas_1",
-      "params": {"stat_type": "deviation_from_run_mean"}
+      "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}
     }
   ]
 }

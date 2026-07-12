@@ -16,6 +16,12 @@ from .feature_config_builder import (
     batch_add_polynomials,
     batch_add_interactions
 )
+from .offline_baseline import (
+    add_window_features,
+    feature_config,
+    window_index,
+    GRANULARITY_SECONDS
+)
 
 __all__ = [
     'FeatureConfigBuilder',
@@ -23,7 +29,11 @@ __all__ = [
     'create_tep_config',
     'batch_add_identities',
     'batch_add_polynomials',
-    'batch_add_interactions'
+    'batch_add_interactions',
+    'add_window_features',
+    'feature_config',
+    'window_index',
+    'GRANULARITY_SECONDS'
 ]
 
 __version__ = '1.0.0'

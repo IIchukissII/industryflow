@@ -16,7 +16,7 @@ Example:
     config.add_identity("xmeas_1")
     config.add_polynomial("xmeas_7", power=2, name="xmeas_7_squared")
     config.add_ratio("xmeas_7", "xmeas_8")
-    config.add_deviation("xmeas_1", baseline=2700)
+    config.add_deviation("xmeas_1", granularity="1min")
 
     # Register with ML Service
     config_id = config.register(ml_service_url, jwt_token)
@@ -200,13 +200,18 @@ class FeatureConfigBuilder:
         self._feature_names.add(feature_name)
         return self
 
-    def add_deviation(self, sensor: str, baseline: float = None, name: Optional[str] = None) -> 'FeatureConfigBuilder':
+    def add_deviation(self, sensor: str, granularity: str = "1min",
+                      name: Optional[str] = None) -> 'FeatureConfigBuilder':
         """
-        Add statistical deviation transformation (sensor - baseline)
+        Add a windowed deviation feature: sensor value minus the mean of its most recent closed
+        aggregate window (ADR-0023). Training must re-derive the same window offline — see
+        ``offline_baseline.add_window_features``, which emits this same config.
 
         Args:
             sensor: Sensor name
-            baseline: Baseline value for deviation (optional, can be set later)
+            granularity: Aggregate window the baseline is read from ("1min", "5min", "1hour").
+                This is the binding between the training and serving computation: both read it
+                from this config, so they cannot window differently.
             name: Feature name (defaults to "{sensor}_deviation")
 
         Returns:
@@ -222,8 +227,8 @@ class FeatureConfigBuilder:
             "type": "statistical",
             "sensor": sensor,
             "params": {
-                "stat_type": "deviation_from_run_mean",
-                "baseline": baseline
+                "stat_type": "deviation_from_window_mean",
+                "granularity": granularity
             }
         })
         self._feature_names.add(feature_name)
