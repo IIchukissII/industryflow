@@ -33,6 +33,15 @@ _AGG_TABLES = {
 }
 DEFAULT_GRANULARITY = "1min"
 
+# Window width of each granularity. This is the binding between the serving read and the offline
+# training re-derivation (ADR-0023 rev 2 dec 9): training reproduces the closed window of exactly
+# this width, so the two sides cannot compute different quantities. Keys must match _AGG_TABLES.
+GRANULARITY_SECONDS = {
+    "1min": 60,
+    "5min": 300,
+    "1hour": 3600,
+}
+
 
 def _schema_for(company_id: str) -> str:
     """Tenant schema name for a company_id, validated as a UUID before interpolation (ADR-0003).
@@ -67,18 +76,19 @@ class AggregateBaselineProvider:
         )
         self._cache = {}  # (schema, equipment_id, sensor_name, granularity) -> (expires_at, value)
 
-    async def compute_rolling_mean(
+    async def compute_baseline(
         self,
         company_id: str,
         equipment_id: str,
         sensor_name: str,
         granularity: Optional[str] = None,
-    ) -> Optional[float]:
-        """Return the latest materialized mean (``avg_value``) for a sensor, or ``None``.
+    ) -> Optional[dict]:
+        """Return the latest closed window's ``{"mean", "std"}`` for a sensor, or ``None``.
 
         ``None`` means "no baseline available" (no aggregate row yet, unknown granularity, or a
         read error) — the caller degrades to its neutral value. Errors are swallowed to ``None``
-        rather than raised, so a degraded DB does not fail inference.
+        rather than raised, so a degraded DB does not fail inference. ``std`` may be ``None``
+        within an otherwise-present baseline: a window holding a single sample has no stddev.
         """
         granularity = granularity or DEFAULT_GRANULARITY
         table = _AGG_TABLES.get(granularity)
@@ -102,11 +112,28 @@ class AggregateBaselineProvider:
         self._cache[key] = (now + self.cache_ttl_seconds, value)
         return value
 
-    async def _read(self, schema, table, equipment_id, sensor_name) -> Optional[float]:
+    async def compute_rolling_mean(
+        self,
+        company_id: str,
+        equipment_id: str,
+        sensor_name: str,
+        granularity: Optional[str] = None,
+    ) -> Optional[float]:
+        """Return just the latest closed window's mean.
+
+        The pre-rev-2 provider API. The core reads ``compute_baseline`` now, but the provider is
+        handed to *domain* transforms through ``TransformContext``, so an extension may already
+        call this — dropping it would be a breaking extension-API change (ADR-0010 dec 3) for no
+        gain. Kept as a thin read over the same baseline, not a second computation.
+        """
+        baseline = await self.compute_baseline(company_id, equipment_id, sensor_name, granularity)
+        return None if baseline is None else baseline["mean"]
+
+    async def _read(self, schema, table, equipment_id, sensor_name) -> Optional[dict]:
         # The aggregate is keyed by sensor_id (UUID); resolve it from the tenant's sensors table
-        # by (equipment_id, sensor_name), then take the most recent closed window's mean.
+        # by (equipment_id, sensor_name), then take the most recent closed window.
         sql = (
-            f"SELECT a.avg_value "
+            f"SELECT a.avg_value, a.stddev_value "
             f"FROM {table} a "
             f"JOIN sensors s ON s.sensor_id = a.sensor_id "
             f"WHERE s.equipment_id = $1::uuid AND s.sensor_name = $2 "
@@ -123,4 +150,5 @@ class AggregateBaselineProvider:
             return None
         if row is None or row["avg_value"] is None:
             return None
-        return float(row["avg_value"])
+        std = row["stddev_value"]
+        return {"mean": float(row["avg_value"]), "std": None if std is None else float(std)}
