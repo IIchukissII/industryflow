@@ -42,6 +42,25 @@ The feature engine dispatches each configured transform `type` through the regis
 generic transforms: `identity`, `polynomial`, `interaction`, `deviation`, `statistical`,
 `rolling_stat`.
 
+**Declare a transform `stateful` if it reads an external store** (ADR-0024) — as opposed to being a
+pure function of the reading it is handed:
+
+```python
+@register_transform("pressure_baseline", stateful=True, neutral=0.0)
+async def pressure_baseline(transformation, sensor_data, ctx):
+    return await ctx.baseline_provider.compute_rolling_mean(...)
+```
+
+The tag is what lets the **stateful-feature kill-switch** neutralize your transform as a class when
+its substrate is degraded: with the switch off, the engine fills the slot with `neutral` and does
+**not call the transform at all**, so the degraded store stops being queried. The feature vector
+keeps its length and order, so bound models keep serving. A transform that reads an external store
+but does not declare `stateful=True` will keep hammering that store during an incident the operator
+believes they have contained — so declare it. Both keywords are optional (`stateful=False`,
+`neutral=0.0`), so transforms written before this existed keep working unchanged.
+
+See [monitoring.md](monitoring.md) for flipping the switch and seeing that it took effect.
+
 ### Anomaly detectors
 
 A detector turns engineered features (and optionally a model) into an anomaly verdict:

@@ -8,5 +8,6 @@ Flexible, configuration-driven feature engineering for multiple equipment types
 """
 from .baseline_provider import AggregateBaselineProvider
 from .engine import FeatureEngineeringEngine
+from .kill_switch import StatefulFeatureSwitch
 
-__all__ = ['AggregateBaselineProvider', 'FeatureEngineeringEngine']
+__all__ = ['AggregateBaselineProvider', 'FeatureEngineeringEngine', 'StatefulFeatureSwitch']

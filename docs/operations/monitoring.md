@@ -346,6 +346,51 @@ Filter by service:
 
 ---
 
+## Runbook: the stateful-feature kill-switch
+
+**What it is.** Some feature transforms (`statistical`, `rolling_stat`) are *stateful*: to compute a
+feature they read a windowed baseline out of the Spark-materialized aggregate tables. Every
+inference issues one such read per stateful feature, so a model carrying nine of them queries the
+database nine times per prediction. When the database is degraded, that load is part of the problem.
+
+The kill-switch (ADR-0024) neutralizes that whole class **live, without a redeploy**: the engine
+fills each stateful feature's slot with its neutral value and does **not call the transform**, so
+those queries stop entirely. The feature vector keeps its length and order, so every bound model
+keeps serving — on partially degraded input.
+
+**When to flip it.** The database is alive but overloaded, and inference is a meaningful part of the
+load. This is not a fix for a *totally unreachable* database: there, the switch's own read fails
+too, it holds `enabled`, and the transforms fall back to the same neutral value on their own. The
+switch buys relief for an overloaded store, not resurrection of a dead one.
+
+**Turn it off** (neutralize stateful features):
+
+```sql
+UPDATE public.platform_config
+   SET value = 'false'::jsonb, updated_at = NOW(), updated_by = '<operator>'
+ WHERE key = 'stateful_features_enabled';
+```
+
+**Turn it back on** when the substrate recovers — `value = 'true'::jsonb`.
+
+The flag is read on the serving path with a short TTL cache, so a flip takes effect within seconds;
+no restart, no redeploy. The service only ever **reads** it (it holds `SELECT` and nothing more), so
+it cannot trip itself — the switch moves because a human moved it.
+
+**Confirm it took effect.** Degraded serving is never silent: `/api/inference/predict` responses
+carry `degraded: true` and list the `neutralized_features`, the service logs the neutralization, and
+the counter rises:
+
+```promql
+# Feature slots being served neutral instead of computed — should be 0 in normal operation
+rate(ml_stateful_features_neutralized_total[5m])
+```
+
+**Alert on it being left off.** The switch's cost is silent quality loss: scores keep coming, and
+they look ordinary unless you check. A non-zero rate for longer than an incident should last is
+worth paging on — it means models are scoring on neutralized input and somebody forgot to flip it
+back.
+
 ## Metrics
 
 ### Available Metrics Categories
