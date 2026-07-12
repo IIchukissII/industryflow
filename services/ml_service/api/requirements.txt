@@ -41,3 +41,6 @@ redis[asyncio]==8.0.1
 
 # Prometheus metrics
 prometheus-fastapi-instrumentator==8.0.2
+# Imported directly (the kill-switch neutralization counter, ADR-0024 dec 5), not only through the
+# instrumentator — so it is pinned as the direct dependency it is, rather than inherited.
+prometheus-client==0.25.0

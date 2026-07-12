@@ -65,7 +65,7 @@ _LEGACY_STAT_TYPES = {"deviation_from_run_mean": "deviation_from_window_mean"}
 _STAT_TYPES = ("deviation_from_window_mean", "window_mean", "window_std")
 
 
-@register_transform("statistical")
+@register_transform("statistical", stateful=True)
 async def statistical(transformation, sensor_data, ctx):
     """A sensor's statistic over its most recent closed aggregate window.
 
@@ -129,8 +129,13 @@ async def statistical(transformation, sensor_data, ctx):
     return sensor_data.get(sensor, 0.0) - baseline["mean"]
 
 
-@register_transform("rolling_stat")
+@register_transform("rolling_stat", stateful=True)
 async def rolling_stat(transformation, sensor_data, ctx):
-    """Placeholder for rolling statistics not yet implemented."""
+    """Placeholder for rolling statistics not yet implemented.
+
+    Registered ``stateful=True`` (ADR-0024 dec 1) because of what it *will* read, not what it reads
+    today: it belongs to the class the kill-switch governs, and tagging it on the day it is
+    implemented would be a thing to forget.
+    """
     logger.warning("Rolling statistics not yet implemented for feature '%s'", transformation.get("name"))
     return 0.0
