@@ -67,9 +67,6 @@ Main class for building feature configurations.
 
 ### Helper Functions
 
-**create_tep_config(name)**
-- Pre-configured builder for TEP process (52 sensors)
-
 **batch_add_identities(config, sensors)**
 - Add identity transformations for multiple sensors
 
@@ -124,21 +121,26 @@ batch_add_polynomials(config, sensors[10:15], powers=[2, 3])
 print(f"Total features: {len(config.get_feature_names())}")
 ```
 
-### Example 3: TEP Process
+### Example 3: Starting from a domain extension's config
+
+These utilities are domain-generic: they know how to shape a feature config, never what your
+process measures. A domain's sensor set and its limits live in that domain's **extension**, not in
+the platform (ADR-0008) — so start from the extension's config rather than from a template baked
+into the builder.
 
 ```python
-from utils.feature_config_builder import create_tep_config, batch_add_identities
+from utils.feature_config_builder import load_config, batch_add_identities
 
-# Start with TEP template (52 sensors pre-configured)
-config = create_tep_config("TEP Anomaly Detection")
+# The TEP reference extension ships its own feature config — a worked example of the shape.
+config = load_config("extensions/tep-reference/tep_reactor_config.json")
 
 # Add important identity features
 important = ["xmeas_1", "xmeas_7", "xmeas_8", "xmeas_10"]
 batch_add_identities(config, important)
 
 # Add critical interactions
-config.add_ratio("xmeas_7", "xmeas_8")  # Reactor pressure/level
-config.add_product("xmeas_9", "xmeas_10")  # Temperature * purge rate
+config.add_ratio("xmeas_7", "xmeas_8")
+config.add_product("xmeas_9", "xmeas_10")
 
 # Add deviations for anomaly detection
 config.add_deviation("xmeas_7")  # deviation from the sensor's recent 1-min window mean
@@ -258,7 +260,7 @@ Use semantic versioning:
 ### Performance
 
 - Use batch methods for large numbers of features
-- Pre-configure common patterns (like TEP template)
+- Keep a domain's reusable config in that domain's extension and `load_config()` it
 - Cache feature configs in production
 
 ## Troubleshooting
@@ -303,9 +305,14 @@ For questions or issues:
 
 ## Version History
 
+**1.1.0** (2026-07-12)
+- Removed the TEP process template: a domain's sensor set belongs in that domain's extension, not
+  in a platform utility (ADR-0008). Load the extension's config instead.
+- `add_deviation()` takes `granularity` and emits `deviation_from_window_mean` (ADR-0023 rev 2)
+- Added `offline_baseline` — the causal re-derivation of the serving window baseline
+
 **1.0.0** (2025-11-22)
 - Initial release
 - FeatureConfigBuilder class
 - Batch helper functions
-- TEP process template
 - Complete example notebook
