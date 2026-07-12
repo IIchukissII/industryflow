@@ -7,9 +7,9 @@ Offline re-derivation of the serving baseline, for training data (ADR-0023 rev 2
 
 At serve time a ``statistical`` feature reads the most recent **closed** window of the
 Spark-materialized aggregates (``sensor_aggregations_<granularity>``) and returns a statistic of
-it. Training data for the reference models is a static CSV, so it cannot issue that read — it must
-re-derive the same quantity offline. "Same" is the whole point: a training feature computed any
-other way is train/serve skew, which is what this module exists to prevent.
+it. Training on historical data (a CSV, a cold-layer Parquet export) cannot issue that read — it
+must re-derive the same quantity offline. "Same" is the whole point: a training feature computed
+any other way is train/serve skew, which is what this module exists to prevent.
 
 The re-derivation, per row at time ``t``:
 
@@ -17,12 +17,13 @@ The re-derivation, per row at time ``t``:
     baseline(t) = statistic over window(t) - 1     — the most recent *closed* window
 
 It is therefore **causal**: a row is described by samples that strictly precede its own window,
-never by its own window (still open at serve time) and never by the future. The whole-run mean this
-replaces (``groupby('simulationRun').transform('mean')``) was neither causal nor reproducible at
-serve time — it averaged every sample of the run, including ones after the row being described.
+never by its own window (still open at serve time) and never by the future. A mean over a whole
+history (``groupby(...).transform('mean')``) is neither — it averages samples taken *after* the row
+it describes, so inference cannot reproduce it at any window size, and a model trained on it is fed
+a feature it never sees in production. That is the defect this replaces (issue #173).
 
-Rows in a run's first window have no closed predecessor and get the neutral ``0.0`` the serving
-transform degrades to when no aggregate row exists yet, so the two agree on the cold-start case too.
+Rows in the first window of a history have no closed predecessor and get the neutral ``0.0`` the
+serving transform degrades to when no aggregate row exists yet, so the two agree on cold start too.
 """
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -64,7 +65,7 @@ def add_window_features(
     granularity: str = DEFAULT_GRANULARITY,
     stats: Iterable[str] = ("deviation_from_window_mean",),
     timestamp_col: str = "timestamp",
-    group_cols: Sequence[str] = ("simulationRun",),
+    group_cols: Sequence[str] = (),
 ) -> Tuple[pd.DataFrame, List[dict]]:
     """Add causal closed-window features and the feature config that serves them.
 
@@ -73,9 +74,10 @@ def add_window_features(
     on and the config that serves it cannot describe different computations.
 
     ``group_cols`` scopes the windowing the way the serving key does. At serve time the aggregate is
-    keyed by ``(equipment, sensor)``; in the TEP CSV each ``simulationRun`` is an independent
-    equipment history (they are offset by a day apiece), so grouping by run is the offline
-    equivalent — it stops one run's tail from leaking into the next run's first window.
+    keyed by ``(equipment, sensor)``, so a frame holding **more than one equipment's history** must
+    group by whatever identifies them (e.g. ``["equipment_id"]``) — otherwise one equipment's tail
+    leaks into another's first window and the offline feature stops matching what serving computes.
+    The default (no grouping) is the single continuous history: one equipment, one timeline.
     """
     if granularity not in GRANULARITY_SECONDS:
         raise ValueError(
@@ -88,9 +90,13 @@ def add_window_features(
         raise ValueError(f"timestamp column {timestamp_col!r} not in frame")
 
     group_cols = list(group_cols)
-    # The row order the caller hands us is not necessarily time order — the TEP notebooks shuffle
-    # before engineering — and a causal computation is meaningless on shuffled rows. Sort a copy,
-    # compute, then restore the caller's original order so downstream joins/labels still line up.
+    missing = [c for c in group_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"group column(s) {missing} not in frame")
+
+    # The row order the caller hands us is not necessarily time order — training frames are often
+    # shuffled before engineering — and a causal computation is meaningless on shuffled rows. Sort a
+    # copy, compute, then restore the caller's original order so downstream joins/labels still line up.
     original_index = df.index
     df = df.sort_values(group_cols + [timestamp_col])
     df["_window"] = window_index(df[timestamp_col], granularity)
@@ -99,9 +105,10 @@ def add_window_features(
     for sensor in sensor_cols:
         # The statistic of each closed window, then shifted onto the rows of the NEXT window: a row
         # reads the window before its own, which is exactly the "most recent closed window" the
-        # serving provider selects.
+        # serving provider selects. With no group_cols the frame is one continuous history, so the
+        # shift runs straight down it — `groupby([])` is not a no-op, it raises.
         per_window = df.groupby(group_cols + ["_window"])[sensor].agg(["mean", "std"])
-        closed = per_window.groupby(group_cols).shift(1)
+        closed = per_window.groupby(group_cols).shift(1) if group_cols else per_window.shift(1)
         aligned = df[group_cols + ["_window"]].merge(
             closed, left_on=group_cols + ["_window"], right_index=True, how="left",
         )

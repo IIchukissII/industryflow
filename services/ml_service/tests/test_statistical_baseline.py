@@ -116,8 +116,9 @@ async def test_legacy_stat_type_still_resolves():
 async def test_missing_stat_type_is_neutral():
     """No default: a config that names no statistic must not silently receive a deviation.
 
-    Regression for the notebook-emitted `{"operation": "mean"}` params, which carried no stat_type
-    and so fell through to the deviation default — serving a deviation into a mean's feature slot.
+    Regression for a real defect: configs emitted with `{"operation": "mean"}` params carried no
+    stat_type at all, so they fell through to the deviation default — serving a *deviation* into a
+    slot the model expected to hold a mean.
     """
     t = {"name": "xmeas_1_run_mean", "type": "statistical", "sensor": "xmeas_1",
          "params": {"operation": "mean", "groupby": "simulationRun"}}
