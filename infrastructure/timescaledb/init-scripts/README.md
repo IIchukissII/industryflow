@@ -381,3 +381,5 @@ SELECT add_feature_config_columns_to_ml_models('tenant_550e8400_e29b_41d4_a716_4
 - [Data & storage architecture](../../../docs/architecture/data-and-storage.md)
 - [ML & feature engineering](../../../docs/architecture/ml-and-features.md)
 - [Alerting](../../../docs/architecture/alerting.md)
+
+<!-- CI control probe: does tracking-gateway pass on pristine main today? Revert after. -->
