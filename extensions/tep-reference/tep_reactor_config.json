@@ -353,55 +353,55 @@
       "name": "xmeas_1_deviation",
       "type": "statistical",
       "sensor": "xmeas_1",
-      "params": {"stat_type": "deviation_from_run_mean"}
+      "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}
     },
     {
       "name": "xmeas_3_deviation",
       "type": "statistical",
       "sensor": "xmeas_3",
-      "params": {"stat_type": "deviation_from_run_mean"}
+      "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}
     },
     {
       "name": "xmeas_4_deviation",
       "type": "statistical",
       "sensor": "xmeas_4",
-      "params": {"stat_type": "deviation_from_run_mean"}
+      "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}
     },
     {
       "name": "xmeas_6_deviation",
       "type": "statistical",
       "sensor": "xmeas_6",
-      "params": {"stat_type": "deviation_from_run_mean"}
+      "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}
     },
     {
       "name": "xmeas_7_deviation",
       "type": "statistical",
       "sensor": "xmeas_7",
-      "params": {"stat_type": "deviation_from_run_mean"}
+      "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}
     },
     {
       "name": "xmeas_8_deviation",
       "type": "statistical",
       "sensor": "xmeas_8",
-      "params": {"stat_type": "deviation_from_run_mean"}
+      "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}
     },
     {
       "name": "xmeas_10_deviation",
       "type": "statistical",
       "sensor": "xmeas_10",
-      "params": {"stat_type": "deviation_from_run_mean"}
+      "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}
     },
     {
       "name": "xmeas_11_deviation",
       "type": "statistical",
       "sensor": "xmeas_11",
-      "params": {"stat_type": "deviation_from_run_mean"}
+      "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}
     },
     {
       "name": "xmeas_13_deviation",
       "type": "statistical",
       "sensor": "xmeas_13",
-      "params": {"stat_type": "deviation_from_run_mean"}
+      "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}
     }
   ]
 }
