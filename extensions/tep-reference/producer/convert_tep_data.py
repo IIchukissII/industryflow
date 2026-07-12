@@ -5,13 +5,20 @@
 """
 Convert TEP RData files to CSV for streaming simulation
 """
+import os
+
 import pandas as pd
 import pyreadr
 from pathlib import Path
 
-# Configuration
-FAULT_FREE_FILE = '../ml_service/notebooks/data/TEP_FaultFree_Training.RData'
-FAULTY_FILE = '../ml_service/notebooks/data/TEP_Faulty_Training.RData'
+# Configuration. The source RData is not committed (it is large, and not ours to redistribute) —
+# download it and either drop it in this extension's own `data/` or point these at it.
+#
+# These used to reach into `../ml_service/notebooks/data/`, a path that no longer exists and that an
+# extension had no business depending on in the first place: an extension implements against the
+# platform's contracts, it does not reach into a service's internals (ADR-0008).
+FAULT_FREE_FILE = os.getenv('TEP_FAULT_FREE_FILE', 'data/TEP_FaultFree_Training.RData')
+FAULTY_FILE = os.getenv('TEP_FAULTY_FILE', 'data/TEP_Faulty_Training.RData')
 OUTPUT_FILE = 'data/tep_streaming_data.csv'
 RANDOM_STATE = 42
 
