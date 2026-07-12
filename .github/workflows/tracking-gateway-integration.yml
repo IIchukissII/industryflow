@@ -71,6 +71,34 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml \
             --profile notebooks up -d --build notebook-tracking-gateway
 
+      # The gateway `depends_on: mlflow`, so bringing it up can restart or recreate MLflow — which
+      # invalidates the readiness proved above, against a container that no longer exists. Re-prove
+      # it HERE, after everything is up, and prove the right thing: `/health` only says the HTTP
+      # server is listening, while the tests immediately WRITE. Gate on a real write (create an
+      # experiment, delete it) so "ready" means "the thing the tests do actually works".
+      #
+      # This is the flake: the first experiments/create would hit a still-booting MLflow, the
+      # gateway would return 500, and the proof failed on a readiness race rather than a defect.
+      - name: Wait for MLflow to be WRITABLE (it may have been restarted by the gateway's depends_on)
+        run: |
+          for i in $(seq 1 40); do
+            body=$(docker run --rm --network industryflow-network curlimages/curl:8.11.1 \
+                     -s -X POST http://mlflow:5000/api/2.0/mlflow/experiments/create \
+                     -H 'Content-Type: application/json' \
+                     -d "{\"name\":\"ci-readiness-probe-$i-$RANDOM\"}" 2>/dev/null || true)
+            id=$(printf '%s' "$body" | sed -n 's/.*"experiment_id"[^"]*"\([^"]*\)".*/\1/p')
+            if [ -n "$id" ]; then
+              echo "mlflow accepted a write (attempt $i, probe experiment $id)"
+              # Don't leave the probe behind: the proof asserts on experiment listings.
+              docker run --rm --network industryflow-network curlimages/curl:8.11.1 \
+                -s -X POST http://mlflow:5000/api/2.0/mlflow/experiments/delete \
+                -H 'Content-Type: application/json' -d "{\"experiment_id\":\"$id\"}" >/dev/null 2>&1 || true
+              exit 0
+            fi
+            echo "waiting for mlflow to accept a write... ($i/40)"; sleep 3
+          done
+          echo "mlflow never accepted a write"; docker compose logs mlflow; exit 1
+
       - name: Wait for the gateway to be serving
         run: |
           name=industryflow-notebook-tracking-gateway
