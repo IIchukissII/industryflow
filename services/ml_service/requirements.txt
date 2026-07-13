@@ -15,7 +15,9 @@ psycopg2-binary==2.9.12
 redis[asyncio]==8.0.1
 
 # Data Processing
-pyarrow==14.0.1
+# Not imported directly here — it backs pandas' and mlflow's Parquet IO. Kept in step with the
+# cold-layer exporter's pin (services/cold_export), since both read the same Parquet.
+pyarrow==25.0.0
 
 # Visualization & Analysis
 matplotlib==3.11.0

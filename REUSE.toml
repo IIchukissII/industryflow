@@ -4,7 +4,7 @@ version = 1
 # notebooks, placeholder/dotfiles) are licensed here instead of inline.
 
 [[annotations]]
-path = ["**/*.json", "**/*.csv", "**/*.ipynb", "**/*.gitkeep", ".gitignore", ".gitattributes", "**/.dockerignore"]
+path = ["**/*.json", "**/*.csv", "**/*.ipynb", "**/*.gitkeep", "**/.gitignore", ".gitattributes", "**/.dockerignore"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 The IndustryFlow contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"
@@ -12,6 +12,14 @@ SPDX-License-Identifier = "AGPL-3.0-or-later"
 # Helm chart files that should not carry a rendered SPDX header.
 [[annotations]]
 path = ["deploy/helm/**/NOTES.txt", "deploy/helm/**/.helmignore"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The IndustryFlow contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+# Binary test fixtures (Parquet carries no comment syntax). The cold-layer one is deliberately an
+# artefact of an OLD pyarrow — it must not be regenerated, so it cannot be given a header either.
+[[annotations]]
+path = ["**/tests/fixtures/*.parquet"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 The IndustryFlow contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"
