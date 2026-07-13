@@ -87,14 +87,19 @@ jobs:
       - name: Load the seed into the hub's volume
         run: |
           docker volume create industryflow_notebook-hub-data
-          # chown the DIRECTORY, not just the file. A fresh volume's root is owned by root, and the hub
-          # runs as uid 1000: it could read a seeded database it does not own, then die creating its
-          # cookie secret next to it ("Permission denied: .../jupyterhub_cookie_secret"). Seeding state
-          # into a volume means owning the whole directory the way the service will.
+          # Own the whole DIRECTORY as the user the hub actually runs as — `USER 10001` in
+          # services/notebook_hub/Dockerfile. Two ways to get this wrong, and I made both: a fresh
+          # volume's root is owned by root, so the hub reads the seeded database fine and then dies
+          # creating its cookie secret beside it ("Permission denied: .../jupyterhub_cookie_secret");
+          # and the uid is not the 1000 you would assume. Seeding state into a volume means handing the
+          # directory over exactly as the service will hold it.
+          HUB_UID=$(grep -oP '^USER \K[0-9]+' services/notebook_hub/Dockerfile)
+          echo "hub runs as uid ${HUB_UID}"
           docker run --rm -v industryflow_notebook-hub-data:/srv/jupyterhub -v "$PWD/hub-seed:/seed" \
-            alpine sh -c "cp /seed/jupyterhub.sqlite /srv/jupyterhub/jupyterhub.sqlite &&
-                          chown -R 1000:1000 /srv/jupyterhub &&
-                          ls -ld /srv/jupyterhub && ls -l /srv/jupyterhub/jupyterhub.sqlite"
+            -e HUB_UID="$HUB_UID" alpine sh -c '
+              cp /seed/jupyterhub.sqlite /srv/jupyterhub/jupyterhub.sqlite &&
+              chown -R "$HUB_UID:$HUB_UID" /srv/jupyterhub &&
+              ls -ld /srv/jupyterhub && ls -l /srv/jupyterhub/jupyterhub.sqlite'
 
       # --wait blocks until every container with a healthcheck reports healthy, and fails if one exits.
       # A hub that crash-loops on the seeded schema fails HERE, which is the whole purpose of this job.
