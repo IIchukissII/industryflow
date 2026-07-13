@@ -15,9 +15,13 @@ psycopg2-binary==2.9.12
 redis[asyncio]==8.0.1
 
 # Data Processing
-# Not imported directly here — it backs pandas' and mlflow's Parquet IO. Kept in step with the
-# cold-layer exporter's pin (services/cold_export), since both read the same Parquet.
-pyarrow==25.0.0
+# Not imported directly here — it backs pandas' and mlflow's Parquet IO. It canNOT track the
+# cold-layer exporter's pin (services/cold_export, on 25): mlflow 3.14.0 requires
+# `pyarrow<25,>=4.0.0`, so 25 makes this file unresolvable against the mlflow pinned below. 24 is
+# what mlflow's own dependency closure settles on. Reading across the versions is fine and is what
+# actually matters here — the cold layer's Parquet is format 2.6 (see cold_export/store.py), which
+# every pyarrow in this range reads.
+pyarrow==24.0.0
 
 # Visualization & Analysis
 matplotlib==3.11.0
