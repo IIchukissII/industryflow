@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # The whole dependency closure is pinned in requirements.txt, not just mlflow/psycopg2/boto3.
 # Pinning only the direct three left every transitive dep (sqlalchemy, alembic, pydantic, ...)

@@ -5,7 +5,7 @@
 # Cold-store broker image (ADR-0025 dec 5, read side). Authenticates a notebook's cold capability
 # and vends read-only, tenant-prefix-scoped pre-signed GET URLs for the cold layer. Holds a
 # read-only cold-bucket principal; the live S3 pre-signing is cluster-validated.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 COPY requirements.txt .
