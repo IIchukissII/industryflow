@@ -4,7 +4,7 @@
 
 # Test deps. policy.py is pure; the broker app is tested with a fake store + object store via
 # FastAPI's TestClient (no Redis, no S3).
-pytest==8.3.4
-pytest-asyncio==0.24.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
 fastapi==0.139.0
 httpx==0.28.1

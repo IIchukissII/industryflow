@@ -57,8 +57,10 @@ jobs:
           # no-infra job (a false green). It runs in cold-layer-integration.yml against a live stack.
           - { service: notebook_cold_broker, path: services/notebook_cold_broker/tests, args: "--ignore=services/notebook_cold_broker/tests/test_cold_broker_integration.py" }
           - { service: alert_service,       path: services/alert_service/tests }
-          # Redis-backed tests are marked `redis` and skipped (no server in CI).
-          - { service: ml_service,          path: services/ml_service/tests, args: "-m 'not redis'" }
+          # No `-m 'not redis'` here: not one test in the repository carries that marker, so the
+          # filter deselected nothing while implying a skipped body of Redis coverage that never
+          # existed. The whole suite runs.
+          - { service: ml_service,          path: services/ml_service/tests }
           # Pure FK-resilience filter test only; test_spark_service.py is a live-DB harness.
           - { service: spark_jobs,          path: services/spark_jobs/tests/test_upsert_filter.py }
           # Cold-layer exporter (ADR-0025): orchestration tests drive fakes, no DB/object store.
