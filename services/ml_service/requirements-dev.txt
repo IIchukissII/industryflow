@@ -9,7 +9,7 @@
 # numpy is only an indirect import here (the package __init__ loads the engine), so the dev
 # pin just needs to install on the CI interpreter (py3.12) — it isn't exercised by these tests.
 redis==5.0.1
-numpy>=1.26.4
+numpy>=2.5.1
 pytest==8.3.4
 pytest-asyncio==0.24.0
 # Model-drift tests (ADR-0021) exercise the real evidently compute path, and the drift package
