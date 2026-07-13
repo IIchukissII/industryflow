@@ -90,3 +90,14 @@ def test_hub_authenticates_from_the_platform_session(profile):
 def test_idle_culler_service_survives(profile):
     """Ephemeral compute (ADR-0020) leans on the culler; idle-culler 2.x must still register."""
     assert "idle-culler" in [s["name"] for s in _load(profile).JupyterHub.services]
+
+
+@pytest.mark.parametrize("profile", ["kube", "docker"])
+def test_hub_migrates_its_own_state_db(profile):
+    """
+    A hub that meets an older schema than its version expects does not warn — it exits, and the
+    container crash-loops. JupyterHub 5 has exactly such a schema, so an in-place upgrade from 4.x
+    dies on start unless the hub migrates itself. This trait is the difference between an image an
+    operator can roll forward and one that needs an undocumented manual step.
+    """
+    assert _load(profile).JupyterHub.upgrade_db is True
