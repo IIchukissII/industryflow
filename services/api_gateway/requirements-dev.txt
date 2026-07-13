@@ -8,3 +8,6 @@
 
 pytest==9.1.1
 pytest-asyncio==1.4.0
+# Starlette's TestClient needs it (it raises at import without one). test_auth_surface.py drives the
+# real fastapi-users routers through it — the only place the auth surface is actually exercised.
+httpx2==2.5.0

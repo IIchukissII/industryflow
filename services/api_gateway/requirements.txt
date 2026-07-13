@@ -14,7 +14,7 @@ pydantic-settings==2.14.2
 redis==8.0.1
 
 # FastAPI Users - Authentication
-fastapi-users[sqlalchemy]==14.0.1
+fastapi-users[sqlalchemy]==15.0.5
 python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 
