@@ -20,7 +20,7 @@ dependencies = [
 # Tenant SQL through the proxy (ADR-0015). Optional so the base client stays lean; the authoring
 # notebook image installs it (industryflow[sql]).
 sql = ["psycopg[binary]>=3.1"]
-dev = ["pytest==8.3.4"]
+dev = ["pytest==9.1.1"]
 
 [tool.setuptools]
 packages = ["industryflow"]

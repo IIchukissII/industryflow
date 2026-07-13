@@ -5,4 +5,4 @@
 # Test-only dependencies. The FK-resilience filter test (tests/test_upsert_filter.py) is pure
 # Python — no pyspark or database. (tests/test_spark_service.py is a live-DB integration
 # harness, run manually, not in CI.)
-pytest==8.3.4
+pytest==9.1.1
