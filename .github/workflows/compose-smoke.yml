@@ -1,0 +1,178 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The gate that starts the stack (ADR-0026 dec 3, dec 4).
+#
+# Every other check in this repository reasons about the code or about the dependency graph: the tests
+# import modules, `deps-resolve` proves the pins satisfy each other, `images.yml` proves the images
+# build. Two failures in one sprint cleared all of that and still shipped a dead service:
+#
+#   * mlflow resolves perfectly on Python 3.14 and then the SERVER dies importing
+#     `importlib.abc.Traversable`, which 3.14 removed (#222);
+#   * JupyterHub 5 does not warn when it meets a 4.x state database — it EXITS, and the container
+#     crash-loops. A human running `docker compose up` on the box found it; nothing in CI did, because
+#     nothing in CI started the hub (#231).
+#
+# So this job starts the real thing and asserts it stays up.
+#
+# THE SEEDED STATE IS THE POINT, not an implementation detail. On empty volumes JupyterHub 5 creates a
+# 5.x schema and starts happily — the bug is invisible. The upgrade path is the path that breaks, so the
+# hub's state database is seeded at the PREVIOUS major's schema before the stack comes up. The seed is
+# generated here by the old JupyterHub itself, never copied from a real hub: a real one carries users
+# and API tokens, and a fixture with credentials in it is not a fixture.
+#
+# This is a SMOKE test, deliberately: converge and probe. The deep functional proofs stay in the
+# targeted integration workflows (cold-layer, tracking-gateway, db-tenant-isolation) that already own
+# them. What this adds is the one thing none of them cover — the stack, as a whole, actually running.
+name: Compose smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compose-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Provide compose env
+        run: cp .env.example .env
+
+      # ADR-0026 dec 4. Build the seed with the JupyterHub the hub is upgrading FROM, so the schema is
+      # genuinely the old one rather than something we assert is old. `new_session_factory` creates the
+      # tables and stamps alembic at that version's head — an empty database with a real 4.x schema.
+      - name: Seed the hub state DB at the PREVIOUS JupyterHub major (the upgrade path is what breaks)
+        env:
+          # The pin JupyterHub 5 replaced. Bump this when the current major moves, or the "upgrade"
+          # test quietly starts upgrading from the version it is already on — i.e. testing nothing.
+          PREV_JUPYTERHUB: "4.1.6"
+        run: |
+          mkdir -p hub-seed
+          cat > hub-seed/seed.py <<'PY'
+          import sqlite3
+          from jupyterhub import orm
+
+          orm.new_session_factory("sqlite:///jupyterhub.sqlite")
+          db = sqlite3.connect("jupyterhub.sqlite")
+          revision = db.execute("select version_num from alembic_version").fetchone()[0]
+          users = db.execute("select count(*) from users").fetchone()[0]
+          print(f"seeded hub state db: alembic={revision} users={users}")
+          # A fixture with credentials in it is not a fixture. The seed is generated, never copied
+          # from a real hub, so it must be empty of users and of API tokens.
+          assert users == 0, "the seed must carry no users and no tokens"
+          PY
+          docker run --rm -v "$PWD/hub-seed:/seed" -w /seed python:3.12-slim \
+            sh -c "pip install --quiet jupyterhub==${PREV_JUPYTERHUB} && python seed.py"
+          # The hub runs as uid 1000; a root-owned file makes SQLite fail 'attempt to write a
+          # readonly database' — which looks like a migration bug and is not one.
+          sudo chown -R 1000:1000 hub-seed
+
+      - name: Load the seed into the hub's volume
+        run: |
+          docker volume create industryflow_notebook-hub-data
+          docker run --rm -v industryflow_notebook-hub-data:/srv/jupyterhub -v "$PWD/hub-seed:/seed" \
+            alpine sh -c "cp /seed/jupyterhub.sqlite /srv/jupyterhub/jupyterhub.sqlite &&
+                          chown 1000:1000 /srv/jupyterhub/jupyterhub.sqlite &&
+                          ls -l /srv/jupyterhub/jupyterhub.sqlite"
+
+      # --wait blocks until every container with a healthcheck reports healthy, and fails if one exits.
+      # A hub that crash-loops on the seeded schema fails HERE, which is the whole purpose of this job.
+      #
+      # SCOPE, stated honestly: the application services, the notebooks profile, and (via depends_on)
+      # the infrastructure they need. NOT the monitoring stack (grafana/prometheus/loki/exporters) and
+      # NOT the Spark JVMs — a 2-vCPU runner cannot converge 31 containers, and neither of those is on
+      # the failure path this gate exists for (a Python dependency that breaks a service on start).
+      # A Spark-image break is therefore still only caught by its own build, which is a known limit.
+      - name: Start the stack (notebooks profile included — the hub is the point)
+        run: |
+          docker compose --profile notebooks up -d --build --wait --wait-timeout 900 \
+            api-gateway ingestion-service ml-service-api alert-service-api alert-service-detector \
+            mlflow notebook-hub notebook-sql-proxy notebook-tracking-gateway notebook-cold-broker
+
+      - name: Nothing is restarting, nothing died
+        run: |
+          rc=0
+          # A crash-looping container can still be "running" between restarts, so healthy is not enough:
+          # a nonzero RestartCount is itself the failure signal (it is exactly what JupyterHub 5 did).
+          for c in $(docker ps -a --filter name=industryflow --format '{{.Names}}'); do
+            state=$(docker inspect -f '{{.State.Status}}' "$c")
+            restarts=$(docker inspect -f '{{.RestartCount}}' "$c")
+            exitcode=$(docker inspect -f '{{.State.ExitCode}}' "$c")
+            # One-shot init containers (minio-init, db-cert-init, cold-export) legitimately exit 0.
+            if [ "$state" = "exited" ] && [ "$exitcode" = "0" ]; then
+              echo "OK    $c (one-shot, exited 0)"; continue
+            fi
+            if [ "$state" != "running" ] || [ "$restarts" != "0" ]; then
+              echo "::error::$c is $state with $restarts restart(s), exit=$exitcode"
+              docker logs --tail=40 "$c" 2>&1 | sed "s/^/    $c| /"
+              rc=1
+            else
+              echo "OK    $c ($state, 0 restarts)"
+            fi
+          done
+          exit $rc
+
+      - name: The hub migrated the seeded schema and is serving
+        run: |
+          # Proof the upgrade path actually ran, rather than the seed being quietly ignored.
+          docker compose --profile notebooks logs notebook-hub 2>&1 | grep -q "Running upgrade" \
+            && echo "OK    the hub migrated the seeded 4.x schema on start" \
+            || { echo "::error::the hub never migrated the seed — the upgrade path was not exercised"; exit 1; }
+          docker compose --profile notebooks exec -T notebook-hub \
+            python -c "import urllib.request; print('hub health:', urllib.request.urlopen('http://localhost:8000' + __import__('os').environ.get('NOTEBOOK_BASE_URL', '/').rstrip('/') + '/hub/health', timeout=10).status)"
+
+      # Probed from inside the network (the services are not host-published), and with the container's
+      # own python so no tooling has to be installed.
+      - name: Probe the services that serve HTTP
+        run: |
+          cat > probe.py <<'PY'
+          import sys, urllib.request
+          TARGETS = {
+              "api-gateway":               "http://localhost:8000/health",
+              "ml-service-api":            "http://ml-service-api:8002/health",
+              "notebook-cold-broker":      "http://notebook-cold-broker:5060/health",
+              "notebook-tracking-gateway": "http://notebook-tracking-gateway:5050/health",
+          }
+          bad = []
+          for name, url in TARGETS.items():
+              try:
+                  code = urllib.request.urlopen(url, timeout=10).status
+                  print(f"{'OK  ' if code == 200 else 'FAIL'}  {name} -> {code}")
+                  if code != 200:
+                      bad.append(name)
+              except Exception as e:
+                  print(f"FAIL  {name} -> {e}")
+                  bad.append(name)
+          sys.exit(1 if bad else 0)
+          PY
+          docker compose cp probe.py api-gateway:/tmp/probe.py
+          docker compose exec -T api-gateway python /tmp/probe.py
+
+      - name: Dump everything on failure
+        if: failure()
+        run: docker compose --profile notebooks ps -a && docker compose --profile notebooks logs --tail=80
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose --profile notebooks down -v
+          docker volume rm -f industryflow_notebook-hub-data || true
+
+  # Stable aggregate status for branch protection, matching the convention the other gates use.
+  compose-smoke-gate:
+    name: compose-smoke-gate
+    needs: [compose-smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on the smoke result
+        run: |
+          result="${{ needs.compose-smoke.result }}"
+          echo "compose-smoke=$result"
+          if [ "$result" != "success" ]; then
+            echo "::error::the stack did not come up clean"; exit 1
+          fi

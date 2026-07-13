@@ -37,24 +37,47 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: api-gateway,            context: services/api_gateway,     file: services/api_gateway/Dockerfile }
-          - { name: ingestion-service,      context: services/ingestion_service, file: services/ingestion_service/Dockerfile }
+          # `smoke` (ADR-0026 dec 5): a shell command run INSIDE the built image. Import the module the
+          # container actually serves — that is the step a dependency resolve cannot take for you.
+          # Images with no Python process to speak of (nginx, the Spark distro, pg_dump) carry none.
+          - { name: api-gateway,            context: services/api_gateway,     file: services/api_gateway/Dockerfile,
+              smoke: "python -c \"import fastapi_users, redis, asyncpg; from fastapi_users.authentication import CookieTransport, JWTStrategy; print('api-gateway auth stack ok')\"" }
+          - { name: ingestion-service,      context: services/ingestion_service, file: services/ingestion_service/Dockerfile,
+              smoke: "python -c \"import aiokafka, fastapi; print('ingestion ok')\"" }
           - { name: frontend,               context: services/frontend,        file: services/frontend/Dockerfile }
-          - { name: ml-service-api,         context: services/ml_service,       file: services/ml_service/api/Dockerfile }
-          - { name: alert-service-api,      context: services/alert_service,    file: services/alert_service/api/Dockerfile }
-          - { name: alert-service-detector, context: services/alert_service,    file: services/alert_service/worker/Dockerfile }
+          # numpy/sklearn/xgboost are C-extension stacks: an ABI mismatch is invisible to a resolve and
+          # fatal on import (this is the pyarrow-14-under-numpy-2 break, #209).
+          - { name: ml-service-api,         context: services/ml_service,       file: services/ml_service/api/Dockerfile,
+              smoke: "python -c \"import numpy, sklearn, xgboost, mlflow, evidently; print('ml stack ok', numpy.__version__)\"" }
+          - { name: alert-service-api,      context: services/alert_service,    file: services/alert_service/api/Dockerfile,
+              smoke: "python -c \"import fastapi, asyncpg, boto3, jose; print('alert-api ok')\"" }
+          - { name: alert-service-detector, context: services/alert_service,    file: services/alert_service/worker/Dockerfile,
+              smoke: "python -c \"import aiokafka, redis; print('alert-detector ok')\"" }
           - { name: spark-streaming,        context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.streaming }
           - { name: spark-aggregations,     context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.aggregations }
           - { name: spark-worker,           context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.worker }
-          - { name: mlflow,                 context: infrastructure/mlflow,     file: infrastructure/mlflow/Dockerfile }
-          - { name: notebook-hub,           context: services/notebook_hub,     file: services/notebook_hub/Dockerfile }
-          - { name: notebook-sql-proxy,     context: services/notebook_sql_proxy, file: services/notebook_sql_proxy/Dockerfile }
-          - { name: notebook-tracking-gateway, context: services/notebook_tracking_gateway, file: services/notebook_tracking_gateway/Dockerfile }
-          - { name: notebook-cold-broker,   context: services/notebook_cold_broker, file: services/notebook_cold_broker/Dockerfile }
-          - { name: notebook-authoring,     context: clients/python,            file: services/notebook_hub/Dockerfile.authoring }
-          - { name: notebook-analytics,     context: clients/python,            file: services/notebook_hub/Dockerfile.analytics }
+          # THE ONE THAT WOULD HAVE CAUGHT #222. mlflow is pure-python and its 95-package closure
+          # resolves cleanly on 3.14 — and then the SERVER dies importing importlib.abc.Traversable.
+          # Importing the client is not enough; it is `mlflow.server` that breaks.
+          - { name: mlflow,                 context: infrastructure/mlflow,     file: infrastructure/mlflow/Dockerfile,
+              smoke: "python -c \"import mlflow.server.fastapi_app; print('mlflow SERVER imports ok', __import__('mlflow').__version__)\"" }
+          - { name: notebook-hub,           context: services/notebook_hub,     file: services/notebook_hub/Dockerfile,
+              smoke: "python -c \"import jupyterhub, dockerspawner, kubespawner; print('hub stack ok', jupyterhub.__version__)\" && jupyterhub --version" }
+          - { name: notebook-sql-proxy,     context: services/notebook_sql_proxy, file: services/notebook_sql_proxy/Dockerfile,
+              smoke: "python -c \"import redis; print('sql-proxy ok')\"" }
+          - { name: notebook-tracking-gateway, context: services/notebook_tracking_gateway, file: services/notebook_tracking_gateway/Dockerfile,
+              smoke: "python -c \"import fastapi, redis; print('tracking-gateway ok')\"" }
+          - { name: notebook-cold-broker,   context: services/notebook_cold_broker, file: services/notebook_cold_broker/Dockerfile,
+              smoke: "python -c \"import fastapi, redis, boto3; print('cold-broker ok')\"" }
+          - { name: notebook-authoring,     context: clients/python,            file: services/notebook_hub/Dockerfile.authoring,
+              smoke: "python -c \"import numpy, pandas, sklearn, mlflow, industryflow; print('authoring kernel ok', numpy.__version__)\"" }
+          - { name: notebook-analytics,     context: clients/python,            file: services/notebook_hub/Dockerfile.analytics,
+              smoke: "python -c \"import numpy, pandas, industryflow; print('analytics kernel ok', numpy.__version__)\"" }
           - { name: db-backup,              context: infrastructure/backup,     file: infrastructure/backup/Dockerfile }
-          - { name: cold-export,            context: services/cold_export,      file: services/cold_export/Dockerfile }
+          # pyarrow is the cold layer's Parquet writer, and pyarrow-vs-numpy is a compiled ABI pair:
+          # pyarrow 14 imports fine until numpy 2 arrives, then dies (#209). An import is the whole test.
+          - { name: cold-export,            context: services/cold_export,      file: services/cold_export/Dockerfile,
+              smoke: "python -c \"import pyarrow, pyarrow.parquet, pyarrow.fs, numpy; print('cold-export ok', pyarrow.__version__, numpy.__version__)\"" }
     steps:
       - uses: actions/checkout@v7
 
@@ -88,6 +111,22 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      # ADR-0026 dec 5: an image must START, not merely build. Both of this sprint's failures were
+      # invisible to every dependency check because a clean resolve says nothing about a run — mlflow
+      # resolves perfectly on Python 3.14 and then dies importing `importlib.abc.Traversable`, which
+      # 3.14 removed. So each image that serves a Python process imports the module it actually serves.
+      # `smoke` is only set where there is something worth importing; images without it (nginx, Spark)
+      # skip this step. Runs on pull_request, where the build is `load`ed into the local daemon — which
+      # is the merge gate, so nothing reaches main unsmoked.
+      - name: Smoke — the image starts, not just builds
+        if: github.event_name == 'pull_request' && matrix.smoke != ''
+        run: |
+          echo "::group::smoke ${{ matrix.name }}: ${{ matrix.smoke }}"
+          docker run --rm --entrypoint sh \
+            "${REGISTRY}/industryflow-${{ matrix.name }}:${{ steps.meta.outputs.version }}" \
+            -c '${{ matrix.smoke }}'
+          echo "::endgroup::"
 
       - name: Install Trivy
         run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
