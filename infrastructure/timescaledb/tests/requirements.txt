@@ -4,9 +4,10 @@
 
 # Test-only dependencies for the TimescaleDB isolation tests.
 # Install with: pip install -r requirements.txt
-# pytest must be >=8.2 for pytest-asyncio 0.24.0 (they conflicted at 7.4.3, which quietly
-# broke this workflow's install from PR #161 until it was caught here).
-pytest==8.3.4
+# These pins are what the services run, not a set of their own: asyncpg lagged at 0.30.0 while every
+# service moved to 0.31.0, and 0.30.0 ships no cp314 wheel — on the 3.14 runner pip was quietly
+# building it from source rather than failing, which is why the drift stayed invisible.
+pytest==9.1.1
 psycopg2-binary==2.9.12
-asyncpg==0.30.0
-pytest-asyncio==0.24.0
+asyncpg==0.31.0
+pytest-asyncio==1.4.0

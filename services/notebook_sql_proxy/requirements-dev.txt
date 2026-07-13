@@ -5,6 +5,6 @@
 # Test-only deps. binding.py / proxy.py / wire.py / scram.py are pure (no redis/postgres at
 # import), so most tests need only pytest + pytest-asyncio. trustme generates a throwaway CA +
 # server cert for the upstream-TLS integration test (a fake Postgres-TLS server, no real DB).
-pytest==8.3.4
-pytest-asyncio==0.24.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
 trustme==1.2.1
