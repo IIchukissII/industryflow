@@ -6,8 +6,11 @@
 # raw measurements from TimescaleDB and writes partitioned Parquet to the object store. No Spark.
 # pyarrow provides both the Parquet writer and the S3/MinIO filesystem (pyarrow.fs.S3FileSystem),
 # so no separate S3 SDK is needed. psycopg2 matches the pin the streaming/ml images use.
-# numpy is pinned < 2 to match pyarrow 14's build (and the rest of the platform, which has not
-# yet taken the numpy-2 major) — pyarrow 14 imports numpy and fails against the 2.x ABI.
-numpy>=1.26.4,<2
-pyarrow==14.0.1
+# pyarrow's wheel is compiled against numpy's C ABI, so the two move together: pyarrow 14 was built
+# against numpy 1.x and fails to import under numpy 2.x. pyarrow 25 is built against 2.x, which is
+# what lets the platform take the numpy-2 major. The Parquet contract is unchanged across the bump
+# (format 2.6, zstd, the explicit COLD_SCHEMA) and tests/test_parquet_compat.py holds it to that
+# against a file written by the old pin.
+numpy>=2.5.1,<3
+pyarrow==25.0.0
 psycopg2-binary==2.9.12
