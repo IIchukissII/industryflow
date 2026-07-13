@@ -5,7 +5,7 @@
 # Notebook hub image (ADR-0011/0012/0014/0018). Serves both deployment profiles: KubeSpawner on
 # Kubernetes (chp runs as a sibling container per the Helm chart) and DockerSpawner on Compose
 # (the hub runs the proxy in-process, so the chp binary is installed here). NOTEBOOK_SPAWNER picks.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # The hub's CODE lives in /opt/hub (immutable, from the image); its runtime STATE (sqlite db,
 # cookie secret) is written under the /srv/jupyterhub workdir. Keeping these apart matters: the
