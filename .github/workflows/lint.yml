@@ -41,6 +41,11 @@ jobs:
   # no image or test job installs will never find that out — it just rots, resolvable-looking, until
   # someone builds it. deps-audit iterates these files too, but it is report-only (continue-on-error
   # + `|| true`), so it reports such a conflict and passes anyway. This gates.
+  #
+  # WHEELS ONLY, deliberately. Without --only-binary a missing wheel is not an error: pip quietly
+  # falls back to building the sdist, so the gate passes for the wrong reason (and passes or fails
+  # depending on which compilers the runner happens to have). Every image installs these with wheels;
+  # the gate has to hold them to the same standard.
   deps-resolve:
     runs-on: ubuntu-latest
     steps:
@@ -50,13 +55,24 @@ jobs:
           python-version: "3.14"
       - name: Resolve every requirements file
         run: |
+          # The MLflow lock is resolved for the interpreter ITS image runs, which is not this job's:
+          # it is held at 3.11 because mlflow does not run on 3.14 (#222). Resolving it against 3.14
+          # would be asking the wrong question. Its own header records the command, and its image
+          # build (build-scan) is what actually proves it.
+          declare -A PYVER=( ["infrastructure/mlflow/requirements.txt"]="3.11" )
           rc=0
           for req in $(git ls-files '**/requirements.txt' 'requirements.txt'); do
-            echo "::group::pip resolve $req"
-            if pip install --dry-run --quiet -r "$req"; then
+            pyver="${PYVER[$req]:-3.14}"
+            echo "::group::pip resolve $req (cp${pyver//./})"
+            # Both manylinux tags: the cp314 scientific wheels ship manylinux_2_28 while
+            # psycopg2-binary still ships only manylinux2014, and either tag alone fails to resolve.
+            if pip install --dry-run --quiet --only-binary=:all: \
+                 --python-version "$pyver" \
+                 --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 \
+                 --target /tmp/deps-resolve --report /dev/null -r "$req"; then
               echo "OK   $req"
             else
-              echo "::error file=$req::$req does not resolve — its pins are mutually unsatisfiable"
+              echo "::error file=$req::$req does not resolve as wheels on CPython $pyver — its pins are mutually unsatisfiable, or one of them ships no wheel for this interpreter"
               rc=1
             fi
             echo "::endgroup::"
