@@ -4,13 +4,13 @@
 
 # Runtime deps for the notebook hub image (jupyterhub_config.py). Not needed for the unit
 # tests, which exercise the pure identity.py (see requirements-dev.txt).
-jupyterhub==4.1.6
+jupyterhub==5.5.0
 # Spawner is a deployment profile (ADR-0018): KubeSpawner on k8s, DockerSpawner on Compose.
 # Both are installed so one image serves either deployment; NOTEBOOK_SPAWNER selects at runtime.
-jupyterhub-kubespawner==6.2.0
-dockerspawner==13.0.0
+jupyterhub-kubespawner==7.0.0
+dockerspawner==14.0.0
 # Capability store (ADR-0015): minted handles + bindings live in the shared Redis.
 redis==8.0.1
 # Idle reclamation (ADR-0020 / ADR-0011 dec 1,7): a managed service that culls idle servers with
 # a minimal scoped token. Work is durable (per-user volume), so reclaiming is free.
-jupyterhub-idle-culler==1.4.0
+jupyterhub-idle-culler==2.0.0
