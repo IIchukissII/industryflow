@@ -6,5 +6,5 @@
 # gateway over HTTP and mint capabilities in Redis. Run inside the compose network so the artifact
 # pre-signed-URL host (minio:9000) resolves.
 pytest==9.1.1
-requests==2.32.3
+requests==2.34.2
 redis==8.0.1
