@@ -42,13 +42,16 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          # Same 22 as frontend-tests and the Dockerfile that actually ships: eslint 9's toolchain
+          # wants node >=20.19, and one node across lint/test/build is one thing to reason about.
+          node-version: "22"
           cache: npm
           cache-dependency-path: services/frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      # Flat config (eslint.config.js) matches files itself — `--ext` was removed in eslint 9.
       - name: eslint
-        run: npx eslint src --ext .js,.jsx
+        run: npx eslint src
 
   frontend-tests:
     runs-on: ubuntu-latest
