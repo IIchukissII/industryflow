@@ -11,7 +11,7 @@
 # redis matches the 8.x every runtime requirements file already pins; this dev pin was the last
 # 5.x left in the tree, so the tests imported a different major than the services run.
 redis==8.0.1
-numpy>=1.26.4
+numpy>=2.5.1
 pytest==9.1.1
 pytest-asyncio==1.4.0
 # Model-drift tests (ADR-0021) exercise the real evidently compute path, and the drift package
