@@ -39,8 +39,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # `.env.example` is a template, not a working config: it ships placeholders that an operator is
+      # told to fill in ("REQUIRED — the hub will not start without it"). Do exactly what an operator
+      # does, and no more — the point is to start the shipped stack, not a special CI variant of it.
       - name: Provide compose env
-        run: cp .env.example .env
+        run: |
+          cp .env.example .env
+          # The hub encrypts the tenant/role it hands the spawn hook (auth_state); the placeholder is
+          # not a key, and the hub exits rather than start without a real one.
+          sed -i "s|^JUPYTERHUB_CRYPT_KEY=.*|JUPYTERHUB_CRYPT_KEY=$(openssl rand -hex 32)|" .env
+          # DockerSpawner reaches the Docker socket through the host's docker group rather than as root
+          # (ADR-0011); the gid differs per machine, so take this runner's.
+          sed -i "s|^DOCKER_GID=.*|DOCKER_GID=$(getent group docker | cut -d: -f3)|" .env
+          grep -E '^(DOCKER_GID|DB_SSLMODE)=' .env
+          grep -q '^JUPYTERHUB_CRYPT_KEY=CHANGE_ME' .env && { echo "::error::crypt key not generated"; exit 1; } || true
 
       # ADR-0017: clients connect to TimescaleDB with sslmode=verify-full and verify the server cert
       # against the internal CA. `.env.example` ships TLS_CERT_DIR empty, so without this step the CA
