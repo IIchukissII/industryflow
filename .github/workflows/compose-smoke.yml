@@ -87,10 +87,14 @@ jobs:
       - name: Load the seed into the hub's volume
         run: |
           docker volume create industryflow_notebook-hub-data
+          # chown the DIRECTORY, not just the file. A fresh volume's root is owned by root, and the hub
+          # runs as uid 1000: it could read a seeded database it does not own, then die creating its
+          # cookie secret next to it ("Permission denied: .../jupyterhub_cookie_secret"). Seeding state
+          # into a volume means owning the whole directory the way the service will.
           docker run --rm -v industryflow_notebook-hub-data:/srv/jupyterhub -v "$PWD/hub-seed:/seed" \
             alpine sh -c "cp /seed/jupyterhub.sqlite /srv/jupyterhub/jupyterhub.sqlite &&
-                          chown 1000:1000 /srv/jupyterhub/jupyterhub.sqlite &&
-                          ls -l /srv/jupyterhub/jupyterhub.sqlite"
+                          chown -R 1000:1000 /srv/jupyterhub &&
+                          ls -ld /srv/jupyterhub && ls -l /srv/jupyterhub/jupyterhub.sqlite"
 
       # --wait blocks until every container with a healthcheck reports healthy, and fails if one exits.
       # A hub that crash-loops on the seeded schema fails HERE, which is the whole purpose of this job.
