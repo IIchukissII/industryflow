@@ -18,8 +18,17 @@ python-jose[cryptography]==3.5.0
 # Data validation
 pydantic>=2.5.0
 
-# MLflow integration
-mlflow-skinny==2.8.0
+# Object storage
+# mlflow-skinny is GONE, and its absence is the point. Nothing in alert_service imports mlflow — the
+# service only stores an `mlflow_run_id` as a column. So this was a dead dependency, and since the
+# runtime moved to Python 3.14 it was a dead dependency that could not even be imported:
+#
+#   >>> import mlflow
+#   TypeError: Metaclasses with custom tp_new are not supported.
+#
+# It shipped anyway, and the container stayed healthy, because nothing on the startup path touched it.
+# The ADR-0026 image smoke test is what surfaced it. It was also a stale CVE surface: 2.8.0, while the
+# rest of the platform moved to mlflow 3.14.0 precisely to remediate CRITICALs.
 boto3==1.43.46
 
 # Utilities
