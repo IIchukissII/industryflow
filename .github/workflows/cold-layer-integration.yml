@@ -74,7 +74,7 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install cold-export integration deps
         run: pip install -r services/cold_export/tests/requirements-integration.txt
@@ -112,7 +112,7 @@ jobs:
             -e COLD_STORE_ENDPOINT=http://minio:9000 \
             -e COLD_STORE_BUCKET=industryflow-cold \
             -e COLD_STORE_ACCESS_KEY="$AK" -e COLD_STORE_SECRET_KEY="$SK" \
-            python:3.12-slim bash -c "
+            python:3.14-slim bash -c "
               pip install -q -r services/notebook_cold_broker/tests/requirements-integration.txt &&
               pytest services/notebook_cold_broker/tests/test_cold_broker_integration.py -m integration -v"
 

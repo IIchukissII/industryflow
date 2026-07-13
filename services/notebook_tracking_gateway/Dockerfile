@@ -5,7 +5,7 @@
 # Experiment-tracking gateway image (ADR-0019). Authenticates a notebook's tracking capability and
 # scopes every MLflow call to the caller's tenant; the live MLflow proxy + artifact pre-signing are
 # cluster-validated (see README / issue #19).
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 COPY requirements.txt .

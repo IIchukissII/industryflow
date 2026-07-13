@@ -11,11 +11,16 @@
 # server (and the CI proof that guards it) with nothing in this repository having changed. A
 # rebuild is not supposed to be a dependency upgrade.
 #
-# Resolved for the image's platform (CPython 3.11, linux/amd64 — what CI builds and what the
+# Resolved for the image's platform (CPython 3.14, linux/amd64 — what CI builds and what the
 # deployment runs). Regenerate after changing a direct pin below:
 #
-#   pip install --dry-run --report r.json --python-version 3.11 --platform manylinux2014_x86_64 \
+#   pip install --dry-run --report r.json --python-version 3.14 \
+#       --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 \
 #       --only-binary=:all: --target /tmp/x mlflow==<v> psycopg2-binary==<v> boto3==<v>
+#
+# BOTH platform tags are required and neither is redundant: the scientific wheels (matplotlib,
+# scikit-learn, numpy) ship manylinux_2_28 for cp314, while psycopg2-binary still ships only
+# manylinux2014. Resolving against either tag alone fails.
 #
 # Deliberately NOT hash-pinned: hashes name specific wheels, so they would bind this image to one
 # architecture. matplotlib, scikit-learn and kiwisolver resolve to different versions on arm64
@@ -27,7 +32,7 @@
 
 boto3==1.28.0
 mlflow==3.14.0
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.12
 
 # --- transitive closure (generated; do not hand-edit) ---
 aiohappyeyeballs==2.7.1
@@ -36,7 +41,7 @@ aiosignal==1.4.0
 alembic==1.18.5
 annotated-doc==0.0.4
 annotated-types==0.7.0
-anyio==4.14.1
+anyio==4.14.2
 attrs==26.1.0
 blinker==1.9.0
 botocore==1.31.85
@@ -46,7 +51,7 @@ cffi==2.1.0
 charset-normalizer==3.4.9
 click==8.4.2
 cloudpickle==3.1.2
-contourpy==1.3.2
+contourpy==1.3.3
 cryptography==48.0.1
 cycler==0.12.1
 databricks-sdk==0.120.0
@@ -62,7 +67,7 @@ google-auth==2.55.2
 graphene==3.4.3
 graphql-core==3.2.11
 graphql-relay==3.2.0
-greenlet==3.2.5
+greenlet==3.5.3
 gunicorn==26.0.0
 h11==0.16.0
 huey==3.2.1
@@ -79,18 +84,19 @@ matplotlib==3.11.0
 mlflow-skinny==3.14.0
 mlflow-tracing==3.14.0
 multidict==6.7.1
-numpy==2.2.6
+narwhals==2.24.0
+numpy==2.5.1
 opentelemetry-api==1.43.0
 opentelemetry-proto==1.43.0
 opentelemetry-sdk==1.43.0
 opentelemetry-semantic-conventions==0.64b0
 packaging==26.2
-pandas==2.3.2
-pillow==12.2.0
+pandas==2.3.3
+pillow==12.3.0
 prettytable==3.18.0
 propcache==0.5.2
 protobuf==6.33.6
-pyarrow==20.0.0
+pyarrow==24.0.0
 pyasn1==0.6.4
 pyasn1_modules==0.4.2
 pycparser==3.0
@@ -103,8 +109,8 @@ pytz==2026.2
 pyyaml==6.0.3
 requests==2.34.2
 s3transfer==0.6.2
-scikit-learn==1.7.2
-scipy==1.16.3
+scikit-learn==1.9.0
+scipy==1.18.0
 six==1.17.0
 skops==0.14.0
 smmap==5.0.3

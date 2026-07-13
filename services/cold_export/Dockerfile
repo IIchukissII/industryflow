@@ -5,7 +5,7 @@
 # Cold-layer exporter (ADR-0025): a single-node columnar writer, not Spark (decision 11). Reads
 # raw measurements from TimescaleDB and writes partitioned Parquet to the object store, then drops
 # the exported chunk. Run on a schedule by a Kubernetes CronJob (decision 9).
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 LABEL service="cold-export"
 
