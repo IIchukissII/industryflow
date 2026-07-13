@@ -4,7 +4,7 @@
 
 # SQL access proxy image (ADR-0015). The Postgres-wire entry point (server.py) is present; the
 # live upstream relay is not yet cluster-validated (see README / issue #19).
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 COPY requirements.txt .
