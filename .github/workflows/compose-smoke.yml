@@ -42,6 +42,19 @@ jobs:
       - name: Provide compose env
         run: cp .env.example .env
 
+      # ADR-0017: clients connect to TimescaleDB with sslmode=verify-full and verify the server cert
+      # against the internal CA. `.env.example` ships TLS_CERT_DIR empty, so without this step the CA
+      # mount is an empty volume, every DB client fails the handshake with "self-signed certificate",
+      # and the stack cannot come up — which is exactly what happened the first time this job ran.
+      # An operator runs this script too; running it here means the gate exercises the real verify-full
+      # path rather than quietly downgrading to sslmode=require the way the other live workflows do.
+      - name: Generate the internal CA (the DB clients verify against it)
+        run: |
+          bash scripts/gen-internal-ca.sh
+          sed -i "s|^TLS_CERT_DIR=.*|TLS_CERT_DIR=${PWD}/deploy/certs|" .env
+          grep -E '^(TLS_CERT_DIR|DB_SSLMODE)=' .env
+          test -f deploy/certs/ca.crt || { echo "::error::the CA was not generated"; exit 1; }
+
       # ADR-0026 dec 4. Build the seed with the JupyterHub the hub is upgrading FROM, so the schema is
       # genuinely the old one rather than something we assert is old. `new_session_factory` creates the
       # tables and stamps alembic at that version's head — an empty database with a real 4.x schema.
