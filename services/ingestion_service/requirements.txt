@@ -6,7 +6,7 @@
 # no .path, which prometheus-fastapi-instrumentator 6.1.0 cannot introspect (every
 # request, including /health, 500s). Same combo api-gateway/ml-service run.
 fastapi==0.139.0
-uvicorn[standard]==0.50.0
+uvicorn[standard]==0.51.0
 pydantic==2.13.4
 
 aiokafka==0.14.0
