@@ -55,6 +55,23 @@ c = get_config()  # noqa: F821  (provided by JupyterHub at load time)
 # deployment. JupyterHub propagates base_url to chp and every single-user server.
 c.JupyterHub.base_url = os.environ.get("NOTEBOOK_BASE_URL", "/")
 
+# Migrate the hub's own state database on start, instead of refusing to boot against an older one.
+# JupyterHub 5 carries a schema its 4.x predecessor did not, and a hub that finds the old schema
+# does not warn — it exits, and the container crash-loops:
+#
+#   Found database schema version 0eee8c825d24 != 4621fec11365.
+#   Backup your database and run `jupyterhub upgrade-db`
+#
+# That is a real defect for an in-place upgrade: an operator who pulls a new image gets a dead hub
+# and a manual migration step nobody wrote down. This is what the trait is for (it is what
+# `jupyterhub upgrade-db` runs), and it is a no-op once the schema matches.
+#
+# Safe here because of what this database *is*: hub session state — users, servers, API tokens —
+# not the user's work. ADR-0020 dec 1 puts authored notebooks on a per-user durable volume, and
+# ADR-0012 mints every credential per session, so nothing in here is a system of record. JupyterHub
+# also backs a SQLite database up itself immediately before migrating it.
+c.JupyterHub.upgrade_db = True
+
 # Allow the platform UI to embed the notebook same-origin (ADR-0014). The hub and each single-user
 # server default to `Content-Security-Policy: frame-ancestors 'none'`, which blocks framing even
 # from the same origin — so the /notebooks iframe would be refused. Relax it to `'self'`: the embed
