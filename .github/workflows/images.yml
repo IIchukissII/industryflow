@@ -121,11 +121,15 @@ jobs:
       # is the merge gate, so nothing reaches main unsmoked.
       - name: Smoke — the image starts, not just builds
         if: github.event_name == 'pull_request' && matrix.smoke != ''
+        # The command goes through the environment, not through the shell: every smoke string contains
+        # single quotes of its own (`print('ok')`), so interpolating it into a quoted argument collides.
+        env:
+          SMOKE: ${{ matrix.smoke }}
+          IMAGE: ${{ env.REGISTRY }}/industryflow-${{ matrix.name }}:${{ steps.meta.outputs.version }}
         run: |
-          echo "::group::smoke ${{ matrix.name }}: ${{ matrix.smoke }}"
-          docker run --rm --entrypoint sh \
-            "${REGISTRY}/industryflow-${{ matrix.name }}:${{ steps.meta.outputs.version }}" \
-            -c '${{ matrix.smoke }}'
+          echo "::group::smoke ${{ matrix.name }}"
+          echo "$SMOKE"
+          docker run --rm --entrypoint sh "$IMAGE" -c "$SMOKE"
           echo "::endgroup::"
 
       - name: Install Trivy
