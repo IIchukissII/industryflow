@@ -92,9 +92,10 @@ jobs:
           PY
           docker run --rm -v "$PWD/hub-seed:/seed" -w /seed python:3.12-slim \
             sh -c "pip install --quiet jupyterhub==${PREV_JUPYTERHUB} && python seed.py"
-          # The hub runs as uid 1000; a root-owned file makes SQLite fail 'attempt to write a
-          # readonly database' — which looks like a migration bug and is not one.
-          sudo chown -R 1000:1000 hub-seed
+          # A root-owned database makes SQLite fail 'attempt to write a readonly database', which reads
+          # like a migration bug and is not one. The volume's ownership is set in the next step, as the
+          # uid the hub actually runs as.
+          sudo chmod -R a+rX hub-seed
 
       - name: Load the seed into the hub's volume
         run: |
