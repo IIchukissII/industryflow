@@ -21,7 +21,7 @@ redis[asyncio]==8.0.1
 # what mlflow's own dependency closure settles on. Reading across the versions is fine and is what
 # actually matters here — the cold layer's Parquet is format 2.6 (see cold_export/store.py), which
 # every pyarrow in this range reads.
-pyarrow==24.0.0
+pyarrow==25.0.0
 
 # Visualization & Analysis
 matplotlib==3.11.0
