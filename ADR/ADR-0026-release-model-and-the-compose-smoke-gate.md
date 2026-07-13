@@ -87,10 +87,16 @@ branch. It was a check that starts the stack, and — for the JupyterHub class �
 
 3. **A `compose-smoke` gate is added, and it is required.** It stands the real Compose stack up —
    the application services and the notebooks profile, with the infrastructure they depend on — and
-   asserts that **every container converges to healthy and none is restarting**, plus a small set of
-   endpoint probes. A crash-looping container fails the merge. A non-zero restart count *is* the signal:
-   a container that dies and respawns is "running" when you look at it, which is exactly how JupyterHub 5
-   would have slipped past a naive check.
+   asserts that **every container converges to healthy and then STAYS there**, plus a small set of
+   endpoint probes. A crash-looping container fails the merge.
+
+   The test is **restart-count stability, not a zero restart count**, and the difference is the whole
+   craft of it. A cold start races: services come up before Postgres and Kafka are accepting
+   connections, die, and are respawned until the dependency is there — ordinary, and convergence to
+   healthy already proves it resolved. A crash-loop looks different: the count keeps *climbing*, and
+   the container is "running" every time you happen to look at it — which is precisely how JupyterHub 5
+   would slip past a point-in-time check. So the gate snapshots the counts, waits, and fails on any that
+   moved. "Did it restart?" is the wrong question; "is it still restarting?" is the right one.
 
    Its scope is stated rather than implied: the monitoring stack (Prometheus/Grafana/Loki/exporters) and
    the Spark JVMs are **out of scope**, because a CI runner cannot converge the whole 31-container stack

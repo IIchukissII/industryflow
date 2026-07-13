@@ -106,27 +106,45 @@ jobs:
             api-gateway ingestion-service ml-service-api alert-service-api alert-service-detector \
             mlflow notebook-hub notebook-sql-proxy notebook-tracking-gateway notebook-cold-broker
 
-      - name: Nothing is restarting, nothing died
+      # The signal is not WHETHER a container restarted — it is whether it KEEPS restarting.
+      #
+      # A cold start races: services come up before Kafka/Postgres finish accepting connections, die,
+      # and are respawned by their restart policy until the dependency is there. That is ordinary, and
+      # `--wait` above already proved they all reached healthy. A crash-loop looks different: the
+      # restart count keeps CLIMBING, and the container is "running" every time you happen to look
+      # (which is exactly how JupyterHub 5 would have slipped past a naive point-in-time check).
+      #
+      # So: snapshot the counts, wait, and fail on any that moved. That separates "settled after a
+      # startup race" from "will never settle", which is the distinction the gate actually cares about.
+      - name: Nothing is crash-looping (restart counts must be STABLE, not zero)
         run: |
+          snapshot() {
+            for c in $(docker ps -a --filter name=industryflow --format '{{.Names}}'); do
+              echo "$c $(docker inspect -f '{{.State.Status}} {{.RestartCount}} {{.State.ExitCode}}' "$c")"
+            done
+          }
+          snapshot > /tmp/before.txt
+          echo "observing for 60s..."
+          sleep 60
+          snapshot > /tmp/after.txt
+
           rc=0
-          # A crash-looping container can still be "running" between restarts, so healthy is not enough:
-          # a nonzero RestartCount is itself the failure signal (it is exactly what JupyterHub 5 did).
-          for c in $(docker ps -a --filter name=industryflow --format '{{.Names}}'); do
-            state=$(docker inspect -f '{{.State.Status}}' "$c")
-            restarts=$(docker inspect -f '{{.RestartCount}}' "$c")
-            exitcode=$(docker inspect -f '{{.State.ExitCode}}' "$c")
+          while read -r c state restarts exitcode; do
+            was=$(awk -v n="$c" '$1==n {print $3}' /tmp/before.txt)
             # One-shot init containers (minio-init, db-cert-init, cold-export) legitimately exit 0.
             if [ "$state" = "exited" ] && [ "$exitcode" = "0" ]; then
               echo "OK    $c (one-shot, exited 0)"; continue
             fi
-            if [ "$state" != "running" ] || [ "$restarts" != "0" ]; then
-              echo "::error::$c is $state with $restarts restart(s), exit=$exitcode"
-              docker logs --tail=40 "$c" 2>&1 | sed "s/^/    $c| /"
-              rc=1
+            if [ "$state" != "running" ]; then
+              echo "::error::$c is $state (exit=$exitcode)"
+              docker logs --tail=40 "$c" 2>&1 | sed "s/^/    $c| /"; rc=1
+            elif [ "$restarts" != "$was" ]; then
+              echo "::error::$c is CRASH-LOOPING — restarts went $was -> $restarts while it was merely being watched"
+              docker logs --tail=40 "$c" 2>&1 | sed "s/^/    $c| /"; rc=1
             else
-              echo "OK    $c ($state, 0 restarts)"
+              echo "OK    $c (running, stable at $restarts restart(s))"
             fi
-          done
+          done < /tmp/after.txt
           exit $rc
 
       - name: The hub migrated the seeded schema and is serving
