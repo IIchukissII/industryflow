@@ -122,7 +122,7 @@ jobs:
             -e IF_REQUIRE_LIVE_STACK=1 \
             -e TRACKING_GATEWAY_URL=http://notebook-tracking-gateway:5050 \
             -e TRACKING_REDIS_URL=redis://redis:6379/0 \
-            python:3.12-slim bash -c "
+            python:3.14-slim bash -c "
               pip install -q -r services/notebook_tracking_gateway/tests/requirements-integration.txt &&
               pytest services/notebook_tracking_gateway/tests/test_tracking_gateway_integration.py -m integration -v"
 

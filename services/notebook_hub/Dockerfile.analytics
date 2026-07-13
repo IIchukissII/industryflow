@@ -12,6 +12,15 @@
 #
 # BUILD CONTEXT = clients/python (so the client is pip-installable from its pyproject):
 #   docker build -f services/notebook_hub/Dockerfile.analytics clients/python
+#
+# HELD AT 3.12 WHILE THE SERVICES MOVED TO 3.14 (#211) — deliberately, not by oversight. The pinned
+# stack below (numpy 1.26.4, pandas 2.2.2, matplotlib 3.9.1) publishes no cp314 wheels, so this
+# image cannot take 3.14 without also taking numpy 2. That bump is not a runtime change: it is the
+# environment users' dashboards run in, it reaches them at the next spawn (ADR-0020 dec 1), and it
+# would silently settle the "notebook and package supply chain" question ADR-0011 explicitly
+# DEFERS. This profile trains nothing, so it is not on the model artifact path — but it is one half
+# of one notebook stack, and splitting the two kernels across interpreters is its own trap. Both
+# move together, under the ADR tracked in #220.
 FROM python:3.12-slim
 
 ARG NB_UID=1000
