@@ -27,6 +27,15 @@ from .ports import WriteResult
 
 logger = logging.getLogger(__name__)
 
+# How a cold Parquet file is encoded. Once retention drops the source chunk this file is the only
+# copy of that history, so the encoding is stated rather than defaulted: a pyarrow upgrade that
+# moved its default format version would otherwise silently change how history is written. 2.6 and
+# zstd are what every file written so far already carries (tests/test_parquet_compat.py pins this
+# against a file the pre-upgrade pyarrow wrote), so this is a statement of the existing contract,
+# not a change to it. Changing either value is a schema decision, not a tuning knob.
+PARQUET_FORMAT_VERSION = "2.6"
+PARQUET_COMPRESSION = "zstd"
+
 
 def _split_endpoint(endpoint: str) -> tuple[str, str]:
     """Turn ``http://minio:9000`` into (``minio:9000``, ``http``) for S3FileSystem."""
@@ -43,15 +52,15 @@ class S3ColdStore:
     def __init__(self, cfg: StoreConfig):
         host, scheme = _split_endpoint(cfg.endpoint)
         self._bucket = cfg.bucket
-        # pyarrow's S3FileSystem uses path-style addressing by default when endpoint_override is
-        # set (MinIO does not do virtual-host buckets), which is exactly what we need. (The
-        # explicit force_virtual_addressing knob only exists in pyarrow >= 15; we pin 14.)
+        # MinIO serves buckets path-style, not virtual-host — so addressing is stated here rather
+        # than inherited from a library default that a future upgrade could flip under us.
         self._fs = fs.S3FileSystem(
             access_key=cfg.access_key,
             secret_key=cfg.secret_key,
             endpoint_override=host,
             scheme=scheme,
             region=cfg.region,
+            force_virtual_addressing=False,
         )
 
     def _path(self, key: str) -> str:
@@ -75,7 +84,10 @@ class S3ColdStore:
             raise ValueError(f"no rows to write for {prefix} {day.isoformat()}")
         rows = 0
         with self._fs.open_output_stream(path) as sink:
-            writer = pq.ParquetWriter(sink, first.schema, compression="zstd")
+            writer = pq.ParquetWriter(
+                sink, first.schema,
+                compression=PARQUET_COMPRESSION, version=PARQUET_FORMAT_VERSION,
+            )
             try:
                 writer.write_batch(first)
                 rows += first.num_rows
