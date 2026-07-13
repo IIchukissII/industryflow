@@ -2,6 +2,11 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Test-only deps. identity.py is pure stdlib, so the tests need only pytest — not jupyterhub
-# or kubespawner (those are runtime image deps, see requirements.txt).
+# Test-only deps. The identity/capability tests are pure stdlib and need only pytest — but
+# test_jupyterhub_config.py executes the real jupyterhub_config.py, which imports jupyterhub,
+# kubespawner and dockerspawner. Proving the hub's config still loads under a JupyterHub major is
+# the whole point of that test, so the runtime deps are pulled in here rather than the test being
+# quietly skipped for lack of them.
+-r requirements.txt
+
 pytest==9.1.1
