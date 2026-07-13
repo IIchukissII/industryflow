@@ -6,6 +6,6 @@
 # capability against the shared store and mints read-only, tenant-prefix-scoped pre-signed GET
 # URLs with boto3. Read-only cousin of the tracking gateway; no httpx (no upstream proxy).
 fastapi==0.139.0
-uvicorn==0.50.0
+uvicorn==0.51.0
 redis==8.0.1
-boto3==1.43.40
+boto3==1.43.46
