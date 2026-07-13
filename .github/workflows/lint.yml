@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Static linting gates: ruff for the Python services, eslint for the frontend.
+# Static linting gates: ruff for the Python services, eslint for the frontend, and a resolvability
+# gate on the requirements files.
 name: Lint
 
 on:
@@ -10,12 +11,14 @@ on:
     branches: [main]
     paths:
       - "**/*.py"
+      - "**/requirements*.txt"
       - "services/frontend/**"
       - "ruff.toml"
       - ".github/workflows/lint.yml"
   pull_request:
     paths:
       - "**/*.py"
+      - "**/requirements*.txt"
       - "services/frontend/**"
       - "ruff.toml"
       - ".github/workflows/lint.yml"
@@ -32,6 +35,33 @@ jobs:
         run: pip install ruff==0.15.20
       - name: ruff check
         run: ruff check .
+
+  # Every requirements.txt must actually be installable. A pin can be individually valid and still
+  # unsatisfiable next to its neighbours (a cap in a transitive dep), and a requirements file that
+  # no image or test job installs will never find that out — it just rots, resolvable-looking, until
+  # someone builds it. deps-audit iterates these files too, but it is report-only (continue-on-error
+  # + `|| true`), so it reports such a conflict and passes anyway. This gates.
+  deps-resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Resolve every requirements file
+        run: |
+          rc=0
+          for req in $(git ls-files '**/requirements.txt' 'requirements.txt'); do
+            echo "::group::pip resolve $req"
+            if pip install --dry-run --quiet -r "$req"; then
+              echo "OK   $req"
+            else
+              echo "::error file=$req::$req does not resolve — its pins are mutually unsatisfiable"
+              rc=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $rc
 
   eslint:
     runs-on: ubuntu-latest
