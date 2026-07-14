@@ -23,6 +23,7 @@ import auth
 import model_cache
 from feature_engineering import FeatureEngineeringEngine
 from extensions import get_detector, DetectorContext, UninterpretableModel
+from model_uri import resolve_model_uri
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +163,14 @@ async def _resolve_company_id(request: Request, request_data: InferenceRequest) 
 # ============================================================================
 
 def _load_model_uncached(mlflow_run_id: str):
-    """Cold-load a model from MLflow (the slow path behind the warm cache)."""
-    model_uri = f"runs:/{mlflow_run_id}/model"
+    """Cold-load a model from MLflow (the slow path behind the warm cache).
+
+    The URI is RESOLVED, not assumed (#240). MLflow 3 stores a logged model under
+    `<experiment>/models/m-<id>/`, not under its run — so `runs:/<run_id>/model` addresses a path that
+    does not exist on a real deployment, and the artifact proxy 404s until the client gives up. It
+    only ever "worked" against a local artifact directory, which is what CI and every local test used.
+    """
+    model_uri = resolve_model_uri(mlflow_run_id)
     model = mlflow.pyfunc.load_model(model_uri)
     logger.info(f"Model loaded from MLflow: {model_uri}")
     return model

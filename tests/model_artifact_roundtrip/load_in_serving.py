@@ -28,6 +28,9 @@ import sklearn
 import skops
 import xgboost
 
+# The serving image puts ml_service's own code on the path (/app) — use ITS resolver, not our own.
+from model_uri import resolve_model_uri
+
 ARTIFACTS = os.environ.get("ROUNDTRIP_DIR", "/artifacts")
 
 # The same MLflow server the kernel logged to, reached the same way ml_service reaches it in
@@ -61,7 +64,11 @@ def main() -> int:
 
     failures = []
     for flavor, entry in manifest["models"].items():
-        uri = f"runs:/{entry['run_id']}/model"
+        # Resolved exactly as ml_service resolves it (#240) — the harness must load the way the
+        # SERVICE loads, or it proves something about a URI the product does not use. `runs:/` was
+        # that mistake: MLflow 3 keeps a logged model outside its run, so against the deployment's
+        # S3-proxied artifacts it addresses nothing.
+        uri = resolve_model_uri(entry["run_id"])
 
         # sklearn raises InconsistentVersionWarning on ANY version difference at unpickle time, even
         # a patch. ADR-0027 permits patch drift, so this is surfaced rather than fatal — but it is
