@@ -145,6 +145,25 @@ The role *name* (`tenant_reader_<uuid>`) is owned by the TimescaleDB init script
 
 ---
 
+## Models
+
+**Model artifact path** — the journey a model makes from the notebook that trains it to the service
+that scores with it: authoring kernel → tracking gateway → registry → `ml_service`. It is a
+**pickle** boundary — what crosses it is a serialised object, not data — which is why the two ends
+are constrained. *(ADR-0027; the hops themselves are ADR-0019 and ADR-0010 dec 6)*
+
+**Train/serve parity** — the constraint ADR-0027 places on that path: the libraries whose objects
+cross it must agree at each end, in *that library's* terms rather than semver's. It is a **floor on
+divergence, not a pin** — either end may move within it. The exact rule per library is ADR-0027
+dec 1; do not restate it elsewhere.
+
+**Compatibility status** — a property of a registered model recording whether its training
+environment still satisfies train/serve parity against the serving environment. It is **surfaced,
+never alerted** — deliberately not routed into ADR-0022's `retrain_recommended`, which is a
+statistical claim about the world, not a mechanical one about two containers. *(ADR-0027 dec 6-7)*
+
+---
+
 ## Deployment
 
 The self-hosted/managed split is a **business and licensing** distinction (ADR-0001). It maps
