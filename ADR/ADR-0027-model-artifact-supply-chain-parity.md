@@ -19,30 +19,54 @@ A model authored in a notebook is trained in one environment and executed in ano
 that journey is already decided:
 
 ```
-authoring kernel  ──pickled estimator──▶  tracking gateway ──▶ registry ──▶  ml_service  ──▶  inference
-   (ADR-0011)                                (ADR-0019)                     (ADR-0010 dec 6)   (ADR-0021)
+authoring kernel  ──serialized model──▶  tracking gateway ──▶ registry ──▶  ml_service  ──▶  inference
+   (ADR-0011)                               (ADR-0019)                     (ADR-0010 dec 6)   (ADR-0021)
 ```
 
 The tenant boundary is decided. The capability that carries the artifact across it is decided. The
 in-process registry that loads it at the far end is decided. **The one thing no ADR decides is whether
-the thing still loads when it gets there** — and what crosses is a *pickle*: the kernel calls
-`mlflow.sklearn.log_model`, `ml_service` calls `mlflow.pyfunc.load_model`, which unpickles into
-whatever environment `ml_service` happens to be running. MLflow *records* the run's requirements;
-nothing *enforces* them on load.
+the thing still loads when it gets there.** The kernel logs a model through an MLflow flavor;
+`ml_service` calls `mlflow.pyfunc.load_model`, which reconstructs it inside whatever environment
+`ml_service` happens to be running. MLflow *records* the run's requirements — it writes
+`requirements.txt` and `python_env.yaml` into the artifact itself — and then *enforces none of them*
+on load.
+
+**What actually crosses is not what it looks like from the outside, and getting this wrong is the
+easiest mistake here** (this ADR's own first draft made it, and so did the architecture review that
+fed it — both asserted "it is a pickle", and both were wrong):
+
+- **scikit-learn models cross as `model.skops`.** MLflow 3's sklearn flavor defaults to
+  `serialization_format="skops"` — a structured, version-checked format, *not* a pickle. `skops` is a
+  hard dependency of `mlflow`, and the authoring kernel pins it explicitly because `mlflow-skinny`
+  does **not** pull it in. It was never the unused hardening library it appeared to be; it is the
+  format the artifact is *in*.
+- **xgboost models cross as a native booster** (`mlflow.xgboost`, json/ubj) — not a pickled wrapper.
+  Routing an `XGBRegressor` through the *sklearn* flavor does not merely work badly: skops refuses it
+  outright as an untrusted type.
 
 The two ends do not match, and have not for some time:
 
-|                    | Python | numpy      | scikit-learn | xgboost   |
-|--------------------|--------|------------|--------------|-----------|
-| authoring kernel   | 3.12   | **1.26.4** | **1.5.1**    | **2.1.1** |
-| `ml_service`       | 3.14   | **2.5.1**  | **1.9.0**    | **2.0.3** |
+|                    | Python | numpy      | scikit-learn | xgboost   | skops        |
+|--------------------|--------|------------|--------------|-----------|--------------|
+| authoring kernel   | 3.12   | **1.26.4** | **1.5.1**    | **2.1.1** | **0.11.0**   |
+| `ml_service`       | 3.14   | **2.5.1**  | **1.9.0**    | **2.0.3** | *(floating)* |
 
-A model trained today crosses a numpy 1→2 ABI break and four scikit-learn minor releases on its way
-to being served — and for xgboost it crosses *backwards*, into an **older** reader than the one that
-wrote it, which is the direction with no compatibility story at all. scikit-learn promises pickle
-compatibility across no version boundary; numpy 1→2 changed the C-level array layout. The platform's
-own blessed worked example — `getting-started.ipynb`, shipped read-only in the authoring image as
-*the* demonstration of read → features → train → register — walks straight across this boundary.
+A model trained today crosses a numpy 1→2 ABI break and four scikit-learn minor releases on its way to
+being served. scikit-learn guarantees compatibility across no version boundary and warns on any
+difference; numpy 1→2 changed the C-level array layout, and numpy arrays are what these formats are
+mostly made of. **The serializer itself was unpinned on the serving side** — MLflow bounds skops only
+as `skops<1`, so the kernel wrote its artifacts with one version and the serving image read them with
+whatever `pip` happened to resolve on the day it was last built. And xgboost crossed *backwards*, into
+an **older** reader than the one that wrote it.
+
+The platform's own blessed worked example — `getting-started.ipynb`, shipped read-only in the authoring
+image as *the* demonstration of read → features → train → register — walks straight across this boundary.
+
+**A live break was found while building this ADR's gate, and it was already in the serving image:**
+xgboost 2.x cannot save under scikit-learn 1.9 at all. sklearn 1.9 removed `_estimator_type` in favour
+of `__sklearn_tags__`; xgboost 2.x's wrapper still reaches for it, so `save_model()` — and with it the
+entire `mlflow.xgboost` flavor — raises. It *fits* and it *predicts*, which is precisely why nobody
+noticed: the break is on the **save** path, and nothing in CI had ever saved an xgboost model.
 
 **This is older than the Python 3.14 bump.** The gap opened when `ml_service` took numpy 2
 unaccompanied — silently, because no decision existed that would have required anyone to look. The
@@ -76,8 +100,8 @@ So the rule has to be stated one level up, and the enumerated pins recognised fo
 
 ## Decision drivers
 
-- **A silent wrong answer is worse than a crash.** An unpickle across a numpy major does not reliably
-  fail loudly; it can succeed and score wrong. The drift lane (ADR-0021) trusts these outputs enough to
+- **A silent wrong answer is worse than a crash.** Reconstructing a model across a numpy major does not
+  reliably fail loudly; it can succeed and score wrong. The drift lane (ADR-0021) trusts these outputs enough to
   alert on them.
 - **The gap was opened by a bump that no rule bound.** Whatever is decided must *bind the next bump*, or
   it decides only today and is re-lost the same way.
@@ -102,7 +126,7 @@ So the rule has to be stated one level up, and the enumerated pins recognised fo
 
    This is the whole rule, and it is deliberately generic: it needs **no amendment when torch arrives**. A
    torch model meeting a serving environment with no torch is refused — cleanly, at the gate, with a
-   reason — instead of being silently unpickled into a stack that cannot honour it.
+   reason — instead of being silently reconstructed inside a stack that cannot honour it.
 
 2. **What the serving environment can satisfy is a declared, closed *supported flavor set* — even though
    the framework set users may author in is open.** The supported set is the union of what `ml_service`
@@ -117,14 +141,22 @@ So the rule has to be stated one level up, and the enumerated pins recognised fo
    - **numpy: the major must match.** 1→2 is an ABI break.
    - **scikit-learn: `major.minor` must match.** Semver-major is *meaningless* here — scikit-learn has been
      on major 1 since 2021, so 1.5 and 1.9, the very drift this ADR closes, are the same major. Its own
-     contract is stricter than semver's: no pickle guarantee across any boundary, and it warns on any
-     difference. `major.minor` is where its serialisation surface actually moves.
-   - **xgboost: the serving version must be `>=` the kernel's, within the major.** Not equality — a
-     *direction*. What crosses is a **pickled sklearn wrapper**, not a native booster file, so xgboost's
-     forward-and-backward booster-format guarantee does **not** apply; the wrapper's Python-level state is
-     what must be readable. Loading runs forward — an old model into a new reader. Today's gap runs
-     *backwards* (kernel 2.1.1 → serving 2.0.3), which is the one direction with no story, and it is
+     contract is stricter than semver's: no compatibility guarantee across any boundary, and it warns on
+     any difference. `major.minor` is where its serialisation surface actually moves.
+   - **The serializers — `skops` and `xgboost` — must satisfy: serving `>=` kernel, within the major.**
+     Not equality: a *direction*. These two libraries **write the artifact's bytes**, and each versions
+     its own format and reads older ones forward — but neither promises that an *older* reader can make
+     sense of a *newer* writer's file. Loading runs forward: an old model into a new reader. Today's gap
+     runs backwards for xgboost (kernel 2.1.1 → serving 2.0.3) and is *unpinned* for skops, and both are
      closed by moving **serving up**, never by pinning the kernel down.
+
+     They are in this contract despite neither looking like it belongs. skops looked like an unused
+     hardening library; it is the format sklearn models are stored in. xgboost looked like an ordinary
+     ML dependency; its models cross as native boosters.
+
+     **xgboost additionally carries a floor that is not about parity at all:** 3.x is *required* by
+     scikit-learn 1.9 on both ends, because 2.x cannot save under it (above). A parity rule alone would
+     have happily allowed 2.x on both sides — matching, and broken.
    - **pandas: the major must match**, as a build-time constraint only. DataFrames cross the `predict()`
      call, not the artifact, so it binds the declarative check (decision 5) and is *not* grounds for
      refusing a model (decision 6).
@@ -210,7 +242,7 @@ So the rule has to be stated one level up, and the enumerated pins recognised fo
    not be able to masquerade as the image's manifest.
 
 10. **Models registered before this ADR are served, marked, and not retroactively refused.** They are
-    already being unpickled across the gap — that is the status quo this record ends, and it is ended
+    already being reconstructed across the gap — that is the status quo this record ends, and it is ended
     *forward*. Where the contract does not hold they carry the broken state of decision 7, which shows to
     the operator and bars a re-deploy; they are not torn out of the serving path they already occupy, and
     they are not auto-retrained — ADR-0022 dec 4 means there is nothing to auto-retrain them *with*. The
@@ -233,7 +265,7 @@ So the rule has to be stated one level up, and the enumerated pins recognised fo
 **A. Strict parity — pin the kernel and `ml_service` to identical versions.** *Rejected.* It is the obvious
 answer and it over-buys: every security patch on the serving side becomes a coordinated, user-visible
 notebook release, to defend against patch drift that scikit-learn's release practice makes unlikely to break
-a pickle. It would also have "solved" this incident by making one side wait indefinitely on the other —
+an artifact. It would also have "solved" this incident by making one side wait indefinitely on the other —
 trading a silent gap for a loud stall. And it is the shape that dies on contact with the open framework set.
 
 **B. No version rule — let the empirical check be the sole authority.** *Rejected, though it is the most
@@ -259,13 +291,21 @@ resolution that gets harder with each framework added. An open set cannot be ser
 cheapest thing to build (the lane exists, the UI exists) and it would quietly ruin the meaning of the one
 alert ADR-0022 was written to make trustworthy.
 
-**F. Switch serialisation to `skops` instead of constraining versions.** *Deferred, not rejected* — and
-noted because the authoring image **already ships `skops`, unused**. It is a version-checked, non-pickle
-sklearn format, and it addresses a real problem this ADR does not: `mlflow.pyfunc.load_model` executes
-arbitrary code from the artifact, so the serving path currently trusts whatever a notebook pickled. That is
-a *trust* decision, not a *parity* decision, and it needs the same empirical gate this ADR builds before it
-could be adopted safely. It also does not generalise to the open set — it is sklearn-shaped. The dependency
-stays in the image: it is the foothold for that record, not dead weight.
+**F. "Adopt `skops` instead of constraining versions."** *Moot — it is already adopted, and this ADR's
+first draft did not know it.* The proposal was to move sklearn artifacts off pickle onto a version-checked
+format. MLflow 3 **already does this by default**: the artifact is `model.skops`. The kernel's `skops` pin
+is not a foothold for a future migration, it is the working serializer, and removing it as "unused" would
+have broken model logging outright.
+
+Recording the error rather than quietly fixing it, because it is the instructive part: *every* participant
+here — the architecture review, the ADR draft, the reviewer — asserted the artifact was a pickle, from the
+shape of the code, confidently, and none of them ran it. That is the failure ADR-0026 named, and it is why
+decision 5 makes the empirical check the authority rather than a formality.
+
+What *remains* genuinely open is the narrower question the skops proposal was really pointing at: MLflow
+still deserializes pickle artifacts when it meets them (`MLFLOW_ALLOW_PICKLE_DESERIALIZATION` defaults to
+true), so the serving path retains a path to executing arbitrary code from a notebook-produced file. That
+is a **trust** decision, not a parity one, and it is deferred below.
 
 ## Consequences
 
@@ -273,6 +313,12 @@ stays in the image: it is the foothold for that record, not dead weight.
 
 - The boundary is named, and the next bump that would break it fails a check instead of shipping.
 - The proof is a real artifact making the real journey, not an assertion that two strings are equal.
+- **The gate earned its keep before it merged.** Building it found three things that reading the code
+  had not: that MLflow serializes sklearn with skops rather than pickle (so the ADR's premise was
+  wrong), that the serving image's serializer was unpinned, and that **xgboost 2.x cannot save under
+  scikit-learn 1.9 — a break already sitting in the serving image**, invisible because it is on the save
+  path and nothing had ever saved an xgboost model. None of these are findable by inspection; all three
+  fell out of running it once.
 - **The rule survives torch.** A framework the serving side cannot honour is refused with a reason, at the
   gate, today — before the adapter contract exists — instead of being silently mis-served.
 - `ml_service` can still take a scikit-learn patch without a notebook release; the kernel can still add a
@@ -288,7 +334,7 @@ stays in the image: it is the foothold for that record, not dead weight.
   moves an artifact between them. It stays affordable only by keeping what it trains trivial — it is testing
   the *boundary*, not the model.
 - **The scikit-learn rule is a judgement, not a proof.** Patch drift is permitted and *can* in principle
-  break a pickle. Decision 7's middle state exists precisely because that residual risk is real.
+  break an artifact. Decision 7's middle state exists precisely because that residual risk is real.
 - **The registration verdict goes stale**, which is why decision 6 pays for a second gate. Even so, a model
   already deployed when its serving environment is rebuilt is not re-checked — only a re-deployment is.
   Closing that needs a background reconciler, deferred below.
@@ -307,8 +353,11 @@ stays in the image: it is the foothold for that record, not dead weight.
   in-process versus out-of-process policy per flavor, packaging of optional flavor sidecars, and how the
   supported set is declared to an operator. **This is the live requirement behind torch and autoencoders**
   (decision 4). It is deferred from *this* record, not from the project's work.
-- **Safer serialisation (`skops` over pickle).** Alternative F. The *trust* half of this boundary: the
-  serving path executes arbitrary code from a notebook-produced artifact.
+- **Refusing pickle artifacts outright (the *trust* half of this boundary).** Alternative F. sklearn
+  models are already skops; but MLflow will still deserialize a pickle when it meets one
+  (`MLFLOW_ALLOW_PICKLE_DESERIALIZATION` defaults true), so the serving path retains a route to executing
+  arbitrary code from a notebook-produced file. Whether to turn that off — and what it breaks — is its
+  own record.
 - **A background reconciler** re-evaluating decision 7's property for already-deployed models when the
   serving environment changes, closing the staleness in Consequences. If it ever warrants a proactive
   notification, that is a **new, mechanical** condition — never ADR-0022's statistical lane (decision 8).
