@@ -33,14 +33,10 @@ def artifact(monkeypatch):
 
     def _setup(declared: dict, present: dict, flavor: str = "mlflow.sklearn", importable=True):
         monkeypatch.setattr(model_compat, "_read_declarations", lambda uri: (flavor, declared))
+        # `present` is the whole truth about this environment: it answers both "is this declared
+        # package here" and "is the flavor's framework here".
         monkeypatch.setattr(model_compat, "_installed", lambda pkg: present.get(pkg))
-
-        def fake_import(name):
-            if not importable:
-                raise ImportError(f"No module named {name}")
-            return object()
-
-        monkeypatch.setattr(model_compat.importlib, "import_module", fake_import)
+        monkeypatch.setattr(model_compat, "_flavor_importable", lambda f: importable)
 
     return _setup
 
@@ -91,9 +87,38 @@ class TestTheOpenFrameworkSet:
         assert any("torch" in r for r in result.reasons)
         assert any("adapter" in r.lower() for r in result.reasons)
 
-    def test_a_missing_library_is_refused_even_when_the_flavor_imports(self, artifact):
-        # The flavor can be importable while the framework it needs is absent.
-        artifact({"lightgbm": "4.5.0"}, {}, flavor="mlflow.sklearn", importable=True)
+    def test_a_missing_framework_is_refused_even_when_the_flavor_module_imports(self, artifact):
+        # mlflow imports its frameworks LAZILY, so `import mlflow.pytorch` can succeed in an image with
+        # no torch at all. Anchor the refusal on the framework being installed, not on that import.
+        artifact({"torch": "2.9.0"}, {}, flavor="mlflow.pytorch", importable=True)
+        result = evaluate("runs:/abc/model")
+        assert result.status == INCOMPATIBLE
+        assert result.flavor_supported is False
+
+
+class TestItDoesNotRefUseModelsThatWork:
+    """The false refusal the BOX caught — a gate that rejects a servable model is worse than no gate.
+
+    MLflow's requirements.txt describes the TRAINING environment, not what is needed to LOAD. The first
+    cut treated any declared-but-absent package as fatal, and refused a model the kernel had just
+    trained because the artifact named `psutil` (a transitive dep of the kernel's mlflow client). The
+    model then loaded and scored with a delta of exactly 0.0 — it was servable all along.
+    """
+
+    def test_a_training_only_dependency_does_not_refuse_the_model(self, artifact):
+        artifact(
+            {"psutil": "7.2.2", "scikit-learn": "1.9.0", "numpy": "2.5.1"},
+            {"scikit-learn": "1.9.0", "numpy": "2.5.1"},   # no psutil here, and it does not matter
+            flavor="mlflow.sklearn",
+        )
+        result = evaluate("runs:/abc/model")
+        assert result.servable, f"refused a servable model over {result.faults}"
+        assert "psutil" not in result.faults
+
+    def test_but_a_missing_SERIALIZER_still_refuses(self, artifact):
+        # skops writes the artifact's bytes. Its absence is not a training-env detail.
+        artifact({"skops": "0.14.0", "scikit-learn": "1.9.0"},
+                 {"scikit-learn": "1.9.0"}, flavor="mlflow.sklearn")
         assert evaluate("runs:/abc/model").status == INCOMPATIBLE
 
 
@@ -101,12 +126,14 @@ class TestWhatIsNotGroundsForRefusal:
     def test_pandas_absence_does_not_refuse_a_model(self, artifact):
         # ADR-0027 dec 3: pandas frames cross the predict() call, not the artifact. It is bound at
         # BUILD time by the parity check and is explicitly not a runtime refusal.
-        artifact({"pandas": "2.3.3", "numpy": "2.5.1"}, {"numpy": "2.5.1"})
+        artifact({"pandas": "2.3.3", "numpy": "2.5.1", "scikit-learn": "1.9.0"},
+                 {"numpy": "2.5.1", "scikit-learn": "1.9.0"})   # no pandas here
         assert evaluate("runs:/abc/model").servable
 
     def test_an_unconstrained_library_version_difference_is_not_refused(self, artifact):
         # scipy is not on the deserialisation path. Recorded, not judged.
-        artifact({"scipy": "1.18.0", "numpy": "2.5.1"}, {"scipy": "1.11.0", "numpy": "2.5.1"})
+        artifact({"scipy": "1.18.0", "numpy": "2.5.1", "scikit-learn": "1.9.0"},
+                 {"scipy": "1.11.0", "numpy": "2.5.1", "scikit-learn": "1.9.0"})
         result = evaluate("runs:/abc/model")
         assert result.status == COMPATIBLE
         assert result.present["scipy"] == "1.11.0"
@@ -133,7 +160,8 @@ class TestTheSerializers:
         assert any("backwards" in r for r in result.reasons)
 
     def test_a_newer_serving_serializer_is_fine(self, artifact):
-        artifact({"skops": "0.11.0"}, {"skops": "0.14.0"})
+        artifact({"skops": "0.11.0", "scikit-learn": "1.9.0"},
+                 {"skops": "0.14.0", "scikit-learn": "1.9.0"})
         assert evaluate("runs:/abc/model").servable
 
     def test_an_older_serving_xgboost_is_refused(self, artifact):
