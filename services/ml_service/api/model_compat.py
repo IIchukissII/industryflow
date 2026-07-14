@@ -113,11 +113,32 @@ SERIALIZATION_CRITICAL = {
     "xgboost": _serving_at_least,
 }
 
-# Declared-but-absent is normally fatal: we cannot honour what we do not have. These are the exceptions —
-# packages MLflow records because they were in the training environment, but which the serving path does
-# not need to RECONSTRUCT the model. pandas is the notable one: frames cross the predict() call, not the
-# artifact, so ADR-0027 dec 3 binds it at build time and explicitly does NOT make it grounds for refusal.
-NOT_REQUIRED_TO_LOAD = {"pandas", "matplotlib", "seaborn", "plotly", "statsmodels", "mlflow-skinny"}
+# WHAT A MISSING PACKAGE ACTUALLY PROVES — and the first cut of this got it backwards.
+#
+# MLflow's `requirements.txt` describes the TRAINING ENVIRONMENT, not the set of things needed to LOAD
+# the model. Treating "declared but absent here" as fatal therefore refuses models that serve perfectly
+# well: on the box, a model the kernel had just trained was refused because the artifact declared
+# `psutil` (a transitive dep of the kernel's mlflow client) — and it then loaded and scored with a delta
+# of exactly 0.0. A gate that refuses what the service can demonstrably serve is worse than no gate; it
+# would push data scientists to route around it.
+#
+# So absence is fatal for exactly two things, both of which the load genuinely cannot do without:
+#
+#   1. THE FLAVOR'S OWN FRAMEWORK. A `mlflow.pytorch` model needs torch to exist. This is the torch
+#      refusal, and it is anchored on the flavor rather than on whether `import mlflow.pytorch` happens
+#      to succeed — mlflow imports its framework lazily, so the import alone is not a reliable probe.
+#   2. THE SERIALIZATION-CRITICAL SET below (numpy, scikit-learn, skops, xgboost) — the libraries that
+#      wrote the artifact's bytes.
+#
+# Everything else the artifact names is recorded and reported, never judged.
+FLAVOR_LIBRARY = {
+    "mlflow.sklearn": "scikit-learn",
+    "mlflow.xgboost": "xgboost",
+    "mlflow.pytorch": "torch",
+    "mlflow.keras": "keras",
+    "mlflow.tensorflow": "tensorflow",
+    "mlflow.lightgbm": "lightgbm",
+}
 
 _PIN = re.compile(r"^([A-Za-z0-9_.\-]+)\s*==\s*([0-9][0-9A-Za-z.\-]*)")
 
@@ -157,6 +178,14 @@ class Compatibility:
             "present": self.present,
             "faults": self.faults,
         }
+
+
+def _flavor_importable(flavor: str) -> bool:
+    try:
+        importlib.import_module(flavor)
+        return True
+    except Exception:  # noqa: BLE001 — any failure to import IS the finding
+        return False
 
 
 def _installed(package: str) -> Optional[str]:
@@ -213,14 +242,18 @@ def evaluate(model_uri: str) -> Compatibility:
     #    mlflow.xgboost, mlflow.pytorch, ...). If we cannot even import it, this image does not carry that
     #    flavor and no version arithmetic below is worth doing. THIS IS THE TORCH CASE, and it fails here
     #    with a sentence an operator can act on rather than an ImportError three frames into a prediction.
+    flavor_library = FLAVOR_LIBRARY.get(flavor or "")
     if flavor:
-        try:
-            importlib.import_module(flavor)
-        except Exception:  # noqa: BLE001 — any failure to import IS the finding
+        # THE TORCH CASE. Anchored on the flavor's framework actually being installed, not on whether
+        # `import mlflow.pytorch` succeeds — mlflow imports its frameworks lazily, so that import can
+        # succeed in an image with no torch at all and would quietly wave the model through.
+        missing_framework = flavor_library is not None and _installed(flavor_library) is None
+        if missing_framework or not _flavor_importable(flavor):
             reasons.append(
-                f"this environment cannot serve `{flavor}` models — the flavor is not installed. "
-                f"Serving a new model framework needs a model adapter (ADR-0027 dec 4); it is not "
-                f"something a version bump can fix."
+                f"this environment cannot serve `{flavor}` models"
+                + (f" — `{flavor_library}` is not installed here." if missing_framework else " — the flavor is not installed.")
+                + " Serving a new model framework needs a model adapter (ADR-0027 dec 4); it is not "
+                  "something a version bump can fix."
             )
             flavor_supported = False
             status = INCOMPATIBLE
@@ -231,14 +264,16 @@ def evaluate(model_uri: str) -> Compatibility:
         present[package] = have
 
         if have is None:
-            if package in NOT_REQUIRED_TO_LOAD:
+            # Absent — but that is only a refusal if the load genuinely needs it (see FLAVOR_LIBRARY).
+            # The artifact's requirements are the TRAINING environment; most of what is named there is
+            # irrelevant to reconstructing the model, and refusing on it rejects models that work.
+            needed = package == flavor_library or package in SERIALIZATION_CRITICAL
+            if not needed:
                 continue
-            # The generic refusal. A torch model's requirements name torch; an image without torch says
-            # so, plainly, at the gate — instead of reconstructing something it cannot honour.
             fault = "not installed in this environment"
             faults[package] = fault
             reasons.append(
-                f"`{package}` is required by this model ({declared_version}) and is {fault}"
+                f"`{package}` is required to load this model ({declared_version}) and is {fault}"
             )
             status = INCOMPATIBLE
             continue
@@ -272,5 +307,12 @@ def evaluate(model_uri: str) -> Compatibility:
 
 
 async def evaluate_run(mlflow_run_id: str) -> Compatibility:
-    """`evaluate`, off the event loop — it does artifact IO against the tracking store."""
-    return await asyncio.to_thread(evaluate, f"runs:/{mlflow_run_id}/model")
+    """`evaluate`, off the event loop — it does artifact IO against the tracking store.
+
+    The URI is resolved rather than assumed (#240): MLflow 3 keeps a logged model outside its run, so
+    a `runs:/` URI addresses nothing on a real deployment. The gate must read the same artifact the
+    serving path will actually load, or it would be inspecting one thing and serving another.
+    """
+    from model_uri import resolve_model_uri
+
+    return await asyncio.to_thread(evaluate, resolve_model_uri(mlflow_run_id))

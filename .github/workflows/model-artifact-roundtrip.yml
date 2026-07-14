@@ -6,7 +6,8 @@
 # load — and still score the same — in the serving image?
 #
 # The two ends of that path are different images, on different interpreters, with different pins, and
-# what crosses between them is a PICKLE. Nothing in CI ever took that journey before this workflow:
+# what crosses between them is a SERIALIZED MODEL (skops for sklearn, a native booster for xgboost —
+# NOT a pickle, though everyone assumed so). Nothing in CI ever took that journey before this workflow:
 # every check described the artifact (does it resolve, does it import) and none of them ran it. That
 # is the exact class ADR-0026 was written about — "the branch is not the gate; the test is the gate"
 # — one layer up, at the model boundary instead of the service boundary.
@@ -15,8 +16,9 @@
 #   parity    — declarative, seconds. Compares the pins the two images DECLARE. Cheap, and it is the
 #               check whose absence let the gap open (ml_service took numpy 2 alone, unwatched).
 #   roundtrip — empirical, minutes. Trains in the real kernel image, loads in the real serving image.
-#               This one is the authority: a version number is a proxy, and the pickle loading is the
-#               fact. It catches what version arithmetic cannot predict in either direction.
+#               This one is the authority: a version number is a proxy, and the artifact loading and
+#               SCORING is the fact. It catches what version arithmetic cannot predict in either
+#               direction — and, since #240, that the model can even be addressed on a real stack.
 name: Model artifact round-trip
 
 # The path lists are duplicated rather than shared with a YAML anchor: GitHub Actions does not
@@ -87,24 +89,46 @@ jobs:
       # is now a 3.14 image. A file-store harness would have failed for a reason with nothing to do
       # with the boundary under test. Nothing in production uses a file store, so the bug costs the
       # product nothing — it only ever bites a test that takes a shortcut.
+      # THE ARTIFACT STORE IS PART OF THE BOUNDARY, and leaving it out made this gate a false green
+      # (#240). MLflow 3 stores a logged model at `<experiment>/models/m-<id>/`, not under its run —
+      # so `runs:/<run_id>/model`, which the serving path used, addresses nothing. Against a LOCAL
+      # artifact directory MLflow still resolves it, so this gate passed while a real deployment
+      # (artifacts proxied to S3/MinIO) 404'd and could not load a single model. Box validation found
+      # it; ADR-0026 dec 6 says a box finding becomes a CI check, so the harness now stands up MinIO
+      # and proxies artifacts exactly as the deployed stack does.
+      - name: Start MinIO (the deployment's artifact store — NOT a local directory)
+        run: |
+          docker network create roundtrip-net
+          docker run -d --name roundtrip-minio --network roundtrip-net \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            -p 9000:9000 minio/minio:latest server /data
+          for i in $(seq 1 45); do
+            if curl -fsS http://localhost:9000/minio/health/live >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker run --rm --network roundtrip-net --entrypoint sh minio/mc:latest -c \
+            "mc alias set m http://roundtrip-minio:9000 minioadmin minioadmin && mc mb -p m/mlflow"
+
       - name: Build and start the MLflow tracking server (the same image the platform runs)
         run: |
           docker build -q -t if-mlflow:roundtrip infrastructure/mlflow
-          docker network create roundtrip-net
-          # sqlite + the server's own artifact proxy (--serve-artifacts): the artifacts land under the
-          # workdir the image's non-root user already owns, and the clients fetch them back through
-          # the server, so neither container needs object-store credentials. The platform's real
-          # deployment uses Postgres + MinIO here; what this harness needs from MLflow is the API and
-          # the artifact round trip, not its storage topology.
+          # sqlite backs the tracking store (the deployment uses Postgres; nothing on the artifact
+          # path depends on which). The ARTIFACT flags, however, are the deployment's verbatim —
+          # proxied to S3/MinIO — because that is the part that was missing when this gate went green
+          # over a serving path that could not load a model (#240).
           #
           # --allowed-hosts "*" mirrors what docker-compose.yml already passes the real MLflow.
           # mlflow 3 rejects any request whose Host header it does not recognise (DNS-rebinding
           # protection) with a 403, so a client reaching it by container name — which is exactly how
           # the tracking gateway reaches it in the deployed stack — is refused without it.
           docker run -d --name roundtrip-mlflow --network roundtrip-net -p 5000:5000 \
+            -e MLFLOW_S3_ENDPOINT_URL=http://roundtrip-minio:9000 \
+            -e AWS_ACCESS_KEY_ID=minioadmin -e AWS_SECRET_ACCESS_KEY=minioadmin \
             if-mlflow:roundtrip \
             mlflow server --host 0.0.0.0 --port 5000 \
               --backend-store-uri sqlite:////home/mlflow/mlflow.db \
+              --default-artifact-root mlflow-artifacts:/ \
+              --artifacts-destination s3://mlflow \
               --serve-artifacts \
               --allowed-hosts "*"
 
