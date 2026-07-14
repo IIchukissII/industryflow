@@ -12,7 +12,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 [![DB tenant isolation](https://github.com/IIchukissII/industryflow/actions/workflows/db-tenant-isolation.yml/badge.svg)](https://github.com/IIchukissII/industryflow/actions/workflows/db-tenant-isolation.yml)
 [![Helm](https://github.com/IIchukissII/industryflow/actions/workflows/helm.yml/badge.svg)](https://github.com/IIchukissII/industryflow/actions/workflows/helm.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)
+![Python 3.14](https://img.shields.io/badge/python-3.14-blue.svg)
 ![React 19](https://img.shields.io/badge/react-19-61dafb.svg)
 
 <table>
@@ -85,13 +85,19 @@ Interactive API docs are served at `http://localhost:8000/docs` when the stack i
 
 ## Technology
 
-Python 3.11 · FastAPI · Apache Spark 3.5 · Apache Kafka · MLflow · PostgreSQL 15 + TimescaleDB ·
+Python 3.14 · FastAPI · Apache Spark 3.5 · Apache Kafka · MLflow · PostgreSQL 15 + TimescaleDB ·
 Redis · MinIO · React 19 (Vite) · Prometheus / Grafana / Loki.
+
+Every service image runs Python 3.14. One does not: the **MLflow** image is pinned to **3.11**, because
+MLflow's server imports a stdlib name 3.14 removed ([#222](https://github.com/IIchukissII/industryflow/issues/222)).
+It is pure-python, so its whole dependency closure *resolves* perfectly on 3.14 and only starting the
+server finds it — which is why `main` requires a check that boots the stack rather than one that merely
+builds it ([ADR-0026](ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md)).
 
 ## Contributing
 
 1. Branch from `main`.
-2. Make changes following the existing code style (Python: PEP 8 via `black` / `flake8`).
+2. Make changes following the existing code style (Python: `ruff`, configured in `ruff.toml` and gated in CI).
 3. Record architectural decisions as ADRs (see [ADR/ADR-0000](ADR/ADR-0000-decision-records-and-source-of-truth.md)).
 4. Add tests and update the relevant docs.
 5. Open a pull request.

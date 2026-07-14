@@ -49,10 +49,25 @@ sample of its training-window distribution — which is the baseline for drift m
 2. Engineers the feature vector from the incoming sensor data (windowed baselines read from the
    Spark-materialized aggregates, ADR-0023).
 3. **Scores** the features through the **anomaly-detector registry**: the model record's
-   `detector` (default `sklearn`, the built-in that handles IsolationForest / XGBoost /
-   `predict_proba` / direct-score models) returns a 0–1 score and a threshold decision. A
-   domain can register a custom or model-free detector without touching the core scorer
+   `detector` (default `sklearn`) returns a 0–1 score and a threshold decision. A domain can
+   register a custom or model-free detector without touching the core scorer
    (**[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)**).
+
+   **What the score MEANS is declared, never inferred from the model's output**
+   (**[ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md)**). It cannot be
+   inferred: `predict() == 1` means *normal* to an IsolationForest and *anomaly* to an XGBoost
+   classifier, and an autoencoder emits no verdict at all — its signal is reconstruction error. The
+   built-ins therefore score an IsolationForest from `decision_function`, a classifier from
+   `predict_proba`, and an autoencoder from how badly it reconstructs its input. A model whose
+   semantics cannot be established is **refused, not scored** — a confident wrong score is worse than
+   an honest refusal, because these are the numbers alerts are raised on. (The cost of getting this
+   wrong is not theoretical: reading the ±1 label instead scored *every* IsolationForest reading as an
+   anomaly — #236.)
+
+   Ask a deployment what it can actually serve with **`GET /api/ml/capabilities`**, which is discovered
+   from the registry rather than maintained by hand. A framework the image does not carry (torch today)
+   is named there as unservable, and refused at registration and deployment with a reason
+   (**[ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md)**).
 
 The alert detection worker calls inference for ML-based rules using the shared
 `INTERNAL_SERVICE_TOKEN` (it has no human to log in); see

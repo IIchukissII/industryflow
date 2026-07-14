@@ -165,11 +165,20 @@ a **floor on divergence, not a pin**. *(ADR-0027 dec 1 and 3; do not restate the
 declared, while the set users may author in is open** — a model outside it is *refused with a
 reason*, never silently mis-served. *(ADR-0027 dec 2)*
 
-**Model adapter** — the plugin category by which a new model flavor (torch, an autoencoder, …) becomes
-servable — in-process where it is cheap, out-of-process where it is not. Named as a plugin category by
-ADR-0008 dec 3 and permitted out-of-process by ADR-0010 dec 4, but **its contract is not yet written**:
-ADR-0010 defers it and ADR-0027 dec 4 hands the open framework set to it. *(the live gap, not a built
-thing — do not write code against this term expecting it to exist)*
+**Model adapter** — how a model flavor becomes servable: a detector registered with the **score
+semantics** it implements and the artifact flavors it can score. Named as a plugin category by ADR-0008
+dec 3; its contract was deferred by ADR-0010 and is **written by ADR-0028**. In-process is the default
+(ADR-0008); a framework this image does not carry — torch today — is **refused at the gate with a
+reason**, and the out-of-process serving boundary it would need is ADR-0028's own named deferral.
+*(ADR-0028)*
+
+**Score semantics** — what a model's output MEANS: `anomaly_probability`, `outlier_score`,
+`reconstruction_error`, or `direct_score`. **Declared by the detector, never inferred from the output** —
+it cannot be inferred, because the information is not there: `predict() == 1` means *normal* to an
+IsolationForest and *anomaly* to an XGBoost classifier, and an autoencoder emits no verdict at all. A
+model whose semantics cannot be established is **refused, not scored** — a confident wrong score is worse
+than an honest refusal, because ADR-0021 raises alerts on these numbers. *(ADR-0028 dec 1-2; the bug that
+proved it is #236)*
 
 **Compatibility status** — a property of a registered model recording whether the serving environment
 still satisfies what the model declares. It is **surfaced, never alerted** — deliberately not routed
