@@ -66,17 +66,32 @@ See [monitoring.md](monitoring.md) for flipping the switch and seeing that it to
 A detector turns engineered features (and optionally a model) into an anomaly verdict:
 
 ```python
-from extensions import register_detector, DetectionResult
+from extensions import register_detector, DetectionResult, RECONSTRUCTION_ERROR
 
-@register_detector("rule")
+@register_detector(
+    "rule",
+    semantics=RECONSTRUCTION_ERROR,          # what your score MEANS (ADR-0028)
+    handles_flavors=["mlflow.sklearn"],      # which artifacts you can score
+)
 async def rule_detector(features, model, threshold, ctx):
     score = ...  # 0.0–1.0
     return DetectionResult(score=score, is_anomaly=score >= threshold)
 ```
 
-The ML inference path dispatches a model record's `detector` (default `sklearn`, the
-built-in that scores scikit-learn-family models) through the registry — so a domain can
-supply a custom or model-free detector without touching the core scorer.
+The ML inference path dispatches a model record's `detector` (default `sklearn`) through the
+registry — so a domain can supply a custom or model-free detector without touching the core
+scorer.
+
+**Declare your semantics; do not let the platform guess them**
+([ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md)). The meaning of a
+model's output is not recoverable from the output: `predict() == 1` means *normal* to an
+IsolationForest and *anomaly* to an XGBoost classifier. The platform used to sniff it, and scored
+every IsolationForest reading as an anomaly for months (#236). If your detector cannot establish what
+a model's output means, raise `UninterpretableModel` — a refusal is legible, a wrong score is not.
+
+`GET /api/ml/capabilities` lists every registered detector, its semantics, and the flavors it claims —
+including the ones your `EXTENSION_MODULES` added. It is discovered from the registry, so it cannot
+drift from what is actually loaded.
 
 ## Loading an extension
 
