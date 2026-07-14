@@ -80,6 +80,33 @@ class TestIssue236:
         assert result.detail["semantics"] == OUTLIER_SCORE
         assert "raw_outlier_score" in result.detail  # the sklearn score itself, not a ±1 verdict
 
+    @pytest.mark.asyncio
+    async def test_the_score_is_usable_at_the_PLATFORM_default_threshold(self, forest):
+        """The test whose absence hid a second bug — and it was found on the box, not in CI.
+
+        The first cut of this fix squashed `decision_function` directly. That value is O(0.1), so every
+        score landed in ~[0.45, 0.56] — and the platform's DEFAULT threshold is **0.85**
+        (`InferenceRequest.threshold`, and `anomaly_threshold` in the alert worker). A far outlier
+        scored 0.54 and would never have fired: #236 inverted, from all-false-positives to
+        all-false-NEGATIVES.
+
+        The tests passed anyway, because they asserted against a threshold of 0.5 — MY assumption
+        rather than the platform's. So this asserts against the number the product actually ships.
+        """
+        PLATFORM_DEFAULT = 0.85  # services/ml_service/api/routers/inference.py: InferenceRequest
+        detector = get_detector("sklearn")
+
+        outlier = await detector(OUTLIER, forest, PLATFORM_DEFAULT, DetectorContext())
+        assert outlier.score >= PLATFORM_DEFAULT, (
+            f"a clear outlier scored {outlier.score:.3f}, under the platform's own default threshold "
+            f"of {PLATFORM_DEFAULT} — it could never fire an alert"
+        )
+        assert outlier.is_anomaly is True
+
+        normal = await detector(NORMAL, forest, PLATFORM_DEFAULT, DetectorContext())
+        assert normal.score < 0.5, f"a normal reading scored {normal.score:.3f}"
+        assert normal.is_anomaly is False
+
 
 class TestClassifierIsUnaffected:
     """A binary classifier's probability was always read correctly; it must stay that way."""
