@@ -96,11 +96,17 @@ jobs:
           # the server, so neither container needs object-store credentials. The platform's real
           # deployment uses Postgres + MinIO here; what this harness needs from MLflow is the API and
           # the artifact round trip, not its storage topology.
+          #
+          # --allowed-hosts "*" mirrors what docker-compose.yml already passes the real MLflow.
+          # mlflow 3 rejects any request whose Host header it does not recognise (DNS-rebinding
+          # protection) with a 403, so a client reaching it by container name — which is exactly how
+          # the tracking gateway reaches it in the deployed stack — is refused without it.
           docker run -d --name roundtrip-mlflow --network roundtrip-net -p 5000:5000 \
             if-mlflow:roundtrip \
             mlflow server --host 0.0.0.0 --port 5000 \
               --backend-store-uri sqlite:////home/mlflow/mlflow.db \
-              --serve-artifacts
+              --serve-artifacts \
+              --allowed-hosts "*"
 
       - name: Wait for MLflow to accept requests
         # Converge, then proceed (ADR-0026 dec 3): a server that is still starting is not a failure,
