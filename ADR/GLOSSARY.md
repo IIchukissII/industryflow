@@ -145,6 +145,39 @@ The role *name* (`tenant_reader_<uuid>`) is owned by the TimescaleDB init script
 
 ---
 
+## Models
+
+**Model artifact path** — the journey a model makes from the notebook that trains it to the service
+that scores with it: authoring kernel → tracking gateway → registry → `ml_service`. What crosses is a
+**serialised model, not data**, which is why the two ends are constrained. It is *not* a pickle,
+though it is routinely assumed to be: sklearn models cross as **skops** and xgboost models as a
+**native booster** (ADR-0027 gives the detail — do not re-derive it from the shape of the code, which
+is how it has been got wrong before). *(ADR-0027; the hops themselves are ADR-0019 and ADR-0010 dec 6)*
+
+**Train/serve parity** — the constraint on that path: **the artifact declares its requirements, and
+the serving environment satisfies them or refuses the model.** The rule is generic — the artifact is
+the authority — so it needs no amendment when a new framework appears. The per-library version
+constraints are an *instantiation* of it for the flavors served today, not the rule itself; they are
+a **floor on divergence, not a pin**. *(ADR-0027 dec 1 and 3; do not restate the pins elsewhere)*
+
+**Supported flavor set** — what the serving environment can actually honour: the union of what
+`ml_service` carries in-process and what **model adapters** are installed. It is **closed and
+declared, while the set users may author in is open** — a model outside it is *refused with a
+reason*, never silently mis-served. *(ADR-0027 dec 2)*
+
+**Model adapter** — the plugin category by which a new model flavor (torch, an autoencoder, …) becomes
+servable — in-process where it is cheap, out-of-process where it is not. Named as a plugin category by
+ADR-0008 dec 3 and permitted out-of-process by ADR-0010 dec 4, but **its contract is not yet written**:
+ADR-0010 defers it and ADR-0027 dec 4 hands the open framework set to it. *(the live gap, not a built
+thing — do not write code against this term expecting it to exist)*
+
+**Compatibility status** — a property of a registered model recording whether the serving environment
+still satisfies what the model declares. It is **surfaced, never alerted** — deliberately not routed
+into ADR-0022's `retrain_recommended`, which is a statistical claim about the world, not a mechanical
+one about two containers. *(ADR-0027 dec 7-8)*
+
+---
+
 ## Deployment
 
 The self-hosted/managed split is a **business and licensing** distinction (ADR-0001). It maps
