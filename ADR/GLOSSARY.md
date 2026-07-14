@@ -148,9 +148,11 @@ The role *name* (`tenant_reader_<uuid>`) is owned by the TimescaleDB init script
 ## Models
 
 **Model artifact path** — the journey a model makes from the notebook that trains it to the service
-that scores with it: authoring kernel → tracking gateway → registry → `ml_service`. It is a
-**pickle** boundary — what crosses it is a serialised object, not data — which is why the two ends
-are constrained. *(ADR-0027; the hops themselves are ADR-0019 and ADR-0010 dec 6)*
+that scores with it: authoring kernel → tracking gateway → registry → `ml_service`. What crosses is a
+**serialised model, not data**, which is why the two ends are constrained. It is *not* a pickle,
+though it is routinely assumed to be: sklearn models cross as **skops** and xgboost models as a
+**native booster** (ADR-0027 gives the detail — do not re-derive it from the shape of the code, which
+is how it has been got wrong before). *(ADR-0027; the hops themselves are ADR-0019 and ADR-0010 dec 6)*
 
 **Train/serve parity** — the constraint on that path: **the artifact declares its requirements, and
 the serving environment satisfies them or refuses the model.** The rule is generic — the artifact is
