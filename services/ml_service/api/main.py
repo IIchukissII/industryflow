@@ -26,6 +26,7 @@ from repository import MLRepository
 from routers import (
     health_router, models_router, registered_models_router,
     inference_router, feature_configs_router, drift_router,
+    capabilities_router,
 )
 from feature_engineering import AggregateBaselineProvider, StatefulFeatureSwitch
 
@@ -91,6 +92,8 @@ app.include_router(registered_models_router)
 app.include_router(inference_router)
 app.include_router(feature_configs_router)
 app.include_router(drift_router)
+# What this deployment can load and interpret (ADR-0028 dec 5) — discovered from the registry.
+app.include_router(capabilities_router)
 
 
 # ============================================================================
