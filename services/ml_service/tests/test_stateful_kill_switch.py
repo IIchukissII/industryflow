@@ -98,9 +98,15 @@ def test_unknown_type_is_not_stateful():
 
 
 def test_extension_api_version_bumped_minor():
-    """Additive capability tags — a minor bump, never a breaking major (ADR-0010 dec 3)."""
+    """Additive capability tags — a minor bump, never a breaking major (ADR-0010 dec 3).
+
+    The literal is the point: the contract's version may only move when someone means it to. It has
+    moved twice, both additively — 0.2.0 for ADR-0024's `stateful`/`neutral` transform tags, and 0.3.0
+    for ADR-0028's `semantics`/`handles_flavors` detector declarations. Both keep older extensions
+    registering untouched, which is what makes them minors and not majors.
+    """
     major, minor, _ = EXTENSION_API_VERSION.split(".")
-    assert (int(major), int(minor)) == (0, 2)
+    assert (int(major), int(minor)) == (0, 3)
 
 
 # --------------------------------------------------------------- null-in-slot, and ZERO calls

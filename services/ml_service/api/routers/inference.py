@@ -17,10 +17,12 @@ import os
 import hmac
 import uuid
 
+import json
+
 import auth
 import model_cache
 from feature_engineering import FeatureEngineeringEngine
-from extensions import get_detector, DetectorContext
+from extensions import get_detector, DetectorContext, UninterpretableModel
 
 logger = logging.getLogger(__name__)
 
@@ -283,10 +285,40 @@ async def predict(
         if detector is None:
             raise HTTPException(status_code=500, detail=f"Unknown anomaly detector: {detector_name}")
 
-        result = await detector(
-            input_features, model, request_data.threshold,
-            DetectorContext(equipment_id=equipment_id),
-        )
+        # An autoencoder's error is unbounded, so it is scored against the error the model itself saw
+        # in training (ADR-0028). Where that scale lives is deliberately not fixed by the ADR; today it
+        # rides in training_metrics, which needs no migration.
+        training_metrics = model_data.get('training_metrics') or {}
+        if isinstance(training_metrics, str):
+            training_metrics = json.loads(training_metrics)
+
+        try:
+            result = await detector(
+                input_features, model, request_data.threshold,
+                DetectorContext(
+                    equipment_id=equipment_id,
+                    reconstruction_scale=training_metrics.get('reconstruction_scale'),
+                ),
+            )
+        except UninterpretableModel as exc:
+            # ADR-0028 dec 2: the detector could not establish what this model's output MEANS, so it
+            # declined to score it. That is a refusal, not a crash — and it must never be resolved by
+            # returning a number anyway. A wrong score is worse than none: ADR-0021 alerts on these,
+            # and ADR-0022 asks an operator to label the alerts.
+            logger.warning(f"Refusing to score model {request_data.model_id}: {exc}")
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": (
+                        "This model's output cannot be interpreted as an anomaly score, so it will "
+                        "not be scored. Returning a guess would risk alerting on a number nobody "
+                        "can justify (ADR-0028)."
+                    ),
+                    "detector": detector_name,
+                    "reason": str(exc),
+                },
+            ) from exc
+
         anomaly_score = result.score
         is_anomaly = result.is_anomaly
 
