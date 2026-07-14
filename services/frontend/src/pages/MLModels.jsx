@@ -150,12 +150,22 @@ function ParityLedger({ status, detail }) {
           {libraries.map((lib) => {
             const fault = faults[lib];
             const serving = present[lib];
+            // A version that differs without breaking the contract still deserves to be findable —
+            // in the drift case it IS the whole finding, and an unmarked ledger would make the
+            // reader diff two columns by eye to locate it.
+            const drifted = !fault && serving && serving !== declared[lib];
             return (
               <div key={lib} className={`mdl-ledger-row${fault ? ' fault' : ''}`} role="row">
                 <span className="mdl-ledger-lib mono" role="cell">{lib}</span>
+                {/* What the model was trained against is never "wrong" — the model is a fact. It is
+                    THIS ENVIRONMENT that fails to meet it, so only the serving side is marked. That
+                    also makes the direction of the fix readable straight off the row. */}
                 <span className="mdl-ledger-v mono" role="cell">{declared[lib]}</span>
-                <span className="mdl-ledger-v mono" role="cell">
-                  {serving || <span className="mdl-compat-missing">— absent</span>}
+                <span
+                  className={`mdl-ledger-v mono${fault ? ' bad' : ''}${drifted ? ' drift' : ''}`}
+                  role="cell"
+                >
+                  {serving || <span className="mdl-compat-missing">absent</span>}
                 </span>
                 {fault && <span className="mdl-ledger-why" role="cell">{fault}</span>}
               </div>
