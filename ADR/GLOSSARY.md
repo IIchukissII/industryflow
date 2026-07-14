@@ -152,15 +152,27 @@ that scores with it: authoring kernel → tracking gateway → registry → `ml_
 **pickle** boundary — what crosses it is a serialised object, not data — which is why the two ends
 are constrained. *(ADR-0027; the hops themselves are ADR-0019 and ADR-0010 dec 6)*
 
-**Train/serve parity** — the constraint ADR-0027 places on that path: the libraries whose objects
-cross it must agree at each end, in *that library's* terms rather than semver's. It is a **floor on
-divergence, not a pin** — either end may move within it. The exact rule per library is ADR-0027
-dec 1; do not restate it elsewhere.
+**Train/serve parity** — the constraint on that path: **the artifact declares its requirements, and
+the serving environment satisfies them or refuses the model.** The rule is generic — the artifact is
+the authority — so it needs no amendment when a new framework appears. The per-library version
+constraints are an *instantiation* of it for the flavors served today, not the rule itself; they are
+a **floor on divergence, not a pin**. *(ADR-0027 dec 1 and 3; do not restate the pins elsewhere)*
 
-**Compatibility status** — a property of a registered model recording whether its training
-environment still satisfies train/serve parity against the serving environment. It is **surfaced,
-never alerted** — deliberately not routed into ADR-0022's `retrain_recommended`, which is a
-statistical claim about the world, not a mechanical one about two containers. *(ADR-0027 dec 6-7)*
+**Supported flavor set** — what the serving environment can actually honour: the union of what
+`ml_service` carries in-process and what **model adapters** are installed. It is **closed and
+declared, while the set users may author in is open** — a model outside it is *refused with a
+reason*, never silently mis-served. *(ADR-0027 dec 2)*
+
+**Model adapter** — the plugin category by which a new model flavor (torch, an autoencoder, …) becomes
+servable — in-process where it is cheap, out-of-process where it is not. Named as a plugin category by
+ADR-0008 dec 3 and permitted out-of-process by ADR-0010 dec 4, but **its contract is not yet written**:
+ADR-0010 defers it and ADR-0027 dec 4 hands the open framework set to it. *(the live gap, not a built
+thing — do not write code against this term expecting it to exist)*
+
+**Compatibility status** — a property of a registered model recording whether the serving environment
+still satisfies what the model declares. It is **surfaced, never alerted** — deliberately not routed
+into ADR-0022's `retrain_recommended`, which is a statistical claim about the world, not a mechanical
+one about two containers. *(ADR-0027 dec 7-8)*
 
 ---
 
