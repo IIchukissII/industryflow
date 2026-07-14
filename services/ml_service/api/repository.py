@@ -59,6 +59,11 @@ def _format_model_row(row: dict, company_id: str) -> Dict[str, Any]:
         'training_start_date': row.get('training_start_date'),
         'training_end_date': row.get('training_end_date'),
         'reference_profile': json.loads(row['reference_profile']) if isinstance(row.get('reference_profile'), str) else row.get('reference_profile'),
+        # ADR-0027. Absent from the list query's older callers, hence .get() — and None is a real
+        # verdict ("never evaluated"), not a formatting artefact.
+        'compatibility_status': row.get('compatibility_status'),
+        'compatibility_detail': json.loads(row['compatibility_detail']) if isinstance(row.get('compatibility_detail'), str) else row.get('compatibility_detail'),
+        'compatibility_checked_at': row.get('compatibility_checked_at'),
         'status': row['status'],
         'deployed_at': row.get('deployed_at'),
         'deprecated_at': row.get('deprecated_at'),
@@ -106,6 +111,7 @@ class MLRepository:
                     training_metrics, hyperparameters, feature_names, feature_config_id, sensor_ids,
                     accuracy, precision_score, recall, f1_score, auc_roc,
                     training_samples, training_start_date, training_end_date,
+                    compatibility_status, compatibility_detail, compatibility_checked_at,
                     status, deployed_at, deprecated_at, created_at, updated_at
                 FROM ml_models
             """
@@ -167,11 +173,17 @@ class MLRepository:
                 'training_start_date': 'training_start_date',
                 'training_end_date': 'training_end_date',
                 'training_duration_seconds': 'training_duration_seconds',
-                'reference_profile': 'reference_profile'  # ADR-0021 drift baseline
+                'reference_profile': 'reference_profile',  # ADR-0021 drift baseline
+                # ADR-0027: the verdict on whether this serving environment can honour what the
+                # artifact declares. Set by the registration gate, refreshed at the deployment gate.
+                'compatibility_status': 'compatibility_status',
+                'compatibility_detail': 'compatibility_detail',
+                'compatibility_checked_at': 'compatibility_checked_at',
             }
 
             # JSONB fields that need serialization (note: feature_names and sensor_ids are arrays, not JSONB)
-            jsonb_fields = {'training_metrics', 'hyperparameters', 'reference_profile'}
+            jsonb_fields = {'training_metrics', 'hyperparameters', 'reference_profile',
+                            'compatibility_detail'}
 
             for key, db_field in field_mapping.items():
                 if key in model_data and model_data[key] is not None:
@@ -232,6 +244,7 @@ class MLRepository:
                     accuracy, precision_score, recall, f1_score, auc_roc,
                     training_samples, training_start_date, training_end_date,
                     reference_profile,
+                    compatibility_status, compatibility_detail, compatibility_checked_at,
                     status, deployed_at, deprecated_at, created_at, updated_at
                 FROM ml_models
                 WHERE model_id = $1
@@ -291,16 +304,48 @@ class MLRepository:
     ) -> bool:
         """Update model status"""
         schema_name = normalize_company_id_to_schema(company_id)
-        
+
         async with self.pool.acquire() as conn:
             await conn.execute(f"SET search_path TO {schema_name}, public")
-            
+
             result = await conn.execute(
                 "UPDATE ml_models SET status = $1 WHERE model_id = $2",
                 status,
                 model_id
             )
-            
+
+            return result == "UPDATE 1"
+
+    async def update_model_compatibility(
+        self,
+        company_id: str,
+        model_id: str,
+        compatibility
+    ) -> bool:
+        """Record the ADR-0027 verdict reached at a gate.
+
+        Re-stamped rather than written once, because the verdict has a shelf life: the serving image
+        can be rebuilt underneath a registered model, so what was true at registration need not be true
+        at deployment. `compatibility_checked_at` is what makes a stale verdict legible as stale.
+        """
+        schema_name = normalize_company_id_to_schema(company_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(f"SET search_path TO {schema_name}, public")
+
+            result = await conn.execute(
+                """
+                UPDATE ml_models
+                SET compatibility_status = $1,
+                    compatibility_detail = $2,
+                    compatibility_checked_at = NOW()
+                WHERE model_id = $3
+                """,
+                compatibility.status,
+                json.dumps(compatibility.as_detail()),
+                model_id
+            )
+
             return result == "UPDATE 1"
     
     async def delete_model(
