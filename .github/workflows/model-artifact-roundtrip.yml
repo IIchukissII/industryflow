@@ -1,0 +1,170 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# ADR-0027's gate on the model artifact path: does a model trained in the authoring kernel still
+# load — and still score the same — in the serving image?
+#
+# The two ends of that path are different images, on different interpreters, with different pins, and
+# what crosses between them is a PICKLE. Nothing in CI ever took that journey before this workflow:
+# every check described the artifact (does it resolve, does it import) and none of them ran it. That
+# is the exact class ADR-0026 was written about — "the branch is not the gate; the test is the gate"
+# — one layer up, at the model boundary instead of the service boundary.
+#
+# TWO CHECKS, AND ONLY ONE IS THE AUTHORITY (ADR-0027 dec 5):
+#   parity    — declarative, seconds. Compares the pins the two images DECLARE. Cheap, and it is the
+#               check whose absence let the gap open (ml_service took numpy 2 alone, unwatched).
+#   roundtrip — empirical, minutes. Trains in the real kernel image, loads in the real serving image.
+#               This one is the authority: a version number is a proxy, and the pickle loading is the
+#               fact. It catches what version arithmetic cannot predict in either direction.
+name: Model artifact round-trip
+
+# The path lists are duplicated rather than shared with a YAML anchor: GitHub Actions does not
+# expand anchors in workflow files, so `*paths` would silently match nothing and this gate would
+# quietly never run — a false green of exactly the kind ADR-0026 exists to prevent.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/notebook_hub/Dockerfile.authoring"
+      - "services/ml_service/api/Dockerfile"
+      - "services/ml_service/api/requirements.txt"
+      - "clients/python/**"
+      - "scripts/check_model_env_parity.py"
+      - "scripts/tests/**"
+      - "tests/model_artifact_roundtrip/**"
+      - ".github/workflows/model-artifact-roundtrip.yml"
+  pull_request:
+    paths:
+      - "services/notebook_hub/Dockerfile.authoring"
+      - "services/ml_service/api/Dockerfile"
+      - "services/ml_service/api/requirements.txt"
+      - "clients/python/**"
+      - "scripts/check_model_env_parity.py"
+      - "scripts/tests/**"
+      - "tests/model_artifact_roundtrip/**"
+      - ".github/workflows/model-artifact-roundtrip.yml"
+
+jobs:
+  # Seconds, and it runs first: if the two ends do not even CLAIM to agree, there is no point
+  # spending ten minutes building two images to watch a pickle fail.
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - run: pip install pytest==9.1.1
+      - name: The pins the two images declare must satisfy ADR-0027
+        run: python scripts/check_model_env_parity.py
+      - name: The check itself must still be able to fail
+        # A parity check that cannot fail is worse than none — it is a green tick asserting the
+        # boundary was inspected. These tests hold it to that, including the scikit-learn semver trap
+        # (1.5 and 1.9 are the SAME major; a major-only rule is a no-op on the very drift we closed).
+        run: pytest scripts/tests -q
+
+  roundtrip:
+    runs-on: ubuntu-latest
+    needs: parity
+    steps:
+      - uses: actions/checkout@v7
+
+      # The REAL images, built from the Dockerfiles that ship. A round trip between two pip installs
+      # on the runner would prove nothing about what a data scientist is actually given at spawn.
+      - name: Build the authoring kernel image (where models are trained)
+        run: docker build -q -t if-authoring:roundtrip -f services/notebook_hub/Dockerfile.authoring clients/python
+
+      - name: Build the ml_service image (where models are served)
+        run: docker build -q -t if-serving:roundtrip -f services/ml_service/api/Dockerfile services/ml_service
+
+      # The kernel and ml_service both reach MLflow over HTTP in production (ADR-0019 puts the
+      # tracking gateway in front of this very API), so the harness stands up the real server rather
+      # than passing a directory between the two containers.
+      #
+      # Not merely for fidelity: mlflow's FileStore is BROKEN ON PYTHON 3.14 — it writes a run and
+      # then cannot read it back. Same family as #222 (mlflow's server dies on 3.14), and the kernel
+      # is now a 3.14 image. A file-store harness would have failed for a reason with nothing to do
+      # with the boundary under test. Nothing in production uses a file store, so the bug costs the
+      # product nothing — it only ever bites a test that takes a shortcut.
+      - name: Build and start the MLflow tracking server (the same image the platform runs)
+        run: |
+          docker build -q -t if-mlflow:roundtrip infrastructure/mlflow
+          docker network create roundtrip-net
+          # sqlite + the server's own artifact proxy (--serve-artifacts): the artifacts land under the
+          # workdir the image's non-root user already owns, and the clients fetch them back through
+          # the server, so neither container needs object-store credentials. The platform's real
+          # deployment uses Postgres + MinIO here; what this harness needs from MLflow is the API and
+          # the artifact round trip, not its storage topology.
+          #
+          # --allowed-hosts "*" mirrors what docker-compose.yml already passes the real MLflow.
+          # mlflow 3 rejects any request whose Host header it does not recognise (DNS-rebinding
+          # protection) with a 403, so a client reaching it by container name — which is exactly how
+          # the tracking gateway reaches it in the deployed stack — is refused without it.
+          docker run -d --name roundtrip-mlflow --network roundtrip-net -p 5000:5000 \
+            if-mlflow:roundtrip \
+            mlflow server --host 0.0.0.0 --port 5000 \
+              --backend-store-uri sqlite:////home/mlflow/mlflow.db \
+              --serve-artifacts \
+              --allowed-hosts "*"
+
+      - name: Wait for MLflow to accept requests
+        # Converge, then proceed (ADR-0026 dec 3): a server that is still starting is not a failure,
+        # but one that never starts must not be reported as a model-compatibility problem.
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:5000/health >/dev/null 2>&1; then
+              echo "MLflow is up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::MLflow tracking server never became ready — the round trip could not be run."
+          docker logs roundtrip-mlflow
+          exit 1
+
+      - name: Create the shared directory for the run manifest
+        # Only the manifest crosses this way (run ids + the kernel's expected predictions). The MODEL
+        # travels through MLflow, exactly as it does in production. The kernel runs as uid 1000 and
+        # the serving image as 10001, so 0777 rather than a chown to either one.
+        run: mkdir -p "${{ runner.temp }}/roundtrip" && chmod 0777 "${{ runner.temp }}/roundtrip"
+
+      - name: TRAIN — in the authoring kernel image
+        run: |
+          docker run --rm --network roundtrip-net \
+            -e MLFLOW_TRACKING_URI=http://roundtrip-mlflow:5000 \
+            -v "${{ runner.temp }}/roundtrip:/artifacts" \
+            -v "${{ github.workspace }}/tests/model_artifact_roundtrip:/harness:ro" \
+            if-authoring:roundtrip \
+            python /harness/train_in_kernel.py
+
+      - name: LOAD AND SCORE — in the serving image
+        # The assertion is NOT "it loaded". Reconstructing a model across a numpy major can succeed
+        # and score WRONG, and a model that quietly lies is worse than one that crashes — ADR-0021
+        # raises alerts on these numbers. So the far end must reproduce the kernel's predictions.
+        run: |
+          docker run --rm --network roundtrip-net \
+            -e MLFLOW_TRACKING_URI=http://roundtrip-mlflow:5000 \
+            -v "${{ runner.temp }}/roundtrip:/artifacts" \
+            -v "${{ github.workspace }}/tests/model_artifact_roundtrip:/harness:ro" \
+            if-serving:roundtrip \
+            python /harness/load_in_serving.py
+
+      - name: MLflow server logs (on failure)
+        if: failure()
+        run: docker logs roundtrip-mlflow
+
+  # Stable aggregate status for branch protection, matching the pattern the other gates use: always
+  # runs, fails only if a job that actually ran failed.
+  model-artifact-roundtrip-gate:
+    name: model-artifact-roundtrip-gate
+    needs: [parity, roundtrip]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verdict
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "::error::A model trained in the authoring kernel does not survive the crossing into the serving image (ADR-0027)."
+            exit 1
+          fi
+          echo "Model artifact path holds (ADR-0027)."

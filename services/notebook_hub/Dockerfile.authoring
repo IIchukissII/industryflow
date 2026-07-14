@@ -11,15 +11,19 @@
 # BUILD CONTEXT = clients/python (so the client is pip-installable from its pyproject):
 #   docker build -f services/notebook_hub/Dockerfile.authoring clients/python
 #
-# HELD AT 3.12 WHILE THE SERVICES MOVED TO 3.14 (#211) — deliberately, not by oversight. The pinned
-# stack below (numpy 1.26.4, pandas 2.2.2, scikit-learn 1.5.1) publishes no cp314 wheels, so this
-# image cannot take 3.14 without also taking numpy 2 / sklearn 1.9. That bump is not a runtime
-# change: it is the environment users author models in, it reaches them at the next spawn
-# (ADR-0020 dec 1), and it would silently settle the "notebook and package supply chain" question
-# ADR-0011 explicitly DEFERS. It also decides train/serve parity — this kernel's sklearn pickles are
-# loaded by ml_service, which already runs sklearn 1.9 / numpy 2. That gap is real and predates
-# #211; no ADR covers it. Both are settled by the ADR tracked in #220, not here.
-FROM python:3.12-slim
+# THIS IMAGE IS ONE END OF THE MODEL ARTIFACT PATH (ADR-0027). What it trains, `ml_service` unpickles
+# — so the pins below are not this image's private business. numpy's major, scikit-learn's
+# major.minor and pandas' major must MATCH the serving image, and xgboost must not be NEWER here than
+# there (a model must never cross backwards, into an older reader than wrote it). ADR-0027 dec 3.
+#
+# `scripts/check_model_env_parity.py` enforces exactly that on every PR, and the round-trip gate
+# proves it for real by training here and loading there. So: do not bump numpy / scikit-learn /
+# pandas / xgboost in this file alone. The check will stop you, which is the point — it was written
+# because ml_service once took numpy 2 by itself and nothing was watching.
+#
+# Held at 3.12 until #220 was decided (the bump would have settled ADR-0011's deferred package
+# supply chain by accident, inside a dependency PR). ADR-0027 decided it; the hold is lifted.
+FROM python:3.14-slim
 
 ARG NB_UID=1000
 ARG NB_USER=jovyan
@@ -29,24 +33,42 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
     && useradd --create-home --uid ${NB_UID} --shell /bin/bash ${NB_USER}
 
 # Notebook runtime: jupyterhub-singleuser (registers the server with the hub) + JupyterLab.
+# The jupyterhub pin tracks the HUB's (services/notebook_hub/requirements.txt) — singleuser and hub
+# speak a versioned protocol to each other, and 5.x tightened XSRF handling on exactly that path. A
+# 4.x singleuser under a 5.x hub is a skew nothing else in CI would catch.
 RUN pip install --no-cache-dir \
-    jupyterhub==4.1.6 \
+    jupyterhub==5.5.0 \
     jupyterlab==4.0.9
 
 # Lean data-science stack (no deep learning): arrays/frames, classic ML, stats, plotting, plus the
 # MLflow client (skinny — no server/UI) so a kernel can track experiments and register models
 # through the tracking gateway (ADR-0019). MLFLOW_TRACKING_URI/TOKEN are injected by the hub.
+#
+# Two pins here are load-bearing in ways their names do not advertise:
+#
+#   xgboost 3.x is REQUIRED BY scikit-learn 1.9, not merely nice to have. sklearn 1.9 removed
+#   `_estimator_type` in favour of `__sklearn_tags__`; xgboost 2.x's sklearn wrapper still reaches for
+#   it, so `XGBRegressor.save_model()` — and therefore `mlflow.xgboost.log_model` — dies with
+#   "`_estimator_type` undefined" under sklearn 1.9. It fits and predicts fine, which is why nothing
+#   noticed: the break is on the SAVE path, and no CI job ever saved an xgboost model. The round-trip
+#   gate (ADR-0027) is what caught it.
+#
+#   skops is NOT an optional extra. mlflow 3's sklearn flavor defaults to
+#   `serialization_format="skops"` — the artifact this kernel writes is `model.skops`, not a pickle —
+#   and `mlflow-skinny` does NOT pull skops in (the full `mlflow` does). Without this line
+#   `mlflow.sklearn.log_model` has no serializer. It is also pinned rather than floating BECAUSE it
+#   is a serialization format on the artifact path: what this kernel writes, ml_service must read.
 RUN pip install --no-cache-dir \
-    numpy==1.26.4 \
-    pandas==2.2.2 \
-    scipy==1.13.1 \
-    scikit-learn==1.5.1 \
-    statsmodels==0.14.2 \
-    xgboost==2.1.1 \
-    matplotlib==3.9.1 \
+    numpy==2.5.1 \
+    pandas==2.3.3 \
+    scipy==1.18.0 \
+    scikit-learn==1.9.0 \
+    statsmodels==0.14.6 \
+    xgboost==3.3.0 \
+    matplotlib==3.11.0 \
     plotly==5.23.0 \
     mlflow-skinny==3.14.0 \
-    skops==0.11.0
+    skops==0.14.0
 
 # The tenant-scoped client + the [sql] extra (psycopg) so the kernel can reach the SQL proxy with
 # its capability (ADR-0015). Built from the context (clients/python).

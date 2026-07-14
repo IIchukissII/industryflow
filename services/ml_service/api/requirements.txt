@@ -24,15 +24,32 @@ python-multipart==0.0.32
 mlflow==3.14.0
 boto3==1.43.46
 
-# ML libraries for inference
+# ML libraries for inference.
+#
+# THE SERVING END OF THE MODEL ARTIFACT PATH (ADR-0027). These four are not free pins: what the
+# authoring kernel (services/notebook_hub/Dockerfile.authoring) trains, this image unpickles. numpy
+# major / scikit-learn major.minor / pandas major must MATCH the kernel's, and xgboost must be >=
+# the kernel's. `scripts/check_model_env_parity.py` fails the PR that moves one end alone — which is
+# how this gap opened: numpy went to 2 here while the kernel stayed on 1, and nothing was watching.
 numpy==2.5.1
 scikit-learn==1.9.0
-xgboost==2.0.3
+# xgboost 3.x is REQUIRED BY sklearn 1.9, not a courtesy bump — and 2.0.3 was ALREADY BROKEN here.
+# sklearn 1.9 removed `_estimator_type` (now `__sklearn_tags__`), which xgboost 2.x's sklearn wrapper
+# still reaches for, so `save_model()` — and with it the whole `mlflow.xgboost` flavor — raises
+# "`_estimator_type` undefined". It fits and predicts fine, which is exactly why this survived: the
+# break is on the save path and nothing in CI ever saved an xgboost model. ADR-0027's round-trip gate
+# found it. It must also stay >= the kernel's pin (models cross forward, never backwards).
+xgboost==3.3.0
+# PINNED, and pinned HERE, because it is a serialization format on the model artifact path. mlflow 3's
+# sklearn flavor writes `model.skops` by default — not a pickle — and mlflow only constrains it as
+# `skops<1`, so this floated: the kernel would write a skops file with one version and this image read
+# it with whatever pip happened to resolve that day. It tracks the kernel's pin (ADR-0027 dec 3).
+skops==0.14.0
 
 # Model-drift detection (ADR-0021): evidently computes the data/prediction drift score in
 # the /api/drift endpoint; pandas frames the reference sample + current window. pandas 2.3 is
 # required for numpy 2 (evidently 0.7.21 does NOT constrain pandas — the old 2.1.3 pin was a
-# choice, not a constraint; sklearn 1.9 / xgboost 2.0.3 / evidently 0.7.21 all run under numpy 2).
+# choice, not a constraint; sklearn 1.9 / xgboost / evidently 0.7.21 all run under numpy 2).
 pandas==2.3.3
 evidently==0.7.21
 

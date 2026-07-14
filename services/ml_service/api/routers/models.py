@@ -9,11 +9,12 @@ Endpoints for model registry and management from industryflow database
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import json
 
 import auth
+import model_compat
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,13 @@ class ModelMetadata(BaseModel):
     training_duration_seconds: Optional[int] = None
     mlflow_run_id: Optional[str] = None
     mlflow_experiment_id: Optional[str] = None
+    # ADR-0027 dec 7: whether this serving environment still satisfies what the model declares.
+    # Surfaced on the model, never fired as an alert — a version mismatch is a mechanical fact about
+    # two containers, not the statistical claim about the world that ADR-0022's lane carries.
+    # None means "never evaluated" (registered before ADR-0027), which is not the same as "fine".
+    compatibility_status: Optional[str] = None
+    compatibility_detail: Optional[Dict[str, Any]] = None
+    compatibility_checked_at: Optional[datetime] = None
     created_at: datetime
     deployed_at: Optional[datetime] = None
 
@@ -150,6 +158,81 @@ async def get_company_id_dependency(
 
 
 # ============================================================================
+# ADR-0027 — the compatibility gate
+# ============================================================================
+
+async def _evaluate_or_reject(
+    mlflow_run_id: Optional[str],
+    *,
+    on_incompatible: int,
+    model_label: str,
+) -> Optional[model_compat.Compatibility]:
+    """Evaluate the artifact against this environment, and refuse it if we cannot honour it.
+
+    One comparison, called at the two gates that admit a model, with different status codes because
+    they mean different things (ADR-0027 dec 5):
+
+      422 at registration — the artifact was never servable here. The author is present; they can fix
+          their environment and log again.
+      409 at deployment  — it was servable when it was registered, and the ground moved underneath it
+          (this image was rebuilt). Nothing about the model changed; the world did.
+
+    The refusal lives at these gates and NOT in `predict`: re-checking on every request would buy
+    nothing these two gates and the CI round-trip have not already established, and would put artifact
+    IO on the hot path.
+
+    Returns None when there is nothing to evaluate — a model with no run has no artifact and is not on
+    the path at all. It is not refused; it is simply unjudged.
+    """
+    if not mlflow_run_id:
+        return None
+
+    try:
+        compatibility = await model_compat.evaluate_run(mlflow_run_id)
+    except model_compat.ArtifactUnreadable as exc:
+        # We could not READ the declarations, so we have no verdict — and saying "your model is
+        # broken" because the tracking store is down would be a lie with a permanent-sounding status
+        # code. 503: transient, retry. ADR-0027's rule is that we refuse what we cannot honour; it is
+        # not a licence to guess.
+        logger.warning(f"Compatibility undecidable for run {mlflow_run_id}: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Could not read the model artifact's declared requirements from the tracking store, "
+                "so its compatibility with this serving environment cannot be established. This is "
+                "transient — retry."
+            ),
+        ) from exc
+
+    if not compatibility.servable:
+        logger.warning(
+            f"Refusing model '{model_label}' (run {mlflow_run_id}): {compatibility.reasons}"
+        )
+        raise HTTPException(
+            status_code=on_incompatible,
+            detail={
+                "message": (
+                    "This serving environment cannot honour what the model declares, so it will not "
+                    "be served (ADR-0027). Loading it anyway risks scoring silently wrong, which is "
+                    "worse than refusing it."
+                ),
+                "reasons": compatibility.reasons,
+                "flavor": compatibility.flavor,
+                "declared": compatibility.declared,
+                "serving": compatibility.present,
+            },
+        )
+
+    if compatibility.status == model_compat.PATCH_DRIFT:
+        logger.info(
+            f"Model '{model_label}' (run {mlflow_run_id}) is servable with patch drift: "
+            f"{compatibility.reasons}"
+        )
+
+    return compatibility
+
+
+# ============================================================================
 # API Endpoints
 # ============================================================================
 
@@ -162,13 +245,30 @@ async def create_model(
     """
     Register a new trained model
     Called after model training to register metadata
+
+    ADR-0027: the artifact declares its requirements and this environment satisfies them or refuses
+    the model. This is the FIRST of the two gates that admit a model — the earliest possible signal,
+    while the author is still at their notebook and the run is fresh. The second is deployment
+    (below), because this verdict expires: the serving image can be rebuilt underneath a model that
+    is sitting unpromoted.
     """
     repository = request.app.state.ml_repository
+
+    payload = model_data.model_dump()
+    compatibility = await _evaluate_or_reject(
+        payload.get("mlflow_run_id"),
+        on_incompatible=422,
+        model_label=model_data.model_name,
+    )
+    if compatibility:
+        payload["compatibility_status"] = compatibility.status
+        payload["compatibility_detail"] = compatibility.as_detail()
+        payload["compatibility_checked_at"] = datetime.now(timezone.utc)
 
     # Create model in database
     model_id = await repository.create_model(
         company_id=company_id,
-        model_data=model_data.model_dump()
+        model_data=payload
     )
 
     if not model_id:
@@ -281,7 +381,30 @@ async def deploy_model(
     
     if not model_data:
         raise HTTPException(status_code=404, detail="Model not found")
-    
+
+    # ADR-0027 dec 5 — the SECOND gate, and the one that actually protects what gets served.
+    #
+    # A model can sit unpromoted for weeks while this image is rebuilt underneath it, so the verdict
+    # taken at registration EXPIRES. Only this gate is positioned to know that. It is also where a
+    # model registered BEFORE ADR-0027 (verdict NULL — never evaluated) finally gets judged: not
+    # evicted from a serving path it already occupies (dec 10), but barred from being re-deployed into
+    # one if this environment can no longer honour it.
+    #
+    # Undeploying is never blocked: archiving a model is the remedy for a bad one, not another way to
+    # break it.
+    if request_data.environment in ("production", "active", "staging"):
+        compatibility = await _evaluate_or_reject(
+            model_data.get("mlflow_run_id"),
+            on_incompatible=409,
+            model_label=str(model_data.get("model_name", model_id)),
+        )
+        if compatibility:
+            await repository.update_model_compatibility(
+                company_id=company_id,
+                model_id=model_id,
+                compatibility=compatibility,
+            )
+
     # Update status
     success = await repository.update_model_status(
         company_id=company_id,
