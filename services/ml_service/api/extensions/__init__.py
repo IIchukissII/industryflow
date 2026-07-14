@@ -22,7 +22,10 @@ logger = logging.getLogger(__name__)
 # (ADR-0010 dec 3 / ADR-0000 supersession discipline). 0.2.0 adds the optional `stateful` /
 # `neutral` capability tags to register_transform (ADR-0024 dec 1) — additive, with
 # back-compatible defaults, so transforms written against 0.1.0 keep working untouched.
-EXTENSION_API_VERSION = "0.2.0"
+# 0.3.0 adds the optional `semantics` / `handles_flavors` declarations to register_detector
+# (ADR-0028 dec 1) — additive in the same way: a detector written against 0.2.0 still registers, it
+# simply declares nothing, and the capabilities view says so rather than pretending otherwise.
+EXTENSION_API_VERSION = "0.3.0"
 
 
 @dataclass
@@ -104,6 +107,11 @@ class DetectorContext:
     """Context an anomaly detector may use (feature names, the equipment under inference)."""
     feature_names: Any = None
     equipment_id: Any = None
+    # The reconstruction error this model saw on its own training data (ADR-0028). The ONLY defensible
+    # scale for turning an autoencoder's unbounded error into a 0-1 score: an MSE of 0.4 is
+    # catastrophic for one model and unremarkable for another, so the scale is a property of the model,
+    # never a platform constant. Absent -> the autoencoder detector refuses rather than inventing one.
+    reconstruction_scale: Any = None
 
 
 @dataclass
@@ -114,21 +122,60 @@ class DetectionResult:
     detail: Dict[str, Any] = field(default_factory=dict)
 
 
+class UninterpretableModel(Exception):
+    """The detector cannot establish what this model's output MEANS, so it will not score it.
+
+    ADR-0028 dec 2. The alternative — return a number anyway — is what produced #236: a detector
+    guessed, guessed wrong, and every IsolationForest prediction came back as an anomaly for months
+    because nothing ever asserted what a *normal* reading should score. A refusal is legible. A
+    confident wrong score is not, and ADR-0021 raises alerts on these numbers.
+    """
+
+
+# The semantics a model's output can carry (ADR-0028 dec 1). This is the fact that CANNOT be
+# recovered from the output itself: `predict() == 1` means *normal* to an IsolationForest and
+# *anomaly* to an XGBoost classifier, and an autoencoder emits no verdict at all — its signal is how
+# far its reconstruction sits from the input. The model says which; the platform never guesses.
+ANOMALY_PROBABILITY = "anomaly_probability"   # calibrated P(anomalous)
+OUTLIER_SCORE = "outlier_score"               # continuous novelty score; more negative = more anomalous
+RECONSTRUCTION_ERROR = "reconstruction_error"  # distance between input and its reconstruction
+DIRECT_SCORE = "direct_score"                 # the model already emits a 0-1 anomaly score
+
 # A detector is: async (features, model, threshold, ctx) -> DetectionResult. `model` is the
 # loaded model (or None for model-free detectors); a detector reads only what it needs.
 DetectorFn = Callable[[Any, Any, float, DetectorContext], Awaitable[DetectionResult]]
 
 _DETECTORS: Dict[str, DetectorFn] = {}
+# What each detector DECLARES about itself (ADR-0028 dec 1/4): the score semantics it implements, and
+# the MLflow artifact flavors it can score. The second is what lets ADR-0027's gate ask not only "can
+# this environment LOAD the artifact" but "is there anything here that knows what its output MEANS" —
+# the same honest refusal, one level up.
+_DETECTOR_TAGS: Dict[str, Dict[str, Any]] = {}
 
 
-def register_detector(name: str):
-    """Register an anomaly detector under ``name`` (ADR-0010). Re-registering a different
-    function is an error, mirroring transforms."""
+def register_detector(
+    name: str,
+    *,
+    semantics: str = DIRECT_SCORE,
+    handles_flavors: List[str] | None = None,
+):
+    """Register an anomaly detector under ``name`` (ADR-0010, completed by ADR-0028). Re-registering
+    a different function is an error, mirroring transforms.
+
+    ``semantics`` declares what the model's output MEANS — it is not derivable from the output (see
+    UninterpretableModel). ``handles_flavors`` names the MLflow artifact flavors this detector can
+    score (e.g. ``mlflow.sklearn``); empty means "makes no claim", which the capabilities view reports
+    honestly rather than reading as "handles everything".
+    """
     def decorator(fn: DetectorFn) -> DetectorFn:
         existing = _DETECTORS.get(name)
         if existing is not None and existing is not fn:
             raise ValueError(f"anomaly detector '{name}' is already registered")
         _DETECTORS[name] = fn
+        _DETECTOR_TAGS[name] = {
+            "semantics": semantics,
+            "handles_flavors": list(handles_flavors or []),
+        }
         return fn
     return decorator
 
@@ -139,6 +186,28 @@ def get_detector(name: str):
 
 def registered_detectors() -> List[str]:
     return sorted(_DETECTORS)
+
+
+def detector_capabilities() -> List[Dict[str, Any]]:
+    """What this deployment can actually score — DISCOVERED from the registry, never a hand-kept list.
+
+    ADR-0028 dec 5. The registry already knows; a second list maintained by hand would drift the first
+    time an operator loaded an adapter through EXTENSION_MODULES. This is what the capabilities
+    endpoint serves, so an operator can ask what a deployment will accept *before* training against
+    it rather than discovering the answer at a failed deploy.
+    """
+    return [
+        {"name": name, **_DETECTOR_TAGS.get(name, {})}
+        for name in registered_detectors()
+    ]
+
+
+def detectors_for_flavor(flavor: str) -> List[str]:
+    """Which registered detectors claim they can score an artifact of this MLflow flavor."""
+    return [
+        name for name in registered_detectors()
+        if flavor in _DETECTOR_TAGS.get(name, {}).get("handles_flavors", [])
+    ]
 
 
 def check_api_version(target: str) -> None:
