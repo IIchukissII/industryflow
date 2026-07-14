@@ -151,8 +151,31 @@ def _outlier_result(raw: float, threshold: float) -> DetectionResult:
     inliers tend to 0, deep outliers tend to 1. It is a rank-preserving normalisation, NOT a
     calibrated probability, and it is reported as such — a threshold set on it means "how far past the
     boundary", not "how likely".
+
+    THE TEMPERATURE IS NOT DECORATION, AND ITS ABSENCE WAS A BUG. `decision_function` is O(0.1) in
+    practice (a normal point sits near +0.12, a clear outlier near -0.25), so squashing the raw value
+    directly pins every score into ~[0.45, 0.56] — and the platform's DEFAULT anomaly threshold is
+    **0.85** (`InferenceRequest.threshold`, and `anomaly_threshold` in the alert worker's rules). A far
+    outlier would have scored 0.54 and never fired: #236 inverted, from all-false-positives to
+    all-false-NEGATIVES. Box validation caught it; the unit tests had not, because they asserted
+    against a 0.5 threshold — my assumption — rather than the one the platform actually ships.
+
+    Dividing by the typical magnitude of the score restores a usable range: a normal reading lands
+    near 0.12, a clear outlier above 0.95, and 0.85 means "well past the boundary" rather than
+    "unreachable".
+
+    Why a fixed temperature is defensible here when a fixed scale is REFUSED for the autoencoder
+    below: `decision_function` is scale-invariant by construction — it is a ratio of average path
+    lengths, so its magnitude is comparable across IsolationForest models and datasets (a dataset
+    scaled by 50x produces the same range). An autoencoder's reconstruction error is not: it carries
+    the units of the data, and differs by orders of magnitude between models. There, the scale must
+    come from the model; here, it is a property of the algorithm.
     """
-    score = 1.0 / (1.0 + np.exp(raw))  # raw < 0 (outlier) -> > 0.5;  raw > 0 (inlier) -> < 0.5
+    # The typical |decision_function| of a decided point. Empirically ~0.12-0.25 across dimensions and
+    # data scales; 0.06 puts a clear outlier comfortably past the 0.85 default and a normal reading
+    # well under it.
+    TEMPERATURE = 0.06
+    score = 1.0 / (1.0 + np.exp(raw / TEMPERATURE))  # raw < 0 (outlier) -> > 0.5; raw > 0 -> < 0.5
     score = _clamp(score)
     return DetectionResult(
         score=score,
