@@ -68,8 +68,103 @@ function normalizePlatform(m) {
     metrics,
     primary: pickPrimary(metrics),
     runId: m.mlflow_run_id || null,
+    // ADR-0027: does the serving environment still satisfy what this model declares? Surfaced here
+    // and NOT as an alert — it is a mechanical fact about two containers, not the statistical claim
+    // about the world that ADR-0022's retrain lane carries. null means "never evaluated" (registered
+    // before ADR-0027), which is not the same as "fine".
+    compatibility: m.compatibility_status || null,
+    compatibilityDetail: m.compatibility_detail || null,
     raw: m,
   };
+}
+
+// The three verdicts (ADR-0027 dec 7), mapped onto the reserved status palette. `compatible` carries
+// no row badge on purpose — a healthy model should be quiet; only a finding earns the reader's eye.
+const COMPAT = {
+  incompatible: {
+    pill: 'badge-crit',
+    label: 'incompatible',
+    title: 'This serving environment cannot honour what the model declares — it will not deploy (ADR-0027).',
+    headline: 'This environment cannot serve this model',
+    note: 'The serving environment does not satisfy what the model declares, so it will not be deployed. Loading it anyway risks scoring silently wrong, which is worse than refusing it.',
+  },
+  patch_drift: {
+    pill: 'badge-warn',
+    label: 'version drift',
+    title: 'Servable, but the training and serving versions are not identical — scikit-learn warns on load (ADR-0027).',
+    headline: 'Trained against different versions',
+    note: 'The model is servable: the versions differ, but not in a way that breaks the contract. scikit-learn warns when it loads a model built by another version, and that warning is shown rather than swallowed.',
+  },
+  compatible: {
+    pill: 'badge-live',
+    label: 'parity',
+    title: 'The serving environment satisfies everything this model declares (ADR-0027).',
+    headline: 'The serving environment satisfies this model',
+    note: null,
+  },
+};
+
+/**
+ * The two manifests, reconciled line by line.
+ *
+ * The whole content here is a comparison, so it is drawn as one: library, what it was trained
+ * against, what would serve it. A library that agrees stays quiet in mono; one that breaks the
+ * contract is marked and carries its reason on the same line, so "which library, which direction"
+ * is answerable at a glance instead of parsed out of a sentence. An absent library shows an em-dash
+ * in the serving column — the gap in the column IS the finding, which is exactly how a torch model
+ * arriving at an image with no torch should read.
+ */
+function ParityLedger({ status, detail }) {
+  const meta = COMPAT[status];
+  if (!meta) return null;
+
+  const declared = detail?.declared || {};
+  const present = detail?.present || {};
+  const faults = detail?.faults || {};
+  const libraries = Object.keys(declared).sort();
+
+  return (
+    <section className="mdl-block">
+      <div className="mdl-block-head">
+        <span className="eyebrow">Environment parity</span>
+        <span className={`badge ${meta.pill}`}>{meta.label}</span>
+      </div>
+
+      <p className={`mdl-compat-head${status === 'incompatible' ? ' crit' : ''}`}>{meta.headline}</p>
+      {meta.note && <p className="mdl-compat-note">{meta.note}</p>}
+
+      {detail?.flavor && (
+        <p className="mdl-compat-flavor mono">
+          {detail.flavor}
+          {detail.flavor_supported === false && <span className="mdl-compat-missing"> · not installed here</span>}
+        </p>
+      )}
+
+      {libraries.length > 0 && (
+        <div className="mdl-ledger" role="table" aria-label="Trained-against versus serving versions">
+          <div className="mdl-ledger-row mdl-ledger-head" role="row">
+            <span role="columnheader">library</span>
+            <span role="columnheader">trained against</span>
+            <span role="columnheader">serving with</span>
+          </div>
+          {libraries.map((lib) => {
+            const fault = faults[lib];
+            const serving = present[lib];
+            return (
+              <div key={lib} className={`mdl-ledger-row${fault ? ' fault' : ''}`} role="row">
+                <span className="mdl-ledger-lib mono" role="cell">{lib}</span>
+                <span className="mdl-ledger-v mono" role="cell">{declared[lib]}</span>
+                <span className="mdl-ledger-v mono" role="cell">
+                  {serving || <span className="mdl-compat-missing">— absent</span>}
+                </span>
+                {fault && <span className="mdl-ledger-why" role="cell">{fault}</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function MLModels() {
@@ -233,6 +328,16 @@ function MLModels() {
                             <Icon name="refresh" size={11} /> retrain
                           </span>
                         )}
+                        {/* Only a FINDING earns a row badge. A model in parity is the expected case
+                            and stays quiet — its verdict is in the drawer for anyone who looks. */}
+                        {(m.compatibility === 'incompatible' || m.compatibility === 'patch_drift') && (
+                          <span
+                            className={`badge ${COMPAT[m.compatibility].pill} mdl-retrain`}
+                            title={COMPAT[m.compatibility].title}
+                          >
+                            <Icon name="alert" size={11} /> {COMPAT[m.compatibility].label}
+                          </span>
+                        )}
                       </td>
                       <td><span className={`badge mdl-src-${m.source}`}>{SOURCE_LABEL[m.source]}</span></td>
                       <td className="mono mdl-dim">{m.version}</td>
@@ -362,6 +467,16 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
               </div>
             </div>
           )}
+
+          {/* Environment parity (ADR-0027). Rendered as a LEDGER, not a warning box, because that is
+              what it actually is: a reconciliation of two manifests — what the model was trained
+              against, and what would serve it — reconciled library by library. Prose bullets would
+              throw that structure away and make the reader rebuild the table in their head.
+
+              Deliberately not an alert (ADR-0027 dec 8): a version mismatch is a mechanical fact
+              about two containers, with a different remedy from the statistical retrain lane above —
+              the weights may be perfectly fine. */}
+          {row.compatibility && <ParityLedger status={row.compatibility} detail={row.compatibilityDetail} />}
 
           {/* Description — editable for notebook models, read-only for platform detectors. */}
           <section className="mdl-block">

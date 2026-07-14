@@ -30,9 +30,10 @@ import xgboost
 
 ARTIFACTS = os.environ.get("ROUNDTRIP_DIR", "/artifacts")
 
-# See train_in_kernel.py: mlflow 3.14 raises on a file-store backend unless this is set. The file
-# store stands in for the tracking backend; the pickle it carries is the thing under test.
-os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
+# The same MLflow server the kernel logged to, reached the same way ml_service reaches it in
+# production — over HTTP, resolving a `runs:/<id>/model` URI (see train_in_kernel.py for why not a
+# file store).
+TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 
 # The kernel and this image are held to numpy-major / sklearn-major.minor equality, so a correct
 # round trip should be exact. The tolerance is here for float summation order across BLAS builds,
@@ -42,7 +43,7 @@ TOLERANCE = 1e-9
 
 
 def main() -> int:
-    mlflow.set_tracking_uri(f"file://{ARTIFACTS}/mlruns")
+    mlflow.set_tracking_uri(TRACKING_URI)
 
     with open(f"{ARTIFACTS}/manifest.json") as fh:
         manifest = json.load(fh)

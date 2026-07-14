@@ -335,6 +335,13 @@ is a **trust** decision, not a parity one, and it is deferred below.
   the *boundary*, not the model.
 - **The scikit-learn rule is a judgement, not a proof.** Patch drift is permitted and *can* in principle
   break an artifact. Decision 7's middle state exists precisely because that residual risk is real.
+- **The artifact's declaration is INFERRED, not exhaustive — so decision 1's authority is imperfect.**
+  Found while building the gate: a scikit-learn model logged from the kernel declares `mlflow`, `pandas`,
+  `scikit-learn` and `skops` — **and not numpy**, the largest ABI risk on the entire path. A gate can only
+  judge what it is told. This is exactly why the contract keeps *three* checks and not one: the
+  declarative check reads the two images' pins directly (numpy included, whatever an artifact claims), the
+  round trip moves a real model between them, and only the runtime gate can refuse a *specific artifact*.
+  None is sufficient alone, and deleting the "redundant" ones would open the hole this ADR closed.
 - **The registration verdict goes stale**, which is why decision 6 pays for a second gate. Even so, a model
   already deployed when its serving environment is rebuilt is not re-checked — only a re-deployment is.
   Closing that needs a background reconciler, deferred below.
@@ -358,6 +365,10 @@ is a **trust** decision, not a parity one, and it is deferred below.
   (`MLFLOW_ALLOW_PICKLE_DESERIALIZATION` defaults true), so the serving path retains a route to executing
   arbitrary code from a notebook-produced file. Whether to turn that off — and what it breaks — is its
   own record.
+- **Making the kernel declare completely.** MLflow *infers* a run's requirements, and the inference misses
+  numpy (see Consequences). The kernel could log an explicit, complete requirement set rather than relying
+  on that inference — which would make decision 1's authority genuinely authoritative instead of merely
+  mostly so. Until then the declarative check is what covers numpy.
 - **A background reconciler** re-evaluating decision 7's property for already-deployed models when the
   serving environment changes, closing the staleness in Consequences. If it ever warrants a proactive
   notification, that is a **new, mechanical** condition — never ADR-0022's statistical lane (decision 8).

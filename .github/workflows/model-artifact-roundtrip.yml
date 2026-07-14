@@ -78,30 +78,74 @@ jobs:
       - name: Build the ml_service image (where models are served)
         run: docker build -q -t if-serving:roundtrip -f services/ml_service/api/Dockerfile services/ml_service
 
-      - name: Create the shared artifact store
-        # Stands in for the tracking backend (ADR-0019). The kernel runs as uid 1000 and the serving
-        # image as 10001, and each must be able to write/read here — hence 0777 rather than a chown
-        # to either one of them.
+      # The kernel and ml_service both reach MLflow over HTTP in production (ADR-0019 puts the
+      # tracking gateway in front of this very API), so the harness stands up the real server rather
+      # than passing a directory between the two containers.
+      #
+      # Not merely for fidelity: mlflow's FileStore is BROKEN ON PYTHON 3.14 — it writes a run and
+      # then cannot read it back. Same family as #222 (mlflow's server dies on 3.14), and the kernel
+      # is now a 3.14 image. A file-store harness would have failed for a reason with nothing to do
+      # with the boundary under test. Nothing in production uses a file store, so the bug costs the
+      # product nothing — it only ever bites a test that takes a shortcut.
+      - name: Build and start the MLflow tracking server (the same image the platform runs)
+        run: |
+          docker build -q -t if-mlflow:roundtrip infrastructure/mlflow
+          docker network create roundtrip-net
+          # sqlite + the server's own artifact proxy (--serve-artifacts): the artifacts land under the
+          # workdir the image's non-root user already owns, and the clients fetch them back through
+          # the server, so neither container needs object-store credentials. The platform's real
+          # deployment uses Postgres + MinIO here; what this harness needs from MLflow is the API and
+          # the artifact round trip, not its storage topology.
+          docker run -d --name roundtrip-mlflow --network roundtrip-net -p 5000:5000 \
+            if-mlflow:roundtrip \
+            mlflow server --host 0.0.0.0 --port 5000 \
+              --backend-store-uri sqlite:////home/mlflow/mlflow.db \
+              --serve-artifacts
+
+      - name: Wait for MLflow to accept requests
+        # Converge, then proceed (ADR-0026 dec 3): a server that is still starting is not a failure,
+        # but one that never starts must not be reported as a model-compatibility problem.
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:5000/health >/dev/null 2>&1; then
+              echo "MLflow is up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::MLflow tracking server never became ready — the round trip could not be run."
+          docker logs roundtrip-mlflow
+          exit 1
+
+      - name: Create the shared directory for the run manifest
+        # Only the manifest crosses this way (run ids + the kernel's expected predictions). The MODEL
+        # travels through MLflow, exactly as it does in production. The kernel runs as uid 1000 and
+        # the serving image as 10001, so 0777 rather than a chown to either one.
         run: mkdir -p "${{ runner.temp }}/roundtrip" && chmod 0777 "${{ runner.temp }}/roundtrip"
 
       - name: TRAIN — in the authoring kernel image
         run: |
-          docker run --rm \
+          docker run --rm --network roundtrip-net \
+            -e MLFLOW_TRACKING_URI=http://roundtrip-mlflow:5000 \
             -v "${{ runner.temp }}/roundtrip:/artifacts" \
             -v "${{ github.workspace }}/tests/model_artifact_roundtrip:/harness:ro" \
             if-authoring:roundtrip \
             python /harness/train_in_kernel.py
 
       - name: LOAD AND SCORE — in the serving image
-        # The assertion is NOT "it loaded". An unpickle across a numpy major can succeed and score
-        # wrong, and a model that quietly lies is worse than one that crashes — ADR-0021 raises
-        # alerts on these numbers. So the far end must reproduce the kernel's predictions exactly.
+        # The assertion is NOT "it loaded". Reconstructing a model across a numpy major can succeed
+        # and score WRONG, and a model that quietly lies is worse than one that crashes — ADR-0021
+        # raises alerts on these numbers. So the far end must reproduce the kernel's predictions.
         run: |
-          docker run --rm \
+          docker run --rm --network roundtrip-net \
+            -e MLFLOW_TRACKING_URI=http://roundtrip-mlflow:5000 \
             -v "${{ runner.temp }}/roundtrip:/artifacts" \
             -v "${{ github.workspace }}/tests/model_artifact_roundtrip:/harness:ro" \
             if-serving:roundtrip \
             python /harness/load_in_serving.py
+
+      - name: MLflow server logs (on failure)
+        if: failure()
+        run: docker logs roundtrip-mlflow
 
   # Stable aggregate status for branch protection, matching the pattern the other gates use: always
   # runs, fails only if a job that actually ran failed.
