@@ -37,15 +37,17 @@ from sklearn.preprocessing import StandardScaler
 
 ARTIFACTS = os.environ.get("ROUNDTRIP_DIR", "/artifacts")
 
-# A file-store tracking backend stands in for the real one, and mlflow 3.14 refuses it unless asked
-# twice — it is in maintenance mode and raises rather than warns. Two reasons it is nonetheless the
-# right backend HERE:
-#   - the kernel ships mlflow-SKINNY, which carries no SQLAlchemy, so a sqlite backend is not even
-#     available on this side of the boundary;
-#   - what is under test is the PICKLE crossing two images, not the transport that carries it. In
-#     production the kernel logs over HTTP through the tracking gateway (ADR-0019); swapping that for
-#     a shared directory changes who moves the bytes, not what the bytes are.
-os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
+# The kernel logs to a real MLflow server over HTTP — which is what it does in production, where the
+# tracking gateway (ADR-0019) sits in front of exactly this API. It is NOT a shortcut around a file
+# store; it is the shorter of the two paths to being faithful, and the file store turned out to be a
+# trap in its own right:
+#
+#   mlflow's FileStore is BROKEN ON PYTHON 3.14 — it writes a run and then cannot read it back
+#   ("Run '<id>' not found" out of create_run). Same family as #222 (mlflow's *server* dies on 3.14),
+#   and the kernel is now a 3.14 image. Nothing in production touches a file store, so this costs the
+#   product nothing — but a harness built on one would have been red for a reason that has nothing to
+#   do with the boundary it is supposed to be testing.
+TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 
 # Fixed data and fixed seeds: the far end must reproduce these predictions exactly, so nothing here
 # may depend on the wall clock, the platform's RNG, or thread scheduling.
@@ -59,7 +61,7 @@ PROBE = RNG.normal(size=(5, 4))
 
 
 def main() -> int:
-    mlflow.set_tracking_uri(f"file://{ARTIFACTS}/mlruns")
+    mlflow.set_tracking_uri(TRACKING_URI)
     mlflow.set_experiment("adr-0027-roundtrip")
 
     print(f"kernel: python {sys.version.split()[0]}, numpy {np.__version__}, "
