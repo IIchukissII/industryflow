@@ -53,6 +53,10 @@ def configure_s3a(builder, checkpoint_location):
     writes and the driver reads, so on a multi-worker cluster the checkpoint must sit on ONE
     store visible to every node — S3A/MinIO (docs/architecture/stream-processing.md). For a
     local path this is a no-op. Credentials/endpoint default to the in-cluster MinIO.
+
+    Spark 4's Hadoop 3.4 S3A runs on the AWS SDK v2, which requires a region even against a custom
+    endpoint like MinIO (it fails to start otherwise); AWS_REGION supplies one, defaulting to a
+    placeholder MinIO ignores.
     """
     if not str(checkpoint_location).startswith("s3a://"):
         return builder
@@ -64,6 +68,8 @@ def configure_s3a(builder, checkpoint_location):
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled",
                 "true" if endpoint.startswith("https://") else "false") \
         .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+        .config("spark.hadoop.fs.s3a.endpoint.region",
+                os.getenv("AWS_REGION", "us-east-1")) \
         .config("spark.hadoop.fs.s3a.aws.credentials.provider",
                 "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
     if access and secret:
@@ -231,8 +237,8 @@ if __name__ == "__main__":
         .appName("IndustryFlow-Aggregations") \
         .master(os.getenv("SPARK_MASTER", "local[*]")) \
         .config("spark.jars.packages",
-                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
-                "org.postgresql:postgresql:42.6.0") \
+                "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.2,"
+                "org.postgresql:postgresql:42.7.4") \
         .config("spark.sql.shuffle.partitions",
                 os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200")) \
         .config("spark.ui.prometheus.enabled", "true")
