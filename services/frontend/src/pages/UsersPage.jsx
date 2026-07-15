@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Icon from '../components/Icon';
 import api from '../services/api';
 
@@ -21,13 +21,7 @@ function UsersPage() {
     is_superuser: false
   });
 
-  // Fetch users and companies
-  useEffect(() => {
-    fetchUsers();
-    fetchCompanies();
-  }, []);
-
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       const response = await api.get('/api/users');
       setUsers(response.data);
@@ -36,16 +30,22 @@ function UsersPage() {
       console.error('Error fetching users:', error);
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchCompanies = async () => {
+  const fetchCompanies = useCallback(async () => {
     try {
       const response = await api.get('/api/companies');
       setCompanies(response.data);
     } catch (error) {
       console.error('Error fetching companies:', error);
     }
-  };
+  }, []);
+
+  // Fetch users and companies on mount. Invoked from an inner async function so the effect body
+  // starts no synchronous setState — the updates land off the sync path as the requests resolve.
+  useEffect(() => {
+    (async () => { await Promise.all([fetchUsers(), fetchCompanies()]); })();
+  }, [fetchUsers, fetchCompanies]);
 
   const handleCreate = () => {
     setEditingUser(null);
