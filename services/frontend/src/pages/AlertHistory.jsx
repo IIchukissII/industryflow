@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from '../components/Icon';
 import './AlertHistory.css';
@@ -90,15 +90,7 @@ function AlertHistory() {
   const sensorFilter = searchParams.get('sensor'); // set when arriving from a Convergence node
   const [metrics, setMetrics] = useState(null); // operator-label precision (ADR-0022)
 
-  useEffect(() => {
-    fetchAlerts();
-    fetchAlertRules();
-    fetchMetrics();
-    const interval = setInterval(fetchAlerts, 20000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchAlerts = async () => {
+  const fetchAlerts = useCallback(async () => {
     try {
       const response = await authFetch('/api/alerts?limit=500');
       if (!response.ok) throw new Error('Failed to fetch alerts');
@@ -109,9 +101,9 @@ function AlertHistory() {
       setError(err.message);
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchAlertRules = async () => {
+  const fetchAlertRules = useCallback(async () => {
     try {
       const response = await authFetch('/api/alert-rules');
       if (!response.ok) throw new Error('Failed to fetch alert rules');
@@ -120,17 +112,25 @@ function AlertHistory() {
     } catch (err) {
       console.error('Failed to fetch alert rules:', err);
     }
-  };
+  }, []);
 
   // Operator-label precision over the last 30 days (ADR-0022). Recall is intentionally absent.
-  const fetchMetrics = async () => {
+  const fetchMetrics = useCallback(async () => {
     try {
       const response = await authFetch('/api/alerts/label-metrics?days=30');
       if (response.ok) setMetrics(await response.json());
     } catch (err) {
       /* precision panel just stays empty if unavailable */
     }
-  };
+  }, []);
+
+  // Load on mount, then poll alerts. The initial loads run from an inner async function so the
+  // effect body itself starts no synchronous setState; the interval fetch is already deferred.
+  useEffect(() => {
+    (async () => { await Promise.all([fetchAlerts(), fetchAlertRules(), fetchMetrics()]); })();
+    const interval = setInterval(fetchAlerts, 20000);
+    return () => clearInterval(interval);
+  }, [fetchAlerts, fetchAlertRules, fetchMetrics]);
 
   // Record an operator's correctness verdict on an alert (ADR-0022). Optimistic: reflect the
   // verdict locally on success, then refresh precision.
