@@ -2,23 +2,16 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import './Settings.css';
 import { API_URL, WS_URL } from '../config';
 
 function Settings() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
+  // Restore the (non-sensitive) user profile synchronously at first render — nothing to await.
+  const [user] = useState(() => {
     const userData = localStorage.getItem('user');
-    if (userData) {
-      setUser(JSON.parse(userData));
-    }
-    setLoading(false);
-  }, []);
-
-  if (loading) return <div className="settings-loading">Loading...</div>;
+    return userData ? JSON.parse(userData) : null;
+  });
 
   return (
     <div className="settings-container">

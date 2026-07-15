@@ -38,14 +38,13 @@ export default [
       'react/no-unescaped-entities': 'off',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
-      // New in eslint-plugin-react-hooks 7 (the React Compiler rules) — they did not exist under
-      // the v4 this config came from, and they flag 18 real findings across 9 components: effects
-      // that setState on mount, and effects calling a fetcher declared below them (hoisting, with
-      // an empty dep array that lies). Fixing those restructures the data-fetching path, which is
-      // a behavioural change and not a linter migration's job — so they are tracked in #214.
-      // `warn`, deliberately not `off`: the findings stay in every lint run rather than vanishing.
-      'react-hooks/set-state-in-effect': 'warn',
-      'react-hooks/immutability': 'warn',
+      // The React Compiler rules from eslint-plugin-react-hooks 7. Enforced as errors (#214):
+      // fetch-on-mount effects invoke `useCallback`'d fetchers from an inner async function (so no
+      // setState runs synchronously in an effect body), prop-derived state is either a lazy
+      // `useState` initialiser or reset via a `key` remount, and components that always load on
+      // mount start in their loading state. A regression fails the lint run rather than warning.
+      'react-hooks/set-state-in-effect': 'error',
+      'react-hooks/immutability': 'error',
       // Non-breaking spaces are used intentionally inside display template literals (keeping
       // "3 days" on one line); allow them there, still flag stray ones in code.
       'no-irregular-whitespace': ['error', { skipTemplates: true }],

@@ -6,7 +6,6 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import './App.css';
 import { getLatestSensors } from './services/api';
-import { API_URL } from './config';
 import websocketService from './services/websocket';
 import AppShell from './components/AppShell';
 import ConvergenceCore from './components/ConvergenceCore';
@@ -40,26 +39,12 @@ function ProtectedRoute({ children, user }) {
 
 function Dashboard({ user }) {
   const [sensors, setSensors] = useState({});
-  const [, setConnected] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
   const [selectedSensor, setSelectedSensor] = useState(null);
   const [alertStatus, setAlertStatus] = useState({}); // sensor_id -> 'crit' | 'warn', from active alerts
   const navigate = useNavigate();
-
-  useEffect(() => {
-    fetch(`${API_URL}/health`)
-      .then(res => res.json())
-      .then(data => {
-        console.log('API Health:', data);
-        setConnected(true);
-      })
-      .catch(err => {
-        console.error('API connection failed:', err);
-        setConnected(false);
-      });
-  }, []);
 
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -271,34 +256,18 @@ function Dashboard({ user }) {
 }
 
 function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // The access token is an httpOnly cookie (not visible to JS); restore the session from
-    // the saved (non-sensitive) user profile. An invalid/expired cookie surfaces as a 401
-    // on the first API call, which the api client handles (refresh, else redirect to login).
+  // The access token is an httpOnly cookie (not visible to JS); restore the session synchronously
+  // from the saved (non-sensitive) user profile at first render — there is nothing to wait for, so
+  // no loading gate. An invalid/expired cookie surfaces as a 401 on the first API call, which the
+  // api client handles (refresh, else redirect to login).
+  const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem('user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-    setLoading(false);
-  }, []);
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
 
   const handleLogin = (userData) => {
     setUser(userData);
   };
-
-  if (loading) {
-    return <div style={{ 
-      display: 'flex', 
-      justifyContent: 'center', 
-      alignItems: 'center', 
-      height: '100vh',
-      background: '#0a0e27',
-      color: '#d1d4dc'
-    }}>Loading...</div>;
-  }
 
   return (
     <Router>

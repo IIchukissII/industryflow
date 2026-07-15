@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Icon from './Icon';
 import './EquipmentConfigModal.css';
 import { createEquipment, updateEquipment, getEquipmentSensors, removeSensorFromEquipment } from '../services/equipmentApi';
@@ -13,8 +13,22 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
-  // Equipment form state
-  const [formData, setFormData] = useState({
+  // Equipment form state. Initialised from `editEquipment` when editing, else the create defaults.
+  // The modal is keyed by equipment id at the render site, so a different target remounts it and
+  // this initialiser runs fresh — no effect mirrors the prop into state.
+  const [formData, setFormData] = useState(() => editEquipment ? {
+    equipment_id: editEquipment.equipment_id,
+    equipment_type: editEquipment.equipment_type,
+    name: editEquipment.name,
+    description: editEquipment.description || '',
+    site_id: editEquipment.site_id || '',
+    location: editEquipment.location || '',
+    sensor_count: editEquipment.sensor_count,
+    expected_sensors: editEquipment.expected_sensors || [],
+    batch_timeout_seconds: editEquipment.batch_timeout_seconds,
+    require_complete_batch: editEquipment.require_complete_batch,
+    min_sensors_for_partial: editEquipment.min_sensors_for_partial
+  } : {
     equipment_id: '',
     equipment_type: 'pump',
     name: '',
@@ -44,31 +58,10 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
     normal_max: ''
   });
 
-  const [createdEquipmentId, setCreatedEquipmentId] = useState(null);
-  const [isEditMode, setIsEditMode] = useState(false);
+  const [createdEquipmentId, setCreatedEquipmentId] = useState(editEquipment?.equipment_id ?? null);
+  const [isEditMode, setIsEditMode] = useState(!!editEquipment);
 
-  useEffect(() => {
-    if (editEquipment) {
-      setFormData({
-        equipment_id: editEquipment.equipment_id,
-        equipment_type: editEquipment.equipment_type,
-        name: editEquipment.name,
-        description: editEquipment.description || '',
-        site_id: editEquipment.site_id || '',
-        location: editEquipment.location || '',
-        sensor_count: editEquipment.sensor_count,
-        expected_sensors: editEquipment.expected_sensors || [],
-        batch_timeout_seconds: editEquipment.batch_timeout_seconds,
-        require_complete_batch: editEquipment.require_complete_batch,
-        min_sensors_for_partial: editEquipment.min_sensors_for_partial
-      });
-      setCreatedEquipmentId(editEquipment.equipment_id);
-      setIsEditMode(true);
-      loadExistingSensors(editEquipment.equipment_id);
-    }
-  }, [editEquipment]);
-
-  const loadExistingSensors = async (equipmentId) => {
+  const loadExistingSensors = useCallback(async (equipmentId) => {
     try {
       const data = await getEquipmentSensors(equipmentId);
       setSensors(data);
@@ -82,7 +75,16 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
       console.error('Error loading sensors:', err);
       setStep(2);
     }
-  };
+  }, []);
+
+  // Editing: pull the equipment's existing sensors and jump to the right step. The form fields are
+  // initialised from the prop above, so this effect only performs the async fetch — invoked from an
+  // inner async function so the effect body itself starts no synchronous setState.
+  useEffect(() => {
+    if (editEquipment) {
+      (async () => { await loadExistingSensors(editEquipment.equipment_id); })();
+    }
+  }, [editEquipment, loadExistingSensors]);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
