@@ -62,11 +62,11 @@ jobs:
           # process a batch — that needs Kafka+TimescaleDB, which ADR-0026 keeps off CI and ADR-0029
           # dec 5 assigns to the box run.
           - { name: spark-streaming,        context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.streaming,
-              smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version 2>&1 | tee /tmp/v | grep -q 'version 4.1' && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
+              smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version > /tmp/v 2>&1 && grep -q 'version 4.1' /tmp/v && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
           - { name: spark-aggregations,     context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.aggregations,
-              smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version 2>&1 | tee /tmp/v | grep -q 'version 4.1' && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
+              smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version > /tmp/v 2>&1 && grep -q 'version 4.1' /tmp/v && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
           - { name: spark-worker,           context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.worker,
-              smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version 2>&1 | tee /tmp/v | grep -q 'version 4.1' && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
+              smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version > /tmp/v 2>&1 && grep -q 'version 4.1' /tmp/v && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
           # THE ONE THAT WOULD HAVE CAUGHT #222. mlflow is pure-python and its 95-package closure
           # resolves cleanly on 3.14 — and then the SERVER dies importing importlib.abc.Traversable.
           # Importing the client is not enough; it is `mlflow.server` that breaks.
