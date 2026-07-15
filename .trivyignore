@@ -6,11 +6,11 @@
 # upgrade AND (b) not reachable with attacker-controlled input in our deployment belong here.
 # Each entry must carry a justification and an expiry so it is revisited.
 
-# --- Apache Spark 3.5.0 bundled JARs (services/spark_jobs/*) ---
+# --- Apache Spark 4.1.2 bundled JARs (services/spark_jobs/*) ---
 # These live in the Spark distribution's jars/ dir, not our code. Remediation is a Spark
-# version upgrade, tracked as its own task (docs/operations/production-readiness.md). In our
-# pipeline the Spark jobs consume only first-party Kafka data (no attacker-supplied Avro
-# schemas), ZooKeeper is internal-only, and Derby is unused — so these are not reachable.
-CVE-2024-47561 exp:2026-09-30  # org.apache.avro:avro 1.7.7/1.11.2 — schema-parse RCE (Spark-bundled)
-CVE-2022-46337 exp:2026-09-30  # org.apache.derby:derby 10.14.2.0 — LDAP injection (Spark-bundled, Derby unused)
-CVE-2023-44981 exp:2026-09-30  # org.apache.zookeeper:zookeeper 3.6.3 — authz bypass (Spark-bundled, ZK internal)
+# version upgrade, tracked as its own task (docs/operations/production-readiness.md). Spark 4.1
+# already carries fixed avro and zookeeper, so the 3.5-era CVE-2024-47561 (avro) and
+# CVE-2023-44981 (zookeeper) are gone; only Derby remains — and Derby is unused in our pipeline,
+# so it is not reachable. (The image's OS packages are patched via `apt-get upgrade` at build, so
+# base-layer CVEs like the linux-libc-dev kernel headers are fixed, not ignored.)
+CVE-2022-46337 exp:2026-09-30  # org.apache.derby:derby 10.16.1.1 — LDAP injection (Spark-bundled, Derby unused)
