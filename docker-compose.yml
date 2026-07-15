@@ -337,7 +337,7 @@ services:
 
   # Spark Master
   spark-master:
-    image: apache/spark:3.5.0
+    image: apache/spark:4.1.2-python3
     container_name: industryflow-spark-master
     ports:
       - "7077:7077"

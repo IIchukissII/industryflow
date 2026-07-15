@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-FROM apache/spark:3.5.0
+FROM apache/spark:4.1.2-python3
 
 # Build arguments for version tracking
 ARG BUILD_DATE
@@ -27,16 +27,16 @@ RUN apt-get update && \
 
 # Install Python dependencies
 RUN pip3 install --no-cache-dir \
-    psycopg2-binary==2.9.9
+    psycopg2-binary==2.9.10
 
 # S3A filesystem for an object-storage checkpoint (multi-worker / spark-on-k8s — ADR-0006,
 # docs/architecture/stream-processing.md). Baked in (not --packages) so the versions are pinned
-# to this image's Hadoop (3.3.4) and resolve offline on every node. aws-java-sdk-bundle is the
-# matching SDK for hadoop-aws 3.3.4.
-RUN curl -fsSL -o /opt/spark/jars/hadoop-aws-3.3.4.jar \
-        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar && \
-    curl -fsSL -o /opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar \
-        https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar
+# to this image's Hadoop (3.4.2) and resolve offline on every node. Spark 4 bundles Hadoop 3.4.x,
+# whose S3A uses the AWS SDK v2 (software.amazon.awssdk:bundle), not the v1 aws-java-sdk-bundle.
+RUN curl -fsSL -o /opt/spark/jars/hadoop-aws-3.4.2.jar \
+        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar && \
+    curl -fsSL -o /opt/spark/jars/bundle-2.35.4.jar \
+        https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.35.4/bundle-2.35.4.jar
 
 # Create directories with proper permissions
 RUN mkdir -p /app/spark_streaming && \
@@ -59,7 +59,7 @@ USER spark
 
 # Pre-download Spark packages to avoid runtime issues
 RUN /opt/spark/bin/spark-submit \
-    --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.postgresql:postgresql:42.6.0 \
+    --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.2,org.postgresql:postgresql:42.7.4 \
     --class org.apache.spark.sql.kafka010.KafkaSourceProvider \
     --help > /dev/null 2>&1 || true
 
@@ -73,7 +73,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # (default local[*]) in its SparkSession builder, so the master has one source of truth.
 # Passing --master here would be a misleading no-op (the builder's .master() overrides it).
 CMD ["/opt/spark/bin/spark-submit", \
-     "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.postgresql:postgresql:42.6.0", \
+     "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.2,org.postgresql:postgresql:42.7.4", \
      "--conf", "spark.sql.streaming.checkpointLocation=/opt/spark/checkpoints", \
      "--py-files", "/app/spark_streaming/upsert_filter.py", \
      "/app/spark_streaming/kafka_to_timescaledb.py"]

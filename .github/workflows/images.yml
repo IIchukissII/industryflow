@@ -39,7 +39,8 @@ jobs:
         include:
           # `smoke` (ADR-0026 dec 5): a shell command run INSIDE the built image. Import the module the
           # container actually serves — that is the step a dependency resolve cannot take for you.
-          # Images with no Python process to speak of (nginx, the Spark distro, pg_dump) carry none.
+          # Images with nothing to load or start (nginx, pg_dump) carry none; the Spark images carry a
+          # version/artifact check instead of an import (their risk is the JVM side — see below).
           - { name: api-gateway,            context: services/api_gateway,     file: services/api_gateway/Dockerfile,
               smoke: "python -c \"import fastapi_users, redis, asyncpg; from fastapi_users.authentication import CookieTransport, JWTStrategy; print('api-gateway auth stack ok')\"" }
           - { name: ingestion-service,      context: services/ingestion_service, file: services/ingestion_service/Dockerfile,
@@ -53,9 +54,19 @@ jobs:
               smoke: "python -c \"import fastapi, asyncpg, boto3, jose; print('alert-api ok')\"" }
           - { name: alert-service-detector, context: services/alert_service,    file: services/alert_service/worker/Dockerfile,
               smoke: "python -c \"import aiokafka, redis; print('alert-detector ok')\"" }
-          - { name: spark-streaming,        context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.streaming }
-          - { name: spark-aggregations,     context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.aggregations }
-          - { name: spark-worker,           context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.worker }
+          # The Spark images DO run a process (a PySpark job / an executor), and their migration risk
+          # is the JVM side a dependency resolve never sees: the base's Spark/Scala version and the
+          # S3A jars baked for the object-store checkpoint (ADR-0029 moved these to Hadoop 3.4.2 + the
+          # AWS SDK v2 bundle). This smoke asserts the image IS Spark 4.1/Scala 2.13 with that stack
+          # baked and psycopg2 present. It does NOT resolve the runtime `--packages` Kafka connector or
+          # process a batch — that needs Kafka+TimescaleDB, which ADR-0026 keeps off CI and ADR-0029
+          # dec 5 assigns to the box run.
+          - { name: spark-streaming,        context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.streaming,
+              smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version 2>&1 | tee /tmp/v | grep -q 'version 4.1' && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
+          - { name: spark-aggregations,     context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.aggregations,
+              smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version 2>&1 | tee /tmp/v | grep -q 'version 4.1' && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
+          - { name: spark-worker,           context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.worker,
+              smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version 2>&1 | tee /tmp/v | grep -q 'version 4.1' && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
           # THE ONE THAT WOULD HAVE CAUGHT #222. mlflow is pure-python and its 95-package closure
           # resolves cleanly on 3.14 — and then the SERVER dies importing importlib.abc.Traversable.
           # Importing the client is not enough; it is `mlflow.server` that breaks.
@@ -116,9 +127,9 @@ jobs:
       # invisible to every dependency check because a clean resolve says nothing about a run — mlflow
       # resolves perfectly on Python 3.14 and then dies importing `importlib.abc.Traversable`, which
       # 3.14 removed. So each image that serves a Python process imports the module it actually serves.
-      # `smoke` is only set where there is something worth importing; images without it (nginx, Spark)
-      # skip this step. Runs on pull_request, where the build is `load`ed into the local daemon — which
-      # is the merge gate, so nothing reaches main unsmoked.
+      # `smoke` is only set where there is something worth loading or starting; images without it
+      # (nginx, pg_dump) skip this step. Runs on pull_request, where the build is `load`ed into the
+      # local daemon — which is the merge gate, so nothing reaches main unsmoked.
       - name: Smoke — the image starts, not just builds
         if: github.event_name == 'pull_request' && matrix.smoke != ''
         # The command goes through the environment, not through the shell: every smoke string contains
