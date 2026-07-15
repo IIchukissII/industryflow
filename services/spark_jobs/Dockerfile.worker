@@ -5,22 +5,23 @@
 # Spark worker image. The streaming/aggregation jobs write to TimescaleDB via psycopg2 inside
 # foreachPartition — which runs in the EXECUTOR, i.e. this worker container. The base
 # apache/spark image has no psycopg2, so executors fail with ModuleNotFoundError; install it here.
-FROM apache/spark:3.5.0
+FROM apache/spark:4.1.2-python3
 
 USER root
-RUN pip3 install --no-cache-dir psycopg2-binary==2.9.9
+RUN pip3 install --no-cache-dir psycopg2-binary==2.9.10
 
 # The executor (here) writes Structured-Streaming state-store deltas to the checkpoint, so when
 # the checkpoint is on object storage it needs the S3A jars on its classpath too — pinned to the
-# image's Hadoop 3.3.4 (matches the streaming/aggregations images). See
-# docs/architecture/stream-processing.md.
+# image's Hadoop 3.4.2 (matches the streaming/aggregations images). Spark 4's Hadoop 3.4.x S3A uses
+# the AWS SDK v2 (software.amazon.awssdk:bundle). See docs/architecture/stream-processing.md.
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/* && \
-    curl -fsSL -o /opt/spark/jars/hadoop-aws-3.3.4.jar \
-        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar && \
-    curl -fsSL -o /opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar \
-        https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar
+    curl -fsSL -o /opt/spark/jars/hadoop-aws-3.4.2.jar \
+        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar && \
+    curl -fsSL -o /opt/spark/jars/bundle-2.35.4.jar \
+        https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.35.4/bundle-2.35.4.jar
 
 # Spark -> Prometheus metrics config (worker + its executors expose /metrics/prometheus). Item 7.
 COPY metrics.properties /opt/spark/conf/metrics.properties
