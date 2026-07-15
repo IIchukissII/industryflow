@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import './AlertRules.css';
 import authFetch from '../services/http';
 
@@ -12,25 +12,8 @@ function AlertRules() {
   const [loading, setLoading] = useState(true);
   const [editingRule, setEditingRule] = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const [, setUser] = useState(null);
-  const [, setConnected] = useState(false);
-  useEffect(() => {
-    // Get user from localStorage
-    const userData = localStorage.getItem('user');
-    if (userData) {
-      setUser(JSON.parse(userData));
-    }
 
-    // Check API connection
-    fetch('/health')
-      .then(res => res.json())
-      .then(() => setConnected(true))
-      .catch(() => setConnected(false));
-
-    fetchRules();
-  }, []);
-
-  const fetchRules = async () => {
+  const fetchRules = useCallback(async () => {
     setLoading(true);
     try {
       const response = await authFetch('/api/alert-rules?enabled_only=false');
@@ -43,7 +26,13 @@ function AlertRules() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Fetch on mount. Invoked from an inner async function so the effect body itself runs no
+  // synchronous setState — the rules land off the sync path when the request resolves.
+  useEffect(() => {
+    (async () => { await fetchRules(); })();
+  }, [fetchRules]);
 
   const handleEdit = (rule) => {
     setEditingRule(rule);
@@ -335,13 +324,9 @@ function EditRuleModal({ rule, onClose, onSave }) {
   const [sensors, setSensors] = useState([]);
   const [equipment, setEquipment] = useState([]);
   const [models, setModels] = useState([]);
-  const [loadingData, setLoadingData] = useState(false);
+  const [loadingData, setLoadingData] = useState(true); // always fetches on mount
 
-  useEffect(() => {
-    fetchSensorsAndEquipment();
-  }, []);
-
-  const fetchSensorsAndEquipment = async () => {
+  const fetchSensorsAndEquipment = useCallback(async () => {
     setLoadingData(true);
     try {
       // Fetch sensors from cache
@@ -374,7 +359,13 @@ function EditRuleModal({ rule, onClose, onSave }) {
     } finally {
       setLoadingData(false);
     }
-  };
+  }, []);
+
+  // Fetch on mount. Invoked from an inner async function so the effect body itself runs no
+  // synchronous setState — the sensor/equipment/model lists land off the sync path on resolve.
+  useEffect(() => {
+    (async () => { await fetchSensorsAndEquipment(); })();
+  }, [fetchSensorsAndEquipment]);
 
   const handleSubmit = (e) => {
     e.preventDefault();

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import EquipmentConfigModal from '../components/EquipmentConfigModal';
 import { getEquipment, getEquipmentById, deleteEquipment } from '../services/equipmentApi';
 import './Equipment.css';
@@ -15,26 +15,8 @@ function Equipment() {
   const [showModal, setShowModal] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [editingEquipment, setEditingEquipment] = useState(null);
-  const [, setUser] = useState(null);
-  const [, setConnected] = useState(false);
 
-  useEffect(() => {
-    // Get user from localStorage
-    const userData = localStorage.getItem('user');
-    if (userData) {
-      setUser(JSON.parse(userData));
-    }
-
-    // Check API connection
-    fetch('/health')
-      .then(res => res.json())
-      .then(() => setConnected(true))
-      .catch(() => setConnected(false));
-
-    fetchEquipment();
-  }, []);
-
-  const fetchEquipment = async () => {
+  const fetchEquipment = useCallback(async () => {
     try {
       const data = await getEquipment();
       setEquipment(data);
@@ -43,7 +25,13 @@ function Equipment() {
       setError(err.message);
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Fetch on mount. Invoked from an inner async function so the effect body itself runs no
+  // synchronous setState — the equipment list lands off the sync path when the request resolves.
+  useEffect(() => {
+    (async () => { await fetchEquipment(); })();
+  }, [fetchEquipment]);
 
   const viewEquipmentDetails = async (equipmentId) => {
     try {
@@ -234,8 +222,10 @@ function Equipment() {
           </div>
         )}
 
-        {/* Config Modal */}
+        {/* Config Modal — keyed by target so opening a different equipment (or switching
+            between create and edit) remounts it with fresh, correctly-initialised form state. */}
         <EquipmentConfigModal
+          key={editingEquipment?.equipment_id ?? 'new'}
           isOpen={showConfigModal}
           onClose={() => {
             setShowConfigModal(false);

@@ -224,7 +224,9 @@ function MLModels() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Load on mount. The fetch is invoked from an inner async function so the effect body itself
+  // starts no synchronous state update — the data arrives (and setState runs) off the sync path.
+  useEffect(() => { (async () => { await load(); })(); }, [load]);
 
   // When a notebook model is opened, pull its full version history + per-version run metrics.
   const openRow = useCallback(async (row) => {
@@ -374,6 +376,7 @@ function MLModels() {
 
       {selected && (
         <ModelDrawer
+          key={selected.key}
           row={selected}
           detail={detail}
           retrainRecommended={!!(selected.id && retrainModels.has(selected.id))}
@@ -394,14 +397,14 @@ function MLModels() {
 
 const PLATFORM_STATUSES = ['production', 'active', 'staging', 'archived'];
 
+// Rendered with `key={row.key}` (see the render site), so opening a different model remounts the
+// drawer — draft/editing/saveErr initialise fresh from the new row, no reset effect required.
 function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStatusChanged }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(row.description || '');
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState(null);
   const [statusBusy, setStatusBusy] = useState(false);
-
-  useEffect(() => { setDraft(row.description || ''); setEditing(false); setSaveErr(null); }, [row.key, row.description]);
 
   // Esc closes the drawer.
   useEffect(() => {
@@ -636,9 +639,8 @@ function DriftPanel({ row }) {
   const [state, setState] = useState('idle'); // idle | loading | done | error
   const [result, setResult] = useState(null);
   const [err, setErr] = useState(null);
-
-  // A different model opened in the drawer starts fresh.
-  useEffect(() => { setState('idle'); setResult(null); setErr(null); }, [row.id]);
+  // A different model starts fresh: the drawer is keyed by row, so selecting another model
+  // remounts this panel — no reset effect needed.
 
   const evaluate = useCallback(async () => {
     if (!row.id) return;
