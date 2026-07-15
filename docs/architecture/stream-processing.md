@@ -81,40 +81,41 @@ Each Kafka message carries the verified `company_id`. The Spark sink resolves it
 schema (UUID-validated, `tenant_<uuid>`) before writing — the same tenant-resolution discipline
 as the rest of the platform (**[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**).
 
-## Upgrading Spark across a major (checkpoint cutover)
+## Upgrading Spark across a major (checkpoint)
 
-Spark does not guarantee a structured-streaming checkpoint written by one major version is readable
-by the next, so a major upgrade **drops the checkpoint and re-derives from Kafka** rather than
-migrating it. The *why* — and why that is safe — is
-**[ADR-0029](../../ADR/ADR-0029-spark-major-upgrade-checkpoint-cutover.md)**; this is the procedure.
+Spark does not *guarantee* a structured-streaming checkpoint written by one major version is readable
+by the next — but it does not forbid it either, and the sinks are idempotent (ADR-0006), so the
+checkpoint is not load-bearing. The policy
+(**[ADR-0029](../../ADR/ADR-0029-spark-major-upgrade-checkpoint-cutover.md)**): **resume** the
+checkpoint when the new version can read it, **reset** it when it can't, and establish which by running
+the boundary — never assume. This is the procedure.
 
-The cost is asymmetric and bounded:
+For **3.5 → 4.1 the checkpoint resumes** (box-verified 2026-07-15): offsets and windowed state both.
+So that upgrade is a rolling restart against the existing checkpoint — no drop, no loss.
 
-- **Raw streaming** (`kafka_to_timescaledb` — stateless, `startingOffsets=earliest`, upsert
-  `DO NOTHING`) re-reads the retained stream and re-upserts it idempotently: **lossless within Kafka
-  retention**.
-- **Aggregations** (`kafka_aggregations` — stateful windows, `startingOffsets=latest`, upsert
-  `DO UPDATE`) resume at the tail; only the windows **open at the cutover instant** are lost or
-  emitted partial, and they self-heal as the next windows close.
+### Resume path (3.5 → 4.1, and any boundary the box run shows resuming)
 
-### Before you cut over
-
-- **Confirm Kafka retention** still covers the measurements you expect the raw stream to re-derive.
-  Anything older than the earliest available offset does not come back from Kafka — it remains in
-  `sensor_measurements` and the cold layer (ADR-0025), which the drop does not touch.
-- **Optional — make the aggregation loss zero** (ADR-0029 Alternative C): pause the producers and let
-  the widest window's watermark pass, so no window is open at the cutover instant. Skip this if the
-  bounded boundary-window gap is acceptable.
-
-### Cut over (compose)
-
-1. **Stop the jobs** (also frees RAM for the image build — the box swaps hard):
+1. Build the new images.
+2. Stop the jobs (also frees RAM for the build — the box swaps hard):
    `docker compose stop spark-streaming spark-aggregations`
-2. **Delete the checkpoint prefix.** On the object store: remove the `spark-checkpoints` prefix
-   (e.g. `mc rm -r --force <alias>/spark-checkpoints`). For a single-node local checkpoint path,
-   delete the contents of `/opt/spark/checkpoints` on the volume instead.
-3. **Bring up the 4.1 images:**
+3. Bring up the new cluster against the **unchanged** checkpoint:
    `docker compose up -d --build spark-master spark-worker spark-streaming spark-aggregations`
+4. Verify (below). The streaming query resumes committed offsets — it goes idle once caught up rather
+   than reprocessing from `earliest` — and the aggregation queries resume their state store.
+
+### Reset path (fallback — a boundary the box run shows NOT resuming)
+
+Only when the new version refuses the old checkpoint or reinitialises it. The idempotent sinks make
+this safe, at a bounded, asymmetric cost (ADR-0029): the measurements stream re-reads from `earliest`
+and re-upserts idempotently (**lossless within Kafka retention** — confirm retention covers what you
+expect; anything older stays in `sensor_measurements` and the cold layer, ADR-0025); the aggregations
+lose only the windows **open at the reset instant** (bounded, self-healing).
+
+- Run the resume path, but **between steps 2 and 3 delete the checkpoint prefix**: on the object store
+  remove `spark-checkpoints` (e.g. `mc rm -r --force <alias>/spark-checkpoints`); for a local path
+  delete the contents of `/opt/spark/checkpoints`.
+- To make the aggregation loss zero, optionally pause the producers first and let the widest window's
+  watermark pass, so no window is open at the reset instant.
 
 ### Verify
 

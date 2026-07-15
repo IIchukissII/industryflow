@@ -3,153 +3,149 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0029 — Upgrading Spark across a major: the checkpoint is dropped, not migrated
+# ADR-0029 — A Spark major upgrade resumes the checkpoint when it can and resets it when it can't; the sinks make both safe
 
 - **ID:** ADR-0029
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-15
 - **Project:** IndustryFlow
-- **Parent:** [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (bounded state, idempotent writes, durable checkpoints — the guarantees this cutover must not break)
-- **Companions:** [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (at-least-once, the property that makes a checkpoint drop safe), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (where this upgrade is proven, and where it is deliberately *not*)
-- **Related:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (the aggregate tables that see a bounded gap at cutover), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (the cold layer, which does not)
+- **Parent:** [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (bounded state, idempotent writes, durable checkpoints — the guarantee this upgrade rests on)
+- **Companions:** [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (at-least-once, which makes re-reading the source safe), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (where this upgrade is proven — the box run whose finding grounds this decision)
+- **Related:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (the aggregate tables that see a bounded gap *only if* a boundary forces a reset), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (the cold layer, which a reset never touches)
 
 ## Context and problem
 
 Spark 4 is a major version, and structured-streaming state — the offset logs, commit logs, and the
-windowed *state store* the aggregation job keeps — is a private format Spark does not promise is portable
-across a major. A checkpoint written by 3.5 may not be readable by 4.1; when it is not, the job either
-refuses to start or, worse, silently reinitialises state and reports success anyway. That is a
-data-correctness question, and it decides the whole migration (#243) before any Scala/JDK/JAR work is
-worth doing.
+windowed *state store* the aggregation job keeps — is a private format Spark does not *promise* is
+portable across a major. So a major upgrade raises a data-correctness question before any
+Scala/JDK/JAR work matters: can the new version resume the old checkpoint, and if not, what happens
+to the state that was in it?
 
 ADR-0006 stopped one step short of here. It made the sinks idempotent, bounded the state with a
 watermark, and put the checkpoint on durable storage so *a restart resumes from committed offsets and
-state* — then named the hole in its own Consequences: *"a corrupted or lost checkpoint becomes its own
-recovery concern."* A major-version upgrade is that concern arriving on purpose. What ADR-0006 left
-unrecorded is what recovery *is*.
+state* — then named the hole in its own Consequences: *"a corrupted or lost checkpoint becomes its
+own recovery concern."* A major-version upgrade is that concern arriving on purpose, and ADR-0006 left
+unrecorded what recovery *is*.
 
-The question, then, is not "how do we carry a 3.5 checkpoint into 4.1" — Spark offers no way to guarantee
-that. It is: **when the checkpoint cannot come across, is re-deriving from the source safe, and how far
-does "safe" reach?** It does not reach equally far for both jobs, and that difference is the substance of
-this decision. The pipeline is already at-least-once (ADR-0005) with idempotent sinks (ADR-0006), so
-re-deriving a dropped checkpoint from the source is the abnormal condition those decisions already cover.
-This ADR states how far that coverage carries, and where it stops.
+The reflex is to treat "no guarantee" as "assume it breaks" and drop the checkpoint on every major.
+That is wrong twice. First, it is not what happens: on the boundary this migration actually crossed
+(3.5 → 4.1), the checkpoint **resumes** — Spark reads the old offset log and reads the old state store
+under its legacy encoding (box run below). Assuming failure would have thrown away correct, in-flight
+window state for nothing. Second — and this is the load-bearing point — **whether it resumes or not is
+not the thing the upgrade's safety depends on.** ADR-0006's idempotent sinks already make re-deriving
+from the source safe. The checkpoint is an optimization that lets a restart skip re-reading; it is not
+the system's source of truth. So the decision is not "migrate the state or lose it." It is: prefer the
+cheap path (resume) when it is available, fall back to the safe path (reset and re-derive) when it is
+not, and never assume which one holds — establish it.
 
 ## Decision drivers
 
-- **A migrated checkpoint has no correctness guarantee; a dropped one does.** Reading an incompatible
-  state store risks *silent* corruption — the worst outcome, because nothing observes it. A fresh start's
-  cost is bounded and knowable. Between an unknown risk and a bounded one, take the bounded one.
-- **The two jobs are not symmetric under a reset**, because one is stateless and re-reads from the start
-  of the stream while the other is stateful and resumes at the tail. A single "drop the checkpoint"
-  sentence hides a real difference in what is lost, so the difference is decided, not left implicit.
-- **The stateless job's "lossless" claim rests on Kafka retention** — a bound no prior ADR names.
-- **This upgrade is not the whole-stack gate's job.** That gate exists to catch *"old state kills the new
-  version"*; here the policy *drops* the old state on purpose, so the gate would test a failure mode we
-  have chosen to bypass — and the Spark JVMs are outside its scope anyway (ADR-0026).
+- **Idempotent sinks (ADR-0006) mean a checkpoint reset is always safe, only sometimes costly.** That
+  removes the pressure to migrate state at all costs — the expensive, unguaranteed thing.
+- **"No guarantee" cuts both ways.** Spark does not promise resume works, so it cannot be *assumed*;
+  but it does not promise it fails either, so it must not be *presumed* to. The only honest source of
+  the answer is running it.
+- **Resume, when it works, is strictly better than a reset:** no reprocessing, and — for the stateful
+  job — no in-flight windows lost. Throwing it away by default is gratuitous.
+- **A reset's cost is asymmetric between the two jobs**, so if a reset is ever forced, its cost has to
+  be understood per job, not hand-waved.
 
 ## Decision
 
-1. **Across a Spark major, the streaming checkpoints are dropped and the streams re-derived, not
-   migrated** — unless Spark's own release notes guarantee state-format compatibility for the specific
-   boundary. The 3.5 → 4.1 boundary carries no such guarantee, so it takes the drop. We do not read the
-   old state store under the new version: an incompatible read can be silently wrong, and the cost of
-   starting fresh is bounded by the two decisions below.
+1. **A Spark major upgrade rests on the idempotent sinks, not on checkpoint portability.** Because
+   every write is idempotent on its natural key (ADR-0006 dec 3) and the pipeline is at-least-once
+   (ADR-0005), re-deriving a stream from the source is always safe. The checkpoint is therefore
+   *disposable*, not load-bearing: the upgrade is correct whether the checkpoint is resumed or reset.
 
-2. **The reset is lossless for the stateless job and bounded-lossy for the stateful one — and this
-   asymmetry is the decision, not an implementation detail.** The measurements job holds no state and
-   re-reads the stream from its beginning, so an idempotent re-upsert reproduces it exactly (ADR-0006
-   dec 3): no duplicates, no loss, only reprocessing time. The aggregations job holds windowed state and
-   resumes at the stream's tail, so windows already closed are safe but windows still open at the cutover
-   instant live only in the dropped state store and are lost or emitted partial. The correctness argument
-   for the drop is therefore *different* for each job, and both halves are on record because neither is
-   derivable without knowing the job's shape.
+2. **The checkpoint is resumed when the new version can read it, and this is established empirically
+   per boundary — never assumed.** Spark's lack of a cross-major guarantee forbids *assuming* resume;
+   it equally forbids *assuming* failure. The boundary is run (the box run, ADR-0026 dec 6) and the
+   observed behaviour decides. For **3.5 → 4.1 the checkpoint resumes** — offsets and state both — so
+   that upgrade is a rolling restart against the existing checkpoint, with no loss.
 
-3. **The stateless job's losslessness is bounded by Kafka retention, named here as a precondition.**
-   "Re-reads the stream from its beginning" means "as far back as Kafka still holds." Anything older is
-   not re-derivable from Kafka — it is, separately, already durable in `sensor_measurements` and the cold
-   layer (ADR-0025), which the drop never touches. The bound is a precondition of the upgrade, not an
-   assumption to discover afterward.
+3. **A reset is the fallback for a boundary that does not resume, and its cost is asymmetric and
+   bounded.** The stateless measurements job re-reads from the beginning of the stream and re-upserts
+   idempotently — lossless within Kafka retention (a precondition to check, since anything older than
+   the earliest retained offset is not re-derivable from Kafka; it remains in `sensor_measurements` and
+   the cold layer, ADR-0025, which a reset never touches). The stateful aggregations job resumes at the
+   stream's tail, so windows already closed are safe and only the windows *open at the reset instant*
+   are lost or emitted partial — bounded to a handful, one-time, self-healing as the next windows close.
+   This asymmetry is decided, not left implicit, because it is the real cost of the fallback.
 
-4. **The stateful job's boundary-window loss is accepted, not engineered away.** It is bounded to the few
-   windows spanning the cutover moment (at most one of each configured width per sensor), one-time, and
-   self-healing as the next complete windows close. Eliminating it — dual-running two Spark versions, or
-   draining ingestion to zero before cutover — costs far more than the handful of windows is worth. An
-   operator who cannot accept even that bounded gap has the drain option; the platform does not require
-   it.
-
-5. **This upgrade is proven by the per-image smoke and a one-time box run, not by the whole-stack gate.**
-   The per-image smoke (ADR-0026 dec 5) confirms the image *is* what the migration claims — Spark 4.1 on
-   Scala 2.13 with the object-store checkpoint's S3A stack baked in — the part a dependency resolve cannot
-   see. That the jobs then resolve their runtime connector, start against an empty checkpoint, and process
-   a batch — the state a cutover leaves them in — and that a 3.5 checkpoint does *not* resume under 4.1,
-   is empirical work for the box run (ADR-0026 dec 6), whose finding is the evidence for decision 1.
-   Neither is the whole-stack gate's job: it excludes the Spark JVMs on cost, and its failure class is one
-   this policy sidesteps by dropping the state. The cutover itself is a deliberate, operator-run act — not
-   automatic, not zero-downtime — and its procedure is a runbook in
-   `docs/architecture/stream-processing.md`; this ADR fixes only that the drop is deliberate and its cost
-   is the one decided above.
+4. **This upgrade is proven by the per-image smoke and the box run, not the whole-stack gate.** The
+   per-image smoke (ADR-0026 dec 5) confirms the image *is* what the migration claims — Spark 4.1 on
+   Scala 2.13 with the object-store checkpoint's S3A stack baked in. Whether the checkpoint resumes, and
+   whether the jobs process correctly under the new version, is empirical work for the box run
+   (ADR-0026 dec 6) — the finding that decides decision 2 for each boundary. Neither belongs on the
+   whole-stack gate: it excludes the Spark JVMs on cost, and its failure class ("old state kills the new
+   version") is one this policy is built to absorb, not to be stopped by. The upgrade itself is a
+   deliberate, operator-run act — the resume path is a rolling restart, the reset path adds a checkpoint
+   drop — and its procedure is a runbook in `docs/architecture/stream-processing.md`; this ADR fixes only
+   which path is taken and why it is safe, not the commands.
 
 ## Alternatives considered
 
-**A. Migrate the 3.5 state store into 4.1.** *Rejected.* Spark gives no cross-major state-format guarantee
-for this boundary, so a "successful" read could be silently wrong — nothing observes it. A bounded,
-visible fresh start beats an unbounded, invisible corruption.
+**A. Drop the checkpoint on every major, unconditionally.** *Rejected.* It treats "no guarantee" as
+"assume failure," which the 3.5 → 4.1 box run shows is false — it would have discarded resumable offsets
+and live window state, taking the aggregation job's bounded-loss cost on every upgrade for no reason.
+The reset is the fallback, not the default.
 
-**B. Dual-write — run 3.5 and 4.1 in parallel until the new one catches up.** *Rejected.* It exists to
-avoid decision 4's boundary-window loss, but that loss is already bounded and self-healing, while
-dual-running two Spark clusters against one Kafka topic and one hypertable doubles the resource budget
-(ADR-0006's core caps) and adds a reconciliation problem. The cost dwarfs the harm it prevents.
+**B. Assume resume and skip verification.** *Rejected.* The mirror mistake. Spark gives no guarantee, so
+a boundary that silently reinitialises state — or refuses to start — would be discovered in production,
+not in the box run. Resume is used only where it is observed, not where it is hoped.
 
-**C. Drain ingestion to zero before cutover, so no window is open.** *Not adopted as a requirement.* It
-makes decision 4's loss zero, at the price of an ingestion pause. It is a legitimate operator choice, so
-the runbook offers it — but it is not required, because the default loss is already within the accepted
-bound.
+**C. Migrate the old state store into the new format by hand.** *Rejected.* There is no supported path,
+so a "successful" migration could be silently wrong — the worst outcome. When resume is unavailable, the
+reset (decision 3) is the safe answer, because the sinks make re-derivation correct; hand-migration buys
+nothing the reset does not, at the price of an unbounded risk.
 
 ## Consequences
 
 ### Positive
 
-- The upgrade has a bounded, correctness-preserving cutover with a *named* cost, instead of an implicit
-  "hope the checkpoint reads." The measurements stream is provably lossless within retention; the
-  aggregation loss is quantified rather than discovered.
-- ADR-0006's open Consequence — "a lost checkpoint is its own recovery concern" — is answered for the one
-  way a checkpoint is *deliberately* lost.
-- The proof is placed where it tests the real failure mode (fresh-start smoke + box run) rather than on a
-  gate whose failure mode this policy sidesteps.
+- The upgrade is correct by construction (idempotent sinks) and cheap when the checkpoint resumes — no
+  reprocessing, no window loss — as it does for 3.5 → 4.1.
+- ADR-0006's open Consequence — "a lost checkpoint is its own recovery concern" — is answered: a reset
+  is safe by design, and its per-job cost is named.
+- The resume-vs-reset choice is grounded in an observation (the box run) rather than an assumption in
+  either direction.
 
 ### Negative
 
-- **A handful of aggregation windows are lost at every Spark major.** Downstream, ADR-0023's feature seam
-  (`sensor_aggregations_*`) and the drift monitoring that reads it (ADR-0021) see a gap for exactly those
-  window slots — bounded, resolving on the next complete window. An operator who cannot accept it uses
-  Alternative C.
-- **The cutover is manual and maintenance-windowed** — not a zero-downtime rolling upgrade. Acceptable for
+- **Every major must be run before it is trusted.** The resume claim is per-boundary; it does not
+  generalise from 3.5 → 4.1 to the next major. The box run is a required step of a Spark major upgrade,
+  not an optional one.
+- **If a future boundary forces a reset,** a handful of aggregation windows are lost, and ADR-0023's
+  feature seam (`sensor_aggregations_*`) plus the drift monitoring that reads it (ADR-0021) see a gap for
+  exactly those window slots — bounded, resolving on the next complete window. This cost is not incurred
+  by 3.5 → 4.1, which resumes.
+- **The upgrade is maintenance-windowed, not zero-downtime** — the jobs stop and restart. Acceptable for
   a monitoring/aggregation workload; a workload that could not tolerate it would reopen this ADR.
-- **The policy assumes Spark keeps *not* guaranteeing cross-major state compatibility.** If a future major
-  ships a supported state migration, decision 1's "unless guaranteed" clause takes it; the drop is the
-  fallback, not a preference.
 
 ### Neutral
 
-- **The cold layer (ADR-0025) is unaffected** — it reads `sensor_measurements`, which the measurements job
-  re-upserts idempotently and which the drop never touches. Stated so it is not re-litigated.
+- **The cold layer (ADR-0025) is unaffected** either way — it reads `sensor_measurements`, which neither
+  a resume nor a reset removes. Stated so it is not re-litigated.
 
 ## Deferred decisions
 
-- **Automating the cutover.** It is a runbook today; whether it becomes a scripted job is deferred until
-  the cadence of Spark majors makes the manual run a burden.
-- **A state format that survives majors** (an external state store, or a documented state migration). Only
-  worth its complexity if boundary-window loss ever stops being acceptable.
+- **Automating the upgrade.** It is a runbook today; whether the resume/reset decision and the restart
+  become a scripted job is deferred until the cadence of Spark majors makes the manual run a burden.
+- **A state format that survives majors** (an external state store, or a documented migration). Only
+  worth its complexity if a future boundary both fails to resume *and* the bounded reset loss stops being
+  acceptable.
 
 ## References
 
-- ADR-0005 — at-least-once delivery; the guarantee decision 2's lossless half rests on.
-- ADR-0006 — idempotent sinks, bounded state, durable checkpoints; the parent whose open "lost checkpoint"
-  consequence this ADR closes for the deliberate-loss case.
-- ADR-0023 — the aggregate tables as the feature seam; the named downstream of decision 4's loss.
-- ADR-0025 — the cold layer; unaffected, and stated so.
-- ADR-0026 — the release gates; decisions 5 (per-image smoke) and 6 (box run) are where this upgrade is
-  proven, and the compose-smoke scope is why it is not proven there.
-- Issue #243 — the Spark 3.5 → 4.1 migration this ADR gates; the box run confirming the incompatibility
-  premise is recorded against it. Cutover procedure: `docs/architecture/stream-processing.md`.
+- ADR-0005 — at-least-once delivery; the guarantee that makes re-reading the source safe.
+- ADR-0006 — idempotent sinks, bounded state, durable checkpoints; the parent whose open "lost
+  checkpoint" consequence this ADR closes, and whose idempotency is the load-bearing safety net.
+- ADR-0023 — the aggregate tables as the feature seam; the named downstream of a *reset's* window loss.
+- ADR-0025 — the cold layer; unaffected by either path, and stated so.
+- ADR-0026 — the release gates; decision 5 (per-image smoke) and decision 6 (box run) are where this
+  upgrade is proven, and the compose-smoke scope is why it is not proven there.
+- Issue #243 — the Spark 3.5 → 4.1 migration this ADR gates. **Box run (2026-07-15, industryflow.local):**
+  4.1.2 resumed the live 3.5.0 checkpoint — the measurements job resumed committed offsets (not a
+  reprocess from earliest) and the aggregations job resumed the state store under the legacy `unsaferow`
+  encoding; streaming 220 fresh readings landed as measurements and drove aggregation upserts. That is
+  the evidence for decisions 1 and 2. Cutover procedure: `docs/architecture/stream-processing.md`.
