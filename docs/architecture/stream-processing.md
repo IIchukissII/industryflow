@@ -66,8 +66,8 @@ duplicates or corrupt state:
   `spark-worker` pool) — so the standalone cluster **scales to N workers** (`SPARK_WORKER_REPLICAS`
   / `docker compose up -d --scale spark-worker=N`) with no shared local volume. The job's
   SparkSession turns S3A on whenever `CHECKPOINT_LOCATION` is an `s3a://` URI (a local path opts
-  out for single-node dev); the S3A jars (`hadoop-aws` + `aws-java-sdk-bundle`, pinned to the
-  image's Hadoop 3.3.4) are baked into all three Spark images, and a `minio-init` one-shot creates
+  out for single-node dev); the S3A jars (`hadoop-aws` + the AWS SDK v2 `bundle`, pinned to the
+  image's Hadoop 3.4.2) are baked into all three Spark images, and a `minio-init` one-shot creates
   the bucket. (Raw streaming is stateless, so it is unaffected either way.)
 
   Under **Helm** Spark runs in local mode (driver = executor, one pod), so its RWO PVC at
@@ -80,3 +80,49 @@ duplicates or corrupt state:
 Each Kafka message carries the verified `company_id`. The Spark sink resolves it to the tenant
 schema (UUID-validated, `tenant_<uuid>`) before writing — the same tenant-resolution discipline
 as the rest of the platform (**[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**).
+
+## Upgrading Spark across a major (checkpoint)
+
+Spark does not *guarantee* a structured-streaming checkpoint written by one major version is readable
+by the next — but it does not forbid it either, and the sinks are idempotent (ADR-0006), so the
+checkpoint is not load-bearing. The policy
+(**[ADR-0029](../../ADR/ADR-0029-spark-major-upgrade-checkpoint-cutover.md)**): **resume** the
+checkpoint when the new version can read it, **reset** it when it can't, and establish which by running
+the boundary — never assume. This is the procedure.
+
+For **3.5 → 4.1 the checkpoint resumes** (box-verified 2026-07-15): offsets and windowed state both.
+So that upgrade is a rolling restart against the existing checkpoint — no drop, no loss.
+
+### Resume path (3.5 → 4.1, and any boundary the box run shows resuming)
+
+1. Build the new images.
+2. Stop the jobs (also frees RAM for the build — the box swaps hard):
+   `docker compose stop spark-streaming spark-aggregations`
+3. Bring up the new cluster against the **unchanged** checkpoint:
+   `docker compose up -d --build spark-master spark-worker spark-streaming spark-aggregations`
+4. Verify (below). The streaming query resumes committed offsets — it goes idle once caught up rather
+   than reprocessing from `earliest` — and the aggregation queries resume their state store.
+
+### Reset path (fallback — a boundary the box run shows NOT resuming)
+
+Only when the new version refuses the old checkpoint or reinitialises it. The idempotent sinks make
+this safe, at a bounded, asymmetric cost (ADR-0029): the measurements stream re-reads from `earliest`
+and re-upserts idempotently (**lossless within Kafka retention** — confirm retention covers what you
+expect; anything older stays in `sensor_measurements` and the cold layer, ADR-0025); the aggregations
+lose only the windows **open at the reset instant** (bounded, self-healing).
+
+- Run the resume path, but **between steps 2 and 3 delete the checkpoint prefix**: on the object store
+  remove `spark-checkpoints` (e.g. `mc rm -r --force <alias>/spark-checkpoints`); for a local path
+  delete the contents of `/opt/spark/checkpoints`.
+- To make the aggregation loss zero, optionally pause the producers first and let the widest window's
+  watermark pass, so no window is open at the reset instant.
+
+### Verify
+
+- Both queries consume: the driver logs show micro-batches and the `spark-submit` processes are up.
+- **Measurements land:** the row count in `tenant_<uuid>.sensor_measurements` climbs.
+- **Aggregations upsert:** fresh rows appear in `tenant_<uuid>.sensor_aggregations_{1min,5min,1hour}`.
+
+If a query fails at submit with `NoClassDefFoundError` / `ClassNotFoundException`, the runtime
+connector (`spark-sql-kafka-0-10_2.13`) or the baked S3A jars are mismatched to the Spark/Hadoop
+version — not a checkpoint problem.
