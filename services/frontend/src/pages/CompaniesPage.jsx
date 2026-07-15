@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
 
 function CompaniesPage() {
@@ -15,12 +15,7 @@ function CompaniesPage() {
     is_active: true
   });
 
-  // Fetch companies
-  useEffect(() => {
-    fetchCompanies();
-  }, []);
-
-  const fetchCompanies = async () => {
+  const fetchCompanies = useCallback(async () => {
     try {
       const response = await api.get('/api/companies');
       setCompanies(response.data);
@@ -29,7 +24,13 @@ function CompaniesPage() {
       console.error('Error fetching companies:', error);
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Fetch companies on mount. Invoked from an inner async function so the effect body itself runs
+  // no synchronous setState — the state updates land off the sync path when the request resolves.
+  useEffect(() => {
+    (async () => { await fetchCompanies(); })();
+  }, [fetchCompanies]);
 
   const handleCreate = () => {
     setEditingCompany(null);
