@@ -218,6 +218,14 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       SPARK_CHECKPOINT_BUCKET: ${SPARK_CHECKPOINT_BUCKET:-spark-checkpoints}
+      # Where an uploaded artifact rests while it is judged (ADR-0030). It shares the artifact
+      # bucket but sits OUTSIDE every tenant prefix, which is what makes it unreachable through the
+      # artifact plane — that plane rewrites every key under the caller's own prefix. The expiry is
+      # the only thing that collects an upload nobody ever committed. Must match the gateway's
+      # staging root.
+      UPLOAD_STAGING_BUCKET: ${UPLOAD_STAGING_BUCKET:-mlflow}
+      UPLOAD_STAGING_PREFIX: ${UPLOAD_STAGING_PREFIX:-_upload-staging/}
+      UPLOAD_STAGING_EXPIRE_DAYS: ${UPLOAD_STAGING_EXPIRE_DAYS:-1}
       # Cold layer (ADR-0025): bucket + a WRITE-SCOPED principal the exporter uses (never the root
       # keys). Created here so the box mirrors the Helm minio-cold-init Job.
       COLD_STORE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
@@ -235,6 +243,16 @@ services:
         mc mb -p "local/$$SPARK_CHECKPOINT_BUCKET"
         mc mb -p local/mlflow
         mc mb -p "local/$$COLD_STORE_BUCKET"
+        # Expire abandoned uploads (ADR-0030). An artifact is staged before it is judged, so
+        # unadmitted bytes have a home — one no tenant can address and nothing loads. An upload that
+        # is staged and never committed is a certainty rather than an edge case (a closed laptop is
+        # enough), and nothing in the request path will ever come back to clean it up: the only
+        # actor who knew about it has gone. Admitted and refused uploads are both cleared at commit;
+        # this is for the third case, where commit never happens.
+        mc ilm rule add "local/$$UPLOAD_STAGING_BUCKET" \
+          --prefix "$$UPLOAD_STAGING_PREFIX" \
+          --expire-days "$$UPLOAD_STAGING_EXPIRE_DAYS" 2>/dev/null \
+          || echo "upload-staging expiry rule already present on $$UPLOAD_STAGING_BUCKET"
         # Write-scoped cold-export principal: put/get/list on ONLY the cold bucket. Only set up
         # when its keys are provided (cold-export profile); tolerate re-runs (mc create/user add
         # error if they already exist).
