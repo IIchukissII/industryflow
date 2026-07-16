@@ -2,9 +2,14 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Test deps. policy.py / scoping.py are pure; the gateway app is tested with a fake upstream +
-# store via FastAPI's TestClient (no MLflow, no object store).
+# Test deps. policy.py / scoping.py / admission.py are pure; the gateway app is tested with a fake
+# upstream + store via FastAPI's TestClient (no MLflow, no object store).
+#
+# This file is what CI installs for the unit-test job, so a runtime import missing here is a red
+# job, not a local inconvenience: every module the tests import needs its dependency listed.
 pytest==9.1.1
 pytest-asyncio==1.4.0
 fastapi==0.139.0
 httpx==0.28.1
+# admission.py parses the artifact manifest (safe_load only). Mirrors requirements.txt.
+PyYAML==6.0.3
