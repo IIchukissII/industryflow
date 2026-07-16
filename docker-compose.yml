@@ -249,10 +249,17 @@ services:
         # enough), and nothing in the request path will ever come back to clean it up: the only
         # actor who knew about it has gone. Admitted and refused uploads are both cleared at commit;
         # this is for the third case, where commit never happens.
-        mc ilm rule add "local/$$UPLOAD_STAGING_BUCKET" \
-          --prefix "$$UPLOAD_STAGING_PREFIX" \
-          --expire-days "$$UPLOAD_STAGING_EXPIRE_DAYS" 2>/dev/null \
-          || echo "upload-staging expiry rule already present on $$UPLOAD_STAGING_BUCKET"
+        # Idempotent by CHECKING, not by hoping `add` fails: it does not — it happily adds a second
+        # rule for the same prefix, and this init runs on every `up`. Found by counting the rules on
+        # a box that had run it twice.
+        if mc ilm rule ls "local/$$UPLOAD_STAGING_BUCKET" 2>/dev/null | grep -q "$$UPLOAD_STAGING_PREFIX"; then
+          echo "upload-staging expiry already present on $$UPLOAD_STAGING_BUCKET"
+        else
+          mc ilm rule add "local/$$UPLOAD_STAGING_BUCKET" \
+            --prefix "$$UPLOAD_STAGING_PREFIX" \
+            --expire-days "$$UPLOAD_STAGING_EXPIRE_DAYS"
+          echo "upload-staging expiry set: $$UPLOAD_STAGING_BUCKET/$$UPLOAD_STAGING_PREFIX after $${UPLOAD_STAGING_EXPIRE_DAYS}d"
+        fi
         # Write-scoped cold-export principal: put/get/list on ONLY the cold bucket. Only set up
         # when its keys are provided (cold-export profile); tolerate re-runs (mc create/user add
         # error if they already exist).
