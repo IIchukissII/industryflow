@@ -15,6 +15,7 @@ import json
 
 import auth
 import extensions
+import load_probe
 import model_compat
 import uploaded_model
 
@@ -463,10 +464,15 @@ async def deploy_model(
     # Undeploying is never blocked: archiving a model is the remedy for a bad one, not another way to
     # break it.
     if request_data.environment in ("production", "active", "staging"):
+        model_label = str(model_data.get("model_name", model_id))
         compatibility = await _evaluate_or_reject(
             model_data.get("mlflow_run_id"),
             on_incompatible=409,
-            model_label=str(model_data.get("model_name", model_id)),
+            model_label=model_label,
+            # An uploaded model is addressed by where its artifact is, because it has no run
+            # (ADR-0030 dec 8). Without this it would reach this gate unjudged — the same hole the
+            # registration gate had, in the place where it would actually matter.
+            artifact_uri=model_data.get("artifact_uri"),
         )
         if compatibility:
             await repository.update_model_compatibility(
@@ -474,6 +480,36 @@ async def deploy_model(
                 model_id=model_id,
                 compatibility=compatibility,
             )
+
+        # ADR-0030 dec 7 — the empirical check, for an artifact nothing watched being made.
+        #
+        # ADR-0027 dec 5 makes the empirical check the AUTHORITY over the declarative one, and it is
+        # a round-trip: a model trained by the real authoring image must load and score in the real
+        # serving image. An uploaded artifact has no authoring image, so one end of that round-trip
+        # does not exist. It is replaced rather than dropped — dropping it would leave this model
+        # judged only by assertions checked against assertions, which is what dec 5 rejects.
+        #
+        # Here rather than at registration because this is where the answer has to be true: the
+        # verdict expires, and this is the gate that already knows that. It EXTENDS this gate rather
+        # than adding a third — a parallel path would be a second answer to a settled question.
+        if uploaded_model.provenance_of(
+            mlflow_run_id=model_data.get("mlflow_run_id"),
+            artifact_uri=model_data.get("artifact_uri"),
+        ) == uploaded_model.PROVENANCE_UPLOADED:
+            result = await load_probe.probe(model_data["artifact_uri"])
+            if result.refused:
+                logger.warning(f"Refusing to deploy uploaded model '{model_label}': {result.error}")
+                raise HTTPException(status_code=409, detail={
+                    "message": (
+                        "This model has not been shown to load and score in this serving "
+                        "environment, so it will not be deployed (ADR-0030 dec 7). Nothing watched "
+                        "it being made, so what it declares is an assertion — the one thing that "
+                        "can still be established is whether it works here, and it did not."
+                    ),
+                    "stage": result.stage,
+                    "error": result.error,
+                })
+            logger.info(f"Uploaded model '{model_label}' loaded and scored in this environment")
 
     # Update status
     success = await repository.update_model_status(
