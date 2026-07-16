@@ -10,3 +10,7 @@ uvicorn==0.51.0
 httpx==0.28.1
 redis==8.0.1
 boto3==1.43.46
+
+# The artifact manifest is YAML; parsed with safe_load only (admission.py) — a gate that
+# refuses code execution must not construct arbitrary Python while reading the upload.
+PyYAML==6.0.3
