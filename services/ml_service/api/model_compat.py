@@ -316,3 +316,15 @@ async def evaluate_run(mlflow_run_id: str) -> Compatibility:
     from model_uri import resolve_model_uri
 
     return await asyncio.to_thread(evaluate, resolve_model_uri(mlflow_run_id))
+
+
+async def evaluate_uri(model_uri: str) -> Compatibility:
+    """`evaluate`, off the event loop, for an artifact addressed directly rather than through a run
+    (ADR-0030 dec 8: an uploaded model has no run to resolve, deliberately).
+
+    There is nothing to resolve here — the URI already addresses the artifact, because whoever put it
+    there recorded where. That makes this the *simpler* case, not a weaker one: the resolution step
+    `evaluate_run` performs exists to find what a run produced, and a question that was never asked
+    cannot be answered wrongly.
+    """
+    return await asyncio.to_thread(evaluate, model_uri)

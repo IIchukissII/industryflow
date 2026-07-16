@@ -14,7 +14,9 @@ import logging
 import json
 
 import auth
+import extensions
 import model_compat
+import uploaded_model
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,14 @@ class ModelCreateRequest(BaseModel):
     model_version: str
     model_type: str
     model_path: Optional[str] = None
+    # An externally-authored model (ADR-0030): where its artifact was put, and what its author says
+    # its output means. Both absent for a kernel-authored model — its run answers the first, and its
+    # detector already declares the second (ADR-0028 dec 1).
+    #
+    # There is deliberately no `provenance` field. It is the one fact most worth lying about, and the
+    # platform reads it off how the model arrived rather than asking (ADR-0030 dec 8).
+    artifact_uri: Optional[str] = None
+    score_semantics: Optional[str] = None
     status: str = "training"
     accuracy: Optional[float] = None
     precision_score: Optional[float] = None
@@ -166,6 +176,7 @@ async def _evaluate_or_reject(
     *,
     on_incompatible: int,
     model_label: str,
+    artifact_uri: Optional[str] = None,
 ) -> Optional[model_compat.Compatibility]:
     """Evaluate the artifact against this environment, and refuse it if we cannot honour it.
 
@@ -181,14 +192,25 @@ async def _evaluate_or_reject(
     nothing these two gates and the CI round-trip have not already established, and would put artifact
     IO on the hot path.
 
-    Returns None when there is nothing to evaluate — a model with no run has no artifact and is not on
-    the path at all. It is not refused; it is simply unjudged.
+    An artifact is addressed by its run, or — for one the platform never watched being made — by
+    where it was put (ADR-0030 dec 8: no synthetic run, so nothing else answers this). The comparison
+    itself is unchanged and deliberately so: it reads the declarations off the artifact and compares
+    them to what this image installs, and it does not care who made it. What differs for an uploaded
+    artifact is the *standing of its input* — declared by a stranger rather than recorded by
+    something that watched — which is why more is asked of it elsewhere at this same gate, not here.
+
+    Returns None only when there is nothing to evaluate: no run AND no artifact. Such a model is not
+    refused; it is simply unjudged. An uploaded model can never reach that state — an upload with no
+    artifact is not an upload.
     """
-    if not mlflow_run_id:
+    if not mlflow_run_id and not artifact_uri:
         return None
 
     try:
-        compatibility = await model_compat.evaluate_run(mlflow_run_id)
+        if mlflow_run_id:
+            compatibility = await model_compat.evaluate_run(mlflow_run_id)
+        else:
+            compatibility = await model_compat.evaluate_uri(artifact_uri)
     except model_compat.ArtifactUnreadable as exc:
         # We could not READ the declarations, so we have no verdict — and saying "your model is
         # broken" because the tracking store is down would be a lie with a permanent-sounding status
@@ -255,15 +277,63 @@ async def create_model(
     repository = request.app.state.ml_repository
 
     payload = model_data.model_dump()
+
+    # Read where it came from; never ask (ADR-0030 dec 8).
+    provenance = uploaded_model.provenance_of(
+        mlflow_run_id=payload.get("mlflow_run_id"),
+        artifact_uri=payload.get("artifact_uri"),
+    )
+    payload["provenance"] = provenance
+
+    if provenance == uploaded_model.PROVENANCE_UPLOADED and not payload.get("artifact_uri"):
+        # Neither a run nor an artifact: there is nothing to judge, and ADR-0030's whole point is
+        # that an unwatched model is judged rather than trusted. Refuse instead of registering
+        # something no gate can ever have an opinion about.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "A model must either be logged through the platform (which records its run) or "
+                "carry the artifact it was uploaded as. This one has neither, so nothing can "
+                "establish what it is (ADR-0030)."
+            ),
+        )
+
     compatibility = await _evaluate_or_reject(
         payload.get("mlflow_run_id"),
         on_incompatible=422,
         model_label=model_data.model_name,
+        artifact_uri=payload.get("artifact_uri"),
     )
     if compatibility:
         payload["compatibility_status"] = compatibility.status
         payload["compatibility_detail"] = compatibility.as_detail()
         payload["compatibility_checked_at"] = datetime.now(timezone.utc)
+
+    # What an uploaded model must answer and a kernel-authored one already has (ADR-0030 dec 5).
+    # Asked here — at the gate that already refuses what this environment cannot honour — because
+    # only the serving side holds the vocabulary and the live detector registry, and that registry is
+    # discovered rather than hand-kept.
+    if provenance == uploaded_model.PROVENANCE_UPLOADED:
+        verdict = uploaded_model.judge_semantics(
+            payload.get("score_semantics"),
+            compatibility.flavor if compatibility else None,
+            vocabulary=extensions.SCORE_SEMANTICS,
+            detectors_for=extensions.detectors_for,
+        )
+        if verdict.refused:
+            logger.warning(f"Refusing uploaded model '{model_data.model_name}': {verdict.reason}")
+            raise HTTPException(status_code=422, detail={
+                "message": verdict.reason,
+                "declared_semantics": payload.get("score_semantics"),
+                "flavor": compatibility.flavor if compatibility else None,
+            })
+        logger.info(
+            f"Uploaded model '{model_data.model_name}' declares '{payload.get('score_semantics')}'; "
+            f"scored here by '{verdict.detector}'"
+        )
+
+    payload.pop("score_semantics", None)  # judged, not stored: the detector remains the authority
+    # on what an output means (ADR-0028 dec 1), and a second copy could only drift from it.
 
     # Create model in database
     model_id = await repository.create_model(

@@ -179,6 +179,11 @@ class MLRepository:
                 'compatibility_status': 'compatibility_status',
                 'compatibility_detail': 'compatibility_detail',
                 'compatibility_checked_at': 'compatibility_checked_at',
+                # ADR-0030 dec 8: where the model came from, and — for one the platform never
+                # watched being made — where its artifact is, since it has no run to answer that
+                # (declining to invent a run means recording what the run would have told us).
+                'provenance': 'provenance',
+                'artifact_uri': 'artifact_uri',
             }
 
             # JSONB fields that need serialization (note: feature_names and sensor_ids are arrays, not JSONB)
