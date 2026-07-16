@@ -115,6 +115,18 @@ async def startup_event():
         logger.error(f"Configuration validation failed: {e}")
         raise
 
+    # The capability store, for demand-minting upload handles (ADR-0030 dec 3). Optional: a
+    # deployment that mints none simply has none, and the surface refuses honestly rather than
+    # failing obscurely at the first request. This is ADR-0015's shared capability store, NOT the
+    # Redis feature store ADR-0023 rev 1 removed from this service.
+    app.state.capability_store = None
+    if config.config.CAPABILITY_REDIS_URL:
+        import redis.asyncio as aioredis
+        app.state.capability_store = aioredis.from_url(config.config.CAPABILITY_REDIS_URL)
+        logger.info("Capability store connected — upload capabilities can be minted (ADR-0030)")
+    else:
+        logger.info("No capability store configured — this deployment mints no upload capabilities")
+
     # Load configured extension plugins (ADR-0010): registers their feature transforms.
     from extensions import load_extension_modules, registered_transforms, EXTENSION_API_VERSION
     modules = [m for m in config.config.EXTENSION_MODULES.split(",") if m.strip()]
