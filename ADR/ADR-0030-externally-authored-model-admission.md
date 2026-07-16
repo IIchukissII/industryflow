@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0030 — Externally-authored models are admitted, but what provenance used to vouch for must be declared and proven
 
 - **ID:** ADR-0030
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-16
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the artifact declares, the serving environment satisfies or refuses — the contract this record extends to artifacts the platform never observed being made)
