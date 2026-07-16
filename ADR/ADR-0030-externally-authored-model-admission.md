@@ -137,6 +137,41 @@ vouch for, and what must an uploaded artifact do instead?**
    a platform session (ADR-0004). Reusing the kernel's audience would hand the upload surface to every
    running kernel — precisely the conflation ADR-0015 dec 3's audience-binding exists to prevent.
 
+   > **rev 1 (2026-07-16): "authorised by the platform session" means *derived from* one, not
+   > *presented as* one — and the audience is what makes decision 4 enforceable at all.**
+   >
+   > **The plane.** This record introduces a fifth capability audience, for uploads, of the same
+   > opaque, single-tenant, centrally-revocable form as the others (ADR-0015 dec 1, 3) — the pattern
+   > every plane before it has extended rather than replaced. It is **not read-only**: it authorises
+   > writing one artifact, and its boundary is the tenant namespace its mediator enforces, exactly as
+   > ADR-0015 dec 1 rev 1 describes for a writing plane.
+   >
+   > **Why an audience of its own, restated because rev 0 undersold it.** Rev 0 gave the reason as
+   > "reusing the kernel's audience would hand the upload surface to every running kernel", which is
+   > true and is the smaller half. The larger half is that **decision 4 refuses executable
+   > serialisation on this path and deliberately leaves the notebook path alone.** Two populations
+   > therefore reach the same mediator under different rules, and the audience is the only fact that
+   > distinguishes them. Collapse the two and there is no third option: either kernels inherit a
+   > refusal this record never decided for them, or uploads escape the refusal that is the
+   > precondition for admitting them at all. The audience is not a lock on this door — it is what
+   > makes the door a different door.
+   >
+   > **The minter, and why not the mediator.** The handle is **demand-minted** (ADR-0015 dec 4 rev 1)
+   > by the **serving side** — the component that already establishes tenant from a verified session
+   > for its own reasons, and that is already this artifact's admission authority at the registration
+   > gate (decisions 5 and 6). An upload is the preamble to registration, so the authority that will
+   > judge the artifact is the one that authorises it to arrive; the question "who may issue this"
+   > gets one answer rather than a convention.
+   >
+   > The mediator holding the artifact-store credential **must not verify the session itself**. The
+   > platform's session signature is symmetric, so a component that can verify a session can forge
+   > one — for any user, in any tenant. Today that mediator's compromise costs an object-store
+   > principal and a store of revocable, single-tenant handles; teaching it to verify sessions would
+   > make its compromise cost every tenant's identity, permanently, and would make ADR-0015 dec 7's
+   > bound on what a store-reader can lose a fiction. It resolves an opaque handle instead, which is
+   > the platform's one mediation pattern and the whole reason capabilities exist: **hold an
+   > operation, not a credential.**
+
 4. **Only artifacts that can be loaded without executing author-supplied code are accepted; an
    artifact carrying executable object-serialisation is refused at the gate.** The path additionally
    requires that the loader never fall back to such a format, which it does by default
