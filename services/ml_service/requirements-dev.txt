@@ -20,3 +20,22 @@ pytest-asyncio==1.4.0
 # 3.14 interpreter pip fell back to a source build and the install failed.
 pandas==2.3.3
 evidently==0.7.21
+
+# --- what it costs to drive a ROUTER, and why that is worth paying (ADR-0030) ------------------
+# Until now this service's tests only ever imported pure modules, so the registration gate was
+# never driven at the wire — and that gap had a price. The gate was keyed on a run and returned
+# "unjudged" without one, so an uploaded artifact (which has no run, by decision) would have gone
+# through it untouched with every pure test still green. A rule that nothing proves is CALLED is a
+# rule that can be quietly disconnected.
+#
+# Importing one router costs the whole service, because `routers/__init__` imports every router
+# eagerly: `models` itself needs only fastapi/pydantic/auth, but the package also pulls the MLflow
+# client (registered-models, experiments), the metrics client (inference) and evidently (drift).
+# That is the honest reason these are here rather than a wish for a lighter list. The tracking
+# gateway's dev requirements carry fastapi + httpx for exactly the same purpose.
+fastapi==0.139.0
+httpx==0.28.1
+python-jose[cryptography]==3.5.0
+asyncpg==0.31.0
+mlflow==3.14.0
+prometheus-client==0.25.0
