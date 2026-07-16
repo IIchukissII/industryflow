@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if and .Values.notebookHub.enabled .Values.notebookHub.trackingGateway.uploadStaging.expiryEnabled }}
+{{- /*
+  Expire abandoned uploads (ADR-0030).
+
+  An externally-authored artifact is staged before it is judged, because the two decisions in play
+  pull against each other: the structural refusal needs the bytes, and ADR-0019 dec 6 keeps the
+  gateway out of the artifact data path so it scales on request rate rather than artifact size —
+  and these are the largest artifacts the platform will see. So unadmitted bytes have a home, in a
+  prefix outside every tenant's, which nothing loads and no tenant can address.
+
+  Admitted and refused uploads are both cleared at commit. This rule is for the third case: staged
+  and never committed. That is a certainty rather than an edge case — a closed laptop is enough —
+  and nothing in the request path ever comes back for it, because the only actor who knew about it
+  has gone. Without this the bytes ADR-0030 said must not accumulate accumulate forever, and the
+  first symptom is a storage bill.
+
+  The compose stack does the same thing in minio-init; this is its cluster counterpart, so a
+  deployment does not depend on which way it was installed. Set expiryEnabled=false where the
+  operator manages bucket lifecycle out-of-band (the same posture job-minio-cold-init takes).
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "industryflow.fullname" . }}-minio-upload-staging-init
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: minio-upload-staging-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "industryflow.labels" . | nindent 8 }}
+        app.kubernetes.io/name: minio-upload-staging-init
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: upload-staging-init
+          image: {{ .Values.coldExport.initImage | quote }}
+          env:
+            - name: MINIO_ENDPOINT
+              value: {{ include "industryflow.minioEndpoint" . | quote }}
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.fullname" . }}
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.fullname" . }}
+                  key: MINIO_SECRET_KEY
+            # The artifact bucket the gateway writes to — staging shares it and is kept out of every
+            # tenant's reach by PREFIX, not by living in a bucket of its own.
+            - name: ARTIFACT_BUCKET
+              value: {{ .Values.notebookHub.trackingGateway.artifactBucket | quote }}
+            # Must match the gateway's staging root. Split across code and infrastructure, so the
+            # gateway's suite checks the two agree rather than trusting they were both remembered.
+            - name: STAGING_PREFIX
+              value: {{ .Values.notebookHub.trackingGateway.uploadStaging.prefix | quote }}
+            - name: EXPIRE_DAYS
+              value: {{ .Values.notebookHub.trackingGateway.uploadStaging.expireDays | quote }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              mc alias set store "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
+              # Idempotent: re-running must not multiply the rule, and a hook runs on every upgrade.
+              if mc ilm rule ls "store/$ARTIFACT_BUCKET" 2>/dev/null | grep -q "$STAGING_PREFIX"; then
+                echo "upload-staging expiry already present on $ARTIFACT_BUCKET ($STAGING_PREFIX)"
+              else
+                mc ilm rule add "store/$ARTIFACT_BUCKET" \
+                  --prefix "$STAGING_PREFIX" --expire-days "$EXPIRE_DAYS"
+                echo "upload-staging expiry set: $ARTIFACT_BUCKET/$STAGING_PREFIX after ${EXPIRE_DAYS}d"
+              fi
+{{- end }}

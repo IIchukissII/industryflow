@@ -13,8 +13,15 @@ from datetime import datetime, timezone
 import logging
 import json
 
+import asyncpg
+
 import auth
+import config
+import extensions
+import load_probe
 import model_compat
+import upload_capability
+import uploaded_model
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +67,14 @@ class ModelMetadata(BaseModel):
     compatibility_status: Optional[str] = None
     compatibility_detail: Optional[Dict[str, Any]] = None
     compatibility_checked_at: Optional[datetime] = None
+    # ADR-0030 dec 8. Provenance is recorded as a first-class fact so an operator can SEE where a
+    # model came from — a fact nobody can read is not one the platform holds. This is a response
+    # model, so a field it does not declare is dropped at the door however faithfully the layers
+    # beneath carried it.
+    #
+    # None means "predates the distinction", which is not "unknown origin": no model registered
+    # before that migration can be an upload, because there was no way to upload one.
+    provenance: Optional[str] = None
     created_at: datetime
     deployed_at: Optional[datetime] = None
 
@@ -78,6 +93,14 @@ class ModelCreateRequest(BaseModel):
     model_version: str
     model_type: str
     model_path: Optional[str] = None
+    # An externally-authored model (ADR-0030): where its artifact was put, and what its author says
+    # its output means. Both absent for a kernel-authored model — its run answers the first, and its
+    # detector already declares the second (ADR-0028 dec 1).
+    #
+    # There is deliberately no `provenance` field. It is the one fact most worth lying about, and the
+    # platform reads it off how the model arrived rather than asking (ADR-0030 dec 8).
+    artifact_uri: Optional[str] = None
+    score_semantics: Optional[str] = None
     status: str = "training"
     accuracy: Optional[float] = None
     precision_score: Optional[float] = None
@@ -166,6 +189,7 @@ async def _evaluate_or_reject(
     *,
     on_incompatible: int,
     model_label: str,
+    artifact_uri: Optional[str] = None,
 ) -> Optional[model_compat.Compatibility]:
     """Evaluate the artifact against this environment, and refuse it if we cannot honour it.
 
@@ -181,14 +205,25 @@ async def _evaluate_or_reject(
     nothing these two gates and the CI round-trip have not already established, and would put artifact
     IO on the hot path.
 
-    Returns None when there is nothing to evaluate — a model with no run has no artifact and is not on
-    the path at all. It is not refused; it is simply unjudged.
+    An artifact is addressed by its run, or — for one the platform never watched being made — by
+    where it was put (ADR-0030 dec 8: no synthetic run, so nothing else answers this). The comparison
+    itself is unchanged and deliberately so: it reads the declarations off the artifact and compares
+    them to what this image installs, and it does not care who made it. What differs for an uploaded
+    artifact is the *standing of its input* — declared by a stranger rather than recorded by
+    something that watched — which is why more is asked of it elsewhere at this same gate, not here.
+
+    Returns None only when there is nothing to evaluate: no run AND no artifact. Such a model is not
+    refused; it is simply unjudged. An uploaded model can never reach that state — an upload with no
+    artifact is not an upload.
     """
-    if not mlflow_run_id:
+    if not mlflow_run_id and not artifact_uri:
         return None
 
     try:
-        compatibility = await model_compat.evaluate_run(mlflow_run_id)
+        if mlflow_run_id:
+            compatibility = await model_compat.evaluate_run(mlflow_run_id)
+        else:
+            compatibility = await model_compat.evaluate_uri(artifact_uri)
     except model_compat.ArtifactUnreadable as exc:
         # We could not READ the declarations, so we have no verdict — and saying "your model is
         # broken" because the tracking store is down would be a lie with a permanent-sounding status
@@ -236,6 +271,57 @@ async def _evaluate_or_reject(
 # API Endpoints
 # ============================================================================
 
+@router.post("/upload-capability", status_code=201)
+async def mint_upload_capability(
+    request: Request,
+    current_user: dict = Depends(auth.verify_jwt_token),
+    company_id: str = Depends(get_company_id_dependency),
+):
+    """Mint a short-lived capability for uploading one externally-authored model (ADR-0030 dec 3).
+
+    This is the platform session becoming an upload — *derived from* a session, never *presented as*
+    one. The mediator that holds the artifact-store credential resolves the opaque handle and learns
+    nothing else; teaching it to verify sessions instead would let a compromise there forge any
+    user's session in any tenant, since the signature is symmetric (ADR-0015 dec 7, dec 4 rev 1).
+
+    Minted here because this service already establishes the tenant from a verified principal for its
+    own reasons (ADR-0003 dec 1), and is the authority that will judge the artifact at the
+    registration gate — so the authority that will judge it is the one that authorises it to arrive.
+    """
+    store = getattr(request.app.state, "capability_store", None)
+    if store is None:
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "This deployment has no capability store configured, so it cannot mint upload "
+                "capabilities and does not accept externally-authored models."
+            ),
+        )
+
+    user = current_user.get("payload", {}).get("sub") or str(current_user.get("user_id", ""))
+    try:
+        # `build_record` is the decision — what this handle is bound to — and it refuses rather than
+        # improvise when there is no verified principal to bind to. The write is here because it is
+        # I/O and this store is async; `mint` is the same decision for a synchronous store.
+        handle, record = upload_capability.build_record(user=user, company_id=company_id)
+    except ValueError as exc:
+        # No tenant, or no user. A handle bound to nothing is not a weaker capability; it is a hole.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await store.set(
+        upload_capability.store_key(handle),
+        json.dumps(record),
+        ex=upload_capability.DEFAULT_TTL_SECONDS,
+    )
+
+    logger.info(f"Minted an upload capability for {user} (tenant {company_id})")
+    return {
+        "capability": handle,
+        "expires_in": upload_capability.DEFAULT_TTL_SECONDS,
+        "upload_url": config.config.UPLOAD_GATEWAY_URL or None,
+    }
+
+
 @router.post("", status_code=201)
 async def create_model(
     model_data: ModelCreateRequest,
@@ -255,21 +341,81 @@ async def create_model(
     repository = request.app.state.ml_repository
 
     payload = model_data.model_dump()
+
+    # Read where it came from; never ask (ADR-0030 dec 8).
+    provenance = uploaded_model.provenance_of(
+        mlflow_run_id=payload.get("mlflow_run_id"),
+        artifact_uri=payload.get("artifact_uri"),
+    )
+    payload["provenance"] = provenance
+
+    if provenance == uploaded_model.PROVENANCE_UPLOADED and not payload.get("artifact_uri"):
+        # Neither a run nor an artifact: there is nothing to judge, and ADR-0030's whole point is
+        # that an unwatched model is judged rather than trusted. Refuse instead of registering
+        # something no gate can ever have an opinion about.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "A model must either be logged through the platform (which records its run) or "
+                "carry the artifact it was uploaded as. This one has neither, so nothing can "
+                "establish what it is (ADR-0030)."
+            ),
+        )
+
     compatibility = await _evaluate_or_reject(
         payload.get("mlflow_run_id"),
         on_incompatible=422,
         model_label=model_data.model_name,
+        artifact_uri=payload.get("artifact_uri"),
     )
     if compatibility:
         payload["compatibility_status"] = compatibility.status
         payload["compatibility_detail"] = compatibility.as_detail()
         payload["compatibility_checked_at"] = datetime.now(timezone.utc)
 
+    # What an uploaded model must answer and a kernel-authored one already has (ADR-0030 dec 5).
+    # Asked here — at the gate that already refuses what this environment cannot honour — because
+    # only the serving side holds the vocabulary and the live detector registry, and that registry is
+    # discovered rather than hand-kept.
+    if provenance == uploaded_model.PROVENANCE_UPLOADED:
+        verdict = uploaded_model.judge_semantics(
+            payload.get("score_semantics"),
+            compatibility.flavor if compatibility else None,
+            vocabulary=extensions.SCORE_SEMANTICS,
+            detectors_for=extensions.detectors_for,
+        )
+        if verdict.refused:
+            logger.warning(f"Refusing uploaded model '{model_data.model_name}': {verdict.reason}")
+            raise HTTPException(status_code=422, detail={
+                "message": verdict.reason,
+                "declared_semantics": payload.get("score_semantics"),
+                "flavor": compatibility.flavor if compatibility else None,
+            })
+        logger.info(
+            f"Uploaded model '{model_data.model_name}' declares '{payload.get('score_semantics')}'; "
+            f"scored here by '{verdict.detector}'"
+        )
+
+    payload.pop("score_semantics", None)  # judged, not stored: the detector remains the authority
+    # on what an output means (ADR-0028 dec 1), and a second copy could only drift from it.
+
     # Create model in database
-    model_id = await repository.create_model(
-        company_id=company_id,
-        model_data=payload
-    )
+    try:
+        model_id = await repository.create_model(
+            company_id=company_id,
+            model_data=payload
+        )
+    except asyncpg.UniqueViolationError:
+        # Already registered under this name and version. A 409 says what happened; the 500 this
+        # used to return told the caller to retry something that can never succeed.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A model named '{model_data.model_name}' version {model_data.model_version} is "
+                f"already registered. Register a new version rather than replacing one: a model "
+                f"version is a record of what was served, and overwriting it would erase that."
+            ),
+        )
 
     if not model_id:
         raise HTTPException(status_code=500, detail="Failed to create model")
@@ -393,10 +539,15 @@ async def deploy_model(
     # Undeploying is never blocked: archiving a model is the remedy for a bad one, not another way to
     # break it.
     if request_data.environment in ("production", "active", "staging"):
+        model_label = str(model_data.get("model_name", model_id))
         compatibility = await _evaluate_or_reject(
             model_data.get("mlflow_run_id"),
             on_incompatible=409,
-            model_label=str(model_data.get("model_name", model_id)),
+            model_label=model_label,
+            # An uploaded model is addressed by where its artifact is, because it has no run
+            # (ADR-0030 dec 8). Without this it would reach this gate unjudged — the same hole the
+            # registration gate had, in the place where it would actually matter.
+            artifact_uri=model_data.get("artifact_uri"),
         )
         if compatibility:
             await repository.update_model_compatibility(
@@ -404,6 +555,36 @@ async def deploy_model(
                 model_id=model_id,
                 compatibility=compatibility,
             )
+
+        # ADR-0030 dec 7 — the empirical check, for an artifact nothing watched being made.
+        #
+        # ADR-0027 dec 5 makes the empirical check the AUTHORITY over the declarative one, and it is
+        # a round-trip: a model trained by the real authoring image must load and score in the real
+        # serving image. An uploaded artifact has no authoring image, so one end of that round-trip
+        # does not exist. It is replaced rather than dropped — dropping it would leave this model
+        # judged only by assertions checked against assertions, which is what dec 5 rejects.
+        #
+        # Here rather than at registration because this is where the answer has to be true: the
+        # verdict expires, and this is the gate that already knows that. It EXTENDS this gate rather
+        # than adding a third — a parallel path would be a second answer to a settled question.
+        if uploaded_model.provenance_of(
+            mlflow_run_id=model_data.get("mlflow_run_id"),
+            artifact_uri=model_data.get("artifact_uri"),
+        ) == uploaded_model.PROVENANCE_UPLOADED:
+            result = await load_probe.probe(model_data["artifact_uri"])
+            if result.refused:
+                logger.warning(f"Refusing to deploy uploaded model '{model_label}': {result.error}")
+                raise HTTPException(status_code=409, detail={
+                    "message": (
+                        "This model has not been shown to load and score in this serving "
+                        "environment, so it will not be deployed (ADR-0030 dec 7). Nothing watched "
+                        "it being made, so what it declares is an assertion — the one thing that "
+                        "can still be established is whether it works here, and it did not."
+                    ),
+                    "stage": result.stage,
+                    "error": result.error,
+                })
+            logger.info(f"Uploaded model '{model_label}' loaded and scored in this environment")
 
     # Update status
     success = await repository.update_model_status(

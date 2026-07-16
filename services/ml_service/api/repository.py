@@ -64,6 +64,12 @@ def _format_model_row(row: dict, company_id: str) -> Dict[str, Any]:
         'compatibility_status': row.get('compatibility_status'),
         'compatibility_detail': json.loads(row['compatibility_detail']) if isinstance(row.get('compatibility_detail'), str) else row.get('compatibility_detail'),
         'compatibility_checked_at': row.get('compatibility_checked_at'),
+        # ADR-0030 dec 8. Read as well as written: the deployment gate asks an uploaded model where
+        # its artifact IS, because it has no run to answer that. A column the write path stores and
+        # the read path drops is a column that does not exist — which is how this surfaced, as a
+        # KeyError on a real box after every unit test had passed.
+        'provenance': row.get('provenance'),
+        'artifact_uri': row.get('artifact_uri'),
         'status': row['status'],
         'deployed_at': row.get('deployed_at'),
         'deprecated_at': row.get('deprecated_at'),
@@ -112,6 +118,7 @@ class MLRepository:
                     accuracy, precision_score, recall, f1_score, auc_roc,
                     training_samples, training_start_date, training_end_date,
                     compatibility_status, compatibility_detail, compatibility_checked_at,
+                    provenance, artifact_uri,
                     status, deployed_at, deprecated_at, created_at, updated_at
                 FROM ml_models
             """
@@ -179,6 +186,11 @@ class MLRepository:
                 'compatibility_status': 'compatibility_status',
                 'compatibility_detail': 'compatibility_detail',
                 'compatibility_checked_at': 'compatibility_checked_at',
+                # ADR-0030 dec 8: where the model came from, and — for one the platform never
+                # watched being made — where its artifact is, since it has no run to answer that
+                # (declining to invent a run means recording what the run would have told us).
+                'provenance': 'provenance',
+                'artifact_uri': 'artifact_uri',
             }
 
             # JSONB fields that need serialization (note: feature_names and sensor_ids are arrays, not JSONB)
@@ -218,6 +230,13 @@ class MLRepository:
                 model_id = await conn.fetchval(query, *values)
                 logger.info(f"Model created: {model_id} in schema {schema_name}")
                 return str(model_id)
+            except asyncpg.UniqueViolationError:
+                # This name and version already exist. That is the caller's fact, not a fault of
+                # ours: reporting it as a server error tells them to retry something that will never
+                # work, and buries the one sentence they need. Raised rather than swallowed so the
+                # router can say which it is.
+                logger.info(f"Model {model_data.get('model_name')} v{model_data.get('model_version')} already exists")
+                raise
             except Exception as e:
                 logger.error(f"Failed to create model: {e}")
                 logger.error(f"Fields were: {fields}")
@@ -245,6 +264,7 @@ class MLRepository:
                     training_samples, training_start_date, training_end_date,
                     reference_profile,
                     compatibility_status, compatibility_detail, compatibility_checked_at,
+                    provenance, artifact_uri,
                     status, deployed_at, deprecated_at, created_at, updated_at
                 FROM ml_models
                 WHERE model_id = $1

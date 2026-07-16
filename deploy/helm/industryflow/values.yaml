@@ -628,6 +628,19 @@ notebookHub:
     presignTtlSeconds: 300
     # The MLflow artifact bucket the gateway pre-signs against (matches mlflow's --artifacts-destination).
     artifactBucket: mlflow
+    # Where an externally-authored artifact rests while it is judged (ADR-0030). It shares the
+    # artifact bucket above and is kept out of every tenant's reach by PREFIX: the artifact plane
+    # rewrites every key under the caller's own `tenant_<uuid>/`, so a root outside all of them is
+    # unreachable through it. Do not move this inside a tenant prefix — that is the isolation.
+    uploadStaging:
+      # Must match the gateway's staging root; the gateway's suite checks the two agree.
+      prefix: _upload-staging/
+      # Admitted and refused uploads are cleared at commit. This collects the third case — staged
+      # and never committed — which nothing in the request path ever returns for.
+      expireDays: 1
+      # Set false where the operator manages bucket lifecycle out-of-band. Then the expiry is
+      # THEIRS to provide: without one, unadmitted bytes accumulate with nothing to collect them.
+      expiryEnabled: true
     resources:
       requests: { cpu: 50m, memory: 64Mi }
       limits: { cpu: 250m, memory: 256Mi }

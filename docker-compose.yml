@@ -218,6 +218,14 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       SPARK_CHECKPOINT_BUCKET: ${SPARK_CHECKPOINT_BUCKET:-spark-checkpoints}
+      # Where an uploaded artifact rests while it is judged (ADR-0030). It shares the artifact
+      # bucket but sits OUTSIDE every tenant prefix, which is what makes it unreachable through the
+      # artifact plane — that plane rewrites every key under the caller's own prefix. The expiry is
+      # the only thing that collects an upload nobody ever committed. Must match the gateway's
+      # staging root.
+      UPLOAD_STAGING_BUCKET: ${UPLOAD_STAGING_BUCKET:-mlflow}
+      UPLOAD_STAGING_PREFIX: ${UPLOAD_STAGING_PREFIX:-_upload-staging/}
+      UPLOAD_STAGING_EXPIRE_DAYS: ${UPLOAD_STAGING_EXPIRE_DAYS:-1}
       # Cold layer (ADR-0025): bucket + a WRITE-SCOPED principal the exporter uses (never the root
       # keys). Created here so the box mirrors the Helm minio-cold-init Job.
       COLD_STORE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
@@ -235,6 +243,23 @@ services:
         mc mb -p "local/$$SPARK_CHECKPOINT_BUCKET"
         mc mb -p local/mlflow
         mc mb -p "local/$$COLD_STORE_BUCKET"
+        # Expire abandoned uploads (ADR-0030). An artifact is staged before it is judged, so
+        # unadmitted bytes have a home — one no tenant can address and nothing loads. An upload that
+        # is staged and never committed is a certainty rather than an edge case (a closed laptop is
+        # enough), and nothing in the request path will ever come back to clean it up: the only
+        # actor who knew about it has gone. Admitted and refused uploads are both cleared at commit;
+        # this is for the third case, where commit never happens.
+        # Idempotent by CHECKING, not by hoping `add` fails: it does not — it happily adds a second
+        # rule for the same prefix, and this init runs on every `up`. Found by counting the rules on
+        # a box that had run it twice.
+        if mc ilm rule ls "local/$$UPLOAD_STAGING_BUCKET" 2>/dev/null | grep -q "$$UPLOAD_STAGING_PREFIX"; then
+          echo "upload-staging expiry already present on $$UPLOAD_STAGING_BUCKET"
+        else
+          mc ilm rule add "local/$$UPLOAD_STAGING_BUCKET" \
+            --prefix "$$UPLOAD_STAGING_PREFIX" \
+            --expire-days "$$UPLOAD_STAGING_EXPIRE_DAYS"
+          echo "upload-staging expiry set: $$UPLOAD_STAGING_BUCKET/$$UPLOAD_STAGING_PREFIX after $${UPLOAD_STAGING_EXPIRE_DAYS}d"
+        fi
         # Write-scoped cold-export principal: put/get/list on ONLY the cold bucket. Only set up
         # when its keys are provided (cold-export profile); tolerate re-runs (mc create/user add
         # error if they already exist).
@@ -687,6 +712,13 @@ services:
       JWT_ALGORITHM: ${JWT_ALGORITHM}
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      # The shared capability store, for demand-minting upload handles (ADR-0030 dec 3). This is
+      # ADR-0015's capability store — NOT the Redis feature store ADR-0023 rev 1 removed from this
+      # service; what is written here is a revocable, single-tenant handle and nothing worse.
+      # Unset = this deployment accepts no externally-authored models, and says so.
+      CAPABILITY_REDIS_URL: ${CAPABILITY_REDIS_URL:-redis://redis:6379/0}
+      # Advertised alongside a minted handle so a client need not know the internal topology.
+      UPLOAD_GATEWAY_URL: ${UPLOAD_GATEWAY_URL:-http://notebook-tracking-gateway:5050}
       MODEL_DIR: /app/models
       # Warm model cache size (ADR-0021): loaded MLflow models reused across inference + drift.
       MODEL_CACHE_SIZE: ${MODEL_CACHE_SIZE:-8}
@@ -703,6 +735,9 @@ services:
       - industryflow-network
     depends_on:
       - timescaledb
+      # The capability store (ADR-0030 dec 3): an upload handle's authority IS its
+      # store entry, so minting without the store is not a degraded mint, it is none.
+      - redis
       - mlflow
     restart: unless-stopped
     healthcheck:

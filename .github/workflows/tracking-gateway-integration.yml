@@ -116,7 +116,15 @@ jobs:
 
       # IN-NETWORK: the artifact 307 points at minio:9000, so the runner must be a container on
       # industryflow-network. IF_REQUIRE_LIVE_STACK=1 makes a SKIP a FAILURE.
-      - name: Run tracking-gateway end-to-end proof (namespacing + isolation + artifacts)
+      # A PATTERN, not a list of files: any `test_*_integration.py` here is picked up, so a new
+      # proof cannot be silently skipped by a filename nobody remembered to add.
+      #
+      # Not the whole directory either. `-m integration` filters at RUN time, but pytest must IMPORT
+      # every module it collects to find the markers — so pointing at the directory drags the unit
+      # tests in, and they need fastapi/PyYAML that this container has no business installing. The
+      # naming convention is what does the work, and it is already the house one (sql-proxy and
+      # cold-broker name their live proofs the same way).
+      - name: Run the gateway's end-to-end proofs (ADR-0019 namespacing + isolation + artifacts; ADR-0030 upload plane)
         run: |
           docker run --rm --network industryflow-network -v "$PWD:/w" -w /w \
             -e IF_REQUIRE_LIVE_STACK=1 \
@@ -124,7 +132,7 @@ jobs:
             -e TRACKING_REDIS_URL=redis://redis:6379/0 \
             python:3.14-slim bash -c "
               pip install -q -r services/notebook_tracking_gateway/tests/requirements-integration.txt &&
-              pytest services/notebook_tracking_gateway/tests/test_tracking_gateway_integration.py -m integration -v"
+              pytest services/notebook_tracking_gateway/tests/test_*_integration.py -m integration -v"
 
       - name: Dump service logs on failure
         if: failure()
