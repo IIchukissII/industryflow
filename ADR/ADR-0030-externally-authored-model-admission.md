@@ -6,8 +6,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0030 — Externally-authored models are admitted, but what provenance used to vouch for must be declared and proven
 
 - **ID:** ADR-0030
-- **Status:** Accepted
-- **Date:** 2026-07-16
+- **Status:** Accepted (rev 1 — implementation surfaced that rev 0 named *components* and *frameworks* where it should have named a *moment* and a *property*, and each imprecision invites a violation of a decision already on record. Rev 1 fixes what "one door" binds (the write path for bytes, not the enforcement point for admission), names where each check runs, and restores decision 4's refusal to a generic property of the serialisation rather than a list of frameworks. No decision is reversed; each is made precise)
+- **Date:** 2026-07-16 (rev 1: 2026-07-16)
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the artifact declares, the serving environment satisfies or refuses — the contract this record extends to artifacts the platform never observed being made)
 - **Companions:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (rev 1 — the tracking gateway, and the only principal permitted to write the artifact store, which is what decision 2 turns on), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (a model declares what its output means; the platform never guesses)
@@ -97,6 +97,22 @@ vouch for, and what must an uploaded artifact do instead?**
 2. **The exception is one door, and it is the tracking gateway** — because of who may write the
    artifact store, not because of who knows the tenant rule.
 
+   > **rev 1 (2026-07-16): what "one door" binds.** It binds **the bytes, not the request**. The
+   > gateway is the exclusive *write path to the artifact store*, because it alone holds that
+   > credential — it is not thereby the enforcement point for admission policy. Rev 0 named the
+   > component without naming the moment, and the available misreading is expensive: it would put
+   > ADR-0028's semantics vocabulary and detector registry inside the gateway, which is precisely the
+   > hand-maintained second list ADR-0028 forbids, and it would ask a component that is not the
+   > serving image to judge what the serving image can honour.
+   >
+   > So: **the gateway refuses on structure** — what the bytes *are* (decision 4), which it can
+   > determine without loading them, without ML libraries, and without a vocabulary. **Admission
+   > policy is the serving side's**, at the two gates it already operates (decisions 5, 6, 7). This
+   > is not a concession; it is the existing shape. A kernel-authored model already takes exactly
+   > this route — bytes to the object store through the gateway, then policy at the serving side's
+   > registration gate — and an uploaded artifact earns no different treatment for arriving by a
+   > different door.
+
    The available argument is that the gateway is the single place the tenant namespace is enforced
    (ADR-0019 dec 5). That argument no longer holds in full, and this record does not rest on it: the
    tenant *name* rule already lives in two places, since the trusted read-path dec 7 promised
@@ -121,11 +137,31 @@ vouch for, and what must an uploaded artifact do instead?**
    a platform session (ADR-0004). Reusing the kernel's audience would hand the upload surface to every
    running kernel — precisely the conflation ADR-0015 dec 3's audience-binding exists to prevent.
 
-4. **Only formats that can be loaded without executing author-supplied code are accepted; a pickle is
-   refused at the gate.** The supported serialisations are those ADR-0027 dec 3 already governs —
-   `skops` for scikit-learn, the native booster for xgboost — and this path additionally requires that
-   the loader never fall back to pickle, which it does by default
+4. **Only artifacts that can be loaded without executing author-supplied code are accepted; an
+   artifact carrying executable object-serialisation is refused at the gate.** The path additionally
+   requires that the loader never fall back to such a format, which it does by default
    (`MLFLOW_ALLOW_PICKLE_DESERIALIZATION` defaults true).
+
+   > **rev 1 (2026-07-16): the rule is generic, and the framework names are not part of it.** Rev 0
+   > read "the supported serialisations are those ADR-0027 dec 3 already governs — `skops` for
+   > scikit-learn, the native booster for xgboost", which invites a closed list of *frameworks* to be
+   > written into the refusal. That would be domain-specific knowledge inserted into a core path, and
+   > ADR-0008 dec 1 forbids exactly that; ADR-0027 was careful for the same reason, calling its own
+   > list "an instance, not the rule" and its rule "deliberately generic — it needs no amendment when
+   > torch arrives". A refusal that enumerates frameworks needs amending for every new one, and would
+   > refuse a safe format nobody had thought of yet.
+   >
+   > The rule is therefore a property of the **serialisation**, not of the framework: *does loading
+   > this require deserialising author-supplied objects?* Executable object-serialisation
+   > (pickle and its relatives) is refused whether it is declared or merely present, and whatever
+   > flavor carries it. Today's safe formats are what the platform's own supported set happens to
+   > use; they are an instance of the rule passing, never the rule itself, and this record does not
+   > name them.
+   >
+   > **What the gate is not asking** is whether this deployment can *serve* the artifact. An open
+   > framework set cannot be judged by a closed list (ADR-0027 dec 2), and the answer already lives
+   > in a registry that is discovered rather than hand-kept. A safe-but-unservable artifact passes
+   > this gate on structure and is refused, with a reason, at the one that knows — decisions 5 and 6.
 
    This resolves, for this path only, what ADR-0027 deferred as "the trust half of this boundary".
    It is deferred there and urgent here, and the difference is entirely provenance:
@@ -141,12 +177,28 @@ vouch for, and what must an uploaded artifact do instead?**
    Refusing pickle is therefore not hardening on this path. It is the **precondition for admitting
    uploads at all**, and if it cannot be enforced, the rest of this record does not apply.
 
-5. **The artifact's output semantics are declared explicitly at upload, or the upload is refused.**
+5. **The artifact's output semantics are declared explicitly by the uploader, and the declaration is
+   judged at the serving side's registration gate — or the model is refused there.**
    ADR-0028 dec 1 made declared semantics a first-class fact and dec 2 forbade inferring them from a
    prediction's value or dtype. The kernel emits that declaration today; an external author has no
    kernel to emit it from, so the declaration becomes a required input. There is no default and no
-   fallback: an upload without a semantics from the vocabulary ADR-0028 governs is refused, exactly as
-   a guess would be.
+   fallback: a model whose declared semantics is absent, is outside the vocabulary ADR-0028 governs,
+   or names something no registered detector implements for that artifact's flavor, is refused —
+   exactly as a guess would be.
+
+   > **rev 1 (2026-07-16): the moment.** Rev 0 said "at upload" and left the enforcement point to be
+   > inferred. The declaration is *carried* with the artifact from the moment it is uploaded, but it
+   > is *judged* at the **registration gate** — the same gate ADR-0027 dec 5 already operates, which
+   > refuses an artifact this environment was never able to serve. It is judged there and not at the
+   > gateway because only the serving side holds the vocabulary and the live detector registry, and
+   > that registry is *discovered*, never hand-kept — a copy would be wrong the first time an
+   > operator installed an adapter. It is judged there and not at the deployment gate because a model
+   > whose output means nothing here was never registrable, and deferring the question would leave it
+   > sitting in the registry in a state the registry has no way to describe.
+   >
+   > That an uploaded artifact can therefore exist in the store before it is admitted is not a new
+   > weakness: it is the window a kernel-authored model already occupies between logging its bytes
+   > and being registered. The standard is unchanged; only the door is new.
 
 6. **Requirements are declared explicitly and completely by the uploader — and are treated as an
    assertion, not a record.** ADR-0027 relies on MLflow's *inference* of a training environment, and
@@ -166,6 +218,12 @@ vouch for, and what must an uploaded artifact do instead?**
    this environment can honour this file — into evidence, instead of accepting the uploader's word for
    both halves. Dropping the check to a version comparison would leave only assertions checked against
    assertions, which ADR-0027 dec 5 rejects.
+
+   > **rev 1 (2026-07-16):** this **extends the deployment gate the serving side already operates** —
+   > the one that refuses a model which was servable when registered and whose ground moved
+   > afterwards — rather than adding a third gate. Rev 0's "before it may be deployed" already named
+   > that moment; rev 1 says so plainly, because a parallel load-and-score path built beside the
+   > existing gate would be a second answer to a question that already has one.
 
 8. **Provenance is recorded as a first-class fact, and never synthesized to look internal.** A model
    version carries whether it was kernel-authored or uploaded. The platform does not fabricate a
