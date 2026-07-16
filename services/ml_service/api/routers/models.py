@@ -67,6 +67,14 @@ class ModelMetadata(BaseModel):
     compatibility_status: Optional[str] = None
     compatibility_detail: Optional[Dict[str, Any]] = None
     compatibility_checked_at: Optional[datetime] = None
+    # ADR-0030 dec 8. Provenance is recorded as a first-class fact so an operator can SEE where a
+    # model came from — a fact nobody can read is not one the platform holds. This is a response
+    # model, so a field it does not declare is dropped at the door however faithfully the layers
+    # beneath carried it.
+    #
+    # None means "predates the distinction", which is not "unknown origin": no model registered
+    # before that migration can be an upload, because there was no way to upload one.
+    provenance: Optional[str] = None
     created_at: datetime
     deployed_at: Optional[datetime] = None
 
