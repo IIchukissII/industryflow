@@ -6,10 +6,19 @@
 Structural admission of an externally-authored artifact (ADR-0030 dec 4) — the **pure** rule, no I/O.
 
 The gateway is the exclusive write path to the artifact store, so it is where bytes can still be
-refused before they exist anywhere (ADR-0030 dec 2 rev 1). What it refuses on is **structure**: what
-the bytes *are*. It does not decide whether this deployment can serve them — an open framework set
-cannot be judged by a closed list (ADR-0027 dec 2), and the registry that knows is discovered, lives
-on the serving side, and is asked at the registration gate instead (ADR-0030 dec 5/6 rev 1).
+refused before they reach the tenant's namespace (ADR-0030 dec 2 rev 1). What it refuses on is
+**structure**: what the bytes *are*. It does not decide whether this deployment can serve them — an
+open framework set cannot be judged by a closed list (ADR-0027 dec 2), and the registry that knows is
+discovered, lives on the serving side, and is asked at the registration gate instead (ADR-0030
+dec 5/6 rev 1).
+
+Note the precise claim: refused **before they reach the tenant's namespace**, not before they exist.
+An artifact is staged first and admitted second, because the two decisions in play pull opposite
+ways — the byte half of this rule needs the bytes, and ADR-0019 dec 6 keeps the mediator out of the
+artifact data path so that it scales on request rate rather than artifact size. Routing the largest
+artifacts the platform will ever see through its control plane to satisfy a check is the wrong trade;
+reading their heads out of a staging area is not. So unadmitted bytes exist, briefly, somewhere no
+tenant can address and nothing loads — and never in the namespace that would make them a model.
 
 The rule is one question, and it is about the **serialisation, never the framework**:
 

@@ -315,6 +315,22 @@ vouch for, and what must an uploaded artifact do instead?**
 
 - **The gateway takes on a shape it was not designed for.** Interactive tracking and artifact
   ingestion have different sizes, timeouts, and failure modes. This is the price of decision 2.
+
+  > **rev 1 (2026-07-16): and decision 4 collides with ADR-0019 dec 6, which is worth stating rather
+  > than discovering.** That decision keeps the mediator *out of the artifact data path* — bytes move
+  > between holder and store directly, so it scales on request rate rather than artifact size.
+  > Decision 4's second half needs the bytes: it refuses an artifact that *is* an object stream
+  > whatever its manifest claims, which is the half that catches a disguised one. A mediator that
+  > only signs a URL never sees them.
+  >
+  > Both survive, and the record does not settle *how* (the transfer question is deferred below) —
+  > but it does settle the property that any answer must keep: **nothing unadmitted reaches the
+  > tenant's namespace, and the artifacts most likely to be enormous do not become the mediator's
+  > bandwidth.** The two are jointly satisfiable only if the bytes come to rest somewhere before they
+  > are judged. So an uploaded artifact is staged before it is admitted, and "refused at the gate"
+  > means refused before it is a model — not before it exists. What follows is that unadmitted bytes
+  > have a home, however briefly, and that home must be one no tenant can address and nothing loads,
+  > with its own expiry; an abandoned upload is a certainty, not an edge case.
 - **An uploaded model is held to a genuinely weaker gate than a kernel-authored one**, and no amount
   of wording fixes that — the round-trip check has one real endpoint instead of two. The platform can
   prove the artifact works here; it cannot prove here resembles there.
