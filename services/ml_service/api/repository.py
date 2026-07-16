@@ -230,6 +230,13 @@ class MLRepository:
                 model_id = await conn.fetchval(query, *values)
                 logger.info(f"Model created: {model_id} in schema {schema_name}")
                 return str(model_id)
+            except asyncpg.UniqueViolationError:
+                # This name and version already exist. That is the caller's fact, not a fault of
+                # ours: reporting it as a server error tells them to retry something that will never
+                # work, and buries the one sentence they need. Raised rather than swallowed so the
+                # router can say which it is.
+                logger.info(f"Model {model_data.get('model_name')} v{model_data.get('model_version')} already exists")
+                raise
             except Exception as e:
                 logger.error(f"Failed to create model: {e}")
                 logger.error(f"Fields were: {fields}")

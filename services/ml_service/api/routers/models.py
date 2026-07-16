@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 import logging
 import json
 
+import asyncpg
+
 import auth
 import config
 import extensions
@@ -390,10 +392,22 @@ async def create_model(
     # on what an output means (ADR-0028 dec 1), and a second copy could only drift from it.
 
     # Create model in database
-    model_id = await repository.create_model(
-        company_id=company_id,
-        model_data=payload
-    )
+    try:
+        model_id = await repository.create_model(
+            company_id=company_id,
+            model_data=payload
+        )
+    except asyncpg.UniqueViolationError:
+        # Already registered under this name and version. A 409 says what happened; the 500 this
+        # used to return told the caller to retry something that can never succeed.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A model named '{model_data.model_name}' version {model_data.model_version} is "
+                f"already registered. Register a new version rather than replacing one: a model "
+                f"version is a record of what was served, and overwriting it would erase that."
+            ),
+        )
 
     if not model_id:
         raise HTTPException(status_code=500, detail="Failed to create model")
