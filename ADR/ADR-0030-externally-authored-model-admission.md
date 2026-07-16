@@ -10,7 +10,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-07-16
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the artifact declares, the serving environment satisfies or refuses — the contract this record extends to artifacts the platform never observed being made)
-- **Companions:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (the one door into tracking, and the single point where the tenant namespace is enforced), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (a model declares what its output means; the platform never guesses)
+- **Companions:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (rev 1 — the tracking gateway, and the only principal permitted to write the artifact store, which is what decision 2 turns on), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (a model declares what its output means; the platform never guesses)
 - **Related:** [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (the durable history that motivates training off-platform), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (notebooks as the analytics surface, and the sandbox that bounds the kernel), [ADR-0021](ADR-0021-model-drift-monitoring.md) (the drift lane, which needs a training baseline an uploaded model has no run to carry), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (audience-bound capabilities)
 
 ## Context and problem
@@ -23,9 +23,20 @@ experiment, a chart, a quick look into the data.
 They are not where a serious model over years of that history gets trained. That work wants compute
 the platform does not offer, GPUs it does not have, and a team's own tooling. So the honest shape of
 the requirement is: the history goes out, the finished model comes back. Today only the first half
-exists. Every model in the registry was authored in the kernel and logged through the tracking
-gateway, because ADR-0019 dec 1 decided that tracking is reached **only** through that gateway. The
-word "only" is load-bearing, and it currently has no exception.
+exists: every model in the registry was authored in the kernel and logged through the tracking
+gateway, because that is the only way in anyone ever built.
+
+An existing decision appears to forbid the second half: ADR-0019 dec 1 states that tracking is
+reached **only** through the gateway. It does not forbid it, and the distinction determines which
+record is owed. That "only" governs **the kernel and its credentials** — it is what keeps the
+tracking backend and object-store secrets out of an untrusted environment. The same record's dec 7
+promises a trusted-side surface, "the platform's own scoped API/UI", and that surface exists,
+reaching the tracking server directly as trusted code (ADR-0013 dec 1).
+
+The obstacle is therefore not a decision that refuses. It is that **no decision addresses the
+question**: nothing on record contemplates an artifact the platform never observed being made.
+Silence is not permission (ADR-0000), and it is a weaker starting point than a prohibition, which
+would at least have to be argued against.
 
 The tempting reading is that no new decision is needed. ADR-0027 already says the artifact declares
 its requirements and the serving environment satisfies them or refuses — a rule it deliberately made
@@ -63,9 +74,9 @@ vouch for, and what must an uploaded artifact do instead?**
   is developed in decision 4.
 - **Which singularity is actually still intact.** ADR-0019 dec 5 concentrated the tenant namespace,
   but the tenant *name* rule already has two implementations — the gateway's, and the one the
-  browser read-path carries in `ml_service`. What has never been duplicated is the privileged
+  browser read-path re-derives on the trusted side. What has never been duplicated is the privileged
   principal that may **write** the artifact store (dec 6). A decision that trades on "one enforcement
-  point" must say which point it means, or it borrows credit the architecture no longer has.
+  point" must say which point it means, or it claims a property the architecture no longer holds.
 - **A refusal with a reason is an honest answer** (ADR-0027 dec 2). An open-core platform owes an
   operator a clean "no", not a load-and-hope.
 - **The platform never guesses** (ADR-0028 dec 2). An absent declaration is a refusal, never a
@@ -75,30 +86,34 @@ vouch for, and what must an uploaded artifact do instead?**
 ## Decision
 
 1. **The platform admits externally-authored model artifacts.** Training off-platform is a supported
-   path, not a workaround. ADR-0011 keeps notebooks as the experimentation surface; this record adds
-   a way back in for work that outgrew them. ADR-0019 dec 1's "only" gains exactly one exception, and
-   it is written here rather than assumed by an implementation.
+   path, not a workaround: ADR-0025 made the history durable so that it could be used, and training
+   over that horizon exceeds what an embedded environment is intended to carry. ADR-0011 keeps
+   notebooks as the experimentation surface; this record admits the work that outgrows them.
+
+   This decision excepts nothing. It fills the silence named in the Context — which is why it needs
+   to exist at all, and why it could not be settled by pointing an existing gate at a new kind of
+   file.
 
 2. **The exception is one door, and it is the tracking gateway** — because of who may write the
    artifact store, not because of who knows the tenant rule.
 
-   The tempting argument is that the gateway is the single place the tenant namespace is enforced
-   (ADR-0019 dec 5). That argument is half spent and this record will not lean on it: the tenant
-   *name* rule already lives in two places, since the browser read-path re-derives it inside
-   `ml_service` rather than calling the gateway. That duplication was accepted for reads, where the
-   cost of getting it wrong is a leak that a prefix re-check catches.
+   The available argument is that the gateway is the single place the tenant namespace is enforced
+   (ADR-0019 dec 5). That argument no longer holds in full, and this record does not rest on it: the
+   tenant *name* rule already lives in two places, since the trusted read-path dec 7 promised
+   re-derives it rather than calling the gateway. That duplication was accepted for reads, where the
+   cost of an error is a leak that a second prefix check catches.
 
-   What is genuinely singular is **write authority over the artifact store** (ADR-0019 dec 6). The
-   gateway holds the only privileged object-store principal; `ml_service` deliberately holds no
-   object-store credential at all — it reaches artifacts through the tracking server, never the
-   bucket. Putting ingestion anywhere else therefore does not *reuse* an existing authority, it
-   **mints a second one**: a new privileged writer to the store where every tenant's models live.
-   That is the cost this decision refuses to pay, and it is a different and better reason than the
-   one about namespaces.
+   What remains singular is **write authority over the artifact store** (ADR-0019 dec 6). The gateway
+   holds the only privileged object-store principal; the serving side holds no object-store
+   credential at all, reaching artifacts through the tracking server rather than the store itself.
+   Siting ingestion elsewhere therefore does not *reuse* an existing authority; it **establishes a
+   second one** — a further privileged writer to the store in which every tenant's models reside.
+   That is the cost this decision declines, and it is a narrower and sounder ground than the
+   namespace argument.
 
-   The gateway was built for interactive tracking, not artifact ingestion, so this is a real cost
-   paid deliberately — a component takes on a shape it was not designed for, in exchange for the
-   number of privileged writers staying at one.
+   The gateway was built for interactive tracking rather than artifact ingestion, so the cost is
+   real and is paid deliberately: a component takes on a shape it was not designed for, in exchange
+   for the number of privileged writers remaining at one.
 
 3. **An upload is authorised by the platform session, under its own audience — never by a tracking
    capability.** ADR-0019 dec 3 mints tracking capabilities for the authoring kernel; they are
@@ -119,8 +134,8 @@ vouch for, and what must an uploaded artifact do instead?**
    > where they already had code execution — their own sandboxed kernel (ADR-0011 dec 2/7). It buys
    > an attacker nothing they did not already hold, which is why refusing it was hardening. For an
    > uploaded artifact, the author has no foothold at all. A pickle would be the platform *granting*
-   > arbitrary code execution, inside `ml_service`, on the trusted side of the boundary, with
-   > `ml_service`'s credentials, to anyone who can authenticate a session.
+   > arbitrary code execution inside the serving environment, on the trusted side of the boundary,
+   > under that environment's credentials, to anyone able to authenticate a session.
 
    Same format, same loader, same line of code — different blast radius, because provenance changed.
    Refusing pickle is therefore not hardening on this path. It is the **precondition for admitting
@@ -174,16 +189,16 @@ vouch for, and what must an uploaded artifact do instead?**
   that provenance is irrelevant because the artifact is the authority. Rejected: it silently converts
   three inherited guarantees into assertions (Context), and it inherits a pickle loader whose blast
   radius has changed underneath it. It is the cheapest option and the one that looks correct.
-- **B. A dedicated upload service, or `ml_service`, with its own object-store principal.** Cleaner to
-  build — the gateway is not shaped for bulk ingestion, and `ml_service` already holds the tenant name
-  rule and already talks to the tracking server as a trusted component. Rejected on decision 2's
-  narrower ground: either would need an object-store write credential it does not have today, making a
-  second privileged writer to the bucket holding every tenant's models. The convenience is real; the
-  new authority is permanent.
-- **C. Refuse external models; require training in the kernel.** Coherent, and what the architecture
-  says today. Rejected because it answers a real requirement with "use the tool that cannot do it":
-  the cold layer exists precisely so history outlives the hot store, and no notebook is going to train
-  over years of it.
+- **B. A dedicated upload service, or the serving side, holding its own object-store principal.**
+  Simpler to build — the gateway is not shaped for bulk ingestion, and the serving side already carries
+  the tenant name rule and already addresses the tracking server as trusted code. Rejected on decision
+  2's narrower ground: either would require an object-store write credential it does not hold today,
+  establishing a second privileged writer to the store in which every tenant's models reside. The
+  convenience is immediate; the additional authority is permanent.
+- **C. Refuse external models; require that training occur in the kernel.** Coherent, and the position
+  the architecture holds by default. Rejected because it answers a real requirement with an
+  environment that cannot meet it: the cold layer exists so that history outlives the hot store, and
+  training over that horizon is beyond what an embedded kernel is intended to carry.
 - **D. Accept pickle but sandbox the load.** Trades a clear structural refusal for a containment
   problem that must then hold forever. Refusing a format is checkable; sandboxing arbitrary code is a
   standing bet.
@@ -235,19 +250,21 @@ vouch for, and what must an uploaded artifact do instead?**
 - **Turning pickle off for the kernel-authored path too.** Decision 4 resolves ADR-0027's deferral only
   for uploads. The notebook path keeps the deferral, with its original reasoning intact.
 - **Whether the tenant name rule should have two implementations at all.** Decision 2 records that it
-  already does — the gateway's and `ml_service`'s — and declines to treat that as an argument. Whether
-  the two should converge, and which owns the rule, is a live question this record surfaces without
-  settling. ADR-0019 dec 5 reads as though the answer is one; the code has said two since the browser
-  read-path existed.
+  already does — the gateway's, and the trusted read-path's — and declines to treat that as an
+  argument. Whether the two should converge, and which owns the rule, is a live question this record
+  surfaces without settling. ADR-0019 dec 5 reads as though the answer is one; the realisation has
+  been two since the trusted read-path existed.
 
 ## References
 
 - ADR-0027 — the declare/satisfy-or-refuse contract this record extends; dec 3 (supported flavor set,
   serialisation), dec 5 (both checks required, empirical is the authority), and the deferred "trust
   half" that decision 4 resolves for this path.
-- ADR-0019 — dec 1 (tracking reached only through the gateway — the "only" this record excepts), dec 3
-  (tracking-capability audience), dec 5 (the single tenant-namespace enforcement point), dec 6 (the
-  privileged artifact-store principal).
+- ADR-0019 — dec 1 (the "only" that governs the *kernel's* credentials, and which this record does
+  **not** except — see Context), dec 3 (tracking-capability audience), dec 5 (the gateway's
+  tenant-namespace enforcement, whose rule the trusted read-path already re-derives — rev 1), dec 6
+  (the privileged artifact-store principal — decision 2's actual ground), dec 7 (the trusted-side
+  scoped API/UI that shows the gateway was never meant to be the only speaker to MLflow).
 - ADR-0028 — dec 1/2 (declared semantics; never guess), dec 7 (the out-of-process record decision 9
   refuses to pre-empt).
 - ADR-0025 — the cold layer whose durable history motivates off-platform training.
