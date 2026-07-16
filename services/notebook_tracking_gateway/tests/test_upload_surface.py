@@ -19,7 +19,6 @@ import os
 import sys
 import uuid
 
-import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -260,6 +259,7 @@ def test_staging_is_partitioned_by_tenant():
     store = FakeStore()
     a_uid = _stage(_upload_client(store, company_id=CID_A)).json()["upload_id"]
     b_uid = _stage(_client(store, **{"nbcap:up": _handle("upload", CID_B)})).json()["upload_id"]
+    assert a_uid != b_uid
     a_keys = [k for _, k in store.presigned if TOKEN_A in k]
     b_keys = [k for _, k in store.presigned if TOKEN_B in k]
     assert a_keys and b_keys
