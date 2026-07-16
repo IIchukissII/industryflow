@@ -29,24 +29,34 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
 AUDIENCE_TRACKING = "tracking"  # the gateway's copy of the audience (ADR-0019 / ADR-0015 dec 3)
+# The upload plane (ADR-0030 dec 3). It reaches this same mediator, so the audience is the ONLY fact
+# separating the two populations — and they are held to different rules: an uploaded artifact faces
+# the structural refusal in `admission`, a kernel logging a model does not (ADR-0030 dec 4 resolves
+# ADR-0027's deferral for this path only, deliberately leaving the notebook path alone). Collapse the
+# two audiences and there is no third outcome: either kernels inherit a refusal nothing decided for
+# them, or uploads escape the refusal that is the precondition for admitting them at all.
+AUDIENCE_UPLOAD = "upload"
 _KEY_PREFIX = "nbcap:"
 
 
 @dataclass(frozen=True)
 class TrackingBinding:
-    """The tenant a tracking handle is bound to (ADR-0019)."""
+    """The tenant a handle is bound to (ADR-0019). One tenant, always — a handle that writes is
+    still bound to exactly one tenant (ADR-0015 dec 1 rev 1)."""
 
     user: str
     company_id: str
+    audience: str = AUDIENCE_TRACKING
 
 
-async def resolve_tracking_binding(
-    aget: Callable[[str], Awaitable[Optional[object]]], handle: str
+async def _resolve_binding(
+    aget: Callable[[str], Awaitable[Optional[object]]], handle: str, expected_audience: str
 ) -> Optional[TrackingBinding]:
-    """Resolve a tracking-audience handle to its tenant, or None to deny.
+    """Resolve a handle of exactly one audience to its tenant, or None to deny.
 
-    None means the gateway refuses the request. A non-tracking handle never resolves here
-    (ADR-0015 dec 3); absent/expired/revoked/malformed all deny (dec 1-2).
+    None means the gateway refuses. Absent/expired/revoked/malformed all deny (ADR-0015 dec 1-2),
+    and the audience must match exactly — possession of one plane's handle never yields another's
+    (dec 3). The audience is compared, never defaulted: a record with no audience denies.
     """
     if not handle:
         return None
@@ -59,12 +69,37 @@ async def resolve_tracking_binding(
         record = json.loads(raw)
     except (ValueError, TypeError):
         return None
-    if record.get("audience") != AUDIENCE_TRACKING:
+    if not isinstance(record, dict):
+        return None
+    if record.get("audience") != expected_audience:
         return None
     company_id = record.get("company_id")
     if not company_id:
         return None
-    return TrackingBinding(user=record.get("user", ""), company_id=company_id)
+    return TrackingBinding(
+        user=record.get("user", ""), company_id=company_id, audience=expected_audience
+    )
+
+
+async def resolve_tracking_binding(
+    aget: Callable[[str], Awaitable[Optional[object]]], handle: str
+) -> Optional[TrackingBinding]:
+    """Resolve a tracking-audience handle to its tenant, or None to deny (ADR-0019 dec 4).
+
+    An upload handle never resolves here: the tracking plane is the kernel's, and an uploader must
+    not reach it by holding the wrong ticket.
+    """
+    return await _resolve_binding(aget, handle, AUDIENCE_TRACKING)
+
+
+async def resolve_upload_binding(
+    aget: Callable[[str], Awaitable[Optional[object]]], handle: str
+) -> Optional[TrackingBinding]:
+    """Resolve an upload-audience handle to its tenant, or None to deny (ADR-0030 dec 3).
+
+    A tracking handle never resolves here — which is the point: see AUDIENCE_UPLOAD above.
+    """
+    return await _resolve_binding(aget, handle, AUDIENCE_UPLOAD)
 
 
 def _tenant_token(company_id: str) -> str:
