@@ -14,9 +14,11 @@ import logging
 import json
 
 import auth
+import config
 import extensions
 import load_probe
 import model_compat
+import upload_capability
 import uploaded_model
 
 logger = logging.getLogger(__name__)
@@ -258,6 +260,57 @@ async def _evaluate_or_reject(
 # ============================================================================
 # API Endpoints
 # ============================================================================
+
+@router.post("/upload-capability", status_code=201)
+async def mint_upload_capability(
+    request: Request,
+    current_user: dict = Depends(auth.verify_jwt_token),
+    company_id: str = Depends(get_company_id_dependency),
+):
+    """Mint a short-lived capability for uploading one externally-authored model (ADR-0030 dec 3).
+
+    This is the platform session becoming an upload — *derived from* a session, never *presented as*
+    one. The mediator that holds the artifact-store credential resolves the opaque handle and learns
+    nothing else; teaching it to verify sessions instead would let a compromise there forge any
+    user's session in any tenant, since the signature is symmetric (ADR-0015 dec 7, dec 4 rev 1).
+
+    Minted here because this service already establishes the tenant from a verified principal for its
+    own reasons (ADR-0003 dec 1), and is the authority that will judge the artifact at the
+    registration gate — so the authority that will judge it is the one that authorises it to arrive.
+    """
+    store = getattr(request.app.state, "capability_store", None)
+    if store is None:
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "This deployment has no capability store configured, so it cannot mint upload "
+                "capabilities and does not accept externally-authored models."
+            ),
+        )
+
+    user = current_user.get("payload", {}).get("sub") or str(current_user.get("user_id", ""))
+    try:
+        # `build_record` is the decision — what this handle is bound to — and it refuses rather than
+        # improvise when there is no verified principal to bind to. The write is here because it is
+        # I/O and this store is async; `mint` is the same decision for a synchronous store.
+        handle, record = upload_capability.build_record(user=user, company_id=company_id)
+    except ValueError as exc:
+        # No tenant, or no user. A handle bound to nothing is not a weaker capability; it is a hole.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await store.set(
+        upload_capability.store_key(handle),
+        json.dumps(record),
+        ex=upload_capability.DEFAULT_TTL_SECONDS,
+    )
+
+    logger.info(f"Minted an upload capability for {user} (tenant {company_id})")
+    return {
+        "capability": handle,
+        "expires_in": upload_capability.DEFAULT_TTL_SECONDS,
+        "upload_url": config.config.UPLOAD_GATEWAY_URL or None,
+    }
+
 
 @router.post("", status_code=201)
 async def create_model(

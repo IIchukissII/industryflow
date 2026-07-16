@@ -687,6 +687,13 @@ services:
       JWT_ALGORITHM: ${JWT_ALGORITHM}
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      # The shared capability store, for demand-minting upload handles (ADR-0030 dec 3). This is
+      # ADR-0015's capability store — NOT the Redis feature store ADR-0023 rev 1 removed from this
+      # service; what is written here is a revocable, single-tenant handle and nothing worse.
+      # Unset = this deployment accepts no externally-authored models, and says so.
+      CAPABILITY_REDIS_URL: ${CAPABILITY_REDIS_URL:-redis://redis:6379/0}
+      # Advertised alongside a minted handle so a client need not know the internal topology.
+      UPLOAD_GATEWAY_URL: ${UPLOAD_GATEWAY_URL:-http://notebook-tracking-gateway:5050}
       MODEL_DIR: /app/models
       # Warm model cache size (ADR-0021): loaded MLflow models reused across inference + drift.
       MODEL_CACHE_SIZE: ${MODEL_CACHE_SIZE:-8}
@@ -703,6 +710,9 @@ services:
       - industryflow-network
     depends_on:
       - timescaledb
+      # The capability store (ADR-0030 dec 3): an upload handle's authority IS its
+      # store entry, so minting without the store is not a degraded mint, it is none.
+      - redis
       - mlflow
     restart: unless-stopped
     healthcheck:
