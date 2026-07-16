@@ -64,6 +64,12 @@ def _format_model_row(row: dict, company_id: str) -> Dict[str, Any]:
         'compatibility_status': row.get('compatibility_status'),
         'compatibility_detail': json.loads(row['compatibility_detail']) if isinstance(row.get('compatibility_detail'), str) else row.get('compatibility_detail'),
         'compatibility_checked_at': row.get('compatibility_checked_at'),
+        # ADR-0030 dec 8. Read as well as written: the deployment gate asks an uploaded model where
+        # its artifact IS, because it has no run to answer that. A column the write path stores and
+        # the read path drops is a column that does not exist — which is how this surfaced, as a
+        # KeyError on a real box after every unit test had passed.
+        'provenance': row.get('provenance'),
+        'artifact_uri': row.get('artifact_uri'),
         'status': row['status'],
         'deployed_at': row.get('deployed_at'),
         'deprecated_at': row.get('deprecated_at'),
@@ -112,6 +118,7 @@ class MLRepository:
                     accuracy, precision_score, recall, f1_score, auc_roc,
                     training_samples, training_start_date, training_end_date,
                     compatibility_status, compatibility_detail, compatibility_checked_at,
+                    provenance, artifact_uri,
                     status, deployed_at, deprecated_at, created_at, updated_at
                 FROM ml_models
             """
@@ -250,6 +257,7 @@ class MLRepository:
                     training_samples, training_start_date, training_end_date,
                     reference_profile,
                     compatibility_status, compatibility_detail, compatibility_checked_at,
+                    provenance, artifact_uri,
                     status, deployed_at, deprecated_at, created_at, updated_at
                 FROM ml_models
                 WHERE model_id = $1
