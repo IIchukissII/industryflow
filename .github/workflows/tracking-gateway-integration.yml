@@ -116,7 +116,11 @@ jobs:
 
       # IN-NETWORK: the artifact 307 points at minio:9000, so the runner must be a container on
       # industryflow-network. IF_REQUIRE_LIVE_STACK=1 makes a SKIP a FAILURE.
-      - name: Run tracking-gateway end-to-end proof (namespacing + isolation + artifacts)
+      # The whole directory, selected by MARKER rather than by naming files. Naming them is another
+      # list that has to be remembered, and this arc has already paid for that class four times: a
+      # new integration proof would simply never run, and the job would stay green while covering
+      # less than it says. `-m integration` cannot forget.
+      - name: Run the gateway's end-to-end proofs (ADR-0019 namespacing + isolation + artifacts; ADR-0030 upload plane)
         run: |
           docker run --rm --network industryflow-network -v "$PWD:/w" -w /w \
             -e IF_REQUIRE_LIVE_STACK=1 \
@@ -124,7 +128,7 @@ jobs:
             -e TRACKING_REDIS_URL=redis://redis:6379/0 \
             python:3.14-slim bash -c "
               pip install -q -r services/notebook_tracking_gateway/tests/requirements-integration.txt &&
-              pytest services/notebook_tracking_gateway/tests/test_tracking_gateway_integration.py -m integration -v"
+              pytest services/notebook_tracking_gateway/tests -m integration -v"
 
       - name: Dump service logs on failure
         if: failure()
