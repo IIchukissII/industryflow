@@ -13,7 +13,6 @@ through it untouched while every unit test stayed green.
 import os
 import sys
 import uuid
-from datetime import datetime, timezone
 
 import pytest
 from fastapi import FastAPI
