@@ -31,7 +31,7 @@ from pydantic import BaseModel
 from mlflow.tracking import MlflowClient
 from mlflow.exceptions import MlflowException
 
-from mlflow_namespace import pick_latest, shape_summary, tenant_prefix
+from mlflow_namespace import is_safe_name, pick_latest, shape_summary, tenant_prefix
 from routers.models import get_company_id_dependency
 
 logger = logging.getLogger(__name__)
@@ -42,10 +42,7 @@ MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 
 
 def _reject_unsafe_name(name: str) -> None:
-    """A tenant addresses a model by its plain name; we re-qualify it with the caller's prefix, so
-    cross-tenant access is impossible by construction. Still reject quotes/wildcards so the value
-    can never alter the MLflow search filter."""
-    if not name or any(c in name for c in "'\"%"):
+    if not is_safe_name(name):
         raise HTTPException(status_code=400, detail="invalid model name")
 
 

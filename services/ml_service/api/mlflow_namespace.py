@@ -29,6 +29,17 @@ def tenant_prefix(company_id: str) -> str:
     return tenant_token(company_id) + "."
 
 
+def is_safe_name(name: str) -> bool:
+    """Whether a caller-supplied experiment/model name is safe to re-qualify and interpolate into an
+    MLflow search filter.
+
+    A tenant addresses an object by its plain name and we re-qualify it with the caller's prefix, so
+    cross-tenant access is already impossible by construction; this only rejects quotes/wildcards so
+    the value can never alter the filter it lands in.
+    """
+    return bool(name) and not any(c in name for c in "'\"%")
+
+
 def strip_owned(prefix: str, qualified: str) -> Optional[str]:
     """Strip the tenant prefix off a qualified name, or ``None`` if it is not the tenant's (so the
     caller drops it rather than leaking another tenant's model)."""
@@ -62,4 +73,43 @@ def shape_summary(model: Dict[str, Any], prefix: str, metrics: Dict[str, float])
         "run_id": latest.get("run_id") if latest else None,
         "metrics": metrics,
         "source": "notebook",
+    }
+
+
+def shape_experiment(experiment: Dict[str, Any], prefix: str) -> Optional[Dict[str, Any]]:
+    """Shape one MLflow experiment into the clean, tenant-stripped summary the UI lists, or ``None``
+    if it is not the caller's tenant's.
+
+    The gateway qualifies experiment names with the same ``tenant_<uuid>.`` prefix it uses for
+    registered models, so the same ownership rule decides both.
+    """
+    name = strip_owned(prefix, experiment.get("name", ""))
+    if name is None:
+        return None
+    return {
+        "name": name,
+        "experiment_id": experiment.get("experiment_id"),
+        "lifecycle_stage": experiment.get("lifecycle_stage"),
+        "creation_time": experiment.get("creation_time"),
+        "last_update_time": experiment.get("last_update_time"),
+        "source": "notebook",
+    }
+
+
+def shape_run(run: Dict[str, Any]) -> Dict[str, Any]:
+    """Shape one MLflow run for the UI.
+
+    A run carries no tenant-namespaced name of its own — its tenant is the one that owns its
+    **experiment**. So this shaping is unconditional by design, and the caller is responsible for
+    only ever passing runs it fetched from an experiment ``shape_experiment`` accepted. Keeping the
+    ownership decision at the experiment boundary means it is made once, not re-derived per run.
+    """
+    return {
+        "run_id": run.get("run_id"),
+        "run_name": run.get("run_name") or "",
+        "status": run.get("status"),
+        "start_time": run.get("start_time"),
+        "end_time": run.get("end_time"),
+        "metrics": run.get("metrics") or {},
+        "params": run.get("params") or {},
     }

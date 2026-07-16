@@ -25,8 +25,8 @@ import config
 from repository import MLRepository
 from routers import (
     health_router, models_router, registered_models_router,
-    inference_router, feature_configs_router, drift_router,
-    capabilities_router,
+    experiments_router, inference_router, feature_configs_router,
+    drift_router, capabilities_router,
 )
 from feature_engineering import AggregateBaselineProvider, StatefulFeatureSwitch
 
@@ -89,6 +89,8 @@ Instrumentator().instrument(app).expose(app)
 app.include_router(health_router)
 app.include_router(models_router)
 app.include_router(registered_models_router)
+# Tenant-scoped experiment/run browsing (ADR-0019) — replaces the removed /api/mlflow/* shim.
+app.include_router(experiments_router)
 app.include_router(inference_router)
 app.include_router(feature_configs_router)
 app.include_router(drift_router)
