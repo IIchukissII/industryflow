@@ -21,6 +21,20 @@ data:
   # Release-scoped so it matches the in-cluster Service DNS (the app default 'ml-service-api'
   # only resolves under compose, not here).
   ML_SERVICE_URL: {{ printf "http://%s-ml-service-api:%v" (include "industryflow.fullname" .) 8002 | quote }}
+  # The shared capability store, where a demand-minted upload handle's binding is recorded
+  # (ADR-0030 dec 3, ADR-0015 dec 4 rev 1). Named for its purpose rather than reusing REDIS_URL,
+  # matching how every other plane names its own (the SQL proxy and tracking gateway each do):
+  # what is in the store is capabilities, and a service that only mints them should say so.
+  #
+  # NOT the Redis feature store ADR-0023 rev 1 removed from ml_service — that was a second
+  # windowing substrate and it stays gone. What is written here is a revocable, single-tenant
+  # handle and nothing whose loss is worse than that (ADR-0015 dec 7).
+  CAPABILITY_REDIS_URL: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
+  {{- if .Values.notebookHub.enabled }}
+  # Where an uploader takes a minted handle — advertised with it so a client need not know the
+  # platform's topology. Release-scoped, like ML_SERVICE_URL above.
+  UPLOAD_GATEWAY_URL: {{ printf "http://%s-notebook-tracking-gateway:%v" (include "industryflow.fullname" .) .Values.notebookHub.trackingGateway.port | quote }}
+  {{- end }}
   # Spark S3A checkpoint endpoint (ADR-0006). Used only when CHECKPOINT_LOCATION is an s3a:// URI
   # (the scale-out path); the default local mode ignores it.
   MINIO_ENDPOINT: {{ include "industryflow.minioEndpoint" . | quote }}

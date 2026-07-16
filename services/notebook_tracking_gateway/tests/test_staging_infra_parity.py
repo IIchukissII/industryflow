@@ -27,7 +27,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import staging  # noqa: E402
 
-_COMPOSE = os.path.join(os.path.dirname(__file__), "..", "..", "..", "docker-compose.yml")
+_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+_COMPOSE = os.path.join(_ROOT, "docker-compose.yml")
+_VALUES = os.path.join(_ROOT, "deploy", "helm", "industryflow", "values.yaml")
 
 
 def _minio_init_env():
@@ -36,6 +38,14 @@ def _minio_init_env():
     with open(_COMPOSE) as fh:
         compose = yaml.safe_load(fh)
     return compose["services"]["minio-init"]["environment"]
+
+
+def _chart_staging():
+    if not os.path.exists(_VALUES):
+        pytest.skip("the chart is not present in this checkout")
+    with open(_VALUES) as fh:
+        values = yaml.safe_load(fh)
+    return values["notebookHub"]["trackingGateway"]["uploadStaging"]
 
 
 def _default_of(value: str) -> str:
@@ -53,6 +63,26 @@ def test_abandoned_uploads_actually_expire():
     # enough — and nothing in the request path returns to collect it.
     env = _minio_init_env()
     assert int(_default_of(str(env["UPLOAD_STAGING_EXPIRE_DAYS"]))) >= 1
+
+
+def test_the_chart_stages_into_the_same_prefix_as_the_code():
+    """Helm is the third place this value lives, and a deployment must not depend on which way it
+    was installed."""
+    assert _chart_staging()["prefix"] == staging.STAGING_ROOT
+
+
+def test_the_chart_expires_abandoned_uploads_too():
+    assert int(_chart_staging()["expireDays"]) >= 1
+    assert _chart_staging()["expiryEnabled"] is True
+
+
+def test_compose_and_the_chart_agree_with_each_other():
+    """Not only that each matches the code — that the two deployments behave the same. A box and a
+    cluster disagreeing about when bytes expire is the kind of difference nobody notices until one
+    of them is full."""
+    env = _minio_init_env()
+    assert _default_of(str(env["UPLOAD_STAGING_PREFIX"])) == _chart_staging()["prefix"]
+    assert int(_default_of(str(env["UPLOAD_STAGING_EXPIRE_DAYS"]))) == int(_chart_staging()["expireDays"])
 
 
 def test_staging_shares_the_artifact_bucket_and_is_kept_out_by_prefix_not_by_bucket():
