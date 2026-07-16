@@ -76,8 +76,13 @@ jobs:
               smoke: "python -c \"import jupyterhub, dockerspawner, kubespawner; print('hub stack ok', jupyterhub.__version__)\" && jupyterhub --version" }
           - { name: notebook-sql-proxy,     context: services/notebook_sql_proxy, file: services/notebook_sql_proxy/Dockerfile,
               smoke: "python -c \"import redis; print('sql-proxy ok')\"" }
+          # Imports what the container SERVES, not merely what it depends on. `import fastapi, redis`
+          # proves the deps installed and would have passed happily on an image whose own modules the
+          # Dockerfile never copied — which is exactly how a crashloop shipped past a green build and
+          # 87 green unit tests (ADR-0030). The CMD is `python -m gateway`; importing it is the
+          # cheapest thing that asks the question the smoke is named for.
           - { name: notebook-tracking-gateway, context: services/notebook_tracking_gateway, file: services/notebook_tracking_gateway/Dockerfile,
-              smoke: "python -c \"import fastapi, redis; print('tracking-gateway ok')\"" }
+              smoke: "python -c \"import gateway; print('tracking-gateway ok')\"" }
           - { name: notebook-cold-broker,   context: services/notebook_cold_broker, file: services/notebook_cold_broker/Dockerfile,
               smoke: "python -c \"import fastapi, redis, boto3; print('cold-broker ok')\"" }
           - { name: notebook-authoring,     context: clients/python,            file: services/notebook_hub/Dockerfile.authoring,
