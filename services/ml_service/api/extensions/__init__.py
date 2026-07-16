@@ -141,6 +141,13 @@ OUTLIER_SCORE = "outlier_score"               # continuous novelty score; more n
 RECONSTRUCTION_ERROR = "reconstruction_error"  # distance between input and its reconstruction
 DIRECT_SCORE = "direct_score"                 # the model already emits a 0-1 anomaly score
 
+# The vocabulary, enumerated once. A caller that must ask "is this a semantics the platform knows?"
+# — an externally-authored model declares its own, and nothing in the artifact vouches for it
+# (ADR-0030 dec 5) — needs the set, and a second copy of it would be wrong the first time this list
+# grows. The list is open by decision (ADR-0028 dec 1: a new semantics is a new registration), which
+# is exactly why nobody may keep their own copy of it.
+SCORE_SEMANTICS = (ANOMALY_PROBABILITY, OUTLIER_SCORE, RECONSTRUCTION_ERROR, DIRECT_SCORE)
+
 # A detector is: async (features, model, threshold, ctx) -> DetectionResult. `model` is the
 # loaded model (or None for model-free detectors); a detector reads only what it needs.
 DetectorFn = Callable[[Any, Any, float, DetectorContext], Awaitable[DetectionResult]]
@@ -207,6 +214,27 @@ def detectors_for_flavor(flavor: str) -> List[str]:
     return [
         name for name in registered_detectors()
         if flavor in _DETECTOR_TAGS.get(name, {}).get("handles_flavors", [])
+    ]
+
+
+def detectors_for(semantics: str, flavor: str) -> List[str]:
+    """Which registered detectors implement these output semantics *for this flavor* — DISCOVERED
+    from the registry, never a hand-kept list (ADR-0028 dec 5).
+
+    Both halves are required, and the conjunction is the point: a detector that understands what
+    `outlier_score` means is still no use against an artifact it cannot load, and one that can load
+    the artifact is no use if it would read the output as something else. This is what the
+    registration gate asks of a model whose semantics were merely *asserted* by an external author
+    (ADR-0030 dec 5) — the question is not "is this a real semantics" but "is there anything here
+    that would know what this model's output MEANS".
+
+    An empty ``handles_flavors`` claims nothing and therefore matches nothing: a detector that makes
+    no claim is not a detector that handles everything.
+    """
+    return [
+        name for name in registered_detectors()
+        if _DETECTOR_TAGS.get(name, {}).get("semantics") == semantics
+        and flavor in _DETECTOR_TAGS.get(name, {}).get("handles_flavors", [])
     ]
 
 
