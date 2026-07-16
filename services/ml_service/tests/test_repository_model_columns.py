@@ -87,6 +87,26 @@ def test_the_write_path_persists_the_columns():
         )
 
 
+def test_the_api_actually_returns_provenance():
+    """The last list in the chain, and the one that made the other three pointless.
+
+    `GET /api/models` declares a response model, and pydantic drops any field it does not name —
+    however faithfully the DB, the SELECT and the row mapping carried it. Provenance was stored,
+    fetched, mapped, and then filtered out at the door: ADR-0030 dec 8 records it as a first-class
+    fact precisely so an operator can SEE it, and a fact nobody can read is not one the platform
+    holds. Asserted through the real model rather than by reading source, because the filtering IS
+    the behaviour under test.
+    """
+    import datetime
+    from routers.models import ModelMetadata
+
+    out = ModelMetadata(
+        model_id="m1", company_id="c1", model_name="n", model_version="1", model_type="outlier",
+        status="production", created_at=datetime.datetime.now(), provenance="uploaded",
+    ).model_dump()
+    assert out.get("provenance") == "uploaded", "the response model drops provenance at the door"
+
+
 def test_every_column_the_writes_persist_can_be_read_back():
     """The asymmetry itself, as a property: anything the insert allowlist accepts should be
     selectable and mappable. This is what nobody checked."""
