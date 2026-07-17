@@ -6,8 +6,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0030 — Externally-authored models are admitted, but what provenance used to vouch for must be declared and proven
 
 - **ID:** ADR-0030
-- **Status:** Accepted (rev 1 — implementation surfaced that rev 0 named *components* and *frameworks* where it should have named a *moment* and a *property*, and each imprecision invites a violation of a decision already on record. Rev 1 fixes what "one door" binds (the write path for bytes, not the enforcement point for admission), names where each check runs, and restores decision 4's refusal to a generic property of the serialisation rather than a list of frameworks. No decision is reversed; each is made precise)
-- **Date:** 2026-07-16 (rev 1: 2026-07-16)
+- **Status:** Accepted (rev 1 — implementation surfaced that rev 0 named *components* and *frameworks* where it should have named a *moment* and a *property*, and each imprecision invites a violation of a decision already on record. Rev 1 fixes what "one door" binds (the write path for bytes, not the enforcement point for admission), names where each check runs, and restores decision 4's refusal to a generic property of the serialisation rather than a list of frameworks. No decision is reversed; each is made precise. rev 2 — closes the transport half of the deferred transfer question for the single-request case. Decision 3 named a browser client, but the realisation only ever served a client already inside the trust network, so the client the record named could not reach the plane. Decision 10 makes the upload plane reachable from the outside without establishing a second writer or breaching a decision already on record; resumability and very-large/multipart transfer stay deferred)
+- **Date:** 2026-07-16 (rev 1: 2026-07-16; rev 2: 2026-07-17)
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the artifact declares, the serving environment satisfies or refuses — the contract this record extends to artifacts the platform never observed being made)
 - **Companions:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (rev 1 — the tracking gateway, and the only principal permitted to write the artifact store, which is what decision 2 turns on), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (a model declares what its output means; the platform never guesses)
@@ -276,6 +276,64 @@ vouch for, and what must an uploaded artifact do instead?**
    serving boundary remains ADR-0028 dec 7's record to write, and this one deliberately does not
    pre-empt it.
 
+10. **rev 2 (2026-07-17): The upload plane is reachable from outside the trust network — the browser
+    decision 3 named — through the platform's one public edge; the write authorisation it hands that
+    client names the edge, never an address only the cluster can resolve.** Decision 3 committed to
+    "a person, at a browser or a CLI", but the realisation served only a client already inside the
+    network: the plane had no route through the front door, and the write authorisation it minted
+    named an interior address a browser can neither resolve nor be granted an origin against. That is
+    intent without reach. This closes the *transport* half of the deferred transfer question for the
+    single-request case; resumability and very-large/multipart transfer stay deferred below.
+
+    Three decisions already on record fix the shape of the only acceptable answer, and this decision
+    adds nothing to them — it is the smallest change that lets decision 3's client actually arrive:
+
+    - **The mediator stays out of the byte path (ADR-0019 dec 6).** The bytes still travel from the
+      client straight to the store under a single-object, single-verb, short-lived authorisation —
+      the artifact analogue of the ADR-0015 handle. Relaying them through the mediator would make it
+      scale with artifact size rather than request rate, the failure ADR-0019 dec 6 refused, and an
+      externally-trained model over the cold-layer horizon is the largest artifact the platform
+      handles. So the *only* thing that changes is the address that authorisation names: the edge,
+      not the interior.
+    - **All external traffic crosses the one HTTPS edge (ADR-0004 dec 1).** A write authorisation
+      naming an interior address is unreachable, carries no edge certificate, and presents no origin a
+      client can be granted. It must therefore name the edge — a per-deployment value, never a fixed
+      interior one — and cross it under the same transport every other external request does.
+    - **Cross-origin access is an explicit allowlist, never wildcard-with-credentials (ADR-0004 dec
+      6).** The store admits the app's own origin, for the write verb, over the pre-admission staging
+      area only. This is a *narrower* exposure than the API already carries, not a wider one: no
+      standing credential rides the write — the authorisation is self-contained and consumed once — so
+      there is nothing a cross-origin misread could exfiltrate.
+
+    **This establishes no second writer, and does not breach ADR-0013 dec 1.** The client holds a
+    signed permission for one object, not a key; the store verifies it against the credential the
+    mediator alone holds (ADR-0019 dec 6, decision 2). Granting the store a network path to the client
+    is not granting the client the store's credential — the distinction ADR-0013 turns on, which
+    forbids untrusted code *holding the credential or reaching the store without a prior
+    authorisation*, not the store having a route. The kernel already reaches this same store by this
+    same presigned means from inside the network; the external client differs only in which boundary
+    the authorisation crosses, never in what it holds. It is the platform's one mediation pattern —
+    hold an operation, not a credential (ADR-0015 dec 1) — applied across one more boundary.
+
+    **The staging invariant is untouched (decision 4, and the rev-1 negative consequence).** Every
+    write authorisation is scoped to the pre-admission staging area outside every tenant namespace;
+    its signature is invalid for any other key, so a route that reaches the store cannot widen what the
+    client can address. The tenant namespace stays written only by the mediator's server-side copy at
+    commit, and nothing unadmitted is ever addressable within it.
+
+    **The upload handle is held only for the one upload, in memory, never in durable client storage.**
+    It is short-lived and consumed, but persisting it would outlive its purpose, which is the posture
+    ADR-0004 already takes toward session material.
+
+    Two alternatives were weighed and rejected. *Relay the bytes through the mediator* (ADR-0019's
+    own rejected fallback) removes the need for a store route and a cross-origin allowlist, but
+    reintroduces exactly the size-coupling ADR-0019 dec 6 refused — and the uploaded model is the
+    artifact most likely to be enormous. *Keep the browser deferred, admit only an in-network client*
+    is coherent with the original deferral, but decision 3 already made the browser a first-class
+    client; deferring it again re-opens a decision already closed. Whether the edge separates the two
+    routes by sub-path or by name is left to the operational companion — it is a realisation detail
+    this record's constraints already bound, not a further decision.
+
 ## Alternatives considered
 
 - **A. Point the existing registration gate at an uploaded file; change nothing else.** The reading
@@ -341,6 +399,12 @@ vouch for, and what must an uploaded artifact do instead?**
   narrows the drift lane's coverage exactly where a model is least understood.
 - The supported-flavor refusal (decision 9) will be met most often by uploads, so the pressure for
   ADR-0028 dec 7's record arrives through this door.
+- **The object store gains an external route and a cross-origin policy it did not have (decision 10).**
+  That route is a new surface, and it stays safe only while it stays narrow: reachable presigned-only
+  (never with a standing credential), scoped to the staging area, and open to the app's own origin
+  alone. It buys no authority a presigned URL did not already carry — but it must be kept as tight as
+  that URL, and a future widening of it (a broader origin, an un-scoped route) would quietly hand the
+  store an exposure this decision was careful not to.
 
 ## Deferred decisions
 
@@ -349,8 +413,12 @@ vouch for, and what must an uploaded artifact do instead?**
   same gap ADR-0021 already defers, and ADR-0028 approaches from the autoencoder-scale side. All three
   should be closed by one record, not three.
 - **Artifact size, transfer, and resumability.** A model trained on years of cold-layer history is not
-  a notebook-sized file; whether ingestion is a direct transfer, a gateway-minted scoped upload, or
-  something staged is an implementation concern this record does not settle.
+  a notebook-sized file. Decision 10 (rev 2) settled the *single-request* case — a gateway-minted,
+  edge-targeted, direct-to-store transfer — because decision 3's browser client could not otherwise
+  reach the plane at all. What stays deferred is the shape a transfer takes once one request will not
+  carry it: resumability, and multipart or chunked upload of a very large artifact. Whichever is
+  chosen must keep decision 10's invariants — bytes direct to the staging area, one writer, the edge
+  as the only address a client is handed.
 - **Attestation and signing of external artifacts.** Decision 6 accepts an assertion. Whether an
   uploaded artifact must eventually carry a verifiable claim about who built it and from what, is the
   supply-chain question proper — and is genuinely separate from admission.
