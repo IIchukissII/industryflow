@@ -40,6 +40,10 @@ class ModelMetadata(BaseModel):
     equipment_id: Optional[str] = None
     equipment_type: Optional[str] = None
     model_name: str
+    # The read path already SELECTs `description` and _format_model_row surfaces it; without a field
+    # here the response model drops it at the door — the same silent loss provenance suffered. It is
+    # load-bearing for an uploaded model, whose author writes a description the operator should read.
+    description: Optional[str] = None
     model_version: str
     model_type: str
     model_path: Optional[str] = None
