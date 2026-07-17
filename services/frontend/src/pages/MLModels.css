@@ -55,9 +55,13 @@
   margin-right: 6px;
 }
 
-/* source pills — notebook is signal, platform is the warmer instrument tone */
+/* origin pills — an identity axis, so it never borrows a status colour. Notebook is signal (the
+ * reasoning surface); platform is the quiet furniture, muted; uploaded wears the gold of the Self —
+ * the one origin that must catch the eye, an external model reconciled into the core. Only uploaded
+ * is accented, mirroring the page's own rule that only a finding earns the reader's attention. */
 .badge.mdl-src-notebook { color: var(--signal); border-color: rgba(74, 144, 217, 0.35); background: var(--signal-soft); }
-.badge.mdl-src-platform { color: var(--warn); border-color: rgba(245, 166, 35, 0.30); background: rgba(245, 166, 35, 0.07); }
+.badge.mdl-src-platform { color: var(--muted); border-color: var(--line); background: var(--panel-2); }
+.badge.mdl-src-uploaded { color: var(--gold); border-color: rgba(207, 169, 78, 0.38); background: var(--gold-soft); gap: 5px; }
 
 .mdl-stage { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 
@@ -195,6 +199,29 @@
 @media (max-width: 560px) {
   .mdl-drawer { width: 100%; }
 }
+
+/* ---- provenance framing (ADR-0030 dec 8) — only uploaded models carry it ----
+ * An uploaded model is admitted but held to a narrower gate than a witnessed one (dec 7), and the
+ * drift lane may not cover it (dec 8). That is context the reader needs BEFORE the parity ledger and
+ * metrics below, so it frames the drawer rather than sitting among the sections.
+ *
+ * Gold, deliberately — not a status colour. An external origin is a fact to attend to, not a fault
+ * to fix: rubedo would cry wolf and citrinitas would imply a caution the model has not earned. It is
+ * a calm bordered frame with a gold spine, not a heavy alarm fill. */
+.mdl-prov {
+  margin-bottom: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(207, 169, 78, 0.28);
+  border-left: 2px solid var(--gold);
+  border-radius: var(--r-sm);
+  background: var(--gold-soft);
+}
+.mdl-prov-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.mdl-prov-eyebrow { margin-bottom: 0; }
+.mdl-prov-title { margin: 0 0 7px; font-size: 13.5px; font-weight: 600; color: var(--text); }
+.mdl-prov-note { margin: 7px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+.mdl-prov-note:first-of-type { margin-top: 0; }
+.mdl-prov-note em { color: var(--text); font-style: italic; }
 
 /* ---- retrain recommendation (ADR-0022) ----------------------------------- */
 .badge.mdl-retrain {
