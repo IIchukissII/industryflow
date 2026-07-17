@@ -40,13 +40,18 @@ function fmtDate(ms) {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' });
 }
 
-// status/stage → which signal dot + pill the row wears.
+// status/stage → which signal dot + pill the row wears. Shared by both kinds of row, so it spans two
+// vocabularies: a notebook model carries an MLflow *stage* (None/Staging/Production/Archived); a
+// platform model carries the `ml_models` DB *status* (training/active/production/deprecated/failed).
 function statusTone(status) {
   const s = (status || '').toLowerCase();
   if (s === 'production' || s === 'active') return { dot: 'ok', pill: 'badge-live' };
-  if (s === 'staging') return { dot: 'pending', pill: 'badge-warn' };
-  if (s === 'archived' || s === 'none' || s === '') return { dot: '', pill: '' };
-  return { dot: 'pending', pill: '' };
+  if (s === 'staging') return { dot: 'pending', pill: 'badge-warn' };   // MLflow stage
+  if (s === 'failed') return { dot: 'bad', pill: 'badge-crit' };        // platform lifecycle outcome
+  // Retired or unset, either vocabulary — quiet. `deprecated` is the DB's retire state; `archived` the
+  // MLflow one.
+  if (s === 'deprecated' || s === 'archived' || s === 'none' || s === '') return { dot: '', pill: '' };
+  return { dot: 'pending', pill: '' }; // training, or anything not yet placed
 }
 
 function normalizeNotebook(m) {
@@ -456,7 +461,10 @@ function MLModels() {
   );
 }
 
-const PLATFORM_STATUSES = ['production', 'active', 'staging', 'archived'];
+// The deploy targets a platform model can be set to — exactly the values the `ml_models.status` CHECK
+// permits for an operator action (production/active serve it, deprecated retires it). `staging` and
+// `archived` were MLflow stage names the DB rejects, so choosing them 500'd; they are gone.
+const PLATFORM_STATUSES = ['production', 'active', 'deprecated'];
 
 // Rendered with `key={row.key}` (see the render site), so opening a different model remounts the
 // drawer — draft/editing/saveErr initialise fresh from the new row, no reset effect required.
