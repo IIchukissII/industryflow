@@ -1,0 +1,152 @@
+/*
+ * SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * The upload wizard (ADR-0030). Gold is the through-line — the same accent the registry uses to mark
+ * an uploaded model, here marking the act of bringing one in. Everything else rides the platform
+ * tokens; the one expressive element is the drop target and the stepped admission ledger.
+ */
+
+.uw-scrim {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(5, 8, 14, 0.6);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 48px 16px; overflow-y: auto;
+  animation: uw-fade 0.15s ease-out;
+}
+.uw-modal {
+  width: min(600px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  animation: uw-rise 0.18s ease-out;
+}
+
+.uw-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 20px 22px; border-bottom: 1px solid var(--line);
+}
+.uw-eyebrow { display: inline-flex; align-items: center; gap: 6px; }
+.uw-title { font-size: 20px; margin-top: 6px; }
+.uw-close { font-size: 20px; line-height: 1; color: var(--muted); }
+
+.uw-body { padding: 20px 22px 22px; }
+.uw-lede { margin: 0 0 18px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.uw-desc { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.uw-desc.faint { color: var(--faint); }
+
+/* ---- drop target ---------------------------------------------------------- */
+.uw-drop {
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  padding: 28px 20px; text-align: center; cursor: pointer;
+  border: 1.5px dashed rgba(207, 169, 78, 0.4);
+  border-radius: var(--r);
+  background: var(--gold-soft);
+  transition: border-color 0.15s, background 0.15s;
+}
+.uw-drop:hover, .uw-drop.over { border-color: var(--gold); background: rgba(207, 169, 78, 0.16); }
+.uw-drop-title { margin: 2px 0 0; color: var(--text); font-size: 13.5px; font-weight: 500; }
+.uw-drop-hint { margin: 0; color: var(--faint); font-size: 12px; }
+
+.uw-files { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; }
+.uw-file {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px; border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+  background: var(--panel-2);
+}
+.uw-file-name { flex: 1; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uw-file-name.manifest { color: var(--gold); }
+.uw-file-size { font-size: 11px; color: var(--faint); }
+.uw-file-x { background: none; border: 0; color: var(--faint); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
+.uw-file-x:hover { color: var(--crit); }
+
+.uw-warn { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; color: var(--warn); font-size: 12.5px; }
+
+/* ---- declaration form ----------------------------------------------------- */
+.uw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+.uw-field { display: flex; flex-direction: column; gap: 6px; }
+.uw-field.uw-narrow { grid-column: auto; }
+.uw-label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); font-family: var(--font-mono); }
+.uw-opt { text-transform: none; letter-spacing: 0; color: var(--faint); font-style: italic; }
+.uw-input {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 9px 11px; font-family: var(--font-sans); font-size: 13px; width: 100%;
+}
+.uw-input.mono { font-family: var(--font-mono); }
+.uw-input:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+
+/* ---- declared semantics --------------------------------------------------- */
+.uw-sem { margin-top: 18px; display: flex; flex-direction: column; gap: 8px; }
+.uw-sem-list { display: flex; flex-direction: column; gap: 6px; }
+.uw-sem-opt {
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  padding: 10px 12px; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+  transition: border-color 0.12s, background 0.12s;
+}
+.uw-sem-opt:hover { border-color: rgba(207, 169, 78, 0.4); }
+.uw-sem-opt.on { border-color: var(--gold); background: var(--gold-soft); }
+.uw-sem-name { font-size: 12.5px; color: var(--text); text-transform: capitalize; }
+.uw-sem-desc { font-size: 12px; color: var(--muted); line-height: 1.45; }
+
+/* ---- actions -------------------------------------------------------------- */
+.uw-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+.uw-actions.center { justify-content: center; }
+
+/* ---- running: the admission ledger ---------------------------------------- */
+.uw-steps { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.uw-step { display: flex; align-items: flex-start; gap: 12px; padding: 11px 4px; position: relative; }
+.uw-step + .uw-step::before {
+  content: ''; position: absolute; left: 12px; top: -8px; height: 16px; width: 1px; background: var(--line);
+}
+.uw-step-dot {
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); background: var(--panel-2);
+  color: var(--faint); font-size: 14px; line-height: 1;
+}
+.uw-step.idle { opacity: 0.55; }
+.uw-step.ok .uw-step-dot { border-color: var(--live); color: var(--live); background: rgba(45, 212, 191, 0.1); }
+.uw-step.run .uw-step-dot { border-color: var(--gold); }
+.uw-step.fail .uw-step-dot { border-color: var(--crit); color: var(--crit); background: rgba(224, 71, 47, 0.1); }
+.uw-step-body { display: flex; flex-direction: column; gap: 1px; padding-top: 2px; }
+.uw-step-label { font-size: 13.5px; color: var(--text); font-weight: 500; }
+.uw-step-count { color: var(--gold); font-size: 12px; }
+.uw-step-note { font-size: 12px; color: var(--faint); }
+
+.uw-spin {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--gold-soft); border-top-color: var(--gold);
+  animation: uw-spin 0.7s linear infinite;
+}
+
+/* ---- refusal (ADR-0027 dec 2: a refusal carries its reason) --------------- */
+.uw-refusal {
+  margin-top: 18px; padding: 13px 15px; border-radius: var(--r-sm);
+  border: 1px solid rgba(245, 166, 35, 0.32); background: rgba(245, 166, 35, 0.08);
+}
+.uw-refusal.reasoned { border-color: rgba(224, 71, 47, 0.35); background: rgba(224, 71, 47, 0.07); }
+.uw-refusal-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); }
+.uw-refusal-msg { margin: 8px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--muted); }
+
+/* ---- done ----------------------------------------------------------------- */
+.uw-done { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 8px 0; }
+.uw-done-mark {
+  width: 56px; height: 56px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(45, 212, 191, 0.1); border: 1px solid rgba(45, 212, 191, 0.35); margin-bottom: 14px;
+}
+.uw-done-title { font-size: 18px; margin-bottom: 8px; }
+.uw-done .uw-desc { max-width: 44ch; }
+
+@keyframes uw-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes uw-rise { from { transform: translateY(10px); opacity: 0.6; } to { transform: translateY(0); opacity: 1; } }
+@keyframes uw-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 560px) {
+  .uw-grid { grid-template-columns: 1fr; }
+  .uw-scrim { padding: 16px 8px; }
+}
