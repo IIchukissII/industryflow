@@ -8,6 +8,8 @@
  * slide-over detail drawer, where a model's metrics read as mono telemetry values.
  */
 
+.mdl-head-actions { display: inline-flex; gap: 8px; align-items: center; }
+
 .mdl-kpis { margin-bottom: var(--gap); }
 
 .mdl-panel { margin-top: var(--gap); overflow: hidden; }

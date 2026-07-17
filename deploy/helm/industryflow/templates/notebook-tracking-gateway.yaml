@@ -84,6 +84,12 @@ spec:
               value: {{ .Values.notebookHub.trackingGateway.artifactBucket | quote }}
             - name: TRACKING_S3_ENDPOINT_URL
               value: {{ include "industryflow.minioEndpoint" . | quote }}
+            # ADR-0030 dec 10: a pre-signed PUT is followed by the client, which may be a browser
+            # outside the cluster — so its URL must name the public edge, not this interior endpoint.
+            # Empty (no publicBaseUrl) → pre-signing falls back to the interior endpoint and only an
+            # in-cluster client can follow the URL, which is the pre-change behaviour.
+            - name: TRACKING_S3_PRESIGN_ENDPOINT_URL
+              value: {{ .Values.publicBaseUrl | default "" | quote }}
             # The object-store principal for the MLflow artifact bucket. The kernel never sees it —
             # bytes move via tenant-scoped pre-signed URLs (ADR-0019 dec 6).
             - name: TRACKING_S3_ACCESS_KEY
