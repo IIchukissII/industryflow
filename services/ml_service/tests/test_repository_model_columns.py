@@ -107,6 +107,25 @@ def test_the_api_actually_returns_provenance():
     assert out.get("provenance") == "uploaded", "the response model drops provenance at the door"
 
 
+def test_the_api_actually_returns_description():
+    """The same door provenance was dropped at, for the same reason.
+
+    `description` is SELECTed by both full-surface reads and surfaced by `_format_model_row`, so the
+    DB, the query, and the mapping all carry it — but the response model dropped it, so no operator
+    could ever read it. It is load-bearing for an uploaded model (ADR-0030), whose author writes a
+    description the platform never watched them earn; losing it silently is the expensive shape this
+    file exists to catch.
+    """
+    import datetime
+    from routers.models import ModelMetadata
+
+    out = ModelMetadata(
+        model_id="m1", company_id="c1", model_name="n", model_version="1", model_type="outlier",
+        status="production", created_at=datetime.datetime.now(), description="what this predicts",
+    ).model_dump()
+    assert out.get("description") == "what this predicts", "the response model drops description at the door"
+
+
 def test_every_column_the_writes_persist_can_be_read_back():
     """The asymmetry itself, as a property: anything the insert allowlist accepts should be
     selectable and mappable. This is what nobody checked."""
