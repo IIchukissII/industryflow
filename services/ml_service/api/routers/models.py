@@ -133,7 +133,7 @@ class ModelDeployRequest(BaseModel):
     model_id: str
     environment: str = Field(
         "production",
-        description="Deployment environment: staging, production, archived, active"
+        description="Deployment target: production or active (serve it), or deprecated (retire it)"
     )
 
 
@@ -514,7 +514,11 @@ async def deploy_model(
     company_id: str = Depends(get_company_id_dependency)
 ):
     """Update model status (deploy/undeploy)"""
-    valid_statuses = ['production', 'staging', 'archived', 'active']
+    # The values the `ml_models.status` CHECK actually permits (03-tenant-ml-tables.sql). The list had
+    # drifted to `staging`/`archived` — MLflow's stage names, which this table never adopted — so
+    # deploying to either wrote a value the DB rejects and 500'd. `deprecated` is this schema's retire
+    # state; `training`/`failed` are lifecycle outcomes, not operator-set deploy targets.
+    valid_statuses = ['production', 'active', 'deprecated']
     if request_data.environment not in valid_statuses:
         raise HTTPException(
             status_code=400,
@@ -540,9 +544,9 @@ async def deploy_model(
     # evicted from a serving path it already occupies (dec 10), but barred from being re-deployed into
     # one if this environment can no longer honour it.
     #
-    # Undeploying is never blocked: archiving a model is the remedy for a bad one, not another way to
-    # break it.
-    if request_data.environment in ("production", "active", "staging"):
+    # Undeploying is never blocked: deprecating a model is the remedy for a bad one, not another way
+    # to break it. Only the states that put a model into a serving path run the load-and-score gate.
+    if request_data.environment in ("production", "active"):
         model_label = str(model_data.get("model_name", model_id))
         compatibility = await _evaluate_or_reject(
             model_data.get("mlflow_run_id"),
@@ -628,19 +632,19 @@ async def delete_model(
     if not model_data:
         raise HTTPException(status_code=404, detail="Model not found")
     
-    # Archive model
+    # Deprecate (soft-delete) the model — to the DB's own retire state, not MLflow's `archived`.
     success = await repository.delete_model(
         company_id=company_id,
         model_id=model_id
     )
-    
+
     if not success:
-        raise HTTPException(status_code=500, detail="Failed to archive model")
-    
-    logger.info(f"Model {model_id} archived")
-    
+        raise HTTPException(status_code=500, detail="Failed to deprecate model")
+
+    logger.info(f"Model {model_id} deprecated")
+
     return {
-        "status": "archived",
+        "status": "deprecated",
         "model_id": model_id
     }
 
