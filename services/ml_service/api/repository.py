@@ -373,14 +373,15 @@ class MLRepository:
         company_id: str,
         model_id: str
     ) -> bool:
-        """Archive model (soft delete)"""
+        """Deprecate a model (soft delete) — to `deprecated`, the retire state the ml_models CHECK
+        permits; `archived` is an MLflow stage name this table never adopted and the DB rejects it."""
         schema_name = normalize_company_id_to_schema(company_id)
-        
+
         async with self.pool.acquire() as conn:
             await conn.execute(f"SET search_path TO {schema_name}, public")
-            
+
             result = await conn.execute(
-                "UPDATE ml_models SET status = 'archived' WHERE model_id = $1",
+                "UPDATE ml_models SET status = 'deprecated' WHERE model_id = $1",
                 model_id
             )
             
