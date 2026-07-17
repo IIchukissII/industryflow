@@ -119,7 +119,7 @@ function AlertHistory() {
     try {
       const response = await authFetch('/api/alerts/label-metrics?days=30');
       if (response.ok) setMetrics(await response.json());
-    } catch (err) {
+    } catch {
       /* precision panel just stays empty if unavailable */
     }
   }, []);

@@ -58,7 +58,7 @@ export default function AppShell({ user, title, wsConnected, lastUpdate, childre
   }, []);
 
   const handleLogout = async () => {
-    try { await api.post('/auth/logout'); } catch (e) { /* best-effort revoke */ }
+    try { await api.post('/auth/logout'); } catch { /* best-effort revoke */ }
     localStorage.removeItem('user');
     window.location.href = '/login';
   };
