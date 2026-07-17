@@ -220,13 +220,12 @@ function ModelUploadWizard({ onClose, onRegistered }) {
               onKeyDown={(e) => { if (e.key === 'Enter') fileInput.current?.click(); }}
             >
               <Icon name="upload" size={22} color="var(--gold)" />
-              <p className="uw-drop-title">Drop the model here, or choose files</p>
-              <p className="uw-drop-hint">The artifact's files, including its <span className="mono">MLmodel</span> manifest</p>
+              <p className="uw-drop-title">Drop the model's files here, or choose them</p>
+              <p className="uw-drop-hint">All of the artifact's files, including its <span className="mono">MLmodel</span> manifest</p>
               <input
                 ref={fileInput}
                 type="file"
                 multiple
-                webkitdirectory=""
                 style={{ display: 'none' }}
                 onChange={(e) => { addFiles([...e.target.files]); e.target.value = ''; }}
               />
