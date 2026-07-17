@@ -7,6 +7,14 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# The platform's public edge origin (scheme + host, no trailing slash), e.g. https://app.example.
+# Set it for a browser deployment to enable uploading an externally-authored model from the UI
+# (ADR-0030 dec 10): the gateway then signs pre-signed PUT URLs against this edge so a browser can
+# follow them, and ml_service advertises it as the upload endpoint. Empty (the default) keeps the
+# in-cluster-only behaviour — pre-signing falls back to the interior object-store endpoint and only a
+# client on the network can follow it, and the upload wizard says browser upload is not configured.
+publicBaseUrl: ""
+
 image:
   # Registry/repo prefix for the application images. Override per environment.
   registry: ghcr.io/iichukissii

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../components/Icon';
 import authFetch from '../services/http';
 import { fmtMetric, pickPrimary } from '../utils/metrics';
+import ModelUploadWizard from './ModelUploadWizard';
 import './MLModels.css';
 
 // Two orthogonal facts get conflated the moment you call them both "source", and one of the two
@@ -207,8 +208,9 @@ function MLModels() {
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null); // the row whose drawer is open
   const [detail, setDetail] = useState(null); // fetched detail for the selected notebook model
-  const [filter, setFilter] = useState('all'); // all | notebook | platform
+  const [filter, setFilter] = useState('all'); // all | notebook | platform | uploaded
   const [retrainModels, setRetrainModels] = useState(() => new Set()); // model_ids with a live retrain rec (ADR-0022)
+  const [uploading, setUploading] = useState(false); // the ADR-0030 upload wizard is open
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -241,8 +243,10 @@ function MLModels() {
       if (!out.length && nbRes.status === 'rejected' && plRes.status === 'rejected') {
         setError('Could not reach the model registry.');
       }
+      return out; // so a caller (the upload wizard) can open a just-registered row from the reload
     } catch {
       setError('Could not load models.');
+      return [];
     } finally {
       setLoading(false);
     }
@@ -263,6 +267,16 @@ function MLModels() {
     } catch { /* drawer still renders summary without history */ }
   }, []);
 
+  // A model just registered through the upload wizard: reload, and open its drawer from the reload's
+  // own result (not via an effect watching state) so the operator lands on it — and can deploy it,
+  // the load-and-score gate (ADR-0030 dec 7). load() returns the freshly-built rows for exactly this.
+  const handleRegistered = useCallback(async (created) => {
+    setUploading(false);
+    const rows = await load();
+    const row = (rows || []).find((m) => m.id === created?.model_id);
+    if (row) openRow(row);
+  }, [load, openRow]);
+
   const counts = useMemo(() => ({
     all: models.length,
     notebook: models.filter((m) => m.origin === 'notebook').length,
@@ -281,9 +295,15 @@ function MLModels() {
           <h1>Models</h1>
           <div className="sub">Every model serving your tenant — authored in notebooks, built in, or brought in from outside.</div>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
-          <Icon name="refresh" size={14} /> {loading ? 'Loading…' : 'Refresh'}
-        </button>
+        <div className="mdl-head-actions">
+          <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
+            <Icon name="refresh" size={14} /> {loading ? 'Loading…' : 'Refresh'}
+          </button>
+          {/* ADR-0030: bring in a model trained off-platform, through the one mediated door. */}
+          <button className="btn btn-primary btn-sm" onClick={() => setUploading(true)}>
+            <Icon name="upload" size={14} /> Upload model
+          </button>
+        </div>
       </div>
 
       <div className="kpi-row mdl-kpis">
@@ -427,6 +447,10 @@ function MLModels() {
             setSelected((s) => ({ ...s, status }));
           }}
         />
+      )}
+
+      {uploading && (
+        <ModelUploadWizard onClose={() => setUploading(false)} onRegistered={handleRegistered} />
       )}
     </>
   );
