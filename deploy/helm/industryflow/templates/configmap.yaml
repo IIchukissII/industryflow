@@ -35,8 +35,9 @@ data:
   # nothing whose loss is worse than that (ADR-0015 dec 7).
   CAPABILITY_REDIS_URL: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
   # Where an uploader takes a minted handle — advertised with it so a client need not know the
-  # platform's topology. Release-scoped, like ML_SERVICE_URL above.
-  UPLOAD_GATEWAY_URL: {{ printf "http://%s-notebook-tracking-gateway:%v" (include "industryflow.fullname" .) .Values.notebookHub.trackingGateway.port | quote }}
+  # platform's topology. The public edge when one is set (so a browser reaches stage/commit at the
+  # front door, ADR-0030 dec 10), else the interior gateway, which only an in-cluster client can reach.
+  UPLOAD_GATEWAY_URL: {{ .Values.publicBaseUrl | default (printf "http://%s-notebook-tracking-gateway:%v" (include "industryflow.fullname" .) .Values.notebookHub.trackingGateway.port) | quote }}
   {{- end }}
   # Spark S3A checkpoint endpoint (ADR-0006). Used only when CHECKPOINT_LOCATION is an s3a:// URI
   # (the scale-out path); the default local mode ignores it.

@@ -93,6 +93,32 @@ believe those numbers.
 - **Migrations do not re-run on an existing volume.** The provenance columns arrive with migration 19;
   on a live database apply it by hand, the way every init-script change has to be.
 
+## Reaching it from the browser (ADR-0030 dec 10)
+
+Decision 3 named a browser client; decision 10 (rev 2) made it reachable. The Models page carries an
+**Upload model** wizard that drives the whole flow — mint, stage, transfer, commit, register — and
+surfaces each gate's verdict where it happens. It stops at registration: deploying (the load-and-score
+gate, dec 7) is a separate control on the model's drawer, because the two gates have two remedies.
+
+What makes it reachable is one setting and one routing rule, and it holds the decision's invariants:
+
+- **`PUBLIC_BASE_URL`** is the platform's public edge origin. Set it and two things follow: the gateway
+  signs pre-signed PUT URLs against *that* origin (so a browser can follow them), and `ml_service`
+  advertises it as the upload endpoint. Leave it empty and pre-signing falls back to the interior
+  object-store endpoint — which only an in-cluster client can reach — and the wizard, seeing a
+  pre-signed URL that is not same-origin, says browser upload is not configured here and points at the
+  CLI flow above instead.
+- **The edge serves both halves under the one origin.** The front door routes the gateway's
+  `stage`/`commit` and the store's staging prefix beneath the same HTTPS origin the app is served from,
+  so the browser's PUT is *first-party* — there is no cross-origin request and therefore no CORS to
+  configure, which is tighter than an allowlist and truer to single-origin (ADR-0004). The store route
+  is pre-signed-only (the bucket is not public) and scoped to the pre-admission staging prefix, so
+  nothing already admitted into a tenant namespace is reachable through it.
+
+The pre-signed URL is still the whole authorisation: the browser holds a signed permission for one
+object, never a key, and the gateway remains the only writer to the store (ADR-0019 dec 6). The upload
+handle lives in memory for the one upload and is never written to browser storage.
+
 ## Deliberately not built
 
 - **Torch and any flavor outside the supported set.** Refused at the gate with a reason; the
@@ -105,5 +131,8 @@ believe those numbers.
 - **Attestation.** The platform accepts the uploader's assertions and checks what it can observe. A
   verifiable claim about *who built this and from what* is the supply-chain question proper, and is
   separate from admission.
-- **Resumable or very large transfers.** The transfer shape is deferred; today an upload is one
-  request per file against a pre-signed URL.
+- **Resumable or very large transfers.** Decision 10 (rev 2) settled the *single-request* transport —
+  one PUT per file against a pre-signed URL, reachable from the browser at the edge. What a transfer
+  becomes once one request will not carry it — resumable, multipart, chunked — stays deferred, and must
+  keep decision 10's invariants (bytes direct to staging, one writer, the edge as the only address a
+  client is handed).

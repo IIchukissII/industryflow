@@ -318,6 +318,24 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
         # follow-the-redirect PUT (with its own Content-Type) is accepted.
         config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
     )
+    # ADR-0030 dec 10 (rev 2): a pre-signed PUT is followed by the CLIENT, and that client may be a
+    # browser outside the trust network. The URL must therefore name the address the client can reach
+    # — the public edge — not the interior one the gateway reaches the store on. This second client is
+    # identical to the one above but for its endpoint; it signs URLs only. The gateway's own
+    # server-side ops (list/head/copy/delete) keep the interior client. Unset → the same endpoint as
+    # before, so an in-cluster client (the kernel) is unaffected, and the two are the same object.
+    presign_endpoint = os.environ.get("TRACKING_S3_PRESIGN_ENDPOINT_URL")
+    if presign_endpoint:
+        s3_presign = boto3.client(
+            "s3",
+            endpoint_url=presign_endpoint,
+            aws_access_key_id=os.environ["TRACKING_S3_ACCESS_KEY"],
+            aws_secret_access_key=os.environ["TRACKING_S3_SECRET_KEY"],
+            region_name=os.environ.get("TRACKING_S3_REGION", "us-east-1"),
+            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        )
+    else:
+        s3_presign = s3
     client = httpx.AsyncClient(base_url=mlflow_url, timeout=30)
 
     class _HttpUpstream:
@@ -331,9 +349,11 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
     class _S3Store:
         def presign(self, method, key):
             op = "get_object" if method == "GET" else "put_object"
-            # The endpoint MLflow's client reaches us on (TRACKING_PUBLIC_URL) is the host the
-            # pre-signed URL must point at; default to the S3 endpoint for in-cluster use.
-            return s3.generate_presigned_url(op, Params={"Bucket": bucket, "Key": key}, ExpiresIn=presign_ttl)
+            # Signed against the endpoint the CLIENT can reach (TRACKING_S3_PRESIGN_ENDPOINT_URL, the
+            # public edge for a browser; the interior endpoint for an in-cluster kernel). SigV4 signs
+            # host+key only, so the client's follow-the-signature PUT lands at that host, and the store
+            # behind the edge recomputes the same signature over the host it is handed (ADR-0030 dec 10).
+            return s3_presign.generate_presigned_url(op, Params={"Bucket": bucket, "Key": key}, ExpiresIn=presign_ttl)
 
         def list_files(self, prefix):
             prefix = prefix.rstrip("/") + "/" if prefix else ""

@@ -717,8 +717,12 @@ services:
       # service; what is written here is a revocable, single-tenant handle and nothing worse.
       # Unset = this deployment accepts no externally-authored models, and says so.
       CAPABILITY_REDIS_URL: ${CAPABILITY_REDIS_URL:-redis://redis:6379/0}
-      # Advertised alongside a minted handle so a client need not know the internal topology.
-      UPLOAD_GATEWAY_URL: ${UPLOAD_GATEWAY_URL:-http://notebook-tracking-gateway:5050}
+      # Advertised alongside a minted handle so a client need not know the internal topology. When
+      # PUBLIC_BASE_URL is set (a browser deployment, ADR-0030 dec 10) it names the public edge, so a
+      # browser can reach stage/commit same-origin; unset, it names the internal gateway, which only
+      # an in-cluster client (a CLI on the network) can reach — and the wizard reads that as "browser
+      # upload is not configured here" and points at the CLI instead.
+      UPLOAD_GATEWAY_URL: ${PUBLIC_BASE_URL:-http://notebook-tracking-gateway:5050}
       MODEL_DIR: /app/models
       # Warm model cache size (ADR-0021): loaded MLflow models reused across inference + drift.
       MODEL_CACHE_SIZE: ${MODEL_CACHE_SIZE:-8}
@@ -880,6 +884,12 @@ services:
       TRACKING_REDIS_URL: redis://redis:6379/0
       TRACKING_ARTIFACT_BUCKET: mlflow
       TRACKING_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL:-http://minio:9000}
+      # ADR-0030 dec 10: a pre-signed PUT is followed by the client, which may be a browser outside
+      # the cluster — so its URL must name the public edge, not this interior endpoint. Set to the
+      # edge origin (same as PUBLIC_BASE_URL) where the frontend routes /mlflow/_upload-staging/ to
+      # the store; unset, pre-signing falls back to the interior endpoint and only an in-cluster
+      # client can follow the URL — the pre-change behaviour, unaffected.
+      TRACKING_S3_PRESIGN_ENDPOINT_URL: ${PUBLIC_BASE_URL:-}
       TRACKING_S3_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       TRACKING_S3_SECRET_KEY: ${MINIO_SECRET_KEY}
     depends_on:
