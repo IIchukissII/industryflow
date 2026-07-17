@@ -8,11 +8,29 @@ import authFetch from '../services/http';
 import { fmtMetric, pickPrimary } from '../utils/metrics';
 import './MLModels.css';
 
-// The registry shows two kinds of tenant model side by side, normalised to one row shape:
-//   • notebook  — MLflow registered models a data scientist authored, read through the safe
-//                 tenant-scoped /api/registered-models path (names already stripped to plain).
-//   • platform  — the built-in anomaly detectors in /api/models, used by the alerting pipeline.
-const SOURCE_LABEL = { notebook: 'Notebook', platform: 'Platform' };
+// Two orthogonal facts get conflated the moment you call them both "source", and one of the two
+// is a lie waiting to happen (ADR-0030):
+//
+//   • WHICH REGISTRY the row was read from — a behavioural fact (`registry`) that decides what the
+//     drawer can do. A notebook-registry model (/api/registered-models, MLflow) carries version
+//     history and an editable description; a platform-registry model (/api/models) carries a deploy
+//     control and an on-demand drift check.
+//   • WHERE THE MODEL WAS AUTHORED — the fact an operator actually reads off the row (`origin`).
+//     ADR-0030 dec 8 made this first-class as *provenance*: a model the platform watched being made
+//     (kernel-authored) versus one brought in from outside (uploaded). An uploaded model lands in
+//     the platform registry, so labelling it by registry alone prints it as "Platform" — the exact
+//     opposite of what it is, the least platform-authored thing on the page.
+//
+// So the two are kept apart on purpose: `registry` gates behaviour, `origin` is what we show.
+const ORIGIN_LABEL = { notebook: 'Notebook', platform: 'Platform', uploaded: 'Uploaded' };
+
+// `origin` = `registry` for a notebook or platform model, splitting out `uploaded` when provenance
+// says so. Provenance is read off how the model arrived (ADR-0030 dec 8), never asked; a platform
+// row with no provenance predates the distinction and is a platform detector, never an upload.
+function originOf(registry, provenance) {
+  if (registry === 'notebook') return 'notebook';
+  return provenance === 'uploaded' ? 'uploaded' : 'platform';
+}
 
 function fmtDate(ms) {
   if (!ms) return '—';
@@ -34,7 +52,8 @@ function normalizeNotebook(m) {
   return {
     key: `notebook:${m.name}`,
     name: m.name,
-    source: 'notebook',
+    registry: 'notebook',
+    origin: 'notebook',
     version: m.latest_version ? `v${m.latest_version}` : '—',
     status: m.stage || 'None',
     updated: m.last_updated_timestamp || m.creation_timestamp || null,
@@ -53,11 +72,16 @@ function normalizePlatform(m) {
     if (m[k] !== null && m[k] !== undefined) metrics[k.replace('_score', '')] = m[k];
   });
   const updated = m.deployed_at || m.training_date || m.created_at || null;
+  // ADR-0030 dec 8: provenance now rides on /api/models. null means "predates the distinction"
+  // (a platform detector), which is not the same as unknown origin — see originOf.
+  const provenance = m.provenance || null;
   return {
     key: `platform:${m.model_id || m.name}`,
     id: m.model_id,
     name: m.name || m.model_name,
-    source: 'platform',
+    registry: 'platform',
+    provenance,
+    origin: originOf('platform', provenance),
     version: m.version ? `v${m.version}` : '—',
     status: m.status || 'unknown',
     updated: updated ? Date.parse(updated) : null,
@@ -217,7 +241,7 @@ function MLModels() {
       if (!out.length && nbRes.status === 'rejected' && plRes.status === 'rejected') {
         setError('Could not reach the model registry.');
       }
-    } catch (e) {
+    } catch {
       setError('Could not load models.');
     } finally {
       setLoading(false);
@@ -232,21 +256,22 @@ function MLModels() {
   const openRow = useCallback(async (row) => {
     setSelected(row);
     setDetail(null);
-    if (row.source !== 'notebook') return;
+    if (row.registry !== 'notebook') return;
     try {
       const res = await authFetch(`/api/registered-models/${encodeURIComponent(row.name)}`);
       if (res.ok) setDetail(await res.json());
-    } catch (e) { /* drawer still renders summary without history */ }
+    } catch { /* drawer still renders summary without history */ }
   }, []);
 
   const counts = useMemo(() => ({
     all: models.length,
-    notebook: models.filter((m) => m.source === 'notebook').length,
-    platform: models.filter((m) => m.source === 'platform').length,
+    notebook: models.filter((m) => m.origin === 'notebook').length,
+    platform: models.filter((m) => m.origin === 'platform').length,
+    uploaded: models.filter((m) => m.origin === 'uploaded').length,
     deployed: models.filter((m) => statusTone(m.status).dot === 'ok').length,
   }), [models]);
 
-  const shown = filter === 'all' ? models : models.filter((m) => m.source === filter);
+  const shown = filter === 'all' ? models : models.filter((m) => m.origin === filter);
 
   return (
     <>
@@ -254,7 +279,7 @@ function MLModels() {
         <div>
           <div className="eyebrow">Model registry</div>
           <h1>Models</h1>
-          <div className="sub">Trained models across your tenant — notebook-authored and platform detectors.</div>
+          <div className="sub">Every model serving your tenant — authored in notebooks, built in, or brought in from outside.</div>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
           <Icon name="refresh" size={14} /> {loading ? 'Loading…' : 'Refresh'}
@@ -272,10 +297,14 @@ function MLModels() {
           <div className="kpi-value">{counts.notebook}</div>
           <div className="kpi-foot">authored in notebooks</div>
         </div>
-        <div className="kpi" style={{ '--accent': 'var(--warn)' }}>
-          <div className="kpi-label">Platform</div>
-          <div className="kpi-value">{counts.platform}</div>
-          <div className="kpi-foot">built-in detectors</div>
+        {/* ADR-0030 dec 8 wants the count of externally-authored models SEEN, not buried — an
+            operator should be able to answer "how many models am I trusting from outside?" at a
+            glance. It takes the headline slot the low-value Platform tile held; the platform count
+            still lives on the filter tab below. */}
+        <div className="kpi" style={{ '--accent': 'var(--gold)' }}>
+          <div className="kpi-label">Uploaded</div>
+          <div className="kpi-value">{counts.uploaded}</div>
+          <div className="kpi-foot">authored off-platform</div>
         </div>
         <div className="kpi" style={{ '--accent': 'var(--live)' }}>
           <div className="kpi-label">In production</div>
@@ -287,8 +316,8 @@ function MLModels() {
       <section className="panel mdl-panel" style={{ padding: 0 }}>
         <div className="panel-head">
           <h2>Registry</h2>
-          <div className="mdl-filters" role="tablist" aria-label="Filter by source">
-            {['all', 'notebook', 'platform'].map((f) => (
+          <div className="mdl-filters" role="tablist" aria-label="Filter by origin">
+            {['all', 'notebook', 'platform', 'uploaded'].map((f) => (
               <button
                 key={f}
                 role="tab"
@@ -296,7 +325,7 @@ function MLModels() {
                 className={`mdl-filter${filter === f ? ' active' : ''}`}
                 onClick={() => setFilter(f)}
               >
-                {f === 'all' ? 'All' : SOURCE_LABEL[f]} <span className="mdl-filter-n">{counts[f]}</span>
+                {f === 'all' ? 'All' : ORIGIN_LABEL[f]} <span className="mdl-filter-n">{counts[f]}</span>
               </button>
             ))}
           </div>
@@ -310,14 +339,14 @@ function MLModels() {
           <div className="mdl-empty">
             <Icon name="cpu" size={26} color="var(--faint)" />
             <p>No models here yet.</p>
-            <span className="mdl-empty-hint">Register a model from a notebook, or train a platform detector.</span>
+            <span className="mdl-empty-hint">Register one from a notebook, train a platform detector, or upload one you built elsewhere.</span>
           </div>
         ) : (
           <div className="mdl-table-wrap">
             <table className="data-table mdl-table">
               <thead>
                 <tr>
-                  <th>Model</th><th>Source</th><th>Version</th><th>Stage</th>
+                  <th>Model</th><th>Origin</th><th>Version</th><th>Stage</th>
                   <th className="mdl-num">Key metric</th><th>Updated</th>
                 </tr>
               </thead>
@@ -351,7 +380,15 @@ function MLModels() {
                           </span>
                         )}
                       </td>
-                      <td><span className={`badge mdl-src-${m.source}`}>{SOURCE_LABEL[m.source]}</span></td>
+                      {/* Uploaded is the one origin that earns an icon: an externally-authored
+                          model is the exceptional case an operator must not skim past, the same way
+                          only a finding earns a row badge above. */}
+                      <td>
+                        <span className={`badge mdl-src-${m.origin}`}>
+                          {m.origin === 'uploaded' && <Icon name="upload" size={11} />}
+                          {ORIGIN_LABEL[m.origin]}
+                        </span>
+                      </td>
                       <td className="mono mdl-dim">{m.version}</td>
                       <td>
                         <span className="mdl-stage">
@@ -425,15 +462,15 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
       if (!res.ok) throw new Error();
       onSaved(draft);
       setEditing(false);
-    } catch (e) {
+    } catch {
       setSaveErr('Could not save. Try again.');
     } finally {
       setSaving(false);
     }
   };
 
-  // Platform detectors can be promoted/retired from here — the status gates whether the alerting
-  // pipeline serves them (production/active = live).
+  // Platform-registry models can be promoted/retired from here — the status gates whether the
+  // alerting pipeline serves them (production/active = live).
   const changeStatus = async (status) => {
     setStatusBusy(true);
     try {
@@ -443,7 +480,7 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
         body: JSON.stringify({ model_id: row.id, environment: status }),
       });
       if (res.ok) onStatusChanged(status);
-    } catch (e) { /* leave the select on its prior value */ } finally {
+    } catch { /* leave the select on its prior value */ } finally {
       setStatusBusy(false);
     }
   };
@@ -457,7 +494,7 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
       <aside className="mdl-drawer" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`${row.name} details`}>
         <div className="mdl-drawer-head">
           <div>
-            <div className="eyebrow">{SOURCE_LABEL[row.source]} model</div>
+            <div className="eyebrow">{ORIGIN_LABEL[row.origin]} model</div>
             <h2 className="mdl-drawer-title">{row.name}</h2>
             <div className="mdl-drawer-meta mono">
               {row.version}
@@ -470,6 +507,32 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
         </div>
 
         <div className="mdl-drawer-body">
+          {/* Provenance (ADR-0030 dec 8). Only an uploaded model carries this — a witnessed model
+              (notebook or platform) is the ordinary case and stays quiet, its origin already told by
+              the header. It frames everything below it: the parity ledger's empirical check is a
+              narrower proof for an upload (dec 7), and the drift lane may not cover it (dec 8), so
+              the reader needs the frame before the sections. Gold, not a status colour — an external
+              origin is a fact to attend to, not a fault to fix. */}
+          {row.origin === 'uploaded' && (
+            <section className="mdl-prov">
+              <div className="mdl-prov-head">
+                <Icon name="upload" size={15} color="var(--gold)" />
+                <span className="eyebrow mdl-prov-eyebrow">Provenance</span>
+              </div>
+              <p className="mdl-prov-title">Authored outside the platform</p>
+              <p className="mdl-prov-note">
+                This model was trained somewhere the platform never watched. It was admitted through
+                the upload path: the artifact carries no executable code, its declared output
+                semantics were accepted, and it loaded and scored in this serving environment before
+                it could deploy.
+              </p>
+              <p className="mdl-prov-note">
+                That is a narrower proof than a notebook or platform model carries — the platform can
+                confirm this model runs <em>here</em>, not that here matches where it was trained.
+              </p>
+            </section>
+          )}
+
           {/* Retrain recommendation (ADR-0022) — sustained drift + label-derived precision decay. */}
           {retrainRecommended && (
             <div className="mdl-retrain-notice">
@@ -536,10 +599,11 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
             ) : <p className="mdl-desc faint">No metrics logged for this model.</p>}
           </section>
 
-          {/* Data drift — platform detectors carry a reference profile, so we can compare recent
-              readings against the training baseline on demand (ADR-0021). Heavy compute, so it's
-              never auto-run: the operator asks for it. */}
-          {row.source === 'platform' && <DriftPanel row={row} />}
+          {/* Data drift — a platform-registry model can be scored against its training baseline on
+              demand (ADR-0021). Heavy compute, so it's never auto-run: the operator asks for it. An
+              uploaded model without a declared baseline honestly reports "unavailable" here rather
+              than a fake zero — which is ADR-0030 dec 8's "visibly un-monitorable" in the flesh. */}
+          {row.registry === 'platform' && <DriftPanel row={row} />}
 
           {/* Source lineage. */}
           {row.runId && (
@@ -549,8 +613,8 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
             </section>
           )}
 
-          {/* Version history — notebook models carry their full lineage. */}
-          {row.source === 'notebook' && (
+          {/* Version history — only notebook-registry (MLflow) models carry their full lineage. */}
+          {row.registry === 'notebook' && (
             <section className="mdl-block">
               <span className="eyebrow">Versions</span>
               {versions === null ? (
@@ -578,8 +642,9 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
             </section>
           )}
 
-          {/* Platform detectors: equipment binding + a deploy control that gates live serving. */}
-          {row.source === 'platform' && (
+          {/* Platform-registry models (built-in detectors and admitted uploads alike): equipment
+              binding + a deploy control that gates live serving. */}
+          {row.registry === 'platform' && (
             <section className="mdl-block">
               <span className="eyebrow">Deployment</span>
               {row.equipment && <p className="mdl-desc" style={{ marginBottom: 12 }}>Equipment type: {row.equipment}</p>}
@@ -655,7 +720,7 @@ function DriftPanel({ row }) {
       if (!res.ok) throw new Error(String(res.status));
       setResult(await res.json());
       setState('done');
-    } catch (e) {
+    } catch {
       setErr('Could not evaluate drift. Try again.');
       setState('error');
     }
