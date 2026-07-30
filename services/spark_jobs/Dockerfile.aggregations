@@ -18,8 +18,16 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}" \
 
 USER root
 
-# Install Python and pip (with cleanup)
-RUN apt-get update && \
+# Install Python and pip (with cleanup). The `upgrade` is the OS-patch layer: apache/spark pins an
+# Ubuntu that goes CRITICAL between Spark releases, so this image patches at build rather than wait
+# for upstream to re-cut. That only holds if the layer actually re-runs — the build restores layers
+# from a persistent cache (.github/workflows/images.yml), which replays this RUN verbatim and would
+# freeze the patch level at whatever the last cache write held while .trivyignore still claims these
+# CVEs are fixed rather than accepted. SECURITY_REFRESH is a cache epoch the workflow advances daily;
+# it is referenced below for no reason other than to move this layer's cache key with it.
+ARG SECURITY_REFRESH=unset
+RUN echo "security refresh: ${SECURITY_REFRESH}" && \
+    apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
         python3-pip \
