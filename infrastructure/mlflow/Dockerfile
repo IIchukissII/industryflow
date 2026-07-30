@@ -13,7 +13,7 @@
 # 3.14.0 is the newest mlflow and no release yet claims 3.14. Only the SERVER is affected — the
 # mlflow CLIENT imports fine on 3.14, so ml_service and the tracking gateway are already there.
 # Tracked in #222; lift this when mlflow ships 3.14 support.
-FROM python:3.14-slim
+FROM python:3.11-slim
 
 # The whole dependency closure is pinned in requirements.txt, not just mlflow/psycopg2/boto3.
 # Pinning only the direct three left every transitive dep (sqlalchemy, alembic, pydantic, ...)
