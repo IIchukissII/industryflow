@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: Install ruff
@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: Resolve every requirements file
@@ -86,7 +86,7 @@ jobs:
         working-directory: services/frontend
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           # Same 22 as frontend-tests and the Dockerfile that actually ships: eslint 9's toolchain
           # wants node >=20.19, and one node across lint/test/build is one thing to reason about.
@@ -106,7 +106,7 @@ jobs:
         working-directory: services/frontend
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           # Vitest runs through Vite 8, which needs node >=20.19/22.12.
           node-version: "22"
