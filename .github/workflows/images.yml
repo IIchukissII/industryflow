@@ -61,11 +61,15 @@ jobs:
           # baked and psycopg2 present. It does NOT resolve the runtime `--packages` Kafka connector or
           # process a batch — that needs Kafka+TimescaleDB, which ADR-0026 keeps off CI and ADR-0029
           # dec 5 assigns to the box run.
-          - { name: spark-streaming,        context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.streaming,
+          #
+          # `patch_os: true` marks the images that patch their own OS at build (`apt-get upgrade`)
+          # because the base pins an Ubuntu older than its CVEs. Those are the only images whose
+          # layer cache must not be allowed to go stale — see the Build step's build-args.
+          - { name: spark-streaming,        context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.streaming, patch_os: true,
               smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version > /tmp/v 2>&1 && grep -q 'version 4.1' /tmp/v && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
-          - { name: spark-aggregations,     context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.aggregations,
+          - { name: spark-aggregations,     context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.aggregations, patch_os: true,
               smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version > /tmp/v 2>&1 && grep -q 'version 4.1' /tmp/v && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
-          - { name: spark-worker,           context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.worker,
+          - { name: spark-worker,           context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.worker, patch_os: true,
               smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.35.4.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version > /tmp/v 2>&1 && grep -q 'version 4.1' /tmp/v && grep -q 'Scala version 2.13' /tmp/v && echo spark-4.1-image-ok" }
           # THE ONE THAT WOULD HAVE CAUGHT #222. mlflow is pure-python and its 95-package closure
           # resolves cleanly on 3.14 — and then the SERVER dies importing importlib.abc.Traversable.
@@ -116,6 +120,19 @@ jobs:
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # A `patch_os` image fixes its base's CVEs with `apt-get upgrade` at build time, and the Trivy
+      # gate below is what proves it worked. But the build restores layers from a persistent cache, so
+      # with no changing input that RUN is replayed verbatim on every build and the image's patch level
+      # silently freezes at whatever the last cache write held — the gate then fails on CVEs the
+      # Dockerfile is supposed to have already fixed, which is how #257/#259 went red without touching
+      # an image. A UTC date as the cache key keeps the patch layer at most a day stale while leaving
+      # every other layer (the ~200 MB of baked S3A jars) cached. Only `patch_os` images take the arg;
+      # passing it to the rest would rebuild them daily for nothing.
+      - name: Security-patch cache epoch
+        if: matrix.patch_os
+        id: epoch
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       - name: Build (load on PR, push on main)
         uses: docker/build-push-action@v7
         with:
@@ -125,6 +142,7 @@ jobs:
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ matrix.patch_os && format('SECURITY_REFRESH={0}', steps.epoch.outputs.day) || '' }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
