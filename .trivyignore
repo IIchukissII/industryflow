@@ -12,5 +12,10 @@
 # already carries fixed avro and zookeeper, so the 3.5-era CVE-2024-47561 (avro) and
 # CVE-2023-44981 (zookeeper) are gone; only Derby remains — and Derby is unused in our pipeline,
 # so it is not reachable. (The image's OS packages are patched via `apt-get upgrade` at build, so
-# base-layer CVEs like the linux-libc-dev kernel headers are fixed, not ignored.)
+# base-layer CVEs like the linux-libc-dev kernel headers are fixed, not ignored. That sentence is a
+# claim about a layer that is cached, and it was briefly false: with no changing input the upgrade
+# was replayed from cache and the patch level froze, so the gate began failing on kernel-header CVEs
+# this file promises are already fixed. The build now passes the patch layer a dated cache epoch —
+# see SECURITY_REFRESH in .github/workflows/images.yml. Nothing about that belongs in this file; the
+# point is that the claim above is only true for as long as that stays wired.)
 CVE-2022-46337 exp:2026-09-30  # org.apache.derby:derby 10.16.1.1 — LDAP injection (Spark-bundled, Derby unused)

@@ -35,6 +35,14 @@ updates:
         update-types: ["minor", "patch"]
       npm-major:
         update-types: ["major"]
+    ignore:
+      # eslint 10 cannot be installed here: eslint-plugin-react's peer range still stops at 9, so
+      # `npm ci` fails to resolve and every check in the PR dies before it runs. The bot cannot know
+      # that and re-proposed it weekly, burning a full image matrix each time. Lift this the moment
+      # the plugin ships an eslint-10 peer range — tracked in #216, which is the reason this is an
+      # ignore rather than a pin.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "docker"
     directories: ["/services/**", "/infrastructure/**"]
@@ -47,8 +55,20 @@ updates:
     ignore:
       # Runtime and database base-image majors are pinned deliberately and migrated with testing
       # (a new Python/Node/Postgres major is a project decision, not a routine bump).
+      #
+      # `python` is ignored for MINORS too, which the other runtimes do not need. A Python feature
+      # release is a major migration wearing a minor's version number: 3.11 -> 3.14 arrives here as a
+      # semver minor, and the bot proposed exactly that for the tracking image — the one image whose
+      # Dockerfile says in its own comment that it cannot move until #222 clears. Semver ignores are
+      # the only guard the bot itself respects, so the guard has to match how the tag actually numbers.
       - dependency-name: "python"
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # Spark is not a routine bump either. A feature release moves the JVM/Scala side and the
+      # Structured-Streaming checkpoint format, which ADR-0029 makes a deliberate, resume-verified
+      # exercise on a real box. Patches stay open: the image smoke pins `version 4.1`, so a 4.1.x
+      # security patch still passes the gate while 4.2 correctly does not.
+      - dependency-name: "apache/spark"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
       - dependency-name: "postgres"
