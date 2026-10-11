@@ -27,32 +27,36 @@ name: Model artifact round-trip
 on:
   push:
     branches: [main]
-    paths:
-      - "services/notebook_hub/Dockerfile.authoring"
-      - "services/ml_service/api/Dockerfile"
-      - "services/ml_service/api/requirements.txt"
-      - "infrastructure/mlflow/**"
-      - "clients/python/**"
-      - "scripts/check_model_env_parity.py"
-      - "scripts/tests/**"
-      - "tests/model_artifact_roundtrip/**"
-      - ".github/workflows/model-artifact-roundtrip.yml"
   pull_request:
-    paths:
-      - "services/notebook_hub/Dockerfile.authoring"
-      - "services/ml_service/api/Dockerfile"
-      - "services/ml_service/api/requirements.txt"
-      - "infrastructure/mlflow/**"
-      - "clients/python/**"
-      - "scripts/check_model_env_parity.py"
-      - "scripts/tests/**"
-      - "tests/model_artifact_roundtrip/**"
-      - ".github/workflows/model-artifact-roundtrip.yml"
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - 'services/notebook_hub/Dockerfile.authoring'
+              - 'services/ml_service/api/Dockerfile'
+              - 'services/ml_service/api/requirements.txt'
+              - 'infrastructure/mlflow/**'
+              - 'clients/python/**'
+              - 'scripts/check_model_env_parity.py'
+              - 'scripts/tests/**'
+              - 'tests/model_artifact_roundtrip/**'
+              - '.github/workflows/model-artifact-roundtrip.yml'
+
   # Seconds, and it runs first: if the two ends do not even CLAIM to agree, there is no point
   # spending ten minutes building two images to watch a pickle fail.
   parity:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -185,13 +189,16 @@ jobs:
   # runs, fails only if a job that actually ran failed.
   model-artifact-roundtrip-gate:
     name: model-artifact-roundtrip-gate
-    needs: [parity, roundtrip]
+    needs: [changes, parity, roundtrip]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Verdict
         run: |
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "::error::change-detection job did not succeed"; exit 1
+          fi
           if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
             echo "::error::A model trained in the authoring kernel does not survive the crossing into the serving image (ADR-0027)."
             exit 1
