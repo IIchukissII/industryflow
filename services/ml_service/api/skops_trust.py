@@ -84,3 +84,19 @@ def load_pyfunc(model_uri: str, provenance: Optional[str]) -> Any:
         apply_trust(local_meta.flavors, provenance)
         local_meta.save(os.path.join(local, "MLmodel"))
         return mlflow.pyfunc.load_model(local)
+
+
+def is_untrusted_types_error(exc: BaseException) -> bool:
+    """True if skops refused the file for untrusted types, however a caller wrapped that refusal.
+
+    MLflow 3.15 lets skops' exception through; 3.17 re-raises it inside an MlflowException. Matching
+    the outer type alone misreports a trust refusal as a generic load failure.
+    """
+    seen: set[int] = set()
+    cur: Optional[BaseException] = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if type(cur).__name__ == "UntrustedTypesFoundException":
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return "untrusted types" in str(exc).lower()
