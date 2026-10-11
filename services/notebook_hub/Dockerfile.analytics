@@ -32,7 +32,7 @@ RUN useradd --create-home --uid ${NB_UID} --shell /bin/bash ${NB_USER}
 # The jupyterhub pin tracks the HUB's (services/notebook_hub/requirements.txt): singleuser and hub
 # speak a versioned protocol, and a 4.x singleuser under the 5.x hub is a skew nothing else catches.
 RUN pip install --no-cache-dir \
-    jupyterhub==5.5.0 \
+    jupyterhub==6.0.1 \
     voila==0.5.7
 
 # Visualisation stack for dashboards (no ML/training libs — operators don't author models).
