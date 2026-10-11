@@ -10,9 +10,10 @@
 #
 # and 3.14 REMOVED importlib.abc.Traversable (deprecated since 3.12). The tracking server therefore
 # dies on import, which the live tracking-gateway proof caught the moment this image was moved.
-# 3.14.0 is the newest mlflow and no release yet claims 3.14. Only the SERVER is affected — the
-# mlflow CLIENT imports fine on 3.14, so ml_service and the tracking gateway are already there.
-# Tracked in #222; lift this when mlflow ships 3.14 support.
+# mlflow 3.15.0 no longer has that import, and psycopg2-binary 2.9.13 ships cp314 wheels, so both
+# blockers are gone upstream; moving this image is still owed and unproven (#222). Only the SERVER
+# was affected — the mlflow CLIENT imports fine on 3.14, so ml_service and the tracking gateway are
+# already there.
 FROM python:3.11-slim
 
 # The whole dependency closure is pinned in requirements.txt, not just mlflow/psycopg2/boto3.
