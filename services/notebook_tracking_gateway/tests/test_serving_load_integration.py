@@ -95,9 +95,14 @@ def test_a_gateway_logged_model_loads_from_the_tracking_server(handle_for, monke
     monkeypatch.setenv("MLFLOW_TRACKING_TOKEN", handle_for(cid))
     mlflow.set_tracking_uri(_gw())
     exp = mlflow.set_experiment("serve-" + uuid.uuid4().hex)
+    registered = "served-" + uuid.uuid4().hex[:8]
     with mlflow.start_run():
-        info = mlflow.sklearn.log_model(model, name="model", input_example=X[:2])
+        # Registering in the same call is the kernel's normal path, and it crosses the gateway's
+        # registry routes (registered-models/create, model-versions/create with a models:/ source).
+        info = mlflow.sklearn.log_model(model, name="model", input_example=X[:2],
+                                        registered_model_name=registered)
     assert info.model_id
+    assert str(info.registered_model_version) == "1"
 
     # The trusted side: straight to the tracking server, as ml_service loads a deployed model.
     monkeypatch.delenv("MLFLOW_TRACKING_TOKEN")

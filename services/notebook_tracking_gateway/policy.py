@@ -197,8 +197,8 @@ def scope_artifact_key(company_id: str, key: str) -> str:
 
 # Which JSON fields of an MLflow REST endpoint are tenant-namespaced *names*. The gateway qualifies
 # these on the request and unqualifies them on the response, so the tenant rule lives in one table
-# rather than scattered across handlers. Endpoints not listed carry only ids (validated by an
-# ownership lookup in the gateway) or no tenant-bearing field.
+# rather than scattered across handlers. Which endpoints are forwarded at all, and the id-ownership
+# rule each is held to, is ``routes.ROUTES`` (default deny); this table only says which fields are names.
 #   request:  fields in the request body/query to qualify (kernel name -> tenant_<uuid>/name)
 #   response: dotted paths in the response to unqualify (drop entries not in the tenant)
 NAME_FIELDS = {
@@ -215,6 +215,17 @@ NAME_FIELDS = {
     "model-versions/create": {"request": ["name"], "response": ["model_version.name"]},
     "model-versions/get": {"request": ["name"], "response": ["model_version.name"]},
     "model-versions/search": {"request": [], "response": ["model_versions[].name"]},
+    "registered-models/rename": {"request": ["name", "new_name"], "response": ["registered_model.name"]},
+    "registered-models/set-tag": {"request": ["name"], "response": []},
+    "registered-models/delete-tag": {"request": ["name"], "response": []},
+    "registered-models/get-latest-versions": {"request": ["name"], "response": ["model_versions[].name"]},
+    "registered-models/alias": {"request": ["name"], "response": ["model_version.name"]},
+    "model-versions/update": {"request": ["name"], "response": ["model_version.name"]},
+    "model-versions/delete": {"request": ["name"], "response": []},
+    "model-versions/set-tag": {"request": ["name"], "response": []},
+    "model-versions/delete-tag": {"request": ["name"], "response": []},
+    "model-versions/transition-stage": {"request": ["name"], "response": ["model_version.name"]},
+    "model-versions/get-download-uri": {"request": ["name"], "response": []},
 }
 
 
