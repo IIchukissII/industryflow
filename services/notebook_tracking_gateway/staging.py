@@ -96,6 +96,17 @@ def safe_member_path(name: str) -> Optional[str]:
     return "/".join(segments)
 
 
+def signs_for_the_edge(key: str) -> bool:
+    """Whether a pre-signed URL for ``key`` must name the public edge rather than the interior store.
+
+    Only the upload staging area is followed by a client outside the trust network (a browser,
+    ADR-0030 dec 10), and it is the only object path the edge routes to the store. A kernel's own
+    artifact transfers stay inside the network: signing them for the edge sends them to a route that
+    does not exist there, so a PUT is refused and a GET returns the web app instead of the bytes.
+    """
+    return (key or "").lstrip("/").startswith(STAGING_ROOT)
+
+
 def staging_key(company_id_token: str, upload_id: str, member: str) -> str:
     """Where one member of an unadmitted artifact rests.
 

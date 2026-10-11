@@ -49,6 +49,7 @@ jobs:
               - 'clients/python/**'
               - 'scripts/check_model_env_parity.py'
               - 'scripts/tests/**'
+              - 'scripts/migrate_tenant_artifact_locations.py'
               - 'tests/model_artifact_roundtrip/**'
               - '.github/workflows/model-artifact-roundtrip.yml'
 

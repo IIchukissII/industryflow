@@ -39,6 +39,7 @@ cluster-bound part (``build_app``/``main``), validated against a real stack (iss
 from __future__ import annotations
 
 import os
+import uuid
 from typing import Any, Awaitable, Callable, Optional, Protocol, Tuple
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -245,6 +246,10 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
         # Qualify request names → proxy → strip response names (and drop foreign entries).
         scoped_params = scoping.scope_request(endpoint, params, cid) if request.method == "GET" else params
         scoped_body = scoping.scope_request(endpoint, body, cid) if body is not None else None
+        if endpoint == "experiments/create" and isinstance(scoped_body, dict):
+            # Recorded location = where the bytes live (decision 5); never the caller's choice.
+            scoped_body = {**scoped_body,
+                           "artifact_location": policy.experiment_artifact_location(cid, uuid.uuid4().hex)}
         status, data = await upstream.call(request.method, endpoint, params=scoped_params, body=scoped_body)
         if isinstance(data, dict):
             data = scoping.scope_response(endpoint, data, cid)
@@ -321,9 +326,10 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
     # ADR-0030 dec 10 (rev 2): a pre-signed PUT is followed by the CLIENT, and that client may be a
     # browser outside the trust network. The URL must therefore name the address the client can reach
     # — the public edge — not the interior one the gateway reaches the store on. This second client is
-    # identical to the one above but for its endpoint; it signs URLs only. The gateway's own
-    # server-side ops (list/head/copy/delete) keep the interior client. Unset → the same endpoint as
-    # before, so an in-cluster client (the kernel) is unaffected, and the two are the same object.
+    # identical to the one above but for its endpoint; it signs upload-staging URLs only
+    # (staging.signs_for_the_edge). A kernel's artifact URLs keep the interior endpoint: the edge does
+    # not route them, and the kernel is inside the network. Server-side ops (list/head/copy/delete)
+    # keep the interior client. Unset → the two are the same object.
     presign_endpoint = os.environ.get("TRACKING_S3_PRESIGN_ENDPOINT_URL")
     if presign_endpoint:
         s3_presign = boto3.client(
@@ -353,7 +359,8 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
             # public edge for a browser; the interior endpoint for an in-cluster kernel). SigV4 signs
             # host+key only, so the client's follow-the-signature PUT lands at that host, and the store
             # behind the edge recomputes the same signature over the host it is handed (ADR-0030 dec 10).
-            return s3_presign.generate_presigned_url(op, Params={"Bucket": bucket, "Key": key}, ExpiresIn=presign_ttl)
+            signer = s3_presign if staging.signs_for_the_edge(key) else s3
+            return signer.generate_presigned_url(op, Params={"Bucket": bucket, "Key": key}, ExpiresIn=presign_ttl)
 
         def list_files(self, prefix):
             prefix = prefix.rstrip("/") + "/" if prefix else ""

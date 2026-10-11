@@ -172,6 +172,20 @@ def owns_artifact_key(company_id: str, key: str) -> bool:
     return key.startswith(artifact_prefix(company_id))
 
 
+def experiment_artifact_location(company_id: str, nonce: str) -> str:
+    """The artifact location the gateway records for an experiment it creates (decision 5).
+
+    MLflow derives every run's and logged model's artifact location from this value, and anything
+    that reads an artifact through MLflow (the serving side, which bypasses the gateway) resolves it
+    from that record. So the record must name the tenant-prefixed path the bytes are actually stored
+    under, or the record and the store disagree and a trusted reader finds nothing. It is always set
+    by the gateway, never taken from the request: a kernel-chosen location could name another tenant's
+    prefix and have a trusted reader fetch it. ``nonce`` keeps experiments apart inside the prefix,
+    because the experiment id does not exist until MLflow assigns it.
+    """
+    return f"mlflow-artifacts:/{artifact_prefix(company_id)}{nonce}"
+
+
 def scope_artifact_key(company_id: str, key: str) -> str:
     """Place a kernel-relative artifact path under the tenant prefix (idempotent)."""
     key = (key or "").lstrip("/")
