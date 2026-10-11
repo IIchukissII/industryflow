@@ -422,11 +422,11 @@
       },
       "targets": [
         {
-          "expr": "up{job=\"alert-service\"}",
+          "expr": "count(time() - container_last_seen{name=\"industryflow-alert-service-detector\"} < 60) or vector(0)",
           "refId": "A"
         }
       ],
-      "title": "Alert Service",
+      "title": "Alert Detector",
       "type": "stat"
     },
     {

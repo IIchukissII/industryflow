@@ -164,7 +164,7 @@ docker logs -f industryflow-spark-streaming
 |-----------|---------|------|------------|
 | **API Gateway** | Request routing, auth | 8000 | FastAPI |
 | **Ingestion Service** | Sensor data ingestion | 8003 | Python/Kafka |
-| **Alert Service** | Anomaly detection | 8001 | FastAPI + PySpark |
+| **Alert Detector** | Rule evaluation, writes alerts | — | Python/Kafka |
 | **ML Service** | Model training/inference | 8002 | FastAPI + MLflow |
 | **Spark Streaming** | Real-time processing | — | PySpark |
 | **Spark Aggregations** | Data aggregation | — | PySpark |
@@ -208,7 +208,6 @@ DB_PASSWORD=<secure-password>
 
 # Services
 API_GATEWAY_PORT=8000
-ALERT_SERVICE_PORT=8001
 ML_SERVICE_PORT=8002
 
 # Monitoring
@@ -261,10 +260,10 @@ curl "http://localhost:8000/api/sensors/<sensor_id>?start_time=<iso8601>&end_tim
 ### Alert rules
 
 ```bash
-curl http://localhost:8001/api/alert-rules \
+curl http://localhost:8000/api/alert-rules \
   -H "Authorization: Bearer <token>"
 
-curl -X POST http://localhost:8001/api/alert-rules \
+curl -X POST http://localhost:8000/api/alert-rules \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{

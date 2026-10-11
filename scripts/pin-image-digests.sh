@@ -40,7 +40,6 @@ fi
 IMAGES="
 apps.api-gateway=industryflow-api-gateway
 apps.ml-service-api=industryflow-ml-service-api
-apps.alert-service-api=industryflow-alert-service-api
 apps.alert-service-detector=industryflow-alert-service-detector
 apps.ingestion-service=industryflow-ingestion-service
 apps.spark-streaming=industryflow-spark-streaming
