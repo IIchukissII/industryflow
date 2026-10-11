@@ -52,6 +52,10 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "pandas"
         update-types: ["version-update:semver-major"]
+      # fastapi-users-db-sqlalchemy (7.0.0, latest) requires sqlalchemy <2.1, so a 2.1 bump cannot
+      # install and breaks the whole group. Lift when it allows 2.1.
+      - dependency-name: "sqlalchemy"
+        versions: [">=2.1"]
 
   # Notebook mediators, the cold layer, Spark helpers and the DB test harness.
   - package-ecosystem: "pip"
