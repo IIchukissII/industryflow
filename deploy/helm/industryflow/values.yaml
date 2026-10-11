@@ -318,8 +318,9 @@ infra:
 
   minio:
     inCluster: true
-    # Pinned by immutable digest (minio:latest is mutable; the tag is kept for readability).
-    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    # Maintained third-party MinIO build (the upstream images were withdrawn). Non-root (65532),
+    # distroless. Pinned by immutable digest; the tag is kept for readability.
+    image: cgr.dev/chainguard/minio:latest@sha256:7df55d002b698e4494a131b848dd553361bbe58b7e19f62d9623c29af1ba9ccf
     apiPort: 9000
     consolePort: 9001
     storage: 20Gi
@@ -378,8 +379,9 @@ coldExport:
     endpoint: ""                 # "" -> derive the in-cluster MinIO endpoint
     bucket: industryflow-cold
     region: us-east-1
-  # mc image for the in-cluster cold-bucket + write-scoped-user bootstrap (inCluster MinIO only).
-  initImage: minio/mc:latest
+  # mc image for the in-cluster bucket + principal bootstraps (inCluster MinIO only). The -dev
+  # variant carries the shell the init scripts need. Pinned by digest.
+  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:207b9a2045f01cef90feda8127a55f769115e060d8350dcb3a29593fc81166ac
   resources:
     requests: { cpu: 200m, memory: 512Mi }
     limits: { cpu: "1", memory: 2Gi }
