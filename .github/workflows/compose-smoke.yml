@@ -125,7 +125,7 @@ jobs:
       - name: Start the stack (notebooks profile included — the hub is the point)
         run: |
           docker compose --profile notebooks up -d --build --wait --wait-timeout 900 \
-            api-gateway ingestion-service ml-service-api alert-service-api alert-service-detector \
+            api-gateway ingestion-service ml-service-api alert-service-detector \
             mlflow notebook-hub notebook-sql-proxy notebook-tracking-gateway notebook-cold-broker
 
       # The signal is not WHETHER a container restarted — it is whether it KEEPS restarting.
@@ -224,7 +224,7 @@ jobs:
                   ("notebook-tracking-gateway", 5050), ("notebook-cold-broker", 5060), ("minio", 9000)]
           MUST_NOT = [("redis", 6379), ("mlflow", 5000), ("kafka", 29092), ("zookeeper", 2181),
                       ("timescaledb", 5432), ("spark-master", 7077), ("ml-service-api", 8002),
-                      ("alert-service-api", 8001), ("prometheus", 9090), ("loki", 3100),
+                      ("prometheus", 9090), ("loki", 3100),
                       (gw, 5000), (gw, 9000), (gw, 9090), (gw, 3100), (gw, 8000), (gw, 6379)]
           def reach(host, port):
               try:

@@ -35,7 +35,6 @@ updates:
     directories:
       - "/services/api_gateway"
       - "/services/alert_service"
-      - "/services/alert_service/api"
       - "/services/ingestion_service"
       - "/services/ml_service"
       - "/services/ml_service/api"

@@ -60,7 +60,7 @@ ignores the objects.
 
 | Object | Source | Notes |
 |--------|--------|-------|
-| ServiceMonitor (per app) | generated for any `apps.<name>.metrics: true` | api-gateway, alert-service-api, ml-service-api today |
+| ServiceMonitor (per app) | generated for any `apps.<name>.metrics: true` | api-gateway, ml-service-api today |
 | ServiceMonitor (per exporter) | postgres/redis/kafka exporters | `observability.exporters.*` |
 | PrometheusRule | `observability.prometheusRules` | target-down, pg/redis down, Kafka lag |
 | Grafana dashboards | `infrastructure/grafana/provisioning/*.json` | shipped as labelled ConfigMaps |

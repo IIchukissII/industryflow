@@ -7,7 +7,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 First-pass Kubernetes packaging for IndustryFlow, per **[ADR-0009](../../../ADR/ADR-0009-kubernetes-deployment-and-packaging.md)**.
 
-**Scope (this pass):** the application services (api-gateway, ml-service API, alert-service API,
+**Scope (this pass):** the application services (api-gateway, ml-service API,
 alert-service detector, ingestion-service, Spark streaming/aggregations) plus the core data
 services (TimescaleDB, Kafka, Zookeeper, Redis, MinIO, MLflow). The monitoring stack, stateful
 operators, autoscaling, and the mTLS device edge are deliberately later passes.

@@ -342,7 +342,7 @@ Search for errors:
 
 Filter by service:
 1. Use "Service" dropdown
-2. Select service (e.g., "alert-service-api")
+2. Select service (e.g., "api-gateway")
 
 ---
 

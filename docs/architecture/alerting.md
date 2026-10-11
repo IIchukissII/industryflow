@@ -10,10 +10,10 @@ authoritative; this is the shape.
 
 ## Two parts
 
-- **Alert API** (`services/alert_service/api`, port 8001) — CRUD for `alert_rules` and read
-  access to `alerts`, tenant-scoped. A direct, internal surface: the edge does not route to it.
-  The browser manages rules and reviews history through the API gateway's own alert routers
-  (`/api/alert-rules`, `/api/alerts`), which the edge sends every `/api/` request to.
+- **HTTP surface: the API gateway** (`/api/alert-rules`, `/api/alerts`). It is the only one
+  (ADR-0031): rule CRUD with whole-rule validation, history, acknowledge, operator labels and
+  precision (ADR-0022), all tenant-scoped through the shared resolver (ADR-0003). The alert service
+  has no HTTP API of its own.
 - **Detection worker** (`services/alert_service/worker`) — a Kafka consumer with no HTTP API
   that evaluates rules against the live stream and writes alerts.
 

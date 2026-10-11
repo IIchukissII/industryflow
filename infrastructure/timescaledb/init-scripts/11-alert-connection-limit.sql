@@ -4,7 +4,8 @@
 
 -- Migration: raise alert_service_user's connection limit (existing deployments).
 --
--- alert-service-api runs 4 uvicorn workers, each opening an asyncpg pool (min 5 / max 20),
+-- (Sized when a separate alert HTTP API shared this role; retired by ADR-0031. The limit stays as headroom.)
+-- That API ran 4 uvicorn workers, each opening an asyncpg pool (min 5 / max 20),
 -- alongside the alert detector — all as alert_service_user. The original CONNECTION LIMIT 10
 -- could not satisfy even startup (4 x min 5 = 20 > 10), so the API failed to boot with
 -- "too many connections for role". Align it with api_gateway_user (50). Idempotent.
