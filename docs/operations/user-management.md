@@ -42,7 +42,7 @@ Create or manage users with the CLI helper, or the API:
 
 ```bash
 # CLI (run inside the api-gateway container or against the DB)
-python3 scripts/manage_users.py            # see --help for create / list / set-role
+python3 scripts/manage_users.py            # see --help for create / list / delete / reset-password
 
 # API: register a user (admin/superuser)
 curl -X POST http://localhost:8000/auth/register \
