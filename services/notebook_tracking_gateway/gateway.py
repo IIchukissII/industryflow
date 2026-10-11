@@ -47,6 +47,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 import admission
 import policy
+import routes
 import scoping
 import staging
 
@@ -91,16 +92,6 @@ class ArtifactStore(Protocol):
 
 
 StoreGet = Callable[[str], Awaitable[Optional[object]]]
-
-# Endpoints whose body references an experiment by id; the gateway must confirm the experiment is
-# the caller's before proxying (the body carries no name to scope).
-_EXPERIMENT_ID_ENDPOINTS = {"runs/create", "runs/search", "experiments/get", "experiments/delete"}
-# Endpoints whose body references a run by id.
-_RUN_ID_ENDPOINTS = {
-    "runs/get", "runs/update", "runs/delete", "runs/log-metric", "runs/log-parameter",
-    "runs/set-tag", "runs/delete-tag", "runs/log-batch",
-}
-
 
 def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
               bucket: str = "") -> FastAPI:
@@ -240,8 +231,13 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
         params = dict(request.query_params)
         body = await _json_body(request)
 
-        # Validate any referenced ids belong to the tenant (the body has no name to scope).
-        await _ensure_owns(upstream, cid, endpoint, params, body)
+        # Default deny: only routes with a written-down tenant rule are forwarded (routes.py).
+        matched = routes.match(request.method, endpoint)
+        if matched is None:
+            raise HTTPException(status_code=403, detail="this tracking route is not available through the gateway")
+        route, path_args = matched
+        # Validate every id the request references belongs to the tenant (ADR-0019 dec 5).
+        await _ensure_owns(upstream, cid, route, path_args, params, body)
 
         # Qualify request names → proxy → strip response names (and drop foreign entries).
         scoped_params = scoping.scope_request(endpoint, params, cid) if request.method == "GET" else params
@@ -271,16 +267,60 @@ async def _json_body(request: Request) -> Optional[dict]:
         raise HTTPException(status_code=400, detail="invalid JSON body")
 
 
-async def _ensure_owns(upstream: Upstream, company_id: str, endpoint: str, params: dict, body: Optional[dict]) -> None:
-    """Refuse an id-bearing call whose experiment/run is not the caller's tenant's (ADR-0019 dec 5)."""
+async def _ensure_owns(upstream: Upstream, company_id: str, route: "routes.Route", path_args: list,
+                      params: dict, body: Optional[dict]) -> None:
+    """Refuse a request that references an experiment, run or logged model outside the caller's tenant
+    (ADR-0019 dec 5). Fails closed: a rule whose subject id is missing refuses rather than skips."""
     src = {**(body or {}), **params}
-    if endpoint in _EXPERIMENT_ID_ENDPOINTS:
-        for exp_id in _as_list(src.get("experiment_id") or src.get("experiment_ids")):
+    rules = route.rules
+    if "experiment" in rules:
+        ids = _as_list(src.get("experiment_id")) + _as_list(src.get("experiment_ids"))
+        if not ids:
+            raise HTTPException(status_code=403, detail="an experiment id is required")
+        for exp_id in ids:
             await _assert_experiment_owned(upstream, company_id, exp_id)
-    if endpoint in _RUN_ID_ENDPOINTS and src.get("run_id"):
-        status, data = await upstream.call("GET", "runs/get", params={"run_id": src["run_id"]}, body=None)
-        exp_id = (((data or {}).get("run") or {}).get("info") or {}).get("experiment_id") if status == 200 else None
-        await _assert_experiment_owned(upstream, company_id, exp_id)
+    if "run" in rules or ("run_opt" in rules and (src.get("run_id") or src.get("run_uuid") or src.get("source_run_id"))):
+        run_ids = [r for r in (src.get("run_id"), src.get("run_uuid"), src.get("source_run_id")) if r]
+        if not run_ids:
+            raise HTTPException(status_code=403, detail="a run id is required")
+        for run_id in run_ids:
+            await _assert_run_owned(upstream, company_id, run_id)
+    if "runs" in rules:
+        run_ids = _as_list(src.get("run_ids"))
+        if not run_ids:
+            raise HTTPException(status_code=403, detail="run ids are required")
+        for run_id in run_ids:
+            await _assert_run_owned(upstream, company_id, run_id)
+    if "logged_model" in rules:
+        model_id = path_args[0] if path_args else src.get("model_id")
+        await _assert_logged_model_owned(upstream, company_id, model_id)
+    if "logged_model_opt" in rules and src.get("model_id"):
+        await _assert_logged_model_owned(upstream, company_id, src["model_id"])
+    if "mv_source" in rules:
+        kind, value = routes.source_kind(src.get("source"))
+        if kind == "run":
+            await _assert_run_owned(upstream, company_id, value)
+        elif kind == "logged_model":
+            await _assert_logged_model_owned(upstream, company_id, value)
+        elif kind == "artifact":
+            if not policy.owns_artifact_key(company_id, value):
+                raise HTTPException(status_code=403, detail="model version source is outside the tenant")
+        else:
+            raise HTTPException(status_code=403, detail=value)
+
+
+async def _assert_run_owned(upstream: Upstream, company_id: str, run_id) -> None:
+    status, data = await upstream.call("GET", "runs/get", params={"run_id": str(run_id)}, body=None)
+    exp_id = (((data or {}).get("run") or {}).get("info") or {}).get("experiment_id") if status == 200 else None
+    await _assert_experiment_owned(upstream, company_id, exp_id)
+
+
+async def _assert_logged_model_owned(upstream: Upstream, company_id: str, model_id) -> None:
+    if not model_id:
+        raise HTTPException(status_code=403, detail="cross-tenant or unknown logged model")
+    status, data = await upstream.call("GET", f"logged-models/{model_id}", params={}, body=None)
+    exp_id = (((data or {}).get("model") or {}).get("info") or {}).get("experiment_id") if status == 200 else None
+    await _assert_experiment_owned(upstream, company_id, exp_id)
 
 
 async def _assert_experiment_owned(upstream: Upstream, company_id: str, experiment_id) -> None:
