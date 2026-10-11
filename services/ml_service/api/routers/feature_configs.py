@@ -67,15 +67,6 @@ async def get_company_id_dependency(
 # Pydantic Models
 # ============================================================================
 
-class TransformationConfig(BaseModel):
-    """Configuration for a single feature transformation"""
-    name: str = Field(..., description="Feature name after transformation")
-    type: str = Field(..., description="Transformation type: identity, polynomial, interaction, rolling_stat, etc.")
-    sensor: Optional[str] = Field(None, description="Source sensor name (for single-sensor transformations)")
-    sensors: Optional[List[str]] = Field(None, description="Source sensor names (for multi-sensor transformations)")
-    params: Optional[Dict[str, Any]] = Field(None, description="Transformation parameters")
-
-
 class FeatureConfigCreate(BaseModel):
     """Request to create a feature engineering configuration"""
     equipment_type: str = Field(..., description="Equipment type (e.g., 'motor', 'pump', 'compressor')")

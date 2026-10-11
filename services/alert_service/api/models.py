@@ -57,13 +57,6 @@ class ModelType(str, Enum):
     STATISTICAL = "statistical"
 
 
-class ModelStatus(str, Enum):
-    """ML model status"""
-    ACTIVE = "active"
-    DEPRECATED = "deprecated"
-    TRAINING = "training"
-    FAILED = "failed"
-
 # ============================================================================
 # Alert Rule Models
 # ============================================================================
@@ -178,49 +171,6 @@ class AlertRule(AlertRuleBase):
         if isinstance(v, uuid.UUID):
             return str(v)
         return v
-
-    model_config = ConfigDict(from_attributes=True)
-
-# ============================================================================
-# ML Model Models
-# ============================================================================
-
-class MLModelBase(SafeBaseModel):
-    """Base ML model fields matching database schema"""
-    equipment_id: Optional[UUID] = None
-    model_name: str
-    description: Optional[str] = None
-    model_type: ModelType
-    model_version: int = 1
-    mlflow_run_id: Optional[str] = None
-    mlflow_experiment_id: Optional[str] = None
-    model_path: Optional[str] = None
-    training_metrics: Optional[Dict[str, Any]] = None
-    hyperparameters: Optional[Dict[str, Any]] = None
-    feature_names: Optional[List[str]] = None
-    sensor_ids: Optional[List[str]] = None
-    accuracy: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    precision_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    recall: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    f1_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    auc_roc: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    training_samples: Optional[int] = None
-    training_start_date: Optional[datetime] = None
-    training_end_date: Optional[datetime] = None
-    status: ModelStatus = ModelStatus.TRAINING
-    deployed_at: Optional[datetime] = None
-    deprecated_at: Optional[datetime] = None
-
-class MLModelCreate(MLModelBase):
-    """Model for creating new ML models"""
-    created_by: Optional[str] = None
-
-
-class MLModel(MLModelBase):
-    """Complete ML model with metadata"""
-    model_id: UUID
-    created_at: datetime
-    created_by: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
