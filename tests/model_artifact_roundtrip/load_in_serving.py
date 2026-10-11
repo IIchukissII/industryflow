@@ -28,7 +28,10 @@ import sklearn
 import skops
 import xgboost
 
-# The serving image puts ml_service's own code on the path (/app) — use ITS resolver, not our own.
+# The serving image puts ml_service's own code on the path (/app) — use ITS resolver and ITS loader,
+# not our own. The loader decides skops trust by provenance (ADR-0027 dec 13).
+import skops_trust
+import uploaded_model
 from model_uri import resolve_model_uri
 
 ARTIFACTS = os.environ.get("ROUNDTRIP_DIR", "/artifacts")
@@ -76,7 +79,7 @@ def main() -> int:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             try:
-                model = mlflow.pyfunc.load_model(uri)
+                model = skops_trust.load_pyfunc(uri, uploaded_model.PROVENANCE_KERNEL)
                 actual = np.asarray(model.predict(probe)).ravel()
             except Exception as exc:  # noqa: BLE001 — any failure to load IS the finding
                 print(f"  FAIL {flavor}: could not load {uri}")
@@ -100,6 +103,23 @@ def main() -> int:
         else:
             print(f"  ok   {flavor}: loaded and reproduces the kernel's predictions "
                   f"(max delta {drift:.1e})")
+
+    # The grant is provenance's, not the artifact's (ADR-0027 dec 13). The kernel logged this tree
+    # model with a trust list in its MLmodel; loaded as an UPLOAD, that list must be discarded and the
+    # model refused. If it loads, the artifact is granting itself trust.
+    tree = manifest["models"].get("sklearn")
+    if tree:
+        try:
+            skops_trust.load_pyfunc(resolve_model_uri(tree["run_id"]), uploaded_model.PROVENANCE_UPLOADED)
+            print("  FAIL trust: a tree model loaded with UPLOADED provenance — the artifact's own trust")
+            print("       list was honoured, or the serving side granted trust it must not.")
+            failures.append("trust")
+        except Exception as exc:  # noqa: BLE001
+            if type(exc).__name__ != "UntrustedTypesFoundException":
+                print(f"  FAIL trust: expected an untrusted-types refusal, got {type(exc).__name__}: {exc}")
+                failures.append("trust")
+            else:
+                print("  ok   trust: the same tree model is refused with uploaded provenance")
 
     print()
     if failures:

@@ -35,6 +35,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from industryflow import SKOPS_TRUSTED_TYPES
+
 ARTIFACTS = os.environ.get("ROUNDTRIP_DIR", "/artifacts")
 
 # The kernel logs to a real MLflow server over HTTP — which is what it does in production, where the
@@ -99,7 +101,10 @@ def main() -> int:
         with mlflow.start_run(run_name=f"roundtrip-{name}") as run:
             # log_model, not save_model: the point is to cross the registry the way a real notebook
             # does (ADR-0019), not to hand-place a file the far end then reads.
-            flavor.log_model(estimator, name="model")
+            # A tree-based sklearn model must name the tree types at save time (ADR-0027 dec 13);
+            # the kernel's client carries the list. Serving ignores it and applies its own grant.
+            extra = {"skops_trusted_types": SKOPS_TRUSTED_TYPES} if name == "sklearn" else {}
+            flavor.log_model(estimator, name="model", **extra)
             manifest[name] = {
                 "run_id": run.info.run_id,
                 "expected": expected.tolist(),
