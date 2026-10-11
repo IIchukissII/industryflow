@@ -74,7 +74,9 @@ sample of its training-window distribution — which is the baseline for drift m
 (**[ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md)** dec 13). skops does not
 trust the internal tree structures of tree-based estimators by default. Models trained in a kernel get
 an explicit grant for exactly those types; uploaded models get none. The trust list an artifact
-carries in its own MLmodel is always discarded. In a notebook, log a tree-based model with
+carries in its own MLmodel is never read: ml_service deserialises skops sklearn models itself and
+wraps them in MLflow's pyfunc, so MLflow's pickle switch (off on the upload path) governs only pickle
+formats (ADR-0027 dec 13 rev 2). In a notebook, log a tree-based model with
 `mlflow.sklearn.log_model(model, name="model", skops_trusted_types=industryflow.SKOPS_TRUSTED_TYPES)`:
 mlflow test-loads on save, so the call fails without it.
 

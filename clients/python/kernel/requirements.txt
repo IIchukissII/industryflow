@@ -26,5 +26,5 @@ statsmodels==0.15.0
 xgboost==3.4.1
 matplotlib==3.11.2
 plotly==7.1.0
-mlflow-skinny==3.15.2
+mlflow-skinny==3.17.0
 skops==0.16.0
