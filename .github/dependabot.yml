@@ -61,8 +61,8 @@ updates:
       #
       # `python` is ignored for MINORS too, which the other runtimes do not need. A Python feature
       # release is a major migration wearing a minor's version number: 3.11 -> 3.14 arrives here as a
-      # semver minor, and the bot proposed exactly that for the tracking image — the one image whose
-      # Dockerfile says in its own comment that it cannot move until #222 clears. Semver ignores are
+      # semver minor, and the bot proposed exactly that for the tracking image while #222 still held it
+      # at 3.11. Semver ignores are
       # the only guard the bot itself respects, so the guard has to match how the tag actually numbers.
       - dependency-name: "python"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
