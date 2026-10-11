@@ -42,10 +42,10 @@ RUN pip3 install --no-cache-dir \
 # docs/architecture/stream-processing.md). Baked in (not --packages) so the versions are pinned
 # to this image's Hadoop (3.4.2) and resolve offline on every node. Spark 4 bundles Hadoop 3.4.x,
 # whose S3A uses the AWS SDK v2 (software.amazon.awssdk:bundle), not the v1 aws-java-sdk-bundle.
-RUN curl -fsSL -o /opt/spark/jars/hadoop-aws-3.4.2.jar \
-        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar && \
-    curl -fsSL -o /opt/spark/jars/bundle-2.35.4.jar \
-        https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.35.4/bundle-2.35.4.jar
+# The jar versions, the netty patch set and the removals live in patch-spark-jars.sh, shared by all
+# three Spark images.
+COPY patch-spark-jars.sh /tmp/patch-spark-jars.sh
+RUN sh /tmp/patch-spark-jars.sh && rm /tmp/patch-spark-jars.sh
 
 # Create directories with proper permissions. The spark user needs a writable home for ivy's cache:
 # Spark 4's base sets the user's passwd home to /nonexistent and ivy derives its cache dir from the

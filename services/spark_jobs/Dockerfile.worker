@@ -27,11 +27,11 @@ RUN echo "security refresh: ${SECURITY_REFRESH}" && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends curl && \
-    rm -rf /var/lib/apt/lists/* && \
-    curl -fsSL -o /opt/spark/jars/hadoop-aws-3.4.2.jar \
-        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar && \
-    curl -fsSL -o /opt/spark/jars/bundle-2.35.4.jar \
-        https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.35.4/bundle-2.35.4.jar
+    rm -rf /var/lib/apt/lists/*
+
+# S3A jars, the netty patch set and the removals: patch-spark-jars.sh, shared with the job images.
+COPY patch-spark-jars.sh /tmp/patch-spark-jars.sh
+RUN sh /tmp/patch-spark-jars.sh && rm /tmp/patch-spark-jars.sh
 
 # Spark -> Prometheus metrics config (worker + its executors expose /metrics/prometheus). Item 7.
 COPY metrics.properties /opt/spark/conf/metrics.properties
