@@ -75,6 +75,21 @@ containment use the Kubernetes profile.
 | 7 | Per-user work persistence + idle reclamation (ADR-0020) | **done** — authoring `work/` on a per-user volume (Docker) / PVC (k8s); `jupyterhub-idle-culler` with a scoped token; compute stays ephemeral, capabilities re-minted per spawn |
 | 8 | Cold-layer read path (ADR-0025 dec 5) | **built** — `cold`-audience capability → `notebook_cold_broker` (read-only cold principal) → tenant-prefix-scoped pre-signed GETs; `IndustryFlowCold` client (`list_files`/`read_all`). Compose-wired; not yet box-run |
 
+**Artifact locations are recorded where the bytes are.** The gateway stores a kernel's artifacts
+under the tenant prefix, and since #308 it also records that prefix as the experiment's artifact
+location (it ignores any location the caller asks for). Serving loads models from the tracking
+server directly, so the record must match the store. Experiments created before that were recorded
+at `mlflow-artifacts:/<id>`, and serving could not load their models. Fix them once, per stack:
+
+```bash
+docker compose exec -T mlflow python - < scripts/migrate_tenant_artifact_locations.py           # dry run
+docker compose exec -T mlflow python - --apply < scripts/migrate_tenant_artifact_locations.py   # write
+```
+
+It only rewrites an experiment whose objects are all under the tenant prefix, moves no object, and
+is safe to re-run. On a stack with a public base URL, kernel artifact URLs are now signed for the
+interior store; only browser upload staging is signed for the edge.
+
 The design is decision-complete (ADR-0011→0015). Every piece except the Kubernetes hub runtime is
 built **and validated on the live compose box**; only the KubeSpawner profile still needs a
 running cluster.

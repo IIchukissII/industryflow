@@ -118,3 +118,12 @@ def test_backslashes_are_refused_rather_than_translated():
 def test_a_refused_path_is_not_quietly_rewritten():
     # Sanitising would store the caller's bytes somewhere they did not ask for and call it success.
     assert staging.safe_member_path("../../../etc/shadow") is None
+
+
+def test_only_the_upload_staging_area_is_signed_for_the_edge():
+    # The edge routes only the staging area to the store. A kernel artifact signed for the edge was
+    # refused (PUT 405) or answered with the web app (GET) on every deployment with a public base URL.
+    assert staging.signs_for_the_edge(staging.staging_key("tenant_x", "u" * 16, "MLmodel"))
+    assert staging.signs_for_the_edge("/" + staging.STAGING_ROOT + "anything")
+    assert not staging.signs_for_the_edge("tenant_x/5/models/m-1/artifacts/model.skops")
+    assert not staging.signs_for_the_edge("tenant_x/uploads/abc/MLmodel")
