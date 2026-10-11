@@ -52,4 +52,16 @@ spec:
           annotations:
             summary: "Kafka consumer lag is high"
             description: "Consumer group {{`{{ $labels.consumergroup }}`}} lag on {{`{{ $labels.topic }}`}} exceeds {{ $pr.kafkaConsumerLagThreshold }}."
+        {{- if and .Values.ingress.enabled .Values.ingress.mtls.enabled .Values.ingress.mtls.crlCheck.enabled }}
+        # ADR-0007 dec 8: an expired device CRL makes the edge refuse every device. Raised from the
+        # device-crl-check job no longer succeeding (kube-state-metrics), well before the CRL
+        # expires. Keyed on the last SUCCESS, so it clears on the first good run after a refresh.
+        - alert: IndustryFlowDeviceCrlStale
+          expr: time() - kube_cronjob_status_last_successful_time{cronjob="{{ include "industryflow.fullname" . }}-device-crl-check"} > {{ .Values.ingress.mtls.crlCheck.alertAfterSeconds }}
+          labels:
+            severity: critical
+          annotations:
+            summary: "Device CRL is close to expiry"
+            description: "Refresh the CRL in the {{ .Values.ingress.mtls.caSecret }} Secret (docs/operations/device-mtls.md). Once it expires, every device is refused at ingestion."
+        {{- end }}
 {{- end }}

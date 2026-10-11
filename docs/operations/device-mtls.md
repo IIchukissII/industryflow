@@ -73,11 +73,54 @@ DEVICE_KEY=deploy/device-ca/devices/<id>/<id>.key \
 
 ```sh
 scripts/device-ca.sh revoke <device_id>         # refreshes the CRL
-docker compose exec ingestion-edge nginx -s reload   # reload so the edge picks up the CRL
 ```
 
-A revoked device is refused at the edge immediately, without waiting for its certificate to
-expire.
+On Compose the edge reloads itself within a minute of the CRL changing. A revoked device is then
+refused at the edge, without waiting for its certificate to expire. On Kubernetes, publish the
+new CRL to the device-CA Secret as described under *Keep the CRL fresh*.
+
+## Keep the CRL fresh
+
+The edge checks every device against the CRL. **A CRL has its own expiry, and once it passes
+the edge refuses every device**, revoked or not. Each CRL is therefore re-signed well inside its
+validity ([ADR-0007](../../ADR/ADR-0007-public-key-infrastructure.md) dec 8):
+
+| CRL | Lists | Re-signed by | Validity | Raised when less than |
+|---|---|---|---|---|
+| Intermediate | revoked devices | `device-ca.sh crl` (intermediate key only) | `CRL_DAYS` = 7 d | `CRL_WARN_DAYS` = 3 d |
+| Root | revoked intermediates | `device-ca.sh root-crl` (needs the offline root key) | `ROOT_CRL_DAYS` = 365 d | `ROOT_CRL_WARN_DAYS` = 30 d |
+
+`device-ca.sh check` reports both and exits non-zero when either is inside its warning window.
+Device certificates carry no CRL distribution point. The edge holds the CRL locally.
+
+**Compose.** The `device-crl-refresh` service re-signs the intermediate's CRL daily
+(`DEVICE_CRL_REFRESH_SECONDS`). It has no network and runs as the CA directory's owner
+(`DEVICE_CA_UID`/`DEVICE_CA_GID`). The edge reloads when the file changes. The service goes
+**unhealthy** when either CRL nears expiry, which shows in `docker compose ps`.
+
+**Root ceremony (both deployments), yearly.** Bring the root key in, run
+`scripts/device-ca.sh root-crl`, then take the key offline again. The routine refresh never
+needs it.
+
+**Kubernetes.** The issuing key does not live in the cluster. Re-sign where the CA lives, at
+least every few days, and publish the result. ingress-nginx picks up Secret changes on its own:
+
+```sh
+scripts/device-ca.sh crl
+kubectl -n <ns> create secret generic industryflow-device-ca \
+  --from-file=ca.crt=deploy/device-ca/ca-chain.crt \
+  --from-file=ca.crl=deploy/device-ca/crl/device-ca.crl \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+The chart's `device-crl-check` CronJob (`ingress.mtls.crlCheck`) checks the Secret's CRL every
+6 hours. When it fails, the `IndustryFlowDeviceCrlStale` alert fires (requires
+`observability.prometheusRules.enabled` and kube-state-metrics). The Secret must contain
+`ca.crl`. Without it, revocation is not checked at all and the check fails.
+
+**Upgrading an existing CA.** Older root CRLs were signed for 30 days. Run
+`scripts/device-ca.sh root-crl` once to re-sign with the long validity, then
+`docker compose up -d device-crl-refresh ingestion-edge`.
 
 ## mTLS only
 
