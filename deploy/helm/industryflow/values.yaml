@@ -555,6 +555,18 @@ ingress:
     caSecret: industryflow-device-ca
     host: ingest.industryflow.local
     verifyDepth: 2
+    # The device-CA Secret must carry ca.crt (the chain) AND ca.crl (the CRL bundle): revocation
+    # is checked at the edge (ADR-0007 dec 6). The CRL is refreshed out of band; the issuing key
+    # does not live in the cluster (ADR-0007 dec 8). This job only watches the CRL's age, and
+    # fails, raising IndustryFlowDeviceCrlStale, while either CRL is within its warning window.
+    crlCheck:
+      enabled: true
+      schedule: "17 */6 * * *"
+      warnDays: 3
+      rootWarnDays: 30
+      # No successful check for this long raises the alert (two missed 6-hourly runs).
+      alertAfterSeconds: 46800
+      image: alpine/openssl:3.5.8@sha256:3f25da71f70eba788067daac3f3df03bd1de7a7c52ed89fa93b94ad2c92d986b
 
 # ---------------------------------------------------------------------------
 # NetworkPolicy restricting ingestion-service ingress to the cluster TLS edge only

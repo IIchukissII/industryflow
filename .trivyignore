@@ -6,16 +6,8 @@
 # upgrade AND (b) not reachable with attacker-controlled input in our deployment belong here.
 # Each entry must carry a justification and an expiry so it is revisited.
 
-# --- Apache Spark 4.1.2 bundled JARs (services/spark_jobs/*) ---
-# These live in the Spark distribution's jars/ dir, not our code. Remediation is a Spark
-# version upgrade, tracked as its own task (docs/operations/production-readiness.md). Spark 4.1
-# already carries fixed avro and zookeeper, so the 3.5-era CVE-2024-47561 (avro) and
-# CVE-2023-44981 (zookeeper) are gone; only Derby remains — and Derby is unused in our pipeline,
-# so it is not reachable. (The image's OS packages are patched via `apt-get upgrade` at build, so
-# base-layer CVEs like the linux-libc-dev kernel headers are fixed, not ignored. That sentence is a
-# claim about a layer that is cached, and it was briefly false: with no changing input the upgrade
-# was replayed from cache and the patch level froze, so the gate began failing on kernel-header CVEs
-# this file promises are already fixed. The build now passes the patch layer a dated cache epoch —
-# see SECURITY_REFRESH in .github/workflows/images.yml. Nothing about that belongs in this file; the
-# point is that the claim above is only true for as long as that stays wired.)
-CVE-2022-46337 exp:2026-09-30  # org.apache.derby:derby 10.16.1.1 — LDAP injection (Spark-bundled, Derby unused)
+# --- Apache Spark bundled JARs (services/spark_jobs/*) ---
+# None accepted. The images patch the distribution's jars/ at build (services/spark_jobs/
+# patch-spark-jars.sh): netty is replaced as a set with a fixed release, and Derby and the Spark
+# Connect REPL jars are removed (unused). The OS layer is patched by `apt-get upgrade`, kept from going
+# stale by SECURITY_REFRESH in .github/workflows/images.yml.

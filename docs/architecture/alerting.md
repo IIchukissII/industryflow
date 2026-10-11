@@ -64,8 +64,15 @@ The worker consumes Kafka **at-least-once** (manual commits, bounded retry, dead
 **[ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md)**). Because at-least-once means a
 reading can be seen more than once, the worker **deduplicates / cools down** alerts: a repeat
 condition keyed by `(company_id, rule_id, sensor_id, equipment_id)` is suppressed within
-`ALERT_COOLDOWN_SECONDS`, so a replay or burst does not produce duplicate alerts. (Cooldown
-state is per worker replica; a Redis-backed shared cooldown is a noted follow-up.)
+`ALERT_COOLDOWN_SECONDS` of its **event time**, so a replay or burst does not produce duplicate
+alerts. Retrain recommendations are keyed by model, with their own `RETRAIN_*` cooldown.
+
+The cooldown is enforced **in the database**, so it holds across restarts and replicas: the
+insert writes only if no alert in the same key sits within the cooldown of the reading's event
+time. The `alert_id` is derived from the key and the event time, never random, so an exact replay
+collides on the primary key and is dropped (`ON CONFLICT DO NOTHING`). A bounded in-memory cache
+(`ALERT_DEDUP_CACHE_MAX`) in front of it spares the query while an anomaly persists. No schema
+change was needed: the hypertable's time index bounds the lookup.
 
 ## Tenant scoping
 
