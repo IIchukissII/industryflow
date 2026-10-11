@@ -16,8 +16,12 @@ Two facts shape this module:
     deployment gate's load probe.
   * **The artifact never grants itself trust.** MLflow's sklearn flavor reads `skops_trusted_types`
     from the artifact's own MLmodel and passes it to skops. Left alone, the file under judgement would
-    decide what it is trusted with. Every skops load here rewrites that field to the serving side's
-    answer before loading, whatever the artifact said.
+    decide what it is trusted with. So a skops sklearn model is never loaded through that flavor: it is
+    deserialised here, with `skops.io.load` and the serving side's grant, and wrapped in MLflow's own
+    pyfunc so callers see the same object. This is also why MLflow's pickle switch is not involved:
+    since 3.17 MLflow gates skops behind it precisely because the flavor trusts the artifact's list,
+    and the upload path keeps that switch off (ADR-0030 dec 4). Pickle formats still go through MLflow
+    and stay behind the switch.
 """
 
 from __future__ import annotations
@@ -38,7 +42,6 @@ KERNEL_TRUSTED_TYPES: tuple[str, ...] = (
 
 _SKLEARN_FLAVOR = "sklearn"
 _SKOPS = "skops"
-_TRUST_KEY = "skops_trusted_types"
 
 
 def trusted_types_for(provenance: Optional[str]) -> Optional[list[str]]:
@@ -48,49 +51,71 @@ def trusted_types_for(provenance: Optional[str]) -> Optional[list[str]]:
     return None
 
 
-def apply_trust(flavors: dict, provenance: Optional[str]) -> bool:
-    """Replace whatever trust list the artifact declares with the serving side's grant.
-
-    Returns True when the model is a skops-serialised sklearn model, i.e. when the rewrite matters.
-    """
+def is_skops_sklearn(flavors: dict) -> bool:
+    """True when the model is a skops-serialised sklearn model, the case this module loads itself."""
     conf = flavors.get(_SKLEARN_FLAVOR)
-    if not conf or conf.get("serialization_format") != _SKOPS:
-        return False
-    conf.pop(_TRUST_KEY, None)
-    grant = trusted_types_for(provenance)
-    if grant:
-        conf[_TRUST_KEY] = grant
-    return True
+    return bool(conf) and conf.get("serialization_format") == _SKOPS
+
+
+# The pyfunc entry points a sklearn model may name: MLflow's own set. The name comes from the
+# artifact, so it is checked rather than looked up blindly on the wrapper.
+_PREDICT_FNS = frozenset({"predict", "predict_proba", "predict_log_proba", "predict_joint_log_proba", "score"})
+
+
+def _load_local_skops(local: str, provenance: Optional[str]) -> Any:
+    import skops.io
+    from mlflow.models import Model
+    from mlflow.pyfunc import PyFuncModel
+    from mlflow.sklearn import _SklearnModelWrapper
+
+    meta = Model.load(os.path.join(local, "MLmodel"))
+    sk = meta.flavors[_SKLEARN_FLAVOR]
+    py = meta.flavors.get("python_function") or {}
+    if py.get("loader_module", "mlflow.sklearn") != "mlflow.sklearn":
+        raise ValueError(f"a sklearn model whose pyfunc loader is {py.get('loader_module')!r} is not supported")
+    predict_fn = py.get("predict_fn", "predict")
+    if predict_fn not in _PREDICT_FNS:
+        raise ValueError(f"unsupported pyfunc predict_fn {predict_fn!r}")
+
+    # The file path also comes from the artifact: keep it inside the downloaded model.
+    root = os.path.realpath(local)
+    path = os.path.realpath(os.path.join(root, sk.get("pickled_model") or py.get("model_path") or ""))
+    if os.path.commonpath([root, path]) != root or not os.path.isfile(path):
+        raise ValueError("the model's serialized file is missing or outside the model directory")
+
+    estimator = skops.io.load(path, trusted=trusted_types_for(provenance))
+    return PyFuncModel(
+        model_meta=meta,
+        model_impl=_SklearnModelWrapper(estimator),
+        predict_fn=predict_fn,
+        model_id=meta.model_id,
+    )
 
 
 def load_pyfunc(model_uri: str, provenance: Optional[str]) -> Any:
-    """Load a model through mlflow's pyfunc loader with the trust decided here, not by the artifact.
+    """Load a model with the trust decided here, never by the artifact.
 
-    A model that is not a skops sklearn model is loaded unchanged. A skops sklearn model is downloaded,
-    its MLmodel trust field rewritten, and loaded from the local copy. The sklearn flavor deserialises
-    eagerly, so the local copy is not needed once the load returns.
+    A model that is not a skops sklearn model goes through MLflow's pyfunc loader unchanged. A skops
+    sklearn model is downloaded and deserialised by `_load_local_skops`; the trust list in its MLmodel
+    is never read. Deserialisation is eager, so the local copy is not needed once the load returns.
     """
     import mlflow
     import mlflow.artifacts
     from mlflow.models import Model
 
-    meta = Model.load(model_uri)
-    if not apply_trust(dict(meta.flavors), provenance):
+    if not is_skops_sklearn(dict(Model.load(model_uri).flavors)):
         return mlflow.pyfunc.load_model(model_uri)
 
     with tempfile.TemporaryDirectory(prefix="model-") as tmp:
         local = mlflow.artifacts.download_artifacts(artifact_uri=model_uri, dst_path=tmp)
-        local_meta = Model.load(local)
-        apply_trust(local_meta.flavors, provenance)
-        local_meta.save(os.path.join(local, "MLmodel"))
-        return mlflow.pyfunc.load_model(local)
+        return _load_local_skops(local, provenance)
 
 
 def is_untrusted_types_error(exc: BaseException) -> bool:
     """True if skops refused the file for untrusted types, however a caller wrapped that refusal.
 
-    MLflow 3.15 lets skops' exception through; 3.17 re-raises it inside an MlflowException. Matching
-    the outer type alone misreports a trust refusal as a generic load failure.
+    Skops raises it directly here, but a caller may wrap it; matching the outer type alone would
+    misreport a trust refusal as a generic load failure.
     """
     seen: set[int] = set()
     cur: Optional[BaseException] = exc

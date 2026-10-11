@@ -46,7 +46,10 @@ def _synthetic_frame(signature):
         name = spec.get("name")
         t = str(spec.get("type", "double"))
         if name is None:            # a tensor-spec artifact declares no column names
-            return np.zeros((1, 1), dtype=np.float64)
+            # One sample of the declared shape: the batch dimension (and any other unknown, -1) is 1.
+            tensor = spec.get("tensor-spec") or {}
+            shape = tuple(1 if d in (None, -1) else int(d) for d in (tensor.get("shape") or (-1, 1)))
+            return np.zeros(shape, dtype=np.dtype(tensor.get("dtype", "float64")))
         if t in ("double", "float"):
             row[name] = [0.0]
         elif t in ("integer", "long"):

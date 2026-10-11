@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0027 — The model artifact declares; the serving environment satisfies or refuses (rev 1)
+# ADR-0027 — The model artifact declares; the serving environment satisfies or refuses (rev 2)
 
 - **ID:** ADR-0027
 - **Status:** Accepted
@@ -12,7 +12,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (whose deferred *"notebook and package supply chain"* this resolves, for the artifact path and no further)
 - **Companions:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (the gateway the artifact crosses), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (whose gate discipline decision 5 applies to a second class of failure)
 - **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (the in-process registry that loads the artifact, and the **deferred model-adapter contract** decision 4 hands the open framework set to), [ADR-0008](ADR-0008-extension-and-plugin-interface.md) (which already names *model adapters* as a plugin category), [ADR-0021](ADR-0021-model-drift-monitoring.md) / [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (the alert lane decision 8 declines to reuse), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (why a kernel stack bump reaches every user), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (provenance, which decision 13 grants trust by)
-- **Supersedes:** ADR-0027 rev 0 (2026-07-14 — deferred the trust half of the boundary; rev 1 resolves it for typed deserialisation on the kernel-authored path as decision 13)
+- **Supersedes:** ADR-0027 rev 0 (2026-07-14 — deferred the trust half of the boundary; rev 1 resolves it for typed deserialisation on the kernel-authored path as decision 13); rev 1 (2026-10-11 — rev 2 records who carries the controls once the serving side, not the framework, performs the typed load)
 
 ## Context and problem
 
@@ -111,6 +111,13 @@ as "the trust half of this boundary." Rev 1 answers it for typed deserialisation
 
 Building it found a second fact: the artifact's own manifest can carry a list of types to trust, and the
 standard loader honours it. If nothing intervened, the file being judged would decide its own trust.
+
+**Revision 2 (2026-10-11).** The tracking framework then closed the same hole from its side: because its
+loader takes the trust list from the artifact, it now refuses every typed artifact while its own
+deserialisation switch is off. That switch is the one the upload path keeps off (ADR-0030 dec 4), so
+every uploaded model in the typed format was refused, including ones that need no grant at all. Decision
+13 already put trust on the serving side; rev 2 has the serving side perform the typed load itself, and
+records what moves with it.
 
 ## Decision drivers
 
@@ -287,6 +294,14 @@ standard loader honours it. If nothing intervened, the file being judged would d
 
     The serializer bump and the grant move together on both ends of the path, and the round trip proves
     a tree-based model makes the journey under the grant.
+
+    - **The serving side performs the typed load itself, so the controls it relied on are now its own**
+      *(rev 2)*. Typed artifacts are not loaded through the framework's flavor, whose trust comes from
+      the artifact; the framework's deserialisation switch therefore governs only executable formats,
+      and is not the control for typed ones. Taking over the load also takes over what the framework's
+      loader decided implicitly from the artifact's manifest: the serialised file must lie inside the
+      artifact, and the entry point the artifact names must be one of the estimator's own prediction
+      methods. Both are refused otherwise.
 
 ### What follows
 

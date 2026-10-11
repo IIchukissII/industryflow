@@ -7,7 +7,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **ID:** ADR-0030
 - **Status:** Accepted (rev 1 — implementation surfaced that rev 0 named *components* and *frameworks* where it should have named a *moment* and a *property*, and each imprecision invites a violation of a decision already on record. Rev 1 fixes what "one door" binds (the write path for bytes, not the enforcement point for admission), names where each check runs, and restores decision 4's refusal to a generic property of the serialisation rather than a list of frameworks. No decision is reversed; each is made precise. rev 2 — closes the transport half of the deferred transfer question for the single-request case. Decision 3 named a browser client, but the realisation only ever served a client already inside the trust network, so the client the record named could not reach the plane. Decision 10 makes the upload plane reachable from the outside without establishing a second writer or breaching a decision already on record; resumability and very-large/multipart transfer stay deferred)
-- **Date:** 2026-07-16 (rev 1: 2026-07-16; rev 2: 2026-07-17)
+- **Date:** 2026-07-16 (rev 1: 2026-07-16; rev 2: 2026-07-17; rev 3: 2026-10-11)
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the artifact declares, the serving environment satisfies or refuses — the contract this record extends to artifacts the platform never observed being made)
 - **Companions:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (rev 1 — the tracking gateway, and the only principal permitted to write the artifact store, which is what decision 2 turns on), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (a model declares what its output means; the platform never guesses)
@@ -197,6 +197,11 @@ vouch for, and what must an uploaded artifact do instead?**
    > framework set cannot be judged by a closed list (ADR-0027 dec 2), and the answer already lives
    > in a registry that is discovered rather than hand-kept. A safe-but-unservable artifact passes
    > this gate on structure and is refused, with a reason, at the one that knows — decisions 5 and 6.
+   >
+   > **rev 3 (2026-10-11): the framework's deserialisation switch is the control for executable
+   > formats only.** It stays off on this path, and executable formats stay refused behind it. Typed
+   > formats are loaded by the serving side itself under ADR-0027 dec 13 (rev 2), whose provenance grant
+   > is their control; an upload receives no grant.
 
    This resolves, for this path only, what ADR-0027 deferred as "the trust half of this boundary".
    It is deferred there and urgent here, and the difference is entirely provenance:

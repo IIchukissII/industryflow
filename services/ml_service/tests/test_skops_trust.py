@@ -68,26 +68,13 @@ def test_nothing_else_gets_a_grant(provenance):
     assert skops_trust.trusted_types_for(provenance) is None
 
 
-def test_an_uploads_declared_list_is_discarded():
-    flavors = {"sklearn": {"serialization_format": "skops", "skops_trusted_types": ["builtins.eval"]}}
-    assert skops_trust.apply_trust(flavors, UPLOADED) is True
-    assert "skops_trusted_types" not in flavors["sklearn"]
-
-
-def test_a_kernel_models_declared_list_is_replaced_not_merged():
-    flavors = {"sklearn": {"serialization_format": "skops", "skops_trusted_types": ["builtins.eval"]}}
-    skops_trust.apply_trust(flavors, KERNEL)
-    assert flavors["sklearn"]["skops_trusted_types"] == list(skops_trust.KERNEL_TRUSTED_TYPES)
-
-
-@pytest.mark.parametrize("flavors", [
-    {"xgboost": {"model_format": "ubj"}},
-    {"sklearn": {"serialization_format": "cloudpickle"}},
+@pytest.mark.parametrize("flavors,expected", [
+    ({"sklearn": {"serialization_format": "skops"}}, True),
+    ({"sklearn": {"serialization_format": "cloudpickle"}}, False),
+    ({"xgboost": {"model_format": "ubj"}}, False),
 ])
-def test_other_formats_are_left_alone(flavors):
-    before = json.dumps(flavors, sort_keys=True)
-    assert skops_trust.apply_trust(flavors, KERNEL) is False
-    assert json.dumps(flavors, sort_keys=True) == before
+def test_only_skops_sklearn_models_are_loaded_here(flavors, expected):
+    assert skops_trust.is_skops_sklearn(flavors) is expected
 
 
 # --- real artifacts ------------------------------------------------------------------------------
@@ -123,6 +110,38 @@ def test_every_supported_tree_family_loads_for_the_kernel(tmp_path, estimator):
     skops_trust.load_pyfunc(path, KERNEL)
 
 
+def test_the_loaded_model_is_the_same_pyfunc_object_callers_use(forest):
+    # Detectors reach the estimator through `_model_impl.sklearn_model`; the probe scores against the
+    # signature. Loading it ourselves must not change either.
+    model, path = forest
+    loaded = skops_trust.load_pyfunc(path, KERNEL)
+    assert isinstance(loaded, mlflow.pyfunc.PyFuncModel)
+    assert type(loaded._model_impl.sklearn_model) is type(model)
+    assert loaded.metadata.signature == Model.load(path).signature
+
+
+def _tamper(path, **pyfunc):
+    meta = Model.load(path)
+    meta.flavors["python_function"].update(pyfunc)
+    meta.save(str(Path(path) / "MLmodel"))
+
+
+def test_an_artifact_cannot_pick_an_arbitrary_method(tmp_path):
+    path = _save(tmp_path, "lin", LinearRegression().fit(X, Y))
+    _tamper(path, predict_fn="__class__")
+    with pytest.raises(ValueError, match="predict_fn"):
+        skops_trust.load_pyfunc(path, UPLOADED)
+
+
+def test_an_artifact_cannot_point_outside_itself(tmp_path):
+    path = _save(tmp_path, "lin", LinearRegression().fit(X, Y))
+    meta = Model.load(path)
+    meta.flavors["sklearn"]["pickled_model"] = "../../etc/passwd"
+    meta.save(str(Path(path) / "MLmodel"))
+    with pytest.raises(ValueError, match="outside the model directory"):
+        skops_trust.load_pyfunc(path, UPLOADED)
+
+
 def test_an_upload_that_needs_no_grant_still_loads(tmp_path):
     model = LinearRegression().fit(X, Y)
     path = _save(tmp_path, "lin", model)
@@ -142,6 +161,22 @@ def test_the_probe_refuses_an_uploaded_tree_model_with_a_trust_reason(forest):
     assert verdict["ok"] is False
     assert verdict["stage"] == "trust"
     assert "ADR-0027 dec 13" in verdict["error"]
+
+
+def _probe(path):
+    proc = subprocess.run(
+        [sys.executable, str(load_probe._WORKER), path],
+        capture_output=True, text=True, timeout=120,
+        env=load_probe._worker_env(), cwd=str(API),
+    )
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_the_probe_scores_an_uploaded_model_that_needs_no_grant(tmp_path):
+    # #303: since mlflow 3.17 its sklearn flavor refuses every skops file while the pickle switch is off,
+    # which the probe keeps off. Loading skops ourselves keeps linear uploads admissible.
+    verdict = _probe(_save(tmp_path, "lin", LinearRegression().fit(X, Y)))
+    assert verdict["ok"] is True, verdict
 
 
 # --- the kernel's copy of the list ---------------------------------------------------------------
