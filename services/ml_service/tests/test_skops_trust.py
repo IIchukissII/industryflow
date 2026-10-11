@@ -156,3 +156,24 @@ def test_the_kernel_client_carries_the_same_list():
         if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "SKOPS_TRUSTED_TYPES"
     )
     assert ast.literal_eval(value) == list(skops_trust.KERNEL_TRUSTED_TYPES)
+
+
+def _raise_wrapped(implicit: bool):
+    try:
+        raise UntrustedTypesFoundException(["sklearn.tree._tree.Tree"])
+    except UntrustedTypesFoundException as inner:
+        if implicit:
+            raise RuntimeError("load failed")  # noqa: B904 — __context__ only, as some wrappers do
+        raise mlflow.exceptions.MlflowException("wrapped") from inner
+
+
+@pytest.mark.parametrize("implicit", [False, True])
+def test_a_wrapped_untrusted_types_refusal_is_still_a_trust_refusal(implicit):
+    # A wrapper that re-raises skops' refusal must not turn a trust refusal into a "load" failure.
+    with pytest.raises(Exception) as info:
+        _raise_wrapped(implicit)
+    assert skops_trust.is_untrusted_types_error(info.value)
+
+
+def test_an_unrelated_load_error_is_not_a_trust_refusal():
+    assert not skops_trust.is_untrusted_types_error(ValueError("bad input shape"))
