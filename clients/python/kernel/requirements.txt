@@ -27,4 +27,4 @@ xgboost==3.3.0
 matplotlib==3.11.0
 plotly==5.23.0
 mlflow-skinny==3.15.0
-skops==0.14.0
+skops==0.16.0

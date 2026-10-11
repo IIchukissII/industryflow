@@ -44,7 +44,7 @@ xgboost==3.3.0
 # sklearn flavor writes `model.skops` by default — not a pickle — and mlflow only constrains it as
 # `skops<1`, so this floated: the kernel would write a skops file with one version and this image read
 # it with whatever pip happened to resolve that day. It tracks the kernel's pin (ADR-0027 dec 3).
-skops==0.14.0
+skops==0.16.0
 
 # Model-drift detection (ADR-0021): evidently computes the data/prediction drift score in
 # the /api/drift endpoint; pandas frames the reference sample + current window. pandas 2.3 is

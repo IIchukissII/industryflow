@@ -3,15 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0027 — The model artifact declares; the serving environment satisfies or refuses
+# ADR-0027 — The model artifact declares; the serving environment satisfies or refuses (rev 1)
 
 - **ID:** ADR-0027
 - **Status:** Accepted
-- **Date:** 2026-07-14
+- **Date:** 2026-10-11
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (whose deferred *"notebook and package supply chain"* this resolves, for the artifact path and no further)
 - **Companions:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (the gateway the artifact crosses), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (whose gate discipline decision 5 applies to a second class of failure)
-- **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (the in-process registry that loads the artifact, and the **deferred model-adapter contract** decision 4 hands the open framework set to), [ADR-0008](ADR-0008-extension-and-plugin-interface.md) (which already names *model adapters* as a plugin category), [ADR-0021](ADR-0021-model-drift-monitoring.md) / [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (the alert lane decision 8 declines to reuse), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (why a kernel stack bump reaches every user)
+- **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (the in-process registry that loads the artifact, and the **deferred model-adapter contract** decision 4 hands the open framework set to), [ADR-0008](ADR-0008-extension-and-plugin-interface.md) (which already names *model adapters* as a plugin category), [ADR-0021](ADR-0021-model-drift-monitoring.md) / [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (the alert lane decision 8 declines to reuse), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (why a kernel stack bump reaches every user), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (provenance, which decision 13 grants trust by)
+- **Supersedes:** ADR-0027 rev 0 (2026-07-14 — deferred the trust half of the boundary; rev 1 resolves it for typed deserialisation on the kernel-authored path as decision 13)
 
 ## Context and problem
 
@@ -97,6 +98,19 @@ An enumerated rule ("numpy, scikit-learn, xgboost must match") does not survive 
 
 So the rule has to be stated one level up, and the enumerated pins recognised for what they are: the
 *instantiation* of that rule for the flavors this platform serves today.
+
+**Revision 1 (2026-10-11).** The serializer that sklearn models cross in stopped trusting, by default,
+the internal tree structure that every tree-based estimator is built from. A crafted file can set that
+structure's node references to values the estimator then follows without checking them, which reaches
+memory outside the model. The serializer now refuses such a file unless the loader names the type as
+trusted. Moving to it is a security patch, and ADR-0026 dec 7 does not let a security patch wait. But it
+made the serving side refuse every tree-based model, including the platform's own anomaly detector and
+models already registered, and the round trip (decision 5) caught it. The format still read older files
+forward. What changed is that the reader now has to be told what it trusts. Rev 0 deferred that question
+as "the trust half of this boundary." Rev 1 answers it for typed deserialisation as **decision 13**.
+
+Building it found a second fact: the artifact's own manifest can carry a list of types to trust, and the
+standard loader honours it. If nothing intervened, the file being judged would decide its own trust.
 
 ## Decision drivers
 
@@ -248,6 +262,32 @@ So the rule has to be stated one level up, and the enumerated pins recognised fo
     they are not auto-retrained — ADR-0022 dec 4 means there is nothing to auto-retrain them *with*. The
     remedy is a human retraining in a kernel that now matches.
 
+### What the serving side trusts
+
+13. **Trust in what an artifact deserialises into is granted by the serving side, by provenance, and
+    never taken from the artifact** *(rev 1)*. The artifact remains the authority on what it *requires*
+    (decision 1). It is never the authority on what it may be *trusted* with: a list of trusted types
+    carried inside an artifact is ignored, whatever its provenance, because the file under judgement
+    cannot vouch for itself.
+
+    - **Kernel-authored artifacts** (provenance recorded by the platform, ADR-0030 dec 8) are loaded with
+      an explicit, minimal list of trusted types: exactly the internal structures the supported tree-based
+      estimators need, and nothing else. This is a named exception to the serializer's default, justified
+      by provenance: the author of such a file already had code execution in their own contained kernel
+      (ADR-0011), so the grant gives them nothing they did not hold. The list grows only by amendment
+      here, never by a model asking.
+    - **Externally uploaded artifacts** get no grant. A model that needs a type the serializer does not
+      trust by default is refused at the deployment gate, with a reason that says so. That is ADR-0030
+      dec 4's rule applied to a typed format: loading it would mean trusting object data from an author
+      with no foothold. Uploaded tree-based models are not servable until a way to admit them that does
+      not rest on trusting that data is decided in its own record.
+    - **Models already registered are covered.** The serializer reads files written by the version
+      before it, so kernel-authored models registered under the old default keep loading under the grant,
+      with identical scores.
+
+    The serializer bump and the grant move together on both ends of the path, and the round trip proves
+    a tree-based model makes the journey under the grant.
+
 ### What follows
 
 11. **ADR-0011's "notebook and package supply chain" deferral is resolved for the artifact path, and only
@@ -286,6 +326,21 @@ set arrives through adapters. That is decision 4, and its contract is its own re
 means, and it is not support: it is a multi-gigabyte CUDA layer charged to every self-hoster who never
 trains a torch model (ADR-0001), a second numeric stack to keep in parity with the first, and a dependency
 resolution that gets harder with each framework added. An open set cannot be served by enumeration.
+
+**G. Stay on the serializer version that trusted tree structures by default** *(rev 1)*. *Rejected.* It
+keeps a known memory-safety flaw on the path that loads models, and ADR-0026 dec 7 refuses to park a
+security patch behind a coordination cost.
+
+**H. Trust the tree structures for every artifact** *(rev 1)*. *Rejected.* It restores the old default by
+hand and erases the provenance distinction ADR-0030 dec 8 made first-class. For an uploaded file, it
+hands exactly the flaw the serializer closed to an author with no foothold.
+
+**I. Validate tree structures before trusting them, for every provenance** *(rev 1)*. *Rejected.* It is
+ADR-0030's alternative D in another form: a structural refusal swapped for a standing bet on the
+correctness of a checker against a library's private internals, which move between releases.
+
+**J. Honour the trust list the artifact declares** *(rev 1)*. *Rejected.* It is what the standard loader
+does, and it lets the file being judged decide its own trust.
 
 **E. Reuse `retrain_recommended` for version incompatibility.** *Rejected* — see decision 8. It is the
 cheapest thing to build (the lane exists, the UI exists) and it would quietly ruin the meaning of the one
@@ -330,6 +385,11 @@ is a **trust** decision, not a parity one, and it is deferred below.
 
 ### Negative
 
+- **Uploaded tree-based models are refused** *(rev 1)*. A real class of external model is not servable
+  until its own record decides how to admit it without trusting its object data.
+- **The trusted-type list is a maintained exception** *(rev 1)*. A new estimator family that needs
+  another internal type is refused until the list is amended here, which is the intended friction.
+
 - **The empirical check is the most expensive thing this ADR asks for**: it stands up both environments and
   moves an artifact between them. It stays affordable only by keeping what it trains trivial — it is testing
   the *boundary*, not the model.
@@ -360,7 +420,8 @@ is a **trust** decision, not a parity one, and it is deferred below.
   in-process versus out-of-process policy per flavor, packaging of optional flavor sidecars, and how the
   supported set is declared to an operator. **This is the live requirement behind torch and autoencoders**
   (decision 4). It is deferred from *this* record, not from the project's work.
-- **Refusing pickle artifacts outright (the *trust* half of this boundary).** Alternative F. sklearn
+- **Refusing pickle artifacts outright (the rest of the *trust* half of this boundary).** Trust in typed
+  deserialisation is resolved in rev 1 as decision 13; what remains is the pickle path. Alternative F. sklearn
   models are already skops; but MLflow will still deserialize a pickle when it meets one
   (`MLFLOW_ALLOW_PICKLE_DESERIALIZATION` defaults true), so the serving path retains a route to executing
   arbitrary code from a notebook-produced file. Whether to turn that off — and what it breaks — is its
