@@ -86,12 +86,12 @@ function UsersPage() {
       if (editingUser) {
         // Update existing user
         await api.patch(
-          `/users/${editingUser.id}`,
+          `/api/users/${editingUser.id}`,
           submitData
         );
       } else {
         // Create new user
-        await api.post('/auth/register', submitData);
+        await api.post('/api/users', submitData);
       }
       setShowModal(false);
       fetchUsers();
@@ -106,7 +106,7 @@ function UsersPage() {
       return;
     }
     try {
-      await api.delete(`/users/${userId}`);
+      await api.delete(`/api/users/${userId}`);
       fetchUsers();
     } catch (error) {
       console.error('Error deleting user:', error);
