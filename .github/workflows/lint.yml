@@ -55,6 +55,13 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
+      - name: Every requirement is an exact pin
+        run: |
+          # A range resolves differently on each build, and Dependabot cannot group a range bump: it
+          # opens a separate PR per range and its requirement replacer can fail on them.
+          bad=$(git ls-files 'services/**requirements*.txt' 'infrastructure/**requirements*.txt' \
+            | xargs grep -nE '^[A-Za-z0-9]' | grep -vE '^[^:]+:[0-9]+:[A-Za-z0-9_.-]+(\[[A-Za-z0-9_,-]+\])?==[^,;]+(\s*;.*)?(\s*#.*)?$' || true)
+          if [ -n "$bad" ]; then echo "::error::non-exact requirement specifiers:"; echo "$bad"; exit 1; fi
       - name: Resolve every requirements file
         run: |
           # Each lock is resolved for the interpreter its image runs; all are 3.14. Add an entry here
