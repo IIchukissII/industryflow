@@ -18,6 +18,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 import rules_engine  # noqa: E402
 from rules_engine import RulesEngine  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(__file__))
+from fake_alert_store import FakeAlertStore  # noqa: E402
+
 MODEL_ID = "22222222-2222-2222-2222-222222222222"
 RULE_ID = "33333333-3333-3333-3333-333333333333"
 
@@ -62,12 +65,8 @@ def _patch_ml(monkeypatch, status, payload):
     monkeypatch.setattr(rules_engine.aiohttp, "ClientSession", lambda *a, **k: _FakeSession(resp))
 
 
-class _RecordingRepo:
-    def __init__(self):
-        self.saved = []
-
-    async def save_alert(self, alert):
-        self.saved.append(alert)
+class _RecordingRepo(FakeAlertStore):
+    pass
 
 
 def _drift_rule(**over):
@@ -169,7 +168,7 @@ def test_evaluate_drift_rules_selects_saves_and_dedups(monkeypatch):
     assert len(repo.saved) == 1
     assert repo.saved[0]["detection_type"] == "statistical"
 
-    # Second immediate pass is suppressed by the cooldown dedup (_should_emit).
+    # Second immediate pass is suppressed by the cooldown dedup (_emit).
     second = asyncio.run(engine.evaluate_drift_rules("co-1", 1440, 0.5))
     assert second == []
     assert len(repo.saved) == 1

@@ -13,7 +13,7 @@ from config import get_settings
 from routers import (
     health, measurements, aggregations, websocket, cache,
     training_data, alerts_history, companies,
-    equipment, alert_rules, auth_tokens, auth_verify
+    equipment, alert_rules, auth_tokens, auth_verify, user_admin
 )
 from database import init_db_pool, close_db_pool, create_user_table
 from messaging.redis_client import redis_client
@@ -22,7 +22,6 @@ from messaging.cache_updater import update_redis_cache
 # Authentication imports
 from users import auth_backend, fastapi_users, current_active_user, ACCESS_COOKIE
 from models.user import User
-from schemas import UserCreate, UserRead
 
 import asyncio
 
@@ -103,17 +102,9 @@ app.include_router(
     tags=["auth"],
 )
 
-app.include_router(
-    fastapi_users.get_register_router(UserRead, UserCreate),
-    prefix="/auth",
-    tags=["auth"],
-)
-
-app.include_router(
-    fastapi_users.get_users_router(UserRead, UserCreate),
-    prefix="/users",
-    tags=["users"],
-)
+# No public registration and no generic users router: self-service and tenant-scoped user
+# administration live in user_admin (ADR-0003 dec 1, ADR-0004 dec 4-5).
+app.include_router(user_admin.router)
 
 # Refresh-token auth (login -> access + refresh, /auth/refresh, /auth/logout) — ADR-0004
 app.include_router(auth_tokens.router)
@@ -148,8 +139,8 @@ async def root():
         "endpoints": {
             "health": "/health",
             "auth_login": "/auth/jwt/login",
-            "auth_register": "/auth/register",
             "users_me": "/users/me",
+            "users": "/api/users",
             "measurements": "/api/measurements",
             "measurements_latest": "/api/measurements/latest",
             "aggregations_1min": "/api/aggregations/1min",

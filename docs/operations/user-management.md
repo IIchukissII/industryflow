@@ -29,6 +29,9 @@ own company**; **cross-company actions require a superuser**:
 | Endpoint | Per-tenant admin | Superuser |
 |----------|------------------|-----------|
 | `GET /api/users` | own company's users | all users |
+| `POST /api/users` | creates into own company only | any company; may grant superuser |
+| `PATCH /api/users/{id}`, `DELETE /api/users/{id}` | own company's non-superusers (404 otherwise); cannot change company or superuser | any |
+| `PATCH /users/me` (any user) | own email and password only | same |
 | `GET /api/companies`, `GET /api/companies/{id}` | own company only | any |
 | `PUT /api/companies/{id}` | own company only (404 otherwise) | any |
 | `POST /api/companies`, `DELETE /api/companies/{id}` | forbidden | allowed (provisioning) |
@@ -38,16 +41,16 @@ not confirmed). Every data query is constrained to the authenticated tenant.
 
 ## Managing users
 
-Create or manage users with the CLI helper, or the API:
+Create or manage users with the CLI helper, or the API. There is no self-registration.
 
 ```bash
 # CLI (run inside the api-gateway container or against the DB)
 python3 scripts/manage_users.py            # see --help for create / list / delete / reset-password
 
-# API: register a user (admin/superuser)
-curl -X POST http://localhost:8000/auth/register \
-  -H "Authorization: Bearer <access_token>" -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "password": "...", "company_id": "<uuid>", "role": "engineer"}'
+# API: create a user (admin: into own company; superuser: any company_id)
+curl -k -b jar.txt -H "X-CSRF-Token: $CSRF" -X POST https://<host>/api/users \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "...", "role": "engineer"}'
 ```
 
 Tenants (companies) are provisioned by a superuser via `POST /api/companies`, which creates
