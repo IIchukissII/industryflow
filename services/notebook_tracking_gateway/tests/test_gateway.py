@@ -11,6 +11,7 @@ import os
 import sys
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -97,6 +98,49 @@ def test_experiment_create_name_is_tenant_qualified():
     _, endpoint, _, body = c.up.calls[-1]
     assert endpoint == "experiments/create"
     assert body["name"] == policy.tenant_prefix(CID) + "churn"
+
+
+def _recorded_location(c):
+    _, endpoint, _, body = c.up.calls[-1]
+    assert endpoint == "experiments/create"
+    return body["artifact_location"]
+
+
+def test_experiment_create_records_the_tenant_prefixed_artifact_location():
+    # The location MLflow records is where the gateway stores the bytes, so a reader that goes to
+    # MLflow directly (the serving side) finds them. Without it the record says `mlflow-artifacts:/<id>`
+    # while the bytes sit under `tenant_<uuid>/`, and every gateway-logged model 404s at load.
+    c = _client()
+    assert c.post("/api/2.0/mlflow/experiments/create", json={"name": "churn"},
+                  headers=_auth()).status_code == 200
+    loc = _recorded_location(c)
+    assert loc.startswith("mlflow-artifacts:/" + policy.artifact_prefix(CID))
+    # The object key the gateway would sign for a path under that location is the same path.
+    path = loc.removeprefix("mlflow-artifacts:/") + "/run1/artifacts/MLmodel"
+    assert policy.scope_artifact_key(CID, path) == path
+
+
+@pytest.mark.parametrize("asked", [
+    "mlflow-artifacts:/{other}x", "s3://mlflow/{other}x", "mlflow-artifacts:/", "file:///etc",
+])
+def test_experiment_create_ignores_a_caller_chosen_artifact_location(asked):
+    # A caller-chosen location could name another tenant's prefix, and a trusted reader would fetch it.
+    c = _client()
+    asked = asked.format(other=policy.artifact_prefix(OTHER))
+    c.post("/api/2.0/mlflow/experiments/create",
+           json={"name": "churn", "artifact_location": asked}, headers=_auth())
+    loc = _recorded_location(c)
+    assert loc != asked
+    assert loc.startswith("mlflow-artifacts:/" + policy.artifact_prefix(CID))
+
+
+def test_each_experiment_gets_its_own_location():
+    c = _client()
+    locs = set()
+    for name in ("a", "b"):
+        c.post("/api/2.0/mlflow/experiments/create", json={"name": name}, headers=_auth())
+        locs.add(_recorded_location(c))
+    assert len(locs) == 2
 
 
 def test_get_by_name_response_is_stripped():
