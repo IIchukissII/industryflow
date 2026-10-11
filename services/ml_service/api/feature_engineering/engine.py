@@ -141,24 +141,3 @@ class FeatureEngineeringEngine:
     def get_feature_names(self) -> List[str]:
         """Get ordered list of feature names"""
         return self.feature_names
-
-    def validate_sensor_data(self, sensor_data: Dict[str, float]) -> bool:
-        """
-        Check if sensor data contains all required base sensors
-
-        Args:
-            sensor_data: Dictionary of sensor readings
-
-        Returns:
-            True if all base sensors present, False otherwise
-        """
-        missing = []
-        for sensor in self.base_sensors:
-            if sensor not in sensor_data:
-                missing.append(sensor)
-
-        if missing:
-            logger.warning(f"Missing {len(missing)} base sensors: {missing[:5]}...")
-            return False
-
-        return True

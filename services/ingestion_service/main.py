@@ -9,7 +9,7 @@ High-throughput sensor data ingestion endpoint (Port 8003)
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from config import get_settings
@@ -80,7 +80,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "ingestion",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "port": settings.INGESTION_SERVICE_PORT
     }
 

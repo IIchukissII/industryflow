@@ -116,8 +116,3 @@ async def send_sensor_data(
     except Exception as e:
         logger.error(f"Failed to send message to Kafka: {e}")
         return False
-
-async def flush_producer():
-    """Flush any pending messages"""
-    producer = await AsyncKafkaProducerSingleton.get_producer()
-    await producer.flush()

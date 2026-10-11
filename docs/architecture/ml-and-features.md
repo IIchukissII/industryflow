@@ -18,7 +18,8 @@ of `transformations`, each with a `type` and params. The `FeatureEngineeringEngi
 config and produces the feature vector; it holds no fixed feature list and no domain knowledge.
 
 Each transformation `type` is resolved through the **extension registry**
-(**[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)**). The platform ships generic
+(**[ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md)** contract,
+**[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)** mechanism). The platform ships generic
 built-ins — `identity`, `polynomial`, `interaction`, `deviation`, `statistical`,
 `rolling_stat` — and a domain registers new transform types in its own module without editing
 the engine. Window statistics (e.g. deviation from a rolling mean) read their baseline from the

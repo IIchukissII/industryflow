@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Experiment-tracking gateway — the wire entry point (ADR-0019).
+Experiment-tracking gateway — the wire entry point (ADR-0013 / ADR-0019).
 
 A notebook's MLflow client points ``MLFLOW_TRACKING_URI`` at this gateway and sends its tracking
 capability as the bearer token (``MLFLOW_TRACKING_TOKEN``). The gateway:
