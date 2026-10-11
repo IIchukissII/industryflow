@@ -90,6 +90,13 @@ It only rewrites an experiment whose objects are all under the tenant prefix, mo
 is safe to re-run. On a stack with a public base URL, kernel artifact URLs are now signed for the
 interior store; only browser upload staging is signed for the edge.
 
+**The gateway forwards only routes it knows, each with an ownership rule.** Every MLflow route it
+proxies is listed with how tenant ownership is checked: the experiment, run or logged model a request
+names must belong to the caller, names are qualified into the caller's namespace, and a model
+version's `source` must resolve into the caller's tenant. Any route not on the list is refused (403),
+so a route a new MLflow release adds is closed until it gets a rule (ADR-0019 dec 5). Traces,
+webhooks and MLflow's own pre-signed-URL routes are refused outright.
+
 The design is decision-complete (ADR-0011→0015). Every piece except the Kubernetes hub runtime is
 built **and validated on the live compose box**; only the KubeSpawner profile still needs a
 running cluster.
