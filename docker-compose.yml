@@ -182,9 +182,37 @@ services:
       - industryflow-network
     restart: unless-stopped
 
-  # MinIO - S3-compatible storage
+  # Fix ownership of a data volume written by an earlier root-run MinIO image. The server below
+  # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
+  # CAP_CHOWN, and a no-op when the volume is already owned correctly.
+  minio-data-owner:
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:207b9a2045f01cef90feda8127a55f769115e060d8350dcb3a29593fc81166ac
+    container_name: industryflow-minio-data-owner
+    user: "0:0"
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        owner=$$(stat -c %u /data/.minio.sys 2>/dev/null || stat -c %u /data)
+        if [ "$$owner" != 65532 ]; then
+          chown -R 65532:65532 /data
+          echo "minio data volume re-owned from uid $$owner to 65532"
+        fi
+    volumes:
+      - minio-data:/data
+    restart: "no"
+
+  # MinIO - S3-compatible storage. The upstream images were withdrawn from public registries; this is
+  # a maintained third-party build of the same server (ADR-0025 dec 10, ADR-0009). Non-root (65532),
+  # distroless: no curl, so the healthcheck speaks HTTP over bash's /dev/tcp.
   minio:
-    image: minio/minio:latest
+    image: cgr.dev/chainguard/minio:latest@sha256:7df55d002b698e4494a131b848dd553361bbe58b7e19f62d9623c29af1ba9ccf
+    depends_on:
+      minio-data-owner:
+        condition: service_completed_successfully
     container_name: industryflow-minio
     ports:
       - "9000:9000"
@@ -196,7 +224,7 @@ services:
       - minio-data:/data
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /minio/health/live HTTP/1.0\r\n\r\n' >&3 && read -r status <&3 && [[ $$status == *' 200 '* ]]"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -209,7 +237,8 @@ services:
   # is a no-op if a bucket already exists, so it is safe on every `up`. Spark jobs gate on this
   # completing (depends_on: service_completed_successfully).
   minio-init:
-    image: minio/mc:latest
+    # The -dev variant: the init script needs a shell, grep and cat, which the minimal one lacks.
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:207b9a2045f01cef90feda8127a55f769115e060d8350dcb3a29593fc81166ac
     container_name: industryflow-minio-init
     depends_on:
       minio:
