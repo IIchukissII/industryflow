@@ -21,6 +21,8 @@ import json
 
 import auth
 import model_cache
+import skops_trust
+import uploaded_model
 from feature_engineering import FeatureEngineeringEngine
 from extensions import get_detector, DetectorContext, UninterpretableModel
 from model_uri import resolve_model_uri
@@ -162,8 +164,11 @@ async def _resolve_company_id(request: Request, request_data: InferenceRequest) 
 # Helper Functions
 # ============================================================================
 
-def _load_model_uncached(mlflow_run_id: str):
+def _load_model_uncached(mlflow_run_id: str, provenance: Optional[str]):
     """Cold-load a model from MLflow (the slow path behind the warm cache).
+
+    What its skops file may deserialise into is the serving side's grant for its provenance, never
+    the list the artifact carries (ADR-0027 dec 13).
 
     The URI is RESOLVED, not assumed (#240). MLflow 3 stores a logged model under
     `<experiment>/models/m-<id>/`, not under its run — so `runs:/<run_id>/model` addresses a path that
@@ -171,19 +176,19 @@ def _load_model_uncached(mlflow_run_id: str):
     only ever "worked" against a local artifact directory, which is what CI and every local test used.
     """
     model_uri = resolve_model_uri(mlflow_run_id)
-    model = mlflow.pyfunc.load_model(model_uri)
-    logger.info(f"Model loaded from MLflow: {model_uri}")
+    model = skops_trust.load_pyfunc(model_uri, provenance)
+    logger.info(f"Model loaded from MLflow: {model_uri} (provenance {provenance})")
     return model
 
 
-def load_model_from_mlflow(mlflow_run_id: str):
+def load_model_from_mlflow(mlflow_run_id: str, provenance: Optional[str]):
     """Load a model by run_id, warm from the process-local cache when already loaded.
 
     The anomaly detector and the drift evaluator both score with the same models
     repeatedly; the cache avoids a cold MLflow fetch on every call (see model_cache).
     """
     try:
-        return model_cache.get_or_load(mlflow_run_id, _load_model_uncached)
+        return model_cache.get_or_load(mlflow_run_id, lambda key: _load_model_uncached(key, provenance))
     except Exception as e:
         logger.error(f"Failed to load model from MLflow: {e}")
         raise
@@ -237,7 +242,12 @@ async def predict(
 
     try:
         # Load model from MLflow
-        model = load_model_from_mlflow(mlflow_run_id)
+        # Provenance as the registry recorded it (ADR-0030 dec 8); derived by the same rule for a row
+        # that predates the column.
+        provenance = model_data.get('provenance') or uploaded_model.provenance_of(
+            mlflow_run_id=mlflow_run_id, artifact_uri=model_data.get('artifact_uri'),
+        )
+        model = load_model_from_mlflow(mlflow_run_id, provenance)
 
         # Get feature engineering configuration
         feature_config_id = model_data.get('feature_config_id')

@@ -125,6 +125,11 @@ handle lives in memory for the one upload and is never written to browser storag
   out-of-process serving boundary is [ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md)
   dec 7's record to write. An upload path makes an unsupported flavor *more likely to arrive*, not
   more servable.
+- **Uploaded tree-based sklearn models** (random forests, gradient boosting, isolation forests, ...).
+  Their skops files deserialise into tree structures the platform trusts only for models trained in
+  its own kernels, so the deployment gate's load probe refuses them with stage `trust`
+  ([ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) dec 13). Admitting them needs
+  its own record.
 - **A drift baseline for uploaded models.** Without one they are visibly un-monitorable rather than
   silently so; where that baseline lives is deferred across ADR-0021/0028/0030 and should be closed
   by one record, not three.

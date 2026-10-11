@@ -59,7 +59,6 @@ def _synthetic_frame(signature):
 
 
 def probe(model_uri: str) -> dict:
-    import mlflow
     from mlflow.models import Model
 
     try:
@@ -74,9 +73,20 @@ def probe(model_uri: str) -> dict:
                 "error": "the artifact declares no input signature, so nothing can establish that "
                          "this environment is able to score it"}
 
+    # Only uploaded artifacts are probed, and they get no trust grant (ADR-0027 dec 13): a skops file
+    # that needs a type outside skops' defaults (every tree-based sklearn model) is refused here, and
+    # whatever trust list the artifact itself declares is discarded first.
+    import skops_trust
+    import uploaded_model
+
     try:
-        model = mlflow.pyfunc.load_model(model_uri)
+        model = skops_trust.load_pyfunc(model_uri, uploaded_model.PROVENANCE_UPLOADED)
     except Exception as exc:  # noqa: BLE001
+        if type(exc).__name__ == "UntrustedTypesFoundException":
+            return {"ok": False, "stage": "trust",
+                    "error": "the model deserialises into types this platform trusts only for models "
+                             "trained in its own kernels, never for uploaded ones (ADR-0027 dec 13, "
+                             f"ADR-0030 dec 4): {exc}"}
         return {"ok": False, "stage": "load", "error": f"{type(exc).__name__}: {exc}"}
 
     try:
