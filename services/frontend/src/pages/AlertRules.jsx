@@ -102,7 +102,7 @@ function AlertRules() {
     if (activeTab === 'all') return rules;
     if (activeTab === 'default') return rules.filter(r => r.is_default);
     if (activeTab === 'overrides') return rules.filter(r => !r.is_default && r.sensor_id);
-    if (activeTab === 'ml') return rules.filter(r => r.detection_type === 'ml_model');
+    if (activeTab === 'ml') return rules.filter(r => r.detection_type === 'ml');
     return rules;
   };
 
@@ -113,10 +113,8 @@ function AlertRules() {
   const DetectionBadge = ({ type }) => {
     const colors = {
       threshold: '#26a69a',
-      ml_model: 'var(--signal)',
-      statistical: '#b98b32',
-      hybrid: '#9c27b0',
-      disabled: '#787b86'
+      ml: 'var(--signal)',
+      statistical: '#b98b32'
     };
     return (
       <span style={{
@@ -136,8 +134,9 @@ function AlertRules() {
   const SeverityBadge = ({ severity }) => {
     const colors = {
       critical: 'var(--crit)',
-      warning: 'var(--warn)',
-      info: 'var(--signal)'
+      high: 'var(--crit)',
+      medium: 'var(--warn)',
+      low: 'var(--signal)'
     };
     return (
       <span style={{
@@ -190,7 +189,7 @@ function AlertRules() {
             className={`tab ${activeTab === 'ml' ? 'active' : ''}`}
             onClick={() => setActiveTab('ml')}
           >
-            ML Models ({rules.filter(r => r.detection_type === 'ml_model').length})
+            ML Models ({rules.filter(r => r.detection_type === 'ml').length})
           </button>
         </div>
 
@@ -243,8 +242,8 @@ function AlertRules() {
                             : `${rule.condition} ${rule.threshold}`}
                         </span>
                       )}
-                      {rule.detection_type === 'ml_model' && (
-                        <span style={{ fontSize: '12px' }}>ML Score {rule.threshold || 0.85}</span>
+                      {rule.detection_type === 'ml' && (
+                        <span style={{ fontSize: '12px' }}>ML Score {rule.anomaly_threshold ?? 0.85}</span>
                       )}
                       {rule.detection_type === 'statistical' && (
                         <span style={{ fontSize: '12px' }}>Drift share {rule.threshold ?? 'default'}</span>
@@ -312,7 +311,7 @@ function EditRuleModal({ rule, onClose, onSave }) {
     threshold_min: rule?.threshold_min || '',
     threshold_max: rule?.threshold_max || '',
     model_id: rule?.model_id || '',
-    severity: rule?.severity || 'warning',
+    severity: rule?.severity || 'medium',
     priority: rule?.priority || 0,
     enabled: rule?.enabled !== false,
     is_default: rule?.is_default || false,
@@ -401,6 +400,14 @@ function EditRuleModal({ rule, onClose, onSave }) {
       }
     }
 
+    if (formData.detection_type === 'ml') {
+      // An ML rule is scored by a model; the server refuses one without it.
+      if (!formData.model_id) {
+        alert('Select the model this ML rule is scored by');
+        return;
+      }
+      payload.model_id = formData.model_id;
+    }
     if (formData.detection_type === 'statistical') {
       // Model-drift rule (ADR-0021): bind the model to watch and, optionally, the
       // drifted-feature share (0–1) that trips the alert. Left blank, the evaluator
@@ -548,14 +555,12 @@ function EditRuleModal({ rule, onClose, onSave }) {
               onChange={(e) => setFormData({ ...formData, detection_type: e.target.value })}
             >
               <option value="threshold">Threshold</option>
-              <option value="ml_model">ML Model</option>
+              <option value="ml">ML Model</option>
               <option value="statistical">Statistical (Model Drift)</option>
-              <option value="hybrid">Hybrid</option>
-              <option value="disabled">Disabled</option>
             </select>
           </div>
 
-          {formData.detection_type === 'statistical' && (
+          {(formData.detection_type === 'statistical' || formData.detection_type === 'ml') && (
             <>
               <div className="form-group">
                 <label>Model to Watch</label>
@@ -577,10 +582,15 @@ function EditRuleModal({ rule, onClose, onSave }) {
                 )}
                 {models.length === 0 && !loadingData && (
                   <small style={{ color: '#ffa726', fontSize: '11px', marginTop: '4px', display: 'block' }}>
-                    No models found. Register a model before adding a drift rule.
+                    No models found. Register a model before adding a model-bound rule.
                   </small>
                 )}
               </div>
+            </>
+          )}
+
+          {formData.detection_type === 'statistical' && (
+            <>
 
               <div className="form-group">
                 <label>Drift Threshold</label>
@@ -662,8 +672,9 @@ function EditRuleModal({ rule, onClose, onSave }) {
               value={formData.severity}
               onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
             >
-              <option value="info">Info</option>
-              <option value="warning">Warning</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
               <option value="critical">Critical</option>
             </select>
           </div>

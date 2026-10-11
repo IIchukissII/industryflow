@@ -720,41 +720,6 @@ services:
       retries: 3
       start_period: 30s
 
-  alert-service-api:
-    build:
-      context: ./services/alert_service
-      dockerfile: api/Dockerfile
-    container_name: industryflow-alert-service-api
-    ports:
-      - "127.0.0.1:${ALERT_SERVICE_PORT}:8001"
-    environment:
-      <<: *db-tls-env
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-      DB_NAME: ${DB_NAME}
-      ALERT_SERVICE_DB_USER: ${ALERT_SERVICE_DB_USER}
-      ALERT_SERVICE_DB_PASSWORD: ${ALERT_SERVICE_DB_PASSWORD}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      JWT_ALGORITHM: ${JWT_ALGORITHM}
-      ALERT_SERVICE_PORT: ${ALERT_SERVICE_PORT}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-    volumes:
-      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
-    networks:
-      - industryflow-network
-    restart: unless-stopped
-    healthcheck:
-      # Slim image has no curl — use the Python stdlib (matches api-gateway/ml-service).
-      test: [ "CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
   # ============================================================================
   # ML Service
   # ============================================================================

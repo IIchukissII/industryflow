@@ -82,8 +82,6 @@ jobs:
           # fatal on import (this is the pyarrow-14-under-numpy-2 break, #209).
           - { name: ml-service-api,         context: services/ml_service,       file: services/ml_service/api/Dockerfile,
               smoke: "python -c \"import numpy, sklearn, xgboost, mlflow, evidently, main; print('ml-service serves', main.app.title, numpy.__version__)\"" }
-          - { name: alert-service-api,      context: services/alert_service,    file: services/alert_service/api/Dockerfile,
-              smoke: "env DB_PORT=5432 python -c \"import api; print('alert-api serves', api.app.title)\"" }
           - { name: alert-service-detector, context: services/alert_service,    file: services/alert_service/worker/Dockerfile,
               smoke: "python -c \"import main; print('alert-detector imports ok')\"" }
           # The Spark images DO run a process (a PySpark job / an executor), and their migration risk
