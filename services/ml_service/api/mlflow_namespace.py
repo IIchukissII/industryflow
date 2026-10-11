@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Pure tenant-namespace rules for the MLflow model registry (ADR-0019), with no I/O or framework
+Pure tenant-namespace rules for the MLflow model registry (ADR-0013 / ADR-0019), with no I/O or framework
 imports so they can be unit-tested in isolation — the ml_service counterpart of
 ``notebook_tracking_gateway/policy.py``.
 

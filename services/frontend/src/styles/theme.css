@@ -88,7 +88,7 @@ a { color: inherit; }
 .wm-accent { color: var(--gold); }
 
 /* numeric / telemetry readouts read as instrument values */
-.mono, .num {
+.mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;

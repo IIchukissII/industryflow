@@ -43,6 +43,9 @@ updates:
       # ignore rather than a pin.
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
+      # @eslint/js majors track eslint's; 10.x peers on eslint 10, so it is blocked by the same #216.
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "docker"
     directories: ["/services/**", "/infrastructure/**"]

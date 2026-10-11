@@ -54,20 +54,6 @@ def require_role(required_role: str):
         return current_user
     return role_checker
 
-def require_any_role(*roles: str):
-    """
-    Dependency factory for multiple allowed roles.
-    Usage: user = Depends(require_any_role("admin", "engineer"))
-    """
-    async def role_checker(current_user: User = Depends(current_active_user)) -> User:
-        if current_user.role not in roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Required one of roles: {', '.join(roles)}"
-            )
-        return current_user
-    return role_checker
-
 # ============================================================================
 # Schema-Per-Tenant Database Dependencies
 # ============================================================================

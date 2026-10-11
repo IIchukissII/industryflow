@@ -45,7 +45,7 @@ Create or manage users with the CLI helper, or the API. There is no self-registr
 
 ```bash
 # CLI (run inside the api-gateway container or against the DB)
-python3 scripts/manage_users.py            # see --help for create / list / set-role
+python3 scripts/manage_users.py            # see --help for create / list / delete / reset-password
 
 # API: create a user (admin: into own company; superuser: any company_id)
 curl -k -b jar.txt -H "X-CSRF-Token: $CSRF" -X POST https://<host>/api/users \
