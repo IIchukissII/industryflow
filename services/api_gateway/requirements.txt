@@ -18,9 +18,8 @@ fastapi-users[sqlalchemy]==15.0.5
 python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 
-aiokafka>=0.14.0
-python-snappy>=0.7.3
-aiokafka>=0.8.0
+aiokafka==0.14.0
+python-snappy==0.7.3
 
 # Prometheus metrics
 prometheus-fastapi-instrumentator==8.0.2
