@@ -4,7 +4,7 @@
 
 """Redis client for caching sensor data."""
 import json
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 import redis.asyncio as aioredis
 
 from config import get_settings
@@ -56,14 +56,6 @@ class RedisClient:
             ttl,
             json.dumps(data)
         )
-    
-    async def get_sensor_value(self, sensor_id: str) -> Optional[Dict[str, Any]]:
-        """Get cached sensor value."""
-        key = f"sensor:latest:{sensor_id}"
-        data = await self.redis.get(key)
-        if data:
-            return json.loads(data)
-        return None
     
     async def get_all_sensors(self) -> Dict[str, Dict[str, Any]]:
         """Get all cached sensor values."""

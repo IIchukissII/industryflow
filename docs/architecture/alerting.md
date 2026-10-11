@@ -11,7 +11,9 @@ authoritative; this is the shape.
 ## Two parts
 
 - **Alert API** (`services/alert_service/api`, port 8001) — CRUD for `alert_rules` and read
-  access to `alerts`, tenant-scoped. The browser manages rules and reviews history through it.
+  access to `alerts`, tenant-scoped. A direct, internal surface: the edge does not route to it.
+  The browser manages rules and reviews history through the API gateway's own alert routers
+  (`/api/alert-rules`, `/api/alerts`), which the edge sends every `/api/` request to.
 - **Detection worker** (`services/alert_service/worker`) — a Kafka consumer with no HTTP API
   that evaluates rules against the live stream and writes alerts.
 
@@ -77,6 +79,7 @@ change was needed: the hypertable's time index bounds the lookup.
 ## Tenant scoping
 
 Both the API and the worker resolve the tenant from the verified `company_id` and operate only
-within that tenant's schema (**[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**).
+within that tenant's schema. The API reads it from the JWT; the worker reads it from the Kafka
+message, where ingestion stamped it from the device certificate's SAN (ADR-0002) (**[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**).
 The worker reads feature configs and ML models from the tenant schema (granted SELECT by the
 init scripts) to evaluate ML rules.

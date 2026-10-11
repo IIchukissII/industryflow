@@ -52,6 +52,7 @@ jobs:
   # spending ten minutes building two images to watch a pickle fail.
   parity:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -68,6 +69,7 @@ jobs:
 
   roundtrip:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: parity
     steps:
       - uses: actions/checkout@v7
@@ -184,6 +186,7 @@ jobs:
     needs: [parity, roundtrip]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Verdict
         run: |

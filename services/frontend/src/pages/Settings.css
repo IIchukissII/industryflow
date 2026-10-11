@@ -132,12 +132,3 @@
 .btn-danger:hover {
   background: rgba(242, 54, 69, 0.3);
 }
-
-.settings-loading {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  color: #787b86;
-  font-size: 16px;
-}

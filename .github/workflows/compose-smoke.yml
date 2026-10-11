@@ -256,6 +256,7 @@ jobs:
     needs: [compose-smoke]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Gate on the smoke result
         run: |

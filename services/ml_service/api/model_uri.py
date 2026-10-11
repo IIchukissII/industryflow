@@ -23,7 +23,6 @@ do live under the run, and this must not break them.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +55,3 @@ def resolve_model_uri(mlflow_run_id: str) -> str:
         )
 
     return f"runs:/{mlflow_run_id}/model"
-
-
-def resolve_model_uri_or(mlflow_run_id: Optional[str]) -> Optional[str]:
-    """`resolve_model_uri`, tolerating a model that has no run at all."""
-    return resolve_model_uri(mlflow_run_id) if mlflow_run_id else None
