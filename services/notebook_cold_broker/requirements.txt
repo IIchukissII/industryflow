@@ -8,4 +8,4 @@
 fastapi==0.143.0
 uvicorn==0.54.0
 redis==8.1.0
-boto3==1.43.109
+boto3==1.43.110
