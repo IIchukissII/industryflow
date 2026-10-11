@@ -12,18 +12,13 @@ updates:
   # and a single entry over every Python directory ran out of time and was cancelled every week.
   # Each entry is still grouped, so it opens at most a minor/patch and a major PR.
   #
-  # The MLflow server's requirements are a lock regenerated from three direct pins (see the file's
-  # header). Only those three are proposed; bumping a transitive pin alone would bypass the regeneration.
-  # CVEs in transitive pins are caught by the image scan in images.yml.
+  # The MLflow server's requirements.txt is a pip-compile lock of requirements.in, so Dependabot
+  # bumps a pin and recompiles the lock as a whole; a transitive pin never moves on its own.
   - package-ecosystem: "pip"
     directory: "/infrastructure/mlflow"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
-    allow:
-      - dependency-name: "mlflow"
-      - dependency-name: "psycopg2-binary"
-      - dependency-name: "boto3"
     groups:
       mlflow-server-minor-patch:
         update-types: ["minor", "patch"]

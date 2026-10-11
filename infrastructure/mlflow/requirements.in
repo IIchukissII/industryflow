@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Direct dependencies of the MLflow tracking server image. requirements.txt is the lock compiled
+# from this file; it pins every transitive dependency so two builds of one commit install the same
+# set. Change a pin here, then recompile (Dependabot does both itself):
+#
+#   pip-compile --no-header --strip-extras --only-binary=:all: infrastructure/mlflow/requirements.in
+#
+# Compile on CPython 3.14 / linux x86_64, the image's platform. Not hash-pinned: matplotlib,
+# scikit-learn and kiwisolver resolve differently on arm64, and hashes would bind the image to one arch.
+mlflow==3.15.0
+psycopg2-binary==2.9.13
+boto3==1.43.109
