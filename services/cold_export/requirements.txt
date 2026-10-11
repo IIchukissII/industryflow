@@ -12,5 +12,5 @@
 # (format 2.6, zstd, the explicit COLD_SCHEMA) and tests/test_parquet_compat.py holds it to that
 # against a file written by the old pin.
 numpy>=2.5.1,<3
-pyarrow==25.0.0
-psycopg2-binary==2.9.12
+pyarrow==25.0.1
+psycopg2-binary==2.9.13
