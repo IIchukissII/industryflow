@@ -25,14 +25,12 @@ updates:
       mlflow-server-major:
         update-types: ["major"]
 
-  # The API, ML, alerting and ingestion services.
+  # The platform API, alerting and ingestion services.
   - package-ecosystem: "pip"
     directories:
       - "/services/api_gateway"
       - "/services/alert_service"
       - "/services/ingestion_service"
-      - "/services/ml_service"
-      - "/services/ml_service/api"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
@@ -42,19 +40,21 @@ updates:
       python-services-major:
         update-types: ["major"]
     ignore:
-      # Breaking numerical/data majors — migrate deliberately with the test suite, not via the bot.
-      - dependency-name: "numpy"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "pandas"
-        update-types: ["version-update:semver-major"]
       # fastapi-users-db-sqlalchemy (7.0.0, latest) requires sqlalchemy <2.1, so a 2.1 bump cannot
       # install and breaks the whole group. Lift when it allows 2.1.
       - dependency-name: "sqlalchemy"
         versions: [">=2.1"]
 
-  # Notebook mediators, the cold layer, Spark helpers and the DB test harness.
+  # ML serving, the authoring kernel, the notebook mediators, the cold layer and Spark helpers.
+  # Serving (ml_service/api) and the kernel (clients/python/kernel) are both ends of the model
+  # artifact path (ADR-0027), so they share this entry and the model-stack group: a bump moves both
+  # ends in ONE PR, and the round-trip gate proves the pair. Split across groups, the bot moves serving
+  # alone and every model the kernel trains stops loading.
   - package-ecosystem: "pip"
     directories:
+      - "/services/ml_service"
+      - "/services/ml_service/api"
+      - "/clients/python/kernel"
       - "/services/notebook_hub"
       - "/services/notebook_sql_proxy"
       - "/services/notebook_sql_proxy/tests"
@@ -68,8 +68,11 @@ updates:
       - "/infrastructure/timescaledb/tests"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 4
     groups:
+      # First match wins, so the model stack is claimed before the generic groups see it.
+      model-stack:
+        patterns: ["numpy", "pandas", "scipy", "scikit-learn", "skops", "xgboost", "mlflow", "mlflow-skinny", "evidently"]
       python-notebooks-data-minor-patch:
         update-types: ["minor", "patch"]
       python-notebooks-data-major:
