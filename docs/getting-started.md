@@ -68,6 +68,12 @@ Additional users can be created by an admin through the API / admin UI.
 | **MLflow** | http://localhost:5000 | — |
 | **Prometheus** | http://localhost:9090 | — |
 
+Only the HTTPS edge (`FRONTEND_HTTPS_PORT`, with `FRONTEND_PORT` redirecting to it; the notebook hub
+is served through it at `/jupyter/`) and the device mTLS edge are published on every interface. Everything else above (the service APIs, MLflow, MinIO, Prometheus,
+Grafana, Loki, the exporters and the Spark UI) is bound to `127.0.0.1` (ADR-0004 dec 1, ADR-0013 dec 1),
+so from another machine reach it through an SSH tunnel (`ssh -L 5000:localhost:5000 <host>`), not
+over the LAN. The browser uses the API through the edge (`https://<host>/api/…`), never on `:8000`.
+
 ### Notebooks (multi-tenant, per-user, non-root)
 
 Per-user JupyterHub notebooks (ADR-0011/0018) are an **opt-in profile** — they spawn per-user
