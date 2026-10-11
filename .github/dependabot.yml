@@ -83,6 +83,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "pandas"
         update-types: ["version-update:semver-major"]
+      # mlflow 3.17 gates skops loads behind the pickle flag, which the upload probe keeps off, so
+      # every sklearn upload would be refused (#303). Lift when the loader no longer depends on it.
+      - dependency-name: "mlflow"
+        versions: [">=3.16"]
+      - dependency-name: "mlflow-skinny"
+        versions: [">=3.16"]
 
   - package-ecosystem: "npm"
     directory: "/services/frontend"
