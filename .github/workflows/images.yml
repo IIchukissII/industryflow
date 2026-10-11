@@ -37,6 +37,8 @@ jobs:
               - '.github/workflows/images.yml'
               - 'scripts/check_spark_version_parity.py'
               - 'scripts/tests/test_spark_version_parity.py'
+              - 'scripts/check_jupyterhub_parity.py'
+              - 'scripts/tests/test_jupyterhub_parity.py'
 
   # Seconds, and it gates the matrix below: a Spark image whose base tag and Kafka connector
   # coordinate disagree is not worth building, because building it is exactly what will NOT catch
@@ -62,6 +64,8 @@ jobs:
         # files were inspected. These hold it to the real diff that prompted it, including the
         # half-fix (build-time warm updated, runtime CMD forgotten).
         run: pytest scripts/tests/test_spark_version_parity.py -q
+      - name: The hub and its spawn images run the same JupyterHub
+        run: python scripts/check_jupyterhub_parity.py && pytest scripts/tests/test_jupyterhub_parity.py -q
 
   build-scan:
     needs: spark-version-parity
