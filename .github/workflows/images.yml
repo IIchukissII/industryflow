@@ -11,27 +11,33 @@ name: Images
 on:
   push:
     branches: [main]
-    paths:
-      - "**/Dockerfile*"
-      - "**/requirements*.txt"
-      - "services/frontend/package*.json"
-      - ".github/workflows/images.yml"
-      - "scripts/check_spark_version_parity.py"
-      - "scripts/tests/test_spark_version_parity.py"
   pull_request:
-    paths:
-      - "**/Dockerfile*"
-      - "**/requirements*.txt"
-      - "services/frontend/package*.json"
-      - ".github/workflows/images.yml"
-      - "scripts/check_spark_version_parity.py"
-      - "scripts/tests/test_spark_version_parity.py"
   workflow_dispatch: {}
 
 env:
   REGISTRY: ghcr.io/iichukissii
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # A manual dispatch builds everything; there is no diff to filter on.
+      relevant: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.relevant == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - '**/Dockerfile*'
+              - '**/requirements*.txt'
+              - 'services/frontend/package*.json'
+              - '.github/workflows/images.yml'
+              - 'scripts/check_spark_version_parity.py'
+              - 'scripts/tests/test_spark_version_parity.py'
+
   # Seconds, and it gates the matrix below: a Spark image whose base tag and Kafka connector
   # coordinate disagree is not worth building, because building it is exactly what will NOT catch
   # the disagreement. The older connector still resolves, and the smoke asserts `version 4.1`, which
@@ -39,6 +45,8 @@ jobs:
   # connector built for a different Spark. The version lives in five places per image and a bot can
   # see one of them; this reads the other four.
   spark-version-parity:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -209,6 +217,8 @@ jobs:
             "${REGISTRY}/industryflow-${{ matrix.name }}:${{ steps.meta.outputs.version }}"
 
   deps-audit:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     # Dependency CVE audit. Report-only for now (informational) — tighten to gating later.
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -229,3 +239,22 @@ jobs:
       - name: npm audit (frontend)
         working-directory: services/frontend
         run: npm audit --audit-level=high || true
+
+  # Always present, so it can be a required check: passes when the workflow's paths did not change,
+  # fails when any job it gates failed or was cancelled (ADR-0026 dec 2).
+  images-gate:
+    name: images-gate
+    needs: [changes, spark-version-parity, build-scan, deps-audit]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Gate
+        run: |
+          echo "changes=${{ needs.changes.result }} relevant=${{ needs.changes.outputs.relevant }}"
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "::error::change-detection job did not succeed"; exit 1
+          fi
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "::error::a gated job failed or was cancelled"; exit 1
+          fi
