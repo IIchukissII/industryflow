@@ -55,11 +55,9 @@ jobs:
           python-version: "3.14"
       - name: Resolve every requirements file
         run: |
-          # The MLflow lock is resolved for the interpreter ITS image runs, which is not this job's:
-          # it is held at 3.11 because mlflow does not run on 3.14 (#222). Resolving it against 3.14
-          # would be asking the wrong question. Its own header records the command, and its image
-          # build (build-scan) is what actually proves it.
-          declare -A PYVER=( ["infrastructure/mlflow/requirements.txt"]="3.11" )
+          # Each lock is resolved for the interpreter its image runs; all are 3.14. Add an entry here
+          # only if an image is ever held on another interpreter.
+          declare -A PYVER=()
           rc=0
           for req in $(git ls-files '**/requirements.txt' 'requirements.txt'); do
             pyver="${PYVER[$req]:-3.14}"

@@ -85,14 +85,14 @@ Interactive API docs are served at `http://localhost:8000/docs` when the stack i
 
 ## Technology
 
-Python 3.14 · FastAPI · Apache Spark 3.5 · Apache Kafka · MLflow · PostgreSQL 15 + TimescaleDB ·
+Python 3.14 · FastAPI · Apache Spark 4.1 · Apache Kafka · MLflow · PostgreSQL 15 + TimescaleDB ·
 Redis · MinIO · React 19 (Vite) · Prometheus / Grafana / Loki.
 
-Every service image runs Python 3.14. One does not: the **MLflow** image is pinned to **3.11**, because
-MLflow's server imports a stdlib name 3.14 removed ([#222](https://github.com/IIchukissII/industryflow/issues/222)).
-It is pure-python, so its whole dependency closure *resolves* perfectly on 3.14 and only starting the
-server finds it — which is why `main` requires a check that boots the stack rather than one that merely
-builds it ([ADR-0026](ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md)).
+Every Python image runs 3.14. The **MLflow** server was the last to move: it was held at 3.11 because
+its server imported a stdlib name 3.14 removed ([#222](https://github.com/IIchukissII/industryflow/issues/222)).
+Its dependency closure *resolved* perfectly on 3.14 and only starting the server found it, which is
+why `main` requires a check that boots the stack rather than one that merely builds it
+([ADR-0026](ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md)).
 
 ## Contributing
 
