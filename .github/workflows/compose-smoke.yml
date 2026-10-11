@@ -69,12 +69,12 @@ jobs:
 
       # ADR-0026 dec 4. Build the seed with the JupyterHub the hub is upgrading FROM, so the schema is
       # genuinely the old one rather than something we assert is old. `new_session_factory` creates the
-      # tables and stamps alembic at that version's head — an empty database with a real 4.x schema.
+      # tables and stamps alembic at that version's head — an empty database with a real previous-major schema.
       - name: Seed the hub state DB at the PREVIOUS JupyterHub major (the upgrade path is what breaks)
         env:
-          # The pin JupyterHub 5 replaced. Bump this when the current major moves, or the "upgrade"
+          # The major the hub upgrades FROM (5.x -> 6.x). Bump this when the current major moves, or the "upgrade"
           # test quietly starts upgrading from the version it is already on — i.e. testing nothing.
-          PREV_JUPYTERHUB: "4.1.6"
+          PREV_JUPYTERHUB: "5.5.0"
         run: |
           mkdir -p hub-seed
           cat > hub-seed/seed.py <<'PY'
