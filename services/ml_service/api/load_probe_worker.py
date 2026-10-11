@@ -82,7 +82,7 @@ def probe(model_uri: str) -> dict:
     try:
         model = skops_trust.load_pyfunc(model_uri, uploaded_model.PROVENANCE_UPLOADED)
     except Exception as exc:  # noqa: BLE001
-        if type(exc).__name__ == "UntrustedTypesFoundException":
+        if skops_trust.is_untrusted_types_error(exc):
             return {"ok": False, "stage": "trust",
                     "error": "the model deserialises into types this platform trusts only for models "
                              "trained in its own kernels, never for uploaded ones (ADR-0027 dec 13, "
