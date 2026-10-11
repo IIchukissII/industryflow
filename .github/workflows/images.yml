@@ -197,7 +197,18 @@ jobs:
           echo "::endgroup::"
 
       - name: Install Trivy
-        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+        # A pinned release, checksum-verified. The previous `curl … main/install.sh | sh` ran an
+        # unpinned script from a moving branch, and the pipe hid its failure until `trivy: not found`.
+        env:
+          TRIVY_VERSION: "0.74.0"
+          TRIVY_SHA256: "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a"
+        run: |
+          set -euo pipefail
+          tgz="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sfL --retry 3 -o "$tgz" "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${tgz}"
+          echo "${TRIVY_SHA256}  ${tgz}" | sha256sum -c -
+          sudo tar xzf "$tgz" -C /usr/local/bin trivy
+          trivy --version
       - name: Trivy scan (gate on fixable CRITICAL)
         # Gating: fails on any fixable CRITICAL. Accepted, justified exceptions (Spark-bundled
         # JARs that need a Spark upgrade) live in .trivyignore with expiry dates.
