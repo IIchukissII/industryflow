@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The authoring kernel's data-science stack (no deep learning): arrays/frames, classic ML, stats,
+# plotting, and the MLflow client (skinny, no server/UI) so a kernel can track experiments and
+# register models through the tracking gateway (ADR-0019).
+#
+# This file is on the model artifact path: what this kernel writes, ml_service must read (ADR-0027).
+# It lives in a requirements file, not the Dockerfile, so the dependency bot sees it, and it is in the
+# same bot group as ml_service's pins. The two ends move in one PR, and the round-trip gate tests it.
+#
+# Two pins are load-bearing in ways their names do not advertise:
+#
+#   xgboost 3.x is REQUIRED BY scikit-learn 1.9. sklearn 1.9 removed `_estimator_type` in favour of
+#   `__sklearn_tags__`; xgboost 2.x's sklearn wrapper still reaches for it, so `save_model()` (and
+#   `mlflow.xgboost.log_model`) dies under sklearn 1.9. The break is on the SAVE path only.
+#
+#   skops is NOT optional. mlflow 3's sklearn flavor writes `model.skops` by default, and
+#   `mlflow-skinny` does not pull skops in. It is pinned because it is a serialization format.
+numpy==2.5.1
+pandas==2.3.3
+scipy==1.18.0
+scikit-learn==1.9.0
+statsmodels==0.14.6
+xgboost==3.3.0
+matplotlib==3.11.0
+plotly==5.23.0
+mlflow-skinny==3.15.0
+skops==0.14.0

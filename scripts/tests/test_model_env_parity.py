@@ -19,6 +19,7 @@ from check_model_env_parity import (  # noqa: E402
     RULES,
     SameComponents,
     ServingAtLeastKernel,
+    kernel_pin_sources,
     parse_pins,
     serving_requirements_path,
 )
@@ -126,6 +127,14 @@ class TestTheCheckReadsWhatTheImageInstalls:
     xgboost was absent from serving. The path is derived from the Dockerfile's COPY so it cannot
     drift back to a file nobody installs.
     """
+
+    def test_kernel_pins_come_from_the_file_its_dockerfile_copies(self):
+        # The kernel's model stack moved out of the Dockerfile into a requirements file so the
+        # dependency bot sees it. If the COPY were not followed, the kernel would read as pinning
+        # nothing and every package would print "not on the shared artifact path" while passing.
+        sources = kernel_pin_sources()
+        assert sources[-1].parts[-3:] == ("python", "kernel", "requirements.txt")
+        assert "scikit-learn" in parse_pins(sources[-1].read_text())
 
     def test_resolves_to_the_file_on_the_images_build_path(self):
         assert serving_requirements_path().parts[-3:] == ("ml_service", "api", "requirements.txt")

@@ -40,35 +40,10 @@ RUN pip install --no-cache-dir \
     jupyterhub==6.0.1 \
     jupyterlab==4.0.9
 
-# Lean data-science stack (no deep learning): arrays/frames, classic ML, stats, plotting, plus the
-# MLflow client (skinny — no server/UI) so a kernel can track experiments and register models
-# through the tracking gateway (ADR-0019). MLFLOW_TRACKING_URI/TOKEN are injected by the hub.
-#
-# Two pins here are load-bearing in ways their names do not advertise:
-#
-#   xgboost 3.x is REQUIRED BY scikit-learn 1.9, not merely nice to have. sklearn 1.9 removed
-#   `_estimator_type` in favour of `__sklearn_tags__`; xgboost 2.x's sklearn wrapper still reaches for
-#   it, so `XGBRegressor.save_model()` — and therefore `mlflow.xgboost.log_model` — dies with
-#   "`_estimator_type` undefined" under sklearn 1.9. It fits and predicts fine, which is why nothing
-#   noticed: the break is on the SAVE path, and no CI job ever saved an xgboost model. The round-trip
-#   gate (ADR-0027) is what caught it.
-#
-#   skops is NOT an optional extra. mlflow 3's sklearn flavor defaults to
-#   `serialization_format="skops"` — the artifact this kernel writes is `model.skops`, not a pickle —
-#   and `mlflow-skinny` does NOT pull skops in (the full `mlflow` does). Without this line
-#   `mlflow.sklearn.log_model` has no serializer. It is also pinned rather than floating BECAUSE it
-#   is a serialization format on the artifact path: what this kernel writes, ml_service must read.
-RUN pip install --no-cache-dir \
-    numpy==2.5.1 \
-    pandas==2.3.3 \
-    scipy==1.18.0 \
-    scikit-learn==1.9.0 \
-    statsmodels==0.14.6 \
-    xgboost==3.3.0 \
-    matplotlib==3.11.0 \
-    plotly==5.23.0 \
-    mlflow-skinny==3.15.0 \
-    skops==0.14.0
+# The data-science stack, pinned in kernel/requirements.txt (in this build context) so the
+# dependency bot sees it alongside ml_service's pins (ADR-0027). Its header explains the pins.
+COPY kernel/requirements.txt /tmp/kernel-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/kernel-requirements.txt && rm /tmp/kernel-requirements.txt
 
 # The tenant-scoped client + the [sql] extra (psycopg) so the kernel can reach the SQL proxy with
 # its capability (ADR-0015). Built from the context (clients/python).
