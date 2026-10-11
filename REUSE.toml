@@ -30,3 +30,11 @@ path = ["img/*.svg"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 The IndustryFlow contributors"
 SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# A pip-compile lock is regenerated whole, so it cannot keep an inline header; its source
+# (requirements.in beside it) carries one.
+[[annotations]]
+path = ["infrastructure/mlflow/requirements.txt"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The IndustryFlow contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"
