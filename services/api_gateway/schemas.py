@@ -4,9 +4,9 @@
 
 # src/api/schemas.py
 import uuid
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from fastapi_users import schemas
 
 
@@ -19,22 +19,54 @@ class UserRead(schemas.BaseUser[uuid.UUID]):
     role: str
 
 
+Role = Literal["admin", "engineer", "observer"]
+
+
 class UserCreate(schemas.BaseUserCreate):
     """
-    Schema for creating new users
-    Admin must provide company_id and role
+    Internal create model handed to the user manager. Never bound to a request body: the
+    tenant and role are set by the admin route, never by the caller (ADR-0004 dec 5).
     """
     company_id: uuid.UUID
-    role: str = "observer"  # Default role
+    role: Role = "observer"
 
 
-class UserUpdate(schemas.BaseUserUpdate):
+class UserSelfUpdate(schemas.BaseUserUpdate):
     """
-    Schema for updating user data
-    Allows updating role and company_id (for admin transfers)
+    What a user may change about themselves: email and password. No tenant, no role, no flags
+    (ADR-0003 dec 1: the tenant comes from the verified principal, so the principal cannot set it).
+    Unknown fields are refused rather than silently dropped.
     """
+    model_config = ConfigDict(extra="forbid")
+    is_active: None = None
+    is_superuser: None = None
+    is_verified: None = None
+
+
+class AdminUserCreate(BaseModel):
+    """
+    Admin-created user. company_id is honoured only for a superuser; a tenant admin always
+    creates into their own company (ADR-0004 dec 5).
+    """
+    model_config = ConfigDict(extra="forbid")
+    email: EmailStr
+    password: str = Field(..., min_length=8)
+    role: Role = "observer"
     company_id: Optional[uuid.UUID] = None
-    role: Optional[str] = None
+    is_active: bool = True
+    is_superuser: bool = False
+
+
+class AdminUserUpdate(schemas.BaseUserUpdate):
+    """
+    Admin update of a user in the admin's own company. company_id and is_superuser are
+    superuser-only (ADR-0004 dec 5).
+    """
+    model_config = ConfigDict(extra="forbid")
+    password: Optional[str] = Field(None, min_length=8)
+    role: Optional[Role] = None
+    company_id: Optional[uuid.UUID] = None
+    is_verified: None = None
 
 
 # ============================================================================
