@@ -19,8 +19,15 @@
 #   issue <company_uuid> <device_id> [csr]  sign a device cert (CSR if given; else generate
 #                                           a TEST key+CSR — local/test producers only)
 #   revoke <device_id>                    revoke a device cert and refresh the CRL
-#   crl                                   regenerate the CRL
+#   crl                                   re-sign the intermediate's CRL (routine; no root key)
+#   root-crl                              re-sign the root's CRL (offline-root ceremony only)
+#   check [crl] [chain]                   fail if a published CRL is close to expiry
 #   chain                                 print the verify chain path (root+intermediate)
+#
+# CRL freshness (ADR-0007 dec 8): the edge refuses EVERY device once a CRL it holds expires, so
+# each CRL is re-signed well inside its validity. The intermediate's CRL is re-signed routinely
+# (`crl`, CRL_DAYS); the root's only at the root ceremony (`root-crl`, ROOT_CRL_DAYS), so the
+# root key can stay offline. `check` raises either one before it expires.
 #
 # Output (git-ignored — holds private keys): deploy/device-ca/
 set -e
@@ -33,6 +40,10 @@ DEV="$CA/devices"
 ROOT_DAYS="${ROOT_DAYS:-3650}"
 INT_DAYS="${INT_DAYS:-1825}"
 DEVICE_DAYS="${DEVICE_DAYS:-90}"
+CRL_DAYS="${CRL_DAYS:-7}"
+ROOT_CRL_DAYS="${ROOT_CRL_DAYS:-365}"
+CRL_WARN_DAYS="${CRL_WARN_DAYS:-3}"
+ROOT_CRL_WARN_DAYS="${ROOT_CRL_WARN_DAYS:-30}"
 SAN_PREFIX="industryflow:tenant"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -57,7 +68,7 @@ certificate       = \$dir/intermediate.crt
 private_key       = \$dir/intermediate.key
 default_md        = sha256
 default_days      = $DEVICE_DAYS
-default_crl_days  = 30
+default_crl_days  = $CRL_DAYS
 policy            = policy_any
 x509_extensions   = device_cert
 unique_subject    = no
@@ -71,7 +82,6 @@ extendedKeyUsage       = clientAuth
 subjectKeyIdentifier   = hash
 authorityKeyIdentifier = keyid,issuer
 subjectAltName         = $san
-crlDistributionPoints  = URI:http://industryflow.local/device-ca.crl
 EOF
 }
 
@@ -91,7 +101,7 @@ crlnumber         = \$dir/crlnumber
 certificate       = \$dir/root.crt
 private_key       = \$dir/root.key
 default_md        = sha256
-default_crl_days  = 30
+default_crl_days  = $ROOT_CRL_DAYS
 EOF
 }
 
@@ -122,7 +132,7 @@ cmd_init() {
 
   # Verify chain the proxy presents/trusts (root first so it can be the trust anchor too).
   cat "$INT/intermediate.crt" "$ROOT/root.crt" > "$CA/ca-chain.crt"
-  cmd_crl
+  cmd_root_crl
   chmod 600 "$ROOT/root.key" "$INT/intermediate.key"
   echo ""
   echo "Device CA ready:"
@@ -165,15 +175,66 @@ cmd_revoke() {
   echo "revoked: $device (CRL refreshed)"
 }
 
+publish_bundle() {
+  # The verifying proxy needs a CRL for every CA in the chain: root (revoked intermediates) +
+  # intermediate (revoked devices). Written via rename so the edge never reads a half-written file.
+  cat "$CA/crl/root.crl" "$CA/crl/intermediate.crl" > "$CA/crl/device-ca.crl.tmp"
+  mv "$CA/crl/device-ca.crl.tmp" "$CA/crl/device-ca.crl"
+  echo "CRL: $CA/crl/device-ca.crl (root + intermediate)"
+}
+
 cmd_crl() {
-  # Publish a CRL bundle covering the whole chain: the intermediate's CRL (revoked devices)
-  # plus the root's CRL (revoked intermediates). The verifying proxy needs both.
+  # Routine refresh: re-signs only the intermediate's CRL, so it needs no root key.
+  [ -f "$CA/crl/root.crl" ] || die "no root CRL - run: device-ca.sh root-crl (needs the root key)"
   write_int_cnf
-  openssl ca -config "$CNF" -gencrl -out "$CA/crl/intermediate.crl"
+  openssl ca -config "$CNF" -gencrl -out "$CA/crl/intermediate.crl.tmp"
+  mv "$CA/crl/intermediate.crl.tmp" "$CA/crl/intermediate.crl"
+  publish_bundle
+}
+
+cmd_root_crl() {
+  # Offline-root ceremony: re-signs the root's CRL (long validity), then the intermediate's.
+  [ -f "$ROOT/root.key" ] || die "no root key at $ROOT/root.key - bring the offline root in to re-sign its CRL"
   write_root_cnf
   openssl ca -config "$ROOTCNF" -gencrl -out "$CA/crl/root.crl"
-  cat "$CA/crl/root.crl" "$CA/crl/intermediate.crl" > "$CA/crl/device-ca.crl"
-  echo "CRL: $CA/crl/device-ca.crl (root + intermediate)"
+  cmd_crl
+}
+
+epoch() {
+  # "Oct 18 12:00:00 2026 GMT" -> seconds. GNU date parses it; busybox needs the format.
+  date -u -d "$1" +%s 2>/dev/null \
+    || date -u -D '%b %d %H:%M:%S %Y' -d "$(echo "${1% GMT}" | tr -s ' ')" +%s
+}
+
+cmd_check() {
+  # Fails (non-zero) when any CRL in the published bundle is inside its warning window. The
+  # root's CRL is told apart by its issuer: the subject of the self-signed cert in the chain.
+  bundle="${1:-$CA/crl/device-ca.crl}"; chain="${2:-$CA/ca-chain.crt}"
+  [ -f "$bundle" ] || die "no CRL bundle at $bundle"
+  [ -f "$chain" ] || die "no CA chain at $chain"
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+  awk -v d="$tmp" '/BEGIN X509 CRL/{n++} n{print > (d "/crl" n ".pem")}' "$bundle"
+  awk -v d="$tmp" '/BEGIN CERTIFICATE/{n++} n{print > (d "/cert" n ".pem")}' "$chain"
+  root_subject=""
+  for c in "$tmp"/cert*.pem; do
+    sub=$(openssl x509 -in "$c" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')
+    iss=$(openssl x509 -in "$c" -noout -issuer -nameopt RFC2253 | sed 's/^issuer=//')
+    [ "$sub" = "$iss" ] && root_subject="$sub"
+  done
+  now=$(date -u +%s); rc=0
+  for f in "$tmp"/crl*.pem; do
+    [ -f "$f" ] || die "no CRL found in $bundle"
+    iss=$(openssl crl -in "$f" -noout -issuer -nameopt RFC2253 | sed 's/^issuer=//')
+    next=$(openssl crl -in "$f" -noout -nextupdate | sed 's/^nextUpdate=//')
+    left=$(( ($(epoch "$next") - now) / 86400 ))
+    warn=$CRL_WARN_DAYS; [ "$iss" = "$root_subject" ] && warn=$ROOT_CRL_WARN_DAYS
+    if [ "$left" -lt "$warn" ]; then
+      echo "STALE: CRL of $iss expires in ${left}d ($next), warn at ${warn}d" >&2; rc=1
+    else
+      echo "ok: CRL of $iss expires in ${left}d ($next)"
+    fi
+  done
+  return $rc
 }
 
 cmd_chain() { echo "$CA/ca-chain.crt"; }
@@ -184,6 +245,8 @@ case "$sub" in
   issue)  cmd_issue "$@" ;;
   revoke) cmd_revoke "$@" ;;
   crl)    cmd_crl ;;
+  root-crl) cmd_root_crl ;;
+  check)  cmd_check "$@" ;;
   chain)  cmd_chain ;;
-  *) echo "usage: device-ca.sh {init|issue <uuid> <device_id> [csr]|revoke <device_id>|crl|chain}" >&2; exit 1 ;;
+  *) echo "usage: device-ca.sh {init|issue <uuid> <device_id> [csr]|revoke <device_id>|crl|root-crl|check [crl] [chain]|chain}" >&2; exit 1 ;;
 esac

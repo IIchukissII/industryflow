@@ -1,0 +1,90 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if and .Values.ingress.enabled .Values.ingress.mtls.enabled .Values.ingress.mtls.crlCheck.enabled }}
+{{- $c := .Values.ingress.mtls.crlCheck }}
+{{- /*
+  Device-CRL freshness watch (ADR-0007 dec 8). The ingress controller refuses EVERY device once a
+  CRL in the device-CA Secret expires. In a cluster the CRL is refreshed out of band (the issuing
+  key does not live in the cluster), so the chart only watches its age: this job fails when
+  either CRL is inside its warning window, and the IndustryFlowDeviceCrlStale rule raises the
+  failure. It reads only the public CA chain and CRL; it holds no key.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "industryflow.fullname" . }}-device-crl-check
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+data:
+  device-ca.sh: |-
+{{ .Files.Get "files/device-ca.sh" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "industryflow.fullname" . }}-device-crl-check
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: device-crl-check
+    app.kubernetes.io/component: pki
+spec:
+  schedule: {{ $c.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: device-crl-check
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            seccompProfile:
+              type: RuntimeDefault
+          {{- end }}
+          containers:
+            - name: device-crl-check
+              image: {{ $c.image | quote }}
+              command: ["sh", "/opt/device-ca/device-ca.sh", "check", "/ca/ca.crl", "/ca/ca.crt"]
+              env:
+                - name: CRL_WARN_DAYS
+                  value: {{ $c.warnDays | quote }}
+                - name: ROOT_CRL_WARN_DAYS
+                  value: {{ $c.rootWarnDays | quote }}
+              {{- if .Values.securityContext.enabled }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              {{- end }}
+              resources:
+                requests: { cpu: 10m, memory: 16Mi }
+                limits: { cpu: 100m, memory: 64Mi }
+              volumeMounts:
+                - { name: device-ca, mountPath: /ca, readOnly: true }
+                - { name: script, mountPath: /opt/device-ca, readOnly: true }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: device-ca
+              secret:
+                secretName: {{ .Values.ingress.mtls.caSecret }}
+            - name: script
+              configMap:
+                name: {{ include "industryflow.fullname" . }}-device-crl-check
+            - name: tmp
+              emptyDir: {}
+{{- end }}
