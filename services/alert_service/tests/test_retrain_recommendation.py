@@ -15,6 +15,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
 from rules_engine import RulesEngine, should_recommend_retrain  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(__file__))
+from fake_alert_store import FakeAlertStore  # noqa: E402
+
 MODEL_ID = "22222222-2222-2222-2222-222222222222"
 RULE_ID = "33333333-3333-3333-3333-333333333333"
 
@@ -51,16 +54,13 @@ def test_none_when_drift_not_sustained():
 
 # --- evaluate_retrain_recommendations --------------------------------------
 
-class _Repo:
+class _Repo(FakeAlertStore):
     def __init__(self, signals):
+        super().__init__()
         self.signals = signals
-        self.saved = []
 
     async def get_retrain_signals(self, model_id, company_id, precision_window_days, drift_lookback_hours):
         return self.signals
-
-    async def save_alert(self, alert):
-        self.saved.append(alert)
 
 
 def _drift_rule(**over):

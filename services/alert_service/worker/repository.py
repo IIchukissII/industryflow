@@ -7,8 +7,8 @@ Repository layer for Alert Service Worker
 Schema-per-tenant architecture
 """
 import asyncpg
-from datetime import datetime
-from typing import List, Dict, Optional
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Tuple
 import uuid as uuid_module
 import logging
 
@@ -26,6 +26,37 @@ def normalize_company_id_to_schema(company_id: str) -> str:
     """
     canonical = str(uuid_module.UUID(str(company_id)))
     return f"tenant_{canonical.replace('-', '_')}"
+
+
+# Dedup scopes for save_alert_once ($n are the insert's own parameters). An alert's scope is
+# (rule, sensor, equipment); a retrain recommendation's is its model. The two never suppress each other.
+_ALERT_SCOPE = (
+    "rule_id IS NOT DISTINCT FROM $3::uuid AND sensor_id IS NOT DISTINCT FROM $4::uuid"
+    " AND equipment_id IS NOT DISTINCT FROM $5::uuid"
+    " AND condition IS DISTINCT FROM 'retrain_recommended'"
+)
+_RETRAIN_SCOPE = "model_id = $11::uuid AND condition = 'retrain_recommended'"
+
+_SAVE_ALERT_ONCE = """
+    WITH prior AS (
+        SELECT max(triggered_at) AS prior_at FROM alerts
+        WHERE {scope}
+          AND triggered_at > $2::timestamptz - $15::interval
+          AND triggered_at < $2::timestamptz + $15::interval
+    ), ins AS (
+        INSERT INTO alerts (
+            alert_id, triggered_at, rule_id, sensor_id, equipment_id, site_id, detection_type,
+            threshold_value, actual_value, condition, model_id, anomaly_score, severity, message,
+            acknowledged
+        )
+        SELECT $1::uuid, $2::timestamptz, $3::uuid, $4::uuid, $5::uuid, $6::text, $7::text,
+               $8::float8, $9::float8, $10::text, $11::uuid, $12::float8, $13::text, $14::text, false
+        WHERE (SELECT prior_at FROM prior) IS NULL
+        ON CONFLICT (alert_id, triggered_at) DO NOTHING
+        RETURNING alert_id
+    )
+    SELECT (SELECT alert_id FROM ins) AS inserted, (SELECT prior_at FROM prior) AS prior_at
+"""
 
 
 class AlertRepository:
@@ -75,41 +106,28 @@ class AlertRepository:
             
             return [dict(row) for row in rows]
     
-    async def save_alert(self, alert_data: Dict) -> str:
-        """Save alert to database with schema routing"""
-        company_id = alert_data['company_id']
-        schema_name = normalize_company_id_to_schema(company_id)
+    async def save_alert_once(
+        self, alert_data: Dict, *, window: timedelta, retrain: bool = False,
+    ) -> Tuple[bool, Optional[datetime]]:
+        """
+        Insert the alert unless one in the same dedup scope already exists within window of its
+        event time, in one statement. Returns (inserted, prior_at), where prior_at is the event time
+        of the alert that suppressed it.
 
-        # Generate alert_id if not provided
-        alert_id = alert_data.get('alert_id', str(uuid_module.uuid4()))
-        triggered_at = alert_data.get('triggered_at', datetime.utcnow())
+        The window check makes the cooldown durable across restarts; ON CONFLICT on the
+        deterministic (alert_id, triggered_at) makes an exact replay a no-op even if two consumers
+        race (ADR-0005 dec 6). Needs no schema change: the window lookup is bounded by the
+        hypertable's time index.
+        """
+        schema_name = normalize_company_id_to_schema(alert_data['company_id'])
+        scope_sql = _RETRAIN_SCOPE if retrain else _ALERT_SCOPE
 
         async with self.pool.acquire() as conn:
-            # Set search path to tenant schema
             await conn.execute(f"SET search_path TO {schema_name}, public")
-
-            # Insert without company_id column
-            await conn.execute("""
-                INSERT INTO alerts (
-                    alert_id,
-                    triggered_at,
-                    rule_id,
-                    sensor_id,
-                    equipment_id,
-                    site_id,
-                    detection_type,
-                    threshold_value,
-                    actual_value,
-                    condition,
-                    model_id,
-                    anomaly_score,
-                    severity,
-                    message,
-                    acknowledged
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-            """,
-                alert_id,
-                triggered_at,
+            row = await conn.fetchrow(
+                _SAVE_ALERT_ONCE.format(scope=scope_sql),
+                alert_data['alert_id'],
+                alert_data['triggered_at'],
                 alert_data['rule_id'],
                 alert_data.get('sensor_id'),
                 alert_data.get('equipment_id'),
@@ -122,12 +140,14 @@ class AlertRepository:
                 alert_data.get('anomaly_score'),
                 alert_data['severity'],
                 alert_data['message'],
-                False  # acknowledged
+                window,
             )
-        
-        logger.info(f"Saved alert {alert_id} to {schema_name}")
-        return alert_id
-    
+
+        inserted = row['inserted'] is not None
+        if inserted:
+            logger.info(f"Saved alert {alert_data['alert_id']} to {schema_name}")
+        return inserted, row['prior_at']
+
     async def get_tenant_schemas(self) -> List[str]:
         """Get all active tenant schemas"""
         async with self.pool.acquire() as conn:
