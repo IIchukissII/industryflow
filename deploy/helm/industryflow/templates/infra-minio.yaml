@@ -40,6 +40,15 @@ spec:
         app.kubernetes.io/name: minio
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      # The image runs as 65532. fsGroup makes a fresh PVC writable and re-groups one first written by
+      # an earlier root-run image; OnRootMismatch skips the walk once ownership is right.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: minio
           image: {{ .Values.infra.minio.image | quote }}
