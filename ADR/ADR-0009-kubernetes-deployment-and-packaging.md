@@ -115,6 +115,10 @@ The chart at acceptance realizes decisions that were placeholders in the first p
   Because first-party digests rotate per build, the production overlay is *generated*, not
   hand-maintained: `scripts/pin-image-digests.sh <tag> > values-digests.yaml`, applied with
   `-f`. This resolves the original "no pinned images" review concern.
+- **Object-store image source (2026-10-11).** The upstream MinIO images were withdrawn from public
+  registries. The in-cluster object store now runs a maintained, signed third-party build of the same
+  server, pinned by digest like every other third-party image. It runs non-root, so the store's
+  volume is owned by that user. The decision is unchanged; only the image's publisher moved.
 
 ## References
 
