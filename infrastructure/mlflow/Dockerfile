@@ -2,19 +2,11 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# HELD AT 3.11 WHILE THE SERVICES MOVED TO 3.14 (#211) — mlflow does not run on 3.14 yet. Not a
-# packaging problem: mlflow is pure-python and resolves cleanly, so no wheel or lock check can see
-# this. It is mlflow's own source. `mlflow/assistant/skill_installer.py` does
-#
-#     from importlib.abc import Traversable
-#
-# and 3.14 REMOVED importlib.abc.Traversable (deprecated since 3.12). The tracking server therefore
-# dies on import, which the live tracking-gateway proof caught the moment this image was moved.
-# mlflow 3.15.0 no longer has that import, and psycopg2-binary 2.9.13 ships cp314 wheels, so both
-# blockers are gone upstream; moving this image is still owed and unproven (#222). Only the SERVER
-# was affected — the mlflow CLIENT imports fine on 3.14, so ml_service and the tracking gateway are
-# already there.
-FROM python:3.11-slim
+# Same interpreter as the services (#211). This image was held at 3.11 until mlflow 3.15.0 dropped
+# its `importlib.abc.Traversable` import (removed in 3.14; the server died on import) and
+# psycopg2-binary 2.9.13 shipped cp314 wheels (#222). A clean resolve proved nothing then: the
+# image smoke imports `mlflow.server`, and the tracking-gateway proof does a real write.
+FROM python:3.14-slim
 
 # The whole dependency closure is pinned in requirements.txt, not just mlflow/psycopg2/boto3.
 # Pinning only the direct three left every transitive dep (sqlalchemy, alembic, pydantic, ...)
