@@ -13,7 +13,7 @@ asyncpg>=0.31.0
 redis[asyncio]==8.0.1
 
 # HTTP client for ML inference
-aiohttp>=3.9.0
+aiohttp>=3.14.4
 
 # Utilities
 python-dateutil>=2.8.2
