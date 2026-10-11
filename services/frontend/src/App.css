@@ -3,16 +3,9 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Dashboard (Core) layout. Chrome lives in AppShell; shared primitives in
- * styles/components.css. This file owns the chart + live-readout composition.
+ * Core page layout. Chrome lives in AppShell; shared primitives in
+ * styles/components.css. This file owns the Convergence panel + channel-history composition.
  */
-
-.dash-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: var(--gap);
-  align-items: start;
-}
 
 /* Core page: the Convergence panel beside the channel history */
 .dash-core {
@@ -37,31 +30,8 @@
 }
 .dash-empty p { margin: 0; font-size: 13px; }
 
-/* live readout rail — the instrument signature */
-.readout-list { padding: 8px; overflow-y: auto; max-height: 560px; }
-.readout-group { margin-bottom: 10px; }
-.readout-eq {
-  display: flex; align-items: center; gap: 7px;
-  padding: 8px 10px 6px; color: var(--muted);
-  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
-}
-.readout {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
-  padding: 9px 11px; border: 1px solid transparent; border-radius: var(--r-sm);
-  background: transparent; color: var(--text); cursor: pointer; text-align: left;
-  transition: background 0.12s, border-color 0.12s;
-}
-.readout:hover { background: var(--panel-2); }
-.readout.active { background: var(--signal-soft); border-color: rgba(74, 144, 217, 0.3); }
-.readout-name { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.readout.active .readout-name { color: var(--text); }
-.readout-val { font-size: 14px; color: var(--live); white-space: nowrap; flex-shrink: 0; }
-.readout-val i { font-style: normal; color: var(--faint); font-size: 11px; margin-left: 4px; }
-
 @media (max-width: 1024px) {
-  .dash-grid { grid-template-columns: 1fr; }
   .dash-core { grid-template-columns: 1fr; }
-  .readout-list { max-height: 360px; }
 }
 @media (max-width: 560px) {
   .dash-selectors { flex-direction: column; }

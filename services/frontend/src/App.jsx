@@ -37,7 +37,7 @@ function ProtectedRoute({ children, user }) {
   return children;
 }
 
-function Dashboard({ user }) {
+function CorePage({ user }) {
   const [sensors, setSensors] = useState({});
   const [wsConnected, setWsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -278,7 +278,7 @@ function App() {
         } />
         <Route path="/" element={
           <ProtectedRoute user={user}>
-            <Dashboard user={user} />
+            <CorePage user={user} />
           </ProtectedRoute>
         } />
         <Route path="/alerts" element={
