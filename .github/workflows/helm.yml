@@ -9,16 +9,27 @@ name: Helm
 on:
   push:
     branches: [main]
-    paths:
-      - "deploy/helm/**"
-      - ".github/workflows/helm.yml"
   pull_request:
-    paths:
-      - "deploy/helm/**"
-      - ".github/workflows/helm.yml"
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - 'deploy/helm/**'
+              - '.github/workflows/helm.yml'
+
   lint-and-template:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -45,3 +56,22 @@ jobs:
             echo "::error::expected render to fail on placeholder secrets, but it succeeded"; exit 1
           fi
           echo "OK: render correctly refused placeholder secrets"
+
+  # Always present, so it can be a required check: passes when the workflow's paths did not change,
+  # fails when any job it gates failed or was cancelled (ADR-0026 dec 2).
+  helm-gate:
+    name: helm-gate
+    needs: [changes, lint-and-template]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Gate
+        run: |
+          echo "changes=${{ needs.changes.result }} relevant=${{ needs.changes.outputs.relevant }}"
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "::error::change-detection job did not succeed"; exit 1
+          fi
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "::error::a gated job failed or was cancelled"; exit 1
+          fi

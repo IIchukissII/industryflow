@@ -9,22 +9,30 @@ name: Lint
 on:
   push:
     branches: [main]
-    paths:
-      - "**/*.py"
-      - "**/requirements*.txt"
-      - "services/frontend/**"
-      - "ruff.toml"
-      - ".github/workflows/lint.yml"
   pull_request:
-    paths:
-      - "**/*.py"
-      - "**/requirements*.txt"
-      - "services/frontend/**"
-      - "ruff.toml"
-      - ".github/workflows/lint.yml"
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - '**/*.py'
+              - '**/requirements*.txt'
+              - 'services/frontend/**'
+              - 'ruff.toml'
+              - '.github/workflows/lint.yml'
+
   ruff:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -48,6 +56,8 @@ jobs:
   # depending on which compilers the runner happens to have). Every image installs these with wheels;
   # the gate has to hold them to the same standard.
   deps-resolve:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -87,6 +97,8 @@ jobs:
           exit $rc
 
   eslint:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -108,6 +120,8 @@ jobs:
         run: npx eslint src
 
   frontend-tests:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -125,3 +139,22 @@ jobs:
         run: npm ci
       - name: vitest
         run: npm test
+
+  # Always present, so it can be a required check: passes when the workflow's paths did not change,
+  # fails when any job it gates failed or was cancelled (ADR-0026 dec 2).
+  lint-gate:
+    name: lint-gate
+    needs: [changes, ruff, deps-resolve, eslint, frontend-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Gate
+        run: |
+          echo "changes=${{ needs.changes.result }} relevant=${{ needs.changes.outputs.relevant }}"
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "::error::change-detection job did not succeed"; exit 1
+          fi
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "::error::a gated job failed or was cancelled"; exit 1
+          fi
