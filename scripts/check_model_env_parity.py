@@ -34,9 +34,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The authoring kernel — the environment models are TRAINED in (ADR-0011 dec 5). Pins live in `pip
-# install` layers rather than a requirements file, so the Dockerfile is read directly.
+# The authoring kernel — the environment models are TRAINED in (ADR-0011 dec 5). Its pins are read
+# from the Dockerfile's own `pip install` layers AND from every requirements file it COPYs from its
+# build context (the same rule as serving: what the image installs, not a path that looks right).
 KERNEL_DOCKERFILE = Path("services/notebook_hub/Dockerfile.authoring")
+KERNEL_BUILD_CONTEXT = Path("clients/python")
 
 # The serving image — the environment models are LOADED in. Its requirements file is not named here:
 # it is read out of the Dockerfile's COPY (see module docstring). The build context mirrors the one
@@ -188,14 +190,28 @@ def serving_requirements_path() -> Path:
     return REPO_ROOT / SERVING_BUILD_CONTEXT / copies[0]
 
 
+def kernel_pin_sources() -> list[Path]:
+    """The kernel Dockerfile plus every requirements file it COPYs from its build context."""
+    dockerfile = REPO_ROOT / KERNEL_DOCKERFILE
+    copies = re.findall(
+        r"^COPY\s+(?:--\S+\s+)*(\S*requirements\S*\.txt)\s",
+        dockerfile.read_text(),
+        re.MULTILINE,
+    )
+    return [dockerfile] + [REPO_ROOT / KERNEL_BUILD_CONTEXT / c for c in copies]
+
+
 def main() -> int:
-    kernel_file = REPO_ROOT / KERNEL_DOCKERFILE
+    kernel_files = kernel_pin_sources()
     serving_file = serving_requirements_path()
 
-    kernel = parse_pins(kernel_file.read_text())
+    kernel: dict[str, str] = {}
+    for f in kernel_files:
+        kernel.update(parse_pins(f.read_text()))
     serving = parse_pins(serving_file.read_text())
 
-    print(f"kernel  (trains): {KERNEL_DOCKERFILE}")
+    kernel_desc = " + ".join(str(f.relative_to(REPO_ROOT)) for f in kernel_files)
+    print(f"kernel  (trains): {kernel_desc}  [requirements read from the Dockerfile COPY]")
     print(f"serving (loads):  {serving_file.relative_to(REPO_ROOT)}  [read from the Dockerfile COPY]")
     print()
 
@@ -212,7 +228,7 @@ def main() -> int:
 
         if reason := rule.check(k, s):
             print(f"  FAIL {package}: {reason}")
-            print(f"::error file={KERNEL_DOCKERFILE}::ADR-0027 train/serve parity — {package}: {reason}")
+            print(f"::error file={kernel_files[-1].relative_to(REPO_ROOT)}::ADR-0027 train/serve parity — {package}: {reason}")
             failures += 1
         else:
             print(f"  ok   {package}: kernel {k} / serving {s}")
