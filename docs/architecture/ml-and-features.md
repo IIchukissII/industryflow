@@ -70,6 +70,14 @@ sample of its training-window distribution — which is the baseline for drift m
    is named there as unservable, and refused at registration and deployment with a reason
    (**[ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md)**).
 
+**sklearn models are loaded with a trust list the serving side chooses by provenance**
+(**[ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md)** dec 13). skops does not
+trust the internal tree structures of tree-based estimators by default. Models trained in a kernel get
+an explicit grant for exactly those types; uploaded models get none. The trust list an artifact
+carries in its own MLmodel is always discarded. In a notebook, log a tree-based model with
+`mlflow.sklearn.log_model(model, name="model", skops_trusted_types=industryflow.SKOPS_TRUSTED_TYPES)`:
+mlflow test-loads on save, so the call fails without it.
+
 The alert detection worker calls inference for ML-based rules using the shared
 `INTERNAL_SERVICE_TOKEN` (it has no human to log in); see
 **[authentication.md](../operations/authentication.md)** and
