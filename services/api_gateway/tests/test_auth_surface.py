@@ -7,13 +7,13 @@ The fastapi-users auth surface, actually exercised (ADR-0004).
 
 Every other test in this suite imports the service's own modules. NONE of them import `main`, so
 until this file existed, `FastAPIUsers(...)`, the two authentication backends, the cookie transport
-and all three generated routers were **never constructed by the test suite** — a fastapi-users major
+and the generated routers were **never constructed by the test suite** — a fastapi-users major
 bump could rewrite that API and the 25 green tests would not have noticed. That is precisely the
 "green CI proves the parts we don't exercise still import" failure a dependency migration invites.
 
 So this builds the real app and drives the routes fastapi-users generates:
 
-  * a **422** on login/register means the router exists and its schema validation ran — the library's
+  * a **422** on login means the router exists and its schema validation ran — the library's
     route and pydantic machinery is alive. A **404** would mean the bump silently dropped the route.
   * a **401** on /users/me means the auth dependency ran and refused, which is the whole point of it.
 
@@ -38,9 +38,8 @@ def client():
 @pytest.mark.parametrize(
     "method, path, kwargs, expected",
     [
-        # fastapi-users generates these three. The status is the evidence the router is real.
+        # fastapi-users generates the login route; /users/me is the gateway's own (user_admin). The status is the evidence the router is real.
         ("POST", "/auth/jwt/login", {"data": {}}, 422),
-        ("POST", "/auth/register", {"json": {}}, 422),
         ("GET", "/users/me", {}, 401),
     ],
 )

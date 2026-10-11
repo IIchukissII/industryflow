@@ -57,8 +57,9 @@ rejected) and are **revoked server-side** on logout.
 | `POST` | `/auth/refresh` | Rotate the session (refresh from cookie or body) |
 | `POST` | `/auth/logout` | Revoke the refresh token and clear the cookies (204) |
 | `POST` | `/auth/jwt/login` | fastapi-users login — access token only (kept for compatibility) |
-| `POST` | `/auth/register` | Register a user (needs `company_id` + `role`) |
 | `GET`  | `/users/me` | Current user |
+| `PATCH` | `/users/me` | Change own email/password (tenant and role are not settable) |
+| `POST`/`PATCH`/`DELETE` | `/api/users[/{id}]` | Admin user management, scoped to the admin's company ([user management](user-management.md)) |
 
 ```bash
 # Browser-style: cookies + CSRF over HTTPS
