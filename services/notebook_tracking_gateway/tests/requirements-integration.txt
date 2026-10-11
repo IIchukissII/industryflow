@@ -11,9 +11,9 @@ redis==8.1.0
 
 # The serving-load proof logs a real model the way a kernel does, so these match the kernel's pins
 # (clients/python/kernel/requirements.txt). They share the model-stack bot group with it.
-numpy==2.5.1
+numpy==2.5.3
 pandas==2.3.3
-scipy==1.18.0
+scipy==1.18.1
 scikit-learn==1.9.1
 mlflow-skinny==3.17.0
 skops==0.16.0
