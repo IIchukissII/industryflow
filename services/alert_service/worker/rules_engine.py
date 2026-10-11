@@ -7,8 +7,9 @@ Rules Engine - Evaluates sensor data against alert rules
 Schema-per-tenant architecture - UUID-based matching only
 """
 import logging
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timezone
+from collections import OrderedDict
+from typing import List, Dict, Any, Optional, Tuple
+from datetime import datetime, timedelta, timezone
 import uuid
 import aiohttp
 import os
@@ -16,6 +17,30 @@ import os
 logger = logging.getLogger(__name__)
 
 ML_SERVICE_URL = os.getenv('ML_SERVICE_URL', 'http://ml-service-api:8002')
+
+# Namespace for deterministic alert ids: the same alert key at the same event time always maps to
+# the same alert_id, so a redelivered reading collides on the primary key instead of duplicating.
+ALERT_ID_NAMESPACE = uuid.UUID('6f1c2a4e-7d3b-5e8a-9c0f-1b2d3e4f5a6b')
+
+# The in-memory dedup state is only a cache in front of the database check, so it is safe to bound.
+DEDUP_CACHE_MAX = int(os.getenv('ALERT_DEDUP_CACHE_MAX', '10000'))
+
+
+def as_utc(ts: Any) -> datetime:
+    """Normalise an event time (ISO string, naive or aware datetime, or None) to aware UTC."""
+    if isinstance(ts, str):
+        ts = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+    if ts is None:
+        return datetime.now(timezone.utc)
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
+
+
+def deterministic_alert_id(scope: Tuple, triggered_at: datetime) -> str:
+    """alert_id derived from the dedup scope and the event time, never random."""
+    name = '|'.join('' if part is None else str(part) for part in scope) + '|' + triggered_at.isoformat()
+    return str(uuid.uuid5(ALERT_ID_NAMESPACE, name))
 
 
 def should_recommend_retrain(
@@ -62,12 +87,10 @@ class RulesEngine:
         self.feature_store = feature_store
         self.ml_detectors = {}  # model_id -> detector (lazy loaded)
         self.sensor_name_cache = {}  # {company_id: {sensor_uuid: sensor_name}}
-        # Alert dedup/cooldown state: {(company_id, rule_id, sensor_id, equipment_id): last_fired}
-        self._last_emit = {}
+        # Dedup/cooldown cache: {scope: event time of the last alert known in the DB}. The DB is the
+        # source of truth (see _emit); this only spares it a query while an anomaly persists.
+        self._last_emit: OrderedDict = OrderedDict()
         self._cooldown_seconds = float(os.getenv("ALERT_COOLDOWN_SECONDS", "300"))
-        # Retrain-recommendation dedup, keyed per model with its own (long) cooldown so a
-        # persistently-decayed model doesn't re-recommend every drift cycle (ADR-0022 dec 4).
-        self._last_retrain_emit = {}
 
         # Log loaded rules
         total = sum(len(rules) for rules in tenant_rules.values())
@@ -105,26 +128,52 @@ class RulesEngine:
         # Fallback: use sensor_id if name not found
         return sensor_id
 
-    def _should_emit(self, alert: Dict[str, Any]) -> bool:
+    def _cached_within(self, scope: Tuple, at: datetime, window: timedelta) -> bool:
+        last = self._last_emit.get(scope)
+        return last is not None and abs(at - last) < window
+
+    def _remember(self, scope: Tuple, at: datetime) -> None:
+        self._last_emit[scope] = at
+        self._last_emit.move_to_end(scope)
+        while len(self._last_emit) > DEDUP_CACHE_MAX:
+            self._last_emit.popitem(last=False)
+
+    async def _emit(self, alert: Dict[str, Any], *, retrain: bool = False,
+                    cooldown_seconds: Optional[float] = None) -> bool:
         """
-        Suppress a duplicate alert for the same (rule, sensor, equipment) within the
-        cooldown window. This makes alert writes idempotent against redelivered readings
-        (at-least-once, ADR-0005 decision 6) and stops a persisting anomaly from raising an
-        alert on every reading / every ML loop iteration (alert storms).
+        Write the alert unless one with the same scope already exists within the cooldown of its
+        event time. Returns True only when a row was written.
+
+        Idempotent against redelivered readings (at-least-once, ADR-0005 dec 6), across restarts:
+        the cooldown is checked in the database against event time, and the alert_id is derived
+        from scope + event time, so replaying a reading finds its own alert (or collides on the
+        primary key) instead of writing a second one. It also stops a persisting anomaly from
+        raising an alert on every reading (alert storms).
+
+        Scope: (company, rule, sensor, equipment) for alerts; (company, model) for retrain
+        recommendations, which have their own long cooldown (ADR-0022 dec 4).
         """
-        key = (
-            alert.get('company_id'),
-            alert.get('rule_id'),
-            alert.get('sensor_id'),
-            alert.get('equipment_id'),
-        )
-        now = datetime.now(timezone.utc)
-        last = self._last_emit.get(key)
-        if last is not None and (now - last).total_seconds() < self._cooldown_seconds:
-            logger.debug(f"Alert suppressed by cooldown: {key}")
+        if retrain:
+            scope = (alert.get('company_id'), 'retrain', alert.get('model_id'))
+        else:
+            scope = (alert.get('company_id'), alert.get('rule_id'),
+                     alert.get('sensor_id'), alert.get('equipment_id'))
+        window = timedelta(seconds=self._cooldown_seconds if cooldown_seconds is None else cooldown_seconds)
+        at = as_utc(alert.get('triggered_at'))
+        alert['triggered_at'] = at
+        alert['alert_id'] = deterministic_alert_id(scope, at)
+
+        if self._cached_within(scope, at, window):
+            logger.debug(f"Alert suppressed by cooldown (cache): {scope}")
             return False
-        self._last_emit[key] = now
-        return True
+        inserted, prior_at = await self.alert_repo.save_alert_once(alert, window=window, retrain=retrain)
+        if inserted:
+            self._remember(scope, at)
+            return True
+        if prior_at is not None:
+            self._remember(scope, as_utc(prior_at))
+        logger.debug(f"Alert suppressed by cooldown (db): {scope}")
+        return False
 
     async def evaluate(self, sensor_data: Dict[str, Any], company_id: str) -> List[Dict]:
         """
@@ -176,10 +225,8 @@ class RulesEngine:
         
         for rule in applicable_rules:
             alert = await self._evaluate_rule(sensor_data, rule, company_id)
-            if alert and self._should_emit(alert):
+            if alert and await self._emit(alert):
                 triggered_alerts.append(alert)
-                # Save alert to database
-                await self.alert_repo.save_alert(alert)
 
         return triggered_alerts
 
@@ -281,10 +328,8 @@ class RulesEngine:
 
                 # Evaluate ML rule
                 alert = await self._evaluate_ml(sensor_data, rule, company_id)
-                if alert and self._should_emit(alert):
+                if alert and await self._emit(alert):
                     triggered_alerts.append(alert)
-                    # Save alert to database
-                    await self.alert_repo.save_alert(alert)
                     logger.info(f"ML alert triggered for equipment {equipment_id[:8]}...")
 
             except Exception as e:
@@ -432,7 +477,7 @@ class RulesEngine:
         if isinstance(timestamp, str):
             timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
         elif not timestamp:
-            timestamp = datetime.utcnow()
+            timestamp = datetime.now(timezone.utc)
 
         alert = {
             'company_id': company_id,
@@ -507,7 +552,7 @@ class RulesEngine:
             if isinstance(timestamp, str):
                 timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
             elif not timestamp:
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(timezone.utc)
 
             anomaly_score = result.get('prediction')
 
@@ -587,9 +632,8 @@ class RulesEngine:
                 alert = await self._evaluate_drift(
                     rule, company_id, window_minutes, default_share_threshold
                 )
-                if alert and self._should_emit(alert):
+                if alert and await self._emit(alert):
                     triggered_alerts.append(alert)
-                    await self.alert_repo.save_alert(alert)
                     logger.info(f"Drift alert triggered: {alert['message']}")
             except Exception as e:
                 logger.error(f"Failed to evaluate drift rule {rule.get('rule_id')}: {e}", exc_info=True)
@@ -690,21 +734,6 @@ class RulesEngine:
         }
         return alert
 
-    def _should_emit_retrain(self, company_id: str, model_id: str, cooldown_seconds: float) -> bool:
-        """Model-scoped cooldown for retrain recommendations (separate from the per-alert one).
-
-        A decayed model stays decayed until someone retrains it, so without a long cooldown it
-        would re-recommend every drift cycle. Keyed per model, so multiple drift rules on one
-        model recommend at most once per window.
-        """
-        key = (company_id, model_id)
-        now = datetime.now(timezone.utc)
-        last = self._last_retrain_emit.get(key)
-        if last is not None and (now - last).total_seconds() < cooldown_seconds:
-            return False
-        self._last_retrain_emit[key] = now
-        return True
-
     async def evaluate_retrain_recommendations(
         self,
         company_id: str,
@@ -753,10 +782,9 @@ class RulesEngine:
                 )
                 if precision is None:
                     continue
-                if not self._should_emit_retrain(company_id, model_id, cooldown_seconds):
-                    continue
                 alert = self._build_retrain_alert(rule, company_id, precision, signals, severity)
-                await self.alert_repo.save_alert(alert)
+                if not await self._emit(alert, retrain=True, cooldown_seconds=cooldown_seconds):
+                    continue
                 triggered.append(alert)
                 logger.info(f"Retrain recommendation: {alert['message']}")
             except Exception as e:

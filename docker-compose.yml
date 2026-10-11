@@ -632,10 +632,44 @@ services:
       # Server cert (handshake) — reuses the internal-CA TLS cert; device CA (verify + CRL).
       - "${TLS_CERT_DIR:-frontend-certs}:/etc/nginx/server:ro"
       - "${DEVICE_CA_DIR:-./deploy/device-ca}:/etc/nginx/device-ca:ro"
+      # Reloads nginx when the CRL changes (re-sign or revoke), so a new list takes effect.
+      - ./services/ingestion_edge/40-crl-reload.sh:/docker-entrypoint.d/40-crl-reload.sh:ro
     depends_on:
       - ingestion-service
     networks:
       - industryflow-network
+    restart: unless-stopped
+
+  # Re-signs the issuing intermediate's CRL before it expires (ADR-0007 dec 8). An expired CRL
+  # makes the edge refuse EVERY device. It uses only the intermediate key, which already lives in
+  # this host's CA dir; the root key is never needed (its CRL is re-signed at the root ceremony,
+  # `device-ca.sh root-crl`). The healthcheck goes unhealthy when either CRL nears expiry. It holds
+  # a signing key, so it has no network at all and runs as the CA dir's owner (DEVICE_CA_UID/GID).
+  device-crl-refresh:
+    image: alpine/openssl:3.5.8@sha256:3f25da71f70eba788067daac3f3df03bd1de7a7c52ed89fa93b94ad2c92d986b
+    container_name: industryflow-device-crl-refresh
+    network_mode: none
+    user: "${DEVICE_CA_UID:-1000}:${DEVICE_CA_GID:-1000}"
+    environment:
+      DEVICE_CA_DIR: /ca
+      CRL_REFRESH_SECONDS: ${DEVICE_CRL_REFRESH_SECONDS:-86400}
+    entrypoint: ["sh", "-ec"]
+    command:
+      - |
+        [ -d /ca/intermediate ] || { echo "device CA not initialized: run scripts/device-ca.sh init" >&2; exit 1; }
+        while true; do
+          sh /opt/device-ca.sh crl || echo "CRL re-sign FAILED" >&2
+          sleep "$$CRL_REFRESH_SECONDS"
+        done
+    healthcheck:
+      test: ["CMD", "sh", "/opt/device-ca.sh", "check"]
+      interval: 1h
+      timeout: 30s
+      start_period: 1m
+      retries: 1
+    volumes:
+      - "${DEVICE_CA_DIR:-./deploy/device-ca}:/ca"
+      - ./scripts/device-ca.sh:/opt/device-ca.sh:ro
     restart: unless-stopped
 
   # ==========================================================================

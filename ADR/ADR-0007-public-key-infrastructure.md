@@ -3,15 +3,17 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0007: Public-key infrastructure — the IndustryFlow device certificate authority
+# ADR-0007: Public-key infrastructure — the IndustryFlow device certificate authority (rev 1)
 
 - **ID:** ADR-0007
 - **Status:** Accepted
-- **Date:** 2026-06-26
+- **Date:** 2026-10-11
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001
 - **Companions:** ADR-0002 (ingestion authentication & device identity), ADR-0004 (API authentication, sessions & transport)
 - **Related (IndustryGrow):** ADR-0007 (PKI and secure-element identity), ADR-0004 rev 1 (gateway host hardening)
+- **Related:** ADR-0009 (its deferred secrets backend gates where the issuing key may live, decision 8)
+- **Supersedes:** ADR-0007 rev 0 (2026-06-26 — left the revocation mechanism, its hosting and its freshness deferred; rev 1 resolves that item as decision 8)
 
 ## Context and problem
 
@@ -20,6 +22,8 @@ ADR-0002 decided that device/gateway ingestion authenticates with mTLS, using cl
 The producers this CA serves are not ordinary software clients. On the IndustryGrow gateway — the first deployment — the device's private key lives in an **ATECC secure element**: it is generated on-device and is non-exportable (IndustryGrow ADR-0007, ADR-0004 rev 1). That hardware fact constrains the PKI: the CA can never generate or hold a device's private key, because a key that exists off the device is exactly the property the secure element exists to prevent. The PKI must be built around signing certificate requests for keys it never sees.
 
 This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0002) or that the browser edge uses ADR-0004's edge server certificate (ADR-0004 dec 8); it decides the certificate authority behind the device side of that trust.
+
+**Revision 1 (2026-10-11).** Rev 0 decided that revocation is checked at the edge (decision 6) but deferred how the revocation list stays valid. A revocation list carries its own expiry, and a verifier that checks revocation refuses every certificate once the list it holds has expired. Rev 0 therefore made revocation an availability dependency without saying what keeps that dependency met. No re-signing was in place, so the edge would refuse the entire fleet on a fixed date. Re-signing also runs into decision 1: the root's list is signed by a key that is meant to be offline. Rev 1 resolves the deferred item as **decision 8**.
 
 ## Decision drivers
 
@@ -45,6 +49,10 @@ This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0
 6. **Revocation is supported and checked at verification.** The CA publishes revocation status (a CRL and/or OCSP), and the terminating reverse proxy (ADR-0002) checks revocation when it verifies a client certificate. A decommissioned or compromised device is revoked and loses access without waiting for its certificate to expire.
 
 7. **The device CA is separate from the browser-facing server certificate.** The proxy presents the browser-facing server certificate (ADR-0004 dec 8 — public ACME when managed, an internal CA when self-hosted) to browsers and verifies device client certificates against this device CA. The two chains are distinct: one authenticates us to browsers, the other authenticates devices to us. Neither is used for the other's purpose.
+
+8. **Revocation is a revocation list held at the verifier. Each list is re-signed where its signing key already lives, well before it expires** *(rev 1)*. The verifier holds the list locally. Device certificates name no distribution point, because nothing fetches from one. Each list's validity is several times its re-signing interval, so one missed re-signing is survivable. A list approaching expiry is detected and raised ahead of time, so its expiry never takes ingestion down unannounced. The two tiers are refreshed differently:
+   - **The issuing intermediate's list** (revoked devices) is re-signed on a short, routine cadence. On a single-host deployment that runs automatically on the host that already holds the issuing key. Where the verifier runs in a cluster, the issuing key does not move into the cluster to be refreshed. The list is refreshed from outside and the cluster only watches its age. In-cluster re-signing is reconsidered once ADR-0009's deferred secrets backend gives that key protection stronger than a plain stored secret.
+   - **The root's list** (revoked intermediates) is re-signed only at the offline-root ceremony and is valid for the ceremony's cadence. Its approaching expiry is watched and is never refreshed automatically, because automatic refresh would bring the root online (decision 1).
 
 ## Alternatives considered
 
@@ -82,7 +90,7 @@ This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0
 - **Per-tenant intermediates (alternative C).** Whether to move from one issuing intermediate to per-tenant intermediates as scale/isolation needs grow.
 - **Enrollment protocol.** Whether enrollment uses EST (RFC 7030), SCEP, or a manual/custom CSR flow, and how the provisioning step authorizes a CSR for a tenant.
 - **Certificate lifetimes and rotation cadence.** Concrete validity periods and renewal timing for device certificates.
-- **Revocation mechanism.** CRL vs OCSP (vs OCSP stapling), its hosting, and freshness requirements.
+- ~~**Revocation mechanism.** CRL vs OCSP (vs OCSP stapling), its hosting, and freshness requirements.~~ *Resolved in rev 1 as decision 8.* OCSP or stapling remains open if a verifier ever cannot hold the list locally.
 - **Root-key custody.** Where the offline root key lives (HSM, air-gapped media) and the signing-ceremony procedure.
 - **SAN URI scheme.** The exact URI structure encoding tenant and device, coordinated with ADR-0003's tenant resolution.
 
