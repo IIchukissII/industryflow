@@ -205,6 +205,41 @@ jobs:
           docker compose cp probe.py api-gateway:/tmp/probe.py
           docker compose exec -T api-gateway python /tmp/probe.py
 
+      # ADR-0018 dec 4: a kernel is untrusted code on a dedicated network that holds only the hub, the
+      # trusted mediators and the object store. Both halves are asserted, because each fails silently:
+      # a mediator missing from the network breaks notebooks, and a platform service added to it (or a
+      # kernel spawned onto the platform network) hands untrusted code the capability store, where it
+      # can list or forge any tenant's capabilities (ADR-0015). The network is read from the hub's own
+      # config, so this proves where kernels are actually spawned. The host-gateway probes prove the
+      # internal ports are loopback-bound, not published on every interface (ADR-0004 dec 1, ADR-0013).
+      - name: The kernel network reaches the mediators and nothing else
+        run: |
+          net=$(docker compose --profile notebooks exec -T notebook-hub printenv NOTEBOOK_NETWORK)
+          gw=$(docker network inspect "$net" --format '{{(index .IPAM.Config 0).Gateway}}')
+          echo "kernel network: $net (host gateway $gw)"
+          cat > reach.py <<'PY'
+          import socket, sys
+          gw = sys.argv[1]
+          MUST = [("notebook-hub", 8081), ("api-gateway", 8000), ("notebook-sql-proxy", 6432),
+                  ("notebook-tracking-gateway", 5050), ("notebook-cold-broker", 5060), ("minio", 9000)]
+          MUST_NOT = [("redis", 6379), ("mlflow", 5000), ("kafka", 29092), ("zookeeper", 2181),
+                      ("timescaledb", 5432), ("spark-master", 7077), ("ml-service-api", 8002),
+                      ("alert-service-api", 8001), ("prometheus", 9090), ("loki", 3100),
+                      (gw, 5000), (gw, 9000), (gw, 9090), (gw, 3100), (gw, 8000), (gw, 6379)]
+          def reach(host, port):
+              try:
+                  socket.create_connection((host, port), timeout=5).close()
+                  return True
+              except OSError:
+                  return False
+          bad = [f"cannot reach {h}:{p}" for h, p in MUST if not reach(h, p)]
+          bad += [f"CAN reach {h}:{p}" for h, p in MUST_NOT if reach(h, p)]
+          print("\n".join(bad) or "kernel network boundary holds")
+          sys.exit(1 if bad else 0)
+          PY
+          docker run --rm --network "$net" --user 1000:1000 -v "$PWD/reach.py:/reach.py:ro" \
+            python:3.12-slim python /reach.py "$gw"
+
       - name: Dump everything on failure
         if: failure()
         run: docker compose --profile notebooks ps -a && docker compose --profile notebooks logs --tail=80

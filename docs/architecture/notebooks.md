@@ -45,8 +45,11 @@ of the isolation design:
 
 - **Kubernetes → KubeSpawner** — a per-user **pod**, contained by a single-user-pod egress
   **NetworkPolicy** (ADR-0009). This is the strongest containment and the production posture.
-- **Compose / single host → DockerSpawner** — a per-user **container** on a dedicated internal
-  network. So the platform's primary live deployment (ADR-0001) gets multi-tenant notebooks too,
+- **Compose / single host → DockerSpawner** — a per-user **container** on a dedicated kernel
+  network (`industryflow-notebook-kernels`). It holds only the hub, the trusted mediators (API
+  gateway, SQL proxy, tracking gateway, cold broker) and the object store their pre-signed URLs name:
+  the same set the Kubernetes NetworkPolicy allows. The capability store, the tracking server, Kafka,
+  the database and Spark are not on it. Compose smoke asserts both halves on every PR. So the platform's primary live deployment (ADR-0001) gets multi-tenant notebooks too,
   retiring the legacy root, auth-disabled, shared-credential Jupyter shim (ADR-0011 alt A).
 
 Everything above the spawner is **spawner-independent and shared** by both: SSO (ADR-0014),

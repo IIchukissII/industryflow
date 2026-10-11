@@ -215,8 +215,8 @@ services:
         condition: service_completed_successfully
     container_name: industryflow-minio
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
@@ -230,6 +230,7 @@ services:
       retries: 3
     networks:
       - industryflow-network
+      - notebook-kernels
     restart: unless-stopped
 
   # MinIO bucket bootstrap — one-shot that creates the buckets the platform needs (the Spark
@@ -335,7 +336,7 @@ services:
       dockerfile: Dockerfile
     container_name: industryflow-mlflow
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     environment:
       BACKEND_STORE_URI: postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/mlflow?sslmode=verify-full&sslrootcert=/etc/ssl/industryflow/ca.crt
       # psycopg2 does not always honour the URI's sslrootcert query param (it then falls back to
@@ -394,8 +395,8 @@ services:
     image: apache/spark:4.1.2-python3
     container_name: industryflow-spark-master
     ports:
-      - "7077:7077"
-      - "8083:8080"
+      - "127.0.0.1:7077:7077"
+      - "127.0.0.1:8083:8080"
     environment:
       SPARK_MASTER_HOST: spark-master
       SPARK_MASTER_PORT: 7077
@@ -529,7 +530,7 @@ services:
       context: ./services/api_gateway
       dockerfile: Dockerfile
     ports:
-      - "${API_GATEWAY_PORT:-8000}:8000"
+      - "127.0.0.1:${API_GATEWAY_PORT:-8000}:8000"
     environment:
       <<: *db-tls-env
       DB_HOST: ${DB_HOST}
@@ -556,6 +557,7 @@ services:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
       - industryflow-network
+      - notebook-kernels
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
     restart: unless-stopped
     healthcheck:
@@ -724,7 +726,7 @@ services:
       dockerfile: api/Dockerfile
     container_name: industryflow-alert-service-api
     ports:
-      - "${ALERT_SERVICE_PORT}:8001"
+      - "127.0.0.1:${ALERT_SERVICE_PORT}:8001"
     environment:
       <<: *db-tls-env
       DB_HOST: ${DB_HOST}
@@ -763,7 +765,7 @@ services:
       dockerfile: api/Dockerfile
     container_name: industryflow-ml-service-api
     ports:
-      - "${ML_SERVICE_PORT}:8002"
+      - "127.0.0.1:${ML_SERVICE_PORT}:8002"
     environment:
       <<: *db-tls-env
       DB_HOST: ${DB_HOST}
@@ -856,7 +858,8 @@ services:
       # Per-profile images (ADR-0011 dec 5): the hook picks one by the user's role profile.
       NOTEBOOK_IMAGE_AUTHORING: industryflow-notebook-authoring
       NOTEBOOK_IMAGE_ANALYTICS: industryflow-notebook-analytics
-      NOTEBOOK_NETWORK: industryflow-network
+      # Kernels spawn onto the dedicated kernel network, not the platform network (ADR-0018 dec 4).
+      NOTEBOOK_NETWORK: industryflow-notebook-kernels
       HUB_CONNECT_IP: notebook-hub
       # Mount the hub under a path prefix so the frontend can embed it same-origin (ADR-0014):
       # <app>/jupyter/ → notebook-sso → hub. JupyterHub propagates this to chp + single-user servers.
@@ -889,6 +892,7 @@ services:
       - api-gateway
     networks:
       - industryflow-network
+      - notebook-kernels
     restart: unless-stopped
 
   # SQL access proxy (ADR-0015): authoring kernels connect with a normal Postgres driver, using
@@ -926,6 +930,7 @@ services:
       - timescaledb
     networks:
       - industryflow-network
+      - notebook-kernels
     restart: unless-stopped
 
   # Experiment-tracking gateway (ADR-0019): authoring kernels point their MLflow client here
@@ -961,6 +966,7 @@ services:
       - minio
     networks:
       - industryflow-network
+      - notebook-kernels
     restart: unless-stopped
 
   # Cold-store broker (ADR-0025 dec 5, read side): resolves a notebook's cold capability to one
@@ -988,6 +994,7 @@ services:
       - minio
     networks:
       - industryflow-network
+      - notebook-kernels
     restart: unless-stopped
 
   # SSO reverse proxy (ADR-0014): the hub's only entry point. Validates the platform session via
@@ -1017,7 +1024,7 @@ services:
     image: prom/prometheus:latest
     container_name: industryflow-prometheus
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -1047,7 +1054,7 @@ services:
       - /var/run:/var/run:rw
       - /sys:/sys:ro
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     networks:
       - industryflow-network
     restart: unless-stopped
@@ -1070,7 +1077,7 @@ services:
       - /sys:/host/sys:ro
       - /:/rootfs:ro
     ports:
-      - "9100:9100"
+      - "127.0.0.1:9100:9100"
     networks:
       - industryflow-network
     restart: unless-stopped
@@ -1084,7 +1091,7 @@ services:
       DATA_SOURCE_PASS: ${DB_PASSWORD}
       DATA_SOURCE_URI: "timescaledb:${DB_PORT}/${DB_NAME}?sslmode=verify-full&sslrootcert=/etc/ssl/industryflow/ca.crt"
     ports:
-      - "9187:9187"
+      - "127.0.0.1:9187:9187"
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
@@ -1100,7 +1107,7 @@ services:
     environment:
       REDIS_ADDR: "redis:6379"
     ports:
-      - "9121:9121"
+      - "127.0.0.1:9121:9121"
     networks:
       - industryflow-network
     depends_on:
@@ -1114,7 +1121,7 @@ services:
     command:
       - '--kafka.server=kafka:29092'
     ports:
-      - "9308:9308"
+      - "127.0.0.1:9308:9308"
     networks:
       - industryflow-network
     depends_on:
@@ -1126,7 +1133,7 @@ services:
     image: grafana/grafana:latest
     container_name: industryflow-grafana
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
@@ -1156,7 +1163,7 @@ services:
     image: grafana/loki:2.9.3
     container_name: industryflow-loki
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     command: -config.file=/etc/loki/loki-config.yml
     volumes:
       - ./infrastructure/loki/loki-config.yml:/etc/loki/loki-config.yml
@@ -1286,4 +1293,14 @@ volumes:
 networks:
   industryflow-network:
     name: industryflow-network
+    driver: bridge
+  # The network spawned notebook kernels join (ADR-0018 dec 4). A kernel is untrusted code, so it
+  # reaches only the hub and the trusted mediators it is meant to use — the API gateway, the SQL
+  # proxy, the tracking gateway, the cold broker — plus the object store, which those mediators answer
+  # with pre-signed (signature-gated) URLs. The capability store, the tracking server, the broker, the
+  # database and Spark are NOT on it: a kernel that could reach the capability store could list or
+  # forge any tenant's capabilities (ADR-0015), and the tracking server must never be reached directly
+  # (ADR-0013 dec 1). Not `internal`: a pre-signed URL may name the public edge (ADR-0030 dec 10).
+  notebook-kernels:
+    name: industryflow-notebook-kernels
     driver: bridge
