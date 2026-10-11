@@ -7,12 +7,12 @@
 # wraps included routers in `_IncludedRouter` objects with no `.path`, which the 6.1.0
 # instrumentator's route-name resolver cannot introspect — it 500s every request, including
 # /health. This is the same pinned combo api-gateway runs; 0.115 sits inside mlflow's fastapi<1.
-fastapi==0.139.0
-uvicorn[standard]==0.51.0
-pydantic==2.13.4
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.0
 
 # Database
-asyncpg==0.31.0
+asyncpg==0.32.0
 
 # Authentication
 python-jose[cryptography]==3.5.0
@@ -22,7 +22,7 @@ python-multipart==0.0.32
 
 # MLflow integration
 mlflow==3.15.0
-boto3==1.43.46
+boto3==1.43.109
 
 # ML libraries for inference.
 #
@@ -54,10 +54,10 @@ pandas==2.3.3
 evidently==0.7.21
 
 # Feature Store
-redis[asyncio]==8.0.1
+redis[asyncio]==8.1.0
 
 # Prometheus metrics
-prometheus-fastapi-instrumentator==8.0.2
+prometheus-fastapi-instrumentator==8.1.0
 # Imported directly (the kill-switch neutralization counter, ADR-0024 dec 5), not only through the
 # instrumentator — so it is pinned as the direct dependency it is, rather than inherited.
-prometheus-client==0.25.0
+prometheus-client==0.26.0

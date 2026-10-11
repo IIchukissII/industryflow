@@ -10,7 +10,7 @@
 # pin just needs to install on the CI interpreter — it isn't exercised by these tests.
 # redis matches the 8.x every runtime requirements file already pins; this dev pin was the last
 # 5.x left in the tree, so the tests imported a different major than the services run.
-redis==8.0.1
+redis==8.1.0
 numpy==2.5.1
 pytest==9.1.1
 pytest-asyncio==1.4.0
@@ -33,9 +33,9 @@ evidently==0.7.21
 # client (registered-models, experiments), the metrics client (inference) and evidently (drift).
 # That is the honest reason these are here rather than a wish for a lighter list. The tracking
 # gateway's dev requirements carry fastapi + httpx for exactly the same purpose.
-fastapi==0.139.0
+fastapi==0.143.0
 httpx==0.28.1
 python-jose[cryptography]==3.5.0
-asyncpg==0.31.0
+asyncpg==0.32.0
 mlflow==3.15.0
-prometheus-client==0.25.0
+prometheus-client==0.26.0
