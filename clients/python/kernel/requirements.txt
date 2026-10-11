@@ -25,6 +25,6 @@ scikit-learn==1.9.1
 statsmodels==0.15.0
 xgboost==3.4.1
 matplotlib==3.11.2
-plotly==5.23.0
+plotly==7.1.0
 mlflow-skinny==3.15.2
 skops==0.16.0
