@@ -65,22 +65,25 @@ jobs:
       matrix:
         include:
           # `smoke` (ADR-0026 dec 5): a shell command run INSIDE the built image. Import the module the
-          # container actually serves — that is the step a dependency resolve cannot take for you.
+          # container actually serves — that is the step a dependency resolve cannot take for you, and
+          # the only one that fails when a Dockerfile's COPY list omits a module. Importing only the
+          # libraries passes on such an image. Where settings are read at import, the smoke passes
+          # placeholder values: they configure nothing, they only let the import run.
           # Images with nothing to load or start (nginx, pg_dump) carry none; the Spark images carry a
           # version/artifact check instead of an import (their risk is the JVM side — see below).
           - { name: api-gateway,            context: services/api_gateway,     file: services/api_gateway/Dockerfile,
-              smoke: "python -c \"import fastapi_users, redis, asyncpg; from fastapi_users.authentication import CookieTransport, JWTStrategy; print('api-gateway auth stack ok')\"" }
+              smoke: "env DB_HOST=x DB_PORT=5432 DB_NAME=x API_GATEWAY_DB_USER=x API_GATEWAY_DB_PASSWORD=x REDIS_HOST=x REDIS_PORT=6379 REDIS_DB=0 JWT_SECRET_KEY=smoke-only-not-a-secret-0123456789abcdef CORS_ORIGINS=https://x python -c \"import main; print('api-gateway serves', main.app.title)\"" }
           - { name: ingestion-service,      context: services/ingestion_service, file: services/ingestion_service/Dockerfile,
-              smoke: "python -c \"import aiokafka, fastapi; print('ingestion ok')\"" }
+              smoke: "env INGESTION_SERVICE_PORT=8003 KAFKA_BOOTSTRAP_SERVERS=x:9092 python -c \"import main; print('ingestion serves', main.app.title)\"" }
           - { name: frontend,               context: services/frontend,        file: services/frontend/Dockerfile }
           # numpy/sklearn/xgboost are C-extension stacks: an ABI mismatch is invisible to a resolve and
           # fatal on import (this is the pyarrow-14-under-numpy-2 break, #209).
           - { name: ml-service-api,         context: services/ml_service,       file: services/ml_service/api/Dockerfile,
-              smoke: "python -c \"import numpy, sklearn, xgboost, mlflow, evidently; print('ml stack ok', numpy.__version__)\"" }
+              smoke: "python -c \"import numpy, sklearn, xgboost, mlflow, evidently, main; print('ml-service serves', main.app.title, numpy.__version__)\"" }
           - { name: alert-service-api,      context: services/alert_service,    file: services/alert_service/api/Dockerfile,
-              smoke: "python -c \"import fastapi, asyncpg, boto3, jose; print('alert-api ok')\"" }
+              smoke: "env DB_PORT=5432 python -c \"import api; print('alert-api serves', api.app.title)\"" }
           - { name: alert-service-detector, context: services/alert_service,    file: services/alert_service/worker/Dockerfile,
-              smoke: "python -c \"import aiokafka, redis; print('alert-detector ok')\"" }
+              smoke: "python -c \"import main; print('alert-detector imports ok')\"" }
           # The Spark images DO run a process (a PySpark job / an executor), and their migration risk
           # is the JVM side a dependency resolve never sees: the base's Spark/Scala version and the
           # S3A jars baked for the object-store checkpoint (ADR-0029 moved these to Hadoop 3.4.2 + the
@@ -104,9 +107,9 @@ jobs:
           - { name: mlflow,                 context: infrastructure/mlflow,     file: infrastructure/mlflow/Dockerfile,
               smoke: "python -c \"import mlflow.server.fastapi_app; print('mlflow SERVER imports ok', __import__('mlflow').__version__)\"" }
           - { name: notebook-hub,           context: services/notebook_hub,     file: services/notebook_hub/Dockerfile,
-              smoke: "python -c \"import jupyterhub, dockerspawner, kubespawner; print('hub stack ok', jupyterhub.__version__)\" && jupyterhub --version" }
+              smoke: "cd /opt/hub && env NOTEBOOK_SPAWNER=docker NOTEBOOK_NETWORK=x NOTEBOOK_IMAGE=x PLATFORM_VERIFY_URL=http://x REDIS_HOST=x REDIS_PORT=6379 python -c \"import os; from traitlets.config import Config; c = Config(); f = os.path.abspath('jupyterhub_config.py'); exec(compile(open(f).read(), f, 'exec'), {'c': c, 'get_config': lambda: c, '__file__': f, '__name__': '__main__'}); print('hub config loads', c.JupyterHub.spawner_class)\" && jupyterhub --version" }
           - { name: notebook-sql-proxy,     context: services/notebook_sql_proxy, file: services/notebook_sql_proxy/Dockerfile,
-              smoke: "python -c \"import redis; print('sql-proxy ok')\"" }
+              smoke: "python -c \"import server; print('sql-proxy imports ok')\"" }
           # Imports what the container SERVES, not merely what it depends on. `import fastapi, redis`
           # proves the deps installed and would have passed happily on an image whose own modules the
           # Dockerfile never copied — which is exactly how a crashloop shipped past a green build and
@@ -115,7 +118,7 @@ jobs:
           - { name: notebook-tracking-gateway, context: services/notebook_tracking_gateway, file: services/notebook_tracking_gateway/Dockerfile,
               smoke: "python -c \"import gateway; print('tracking-gateway ok')\"" }
           - { name: notebook-cold-broker,   context: services/notebook_cold_broker, file: services/notebook_cold_broker/Dockerfile,
-              smoke: "python -c \"import fastapi, redis, boto3; print('cold-broker ok')\"" }
+              smoke: "python -c \"import broker; print('cold-broker imports ok')\"" }
           - { name: notebook-authoring,     context: clients/python,            file: services/notebook_hub/Dockerfile.authoring,
               smoke: "python -c \"import numpy, pandas, sklearn, mlflow, industryflow; print('authoring kernel ok', numpy.__version__)\"" }
           - { name: notebook-analytics,     context: clients/python,            file: services/notebook_hub/Dockerfile.analytics,
@@ -124,7 +127,7 @@ jobs:
           # pyarrow is the cold layer's Parquet writer, and pyarrow-vs-numpy is a compiled ABI pair:
           # pyarrow 14 imports fine until numpy 2 arrives, then dies (#209). An import is the whole test.
           - { name: cold-export,            context: services/cold_export,      file: services/cold_export/Dockerfile,
-              smoke: "python -c \"import pyarrow, pyarrow.parquet, pyarrow.fs, numpy; print('cold-export ok', pyarrow.__version__, numpy.__version__)\"" }
+              smoke: "python -c \"import pyarrow, pyarrow.parquet, pyarrow.fs, numpy, cold_export.main; print('cold-export imports ok', pyarrow.__version__, numpy.__version__)\"" }
     steps:
       - uses: actions/checkout@v7
 
