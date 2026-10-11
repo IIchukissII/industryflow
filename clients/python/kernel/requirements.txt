@@ -18,13 +18,13 @@
 #
 #   skops is NOT optional. mlflow 3's sklearn flavor writes `model.skops` by default, and
 #   `mlflow-skinny` does not pull skops in. It is pinned because it is a serialization format.
-numpy==2.5.1
+numpy==2.5.3
 pandas==2.3.3
-scipy==1.18.0
-scikit-learn==1.9.0
+scipy==1.18.1
+scikit-learn==1.9.1
 statsmodels==0.14.6
-xgboost==3.3.0
+xgboost==3.4.1
 matplotlib==3.11.0
 plotly==5.23.0
-mlflow-skinny==3.15.0
+mlflow-skinny==3.17.0
 skops==0.16.0
