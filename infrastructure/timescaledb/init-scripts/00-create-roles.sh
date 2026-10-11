@@ -72,7 +72,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     -- =============================================================================
     
     -- Connection limits. Must cover each service's (uvicorn workers x asyncpg pool) footprint:
-    -- alert-service-api runs 4 workers (pool min 5 / max 20) plus the detector, so 10 was too
+    -- sized when a separate alert HTTP API (4 workers, pool min 5 / max 20) shared this role with the detector (retired by ADR-0031); 10 was too
     -- low to even start it — raised to 50 (in line with api_gateway_user). See migration 11.
     ALTER ROLE api_gateway_user CONNECTION LIMIT 50;
     ALTER ROLE spark_streaming_user CONNECTION LIMIT 50;

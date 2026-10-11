@@ -150,19 +150,6 @@ apps:
       requests: { cpu: 250m, memory: 512Mi }
       limits: { cpu: "1", memory: 1Gi }
 
-  alert-service-api:
-    enabled: true
-    image: industryflow-alert-service-api
-    digest: ""
-    secretKeys: [ALERT_SERVICE_DB_PASSWORD, JWT_SECRET_KEY, INTERNAL_SERVICE_TOKEN]
-    metrics: true
-    replicas: 1
-    port: 8001
-    probe: { path: /health, port: 8001 }
-    resources:
-      requests: { cpu: 100m, memory: 256Mi }
-      limits: { cpu: 500m, memory: 512Mi }
-
   alert-service-detector:
     # Kafka consumer worker — no HTTP port/Service.
     enabled: true
