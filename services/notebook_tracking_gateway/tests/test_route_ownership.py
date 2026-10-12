@@ -222,3 +222,119 @@ def test_model_version_source_must_point_into_the_callers_tenant(c, body, status
     r = c.post(API + "model-versions/create", headers=H, json={"name": "m", **body})
     assert r.status_code == status
     assert bool(_forwarded(c, "model-versions/create")) == (status == 200)
+
+
+# --- one request message: what is checked is what is forwarded ----------------------------------
+# MLflow reads a GET's message from its query string and every other method's from its JSON body.
+# Checking one and forwarding the other let a caller name its own id to the check and a foreign id
+# to MLflow.
+
+@pytest.mark.parametrize("endpoint,key,own,foreign", [
+    ("runs/update", "run_id", OWN_RUN, FOREIGN_RUN),
+    ("runs/log-metric", "run_id", OWN_RUN, FOREIGN_RUN),
+    ("runs/set-tag", "run_id", OWN_RUN, FOREIGN_RUN),
+    ("runs/create", "experiment_id", OWN_EXP, FOREIGN_EXP),
+    ("experiments/delete", "experiment_id", OWN_EXP, FOREIGN_EXP),
+])
+def test_query_string_cannot_vouch_for_a_body_id(c, endpoint, key, own, foreign):
+    r = c.post(API + endpoint, headers=H, params={key: own}, json={key: foreign})
+    assert r.status_code in (400, 403)
+    assert not _forwarded(c, endpoint)
+
+
+def test_a_body_request_is_forwarded_without_a_query_string(c):
+    assert c.post(API + "runs/update", headers=H, json={"run_id": OWN_RUN}).status_code == 200
+    (_, _, params, body), = _forwarded(c, "runs/update")
+    assert params == {} and body == {"run_id": OWN_RUN}
+
+
+@pytest.mark.parametrize("method,endpoint", [
+    ("DELETE", "registered-models/delete"), ("DELETE", "registered-models/delete-tag"),
+    ("DELETE", "registered-models/alias"), ("DELETE", "model-versions/delete"),
+    ("PATCH", "registered-models/update"), ("POST", "registered-models/set-tag"),
+])
+def test_unqualified_names_in_a_write_query_string_are_refused(c, method, endpoint):
+    foreign = policy.tenant_prefix(OTHER) + "theirs"
+    r = c.request(method, API + endpoint, headers=H, params={"name": foreign, "version": "1"})
+    assert r.status_code == 400
+    assert not _forwarded(c, endpoint)
+
+
+@pytest.mark.parametrize("body", [[1, 2], "s", 3, None])
+def test_a_body_that_is_not_an_object_is_a_400(c, body):
+    r = c.post(API + "runs/update", headers=H, content=json.dumps(body))
+    assert r.status_code == 400
+    assert not _forwarded(c, "runs/update")
+
+
+# --- repeated query fields -----------------------------------------------------------------------
+
+@pytest.mark.parametrize("order", [(OWN_RUN, FOREIGN_RUN), (FOREIGN_RUN, OWN_RUN)])
+def test_bulk_metric_history_checks_every_run_in_any_order(c, order):
+    r = c.get(API + "metrics/get-history-bulk-interval", headers=H,
+              params=[("run_ids", order[0]), ("run_ids", order[1]), ("metric_key", "m")])
+    assert r.status_code == 403
+    assert not _forwarded(c, "metrics/get-history-bulk-interval")
+
+
+def test_bulk_metric_history_forwards_every_run(c):
+    second = "c" * 32
+    c.up.runs[second] = OWN_EXP
+    r = c.get(API + "metrics/get-history-bulk-interval", headers=H,
+              params=[("run_ids", OWN_RUN), ("run_ids", second), ("metric_key", "m")])
+    assert r.status_code == 200
+    (_, _, params, _), = _forwarded(c, "metrics/get-history-bulk-interval")
+    assert params["run_ids"] == [OWN_RUN, second] and params["metric_key"] == "m"
+
+
+# --- the path the gateway routes on is the path it scopes and forwards -----------------------------
+
+@pytest.mark.parametrize("path", [
+    "/experiments/create", "experiments/create/", "experiments//create",
+    "logged-models/../experiments", "logged-models/./" + "m-" + "1" * 32,
+])
+def test_non_canonical_paths_are_refused(c, path):
+    r = c.post(API + path, headers=H, json={"name": "x", "artifact_location": "s3://elsewhere"})
+    assert r.status_code == 403
+    assert not [call for call in c.up.calls if call[1] != "experiments/get"]
+
+
+# --- model-version sources -------------------------------------------------------------------------
+
+@pytest.mark.parametrize("rest", [
+    "/../" + policy.artifact_prefix(OTHER) + "1/models/m/artifacts",
+    "/./x", "//x", "/%2e%2e/x", "/a\\b",
+])
+def test_artifact_source_cannot_climb_out_of_the_tenant(c, rest):
+    source = "mlflow-artifacts:/" + policy.artifact_prefix(CID).rstrip("/") + rest
+    r = c.post(API + "model-versions/create", headers=H, json={"name": "m", "source": source})
+    assert r.status_code == 403
+    assert not _forwarded(c, "model-versions/create")
+
+
+def test_an_artifact_source_inside_the_tenant_is_accepted(c):
+    source = "mlflow-artifacts:/" + policy.artifact_prefix(CID) + "1/models/m-x/artifacts"
+    assert c.post(API + "model-versions/create", headers=H, json={"name": "m", "source": source}).status_code == 200
+
+
+# --- lookups ------------------------------------------------------------------------------------
+
+def test_one_run_named_twice_is_looked_up_once(c):
+    r = c.post(API + "model-versions/create", headers=H,
+               json={"name": "m", "source": f"runs:/{OWN_RUN}/model", "run_id": OWN_RUN})
+    assert r.status_code == 200
+    assert len(_forwarded(c, "runs/get")) == 1
+    assert len(_forwarded(c, "experiments/get")) == 1
+
+
+def test_a_repeated_name_field_is_refused_not_forwarded_unqualified(c):
+    foreign = policy.tenant_prefix(OTHER) + "theirs"
+    r = c.get(API + "registered-models/get", headers=H, params=[("name", foreign), ("name", "mine")])
+    assert r.status_code == 400
+    assert not _forwarded(c, "registered-models/get")
+
+
+def test_a_get_with_a_body_is_refused(c):
+    r = c.request("GET", API + "runs/get", headers=H, params={"run_id": OWN_RUN}, content=json.dumps({"run_id": FOREIGN_RUN}))
+    assert r.status_code == 400
+    assert not _forwarded(c, "runs/get")

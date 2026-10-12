@@ -165,11 +165,19 @@ def artifact_prefix(company_id: str) -> str:
     return tenant_token(company_id) + "/"
 
 
+def is_plain_key(key: str) -> bool:
+    """Whether a key means only what it spells: no empty, ``.`` or ``..`` segment and no backslash. A
+    prefix test on any other key proves nothing — a reader that normalises it can land under another
+    tenant's prefix."""
+    return "\\" not in key and all(seg not in ("", ".", "..") for seg in key.split("/"))
+
+
 def owns_artifact_key(company_id: str, key: str) -> bool:
-    """Whether an object-store key is under the caller's tenant prefix — checked before the
-    gateway signs a pre-signed URL for it (ADR-0019 dec 6)."""
+    """Whether an artifact URI's key is under the caller's tenant prefix (a model version's source,
+    which a trusted reader later resolves itself). The key is still URI-encoded, so a percent-escape
+    is refused too: decoded, it could spell a segment the plain-key test never saw."""
     key = (key or "").lstrip("/")
-    return key.startswith(artifact_prefix(company_id))
+    return "%" not in key and is_plain_key(key) and key.startswith(artifact_prefix(company_id))
 
 
 def experiment_artifact_location(company_id: str, nonce: str) -> str:
@@ -187,8 +195,14 @@ def experiment_artifact_location(company_id: str, nonce: str) -> str:
 
 
 def scope_artifact_key(company_id: str, key: str) -> str:
-    """Place a kernel-relative artifact path under the tenant prefix (idempotent)."""
+    """Place a kernel-relative artifact path under the tenant prefix (idempotent).
+
+    Raises ValueError for a key that is not plain (``is_plain_key``): prefixing it would not keep it
+    inside the tenant.
+    """
     key = (key or "").lstrip("/")
+    if key and not is_plain_key(key.rstrip("/")):
+        raise ValueError("artifact path is not a plain key")
     prefix = artifact_prefix(company_id)
     return key if key.startswith(prefix) else f"{prefix}{key}"
 

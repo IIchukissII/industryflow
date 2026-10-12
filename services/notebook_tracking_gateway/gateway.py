@@ -115,7 +115,7 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
     @app.api_route(_ARTIFACT_PREFIX + "/{artifact_path:path}", methods=["GET", "PUT", "DELETE"])
     async def artifact_object(artifact_path: str, request: Request,
                               binding: policy.TrackingBinding = Depends(tenant)):
-        key = policy.scope_artifact_key(binding.company_id, artifact_path)  # force under tenant prefix
+        key = _artifact_key(binding.company_id, artifact_path)  # force under tenant prefix
         if request.method == "DELETE":
             artifacts.delete(key)
             return JSONResponse({})
@@ -126,7 +126,7 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
 
     @app.get(_ARTIFACT_PREFIX)
     async def artifact_list(request: Request, binding: policy.TrackingBinding = Depends(tenant)):
-        prefix = policy.scope_artifact_key(binding.company_id, request.query_params.get("path", ""))
+        prefix = _artifact_key(binding.company_id, request.query_params.get("path", ""))
         return JSONResponse({"files": artifacts.list_files(prefix)})
 
     # --- the upload plane: staged, judged on structure, then admitted (ADR-0030) ---
@@ -228,30 +228,41 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
     @app.api_route(_MLFLOW_PREFIX + "{endpoint:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def proxy(endpoint: str, request: Request, binding: policy.TrackingBinding = Depends(tenant)):
         cid = binding.company_id
-        params = dict(request.query_params)
-        body = await _json_body(request)
 
-        # Default deny: only routes with a written-down tenant rule are forwarded (routes.py).
+        # Default deny: only routes with a written-down tenant rule are forwarded (routes.py). The
+        # match is exact, so the endpoint routed on is the one scoped and forwarded below.
         matched = routes.match(request.method, endpoint)
         if matched is None:
             raise HTTPException(status_code=403, detail="this tracking route is not available through the gateway")
         route, path_args = matched
+        message = await _request_message(request)
+        if any(not isinstance(message[f], str) for f in policy.request_name_fields(endpoint) if f in message):
+            # Only a single string can be qualified; anything else would reach MLflow unscoped.
+            raise HTTPException(status_code=400, detail="a name field must be a single string")
         # Validate every id the request references belongs to the tenant (ADR-0019 dec 5).
-        await _ensure_owns(upstream, cid, route, path_args, params, body)
+        await _ensure_owns(_Lookups(upstream, cid), route, path_args, message)
 
         # Qualify request names → proxy → strip response names (and drop foreign entries).
-        scoped_params = scoping.scope_request(endpoint, params, cid) if request.method == "GET" else params
-        scoped_body = scoping.scope_request(endpoint, body, cid) if body is not None else None
-        if endpoint == "experiments/create" and isinstance(scoped_body, dict):
+        scoped = scoping.scope_request(endpoint, message, cid)
+        if endpoint == "experiments/create":
             # Recorded location = where the bytes live (decision 5); never the caller's choice.
-            scoped_body = {**scoped_body,
-                           "artifact_location": policy.experiment_artifact_location(cid, uuid.uuid4().hex)}
-        status, data = await upstream.call(request.method, endpoint, params=scoped_params, body=scoped_body)
+            scoped["artifact_location"] = policy.experiment_artifact_location(cid, uuid.uuid4().hex)
+        if request.method == "GET":
+            status, data = await upstream.call("GET", endpoint, params=scoped, body=None)
+        else:
+            status, data = await upstream.call(request.method, endpoint, params={}, body=scoped)
         if isinstance(data, dict):
             data = scoping.scope_response(endpoint, data, cid)
         return JSONResponse(status_code=status, content=data)
 
     return app
+
+
+def _artifact_key(company_id: str, path: str) -> str:
+    try:
+        return policy.scope_artifact_key(company_id, path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 async def _json_body(request: Request) -> Optional[dict]:
@@ -262,74 +273,134 @@ async def _json_body(request: Request) -> Optional[dict]:
         return {}
     import json
     try:
-        return json.loads(raw)
+        body = json.loads(raw)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="the JSON body must be an object")
+    return body
 
 
-async def _ensure_owns(upstream: Upstream, company_id: str, route: "routes.Route", path_args: list,
-                      params: dict, body: Optional[dict]) -> None:
+async def _request_message(request: Request) -> dict:
+    """The one place an MLflow request carries its fields, as MLflow itself reads them.
+
+    MLflow reads a GET's fields from its query string and every other method's from its JSON body,
+    ignoring the other place. The gateway checks and scopes exactly that message and forwards only it:
+    a request that also carries fields in the other place is refused, because whatever the gateway
+    vouched for there is not what MLflow would act on.
+    """
+    if request.method == "GET":
+        if await request.body():
+            raise HTTPException(status_code=400, detail="a GET request carries its fields in the query string")
+        message: dict = {}
+        for key, value in request.query_params.multi_items():
+            # A repeated field (run_ids) keeps every value; MLflow reads it as a list.
+            if key in message:
+                prev = message[key]
+                message[key] = (prev if isinstance(prev, list) else [prev]) + [value]
+            else:
+                message[key] = value
+        return message
+    if request.query_params:
+        raise HTTPException(status_code=400, detail="this request carries its fields in the JSON body, not the query string")
+    return await _json_body(request)
+
+
+class _Lookups:
+    """The ownership lookups for one request, each id asked of MLflow once.
+
+    A request can name the same run or experiment through several fields (a model version's
+    ``source`` and its ``run_id``), and every run resolves to an experiment; the verdicts are memoised
+    so each costs one upstream call, however often it is named.
+    """
+
+    def __init__(self, upstream: Upstream, company_id: str):
+        self.upstream = upstream
+        self.company_id = company_id
+        self._experiments: dict[str, bool] = {}
+        self._runs: dict[str, bool] = {}
+        self._models: dict[str, bool] = {}
+
+    async def experiment(self, experiment_id) -> None:
+        if not experiment_id:
+            raise HTTPException(status_code=403, detail="cross-tenant or unknown experiment")
+        key = str(experiment_id)
+        if key not in self._experiments:
+            status, data = await self.upstream.call("GET", "experiments/get", params={"experiment_id": key}, body=None)
+            name = (((data or {}).get("experiment")) or {}).get("name") if status == 200 else None
+            self._experiments[key] = bool(name) and policy.owns_name(self.company_id, name)
+        if not self._experiments[key]:
+            raise HTTPException(status_code=403, detail="cross-tenant or unknown experiment")
+
+    async def run(self, run_id) -> None:
+        key = str(run_id)
+        if key not in self._runs:
+            status, data = await self.upstream.call("GET", "runs/get", params={"run_id": key}, body=None)
+            exp_id = (((data or {}).get("run") or {}).get("info") or {}).get("experiment_id") if status == 200 else None
+            self._runs[key] = await self._owned(exp_id)
+        if not self._runs[key]:
+            raise HTTPException(status_code=403, detail="cross-tenant or unknown experiment")
+
+    async def logged_model(self, model_id) -> None:
+        if not model_id:
+            raise HTTPException(status_code=403, detail="cross-tenant or unknown logged model")
+        key = str(model_id)
+        if key not in self._models:
+            status, data = await self.upstream.call("GET", f"logged-models/{key}", params={}, body=None)
+            exp_id = (((data or {}).get("model") or {}).get("info") or {}).get("experiment_id") if status == 200 else None
+            self._models[key] = await self._owned(exp_id)
+        if not self._models[key]:
+            raise HTTPException(status_code=403, detail="cross-tenant or unknown experiment")
+
+    async def _owned(self, experiment_id) -> bool:
+        try:
+            await self.experiment(experiment_id)
+        except HTTPException:
+            return False
+        return True
+
+
+async def _ensure_owns(lookups: _Lookups, route: "routes.Route", path_args: list, src: dict) -> None:
     """Refuse a request that references an experiment, run or logged model outside the caller's tenant
-    (ADR-0019 dec 5). Fails closed: a rule whose subject id is missing refuses rather than skips."""
-    src = {**(body or {}), **params}
+    (ADR-0019 dec 5). Fails closed: a rule whose subject id is missing refuses rather than skips.
+
+    ``src`` is the request's one message (``_request_message``) — the fields MLflow will act on.
+    """
     rules = route.rules
     if "experiment" in rules:
         ids = _as_list(src.get("experiment_id")) + _as_list(src.get("experiment_ids"))
         if not ids:
             raise HTTPException(status_code=403, detail="an experiment id is required")
         for exp_id in ids:
-            await _assert_experiment_owned(upstream, company_id, exp_id)
+            await lookups.experiment(exp_id)
     if "run" in rules or ("run_opt" in rules and (src.get("run_id") or src.get("run_uuid") or src.get("source_run_id"))):
         run_ids = [r for r in (src.get("run_id"), src.get("run_uuid"), src.get("source_run_id")) if r]
         if not run_ids:
             raise HTTPException(status_code=403, detail="a run id is required")
         for run_id in run_ids:
-            await _assert_run_owned(upstream, company_id, run_id)
+            await lookups.run(run_id)
     if "runs" in rules:
         run_ids = _as_list(src.get("run_ids"))
         if not run_ids:
             raise HTTPException(status_code=403, detail="run ids are required")
         for run_id in run_ids:
-            await _assert_run_owned(upstream, company_id, run_id)
+            await lookups.run(run_id)
     if "logged_model" in rules:
         model_id = path_args[0] if path_args else src.get("model_id")
-        await _assert_logged_model_owned(upstream, company_id, model_id)
+        await lookups.logged_model(model_id)
     if "logged_model_opt" in rules and src.get("model_id"):
-        await _assert_logged_model_owned(upstream, company_id, src["model_id"])
+        await lookups.logged_model(src["model_id"])
     if "mv_source" in rules:
         kind, value = routes.source_kind(src.get("source"))
         if kind == "run":
-            await _assert_run_owned(upstream, company_id, value)
+            await lookups.run(value)
         elif kind == "logged_model":
-            await _assert_logged_model_owned(upstream, company_id, value)
+            await lookups.logged_model(value)
         elif kind == "artifact":
-            if not policy.owns_artifact_key(company_id, value):
+            if not policy.owns_artifact_key(lookups.company_id, value):
                 raise HTTPException(status_code=403, detail="model version source is outside the tenant")
         else:
             raise HTTPException(status_code=403, detail=value)
-
-
-async def _assert_run_owned(upstream: Upstream, company_id: str, run_id) -> None:
-    status, data = await upstream.call("GET", "runs/get", params={"run_id": str(run_id)}, body=None)
-    exp_id = (((data or {}).get("run") or {}).get("info") or {}).get("experiment_id") if status == 200 else None
-    await _assert_experiment_owned(upstream, company_id, exp_id)
-
-
-async def _assert_logged_model_owned(upstream: Upstream, company_id: str, model_id) -> None:
-    if not model_id:
-        raise HTTPException(status_code=403, detail="cross-tenant or unknown logged model")
-    status, data = await upstream.call("GET", f"logged-models/{model_id}", params={}, body=None)
-    exp_id = (((data or {}).get("model") or {}).get("info") or {}).get("experiment_id") if status == 200 else None
-    await _assert_experiment_owned(upstream, company_id, exp_id)
-
-
-async def _assert_experiment_owned(upstream: Upstream, company_id: str, experiment_id) -> None:
-    if not experiment_id:
-        raise HTTPException(status_code=403, detail="cross-tenant or unknown experiment")
-    status, data = await upstream.call("GET", "experiments/get", params={"experiment_id": str(experiment_id)}, body=None)
-    name = (((data or {}).get("experiment")) or {}).get("name") if status == 200 else None
-    if not name or not policy.owns_name(company_id, name):
-        raise HTTPException(status_code=403, detail="cross-tenant or unknown experiment")
 
 
 def _as_list(v) -> list:
