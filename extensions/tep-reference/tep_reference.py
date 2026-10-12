@@ -6,7 +6,7 @@
 Reference extension (ADR-0010 dec 5): a Tennessee-Eastman-Process domain transform that
 registers through the platform's feature-transform contract WITHOUT editing the core.
 
-This is illustrative — IndustryGrow is the real reference extension in its own repository.
+This is illustrative — the sibling project is the real reference extension in its own repository.
 The platform loads this module only when EXTENSION_MODULES names ``tep_reference``; the core
 never imports it.
 """

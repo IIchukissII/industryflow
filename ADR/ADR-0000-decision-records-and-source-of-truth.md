@@ -18,7 +18,7 @@ IndustryFlow's reasoning is spread across many artifacts: service code in seven 
 
 An unrecorded rationale has two failure modes. A contributor cannot recover the *why*, so they reimplement it from a guess and the guesses diverge. And there is no authoritative home for a fact, so "where do I change the Kafka topic name / the tenant-schema rule / the CORS policy?" has several answers and none is correct. Both failures are the same underlying problem: a fact or a decision that lives in more than one place has more than one place to go wrong, and the review of "is this duplicated?" cannot be made mechanical.
 
-This ADR establishes the discipline the project currently lacks and makes it the explicit root of the decision record. It is deliberately the lowest-numbered ADR because it governs the form of every other ADR rather than any technical subsystem. The practice is adopted from the sibling project IndustryGrow, which is built on IndustryFlow and already runs its architecture this way; IndustryFlow is the underlying platform and should hold its own decisions to the same standard rather than inheriting them second-hand.
+This ADR establishes the discipline the project currently lacks and makes it the explicit root of the decision record. It is deliberately the lowest-numbered ADR because it governs the form of every other ADR rather than any technical subsystem. The practice is adopted from the sibling project, which is built on IndustryFlow and already runs its architecture this way; IndustryFlow is the underlying platform and should hold its own decisions to the same standard rather than inheriting them second-hand.
 
 **Revision 1.** Practice since acceptance surfaced a gap in decision 5. Several Accepted ADRs (e.g. ADR-0009 and ADR-0019) grew short, clearly-labeled sections recording what was *resolved or implemented* after acceptance — outcomes and resolved deferrals, not new decisions — which decision 5 as written sanctioned only on a still-Proposed draft. The converse also occurred: ADR-0010 grew an after-the-fact *anomaly-detector contract*, which is a new decision rather than a status note, and was therefore taken to a revision (ADR-0010 rev 1) rather than left as an addendum. Forcing full supersession ceremony onto every post-acceptance status note discourages the very act of keeping the record current, while leaving the practice unaddressed lets a genuine new decision blur into a silent in-place edit. This revision draws the line explicitly: a labeled status addendum that changes no recorded decision is allowed on an Accepted ADR; anything that adds or alters a *decision* still takes a revision.
 
@@ -28,7 +28,7 @@ This ADR establishes the discipline the project currently lacks and makes it the
 - **Duplication is the dominant source of documentation entropy.** N copies of a fact are N independent opportunities to drift; the only copy count that cannot drift is one. The README/compose/`.env.example` divergences already on record are this failure in the live codebase.
 - **A contributor needs one place to look and one place to change.** If a value can be edited in two documents, review cannot be mechanical and drift is caught by memory rather than by process.
 - **Copy-pasted decisions propagate copy-pasted bugs.** The tenant-resolution logic duplicated across services shows that an unrecorded *decision* drifts the same way an unrecorded *value* does — and carries its defects with it.
-- **The platform should own its decisions directly.** IndustryGrow records why IndustryFlow is used; IndustryFlow must record why IndustryFlow is *built the way it is*, in its own repository, as its own source of truth.
+- **The platform should own its decisions directly.** The sibling project records why IndustryFlow is used; IndustryFlow must record why IndustryFlow is *built the way it is*, in its own repository, as its own source of truth.
 
 ## Decision
 
@@ -56,7 +56,7 @@ This ADR establishes the discipline the project currently lacks and makes it the
 
 **C. Keep decisions in code comments and commit messages.** *Rejected:* comments are scoped to one file and one service, so a cross-cutting decision (multi-tenancy, delivery semantics) has no single home and gets re-explained per service — the copy-paste-the-decision failure already in the codebase. Commit messages are not discoverable as a body of current decisions.
 
-**D. Inherit IndustryGrow's ADRs by reference instead of keeping our own.** *Rejected:* IndustryGrow's ADRs decide IndustryGrow's concerns and treat IndustryFlow as a given. IndustryFlow's internal decisions (schema-per-tenant, Kafka→Spark→TimescaleDB, the auth model) are not recorded there and must not depend on another project's repository for their source of truth.
+**D. Inherit the sibling project's ADRs by reference instead of keeping our own.** *Rejected:* the sibling's ADRs decide the sibling's concerns and treat IndustryFlow as a given. IndustryFlow's internal decisions (schema-per-tenant, Kafka→Spark→TimescaleDB, the auth model) are not recorded there and must not depend on another project's repository for their source of truth.
 
 **E. Require a revision bump for any post-acceptance edit, including implementation-status notes *(rev 1)*.** *Rejected:* it would attach full supersession ceremony (rev title, `Supersedes:`, narrative rationale) to merely recording that a deferred item was resolved or that code settled an implementation detail — friction heavy enough to discourage keeping the record current, which is the opposite of this ADR's aim. Decision 5 instead admits labeled status addenda that change no decision, and reserves revisions for changes to the decisions themselves.
 
@@ -78,7 +78,7 @@ This ADR establishes the discipline the project currently lacks and makes it the
 
 ## Deferred decisions
 
-- **ADR-0001 framing.** The project's scope, licensing posture, intended audience, and relationship to IndustryGrow are a framing decision to be recorded in ADR-0001, not here. (ADR-0001 has since been accepted and relicensed the project to AGPL-3.0-or-later; this ADR does not restate the licence to avoid the very duplication it forbids.)
+- **ADR-0001 framing.** The project's scope, licensing posture, intended audience, and relationship to the sibling project are a framing decision to be recorded in ADR-0001, not here. (ADR-0001 has since been accepted and relicensed the project to AGPL-3.0-or-later; this ADR does not restate the licence to avoid the very duplication it forbids.)
 - **ADR template.** A skeleton enforcing the section structure shared across ADRs is implied but not yet written.
 - **Cross-reference and duplication tooling.** A linter that flags a value duplicated across README / compose / `.env.example`, or a checker that validates references resolve, is desirable but unspecified.
 - **The authoritative-home registry.** A concise map of which artifact owns which class of fact (ports/topics → `.env.example`, schema → SQL init scripts, rationale → ADR) could be maintained, but its location and format are open.
@@ -88,4 +88,4 @@ This ADR establishes the discipline the project currently lacks and makes it the
 - [`GLOSSARY.md`](GLOSSARY.md) — the single authoritative definition of each cross-cutting term, applying this ADR's single-source discipline to vocabulary.
 - M. Nygard, "Documenting Architecture Decisions" (2011) — the ADR practice this record formalizes for the project.
 - MADR (Markdown Any Decision Records) — format lineage for the ADR structure in use.
-- IndustryGrow ADR-0000 — the sibling project's governance root, from which this discipline is adopted.
+- Sibling ADR-0000 — the sibling project's governance root, from which this discipline is adopted.

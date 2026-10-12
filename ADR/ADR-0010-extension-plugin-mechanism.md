@@ -80,8 +80,8 @@ on it.
    Tennessee-Eastman artifacts move out of the core into an in-repo reference extension
    (`extensions/tep-reference/`) — its feature configuration and a sample domain transform that
    registers through the contract. The core loads it only when `EXTENSION_MODULES` names it, so
-   the platform does not import it by default (ADR-0008 decisions 6, 7). IndustryGrow remains the
-   real reference extension in its own repository.
+   the platform does not import it by default (ADR-0008 decisions 6, 7). The sibling project remains
+   the real reference extension in its own repository.
 
 6. **The second contract is the anomaly detector *(rev 1)*.** A detector implements
    `async (features, model, threshold, ctx: TransformContext) -> DetectionResult`, registered
