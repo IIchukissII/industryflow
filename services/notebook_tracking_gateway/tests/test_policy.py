@@ -92,3 +92,17 @@ def test_name_field_map_accessors():
     assert p.request_name_fields("experiments/create") == ["name"]
     assert p.response_name_paths("experiments/search") == ["experiments[].name"]
     assert p.request_name_fields("runs/log-metric") == []  # ids only, validated by lookup
+
+
+@pytest.mark.parametrize("key", ["../x", "a/../../x", "a/./b", "a//b", "a\\..\\b"])
+def test_an_artifact_key_that_is_not_plain_is_refused(key):
+    cid = str(uuid.uuid4())
+    with pytest.raises(ValueError):
+        p.scope_artifact_key(cid, key)
+    assert p.owns_artifact_key(cid, p.artifact_prefix(cid) + key) is False
+
+
+def test_an_encoded_artifact_uri_key_is_not_owned():
+    cid = str(uuid.uuid4())
+    assert p.owns_artifact_key(cid, p.artifact_prefix(cid) + "%2e%2e/x") is False
+    assert p.scope_artifact_key(cid, "dir/") == p.artifact_prefix(cid) + "dir/"
