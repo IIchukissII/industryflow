@@ -11,7 +11,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001
 - **Companions:** ADR-0002 (ingestion authentication & device identity), ADR-0004 (API authentication, sessions & transport)
-- **Related (IndustryGrow):** ADR-0007 (PKI and secure-element identity), ADR-0004 rev 1 (gateway host hardening)
+- **Related (sibling):** ADR-0007 (PKI and secure-element identity), ADR-0004 rev 1 (gateway host hardening)
 - **Related:** ADR-0009 (its deferred secrets backend gates where the issuing key may live, decision 8)
 - **Supersedes:** ADR-0007 rev 0 (2026-06-26 — left the revocation mechanism, its hosting and its freshness deferred; rev 1 resolves that item as decision 8)
 
@@ -19,7 +19,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 ADR-0002 decided that device/gateway ingestion authenticates with mTLS, using client certificates issued by IndustryFlow's own certificate authority, with the tenant (`company_id`) and `device_id` carried in the certificate; it deferred the PKI itself. ADR-0004 (rev 1) decided that the browser-facing API is served over HTTPS with a deployment-keyed edge server certificate (ADR-0004 dec 8: public ACME when managed, an internal CA when self-hosted), and explicitly noted that this server certificate is a **different** PKI concern from the device CA. Both ADRs therefore point at a PKI that has not yet been specified: who the root of trust is, how a device's identity is encoded and bound to a tenant, how a device enrolls, how long a certificate lives, and how a certificate is revoked.
 
-The producers this CA serves are not ordinary software clients. On the IndustryGrow gateway — the first deployment — the device's private key lives in an **ATECC secure element**: it is generated on-device and is non-exportable (IndustryGrow ADR-0007, ADR-0004 rev 1). That hardware fact constrains the PKI: the CA can never generate or hold a device's private key, because a key that exists off the device is exactly the property the secure element exists to prevent. The PKI must be built around signing certificate requests for keys it never sees.
+The producers this CA serves are not ordinary software clients. On the sibling project's gateway — the first deployment — the device's private key lives in an **ATECC secure element**: it is generated on-device and is non-exportable (sibling ADR-0007, ADR-0004 rev 1). That hardware fact constrains the PKI: the CA can never generate or hold a device's private key, because a key that exists off the device is exactly the property the secure element exists to prevent. The PKI must be built around signing certificate requests for keys it never sees.
 
 This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0002) or that the browser edge uses ADR-0004's edge server certificate (ADR-0004 dec 8); it decides the certificate authority behind the device side of that trust.
 
@@ -99,5 +99,5 @@ This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0
 - ADR-0002 — ingestion authentication & device identity; establishes mTLS with certificates from this CA and the verifying reverse proxy.
 - ADR-0004 — API authentication, sessions & transport; the browser-facing edge server certificate (dec 8) that this ADR keeps distinct from the device CA.
 - ADR-0003 — tenant→schema resolution; consumes the verified tenant identity encoded by decision 3.
-- IndustryGrow ADR-0007 — PKI and secure-element identity; the device-side counterpart whose non-exportable-key model constrains decisions 1–2.
+- Sibling ADR-0007 — PKI and secure-element identity; the device-side counterpart whose non-exportable-key model constrains decisions 1–2.
 - RFC 5280 (X.509 PKI), RFC 6125 (identity in certificates), RFC 7030 (EST) — standards underpinning the hierarchy, SAN identity, and enrollment choices.

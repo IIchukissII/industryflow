@@ -9,7 +9,7 @@ A minimal **reference extension** demonstrating the plugin contract from
 **[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)** (which makes
 **[ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md)** concrete). It exists to
 show — and test — that a domain extends IndustryFlow *without editing the core*. The real
-reference extension is IndustryGrow, in its own repository.
+reference extension is the sibling project, in its own repository.
 
 It contains:
 

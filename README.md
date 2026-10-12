@@ -28,10 +28,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 IndustryFlow ingests high-velocity sensor streams, processes them through Kafka and Spark into
 TimescaleDB, detects anomalies with ML models, and surfaces real-time alerts — with a full
 Prometheus / Grafana / Loki observability stack. It is multi-tenant by design (schema-per-tenant
-isolation) and is the platform that the [IndustryGrow](https://github.com/IIchukissII/IndustryGrow)
-cultivation project is built on.
+isolation) and is the platform a sibling cultivation project is built on.
 
-Where IndustryGrow is the **tree**, IndustryFlow is the **ground it grows from** — the gateway
+Where an application is the **tree**, IndustryFlow is the **ground it grows from** — the gateway
 core at the centre, where every sensor stream converges.
 
 </td>

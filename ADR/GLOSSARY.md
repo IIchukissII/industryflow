@@ -236,10 +236,10 @@ declares this one as its **Parent**; this back-link is expected to be reciprocal
 one replaces. A substantive change to a recorded decision produces a new revision: a `(rev N)`
 title plus a `Supersedes:` line, per ADR-0000 dec 5. *(ADR-0000 dec 5)*
 
-**Related (IndustryGrow)** — a reference to the **sibling project's** ADRs, not this
-repository's. The "(IndustryGrow)" qualifier is load-bearing: IndustryGrow's ADR numbers overlap
-this repo's (both have an ADR-0001, ADR-0007), so the prefix is the only thing disambiguating
-them. *(e.g. ADR-0002, ADR-0007, ADR-0008)*
+**Related (sibling)** — a reference to the **sibling project's** ADRs, not this repository's. The
+"(sibling)" qualifier is load-bearing: the sibling's ADR numbers overlap this repo's (both have an
+ADR-0001, ADR-0007), so the qualifier is the only thing disambiguating them. *(e.g. ADR-0002,
+ADR-0007, ADR-0008)*
 
 **Single source of truth** — the governing discipline: every fact has exactly one authoritative
 home and is referenced, never copied, elsewhere. This glossary follows it by pointing at the

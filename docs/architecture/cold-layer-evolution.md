@@ -76,7 +76,7 @@ Two decisions ADR-0025 left open were settled when the layer was built:
 - **Long-horizon _aggregate_ history (dec 7).** A separate ADR *if* a reader ever needs aggregates
   beyond the tiered hot-layer retention (90d/180d/1yr). Do **not** copy aggregates into the cold
   layer — they are derivable from raw (ADR alternative D).
-- **Prefect / ML-pipeline orchestration (dec 9).** IndustryGrow Phase-2's concern, when a real
+- **Prefect / ML-pipeline orchestration (dec 9).** The sibling project's Phase-2 concern, when a real
   feature-prep → train → validate → register dependency graph exists — not the cold export's.
 
 ## Trigger-watch quick reference
@@ -89,4 +89,4 @@ Two decisions ADR-0025 left open were settled when the layer was built:
 | Single-node → Spark | per-run volume > one node | export duration → schedule interval; mem → limit; rows/day ~10⁸ | open, gated |
 | Raw-retention horizon | (config) cost / disk / query-window change | raw hypertable size, node disk | open, tunable now (`COLD_EXPORT_HORIZON_DAYS`) |
 | Long-horizon aggregate history | a reader needs >tiered aggregate retention | a feature request | out of scope (own ADR) |
-| Prefect / ML-pipeline | a real ML dependency graph (IndustryGrow P2) | that project starting | out of scope (own project) |
+| Prefect / ML-pipeline | a real ML dependency graph (sibling project, Phase 2) | that project starting | out of scope (own project) |
