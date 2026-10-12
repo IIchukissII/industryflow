@@ -15,7 +15,7 @@ Lean design overviews per subsystem; see the [ADRs](../../ADR/) for the decision
 | [ml-and-features.md](ml-and-features.md) | Config-driven feature engineering, MLflow models, inference, the plugin registry; model trust by provenance (ADR-0027) |
 | [model-upload.md](model-upload.md) | Admitting a model the platform never watched being made (ADR-0030): staged bytes, the structural refusal, and the two gates that judge it |
 | [alerting.md](alerting.md) | Threshold & ML-based detection, durable dedup under redelivery (ADR-0005), the detection worker; the gateway is the only alerting API (ADR-0031) |
-| [notebooks.md](notebooks.md) | Embedded analytics & experimentation: per-tenant read-only role, tenant-scoped data path, dedicated kernel network, default-deny tracking gateway (ADR-0011/0012/0013/0018/0019) |
+| [notebooks.md](notebooks.md) | Embedded analytics & experimentation: per-tenant read-only role, tenant-scoped data path, dedicated kernel network, default-deny tracking gateway (ADR-0011→0015, ADR-0018→0020) |
 
 For the **plugin/extension** model that keeps these subsystems domain-generic, see
 [operations/extensions.md](../operations/extensions.md) (ADR-0008/0010).

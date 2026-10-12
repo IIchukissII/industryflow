@@ -124,8 +124,14 @@ _PATTERNS = [(method, _compile(ep), route) for (method, ep), route in ROUTES.ite
 
 
 def match(method: str, endpoint: str) -> Optional[tuple[Route, list[str]]]:
-    """The route rule for a request and its path parameters, or None (refuse) if it is not allowed."""
-    endpoint = endpoint.strip("/")
+    """The route rule for a request and its path parameters, or None (refuse) if it is not allowed.
+
+    Only the canonical spelling matches — no leading, trailing or doubled slash, no dot segment. The
+    gateway scopes and forwards the endpoint it was given, so a spelling that matched here but read
+    differently there would route on one name and scope on another.
+    """
+    if any(seg in ("", ".", "..") for seg in endpoint.split("/")):
+        return None
     exact = ROUTES.get((method, endpoint))
     if exact is not None:
         return exact, []
