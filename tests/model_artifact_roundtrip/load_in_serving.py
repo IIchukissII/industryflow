@@ -105,8 +105,8 @@ def main() -> int:
                   f"(max delta {drift:.1e})")
 
     # The grant is provenance's, not the artifact's (ADR-0027 dec 13). The kernel logged this tree
-    # model with a trust list in its MLmodel; loaded as an UPLOAD, that list must be discarded and the
-    # model refused. If it loads, the artifact is granting itself trust.
+    # model with a trust list in its MLmodel; loaded as an UPLOAD, that list must not be read and the
+    # model is refused. If it loads, the artifact is granting itself trust.
     tree = manifest["models"].get("sklearn")
     if tree:
         try:

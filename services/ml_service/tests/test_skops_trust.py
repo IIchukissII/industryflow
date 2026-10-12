@@ -6,7 +6,7 @@
 
 Real mlflow sklearn artifacts, saved to a temp dir and loaded through the serving loader; no mocks on
 the load path. The artifacts are saved WITH a trust list in their MLmodel, the way a kernel logs a
-tree model, so every refusal below also proves the artifact's own list was discarded.
+tree model, so every refusal below also proves the artifact's own list is never read.
 """
 
 import ast
@@ -133,12 +133,31 @@ def test_an_artifact_cannot_pick_an_arbitrary_method(tmp_path):
         skops_trust.load_pyfunc(path, UPLOADED)
 
 
-def test_an_artifact_cannot_point_outside_itself(tmp_path):
+@pytest.mark.parametrize("field", ["model_path", "data"])
+def test_an_artifact_cannot_point_outside_itself(tmp_path, field):
+    path = _save(tmp_path, "lin", LinearRegression().fit(X, Y))
+    _tamper(path, **{field: "../../etc/passwd"})
+    with pytest.raises(ValueError, match="outside the model directory"):
+        skops_trust.load_pyfunc(path, UPLOADED)
+
+
+def test_the_file_loaded_is_the_one_mlflow_would_load(tmp_path):
+    # MLflow's pyfunc loader opens python_function's `data`, else its `model_path`; the sklearn
+    # flavor's `pickled_model` is not what it reads, so a differing value must not change the load.
+    model = LinearRegression().fit(X, Y)
+    path = _save(tmp_path, "lin", model)
+    meta = Model.load(path)
+    meta.flavors["sklearn"]["pickled_model"] = "elsewhere.skops"
+    meta.save(str(Path(path) / "MLmodel"))
+    assert np.allclose(skops_trust.load_pyfunc(path, UPLOADED).predict(X), model.predict(X))
+
+
+def test_a_model_without_a_pyfunc_flavor_is_refused(tmp_path):
     path = _save(tmp_path, "lin", LinearRegression().fit(X, Y))
     meta = Model.load(path)
-    meta.flavors["sklearn"]["pickled_model"] = "../../etc/passwd"
+    del meta.flavors["python_function"]
     meta.save(str(Path(path) / "MLmodel"))
-    with pytest.raises(ValueError, match="outside the model directory"):
+    with pytest.raises(ValueError, match="python_function"):
         skops_trust.load_pyfunc(path, UPLOADED)
 
 
@@ -177,6 +196,39 @@ def test_the_probe_scores_an_uploaded_model_that_needs_no_grant(tmp_path):
     # which the probe keeps off. Loading skops ourselves keeps linear uploads admissible.
     verdict = _probe(_save(tmp_path, "lin", LinearRegression().fit(X, Y)))
     assert verdict["ok"] is True, verdict
+
+
+def _schema(kind):
+    from mlflow.types import ColSpec, Schema, TensorSpec
+    cols = lambda t: Schema([ColSpec(t, f"c{i}") for i in range(4)])  # noqa: E731
+    return {
+        "double": cols("double"), "float32": cols("float"), "int32": cols("integer"), "int64": cols("long"),
+        "tensor": Schema([TensorSpec(np.dtype("float64"), (-1, 4))]),
+        "tensor-float32": Schema([TensorSpec(np.dtype("float32"), (-1, 4))]),
+        "named-tensor": Schema([TensorSpec(np.dtype("float64"), (-1, 4), "x")]),
+    }[kind]
+
+
+@pytest.mark.parametrize("kind", ["double", "float32", "int32", "int64", "tensor", "tensor-float32"])
+def test_the_probe_builds_an_input_in_the_declared_types(tmp_path, kind):
+    # A synthetic input of the wrong dtype or form fails MLflow's schema enforcement, so a valid
+    # upload would be refused at the score stage.
+    from mlflow.models import ModelSignature
+    from mlflow.types import ColSpec, Schema
+    path = str(tmp_path / kind)
+    mlflow.sklearn.save_model(LinearRegression().fit(X, Y), path, serialization_format="skops",
+                              signature=ModelSignature(inputs=_schema(kind), outputs=Schema([ColSpec("double")])))
+    verdict = _probe(path)
+    assert verdict["ok"] is True, verdict
+
+
+def test_the_probe_feeds_named_tensors_by_name():
+    # Named tensors are passed as a dict of arrays; an sklearn model cannot score that form, so this
+    # checks the input itself rather than a round trip.
+    from mlflow.models import ModelSignature
+    import load_probe_worker
+    out = load_probe_worker._synthetic_frame(ModelSignature(inputs=_schema("named-tensor")))
+    assert set(out) == {"x"} and out["x"].shape == (1, 4) and out["x"].dtype == np.float64
 
 
 # --- the kernel's copy of the list ---------------------------------------------------------------

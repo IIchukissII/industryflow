@@ -69,17 +69,21 @@ def _load_local_skops(local: str, provenance: Optional[str]) -> Any:
     from mlflow.sklearn import _SklearnModelWrapper
 
     meta = Model.load(os.path.join(local, "MLmodel"))
-    sk = meta.flavors[_SKLEARN_FLAVOR]
-    py = meta.flavors.get("python_function") or {}
-    if py.get("loader_module", "mlflow.sklearn") != "mlflow.sklearn":
+    py = meta.flavors.get("python_function")
+    if not py:
+        # MLflow's pyfunc loader refuses a model without this flavor; so does this one.
+        raise ValueError("the model has no python_function flavor")
+    if py.get("loader_module") != "mlflow.sklearn":
         raise ValueError(f"a sklearn model whose pyfunc loader is {py.get('loader_module')!r} is not supported")
     predict_fn = py.get("predict_fn", "predict")
     if predict_fn not in _PREDICT_FNS:
         raise ValueError(f"unsupported pyfunc predict_fn {predict_fn!r}")
 
-    # The file path also comes from the artifact: keep it inside the downloaded model.
+    # The file MLflow's pyfunc loader would open (`data`, else `model_path`), so what is proven here
+    # is what any MLflow reader of this artifact would load. It comes from the artifact: keep it
+    # inside the downloaded model.
     root = os.path.realpath(local)
-    path = os.path.realpath(os.path.join(root, sk.get("pickled_model") or py.get("model_path") or ""))
+    path = os.path.realpath(os.path.join(root, py.get("data") or py.get("model_path") or ""))
     if os.path.commonpath([root, path]) != root or not os.path.isfile(path):
         raise ValueError("the model's serialized file is missing or outside the model directory")
 
@@ -103,7 +107,7 @@ def load_pyfunc(model_uri: str, provenance: Optional[str]) -> Any:
     import mlflow.artifacts
     from mlflow.models import Model
 
-    if not is_skops_sklearn(dict(Model.load(model_uri).flavors)):
+    if not is_skops_sklearn(Model.load(model_uri).flavors):
         return mlflow.pyfunc.load_model(model_uri)
 
     with tempfile.TemporaryDirectory(prefix="model-") as tmp:

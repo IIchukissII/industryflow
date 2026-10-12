@@ -39,25 +39,30 @@ def _synthetic_frame(signature):
     """
     import numpy as np
     import pandas as pd
+    from mlflow.types import DataType
 
-    inputs = signature.inputs.to_dict()
+    schema = signature.inputs
+    if schema.is_tensor_spec():
+        # One sample of each declared tensor, in its declared dtype: the batch dimension (and any
+        # other unknown, -1) is 1. MLflow allows a single unnamed tensor, or named ones as a dict.
+        tensors = {spec.name: np.zeros(tuple(1 if d in (None, -1) else int(d) for d in spec.shape),
+                                       dtype=spec.type)
+                   for spec in schema.inputs}
+        return tensors if schema.has_input_names() else next(iter(tensors.values()))
+
     row = {}
-    for spec in inputs:
-        name = spec.get("name")
-        t = str(spec.get("type", "double"))
-        if name is None:            # a tensor-spec artifact declares no column names
-            # One sample of the declared shape: the batch dimension (and any other unknown, -1) is 1.
-            tensor = spec.get("tensor-spec") or {}
-            shape = tuple(1 if d in (None, -1) else int(d) for d in (tensor.get("shape") or (-1, 1)))
-            return np.zeros(shape, dtype=np.dtype(tensor.get("dtype", "float64")))
-        if t in ("double", "float"):
-            row[name] = [0.0]
-        elif t in ("integer", "long"):
-            row[name] = [0]
-        elif t == "boolean":
-            row[name] = [False]
+    for spec in schema.inputs:
+        if spec.type == DataType.string:
+            row[spec.name] = pd.Series([""], dtype=object)
+        elif spec.type == DataType.binary:
+            row[spec.name] = pd.Series([b""], dtype=object)
+        elif spec.type == DataType.datetime:
+            row[spec.name] = pd.Series([pd.Timestamp(0)])
+        elif isinstance(spec.type, DataType):
+            # The column's own dtype: MLflow will not narrow a float64/int64 column to float32/int32.
+            row[spec.name] = pd.Series(np.zeros(1, dtype=spec.type.to_numpy()))
         else:
-            row[name] = [""]
+            raise ValueError(f"cannot build an input for column {spec.name!r} of type {spec.type}")
     return pd.DataFrame(row)
 
 
@@ -77,8 +82,8 @@ def probe(model_uri: str) -> dict:
                          "this environment is able to score it"}
 
     # Only uploaded artifacts are probed, and they get no trust grant (ADR-0027 dec 13): a skops file
-    # that needs a type outside skops' defaults (every tree-based sklearn model) is refused here, and
-    # whatever trust list the artifact itself declares is discarded first.
+    # that needs a type outside skops' defaults (every tree-based sklearn model) is refused here.
+    # The trust list the artifact itself declares is never read.
     import skops_trust
     import uploaded_model
 
