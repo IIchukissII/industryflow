@@ -17,7 +17,7 @@ IndustryFlow is a multi-tenant industrial-IoT platform: it ingests high-velocity
 
 That gap is not cosmetic. Every technical ADR here already declares `Parent: ADR-0001`, because each one assumes answers to framing questions it does not itself decide. ADR-0004 assumes there are external adopters whose browsers must be served trusted certificates and whose tenants must be isolated; ADR-0002 assumes a fleet of third-party gateways with hardware identities; the whole schema-per-tenant design assumes more than one tenant and therefore more than one operator. Those assumptions only make sense under a particular framing — a general-purpose platform with real external users — and that framing was being applied by habit, never stated. This ADR states it, so the technical decisions have a real parent rather than an implied one.
 
-There is also a concrete inconsistency to resolve. The repository is licensed **MIT** today, but the sibling project **IndustryGrow** — a cultivation platform built on IndustryFlow, by the same maintainer — is **AGPL-3.0 open-core**, and IndustryGrow's own framing (its ADR-0001) describes "the platform" as part of its copyleft open core. IndustryFlow and IndustryGrow therefore disagree about IndustryFlow's license. A framing ADR is the right place to settle which is correct, because the answer follows from what the project is meant to be, not from a file.
+There is also a concrete inconsistency to resolve. The repository is licensed **MIT** today, but the sibling project — a cultivation platform built on IndustryFlow, by the same maintainer — is **AGPL-3.0 open-core**, and the sibling's own framing (its ADR-0001) describes "the platform" as part of its copyleft open core. IndustryFlow and the sibling therefore disagree about IndustryFlow's license. A framing ADR is the right place to settle which is correct, because the answer follows from what the project is meant to be, not from a file.
 
 The decision is made now, rather than later, because licensing, audience, the open/commercial boundary, and the platform's scope all constrain downstream choices — repository structure, contribution policy, what may be accepted into the core, and how the managed and self-hosted deployments relate. Framing precedes implementation.
 
@@ -26,7 +26,7 @@ The decision is made now, rather than later, because licensing, audience, the op
 - **The platform must scale from self-hosted to managed.** The multi-tenant, schema-per-tenant design is already an investment in serving many operators; the framing should make use of it, not strand it.
 - **Open adoption is strategically valuable, but the core must not be strip-mined.** Community self-hosting and a real external user base are the point; a permissive license that lets a closed competitor run the platform as a service without contributing back undermines the sustainability the project needs.
 - **It must sustain its own development.** This is not a hobby in the long run; there has to be a funding path that does not depend on goodwill.
-- **IndustryFlow needs a first real deployment to prove it.** It had none; IndustryGrow becomes the first end-to-end deployment and, by being first, shapes priorities — without IndustryFlow collapsing into "IndustryGrow's backend."
+- **IndustryFlow needs a first real deployment to prove it.** It had none; the sibling project becomes the first end-to-end deployment and, by being first, shapes priorities — without IndustryFlow collapsing into "the sibling's backend."
 - **The platform must stay domain-generic.** Cultivation is one domain; others should be able to build on the same core. Domain specifics belong in extensions, not in the platform.
 - **Framing precedes technology.** The technical ADRs already depend on this record; it should exist as their explicit parent.
 
@@ -42,13 +42,13 @@ The decision is made now, rather than later, because licensing, audience, the op
 
 5. **Sustainability comes from the managed offering and commercial-license exceptions.** Continued development is funded by the managed service and by selling AGPL exceptions to organizations that need them — the model that makes "not a hobby in the long run" actionable without closing the source.
 
-6. **IndustryGrow is the first deployment, not the definition.** IndustryGrow is built on IndustryFlow and is its first end-to-end real deployment; it proves the platform and informs its priorities. IndustryFlow remains general-purpose: IndustryGrow is the first consumer, not the only intended one. Per ADR-0000, IndustryFlow owns its platform decisions in this repository and IndustryGrow owns its cultivation-domain decisions in its own; neither mirrors the other's records.
+6. **The sibling project is the first deployment, not the definition.** The sibling project is built on IndustryFlow and is its first end-to-end real deployment; it proves the platform and informs its priorities. IndustryFlow remains general-purpose: the sibling is the first consumer, not the only intended one. Per ADR-0000, IndustryFlow owns its platform decisions in this repository and the sibling owns its cultivation-domain decisions in its own; neither mirrors the other's records.
 
-7. **Domain specifics live in extensions, not in the core.** The platform stays domain-generic and exposes extension points; domain entities, profiles, and types (as IndustryGrow contributes for cultivation) are built on top of the platform rather than added into it. Keeping that boundary clean is what lets a second and third domain reuse the same core. The concrete extension/plugin interface is a technical decision deferred to its own ADR.
+7. **Domain specifics live in extensions, not in the core.** The platform stays domain-generic and exposes extension points; domain entities, profiles, and types (as the sibling contributes for cultivation) are built on top of the platform rather than added into it. Keeping that boundary clean is what lets a second and third domain reuse the same core. The concrete extension/plugin interface is a technical decision deferred to its own ADR.
 
 ## Alternatives considered
 
-**A. Keep the permissive MIT license.** *Rejected:* MIT lets a closed competitor operate the platform as a service without contributing changes back, which directly undermines decision 5's sustainability goal. AGPL is chosen specifically for its network-use copyleft; the protection against strip-mining is the reason, and MIT does not provide it. This also resolves the IndustryFlow/IndustryGrow license disagreement in favour of IndustryGrow's framing.
+**A. Keep the permissive MIT license.** *Rejected:* MIT lets a closed competitor operate the platform as a service without contributing changes back, which directly undermines decision 5's sustainability goal. AGPL is chosen specifically for its network-use copyleft; the protection against strip-mining is the reason, and MIT does not provide it. This also resolves the license disagreement with the sibling project in favour of the sibling's framing.
 
 **B. Make IndustryFlow fully proprietary/closed.** *Rejected:* it forecloses community adoption and the "first real deployment proves the platform" strategy, and it contradicts the open-core intent. The value of an external user base and community contribution outweighs the control a closed model would give.
 
@@ -56,7 +56,7 @@ The decision is made now, rather than later, because licensing, audience, the op
 
 **D. Self-hosted only, with no managed offering.** *Rejected:* it leaves the multi-tenant investment unused for sustainability and forgoes the managed revenue that funds development. The architecture was built for many tenants; the framing should monetize that, not ignore it.
 
-**E. Treat IndustryFlow as only IndustryGrow's backend.** *Rejected:* the platform is built domain-generic and other domains are an explicit goal; collapsing it into a single application's backend would justify baking cultivation specifics into the core (violating decision 7) and abandon the general-platform thesis. IndustryGrow is first, not sole.
+**E. Treat IndustryFlow as only the sibling's backend.** *Rejected:* the platform is built domain-generic and other domains are an explicit goal; collapsing it into a single application's backend would justify baking cultivation specifics into the core (violating decision 7) and abandon the general-platform thesis. The sibling is first, not sole.
 
 ## Consequences
 
@@ -65,8 +65,8 @@ The decision is made now, rather than later, because licensing, audience, the op
 - The project has a stated identity, license, and funding model, and the technical ADRs now have a real parent rather than an implied one.
 - The AGPL protects the core from being run as a closed service without reciprocity, while still letting the community self-host and contribute.
 - The managed offering and commercial-license exceptions give a concrete, source-open path to funding continued development.
-- A clean domain-generic boundary keeps the platform reusable across domains, with IndustryGrow as the proving deployment rather than a constraint.
-- The IndustryFlow/IndustryGrow license inconsistency is resolved.
+- A clean domain-generic boundary keeps the platform reusable across domains, with the sibling as the proving deployment rather than a constraint.
+- The license inconsistency with the sibling project is resolved.
 
 ### Negative
 
@@ -86,6 +86,6 @@ The decision is made now, rather than later, because licensing, audience, the op
 
 ## References
 
-- IndustryGrow ADR-0001 — the sibling application's framing, which treats IndustryFlow as its platform and whose open-core/AGPL model this ADR aligns IndustryFlow with.
+- Sibling ADR-0001 — the sibling application's framing, which treats IndustryFlow as its platform and whose open-core/AGPL model this ADR aligns IndustryFlow with.
 - ADR-0000 — decision records and single-source-of-truth; establishes that IndustryFlow owns its decisions in its own repository.
 - IndustryFlow review (2026-06-26) — the code review whose cross-cutting findings prompted the ADR initiative this framing now roots.

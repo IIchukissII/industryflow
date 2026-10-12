@@ -12,13 +12,13 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0003 (tenant→schema resolution)
 - **Refined by:** ADR-0010 (the in-process registry and feature-transform contract that realizes this interface)
-- **Related (IndustryGrow):** ADR-0001 (the reference extension; contributes the production_unit entity, cultivation-domain types, and plugin interfaces)
+- **Related (sibling):** ADR-0001 (the reference extension; contributes the production_unit entity, cultivation-domain types, and plugin interfaces)
 
 ## Context and problem
 
 ADR-0001 decided that IndustryFlow is a domain-generic platform and that domain specifics live in extensions, not in the core — and it deferred the actual extension mechanism to its own ADR. That mechanism now needs deciding, because the boundary it describes is already being crossed informally. The ml_service carries a `feature_configs/tep_reactor_config.json` — a Tennessee-Eastman-Process-specific feature definition sitting inside the platform; the mock service ships a `sensors_mapping.json`; alert rules encode domain thresholds. These are domain knowledge living in platform code by convention, with no defined surface that says "this is where a domain plugs in and this is where the core ends."
 
-Without a stated extension model, the convenient path is to add each domain's needs directly into the core — a new column on a core table here, a domain branch in a feature function there — which is exactly the erosion ADR-0001 decision 7 warns against. The first real consumer, IndustryGrow, contributes a domain entity (`production_unit`), cultivation-domain types, and plugin interfaces; if those land *in* the platform, IndustryFlow becomes IndustryGrow's backend in practice no matter what the framing says, and a second domain cannot reuse the core without inheriting cultivation's specifics.
+Without a stated extension model, the convenient path is to add each domain's needs directly into the core — a new column on a core table here, a domain branch in a feature function there — which is exactly the erosion ADR-0001 decision 7 warns against. The first real consumer, the sibling project, contributes a domain entity (`production_unit`), cultivation-domain types, and plugin interfaces; if those land *in* the platform, IndustryFlow becomes the sibling's backend in practice no matter what the framing says, and a second domain cannot reuse the core without inheriting cultivation's specifics.
 
 This ADR decides how a domain extends IndustryFlow: what the extension surfaces are, how extensions depend on the platform, and what keeps domain code out of the core. It is deliberately a direction, not a full interface specification — the concrete mechanics are large enough to deserve their own follow-up work and are deferred.
 
@@ -39,11 +39,11 @@ This ADR decides how a domain extends IndustryFlow: what the extension surfaces 
 
 3. **Code plugins extend behaviour where configuration cannot.** Custom logic the platform cannot express declaratively — bespoke feature transforms, custom anomaly detectors, model adapters — is provided as plugins registered through a declared platform interface and loaded by the relevant service, not by modifying core modules. The plugin interface is the contract; the plugin is the extension.
 
-4. **Domain data lives in the tenant schema as extension-owned tables, not as columns on core tables.** Domain entities and attributes (e.g. IndustryGrow's `production_unit`) are added within the tenant schema (which ADR-0003 already isolates per tenant) as tables the extension owns and registers, leaving the core's generic entities (equipment, sensor, measurement) unchanged. The core schema does not accrete per-domain columns.
+4. **Domain data lives in the tenant schema as extension-owned tables, not as columns on core tables.** Domain entities and attributes (e.g. the sibling's `production_unit`) are added within the tenant schema (which ADR-0003 already isolates per tenant) as tables the extension owns and registers, leaving the core's generic entities (equipment, sensor, measurement) unchanged. The core schema does not accrete per-domain columns.
 
 5. **Extensions are versioned against a declared extension-API version.** The platform publishes its extension contracts with a version and a compatibility guarantee; an extension declares the platform version it targets. A breaking change to a contract is a versioned change, not a silent one (consistent with ADR-0000's supersession discipline).
 
-6. **Extensions are packaged and released separately, depending on the platform.** A domain extension is its own package/repository that depends on IndustryFlow; the platform neither vendors nor imports it. IndustryGrow is the reference extension and the proof that the boundary holds. Per ADR-0000, each owns its decisions in its own repository.
+6. **Extensions are packaged and released separately, depending on the platform.** A domain extension is its own package/repository that depends on IndustryFlow; the platform neither vendors nor imports it. The sibling project is the reference extension and the proof that the boundary holds. Per ADR-0000, each owns its decisions in its own repository.
 
 7. **The boundary is enforced in review.** A change that puts domain-specific logic, entities, or vocabulary into a core path is rejected in favour of an extension point. "Does this belong in the core or in an extension?" is a standing review question, and the default answer for anything domain-named is "extension."
 
@@ -64,7 +64,7 @@ This ADR decides how a domain extends IndustryFlow: what the extension surfaces 
 ### Positive
 
 - The core stays generic and reusable, so a second and third domain can build on it without forking — the platform thesis becomes real rather than asserted.
-- Domains evolve independently of the platform's release cycle, and IndustryGrow's contributions (production_unit, domain types, plugins) land in IndustryGrow, not in the core.
+- Domains evolve independently of the platform's release cycle, and the sibling's contributions (production_unit, domain types, plugins) land in the sibling's repository, not in the core.
 - The one-way dependency and separate packaging make the boundary explicit and checkable, and align with ADR-0000's per-repository ownership.
 - The existing config-driven feature engineering is recognized and generalized into a real extension surface rather than an ad-hoc file.
 
@@ -89,4 +89,4 @@ This ADR decides how a domain extends IndustryFlow: what the extension surfaces 
 - ADR-0001 — IndustryFlow framing; decision 7 (domain specifics live in extensions) that this ADR gives a shape.
 - ADR-0003 — tenant→schema resolution; the per-tenant schema where extension-owned domain tables live (decision 4).
 - ADR-0000 — decision records & single-source-of-truth; the per-repository ownership the separate-packaging decision relies on.
-- IndustryGrow — the reference extension, contributing the production_unit entity, cultivation-domain types, and plugin interfaces on top of the platform.
+- The sibling project — the reference extension, contributing the production_unit entity, cultivation-domain types, and plugin interfaces on top of the platform.
