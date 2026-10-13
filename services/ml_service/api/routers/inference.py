@@ -155,6 +155,7 @@ async def _resolve_company_id(request: Request, request_data: InferenceRequest) 
     # its if_access default is a Cookie(None) marker (truthy) — calling it positionally would make
     # the cookie branch fire on a FieldInfo and 500 instead of cleanly reading the cookie / 401ing.
     user_data = await auth.verify_jwt_token(
+        request=request,
         authorization=request.headers.get("Authorization"),
         if_access=request.cookies.get("if_access"),
     )

@@ -161,6 +161,11 @@ REVOKE ALL ON FUNCTION public.update_company(UUID, TEXT, BOOLEAN) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.provision_company(TEXT, BOOLEAN) TO api_gateway_user;
 GRANT EXECUTE ON FUNCTION public.update_company(UUID, TEXT, BOOLEAN) TO api_gateway_user;
 
+-- The ML service authenticates users itself and must refuse a suspended company's users as the
+-- gateway does (ADR-0033 dec 3), so it reads the registry's active flag. Granted here rather than
+-- in 01 so that re-applying this script brings an existing database along.
+GRANT SELECT ON public.companies TO ml_service_user;
+
 DO $$
 BEGIN
     RAISE NOTICE '✓ Company provisioning: provision_company(), update_company() (SECURITY DEFINER, api_gateway_user only)';

@@ -110,6 +110,8 @@ A superuser can also provision through the API (`POST /api/companies`), which us
 - No teardown: deactivation is `update_company(id, NULL, false)`. It suspends the tenant's database
   identity (ADR-0033 dec 3): the SQL proxy login becomes `NOLOGIN` and its open sessions are
   terminated; reactivating restores `LOGIN`.
+- Grants `ml_service_user` `SELECT` on `public.companies`: the ML service authenticates users
+  itself and refuses a suspended company's users, as the gateway does.
 - Idempotent. On an existing database apply it with
   `psql -v ON_ERROR_STOP=1 -f 21-company-provisioning.sql` as the database superuser.
 
