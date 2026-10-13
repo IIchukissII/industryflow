@@ -1123,7 +1123,8 @@ services:
     networks:
       - industryflow-network
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     restart: unless-stopped
 
   # Grafana - Monitoring & Dashboards
