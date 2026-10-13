@@ -52,6 +52,16 @@ spec:
           annotations:
             summary: "Kafka consumer lag is high"
             description: "Consumer group {{`{{ $labels.consumergroup }}`}} lag on {{`{{ $labels.topic }}`}} exceeds {{ $pr.kafkaConsumerLagThreshold }}."
+        # ADR-0005: a reading that could not be processed is dead-lettered, never dropped, but a
+        # dead letter nobody looks at is a drop with extra steps. The DLQ topic's offset growth is
+        # the count of dead-lettered readings (the kafka exporter publishes it for every topic).
+        - alert: IndustryFlowDeadLetteredReadings
+          expr: sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".+\\.dlq"}[{{ $pr.deadLetterWindow }}])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "Readings were dead-lettered"
+            description: "{{`{{ $value | humanize }}`}} message(s) reached {{`{{ $labels.topic }}`}} in the last {{ $pr.deadLetterWindow }}. Inspect them there; they raised no alert."
         {{- if and .Values.ingress.enabled .Values.ingress.mtls.enabled .Values.ingress.mtls.crlCheck.enabled }}
         # ADR-0007 dec 8: an expired device CRL makes the edge refuse every device. Raised from the
         # device-crl-check job no longer succeeding (kube-state-metrics), well before the CRL

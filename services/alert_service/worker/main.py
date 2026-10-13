@@ -19,10 +19,25 @@ from feature_store import FeatureStore
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, str(config.LOG_LEVEL).upper(), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+async def wait_for_first_exit(tasks, still_running) -> None:
+    """Wait until any loop ends. Every loop is meant to run until shutdown, so one that ends while
+    the service is still running is a failure: the others are cancelled and RuntimeError is raised,
+    so the process exits non-zero and is restarted instead of staying up with a dead loop."""
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
+    if not still_running():
+        return
+    task = next(iter(done))
+    error = None if task.cancelled() else task.exception()
+    raise RuntimeError(f"{tasks[task]} ended unexpectedly: {error!r}") from error
 
 
 class AlertService:
@@ -38,6 +53,7 @@ class AlertService:
         self.ml_eval_task = None
         self.drift_eval_task = None
         self.consume_task = None
+        self.stop_requested = False
     
     async def initialize(self):
         """Initialize database connection and load rules"""
@@ -60,15 +76,16 @@ class AlertService:
             ssl=db_ssl_context(),
         )
 
-        # Initialize Feature Store
+        # Initialize Feature Store. Fail now if Redis is unreachable: running on with the ML
+        # rules reading an empty snapshot would look healthy and never raise an ML alert.
         logger.info("Initializing Feature Store...")
-        redis_url = getattr(config, 'REDIS_URL', 'redis://redis:6379/0')
         self.feature_store = FeatureStore(
-            redis_url=redis_url,
+            redis_url=config.REDIS_URL,
             max_window=100,
             ttl_seconds=3600
         )
-        logger.info(f"Feature Store initialized: {redis_url}")
+        await self.feature_store.ping()
+        logger.info("Feature Store initialized")
 
         # Load rules from all tenant schemas
         await self._load_rules()
@@ -101,7 +118,12 @@ class AlertService:
             self.rules_engine = RulesEngine(
                 tenant_rules=tenant_rules,
                 alert_repo=alert_repo,
-                feature_store=self.feature_store
+                feature_store=self.feature_store,
+                ml_service_url=config.ML_SERVICE_URL,
+                internal_service_token=config.INTERNAL_SERVICE_TOKEN,
+                cooldown_seconds=config.ALERT_COOLDOWN_SECONDS,
+                dedup_cache_max=config.ALERT_DEDUP_CACHE_MAX,
+                feature_max_age_seconds=config.FEATURE_MAX_AGE_SECONDS,
             )
     
     async def _periodic_reload(self):
@@ -213,6 +235,8 @@ class AlertService:
 
     async def run(self):
         """Main service loop"""
+        if self.stop_requested:  # a signal arrived during initialize()
+            return
         self.running = True
 
         # Start periodic rule reload task
@@ -234,20 +258,24 @@ class AlertService:
         logger.info("ML evaluation interval: 10s")
         logger.info(f"Drift evaluation interval: {config.DRIFT_EVAL_INTERVAL}s")
 
-        # Wait for tasks
-        results = await asyncio.gather(
-            self.reload_task,
-            self.ml_eval_task,
-            self.drift_eval_task,
-            self.consume_task,
-            return_exceptions=True
-        )
+        tasks = {
+            self.reload_task: "reload_task",
+            self.ml_eval_task: "ml_eval_task",
+            self.drift_eval_task: "drift_eval_task",
+            self.consume_task: "consume_task",
+        }
+        await wait_for_first_exit(tasks, lambda: self.running)
 
-        # Log any exceptions
-        task_names = ["reload_task", "ml_eval_task", "drift_eval_task", "consume_task"]
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"{task_names[i]} failed with exception: {result}", exc_info=result)
+    def stop(self):
+        """Signal handler: stop the loops; main() then shuts down cleanly."""
+        logger.info("Stop requested")
+        self.stop_requested = True
+        self.running = False
+        if self.kafka_consumer:
+            self.kafka_consumer.running = False
+        for task in (self.reload_task, self.ml_eval_task, self.drift_eval_task, self.consume_task):
+            if task:
+                task.cancel()
     
     async def shutdown(self):
         """Gracefully shutdown the service"""
@@ -280,42 +308,25 @@ class AlertService:
         logger.info("Alert Detection Service stopped")
 
 
-# Global service instance
-service = None
-
-
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    logger.info(f"Received signal {signum}")
-    if service:
-        asyncio.create_task(service.shutdown())
-
-
 async def main():
-    """Main entry point"""
-    global service
-    
-    # Setup signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
+    """Main entry point. Exits non-zero when initialisation fails or any loop dies."""
+    service = AlertService()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, service.stop)
+
+    exit_code = 0
     try:
-        # Create and initialize service
-        service = AlertService()
         await service.initialize()
-        
-        # Run service
         await service.run()
-    
-    except KeyboardInterrupt:
-        logger.info("Received keyboard interrupt")
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
-        sys.exit(1)
+        exit_code = 1
     finally:
-        if service:
-            await service.shutdown()
+        await service.shutdown()
+    return exit_code
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))
