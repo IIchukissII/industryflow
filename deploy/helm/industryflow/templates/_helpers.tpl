@@ -79,6 +79,22 @@ stringData:
 {{- end }}
 {{- end -}}
 
+{{/*
+The per-service role passwords the in-cluster TimescaleDB consumes at first init (00-create-roles.sh
+and 13-notebook-sql-proxy-role.sh create one role from each). ONE list for both consumers: the
+timescaledb scoped Secret carries exactly these keys and the StatefulSet passes exactly these into
+the container, so a role cannot be put in one and forgotten in the other (it would be created with
+no password). Returned space-separated; callers `splitList " "` it.
+*/}}
+{{- define "industryflow.timescaledbRoleKeys" -}}
+{{- $keys := list "API_GATEWAY_DB_PASSWORD" "SPARK_STREAMING_DB_PASSWORD" "ALERT_SERVICE_DB_PASSWORD" "ML_SERVICE_DB_PASSWORD" "MLFLOW_DB_PASSWORD" "METRICS_DB_PASSWORD" -}}
+{{- /* The notebook SQL proxy role (ADR-0015). */ -}}
+{{- if .Values.notebookHub.enabled }}{{ $keys = append $keys "NOTEBOOK_SQL_PROXY_DB_PASSWORD" }}{{ end -}}
+{{- /* The cold_export_user role (ADR-0025). */ -}}
+{{- if .Values.coldExport.enabled }}{{ $keys = append $keys "COLD_EXPORT_DB_PASSWORD" }}{{ end -}}
+{{- join " " $keys -}}
+{{- end -}}
+
 {{/* Resolve the TimescaleDB host: in-cluster service name or external host. */}}
 {{- define "industryflow.dbHost" -}}
 {{- if .Values.infra.timescaledb.inCluster -}}

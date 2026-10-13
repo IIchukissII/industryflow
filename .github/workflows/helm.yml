@@ -25,6 +25,12 @@ jobs:
           filters: |
             relevant:
               - 'deploy/helm/**'
+              # The chart renders these through symlinks under files/ (one source with compose);
+              # tests/config_guards checks this list covers every symlink target.
+              - 'infrastructure/timescaledb/config/**'
+              - 'infrastructure/timescaledb/init-scripts/**'
+              - 'infrastructure/grafana/**'
+              - 'scripts/device-ca.sh'
               - '.github/workflows/helm.yml'
 
   lint-and-template:

@@ -4,8 +4,10 @@
 
 # Build, scan, and (on main) publish every service image to GHCR.
 # - PRs: build + Trivy scan (no push) — catches build breaks and CRITICAL CVEs before merge.
-# - push to main: build + scan + push, tagged :latest and :sha-<short> (immutable).
-# Scoped to image-relevant changes so ordinary code/test PRs don't trigger 13 builds.
+# - push to main: build + scan + push, tagged :latest and :sha-<short> (immutable). ALWAYS: a merge
+#   that changes only a service's code changes what its image serves, so main never skips a publish.
+# PRs are scoped to the paths images are built from (every build context below), so a docs-only PR
+# does not trigger 17 builds; tests/config_guards checks the filter covers every context.
 name: Images
 
 on:
@@ -22,8 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      # A manual dispatch builds everything; there is no diff to filter on.
-      relevant: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.relevant == 'true' }}
+      # A manual dispatch builds everything; there is no diff to filter on. A push to main publishes
+      # everything: the filter exists to spare PRs, and a code-only merge (#314, #315) that skipped it
+      # left GHCR serving the previous code under the new commit's name.
+      relevant: ${{ github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true' }}
       # The Spark version is also written outside the images (compose, manifests, code, test pins);
       # a change there runs the parity check without building every image.
       spark_parity: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.spark_parity == 'true' }}
@@ -34,9 +38,13 @@ jobs:
         with:
           filters: |
             relevant:
-              - '**/Dockerfile*'
-              - '**/requirements*.txt'
-              - 'services/frontend/package*.json'
+              # Every build context in the matrix below, whole: an image is everything its context
+              # COPYs, not only its Dockerfile and pins.
+              - 'services/**'
+              - 'clients/python/**'
+              - 'infrastructure/mlflow/**'
+              - 'infrastructure/backup/**'
+              - '.trivyignore'
               - '.github/workflows/images.yml'
               - 'scripts/check_spark_version_parity.py'
               - 'scripts/tests/test_spark_version_parity.py'
@@ -81,6 +89,8 @@ jobs:
         run: python scripts/check_jupyterhub_parity.py && pytest scripts/tests/test_jupyterhub_parity.py -q
 
   build-scan:
+    # `relevant` is checked here too, not only inherited through spark-version-parity: the build must
+    # run exactly when the change detector says so, whatever happens to the gating job's own `if`.
     needs: [changes, spark-version-parity]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
