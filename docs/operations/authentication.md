@@ -31,10 +31,17 @@ The web client never holds a token in JavaScript. On `POST /auth/login` the gate
 The browser sends the cookies automatically; the SPA reads `if_csrf` and echoes it in an
 `X-CSRF-Token` header on every unsafe (POST/PUT/PATCH/DELETE) request. The gateway enforces
 **double-submit CSRF** (`X-CSRF-Token` must equal `if_csrf`) on cookie-authenticated unsafe
-requests — bearer/API clients are exempt, and `/auth/*` is exempt. The websocket
-authenticates from the same `if_access` cookie on the `wss://` handshake (no token in the URL).
+requests — bearer/API clients are exempt, and `/auth/*` is exempt.
 
-`Secure` cookies require HTTPS; set `COOKIE_SECURE=true` in any deployed environment.
+The websockets (`/ws/sensors`, `/ws/sensors/{equipment_id}`) authenticate only from the same
+`if_access` cookie on the `wss://` handshake. A `?token=` in the URL is not accepted, since URLs
+end up in access logs. A socket lives no longer than its session: it closes with code **4401** when
+the access token expires (the client refreshes via `/auth/refresh` and reconnects) and with
+**1008** when the user is inactive or deactivated (checked every minute while open).
+
+`Secure` cookies require HTTPS, which every edge serves. `COOKIE_SECURE` defaults to `true`
+(gateway, compose, `.env.example` and Helm); set it to `false` only for a throwaway plain-HTTP
+development setup.
 
 ## Tokens
 
@@ -47,7 +54,11 @@ The access JWT carries **`company_id` and `role` claims** (`CompanyClaimJWTStrat
 `services/api_gateway/users.py`); downstream services read the tenant from the claim rather
 than looking it up (**[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**).
 Refresh tokens are **single-use and rotated** on every refresh (reuse is detected and
-rejected) and are **revoked server-side** on logout.
+rejected) and are **revoked server-side** on logout. They are indexed per user, and **all** of a
+user's sessions are revoked when the password is changed or reset, when the user is deactivated
+(including by deactivating their company) and when the user is deleted. Each refresh token also
+carries a fingerprint of the password hash it was issued under, so a password set outside the
+gateway (the admin CLI) ends the existing sessions at their next refresh.
 
 ## Endpoints (API Gateway)
 
