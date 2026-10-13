@@ -3,14 +3,15 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0022 — Concept-drift operator feedback (alert labels, precision-over-time, retrain recommendation)
+# ADR-0022 — Concept-drift operator feedback (alert labels, precision-over-time, retrain recommendation) (rev 1)
 
 - **ID:** ADR-0022
 - **Status:** Accepted
-- **Date:** 2026-07-05
+- **Date:** 2026-07-05 (rev 1: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring.md) (model drift monitoring — realizes its top deferred decision)
 - **Companions:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md)/[ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (model registry + tracking).
+- **Supersedes:** ADR-0022 rev 0 (2026-07-05 — said "operators" label alerts without saying who an operator is; any authenticated user of the tenant could label, including a read-only one; rev 1 requires a writing role, decisions 1 and 6)
 
 ## Context and problem
 
@@ -23,6 +24,8 @@ Label-free drift answers *"has the input distribution moved?"* It cannot answer 
 
 So the undecided shape is: what an operator labels, where the label lives (given the alert itself expires), what performance signal we can honestly derive, and what "closed-loop retrain" can mean when no trainer exists.
 
+**Revision 1 (2026-10-13).** This record says throughout that *operators* label alerts, and never says what makes someone an operator. The label surface took the broadest reading: any authenticated user of the tenant could label, including a user whose role is read-only everywhere else on the platform. A label is not a view. It is a durable write that outlives the alert (decision 2), feeds a precision figure (decision 3), and can trigger a high-severity retrain recommendation (decision 4) — so a user the tenant chose to give read-only access could move a model's quality record and raise alerts. Rev 1 says who an operator is (decision 1) and holds the label write to it (decision 6).
+
 ## Decision drivers
 
 - **Reuse ADR-0021's homes.** Labels ride the alert surface operators already use (acknowledge → label is the same gesture on the same row); precision-over-time is a read over those labels; the retrain evaluator is a sibling of the existing scheduled drift evaluator. No parallel system.
@@ -34,6 +37,8 @@ So the undecided shape is: what an operator labels, where the label lives (given
 
 1. **Operators label a fired alert with a correctness verdict — `true_positive` | `false_positive` | `unsure` — distinct from acknowledge.** Acknowledge means "I have seen this"; a label means "this alert was (not) a real event." One current verdict per alert, re-labelable (an upsert), with an optional free-text note and the acting operator recorded. The write mirrors the existing acknowledge action on the alert surface the frontend already talks to.
 
+   > **rev 1 (2026-10-13): an operator is a user holding a writing role in the tenant.** "Operator" in this record means a user of the tenant whose role permits changing tenant data (ADR-0004 dec 5) — not every authenticated user. Labelling, like acknowledging, is a write and requires such a role; a **read-only user cannot label** and is refused, though they may read labels and the metrics derived from them. The roles themselves, and which of them write, are owned by the platform's authorization model, not by this record.
+
 2. **Labels persist in a dedicated per-tenant `alert_labels` table, never as columns on the `alerts` hypertable.** The alerts hypertable drops chunks at 90 days; the label must survive that. `alert_labels` is an ordinary (non-hypertable, no-retention) per-tenant table keyed by `alert_id`, and it **denormalizes** the labelled alert's `rule_id`, `model_id`, `detection_type`, and `severity` at label time so the verdict stays self-describing and groupable after the source alert row has aged out.
 
 3. **v1 derives precision and false-positive rate over time; true recall is out of reach and stays deferred.** From labelled fired alerts we can compute, per rule and per model over a window, precision = TP / (TP + FP) and the false-positive rate and volume trend. **Recall is not computable from fired-alert labels alone** — we never observe the anomalies that *didn't* fire (the false negatives), so any "recall" from this data would be a fiction. Recall requires a separate ground-truth source and is explicitly deferred; the metric surface must not imply otherwise.
@@ -42,7 +47,7 @@ So the undecided shape is: what an operator labels, where the label lives (given
 
 5. **Same split of homes as ADR-0021.** The label write and the precision-over-time read live on the api_gateway alert surface (tenant-scoped, authenticated operator); the retrain-recommendation evaluator is a sibling of the scheduled drift evaluator in the alert service, reusing its internal→ml-service auth path. No new service.
 
-6. **Tenant-scoped and attributed throughout.** Every label, metric, and recommendation is for one tenant, written through the existing schema-routed path with the acting operator recorded on the label. No cross-tenant read or aggregation.
+6. **Tenant-scoped and attributed throughout.** Every label, metric, and recommendation is for one tenant, written through the existing schema-routed path with the acting operator recorded on the label. No cross-tenant read or aggregation. **rev 1:** the acting operator holds a writing role in that tenant (decision 1); attribution records who wrote the label, and authorization decides who may.
 
 ## Alternatives considered
 
@@ -51,6 +56,8 @@ So the undecided shape is: what an operator labels, where the label lives (given
 - **Compute recall from operator labels.** *Rejected as impossible:* fired-alert labels contain no information about missed events (false negatives). Presenting a recall number here would mislead.
 - **Build an auto-retrain executor now.** *Rejected:* no training service exists (the `/api/training` stub was removed). An honest closed loop recommends and surfaces; automated execution needs a trainer and its own ADR.
 - **A standalone feedback/labelling microservice.** *Rejected:* labelling is a small write on the alert row; the alert surface is its natural home, exactly as ADR-0021 kept drift in the alert service rather than spinning up a service.
+
+- **Let any authenticated tenant user label *(rev 1)*.** *Rejected:* it treats a durable quality signal as if it were a view. A label changes precision and can trigger a retrain recommendation; the tenant's choice to make a user read-only would not hold on the one surface where their input becomes a write.
 
 ## Consequences
 
@@ -74,8 +81,8 @@ So the undecided shape is: what an operator labels, where the label lives (given
 
 - **Implementation.** Every decision above is realised and validated end-to-end on the compose
   deployment; no decision changed in doing so. This record's status line once read "rev 1" and then
-  "rev 2"; both were implementation-progress notes, not revisions of a decision, and there is no
-  revision of this record under ADR-0000 dec 5. The slices, their storage and their validation are in
+  "rev 2"; both were implementation-progress notes, not revisions of a decision under ADR-0000
+  dec 5. The revision now numbered rev 1 is the one recorded above (2026-10-13). The slices, their storage and their validation are in
   `docs/architecture/alerting.md`. The one surface not built is a retrain flag shown beside the model
   on the models view; the recommendation is surfaced in alert history.
 
