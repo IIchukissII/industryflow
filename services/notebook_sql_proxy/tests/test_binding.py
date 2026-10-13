@@ -49,6 +49,45 @@ async def test_absent_empty_malformed_denied():
     assert await b.resolve_sql_binding(store.get, "bad") is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", [
+    "[]", "null", '"sql"', "42",                                       # valid JSON, not an object
+    json.dumps({"user": "u", "audience": "sql"}),                       # no tenant
+    json.dumps({"user": "u", "audience": "sql", "company_id": ""}),     # empty tenant
+    json.dumps({"user": "u", "audience": "sql", "company_id": "x; DROP"}),  # not a UUID
+])
+async def test_a_malformed_store_entry_denies_rather_than_raising(raw):
+    store = FakeAsyncStore({f"{b._KEY_PREFIX}h": raw})
+    assert await b.resolve_sql_binding(store.get, "h") is None
+
+
+@pytest.mark.asyncio
+async def test_the_bound_tenant_is_canonicalised():
+    cid = uuid.uuid4()
+    store = FakeAsyncStore({f"{b._KEY_PREFIX}h": _rec(str(cid).upper())})
+    assert (await b.resolve_sql_binding(store.get, "h")).company_id == str(cid)
+
+
+def test_tenant_login_role_from_uuid():
+    cid = "550e8400-e29b-41d4-a716-446655440000"
+    assert b.tenant_login_role(cid) == "tenant_sqlproxy_550e8400_e29b_41d4_a716_446655440000"
+    with pytest.raises(ValueError):
+        b.tenant_login_role("tenant_reader_x")
+
+
+def test_enrol_statement_carries_only_a_verifier():
+    cid = str(uuid.uuid4())
+    verifier = "SCRAM-SHA-256$4096:c2FsdA==$c3RvcmVk:c2VydmVy"
+    assert b.enrol_statement(cid, verifier) == (
+        f"SELECT public.notebook_sql_proxy_enrol('{cid}'::uuid, '{verifier}')"
+    )
+    for bad in ("plaintext-password", "SCRAM-SHA-256$4096:a$b:c'; DROP ROLE x; --", ""):
+        with pytest.raises(ValueError):
+            b.enrol_statement(cid, bad)
+    with pytest.raises(ValueError):
+        b.enrol_statement("not-a-uuid", verifier)
+
+
 def test_reader_role_from_uuid():
     cid = "550e8400-e29b-41d4-a716-446655440000"
     assert b.reader_role(cid) == "tenant_reader_550e8400_e29b_41d4_a716_446655440000"

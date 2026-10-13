@@ -79,3 +79,22 @@ def test_split_message_leaves_trailing_bytes():
     # The second message is returned intact for the next split.
     t2, _, rest2 = wire.split_message(rest)
     assert t2 == wire.MSG_READY_FOR_QUERY and rest2 == b""
+
+
+def test_cancel_request_roundtrip():
+    packet = wire.build_cancel_request(1234, 0xFFFFFFFE)
+    assert packet[:4] == b"\x00\x00\x00\x10"  # length 16, as libpq sends it
+    code, _params = wire.parse_startup_packet(packet[4:])
+    assert code == wire.CANCEL_REQUEST_CODE
+    assert wire.parse_cancel_request(packet[4:]) == (1234, 0xFFFFFFFE)
+
+
+def test_cancel_request_rejects_a_wrong_length():
+    with pytest.raises(wire.ProtocolError):
+        wire.parse_cancel_request(wire.build_cancel_request(1, 2)[4:] + b"\x00")
+
+
+def test_backend_key_data_roundtrip():
+    type_byte, payload, _ = wire.split_message(wire.build_backend_key_data(7, 9))
+    assert type_byte == wire.MSG_BACKEND_KEY_DATA
+    assert wire.parse_backend_key_data(payload) == (7, 9)

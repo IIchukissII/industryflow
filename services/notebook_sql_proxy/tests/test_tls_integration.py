@@ -11,7 +11,7 @@ no real Postgres here — instead a *fake Postgres-TLS server* (an asyncio serve
 trustme-issued cert) speaks just enough of the wire protocol to exercise the negotiation,
 handshake, trust-anchor check, and StartupMessage-over-TLS end to end:
 
-  client (PostgresBackend.connect_privileged)        fake server
+  client (UpstreamConnection.open)                   fake server
         --- SSLRequest ----------------------->
         <-- 'S' -------------------------------
         ===== TLS handshake (verify CA) =======
@@ -35,17 +35,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import server  # noqa: E402
 import wire  # noqa: E402
-from binding import SqlBinding  # noqa: E402
-
-
-class _DummyClientWriter:
-    """Stand-in for the kernel-facing writer; connect_privileged never touches the client side."""
-
-    def is_closing(self):
-        return False
-
-    def close(self):
-        pass
 
 
 async def _start_fake_pg(server_ctx, *, decline_tls=False):
@@ -111,14 +100,26 @@ def _server_ctx(server_cert):
     return ctx
 
 
+class _Upstream:
+    """One upstream session opened the way the proxy opens a tenant's (UpstreamConnection.open)."""
+
+    def __init__(self, host, port, ssl_context):
+        self._conn = server.UpstreamConnection(server.UpstreamConfig(
+            host=host, port=port, database="industryflow",
+            enrol_user="notebook_sql_proxy", enrol_password="pw", tenant_key=b"k" * 32,
+            ssl_context=ssl_context, require_tls=True,
+        ))
+        self._user = "tenant_sqlproxy_" + str(uuid.uuid4()).replace("-", "_")
+
+    async def open(self):
+        await self._conn.open(self._user, "pw")
+
+    async def close(self):
+        await self._conn.close()
+
+
 def _backend(host, port, ssl_context):
-    return server.PostgresBackend(
-        SqlBinding(user="alice", company_id=str(uuid.uuid4())),
-        asyncio.StreamReader(),
-        _DummyClientWriter(),
-        host=host, port=port, user="notebook_sql_proxy", password="pw", database="industryflow",
-        ssl_context=ssl_context, require_tls=True,
-    )
+    return _Upstream(host, port, ssl_context)
 
 
 @pytest.mark.asyncio
@@ -131,13 +132,13 @@ async def test_verify_full_connects_over_tls(tmp_path):
     ctx = server.build_upstream_ssl_context("verify-full", ca_path)
     backend = _backend(host, port, ctx)
     try:
-        await backend.connect_privileged()      # SSLRequest → TLS → startup → AuthOk/ReadyForQuery
+        await backend.open()      # SSLRequest → TLS → startup → AuthOk/ReadyForQuery
         await backend.close()
     finally:
         await _teardown(srv, handlers)
 
     # The StartupMessage was read by the server only after the TLS upgrade succeeded.
-    assert received.get("user") == "notebook_sql_proxy"
+    assert received.get("user", "").startswith("tenant_sqlproxy_")
     assert received.get("database") == "industryflow"
 
 
@@ -153,7 +154,7 @@ async def test_verify_full_rejects_untrusted_cert(tmp_path):
     backend = _backend(host, port, ctx)
     try:
         with pytest.raises(ssl.SSLCertVerificationError):
-            await backend.connect_privileged()
+            await backend.open()
         await backend.close()
     finally:
         await _teardown(srv, handlers)
@@ -172,7 +173,7 @@ async def test_required_tls_refuses_when_server_declines(tmp_path):
     backend = _backend(host, port, ctx)
     try:
         with pytest.raises(ConnectionError):
-            await backend.connect_privileged()   # server replied 'N' but verify-full requires TLS
+            await backend.open()   # server replied 'N' but verify-full requires TLS
         await backend.close()
     finally:
         await _teardown(srv, handlers)

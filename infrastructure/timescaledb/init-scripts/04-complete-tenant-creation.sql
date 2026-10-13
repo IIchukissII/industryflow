@@ -84,10 +84,13 @@ BEGIN
     -- Future tables added to this schema by the creating role are granted SELECT too.
     EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT SELECT ON TABLES TO %I', v_schema_name, v_reader_role);
 
-    -- The notebook SQL proxy (ADR-0015) SET ROLEs into this reader; grant it membership when the
-    -- proxy role exists (the `notebooks` profile created it via 13-notebook-sql-proxy-role.sh).
+    -- The notebook SQL proxy (ADR-0015) opens a kernel's session as this tenant's own login
+    -- (tenant_sqlproxy_<uuid>), which SET ROLEs into this reader and can reach no other tenant.
+    -- Created when the `notebooks` profile is on (13-notebook-sql-proxy-role.sh created the proxy
+    -- principal and defines ensure_tenant_sql_login(), resolved here at call time). The proxy
+    -- itself is never granted the reader: a session it opens carries a kernel's bytes.
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'notebook_sql_proxy') THEN
-        EXECUTE format('GRANT %I TO notebook_sql_proxy', v_reader_role);
+        PERFORM ensure_tenant_sql_login(p_company_id);
     END IF;
 
     -- Cold-layer exporter (ADR-0025): least-privilege read access to raw measurements only. It
