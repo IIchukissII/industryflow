@@ -55,6 +55,50 @@ def test_tampered_server_signature_is_rejected():
     assert client.verify_server_final(b"v=AAAATRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4=") is False
 
 
+def test_verifier_matches_the_rfc_vector_keys():
+    """The stored verifier Postgres would compute for the RFC 7677 password and salt."""
+    import base64
+
+    v = scram.scram_verifier(_PASSWORD, salt=base64.b64decode("W22ZaJ0SNY7soEsUEjb6gQ=="), iterations=4096)
+    assert v.startswith("SCRAM-SHA-256$4096:W22ZaJ0SNY7soEsUEjb6gQ==$")
+    # The server signature the RFC vector expects can be recomputed from the verifier's ServerKey,
+    # so a server holding only this verifier authenticates the RFC exchange.
+    import hashlib
+    import hmac
+
+    server_key = base64.b64decode(v.rsplit(":", 1)[1])
+    client = _client()
+    client.client_first()
+    client.client_final(_SERVER_FIRST)
+    signature = hmac.new(server_key, client._auth_message.encode(), hashlib.sha256).digest()
+    assert b"v=" + base64.b64encode(signature) == _SERVER_FINAL
+
+
+def test_verifier_accepts_the_clients_proof():
+    """A server holding only the verifier accepts the proof a client derives from the password."""
+    import base64
+    import hashlib
+    import hmac
+
+    v = scram.scram_verifier("derived-password")
+    _, rest = v.split("$", 1)
+    iter_salt, keys = rest.split("$")
+    iterations, salt = iter_salt.split(":")
+    stored_key = base64.b64decode(keys.split(":")[0])
+
+    client = scram.ScramClient("u", "derived-password", "clientnonce")
+    client.client_first()
+    final = client.client_final(f"r=clientnonceSERVER,s={salt},i={iterations}".encode())
+    proof = base64.b64decode(final.decode().rsplit("p=", 1)[1])
+    signature = hmac.new(stored_key, client._auth_message.encode(), hashlib.sha256).digest()
+    client_key = bytes(x ^ y for x, y in zip(proof, signature))
+    assert hashlib.sha256(client_key).digest() == stored_key
+
+
+def test_verifier_salts_are_fresh():
+    assert scram.scram_verifier("p") != scram.scram_verifier("p")
+
+
 def test_server_nonce_must_extend_client_nonce():
     client = _client()
     client.client_first()

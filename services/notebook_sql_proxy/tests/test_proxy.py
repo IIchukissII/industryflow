@@ -30,15 +30,17 @@ class FakeBackend:
         self.executed: list[str] = []
         self.relayed = False
         self.closed = False
+        self.still_authorized = None
 
-    async def connect_privileged(self):
+    async def connect(self):
         self.connected = True
 
     async def execute(self, sql):
         self.executed.append(sql)
 
-    async def relay(self):
+    async def relay(self, still_authorized):
         self.relayed = True
+        self.still_authorized = still_authorized
 
     async def close(self):
         self.closed = True
@@ -94,3 +96,40 @@ async def test_api_handle_is_rejected_by_sql_proxy():
 
     ok = await proxy.serve_connection("apionly", store.get, lambda binding: FakeBackend())
     assert ok is False
+
+
+# --- the session re-checks its capability for as long as it lives (ADR-0012 dec 6) -------------
+
+async def _served(store, handle="good"):
+    backends = []
+
+    def factory(binding):
+        be = FakeBackend()
+        backends.append(be)
+        return be
+
+    assert await proxy.serve_connection(handle, store.get, factory) is True
+    return backends[0]
+
+
+@pytest.mark.asyncio
+async def test_the_relay_is_handed_a_recheck_that_holds_while_the_handle_does():
+    store = FakeAsyncStore({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()))})
+    be = await _served(store)
+    assert await be.still_authorized() is True
+
+
+@pytest.mark.asyncio
+async def test_the_recheck_fails_once_the_handle_is_revoked():
+    store = FakeAsyncStore({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()))})
+    be = await _served(store)
+    del store.mapping[f"{b._KEY_PREFIX}good"]  # revocation is deletion (ADR-0015 dec 2)
+    assert await be.still_authorized() is False
+
+
+@pytest.mark.asyncio
+async def test_the_recheck_fails_if_the_handle_is_rebound_to_another_tenant():
+    store = FakeAsyncStore({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()))})
+    be = await _served(store)
+    store.mapping[f"{b._KEY_PREFIX}good"] = _sql_record(str(uuid.uuid4()))
+    assert await be.still_authorized() is False

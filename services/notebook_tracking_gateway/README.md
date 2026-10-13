@@ -31,7 +31,11 @@ object-store credentials live only here, never in the kernel (ADR-0013 dec 1, AD
   kernel↔object-store. Written against injectable `Upstream`/`ArtifactStore`, so the orchestration
   is testable with a fake MLflow.
 - **`admission.py`, `staging.py`** — the upload plane (ADR-0030): an externally-authored artifact is
-  staged, judged on structure, then admitted into the tenant's prefix or discarded.
+  staged, judged on structure, then admitted into the tenant's prefix or discarded. The commit
+  spends the upload handle (one upload per handle), refuses a manifest over 256 KiB rather than
+  judging it truncated, and promotes each member with an ETag-conditional copy, so bytes re-PUT
+  after the verdict are never admitted (409). Admitted uploads (`<tenant>/uploads/…`) are written
+  only by this plane: the kernel's artifact plane refuses PUT/DELETE there (403).
 - **`tests/`** — unit tests run in the `unit-tests` CI workflow; `test_*_integration.py` run against
   a live MLflow + MinIO + Redis in the `tracking-gateway-integration` workflow.
 

@@ -32,6 +32,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
+import staging
+
 AUDIENCE_TRACKING = "tracking"  # the gateway's copy of the audience (ADR-0019 / ADR-0015 dec 3)
 # The upload plane (ADR-0030 dec 3). It reaches this same mediator, so the audience is the ONLY fact
 # separating the two populations — and they are held to different rules: an uploaded artifact faces
@@ -77,8 +79,11 @@ async def _resolve_binding(
         return None
     if record.get("audience") != expected_audience:
         return None
-    company_id = record.get("company_id")
-    if not company_id:
+    try:
+        # Canonical, or deny: the tenant becomes every namespace below, and a malformed one must be
+        # a refusal rather than a 500 from the first place it is used.
+        company_id = str(uuid.UUID(str(record.get("company_id") or "")))
+    except ValueError:
         return None
     return TrackingBinding(
         user=record.get("user", ""), company_id=company_id, audience=expected_audience
@@ -192,6 +197,26 @@ def experiment_artifact_location(company_id: str, nonce: str) -> str:
     because the experiment id does not exist until MLflow assigns it.
     """
     return f"mlflow-artifacts:/{artifact_prefix(company_id)}{nonce}"
+
+
+def is_upload_reserved(company_id: str, scoped_key: str) -> bool:
+    """Whether a tenant-scoped artifact key lies where only the upload plane may write (ADR-0030).
+
+    An admitted upload (``<tenant>/uploads/<id>/…``) was judged on its bytes before it was admitted;
+    a kernel overwriting or deleting it through the artifact plane afterwards would put bytes there
+    that nothing judged, and the serving side resolves uploads by exactly that path. The staging
+    root's name is reserved too, inside a tenant's prefix, so no kernel path can pass for it.
+    """
+    key = (scoped_key or "").lstrip("/")
+    prefix = artifact_prefix(company_id)
+    relative = key[len(prefix):] if key.startswith(prefix) else key
+    first = relative.split("/", 1)[0]
+    return first in (staging.ADMITTED_ROOT.rstrip("/"), staging.STAGING_ROOT.rstrip("/"))
+
+
+def store_key(handle: str) -> str:
+    """The shared store key of a capability handle (the contract every verifier shares)."""
+    return f"{_KEY_PREFIX}{handle}"
 
 
 def scope_artifact_key(company_id: str, key: str) -> str:

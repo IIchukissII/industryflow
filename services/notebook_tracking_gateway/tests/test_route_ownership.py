@@ -64,10 +64,14 @@ class Art:
     def delete(self, key): pass
 
 
+async def _never_consumed(_key):
+    raise AssertionError("the tracking plane never consumes a handle")
+
+
 @pytest.fixture
 def c():
     up = Upstream()
-    client = TestClient(gateway.build_app(Store().get, up, Art()))
+    client = TestClient(gateway.build_app(Store().get, up, Art(), store_consume=_never_consumed))
     client.up = up
     return client
 

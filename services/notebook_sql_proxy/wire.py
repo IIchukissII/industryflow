@@ -102,6 +102,37 @@ def build_ssl_request() -> bytes:
     return struct.pack("!II", 8, SSL_REQUEST_CODE)
 
 
+def parse_cancel_request(data: bytes) -> Tuple[int, int]:
+    """Parse a CancelRequest body (after the length prefix) into ``(process_id, secret_key)``.
+
+    Protocol 3.0 framing: ``Int32 code | Int32 pid | Int32 key`` — exactly 12 bytes.
+    """
+    if len(data) != 12:
+        raise ProtocolError("CancelRequest must carry exactly a process id and a 4-byte key")
+    code, pid, key = struct.unpack("!III", data)
+    if code != CANCEL_REQUEST_CODE:
+        raise ProtocolError("not a CancelRequest")
+    return pid, key
+
+
+def build_cancel_request(pid: int, key: int) -> bytes:
+    """The CancelRequest packet: ``Int32 len=16 | Int32 code | Int32 pid | Int32 key``."""
+    return struct.pack("!IIII", 16, CANCEL_REQUEST_CODE, pid, key)
+
+
+def build_backend_key_data(pid: int, key: int) -> bytes:
+    """BackendKeyData (type ``K``): the pid/key a client quotes in a later CancelRequest."""
+    return build_message(MSG_BACKEND_KEY_DATA, struct.pack("!II", pid, key))
+
+
+def parse_backend_key_data(payload: bytes) -> Tuple[int, int]:
+    """Parse a protocol 3.0 BackendKeyData payload into ``(process_id, secret_key)``."""
+    if len(payload) != 8:
+        raise ProtocolError("BackendKeyData must carry a process id and a 4-byte key")
+    pid, key = struct.unpack("!II", payload)
+    return pid, key
+
+
 def build_startup_message(params: Dict[str, str]) -> bytes:
     """Build a StartupMessage (used by the proxy to open the *upstream* connection)."""
     body = struct.pack("!I", PROTOCOL_VERSION_3)

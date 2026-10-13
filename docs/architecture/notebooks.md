@@ -125,15 +125,25 @@ running cluster.
   (spawner-agnostic — consumed by KubeSpawner or DockerSpawner, ADR-0018).
 - **Capability mint/resolve/revoke** (`services/notebook_hub/capabilities.py` + the
   verifier-side `capability_auth.py` in api_gateway and `binding.py` in the SQL proxy): opaque
-  handles backed by a short-lived store entry, single-tenant, read-only, audience-bound
-  (API vs SQL, not interchangeable), revoked by deleting the entry.
+  handles backed by a short-lived store entry, single-tenant, audience-bound (not
+  interchangeable), read-only except the tracking plane's (ADR-0015 dec 1 rev 1), revoked by
+  deleting the entry. The hub records every handle it mints for a server, **refreshes their
+  lifetime while the server is healthy** (each spawner poll), and **revokes them when the server
+  stops, is replaced by a respawn, or its user logs out** of the platform.
 - **SQL proxy** (`services/notebook_sql_proxy`): the full Postgres-wire proxy — resolve an SQL
-  handle → tenant, connect upstream over **`verify-full` TLS** (ADR-0017), `SET ROLE` into the
-  reader role + `search_path` to its schema, relay; a denied handle opens no backend. The wire
-  codec and the SCRAM-SHA-256 client (RFC 7677 vector) are unit-tested; **box-validated
-  end-to-end** by an automated integration test (`test_sql_proxy_integration.py`, 5/5 green
-  against the live stack — own-tenant read, read-only, cross-tenant denied, revoked/API-audience
-  refused), closing that part of **issue #19**.
+  handle → tenant, connect upstream over **`verify-full` TLS** (ADR-0017) **as that tenant's own
+  login** (`tenant_sqlproxy_<uuid>`), `SET ROLE` into the reader role + `search_path` to its
+  schema, relay; a denied handle opens no backend. The relay is byte-transparent, so the session
+  user is what bounds a kernel: the tenant login is `NOINHERIT` and a member of its own reader
+  only, so `SET ROLE` into another tenant, `RESET ROLE`, `set_config('role', …)` and
+  `SET SESSION AUTHORIZATION` are refused **by Postgres**. Its password is an HMAC of the tenant
+  under a key only the proxy holds; the proxy installs the SCRAM verifier on first use through
+  `notebook_sql_proxy`, an enrolment role that is a member of nothing and never carries a kernel's
+  session. Each open session **re-checks its handle** (`SQL_PROXY_REVALIDATE_SECONDS`) and is
+  ended once it is revoked, and a notebook interrupt (CancelRequest) is forwarded to the upstream
+  query through a proxy-issued key. Proven against a real database by
+  `test_notebook_sql_login_isolation.py` and end-to-end through the running proxy by
+  `test_sql_proxy_integration.py`, both in the `db-tenant-isolation` workflow.
 - **Client** (`clients/python/industryflow`): `IndustryFlowClient` loads tenant data via the data
   API (`X-IF-Capability`); `IndustryFlowSQL` / `sql_query` run tenant SQL through the proxy with
   the SQL capability as the password (the `[sql]` extra). Holds no DB/object-store credential.

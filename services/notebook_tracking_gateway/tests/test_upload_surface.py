@@ -14,6 +14,7 @@ ones a fake can still prove honestly:
   * **a refused artifact leaves nothing behind**;
   * **the audience separates the populations** — a kernel's tracking handle is not an uploader.
 """
+import hashlib
 import json
 import os
 import sys
@@ -50,6 +51,9 @@ class FakeStore:
     def __init__(self):
         self.objects = {}
         self.presigned = []
+        # key -> bytes a caller re-PUTs (through a still-valid staging URL) right after the gateway
+        # has read that key: the window between judging and promoting.
+        self.replace_after_read = {}
 
     def presign(self, method, key):
         self.presigned.append((method, key))
@@ -61,12 +65,25 @@ class FakeStore:
     def delete(self, key):
         self.objects.pop(key, None)
 
+    @staticmethod
+    def etag(value):
+        return '"' + hashlib.md5(value).hexdigest() + '"'
+
     def head(self, key, length):
         v = self.objects.get(key)
-        return v[:length] if v is not None else None
+        if v is None:
+            return None
+        read = (v[:length], self.etag(v))
+        if key in self.replace_after_read:
+            self.objects[key] = self.replace_after_read.pop(key)
+        return read
 
-    def copy(self, src, dst):
-        self.objects[dst] = self.objects[src]
+    def copy(self, src, dst, if_match):
+        v = self.objects.get(src)
+        if v is None or self.etag(v) != if_match:
+            return False
+        self.objects[dst] = v
+        return True
 
     def list_keys(self, prefix):
         return sorted(k for k in self.objects if k.startswith(prefix))
@@ -76,11 +93,15 @@ def _client(store, **handles):
     async def store_get(key):
         return handles.get(key)
 
+    async def store_consume(key):
+        return int(handles.pop(key, None) is not None)
+
     class Upstream:
         async def call(self, method, endpoint, *, params, body):
             return 200, {}
 
-    return TestClient(gateway.build_app(store_get, Upstream(), store, bucket="mlflow"))
+    return TestClient(gateway.build_app(store_get, Upstream(), store, bucket="mlflow",
+                                        store_consume=store_consume))
 
 
 def _handle(audience, company_id):
@@ -276,3 +297,124 @@ def test_admitted_bytes_land_only_in_the_handles_own_tenant_prefix():
            headers={"Authorization": "Bearer up"})
     assert [k for k in store.objects if k.startswith(policy.artifact_prefix(CID_A))] == []
     assert [k for k in store.objects if k.startswith(policy.artifact_prefix(CID_B))] != []
+
+
+# --- what is admitted is exactly what was judged ------------------------------------------------
+
+def _commit(client, uid):
+    return client.post("/api/2.0/industryflow-upload/commit", json={"upload_id": uid},
+                       headers={"Authorization": "Bearer up"})
+
+
+def test_bytes_replaced_after_judgement_are_never_admitted():
+    """The staging PUT URLs stay valid for their whole lifetime, so a caller can re-PUT a member
+    after the gateway judged it and before it is promoted. Promotion copies only the version that was
+    judged; anything else refuses the whole upload."""
+    store = FakeStore()
+    c = _upload_client(store)
+    uid = _stage(c).json()["upload_id"]
+    _staged(store, TOKEN_A, uid)
+    member = staging.staging_prefix(TOKEN_A, uid) + "model.skops"
+    store.replace_after_read[member] = PICKLE_HEAD + b"swapped in after the verdict"
+
+    r = _commit(c, uid)
+    assert r.status_code == 409
+    assert [k for k in store.objects if k.startswith(policy.artifact_prefix(CID_A))] == []
+    assert store.list_keys(staging.staging_prefix(TOKEN_A, uid)) == []
+
+
+def test_a_manifest_replaced_after_judgement_is_never_admitted():
+    store = FakeStore()
+    c = _upload_client(store)
+    uid = _stage(c).json()["upload_id"]
+    _staged(store, TOKEN_A, uid)
+    store.replace_after_read[staging.staging_prefix(TOKEN_A, uid) + "MLmodel"] = PICKLE_MANIFEST
+
+    assert _commit(c, uid).status_code == 409
+    assert [k for k in store.objects if k.startswith(policy.artifact_prefix(CID_A))] == []
+
+
+def test_an_oversized_manifest_is_refused_not_judged_truncated():
+    """Truncated, a manifest is a declaration the caller did not make: the safe flavor could sit in
+    the first 256 KiB and anything at all after it."""
+    store = FakeStore()
+    c = _upload_client(store)
+    uid = _stage(c).json()["upload_id"]
+    padded = SAFE_MANIFEST + b"#" * (gateway._MANIFEST_MAX_BYTES - len(SAFE_MANIFEST) + 1)
+    _staged(store, TOKEN_A, uid, manifest=padded)
+
+    r = _commit(c, uid)
+    assert r.status_code == 422
+    assert "larger than" in r.json()["detail"]
+    assert [k for k in store.objects if k.startswith(policy.artifact_prefix(CID_A))] == []
+    assert store.list_keys(staging.staging_prefix(TOKEN_A, uid)) == []
+
+
+def test_a_manifest_at_the_limit_is_still_judged():
+    store = FakeStore()
+    c = _upload_client(store)
+    uid = _stage(c).json()["upload_id"]
+    padded = SAFE_MANIFEST + b"#" * (gateway._MANIFEST_MAX_BYTES - len(SAFE_MANIFEST))
+    _staged(store, TOKEN_A, uid, manifest=padded)
+    assert _commit(c, uid).status_code == 200
+
+
+# --- an upload handle authorises one upload (ADR-0015 dec 4 rev 1) -------------------------------
+
+def test_a_committed_handle_is_spent():
+    store = FakeStore()
+    c = _upload_client(store)
+    uid = _stage(c).json()["upload_id"]
+    _staged(store, TOKEN_A, uid)
+    assert _commit(c, uid).status_code == 200
+
+    assert _stage(c).status_code == 401           # no second stage...
+    uid2 = staging.new_upload_id()
+    _staged(store, TOKEN_A, uid2)
+    assert _commit(c, uid2).status_code == 401    # ...and no second commit
+
+
+def test_a_refused_commit_spends_the_handle_too():
+    store = FakeStore()
+    c = _upload_client(store)
+    uid = _stage(c).json()["upload_id"]
+    _staged(store, TOKEN_A, uid, manifest=PICKLE_MANIFEST, model_head=PICKLE_HEAD)
+    assert _commit(c, uid).status_code == 422
+    assert _stage(c).status_code == 401
+
+
+def test_a_commit_of_nothing_does_not_spend_the_handle():
+    store = FakeStore()
+    c = _upload_client(store)
+    assert _commit(c, staging.new_upload_id()).status_code == 404
+    assert _stage(c).status_code == 200
+
+
+# --- the kernel's artifact plane cannot write where the upload plane writes -----------------------
+
+def _kernel_client(store):
+    return _client(store, **{"nbcap:tr": _handle("tracking", CID_A)})
+
+
+def _artifact(client, method, path):
+    return client.request(method, f"/api/2.0/mlflow-artifacts/artifacts/{path}",
+                          headers={"Authorization": "Bearer tr"}, follow_redirects=False)
+
+
+def test_a_kernel_cannot_overwrite_or_delete_an_admitted_upload():
+    store = FakeStore()
+    c = _kernel_client(store)
+    for path in ("uploads/abc/model.skops", f"{policy.artifact_prefix(CID_A)}uploads/abc/MLmodel",
+                 "uploads", "_upload-staging/x"):
+        for method in ("PUT", "DELETE"):
+            assert _artifact(c, method, path).status_code == 403, (method, path)
+    assert store.presigned == []
+
+
+def test_a_kernel_still_reads_its_tenants_uploads_and_writes_its_own_runs():
+    store = FakeStore()
+    c = _kernel_client(store)
+    assert _artifact(c, "GET", "uploads/abc/MLmodel").status_code == 307
+    assert _artifact(c, "PUT", "0123abcd/run1/artifacts/model.skops").status_code == 307
+    # A segment merely *named like* the reserved roots, deeper in a run's path, is the kernel's own.
+    assert _artifact(c, "PUT", "0123abcd/run1/artifacts/uploads/x").status_code == 307

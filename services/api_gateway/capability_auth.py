@@ -17,11 +17,14 @@ audience check makes an SQL-audience handle unusable here (dec 3).
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
 AUDIENCE_API = "api"
 _KEY_PREFIX = "nbcap:"
+# The hub's per-user index of the handles it minted (handle -> server).
+_USER_INDEX_PREFIX = "nbcap-user:"
 
 
 @dataclass(frozen=True)
@@ -41,7 +44,8 @@ async def resolve_capability(
     """Resolve a handle to its binding, or None to deny.
 
     ``aget`` is an async getter over the store (e.g. ``redis.get``) returning the stored value
-    or None. None / unknown / wrong-audience / malformed all deny.
+    or None. None / unknown / wrong-audience / malformed all deny — including a record that is not
+    an object or whose tenant is missing or not a UUID, which must be a refusal, not a 500.
     """
     if not handle:
         return None
@@ -54,11 +58,32 @@ async def resolve_capability(
         record = json.loads(raw)
     except (ValueError, TypeError):
         return None
+    if not isinstance(record, dict):
+        return None
     if record.get("audience") != expected_audience:
         return None
+    try:
+        # Canonical, or deny: the tenant scopes every query this request makes (ADR-0003).
+        company_id = str(uuid.UUID(str(record.get("company_id") or "")))
+    except ValueError:
+        return None
     return CapabilityBinding(
-        user=record.get("user", ""),
-        company_id=record["company_id"],
+        user=str(record.get("user", "")),
+        company_id=company_id,
         audience=record["audience"],
         read_only=bool(record.get("read_only", True)),
     )
+
+
+async def revoke_user_capabilities(redis, user_id: str) -> int:
+    """Revoke every notebook capability minted for a user — the platform's logout (ADR-0012 dec 6).
+
+    The hub records each handle it mints in a per-user index (services/notebook_hub/capabilities.py,
+    the minter's copy of this contract). Deleting the handles ends them at every verifier at once;
+    the hub notices at its next poll of the user's server and stops it. Returns how many were revoked.
+    """
+    index = f"{_USER_INDEX_PREFIX}{user_id}"
+    handles = await redis.hkeys(index)
+    keys = [f"{_KEY_PREFIX}{h.decode() if isinstance(h, (bytes, bytearray)) else h}" for h in handles]
+    await redis.delete(index, *keys)
+    return len(keys)

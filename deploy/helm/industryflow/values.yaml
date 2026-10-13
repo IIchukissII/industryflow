@@ -522,9 +522,13 @@ secrets:
     # Encrypts auth_state (the verified tenant/role the hub carries to spawn); required by
     # enable_auth_state. Generate: openssl rand -hex 32.
     JUPYTERHUB_CRYPT_KEY: "CHANGE_ME"
-    # Password for the privileged notebook_sql_proxy DB role (ADR-0015). Consumed by
-    # 13-notebook-sql-proxy-role.sh at DB init and by the SQL proxy to log in. notebookHub only.
+    # Password for the notebook_sql_proxy enrolment DB role (ADR-0015; a member of nothing, it may
+    # only install a tenant login's verifier). Consumed by 13-notebook-sql-proxy-role.sh at DB init
+    # and by the SQL proxy. notebookHub only.
     NOTEBOOK_SQL_PROXY_DB_PASSWORD: "CHANGE_ME"
+    # Key the SQL proxy derives each per-tenant SQL login's password from. Proxy-only — never given
+    # to the database. At least 32 characters; generate: openssl rand -hex 32. notebookHub only.
+    NOTEBOOK_SQL_PROXY_TENANT_KEY: "CHANGE_ME"
 
 # ---------------------------------------------------------------------------
 # Ingress — the single TLS edge (ADR-0002 mTLS device path, ADR-0004 HTTPS).
@@ -608,8 +612,9 @@ notebookHub:
     # in X-IF-* response headers (implemented; ADR-0014 handoff contract).
     verifyPath: /auth/verify
   # SQL access proxy (ADR-0015): authoring kernels connect with a Postgres driver using their SQL
-  # capability handle as the password; the proxy logs in as the privileged notebook_sql_proxy role
-  # and SET ROLEs into the tenant reader. The live relay is not yet cluster-validated (issue #19).
+  # capability handle as the password; the proxy logs in as that tenant's own login
+  # (tenant_sqlproxy_<uuid>, confined to it by the database) and SET ROLEs into the tenant reader.
+  # One replica: a kernel's cancel must reach the replica holding its session.
   sqlProxy:
     image: industryflow-notebook-sql-proxy
     digest: ""

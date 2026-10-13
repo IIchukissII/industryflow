@@ -2,18 +2,22 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""End-to-end proof for the SQL access proxy (ADR-0015 dec 5) — the open work in issue #19.
+"""End-to-end proof for the SQL access proxy (ADR-0015 dec 5).
 
-Every other proxy test uses a fake backend/store; this one drives the REAL relay for the first
-time. It stands up nothing itself — it expects a live notebooks-profile stack reachable via env
-(TimescaleDB with the init scripts + the ``notebook_sql_proxy`` privileged role, Redis, and the
-proxy on :6432) — and proves the three properties the fake tests cannot:
+Every other proxy test uses a fake backend/store; this one drives the REAL relay. It stands up
+nothing itself — it expects a live notebooks-profile stack reachable via env (TimescaleDB with the
+init scripts and the notebooks principals, Redis, and the proxy on :6432) — and proves what the
+fake tests cannot:
 
-  * a valid SQL-audience handle reads its OWN tenant, read-only, through the proxy;
-  * that same handle CANNOT read another tenant (cross-tenant denied at the GRANT boundary,
-    exactly as the reader-role isolation test proves at the DB level — here through the proxy);
-  * a revoked handle is refused (no backend opened);
-  * an API-audience handle is refused at the SQL proxy (planes are not interchangeable).
+  * a valid SQL-audience handle reads its OWN tenant, read-only, through the proxy, in a session
+    opened as that tenant's own login;
+  * that same handle CANNOT read another tenant — not by a plain cross-tenant SELECT, and not by
+    any of the ways a relayed kernel could try to change who it is (SET ROLE into another tenant's
+    reader, RESET ROLE, set_config('role'), SET SESSION AUTHORIZATION). The proxy relays these
+    verbatim; Postgres refuses them, because the session user can reach nothing else;
+  * a revoked handle is refused (no backend opened), and revoking it ends a session already open;
+  * an API-audience handle is refused at the SQL proxy (planes are not interchangeable);
+  * a notebook interrupt (libpq's CancelRequest) cancels the running query.
 
 It drives the proxy as a kernel does: a Postgres client presenting the capability handle in
 place of the password (ADR-0015 dec 5). Kernel→proxy is plaintext cleartext-password (the proxy
@@ -100,9 +104,9 @@ def stack():
     cur.execute("SELECT 1 FROM pg_proc WHERE proname = 'create_tenant_schema'")
     if cur.fetchone() is None:
         pytest.skip("create_tenant_schema() not present — init scripts not applied")
-    # The proxy's privileged role only exists on the notebooks profile; without it a tenant's
-    # reader grants no membership to the proxy and the relay could not SET ROLE — so this test
-    # is meaningless. Skip rather than assert a false negative.
+    # The proxy's principals only exist on the notebooks profile; without them there is no tenant
+    # login to open a session as — so this test is meaningless. Skip rather than assert a false
+    # negative.
     cur.execute("SELECT 1 FROM pg_roles WHERE rolname = 'notebook_sql_proxy'")
     if cur.fetchone() is None:
         pytest.skip("notebook_sql_proxy role absent — notebooks profile not up")
@@ -134,6 +138,7 @@ def stack():
     except Exception as e:  # noqa: BLE001
         for _cid, schema in (a, b_tenant):
             cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            cur.execute(f'DROP ROLE IF EXISTS "{b.tenant_login_role(str(_cid))}"')
             cur.execute(f'DROP ROLE IF EXISTS "{b.reader_role(str(_cid))}"')
         conn.close()
         pytest.skip(f"proxy not reachable on {os.getenv('PROXY_HOST', 'localhost')}:"
@@ -144,6 +149,7 @@ def stack():
     finally:
         for _cid, schema in (a, b_tenant):
             cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            cur.execute(f'DROP ROLE IF EXISTS "{b.tenant_login_role(str(_cid))}"')
             cur.execute(f'DROP ROLE IF EXISTS "{b.reader_role(str(_cid))}"')
         conn.close()
 
@@ -209,3 +215,113 @@ def test_api_audience_handle_is_refused(stack):
     handle = _mint(stack["rc"], company_id=str(cid_a), audience="api")  # wrong plane
     with pytest.raises(psycopg2.OperationalError):
         _proxy_connect(handle)
+
+
+# ------------------------------------------------------- a kernel cannot change who it is
+
+def _refused(conn, sql, params=None):
+    """The statement is relayed verbatim and refused by Postgres (42501); the session survives."""
+    cur = conn.cursor()
+    with pytest.raises(errors.InsufficientPrivilege):
+        cur.execute(sql, params)
+
+
+@pytest.fixture
+def kernel(stack):
+    cid_a, _ = stack["a"]
+    conn = _proxy_connect(_mint(stack["rc"], company_id=str(cid_a)))
+    conn.autocommit = True
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def test_the_session_user_is_the_tenants_own_login(stack, kernel):
+    cid_a, _ = stack["a"]
+    cur = kernel.cursor()
+    cur.execute("SELECT session_user, current_user")
+    assert cur.fetchone() == (b.tenant_login_role(str(cid_a)), b.reader_role(str(cid_a)))
+
+
+def test_set_role_into_another_tenants_reader_is_refused(stack, kernel):
+    cid_b, _ = stack["b"]
+    _refused(kernel, f'SET ROLE "{b.reader_role(str(cid_b))}"')
+
+
+def test_reset_role_then_cross_tenant_select_is_refused(stack, kernel):
+    _, schema_a = stack["a"]
+    _, schema_b = stack["b"]
+    cur = kernel.cursor()
+    cur.execute("RESET ROLE")
+    _refused(kernel, f'SELECT count(*) FROM "{schema_b}".equipment')
+    # ...and RESET ROLE gains nothing even within the tenant: the login itself reads nothing.
+    _refused(kernel, f'SELECT count(*) FROM "{schema_a}".equipment')
+
+
+def test_set_config_role_into_another_tenant_is_refused(stack, kernel):
+    cid_b, _ = stack["b"]
+    _refused(kernel, "SELECT set_config('role', %s, false)", (b.reader_role(str(cid_b)),))
+
+
+def test_set_session_authorization_is_refused(stack, kernel):
+    cid_b, _ = stack["b"]
+    _refused(kernel, f'SET SESSION AUTHORIZATION "{b.tenant_login_role(str(cid_b))}"')
+    _refused(kernel, "SET SESSION AUTHORIZATION notebook_sql_proxy")
+
+
+def test_set_role_into_the_enrolment_principal_is_refused(stack, kernel):
+    _refused(kernel, "SET ROLE notebook_sql_proxy")
+
+
+# ------------------------------------------------------------ revocation and cancellation
+
+def test_revoking_the_handle_ends_an_open_session(stack):
+    """Revocation reaches a session already open (ADR-0012 dec 6), not only the next connect. The
+    proxy re-checks every SQL_PROXY_REVALIDATE_SECONDS (the CI overlay sets 1s)."""
+    import time
+
+    cid_a, _ = stack["a"]
+    handle = _mint(stack["rc"], company_id=str(cid_a))
+    conn = _proxy_connect(handle)
+    conn.autocommit = True
+    try:
+        conn.cursor().execute("SELECT 1")
+        stack["rc"].delete(f"{b._KEY_PREFIX}{handle}")
+        deadline = time.monotonic() + float(os.getenv("PROXY_REVOKE_DEADLINE_SECONDS", "20"))
+        while time.monotonic() < deadline:
+            try:
+                conn.cursor().execute("SELECT 1")
+            except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                return
+            time.sleep(0.5)
+        pytest.fail("a session whose handle was revoked was still serving queries")
+    finally:
+        conn.close()
+
+
+def test_a_notebook_interrupt_cancels_the_running_query(stack, kernel):
+    """libpq's cancel (a notebook interrupt) opens a new connection quoting the BackendKeyData the
+    proxy issued; the proxy maps it to the upstream session and cancels the query there."""
+    import threading
+    import time
+
+    outcome = {}
+
+    def run():
+        try:
+            kernel.cursor().execute("SELECT pg_sleep(60)")
+            outcome["result"] = "completed"
+        except errors.QueryCanceled:
+            outcome["result"] = "cancelled"
+        except Exception as e:  # noqa: BLE001
+            outcome["result"] = repr(e)
+
+    t = threading.Thread(target=run)
+    started = time.monotonic()
+    t.start()
+    time.sleep(1.0)
+    kernel.cancel()
+    t.join(timeout=30)
+    assert outcome.get("result") == "cancelled"
+    assert time.monotonic() - started < 30

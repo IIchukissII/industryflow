@@ -4,21 +4,22 @@
 
 """
 SCRAM-SHA-256 client (RFC 5802 / RFC 7677), the auth method the proxy uses to open its
-**upstream** privileged connection to TimescaleDB (ADR-0017 mandates ``scram-sha-256``).
+**upstream** connections to TimescaleDB (ADR-0017 mandates ``scram-sha-256``), plus the verifier
+the proxy enrols for a tenant login.
 
 This is the pure cryptographic core: build the client-first and client-final messages from the
-server's challenge and verify the server signature. It performs no I/O — ``server.py`` exchanges
-the messages over the SASL wire. Being pure, it is validated here against the published RFC 7677
-test vector, so the crypto is correct even though the end-to-end exchange against a live Postgres
-is part of the cluster-bound integration work (issue #19).
+server's challenge, verify the server signature, and compute a stored verifier. It performs no
+I/O — ``server.py`` exchanges the messages over the SASL wire. Being pure, it is validated here
+against the published RFC 7677 test vector.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
+import secrets
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
 
 _DIGEST = "sha256"
 GS2_HEADER = b"n,,"  # no channel binding, no authzid
@@ -49,6 +50,25 @@ def _parse_server_message(message: str) -> Dict[str, str]:
 def salted_password(password: str, salt: bytes, iterations: int) -> bytes:
     """PBKDF2(HMAC-SHA-256) of the password — the ``SaltedPassword`` of RFC 5802."""
     return hashlib.pbkdf2_hmac(_DIGEST, password.encode("utf-8"), salt, iterations)
+
+
+# Postgres' own default iteration count for scram-sha-256 (scram_iterations).
+DEFAULT_ITERATIONS = 4096
+
+
+def scram_verifier(password: str, *, salt: Optional[bytes] = None, iterations: int = DEFAULT_ITERATIONS) -> str:
+    """The SCRAM-SHA-256 verifier Postgres stores for ``password`` (``pg_authid.rolpassword``).
+
+    ``SCRAM-SHA-256$<iterations>:<salt>$<StoredKey>:<ServerKey>``. The proxy enrols a tenant login
+    with this rather than the password, so the plaintext never reaches the database or its logs.
+    The password is ASCII (base64url), for which SASLprep is the identity.
+    """
+    salt = salt if salt is not None else secrets.token_bytes(16)
+    salted = salted_password(password, salt, iterations)
+    stored_key = _h(_hmac(salted, b"Client Key"))
+    server_key = _hmac(salted, b"Server Key")
+    b64 = lambda b: base64.b64encode(b).decode("ascii")  # noqa: E731
+    return f"SCRAM-SHA-256${iterations}:{b64(salt)}${b64(stored_key)}:{b64(server_key)}"
 
 
 @dataclass

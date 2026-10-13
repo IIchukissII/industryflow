@@ -55,6 +55,15 @@ async def rotate_refresh_token(token: str) -> Optional[Tuple[str, str]]:
     return user_id, new_token
 
 
-async def revoke_refresh_token(token: str) -> None:
-    """Revoke a refresh token (end the session). Idempotent."""
-    await redis_client.redis.delete(_key(token))
+async def revoke_refresh_token(token: str) -> Optional[str]:
+    """Revoke a refresh token (end the session). Idempotent.
+
+    Returns the user id the token belonged to, or None if it was unknown — so a logout can end
+    what else belongs to that session's user (their notebook capabilities).
+    """
+    key = _key(token)
+    user_id = await redis_client.redis.get(key)
+    await redis_client.redis.delete(key)
+    if isinstance(user_id, bytes):
+        user_id = user_id.decode()
+    return user_id

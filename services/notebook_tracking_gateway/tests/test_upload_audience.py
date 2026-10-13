@@ -103,6 +103,16 @@ async def test_malformed_records_deny():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("company_id", ["not-a-uuid", "tenant_x/../y", 42])
+@pytest.mark.parametrize("audience", ["upload", "tracking"])
+async def test_a_tenant_that_is_not_a_uuid_denies(audience, company_id):
+    """A malformed tenant is a refusal at resolution, not a 500 at the first namespace built from it."""
+    resolve = policy.resolve_upload_binding if audience == "upload" else policy.resolve_tracking_binding
+    raw = _rec(audience, company_id=company_id)
+    assert await resolve(_store(**{"nbcap:h": raw}), "h") is None
+
+
+@pytest.mark.asyncio
 async def test_bytes_from_the_store_are_decoded():
     b = await policy.resolve_upload_binding(_store(**{"nbcap:h": _rec("upload").encode()}), "h")
     assert b is not None and b.company_id == CID

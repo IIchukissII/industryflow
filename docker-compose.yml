@@ -130,7 +130,7 @@ services:
       ALERT_SERVICE_DB_PASSWORD: ${ALERT_SERVICE_DB_PASSWORD}
       ML_SERVICE_DB_PASSWORD: ${ML_SERVICE_DB_PASSWORD}
       MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD}
-      # Notebook SQL proxy privileged role (ADR-0015) — created only when set (notebooks profile).
+      # Notebook SQL proxy enrolment role (ADR-0015) — created only when set (notebooks profile).
       NOTEBOOK_SQL_PROXY_DB_PASSWORD: ${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}
       # Cold-layer exporter role (ADR-0025) — created at init; the exporter connects as it.
       COLD_EXPORT_DB_PASSWORD: ${COLD_EXPORT_DB_PASSWORD:-}
@@ -791,9 +791,10 @@ services:
   # NOTEBOOK HUB (ADR-0011/0014/0018) — opt-in `notebooks` profile.
   # Multi-tenant, per-user, NON-ROOT notebooks via JupyterHub + DockerSpawner. Replaces the old
   # root, auth-disabled, shared-credential `jupyter` shim (retired, ADR-0018 dec 5). The kernel
-  # holds only opaque, single-tenant, read-only capability handles minted by the hub — never a DB
-  # password. Bring up:  docker compose --profile notebooks build
-  #                      docker compose --profile notebooks up -d notebook-hub notebook-sso
+  # holds only opaque, single-tenant capability handles minted by the hub (read-only except the
+  # tracking plane, ADR-0015 dec 1 rev 1) — never a DB password.
+  # Bring up:  docker compose --profile notebooks build
+  #            docker compose --profile notebooks up -d notebook-hub notebook-sso
   # ==========================================================================
 
   # Build-only: the two per-user images the hub spawns by role profile (ADR-0011 dec 5) — authoring
@@ -868,12 +869,11 @@ services:
 
   # SQL access proxy (ADR-0015): authoring kernels connect with a normal Postgres driver, using
   # their opaque SQL capability handle as the password. The proxy resolves the handle to a tenant,
-  # connects to TimescaleDB as the privileged `notebook_sql_proxy` role, SET ROLEs into that
-  # tenant's read-only role, and relays. The kernel never holds a DB password. Not exposed on a
-  # host port — only the spawned kernels (same network) reach it at `notebook-sql-proxy:6432`.
-  # The proxy verifies the DB server cert against the internal CA (verify-full, ADR-0017) — same
-  # CA mount as every other DB client. NOTE: the live end-to-end relay against a real Postgres is
-  # not yet cluster-validated (see services/notebook_sql_proxy README / issue #19).
+  # connects to TimescaleDB as that tenant's own login (tenant_sqlproxy_<uuid>, confined to it by
+  # the database), SET ROLEs into the tenant's read-only role, and relays. The kernel never holds a
+  # DB password. Not exposed on a host port — only the spawned kernels (same network) reach it at
+  # `notebook-sql-proxy:6432`. The proxy verifies the DB server cert against the internal CA
+  # (verify-full, ADR-0017) — same CA mount as every other DB client.
   notebook-sql-proxy:
     profiles: ["notebooks"]
     build:
@@ -887,8 +887,10 @@ services:
       SQL_PROXY_REDIS_URL: redis://redis:6379/0
       SQL_PROXY_DB_HOST: timescaledb
       SQL_PROXY_DB_PORT: "5432"
+      # The enrolment principal (member of nothing); kernels' sessions use the per-tenant logins.
       SQL_PROXY_DB_USER: notebook_sql_proxy
       SQL_PROXY_DB_PASSWORD: ${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}
+      SQL_PROXY_TENANT_LOGIN_KEY: ${NOTEBOOK_SQL_PROXY_TENANT_KEY:-}
       SQL_PROXY_DB_NAME: ${DB_NAME}
       # Upstream TLS to the hardened DB (ADR-0017): verify the server cert against the same
       # internal CA every DB client trusts. Set DB_SSLMODE=disable for a dev DB without certs.
