@@ -67,6 +67,8 @@ COPY spark-defaults.conf /opt/spark/conf/spark-defaults.conf
 # Copy the spark aggregations script + the local modules it imports (also shipped to executors via
 # --py-files). tests/test_image_modules.py holds this list, the chmod and --py-files to the imports.
 COPY kafka_aggregations.py aggregation_windows.py reading_guard.py /app/spark_streaming/
+# The container health check (not imported by the job, so not in --py-files).
+COPY healthcheck.py /app/spark_streaming/
 # The platform's shared tenant-naming and window contract (libs/industryflow_contracts; ADR-0003
 # dec 5-7, ADR-0006 dec 7), from the named build context `contracts`. The driver imports it from the
 # job's directory; the zip is what --py-files ships to the executors.
@@ -92,9 +94,10 @@ RUN printf "print('ivy warm ok')\n" > /tmp/warm.py && \
 
 WORKDIR /app
 
-# Health check - verify process is running
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD pgrep -f "kafka_aggregations.py" || exit 1
+# Health: the job has compute (driver UI: an application with an active executor, or local mode),
+# not merely a live process — a job WAITING on the master for resources is unhealthy (healthcheck.py).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
+    CMD ["python3", "/app/spark_streaming/healthcheck.py"]
 
 # Run the aggregations job. Master is set once via SPARK_MASTER (default local[*]) in the
 # job's SparkSession builder — not here — so there is a single source of truth.
