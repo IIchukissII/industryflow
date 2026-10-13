@@ -190,7 +190,7 @@ async def create_company(
     except DBAPIError as e:
         raise _provisioning_error(e)
 
-    logger.info(f"Created company {row.company_id}")
+    logger.info(f"Created company {row.company_id} (by user {current_user.id})")
     return _row(row)
 
 
@@ -236,10 +236,10 @@ async def update_company(
     # Deactivating is suspending, by whichever route it is asked for: the same path as delete.
     if is_active is False:
         await _suspended(company_id, user_ids)
-        logger.info(f"Deactivated company {company_id}; ended the sessions of {len(user_ids)} user(s)")
+        logger.info(f"Deactivated company {company_id} (by user {current_user.id}); ended the sessions of {len(user_ids)} user(s)")
     elif is_active is True:
         await _reactivated(company_id)
-    logger.info(f"Updated company: {company_id}")
+    logger.info(f"Updated company {company_id} (by user {current_user.id})")
     return _row(row)
 
 
@@ -276,5 +276,5 @@ async def delete_company(
     # After the commit: a deactivated user can no longer refresh even if this step fails part way
     # (refresh checks is_active), so revocation here only ends the sessions sooner.
     await _suspended(company_id, user_ids)
-    logger.info(f"Deactivated company {company_id} and {len(user_ids)} user(s)")
+    logger.info(f"Deactivated company {company_id} and {len(user_ids)} user(s) (by user {current_user.id})")
     return _row(row)
