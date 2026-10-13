@@ -4,71 +4,63 @@
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+from sqlalchemy.engine import URL
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
-    
+
     # API Configuration
     API_TITLE: str = "IndustryFlow API"
     API_VERSION: str = "1.0.0"
     API_DESCRIPTION: str = "Real-time IoT Data Processing Platform"
-    
+
     # Database Configuration
     DB_HOST: str
     DB_PORT: int
     DB_NAME: str
     API_GATEWAY_DB_USER: str
     API_GATEWAY_DB_PASSWORD: str
-    
+    # Per-worker pool (the gateway's only one). Footprint: replicas x workers x (size + overflow)
+    # must fit api_gateway_user's CONNECTION LIMIT; see database.py.
+    API_GATEWAY_DB_POOL_SIZE: int = 5
+    API_GATEWAY_DB_MAX_OVERFLOW: int = 2
+
     # Redis Configuration
     REDIS_HOST: str
     REDIS_PORT: int
     REDIS_DB: int
-    
+
     # JWT Configuration
     JWT_SECRET_KEY: str
     # Short-lived access token; refresh token is revocable and rotated (ADR-0004 dec 2).
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    # httpOnly cookie delivery + CSRF (ADR-0004 dec 3). COOKIE_SECURE must be true in
-    # production (requires HTTPS); false only for local plain-HTTP development.
-    COOKIE_SECURE: bool = False
+    # httpOnly cookie delivery + CSRF (ADR-0004 dec 3). Every edge is HTTPS-only (ADR-0004
+    # dec 1), so the cookies are Secure by default; false only for a throwaway plain-HTTP
+    # development setup.
+    COOKIE_SECURE: bool = True
     COOKIE_SAMESITE: str = "lax"
-    
+
     # CORS Configuration
     CORS_ORIGINS: str
-    
+
     @property
-    def database_url(self) -> str:
-        """Construct async PostgreSQL connection URL"""
-        return f"postgresql+asyncpg://{self.API_GATEWAY_DB_USER}:{self.API_GATEWAY_DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
-    
+    def database_url(self) -> URL:
+        """Async PostgreSQL connection URL (built, not formatted, so any password is safe)."""
+        return URL.create(
+            "postgresql+asyncpg",
+            username=self.API_GATEWAY_DB_USER,
+            password=self.API_GATEWAY_DB_PASSWORD,
+            host=self.DB_HOST,
+            port=self.DB_PORT,
+            database=self.DB_NAME,
+        )
+
     @property
     def redis_url(self) -> str:
         """Construct Redis connection URL"""
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
-    
-    # Properties for asyncpg pool
-    @property
-    def timescaledb_host(self) -> str:
-        return self.DB_HOST
-    
-    @property
-    def timescaledb_port(self) -> int:
-        return self.DB_PORT
-    
-    @property
-    def timescaledb_user(self) -> str:
-        return self.API_GATEWAY_DB_USER
-    
-    @property
-    def timescaledb_password(self) -> str:
-        return self.API_GATEWAY_DB_PASSWORD
-    
-    @property
-    def timescaledb_database(self) -> str:
-        return self.DB_NAME
-    
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 
 @lru_cache()

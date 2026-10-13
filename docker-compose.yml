@@ -546,9 +546,15 @@ services:
       JWT_ALGORITHM: ${JWT_ALGORITHM}
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # Every edge is HTTPS-only (ADR-0004 dec 1), so the session cookies are Secure.
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      # Workers x (pool size + overflow) must fit api_gateway_user's CONNECTION LIMIT
+      # (services/api_gateway/tests/test_db_connection_budget.py checks it).
+      API_GATEWAY_WORKERS: ${API_GATEWAY_WORKERS:-2}
+      API_GATEWAY_DB_POOL_SIZE: ${API_GATEWAY_DB_POOL_SIZE:-5}
+      API_GATEWAY_DB_MAX_OVERFLOW: ${API_GATEWAY_DB_MAX_OVERFLOW:-2}
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -559,7 +565,6 @@ services:
     networks:
       - industryflow-network
       - notebook-kernels
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
     restart: unless-stopped
     healthcheck:
       # python-slim has no curl; use stdlib urllib (always present in the image).

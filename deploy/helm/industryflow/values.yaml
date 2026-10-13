@@ -450,6 +450,14 @@ config:
   # spark-streaming/spark-aggregations `secretKeys`, and set their `persistence.enabled=false`.
   CHECKPOINT_LOCATION: /opt/spark/checkpoints
   CORS_ORIGINS: "https://app.industryflow.local"
+  # The ingress is HTTPS-only (ADR-0004 dec 1), so the api-gateway session cookies are Secure.
+  COOKIE_SECURE: "true"
+  # api-gateway DB footprint: (replicas, or hpa.maxReplicas) x workers x (pool size + overflow)
+  # must fit api_gateway_user's CONNECTION LIMIT (50). One worker per pod: Kubernetes scales
+  # with pods. services/api_gateway/tests/test_db_connection_budget.py checks these defaults.
+  API_GATEWAY_WORKERS: "1"
+  API_GATEWAY_DB_POOL_SIZE: "5"
+  API_GATEWAY_DB_MAX_OVERFLOW: "2"
   ENVIRONMENT: production
   # Extension plugin modules the ML service loads at startup (ADR-0008/0010); empty = built-ins.
   EXTENSION_MODULES: ""

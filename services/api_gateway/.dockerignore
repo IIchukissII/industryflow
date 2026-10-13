@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The Dockerfile copies the build context whole (COPY . .): keep tests, dev pins, caches and any
+# local .env (config.py would read it) out of the image.
+tests/
+requirements-dev.txt
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+Dockerfile
+.dockerignore

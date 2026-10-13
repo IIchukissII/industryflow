@@ -4,7 +4,12 @@
 
 """Background task to update Redis cache with latest sensor data."""
 import asyncio
-from database import get_db_pool
+import uuid
+
+from sqlalchemy import text
+
+from database import engine
+from dependencies import normalize_company_id_to_schema
 from messaging.redis_client import redis_client
 
 async def update_redis_cache():
@@ -18,25 +23,30 @@ async def update_redis_cache():
     
     while True:
         try:
-            pool = await get_db_pool()
-            async with pool.acquire() as conn:
+            # One connection from the gateway's single pool (database.py), held for one sweep.
+            async with engine.connect() as conn:
+                # Autocommit: one tenant's failed query must not abort the sweep for the others.
+                conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
                 # Get all tenant schemas
-                tenant_schemas = await conn.fetch("""
-                    SELECT schema_name 
-                    FROM information_schema.schemata 
-                    WHERE schema_name LIKE 'tenant_%'
-                """)
-                
+                tenant_schemas = (await conn.execute(text("""
+                    SELECT schema_name
+                    FROM information_schema.schemata
+                    WHERE schema_name LIKE 'tenant\\_%'
+                """))).mappings().all()
+
                 total_sensors = 0
-                
+
                 # Query from each tenant schema
                 for schema_row in tenant_schemas:
-                    schema_name = schema_row['schema_name']
-                    
-                    # Extract company_id from schema name
+                    # Extract company_id from schema name and rebuild the schema through the one
+                    # canonical mapping, so only a UUID-derived identifier reaches the SQL (ADR-0003).
                     # tenant_550e8400_e29b_41d4_a716_446655440000 -> 550e8400-e29b-41d4-a716-446655440000
-                    company_id = schema_name.replace('tenant_', '').replace('_', '-')
-                    
+                    try:
+                        company_id = str(uuid.UUID(schema_row['schema_name'].removeprefix('tenant_').replace('_', '-')))
+                    except ValueError:
+                        continue
+                    schema_name = normalize_company_id_to_schema(company_id)
+
                     try:
                         # Query latest value for each sensor in this tenant
                         # Note: No company_id in SELECT - it's implicit in schema
@@ -50,7 +60,7 @@ async def update_redis_cache():
                                     value,
                                     unit,
                                     quality_code
-                                FROM {schema_name}.sensor_measurements
+                                FROM "{schema_name}".sensor_measurements
                                 WHERE time > NOW() - INTERVAL '1 hour'
                                 ORDER BY sensor_id, time DESC
                             )
@@ -58,7 +68,7 @@ async def update_redis_cache():
                             LIMIT 1000
                         """
                         
-                        rows = await conn.fetch(query)
+                        rows = (await conn.execute(text(query))).mappings().all()
                         
                         # Update Redis for each sensor
                         for row in rows:
