@@ -3,15 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0002: Ingestion authentication and device identity — mTLS for gateways, JWT for the API
+# ADR-0002: Ingestion authentication and device identity — mTLS for gateways, JWT for the API (rev 1)
 
 - **ID:** ADR-0002
 - **Status:** Accepted
-- **Date:** 2026-06-26
+- **Date:** 2026-06-26 (rev 1: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0003 (tenant→schema resolution), ADR-0004 (API authentication, sessions & transport)
 - **Related (sibling):** ADR-0004 rev 1 (gateway host hardening), ADR-0007 (PKI and secure-element identity)
+- **Supersedes:** ADR-0002 rev 0 (2026-06-26 — decision 3 trusted "the identity headers" from the edge without saying which; rev 1 makes each deployment honour exactly one header convention and refuse the other, so no client-supplied header can stand in for the identity the edge vouches for)
 
 ## Context and problem
 
@@ -24,6 +25,8 @@ This model was designed for a human or a service calling an HTTP API, and it is 
 - **The tenant is derived from an untrusted source and used unsafely.** `company_id` reaches the ingestion path from the token/body and is interpolated into `SET search_path TO {schema}` without UUID validation (review finding **X1**, the `search_path` injection), and resolving it costs an O(number-of-tenants) schema scan on the hot ingestion path (review finding **X2**).
 
 So ingestion authentication is really **two different trust domains wearing one mechanism**. Machine producers in the field need a credential bound to hardware that cannot be replayed and that carries a *verified* tenant identity; human and service callers of the HTTP API (the frontend, operators, service-to-service calls) are well served by the existing JWT. Forcing both through one JWT path is what produces the committed-secret footgun, the replay exposure, and the unsafe tenant derivation. This ADR records how ingestion authenticates, and where the tenant identity for ingested data comes from. It does **not** redesign the API's JWT auth (ADR-0004) nor the general tenant→schema resolution used by query paths (ADR-0003); it decides the ingestion/device boundary and hands those neighbours a verified identity to build on.
+
+**Revision 1 (2026-10-13).** Decision 3 made the forwarded identity trustworthy by two conditions: the service is reachable only through the edge, and it accepts the identity only from the edge. Review found a third condition the record never stated. The platform terminates device mTLS at two different edges — one per deployment shape — and each writes the verified identity under its own header convention. The ingestion service accepted either. An edge overwrites the headers *it* writes, and has no reason to touch a convention it does not use, so a client could send the other convention's headers and have them pass through the edge untouched, to a service that would honour them as verified. The network boundary held and the proxy did its job; the gap was that "the identity headers" named two sets, and only one of them was ever vouched for. Rev 1 makes the convention a single, per-deployment fact (decision 3).
 
 ## Decision drivers
 
@@ -47,13 +50,17 @@ So ingestion authentication is really **two different trust domains wearing one 
 
 3. **The ingestion service trusts the identity headers only from the terminating proxy.** Because a verified-identity header is forgeable if it can reach the service from anywhere, the ingestion service must be reachable only via the proxy (network isolation), and must not accept the identity headers from any other source. The trust that the header reflects a *verified* certificate is the proxy's responsibility and the network's; this coupling is explicit and is called out in the negative consequences.
 
+   > **rev 1 (2026-10-13): each deployment honours exactly one identity header convention, and refuses the other.** The identity the edge vouches for is carried under the header convention *that edge* writes, and it is the only one the service behind it honours. The convention is a per-deployment fact, set in deployment configuration with no default: a service that does not know which edge it sits behind does not start, rather than guessing or accepting both. A request that carries the *other* convention's identity headers is **refused**, not ignored — their presence means a client tried to supply an identity, and that is never benign. The edge, for its part, overwrites the headers of its own convention and, where it can, blanks those of the other; the refusal is what makes that a convenience rather than the control.
+   >
+   > The reason is the one this decision already gives, applied to a case it did not name. An edge strips and replaces what it writes; it cannot be relied on to strip a convention it does not use. A service that honoured two conventions behind an edge that vouches for one would accept, under the second, an identity no edge ever verified. With one convention per deployment, every identity the service honours is one its edge wrote, and a client can never supply the identity the edge vouches for.
+
 ### Identity and the certificate authority
 
 4. **IndustryFlow operates its own certificate authority and issues device certificates.** This CA is the server-side counterpart to the sibling's gateway PKI (sibling ADR-0007); IndustryFlow issues the client certificates that gateways present. The CA hierarchy, issuance/provisioning workflow, and revocation mechanism are PKI concerns deferred to a dedicated PKI ADR (see *Deferred decisions*) — this ADR fixes only *that* IndustryFlow runs its own CA and that ingestion trusts certificates chaining to it.
 
 5. **Tenant and device identity are carried in the certificate.** A device certificate encodes its `company_id` (tenant) and a `device_id` in the subject/SAN. The exact field encoding is a PKI-ADR detail, but the decision here is that the **tenant is read from the verified certificate, not from the request body or a JWT claim**.
 
-### Consequences for tenant resolution on ingestion
+## Consequences for tenant resolution on ingestion
 
 6. **Ingested data's tenant comes from the verified certificate field and is validated before use.** The `company_id` used to route a write to its tenant schema is taken from the authenticated certificate identity, validated as a well-formed UUID, and only then used to build the schema name. This **supersedes the ingestion path's body/JWT-derived `company_id`** and removes the X1 injection vector and the X2 per-request schema scan *for ingestion*. The general tenant→schema resolution mechanism shared by query paths is decided in ADR-0003; this ADR guarantees ADR-0003 a trustworthy, pre-validated tenant identity on the ingestion side.
 
@@ -79,6 +86,8 @@ So ingestion authentication is really **two different trust domains wearing one 
 
 **E. Pass the tenant in a request header/body without certificate binding.** *Rejected:* this is the X1 defect with extra steps — an unverified, caller-supplied tenant identity used to route a write. The whole point of decisions 5–6 is that the tenant comes from a *verified* certificate, not from anything the caller can assert freely.
 
+**F. Honour every header convention a supported edge might write, in every deployment *(rev 1)*.** *Rejected:* it lets one service image run behind either edge without configuration, which is its whole appeal, and it is exactly the gap rev 1 closes — the convention an edge does not write is one it does not overwrite, so honouring it honours whatever a client sent. One required setting per deployment is a small price for every honoured identity having been written by the edge.
+
 ## Consequences
 
 ### Positive
@@ -93,13 +102,14 @@ So ingestion authentication is really **two different trust domains wearing one 
 
 - IndustryFlow must run and operate a certificate authority — issuance, provisioning onto devices, rotation, and revocation — which is real operational burden that did not exist under JWT. The bulk of it is deferred to the PKI ADR, but the burden is incurred by this decision.
 - The ingestion service now trusts an identity header from the terminating proxy; if the service is reachable off the proxy path, that header is spoofable. The deployment must enforce that the ingestion service is reachable only via the proxy (decision 3) — a network-isolation requirement that becomes a standing operational invariant.
+- **rev 1:** the header convention is a required per-deployment setting, so a deployment configured for the wrong edge refuses every device until it is corrected. That failure is loud and immediate by design, and preferable to the silent alternative.
 - Local development and testing get more complex: a dev CA, dev certificates, and the terminating proxy must be present to exercise the real ingestion path.
 - During the transition window (decision 8) two ingestion auth mechanisms were accepted at once, a temporary increase in surface area. This window is now **closed** (see decision 8): ingestion accepts only mTLS and holds no database role.
 
 ## Deferred decisions
 
 - **PKI architecture.** CA hierarchy (root/intermediate), the exact certificate fields and encoding for `company_id`/`device_id`, device provisioning and enrolment workflow, certificate lifetime, and revocation mechanism (CRL/OCSP) are a dedicated PKI ADR — mirroring the sibling's split between gateway behaviour (sibling ADR-0004) and PKI/identity (sibling ADR-0007). This ADR fixes only that IndustryFlow runs its own CA and reads tenant/device identity from the certificate.
-- **Reverse-proxy product and configuration.** The choice of nginx/Traefik/Envoy and the concrete header names carrying the verified identity are implementation concerns owned by the deployment artifacts, not this ADR.
+- ~~**Reverse-proxy product and configuration.**~~ *Resolved in part by rev 1, decision 3:* how many identity header conventions a deployment honours is no longer open — exactly one, the one its edge writes, with the other refused. The choice of proxy product and the concrete header names carrying the verified identity remain implementation concerns owned by the deployment artifacts, not this ADR.
 - **General tenant→schema resolution.** How the validated `company_id` maps to a schema and is applied safely on *all* paths (not just ingestion) is ADR-0003; this ADR supplies it a verified identity for the ingestion case.
 - **Service-to-service auth.** Whether internal service-to-service calls (gateway→alert, etc.) use mTLS, JWT, or network trust is out of scope here and belongs with ADR-0004.
 
