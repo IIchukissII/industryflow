@@ -8,8 +8,8 @@ notebook (ADR-0011 dec 4 — the default data path).
 
 Phase-1 skeleton. It calls the existing api_gateway read endpoints over HTTP, authenticated as
 the user. The credential is a per-session capability minted by the notebook spawner
-(ADR-0012); this client just carries it as a bearer token — it never holds a database or
-object-store credential. The HTTP transport is injectable so the ergonomics can be tested
+(ADR-0012); this client just carries it in the ``X-IF-Capability`` header — it never holds a
+database or object-store credential. The HTTP transport is injectable so the ergonomics can be tested
 without a running server.
 """
 from __future__ import annotations
@@ -35,7 +35,7 @@ class IndustryFlowClient:
 
     Args:
         base_url: gateway origin, e.g. ``https://api.industryflow.local``.
-        token: the per-session capability (ADR-0012) sent as ``Authorization: Bearer``.
+        token: the per-session capability (ADR-0012) sent as the ``X-IF-Capability`` header.
         session: optional ``requests.Session``-like object (injectable for tests).
         verify: TLS verification, forwarded to the transport.
     """
