@@ -1,0 +1,1 @@
+../../../../infrastructure/minio/minio-init.sh

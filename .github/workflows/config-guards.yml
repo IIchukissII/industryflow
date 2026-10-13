@@ -32,3 +32,38 @@ jobs:
       - run: pip install pytest==9.1.1 pyyaml==6.0.3
       - name: Configuration guards
         run: pytest tests/config_guards -v
+
+  # The object-store principals minio-init.sh creates, enforced by a real MinIO (the pinned build both
+  # deployments run): each principal must be able to do its consumer's job and be refused everything
+  # else. A policy document that reads right proves nothing until the store has said no to it.
+  object-store-principals:
+    name: object-store-principals
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MINIO_IMAGE: cgr.dev/chainguard/minio:latest@sha256:7df55d002b698e4494a131b848dd553361bbe58b7e19f62d9623c29af1ba9ccf
+      MC_IMAGE: cgr.dev/chainguard/minio-client:latest-dev@sha256:207b9a2045f01cef90feda8127a55f769115e060d8350dcb3a29593fc81166ac
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - run: pip install pytest==9.1.1
+      - name: Start MinIO and take the mc client out of its pinned image
+        run: |
+          docker run -d --name minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=ci-root -e MINIO_ROOT_PASSWORD=ci-root-secret-0123456789 \
+            "$MINIO_IMAGE" server /data
+          id=$(docker create "$MC_IMAGE")
+          mkdir -p "$RUNNER_TEMP/bin" && docker cp "$id:/usr/bin/mc" "$RUNNER_TEMP/bin/mc" && docker rm "$id"
+          for i in $(seq 1 45); do curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null 2>&1 && break; sleep 1; done
+      - name: Each principal does its job and nothing else
+        env:
+          MINIO_TEST_ENDPOINT: http://127.0.0.1:9000
+          MINIO_TEST_ROOT_USER: ci-root
+          MINIO_TEST_ROOT_PASSWORD: ci-root-secret-0123456789
+          IF_REQUIRE_LIVE_STACK: "1"
+        run: MC="$RUNNER_TEMP/bin/mc" pytest tests/object_store -v
+      - name: MinIO logs (on failure)
+        if: failure()
+        run: docker logs minio

@@ -66,18 +66,44 @@ spec:
                 name: {{ include "industryflow.fullname" . }}-config
             - secretRef:
                 name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "mlflow") }}
+          # The same server flags compose runs: the backend store in the DB (not the image's local
+          # default, which a pod restart erases), artifacts proxied to the object store, and clients
+          # handed `mlflow-artifacts:` so they never need an object-store credential (ADR-0019).
+          # $(VAR)s are expanded by Kubernetes from the env below and the envFrom sources.
+          args:
+            - mlflow
+            - server
+            - --backend-store-uri
+            - {{ printf "postgresql://$(MLFLOW_DB_USER):$(MLFLOW_DB_PASSWORD)@%s:%v/mlflow" (include "industryflow.dbHost" .) .Values.infra.timescaledb.port | quote }}
+            - --default-artifact-root
+            - mlflow-artifacts:/
+            - --artifacts-destination
+            - {{ printf "s3://%s" .Values.notebookHub.trackingGateway.artifactBucket | quote }}
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "5000"
+            - --allowed-hosts
+            - "*"
           env:
-            # MLflow stores artifacts in MinIO over the S3 API — boto reads AWS_* names.
+            # The artifact-bucket principal (read/write on that bucket only) — boto reads AWS_* names.
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "mlflow") }}
-                  key: MINIO_ACCESS_KEY
+                  key: MLFLOW_STORE_ACCESS_KEY
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "mlflow") }}
-                  key: MINIO_SECRET_KEY
+                  key: MLFLOW_STORE_SECRET_KEY
+            {{- if .Values.tls.db.enabled }}
+            # libpq reads these for the backend store's TLS (ADR-0017), as in compose.
+            - name: PGSSLMODE
+              value: {{ .Values.tls.db.sslmode | quote }}
+            - name: PGSSLROOTCERT
+              value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /health
@@ -88,8 +114,7 @@ spec:
             requests: { cpu: 100m, memory: 256Mi }
             limits: { cpu: 500m, memory: 512Mi }
           {{- if .Values.tls.db.enabled }}
-          # CA for the Postgres backend store over TLS (ADR-0017). The backend-store-uri must
-          # carry ?sslmode=verify-full&sslrootcert=<mountPath>/ca.crt (as the compose path does).
+          # CA for the Postgres backend store over TLS (ADR-0017), named by PGSSLROOTCERT above.
           volumeMounts:
             - name: db-ca
               mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}

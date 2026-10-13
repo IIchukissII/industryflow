@@ -135,3 +135,16 @@ def test_compose_smoke_starts_every_edge():
     up = next(s["run"] for s in steps if "docker compose" in s.get("run", "") and " up " in s["run"])
     missing = sorted(e for e in edges if e not in up.split())
     assert not missing, f"compose-smoke never starts the edge(s) {missing}"
+
+
+def test_workflows_that_run_minio_init_watch_its_script():
+    script = "infrastructure/minio/minio-init.sh"
+    missed = []
+    for wf in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        doc = load_yaml(f".github/workflows/{wf.name}")
+        runs = " ".join(s.get("run", "") for j in doc["jobs"].values() for s in j.get("steps", []))
+        if "minio-init" not in runs or "changes" not in doc["jobs"]:
+            continue
+        if not covered(script, workflow_filter(wf.name)):
+            missed.append(wf.name)
+    assert not missed, f"workflows that run minio-init but never re-run when it changes: {missed}"

@@ -18,11 +18,14 @@ x-ca-mount: &ca-mount "${TLS_CERT_DIR:-db-ca}:/etc/ssl/industryflow:ro"
 # the executors, so on a multi-worker cluster it must live on ONE store visible to all — MinIO
 # via S3A, not a local volume (docs/architecture/stream-processing.md). The job's SparkSession
 # enables S3A when CHECKPOINT_LOCATION is an s3a:// URI. Set it to a local path to opt out.
+# The jobs authenticate with the checkpoint-only principal minio-init creates, never the root key:
+# it reaches the checkpoint bucket and nothing else (ADR-0025 dec 11). The job reads it under the
+# MINIO_* names.
 x-spark-s3a-env: &spark-s3a-env
   CHECKPOINT_LOCATION: ${SPARK_CHECKPOINT_LOCATION:-s3a://spark-checkpoints}
   MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
-  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+  MINIO_ACCESS_KEY: ${SPARK_CHECKPOINT_ACCESS_KEY}
+  MINIO_SECRET_KEY: ${SPARK_CHECKPOINT_SECRET_KEY}
 
 # Third-party images are pinned by tag AND digest, exactly as the Helm chart pins the same image
 # (ADR-0009, ADR-0016: no :latest). A tag alone is a moving pointer; the digest is what ran.
@@ -249,98 +252,51 @@ services:
       - notebook-kernels
     restart: unless-stopped
 
-  # MinIO bucket bootstrap — one-shot that creates the buckets the platform needs (the Spark
-  # S3A checkpoint store, plus the MLflow artifact bucket) and exits. Idempotent: `mc mb -p`
-  # is a no-op if a bucket already exists, so it is safe on every `up`. Spark jobs gate on this
-  # completing (depends_on: service_completed_successfully).
+  # Object-store bootstrap (infrastructure/minio/minio-init.sh — the same script the Helm chart's
+  # minio-init Job runs): the buckets, the upload-staging expiry, and one SCOPED principal per
+  # consumer. The root key is used here and by the server only; every service below authenticates
+  # with its own principal, scoped to the bucket (or prefix) its job touches. Idempotent, so it is
+  # safe on every `up`; the services that need a bucket or principal gate on it completing.
   minio-init:
-    # The -dev variant: the init script needs a shell, grep and cat, which the minimal one lacks.
+    # The -dev variant: the init script needs a shell, grep and mktemp, which the minimal one lacks.
     image: cgr.dev/chainguard/minio-client:latest-dev@sha256:207b9a2045f01cef90feda8127a55f769115e060d8350dcb3a29593fc81166ac
     container_name: industryflow-minio-init
     depends_on:
       minio:
         condition: service_healthy
     environment:
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_SECRET_KEY: ${MINIO_SECRET_KEY}
       SPARK_CHECKPOINT_BUCKET: ${SPARK_CHECKPOINT_BUCKET:-spark-checkpoints}
-      # Where an uploaded artifact rests while it is judged (ADR-0030). It shares the artifact
-      # bucket but sits OUTSIDE every tenant prefix, which is what makes it unreachable through the
-      # artifact plane — that plane rewrites every key under the caller's own prefix. The expiry is
-      # the only thing that collects an upload nobody ever committed. Must match the gateway's
-      # staging root.
-      UPLOAD_STAGING_BUCKET: ${UPLOAD_STAGING_BUCKET:-mlflow}
+      # MLflow's --artifacts-destination and the tracking gateway's TRACKING_ARTIFACT_BUCKET.
+      ARTIFACT_BUCKET: mlflow
+      BACKUP_BUCKET: ${BACKUP_S3_BUCKET:-industryflow-backups}
+      COLD_STORE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
+      # Where an uploaded artifact rests while it is judged (ADR-0030): the artifact bucket, OUTSIDE
+      # every tenant prefix, which is what makes it unreachable through the artifact plane. The
+      # expiry collects an upload nobody ever committed. Must match the gateway's staging root.
       UPLOAD_STAGING_PREFIX: ${UPLOAD_STAGING_PREFIX:-_upload-staging/}
       UPLOAD_STAGING_EXPIRE_DAYS: ${UPLOAD_STAGING_EXPIRE_DAYS:-1}
-      # Cold layer (ADR-0025): bucket + a WRITE-SCOPED principal the exporter uses (never the root
-      # keys). Created here so the box mirrors the Helm minio-cold-init Job.
-      COLD_STORE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
+      # One principal per consumer (see the script's table).
+      SPARK_CHECKPOINT_ACCESS_KEY: ${SPARK_CHECKPOINT_ACCESS_KEY}
+      SPARK_CHECKPOINT_SECRET_KEY: ${SPARK_CHECKPOINT_SECRET_KEY}
+      MLFLOW_STORE_ACCESS_KEY: ${MLFLOW_STORE_ACCESS_KEY}
+      MLFLOW_STORE_SECRET_KEY: ${MLFLOW_STORE_SECRET_KEY}
+      MODEL_READ_ACCESS_KEY: ${MODEL_READ_ACCESS_KEY}
+      MODEL_READ_SECRET_KEY: ${MODEL_READ_SECRET_KEY}
+      BACKUP_STORE_ACCESS_KEY: ${BACKUP_STORE_ACCESS_KEY}
+      BACKUP_STORE_SECRET_KEY: ${BACKUP_STORE_SECRET_KEY}
+      # Profile-scoped consumers (notebooks, cold-export): provisioned when their keys are set.
+      TRACKING_STORE_ACCESS_KEY: ${TRACKING_STORE_ACCESS_KEY:-}
+      TRACKING_STORE_SECRET_KEY: ${TRACKING_STORE_SECRET_KEY:-}
       COLD_STORE_ACCESS_KEY: ${COLD_STORE_ACCESS_KEY:-}
       COLD_STORE_SECRET_KEY: ${COLD_STORE_SECRET_KEY:-}
-      # Read-only cold principal the cold-store broker uses to vend pre-signed GETs (ADR-0025 read
-      # side) — separate from the write principal above and from the root keys.
       COLD_READ_ACCESS_KEY: ${COLD_READ_ACCESS_KEY:-}
       COLD_READ_SECRET_KEY: ${COLD_READ_SECRET_KEY:-}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -e
-        mc alias set local http://minio:9000 "$$MINIO_ACCESS_KEY" "$$MINIO_SECRET_KEY"
-        mc mb -p "local/$$SPARK_CHECKPOINT_BUCKET"
-        mc mb -p local/mlflow
-        mc mb -p "local/$$COLD_STORE_BUCKET"
-        # Expire abandoned uploads (ADR-0030). An artifact is staged before it is judged, so
-        # unadmitted bytes have a home — one no tenant can address and nothing loads. An upload that
-        # is staged and never committed is a certainty rather than an edge case (a closed laptop is
-        # enough), and nothing in the request path will ever come back to clean it up: the only
-        # actor who knew about it has gone. Admitted and refused uploads are both cleared at commit;
-        # this is for the third case, where commit never happens.
-        # Idempotent by CHECKING, not by hoping `add` fails: it does not — it happily adds a second
-        # rule for the same prefix, and this init runs on every `up`. Found by counting the rules on
-        # a box that had run it twice.
-        if mc ilm rule ls "local/$$UPLOAD_STAGING_BUCKET" 2>/dev/null | grep -q "$$UPLOAD_STAGING_PREFIX"; then
-          echo "upload-staging expiry already present on $$UPLOAD_STAGING_BUCKET"
-        else
-          mc ilm rule add "local/$$UPLOAD_STAGING_BUCKET" \
-            --prefix "$$UPLOAD_STAGING_PREFIX" \
-            --expire-days "$$UPLOAD_STAGING_EXPIRE_DAYS"
-          echo "upload-staging expiry set: $$UPLOAD_STAGING_BUCKET/$$UPLOAD_STAGING_PREFIX after $${UPLOAD_STAGING_EXPIRE_DAYS}d"
-        fi
-        # Write-scoped cold-export principal: put/get/list on ONLY the cold bucket. Only set up
-        # when its keys are provided (cold-export profile); tolerate re-runs (mc create/user add
-        # error if they already exist).
-        if [ -n "$$COLD_STORE_ACCESS_KEY" ] && [ -n "$$COLD_STORE_SECRET_KEY" ]; then
-          cat > /tmp/cold-rw.json <<EOF
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET"]},
-            {"Effect": "Allow", "Action": ["s3:PutObject", "s3:GetObject"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET/*"]}
-          ]
-        }
-        EOF
-          mc admin policy create local cold-export-rw /tmp/cold-rw.json || true
-          mc admin user add local "$$COLD_STORE_ACCESS_KEY" "$$COLD_STORE_SECRET_KEY" || true
-          mc admin policy attach local cold-export-rw --user "$$COLD_STORE_ACCESS_KEY" || true
-          echo "cold write principal ready on $$COLD_STORE_BUCKET"
-        fi
-        # Read-only cold principal for the broker: get/list on ONLY the cold bucket, NO put/delete.
-        if [ -n "$$COLD_READ_ACCESS_KEY" ] && [ -n "$$COLD_READ_SECRET_KEY" ]; then
-          cat > /tmp/cold-ro.json <<EOF
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET"]},
-            {"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET/*"]}
-          ]
-        }
-        EOF
-          mc admin policy create local cold-broker-ro /tmp/cold-ro.json || true
-          mc admin user add local "$$COLD_READ_ACCESS_KEY" "$$COLD_READ_SECRET_KEY" || true
-          mc admin policy attach local cold-broker-ro --user "$$COLD_READ_ACCESS_KEY" || true
-          echo "cold read principal ready on $$COLD_STORE_BUCKET"
-        fi
-        echo "buckets ready: $$SPARK_CHECKPOINT_BUCKET, mlflow, $$COLD_STORE_BUCKET"
+    entrypoint: ["/bin/sh", "/opt/minio-init.sh"]
+    volumes:
+      - ./infrastructure/minio/minio-init.sh:/opt/minio-init.sh:ro
     networks:
       - industryflow-network
     restart: "no"
@@ -361,8 +317,9 @@ services:
       PGSSLMODE: ${DB_SSLMODE:-verify-full}
       PGSSLROOTCERT: /etc/ssl/industryflow/ca.crt
       MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
-      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      # The artifact-bucket principal minio-init creates (read/write on that bucket only).
+      AWS_ACCESS_KEY_ID: ${MLFLOW_STORE_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MLFLOW_STORE_SECRET_KEY}
     # List form (not a folded scalar): the `&` in a URI query string truncates a `command: >`
     # block, which silently dropped --host/--port and left MLflow bound to localhost. TLS to the
     # DB is supplied by PGSSLMODE/PGSSLROOTCERT above, so the URI needs no query params.
@@ -387,8 +344,9 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      # The artifact bucket and this server's principal exist only once minio-init has run.
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       # Slim image has no curl — use the Python stdlib. Longer start_period: mlflow boots slowly.
       test: [ "CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/health').status==200 else 1)" ]
@@ -800,9 +758,11 @@ services:
       MODEL_CACHE_SIZE: ${MODEL_CACHE_SIZE:-8}
       # Extension plugin modules to import at startup (ADR-0010); empty = generic built-ins.
       EXTENSION_MODULES: ${EXTENSION_MODULES:-}
-      # MinIO/S3 credentials for loading models from MLflow
-      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      # Read-only object-store principal, scoped to admitted uploads (tenant_*/uploads/*): an
+      # uploaded artifact is registered by its s3:// location (ADR-0030), so loading it reads the
+      # store directly. Tracked models are reached through the tracking server and need nothing.
+      AWS_ACCESS_KEY_ID: ${MODEL_READ_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MODEL_READ_SECRET_KEY}
       MLFLOW_S3_ENDPOINT_URL: ${MINIO_ENDPOINT}
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
@@ -967,12 +927,17 @@ services:
       # the store; unset, pre-signing falls back to the interior endpoint and only an in-cluster
       # client can follow the URL — the pre-change behaviour, unaffected.
       TRACKING_S3_PRESIGN_ENDPOINT_URL: ${PUBLIC_BASE_URL:-}
-      TRACKING_S3_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      TRACKING_S3_SECRET_KEY: ${MINIO_SECRET_KEY}
+      # The gateway's own artifact-bucket principal (ADR-0030 dec 2: the one writer on the upload
+      # path); provisioned by minio-init when these are set.
+      TRACKING_S3_ACCESS_KEY: ${TRACKING_STORE_ACCESS_KEY:-}
+      TRACKING_S3_SECRET_KEY: ${TRACKING_STORE_SECRET_KEY:-}
     depends_on:
-      - redis
-      - mlflow
-      - minio
+      redis:
+        condition: service_started
+      mlflow:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
     networks:
       - industryflow-network
       - notebook-kernels
@@ -1222,8 +1187,10 @@ services:
       PGPORT: ${DB_PORT}
       PGUSER: ${DB_USER}
       PGPASSWORD: ${DB_PASSWORD}
-      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      # The backup bucket's own principal (read/write/delete there only), created by minio-init
+      # together with the bucket.
+      AWS_ACCESS_KEY_ID: ${BACKUP_STORE_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_STORE_SECRET_KEY}
       AWS_DEFAULT_REGION: ${BACKUP_S3_REGION:-us-east-1}
       S3_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
       S3_BUCKET: ${BACKUP_S3_BUCKET:-industryflow-backups}
@@ -1231,12 +1198,16 @@ services:
       DATABASES: ${BACKUP_DATABASES:-industryflow mlflow}
       RETAIN_PER_DB: ${BACKUP_RETAIN_PER_DB:-14}
       # Cold-layer mirror (ADR-0025): the cold bucket is the only copy of raw history older than the
-      # export horizon. Read with the read-only cold principal; empty keys fall back to the ones above.
+      # export horizon. Read with the read-only cold principal (minio-init.sh cold-broker-ro); the
+      # backup principal above cannot read the cold bucket.
       COLD_SOURCE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
       COLD_SOURCE_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
       COLD_SOURCE_ACCESS_KEY_ID: ${COLD_READ_ACCESS_KEY:-}
       COLD_SOURCE_SECRET_ACCESS_KEY: ${COLD_READ_SECRET_KEY:-}
       COLD_BACKUP_PREFIX: ${BACKUP_COLD_PREFIX:-cold}
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
