@@ -173,7 +173,7 @@ jobs:
         run: |
           # Proof the upgrade path actually ran, rather than the seed being quietly ignored.
           docker compose --profile notebooks logs notebook-hub 2>&1 | grep -q "Running upgrade" \
-            && echo "OK    the hub migrated the seeded 4.x schema on start" \
+            && echo "OK    the hub migrated the seeded previous-major schema on start" \
             || { echo "::error::the hub never migrated the seed — the upgrade path was not exercised"; exit 1; }
           docker compose --profile notebooks exec -T notebook-hub \
             python -c "import urllib.request; print('hub health:', urllib.request.urlopen('http://localhost:8000' + __import__('os').environ.get('NOTEBOOK_BASE_URL', '/').rstrip('/') + '/hub/health', timeout=10).status)"

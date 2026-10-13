@@ -476,8 +476,8 @@ services:
       <<: [*db-tls-env, *spark-s3a-env]
       # Spark configuration
       SPARK_MASTER: spark://spark-master:7077
-      SPARK_DRIVER_MEMORY: 2g
-      SPARK_EXECUTOR_MEMORY: 2g
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-2g}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-2g}
       # Resource budget on the shared worker (ADR-0006): cores capped so streaming +
       # aggregations coexist (sum <= SPARK_WORKER_CORES). Raise these / add workers to scale.
       SPARK_CORES_MAX: ${SPARK_STREAMING_CORES_MAX:-1}
@@ -517,8 +517,8 @@ services:
       <<: [*db-tls-env, *spark-s3a-env]
       # Spark configuration
       SPARK_MASTER: spark://spark-master:7077
-      SPARK_DRIVER_MEMORY: 2g
-      SPARK_EXECUTOR_MEMORY: 2g
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-2g}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-2g}
       # Aggregations runs 3 windowed streams; give it the larger share of the worker
       # (sum with streaming <= SPARK_WORKER_CORES). Raise / add workers to scale.
       SPARK_CORES_MAX: ${SPARK_AGG_CORES_MAX:-3}
