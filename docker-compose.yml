@@ -597,14 +597,19 @@ services:
     build:
       context: ./services/frontend
       dockerfile: Dockerfile
-      args:
-        REACT_APP_API_URL: ${REACT_APP_API_URL:-}
-        REACT_APP_WS_URL: ${REACT_APP_WS_URL:-}
     container_name: industryflow-frontend
     environment:
       # Extra SANs for the self-signed dev cert, e.g. the host LAN IP
       # ("IP:<host-ip>"). Ignored when a real cert is mounted at /etc/nginx/certs.
       CERT_EXTRA_SAN: ${CERT_EXTRA_SAN:-}
+      # The edge's upstreams (services/frontend/nginx.conf.template); the container refuses to
+      # start without them. Re-resolved per request through Docker's embedded DNS, so a recreated
+      # service is followed and the opt-in notebooks plane answers 502 while it is down.
+      EDGE_API_GATEWAY: api-gateway:8000
+      EDGE_ML_SERVICE: ml-service-api:8002
+      EDGE_NOTEBOOK_SSO: notebook-sso:8080
+      EDGE_TRACKING_GATEWAY: notebook-tracking-gateway:5050
+      EDGE_OBJECT_STORE_URL: ${MINIO_ENDPOINT:-http://minio:9000}
     ports:
       # Unprivileged nginx listens on 8443/8080 inside the container; host ports unchanged.
       - "${FRONTEND_HTTPS_PORT:-3443}:8443"

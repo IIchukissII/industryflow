@@ -101,19 +101,24 @@ spec:
             - secretRef:
                 name: {{ include "industryflow.workloadSecretName" (dict "ctx" $root "workload" $name) }}
             {{- end }}
-          {{- if has "MINIO_ACCESS_KEY" ($app.secretKeys | default list) }}
-          {{- /* MinIO creds are consumed as S3/AWS creds (e.g. the MLflow client loading model artifacts). */}}
+          {{- if or $app.secretEnv $app.edge }}
           env:
-            - name: AWS_ACCESS_KEY_ID
+            {{- /* apps.<name>.secretEnv: env var -> one of the workload's own secretKeys, for a
+                   credential the process reads under a name other than its key (e.g. the AWS_*
+                   names an S3 client reads, fed from a scoped object-store principal). */}}
+            {{- range $envName, $key := ($app.secretEnv | default dict) }}
+            {{- if not (has $key ($app.secretKeys | default list)) }}
+            {{- fail (printf "apps.%s.secretEnv.%s names %s, which is not in apps.%s.secretKeys" $name $envName $key $name) }}
+            {{- end }}
+            - name: {{ $envName }}
               valueFrom:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" $root "workload" $name) }}
-                  key: MINIO_ACCESS_KEY
-            - name: AWS_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" $root "workload" $name) }}
-                  key: MINIO_SECRET_KEY
+                  key: {{ $key }}
+            {{- end }}
+            {{- if $app.edge }}
+            {{- include "industryflow.edgeEnv" $root | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- if or $app.port $app.metricsPort }}
           ports:

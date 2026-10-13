@@ -6,6 +6,10 @@
 
 nameOverride: ""
 fullnameOverride: ""
+# The cluster's DNS domain. The frontend edge names its upstreams by fully-qualified Service name
+# (<svc>.<namespace>.svc.<clusterDomain>), because it re-resolves them per request and a resolver
+# applies no search domains.
+clusterDomain: cluster.local
 
 # The platform's public edge origin (scheme + host, no trailing slash), e.g. https://app.example.
 # Set it for a browser deployment to enable uploading an externally-authored model from the UI
@@ -135,6 +139,7 @@ apps:
     # MINIO_* are also exposed as AWS_* (the MLflow client loads model artifacts from MinIO).
     # No MLFLOW_DB_*: ml-service reaches MLflow over its REST API, never the MLflow DB directly.
     secretKeys: [ML_SERVICE_DB_PASSWORD, JWT_SECRET_KEY, INTERNAL_SERVICE_TOKEN, MINIO_ACCESS_KEY, MINIO_SECRET_KEY]
+    secretEnv: { AWS_ACCESS_KEY_ID: MINIO_ACCESS_KEY, AWS_SECRET_ACCESS_KEY: MINIO_SECRET_KEY }
     metrics: true
     hpa:
       enabled: false
@@ -257,6 +262,12 @@ apps:
       minReplicas: 2
       maxReplicas: 6
       targetCPUUtilizationPercentage: 70
+    # The edge's upstreams (EDGE_*) are rendered from this release's Service FQDNs
+    # (industryflow.edgeEnv); the container refuses to start without them.
+    edge: true
+    # The Ingress terminates TLS and reaches 8080 with X-Forwarded-Proto: https, which the edge
+    # serves (plain requests without it are redirected to https). The security headers (HSTS, CSP,
+    # frame/sniff/referrer policy) are set by the edge and pass through the Ingress unchanged.
     port: 8080
     probe: { path: /healthz, port: 8080 }
     ingress: { host: app.industryflow.local, path: / }

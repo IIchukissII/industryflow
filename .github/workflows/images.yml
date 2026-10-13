@@ -45,6 +45,10 @@ jobs:
               - 'infrastructure/mlflow/**'
               - 'infrastructure/backup/**'
               - '.trivyignore'
+              # The edge smoke renders the frontend config from these.
+              - 'docker-compose.yml'
+              - 'deploy/helm/**'
+              - 'scripts/edge_env.py'
               - '.github/workflows/images.yml'
               - 'scripts/check_spark_version_parity.py'
               - 'scripts/tests/test_spark_version_parity.py'
@@ -113,6 +117,7 @@ jobs:
               smoke: "env DB_HOST=x DB_PORT=5432 DB_NAME=x API_GATEWAY_DB_USER=x API_GATEWAY_DB_PASSWORD=x REDIS_HOST=x REDIS_PORT=6379 REDIS_DB=0 JWT_SECRET_KEY=smoke-only-not-a-secret-0123456789abcdef CORS_ORIGINS=https://x python -c \"import main; print('api-gateway serves', main.app.title)\"" }
           - { name: ingestion-service,      context: services/ingestion_service, file: services/ingestion_service/Dockerfile,
               smoke: "env INGESTION_SERVICE_PORT=8003 KAFKA_BOOTSTRAP_SERVERS=x:9092 DEVICE_IDENTITY_HEADERS=x-client python -c \"import main; print('ingestion serves', main.app.title)\"" }
+          # No `smoke`: the edge has its own smoke step below (nginx -t per deployment + behaviour).
           - { name: frontend,               context: services/frontend,        file: services/frontend/Dockerfile }
           # numpy/sklearn/xgboost are C-extension stacks: an ABI mismatch is invisible to a resolve and
           # fatal on import (this is the pyarrow-14-under-numpy-2 break, #209).
@@ -231,6 +236,50 @@ jobs:
           echo "$SMOKE"
           docker run --rm --entrypoint sh "$IMAGE" -c "$SMOKE"
           echo "::endgroup::"
+
+      # The frontend has no Python to import; its smoke is the edge itself. The image renders its
+      # nginx config at start from the upstreams the deployment passes, so `nginx -t` runs on the
+      # config each deployment actually produces — compose's service names and the chart's
+      # rendered Service FQDNs — and the running edge is probed for the behaviour both rely on:
+      # plain requests redirect, a TLS-terminating proxy's X-Forwarded-Proto: https is served (the
+      # Ingress path), the security headers are present, and a missing upstream refuses to start.
+      - uses: actions/setup-python@v7
+        if: github.event_name == 'pull_request' && matrix.name == 'frontend'
+        with:
+          python-version: "3.14"
+      - uses: azure/setup-helm@v5
+        if: github.event_name == 'pull_request' && matrix.name == 'frontend'
+        with:
+          version: v3.16.3
+      - name: Smoke — the edge config each deployment renders passes nginx -t and behaves
+        if: github.event_name == 'pull_request' && matrix.name == 'frontend'
+        env:
+          IMAGE: ${{ env.REGISTRY }}/industryflow-${{ matrix.name }}:${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          pip install --quiet pyyaml==6.0.3
+          python scripts/edge_env.py compose > compose.env
+          python scripts/edge_env.py helm --set notebookHub.enabled=true > helm.env
+          for env in compose helm; do
+            echo "::group::nginx -t with the ${env} upstreams"
+            cat "${env}.env"
+            docker run --rm --env-file "${env}.env" "$IMAGE" nginx -t
+            echo "::endgroup::"
+          done
+          grep -v '^EDGE_ML_SERVICE=' compose.env > incomplete.env
+          if docker run --rm --env-file incomplete.env "$IMAGE" nginx -t; then
+            echo "::error::the edge started without an upstream"; exit 1
+          fi
+          docker run -d --name edge --env-file compose.env -p 18080:8080 -p 18443:8443 "$IMAGE"
+          trap 'docker logs edge; docker rm -f edge' EXIT
+          for i in $(seq 1 30); do curl -fsS http://localhost:18080/healthz >/dev/null 2>&1 && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18080/)" = 301
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' http://localhost:18080/)" = 200
+          headers=$(curl -sk -D - -o /dev/null https://localhost:18443/)
+          for h in Strict-Transport-Security Content-Security-Policy X-Content-Type-Options X-Frame-Options Referrer-Policy; do
+            echo "$headers" | grep -qi "^$h:" || { echo "::error::missing $h"; echo "$headers"; exit 1; }
+          done
+          echo "edge ok"
 
       - name: Install Trivy
         # A pinned release, checksum-verified. The previous `curl … main/install.sh | sh` ran an

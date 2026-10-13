@@ -139,3 +139,36 @@ no password). Returned space-separated; callers `splitList " "` it.
 {{- required "infra.mlflow.external.trackingUri is required when inCluster=false" .Values.infra.mlflow.external.trackingUri -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+The cluster-internal FQDN of one of this release's Services. Call with a dict: ctx, name (the
+suffix after the fullname). Fully qualified because the edge re-resolves its upstreams through a
+resolver, and a resolver applies no search domains.
+*/}}
+{{- define "industryflow.serviceFqdn" -}}
+{{- $ctx := .ctx -}}
+{{- printf "%s-%s.%s.svc.%s" (include "industryflow.fullname" $ctx) .name $ctx.Release.Namespace $ctx.Values.clusterDomain -}}
+{{- end -}}
+
+{{/*
+The frontend edge's upstreams (services/frontend/nginx.conf.template): the release's Service FQDNs.
+The container refuses to start without every one of them, so this list and the template's
+variables move together (tests/config_guards renders both and compares).
+*/}}
+{{- define "industryflow.edgeEnv" -}}
+{{- $apps := .Values.apps -}}
+- name: EDGE_API_GATEWAY
+  value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "api-gateway")) (index $apps "api-gateway").port | quote }}
+- name: EDGE_ML_SERVICE
+  value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "ml-service-api")) (index $apps "ml-service-api").port | quote }}
+- name: EDGE_NOTEBOOK_SSO
+  value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "notebook-sso")) .Values.notebookHub.ssoProxy.port | quote }}
+- name: EDGE_TRACKING_GATEWAY
+  value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "notebook-tracking-gateway")) .Values.notebookHub.trackingGateway.port | quote }}
+- name: EDGE_OBJECT_STORE_URL
+  {{- if .Values.infra.minio.inCluster }}
+  value: {{ printf "http://%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "minio")) .Values.infra.minio.apiPort | quote }}
+  {{- else }}
+  value: {{ .Values.infra.minio.external.endpoint | quote }}
+  {{- end }}
+{{- end -}}
