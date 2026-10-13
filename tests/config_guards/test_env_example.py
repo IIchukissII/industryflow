@@ -14,8 +14,10 @@ from _repo import ROOT
 ENV = (ROOT / ".env.example").read_text()
 COMPOSE = (ROOT / "docker-compose.yml").read_text()
 
-# Read by something other than compose interpolation: scripts/seed_users.py builds these names.
-SCRIPT_READ = re.compile(r"^ADMIN_USER_\d+_(EMAIL|PASSWORD|COMPANY_ID|ROLE)$")
+# Read by something other than compose interpolation: scripts/seed_users.py builds these names; the
+# suffixes are read from the script itself, so a new one it reads is not mistaken for dead.
+SEED = (ROOT / "scripts" / "seed_users.py").read_text()
+SCRIPT_READ = re.compile(r"^ADMIN_USER_\d+_(%s)$" % "|".join(sorted(set(re.findall(r"ADMIN_USER_\{i\}_(\w+)", SEED)))))
 
 
 def test_every_variable_is_read_by_compose_or_a_named_script():
@@ -23,7 +25,7 @@ def test_every_variable_is_read_by_compose_or_a_named_script():
     interpolated = set(re.findall(r"\$\{(\w+)", COMPOSE))
     dead = [k for k in keys if k not in interpolated and not SCRIPT_READ.match(k)]
     assert not dead, f".env.example variables nothing reads: {dead}"
-    assert "ADMIN_USER_{i}_" in (ROOT / "scripts" / "seed_users.py").read_text()
+    assert "ADMIN_USER_{i}_" in SEED
 
 
 def test_no_private_network_address_is_committed():

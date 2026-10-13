@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from _repo import ROOT, load_yaml
+from _repo import load_yaml
 
 DIGEST = re.compile(r"^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$")
 

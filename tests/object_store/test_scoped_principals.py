@@ -118,11 +118,17 @@ ALLOWED = {
     "tracking-gateway": [("put", f"{ART}/_upload-staging/tenant_aaaa/u2/m"), ("get", UPLOADED),
                          ("delete", f"{ART}/_upload-staging/tenant_aaaa/u2/m")],
     "model-read": [("get", UPLOADED), ("list", f"{ART}/tenant_aaaa/uploads/u1/")],
+    # The backup job also mirrors the cold bucket into its own under cold/ (written here, read with
+    # the cold read principal, below): put, list and head the mirror's keys.
     "db-backup": [("put", f"{BAK}/timescaledb/b.dump"), ("list", f"{BAK}/timescaledb/"),
-                  ("get", f"{BAK}/timescaledb/a.dump"), ("delete", f"{BAK}/timescaledb/b.dump")],
+                  ("get", f"{BAK}/timescaledb/a.dump"), ("delete", f"{BAK}/timescaledb/b.dump"),
+                  ("put", f"{BAK}/cold/tenant_aaaa/year=2026/p.parquet"), ("list", f"{BAK}/cold/"),
+                  ("get", f"{BAK}/cold/tenant_aaaa/year=2026/p.parquet")],
     "cold-export-rw": [("put", f"{COLD}/tenant_aaaa/year=2026/q.parquet"), ("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"),
                        ("list", f"{COLD}/tenant_aaaa/")],
-    "cold-broker-ro": [("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("list", f"{COLD}/tenant_aaaa/")],
+    # Also the backup job's cold mirror source: it lists the whole bucket, then reads each object.
+    "cold-broker-ro": [("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("list", f"{COLD}/tenant_aaaa/"),
+                       ("list", f"{COLD}/")],
 }
 
 REFUSED = {
@@ -133,7 +139,8 @@ REFUSED = {
     # Serving reads admitted uploads and nothing else: not tracked runs, not other buckets, no write.
     "model-read": [("put", f"{ART}/tenant_aaaa/uploads/u1/evil"), ("delete", UPLOADED), ("get", TRACKED),
                    ("list", f"{ART}/"), ("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet")],
-    "db-backup": [("get", TRACKED), ("put", f"{ART}/x")],
+    # The mirror must read the cold bucket with the cold read principal; the backup one cannot.
+    "db-backup": [("get", TRACKED), ("put", f"{ART}/x"), ("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet")],
     "cold-export-rw": [("delete", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("get", TRACKED)],
     "cold-broker-ro": [("put", f"{COLD}/tenant_aaaa/x"), ("delete", f"{COLD}/tenant_aaaa/year=2026/p.parquet"),
                        ("get", TRACKED)],

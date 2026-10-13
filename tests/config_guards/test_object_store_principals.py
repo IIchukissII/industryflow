@@ -118,3 +118,17 @@ def test_chart_mlflow_server_uses_the_database_and_the_object_store():
     joined = " ".join(args)
     assert "--backend-store-uri postgresql://" in joined, args
     assert "--artifacts-destination s3://" in joined and "--default-artifact-root mlflow-artifacts:/" in joined, args
+
+
+def test_the_backup_cold_mirror_reads_with_the_cold_read_principal():
+    # The backup principal cannot read the cold bucket; the mirror's source keys must be the cold
+    # read principal's, in compose and in the chart.
+    env = COMPOSE["db-backup"]["environment"]
+    assert _interpolated(env["COLD_SOURCE_ACCESS_KEY_ID"]) == {"COLD_READ_ACCESS_KEY"}
+    assert _interpolated(env["COLD_SOURCE_SECRET_ACCESS_KEY"]) == {"COLD_READ_SECRET_KEY"}
+    docs = helm_template(*ALL_ON)
+    c = find(docs, "CronJob", "-db-backup")["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]
+    refs = {e["name"]: e["valueFrom"]["secretKeyRef"]["key"]
+            for e in c["env"] if "secretKeyRef" in e.get("valueFrom", {})}
+    assert refs["COLD_SOURCE_ACCESS_KEY_ID"] == "COLD_READ_ACCESS_KEY"
+    assert refs["AWS_ACCESS_KEY_ID"] == "BACKUP_STORE_ACCESS_KEY"
