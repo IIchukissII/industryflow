@@ -3,16 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0009: Deployment and orchestration — Kubernetes, packaged with Helm (rev 1)
+# ADR-0009: Deployment and orchestration — Kubernetes, packaged with Helm (rev 2)
 
 - **ID:** ADR-0009
 - **Status:** Accepted
-- **Date:** 2026-06-28
+- **Date:** 2026-06-27 (rev 1: 2026-06-28; rev 2: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0002 (ingestion mTLS edge), ADR-0004 (API HTTPS edge), ADR-0006 (durable Spark checkpoints)
-- **Related:** ADR-0018 (spawner portability — establishes single-host Compose as a first-class self-hosted target), ADR-0016 (observability stack deferred to here)
-- **Supersedes:** ADR-0009 rev 0 (2026-06-27 — treated `docker-compose.yml` as a local-development convenience only and rejected Compose as a deployment path; rev 1 admits single-host Compose as a supported self-hosted deployment target, reconciling this ADR with ADR-0018)
+- **Related:** ADR-0018 (spawner portability — establishes single-host Compose as a first-class self-hosted target), ADR-0016 (observability stack deferred to here), ADR-0031 (retires the separate alerting API listed in decision 2 at rev 1)
+- **Supersedes:** ADR-0009 rev 0 (2026-06-27 — treated `docker-compose.yml` as a local-development convenience only and rejected Compose as a deployment path; rev 1 admits single-host Compose as a supported self-hosted deployment target, reconciling this ADR with ADR-0018); rev 1 (2026-06-28 — listed a separate alerting API among the Deployments and the tracking server among the StatefulSets; rev 2 follows ADR-0031 for the first and classifies the tracking server by where its state lives)
 
 ## Context and problem
 
@@ -21,6 +21,8 @@ IndustryFlow ships today as a single `docker-compose.yml` of ~20 containers. Com
 Moving to Kubernetes raises immediate questions the project has not decided: how the manifests are packaged and parameterized per environment; how the stateful infrastructure (TimescaleDB, Kafka, Redis, MinIO, MLflow) is run when the same chart must serve both a self-hoster who wants everything in-cluster and a managed deployment that points at external managed datastores; and where the TLS edge lives. This ADR records those decisions. It does not retire `docker-compose.yml`; it adds the Kubernetes deployment path the *managed* offering and *scaled* self-hosting require.
 
 **Revision 1 (2026-06-28).** Rev 0 framed Compose as a local-development convenience only and rejected it as a deployment path, with self-hosting equated to in-cluster Helm. That was too strong: a small self-hoster running a single host is a real, supported deployment shape, and the platform in fact runs that way today (the notebook hub's Compose spawner in ADR-0018 is built on this premise, and ADR-0017 records "the live deployment is docker-compose"). Rev 1 therefore recognizes **two self-hosted shapes** — single-host Compose for small/test deployments, and in-cluster Helm for scaled self-hosting — while the *managed* offering remains Kubernetes/Helm. Kubernetes is still the target for everything Compose structurally cannot do (rolling updates, autoscaling, self-healing, multi-node scheduling, managed-multi-tenancy); what changes is that Compose is no longer *only* a dev tool. Decision 6 and Alternative A below carry the revised stance.
+
+**Revision 2 (2026-10-13).** Two entries in the workload lists had stopped being true. Decision 2 still listed an alerting-service API among the stateless Deployments after ADR-0031 retired that deployable — the alerting service now has no HTTP surface of its own. And decision 3 listed the experiment-tracking server among the StatefulSets, while the chart has always run it as a Deployment. The chart is right and the record was wrong, by the record's own driver: what makes a workload stateful is that it owns durable storage and a stable identity. The tracking server owns neither — its metadata lives in the database and its artifacts in the object store, both of which are toggled and run under decision 3 — so it is a stateless front to stateful stores, and scales and rolls like any other service. Rev 2 corrects both lists and marks the first as ADR-0031's.
 
 ## Decision drivers
 
@@ -34,9 +36,13 @@ Moving to Kubernetes raises immediate questions the project has not decided: how
 
 1. **Kubernetes is the deployment target; Helm is the packaging.** A single Helm chart (`deploy/helm/industryflow`) renders the manifests, parameterized by `values.yaml` per environment. Helm is chosen over raw manifests/Kustomize for its templating and, decisively, its ability to toggle optional dependencies (decision 3).
 
-2. **Stateless workloads are Deployments; the Spark jobs are Deployments too.** The application services (api-gateway, ml-service API, alert-service API, alert-service detector worker, ingestion-service) and the Spark streaming/aggregation jobs run as Deployments with liveness/readiness probes and resource requests and limits on every workload — closing the review's "no resource limits" gap. They are horizontally scalable (HPA-ready) where the workload allows.
+2. **Stateless workloads are Deployments; the Spark jobs are Deployments too.** The application services (api-gateway, ml-service API, the alert-service detector worker, ingestion-service, and the experiment-tracking server — rev 2) and the Spark streaming/aggregation jobs run as Deployments with liveness/readiness probes and resource requests and limits on every workload — closing the review's "no resource limits" gap. They are horizontally scalable (HPA-ready) where the workload allows.
 
-3. **Stateful infrastructure runs as StatefulSets, gated by a per-dependency `inCluster` toggle.** TimescaleDB, Kafka, Zookeeper, Redis, MinIO, and MLflow are StatefulSets with PersistentVolumeClaims when `inCluster` is true (the self-hosted default), or are omitted in favour of an externally-supplied endpoint when false (the managed default). One chart serves both deployment models from ADR-0001 by flipping toggles, with no fork.
+   > *Rev 1 read:* "(api-gateway, ml-service API, alert-service API, alert-service detector worker, ingestion-service)". The alert-service API is retired by ADR-0031 dec 2; the tracking server moves here from decision 3 (rev 2).
+
+3. **Stateful infrastructure runs as StatefulSets, gated by a per-dependency in-cluster toggle.** The workloads that own durable storage — the database, the message broker and its coordinator, the key-value store and the object store — are StatefulSets with persistent volume claims when run in-cluster (the self-hosted default), or are omitted in favour of an externally-supplied endpoint (the managed default). The experiment-tracking server sits behind the same toggle but is a Deployment (decision 2): its state lives in the database and the object store, not in the pod *(rev 2)*. One chart serves both deployment models from ADR-0001 by flipping toggles, with no fork.
+
+   > *Rev 1 read:* "TimescaleDB, Kafka, Zookeeper, Redis, MinIO, and MLflow are StatefulSets". The chart never ran the tracking server that way, and by this decision's own criterion it should not.
 
 4. **Configuration is a ConfigMap; secrets are a Kubernetes Secret injected externally.** Non-secret configuration (hosts, ports, topic names) is a ConfigMap; secrets (DB passwords, JWT secret, MinIO keys) are a Secret whose values are supplied by a secrets backend (SealedSecrets/Vault/CSI) in real deployments and are never committed to the chart. The chart ships placeholders, not values.
 
@@ -55,6 +61,8 @@ Moving to Kubernetes raises immediate questions the project has not decided: how
 **D. Always require external managed datastores.** *Rejected:* a self-hoster must be able to run the whole stack on their own cluster with no external dependencies. Again the toggle serves both.
 
 **E. Use dedicated operators for the stateful services (e.g. a Postgres/Kafka operator).** *Deferred, not rejected:* operators run stateful services better than hand-written StatefulSets at scale and are the likely future direction, but they add heavy dependencies and are more than this first pass needs. StatefulSets now; operators revisited when operational load justifies them.
+
+**F. Run the tracking server as a StatefulSet, as rev 1 said *(rev 2)*.** *Rejected:* a StatefulSet buys stable identity and per-pod storage, and the tracking server uses neither; it would only make the server harder to roll and scale while its real state stays where it already is.
 
 ## Consequences
 
@@ -105,16 +113,14 @@ The chart at acceptance realizes decisions that were placeholders in the first p
   there: the app chart emits ServiceMonitors / PrometheusRules / Grafana-dashboard ConfigMaps
   and ships the data-store exporters, while the backend (`kube-prometheus-stack` + Loki) runs
   separately (`deploy/observability/`). Tenant sensor alerts stay out of the shared stack.
-- **Image registry and digest pinning.** Images are built, scanned (Trivy, gating on fixable
-  CRITICAL), and published to `ghcr.io/iichukissii` by `.github/workflows/images.yml`
-  (`:latest` + `:sha-<short>`). The chart references images by **immutable digest** in
-  production: third-party images (TimescaleDB, Kafka/ZooKeeper, Redis, MinIO, the notebook
-  proxy/nginx) are pinned as `name:tag@sha256:…` directly in `values.yaml`; first-party
-  `industryflow-*` images carry a per-image `digest:` (empty by default → the mutable
-  `image.tag` for dev) that, when set, wins over the tag via the `industryflow.image` helper.
-  Because first-party digests rotate per build, the production overlay is *generated*, not
-  hand-maintained: `scripts/pin-image-digests.sh <tag> > values-digests.yaml`, applied with
-  `-f`. This resolves the original "no pinned images" review concern.
+- **Image registry and digest pinning.** Images are built, scanned (gating on fixable critical
+  vulnerabilities), and published to the project's container registry by CI, with a moving tag
+  and a per-commit tag. In production the chart references every image by **immutable digest**:
+  third-party images are pinned by digest in the chart's values; first-party images carry an
+  optional per-image digest that, when set, wins over the mutable tag. Because first-party digests
+  rotate per build, the production overlay of digests is *generated*, not hand-maintained. This
+  resolves the original "no pinned images" review concern. (Registry, tags, the generator and how
+  to apply its output: `deploy/helm/industryflow/README.md`.)
 - **Object-store image source (2026-10-11).** The upstream MinIO images were withdrawn from public
   registries. The in-cluster object store now runs a maintained, signed third-party build of the same
   server, pinned by digest like every other third-party image. It runs non-root, so the store's

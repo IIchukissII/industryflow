@@ -108,8 +108,10 @@ compatibility (major must match) and refuses a mismatch.
 
 ## Versioning, boundaries, packaging
 
-- The platform publishes `EXTENSION_API_VERSION` (semver). A breaking contract change is a
-  major bump, never silent.
+- The platform publishes `EXTENSION_API_VERSION` (semver; the current value is in
+  `services/ml_service/api/extensions/__init__.py`). The contract is still **0.x, pre-stable**: a
+  minor bump may remove or change an element, and the ADR or revision that makes such a change
+  names what broke. From 1.0 a breaking change is a major bump. See ADR-0010 dec 3 (rev 2).
 - Domain data lives in **extension-owned tables** inside the per-tenant schema, not as columns
   on core tables — the core's generic entities (equipment, sensor, measurement) stay unchanged.
 - Extensions are **separate packages** that depend on IndustryFlow; the platform never vendors

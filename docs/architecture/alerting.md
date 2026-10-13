@@ -55,6 +55,11 @@ still *correct*. That needs a human verdict (**[ADR-0022](../../ADR/ADR-0022-con
   when a model shows **both** sustained drift **and** label-derived precision decay — model-scoped
   cooldown so it doesn't repeat every cycle. It *recommends* retraining (manual/notebook); it does
   not train, since no training service exists. Tunable via the `RETRAIN_*` config.
+- **Storage.** `alert_labels` is created by init script `15-alert-labels.sql`, wired into
+  `create_tenant_schema()` and backfilled onto existing tenants; the verdict is `CHECK`-constrained
+  and `unsure` is excluded from the precision denominator. All of this is validated end-to-end on
+  the compose deployment. Not built: a retrain flag beside the model on the Models page (the
+  recommendation lands in alert history).
 - **Operator UI.** The Alert History page carries a per-alert three-way label control (Real /
   False / Unsure) and a "Precision (labelled)" KPI, alongside the acknowledge action — so labelling
   and the resulting precision live where operators already triage alerts.

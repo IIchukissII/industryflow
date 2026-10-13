@@ -3,14 +3,15 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0024 — Stateful-feature kill-switch (null-in-slot, live via config)
+# ADR-0024 — Stateful-feature kill-switch (null-in-slot, live via config) (rev 1)
 
 - **ID:** ADR-0024
-- **Status:** Accepted (rev 1 — implemented. The guarded substrate is now the Postgres aggregate tables, not Redis: ADR-0023 rev 1 removed ml_service's Redis feature store, which invalidated this ADR's original context and forced dec 2's circularity question to be answered properly, in dec 7)
+- **Status:** Accepted
 - **Date:** 2026-07-06 (rev 1: 2026-07-12)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0010 (extension/plugin mechanism — extends the transform contract with a capability tag)
 - **Companions:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (the safety valve for its Redis-demotion/operational-burden trigger), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (surfacing degraded serving).
+- **Supersedes:** ADR-0024 rev 0 (2026-07-06, Proposed — written when the stateful class read a key-value store; rev 1 records that the guarded substrate is now the database's aggregates, and adds decision 7, which that forced)
 
 ## Context and problem
 
@@ -41,13 +42,13 @@ This is **not** the substrate migration (ADR-0023). It hardens the path that exi
 
 ## Decision
 
-1. **Transforms declare their class at registration.** The ADR-0010 transform contract gains an optional `stateful` capability flag: `register_transform(name, *, stateful=False)`. The registry carries the tag; `get_transform`'s callers can ask whether a type is stateful. Stateless built-ins are unchanged (default `False`); `statistical` and `rolling_stat` register `stateful=True`. This is an **additive** contract change — an optional keyword with a back-compatible default — so it is a **minor** extension-API bump (`EXTENSION_API_VERSION` 0.1.0 → 0.2.0 per ADR-0010 dec 3), never a breaking major, and existing/domain transforms that don't pass it keep working. **rev 1:** the stateful class is a property of the *transform type*, not of the `stat_type` inside it — so `statistical` is stateful for **all** of its statistics (`deviation_from_window_mean`, `window_mean`, `window_std`; ADR-0023 rev 2), since each reads the same aggregate row. The bump lands at 0.2.0 as written: ADR-0023 rev 1 reshaped `TransformContext` but never bumped the published version, which stood at 0.1.0.
+1. **Transforms declare their class at registration.** The ADR-0010 transform contract gains an optional `stateful` capability flag: `register_transform(name, *, stateful=False)`. The registry carries the tag; `get_transform`'s callers can ask whether a type is stateful. Stateless built-ins are unchanged (default `False`); `statistical` and `rolling_stat` register `stateful=True`. This is an **additive** contract change — an optional keyword with a back-compatible default — so it is a **minor** extension-API bump under ADR-0010 dec 3, and existing/domain transforms that don't pass it keep working. **rev 1:** the stateful class is a property of the *transform type*, not of the `stat_type` inside it — so `statistical` is stateful for **all** of its statistics (`deviation_from_window_mean`, `window_mean`, `window_std`; ADR-0023 rev 2), since each reads the same aggregate row. This record's bump is the first after ADR-0023 rev 1 reshaped the transform context without one; ADR-0010 rev 2 records how a breaking change at the pre-stable major is versioned and announced. The current version number is owned by the extension SDK, not by this record.
 
-2. **A single, global, live kill-switch.** One operational flag — *stateful features enabled: yes/no* — is read live on the serving path and flipped by an operator. It is **global** (platform-wide), matching the failure it guards (a shared substrate is degraded for everyone), and **DB-backed with a short read cache**. It is deliberately **not** stored in Redis (the switch would be dead exactly when the substrate it guards is down) and **not** an env var (not live without a restart). **rev 1:** the flag lives in **`public.platform_config`** — the shared schema, never a tenant one, because a platform-global flag is not tenant data (ADR-0003). It is read fully qualified as `public.platform_config` precisely because the inference path may hold a tenant `search_path`, where a bare table name would resolve into the tenant schema and fail.
+2. **A single, global, live kill-switch.** One operational flag — *stateful features enabled: yes/no* — is read live on the serving path and flipped by an operator. It is **global** (platform-wide), matching the failure it guards (a shared substrate is degraded for everyone), and **DB-backed with a short read cache**. It is deliberately **not** stored in Redis (the switch would be dead exactly when the substrate it guards is down) and **not** an env var (not live without a restart). **rev 1:** the flag lives in a platform-wide configuration table in the **shared schema**, never a tenant one, because a platform-global flag is not tenant data (ADR-0003). It is read schema-qualified precisely because the inference path may hold a tenant search path, where an unqualified name would resolve into the tenant schema and fail.
 
 3. **Null-in-slot semantics.** When the switch is off, the engine fills each stateful transform's slot with the **neutral value** (`0.0` by default, reusing the engine's existing missing-feature fallback) **without calling the transform**. Vector length and order are unchanged, so every bound model keeps serving — on partially-neutralized input. A transform may declare a different neutral value if `0.0` is not neutral for it (optional; default `0.0`).
 
-4. **Short-circuit before the substrate call.** The switch check sits in `engine._apply_transformation` **ahead of** `await fn(...)`, so a killed class issues **zero** feature-store calls. Relieving the degraded dependency — not just protecting the model — is the point; nulling *after* the call would protect the model but keep hammering the store, which is useless in the incident this is built for.
+4. **Short-circuit before the substrate call.** The switch check sits in the engine's per-transform dispatch, **ahead of** the call into the transform, so a killed class issues **zero** substrate calls. Relieving the degraded dependency — not just protecting the model — is the point; nulling *after* the call would protect the model but keep hammering the store, which is useless in the incident this is built for.
 
 5. **Degraded serving is observable.** Flipping the switch is not silent: the switch state and per-inference neutralization are logged and metered, and the inference response carries a marker that its score was computed with the stateful class neutralized (ADR-0016 surface). Trading a loud failure (store errors) for a silent one (confidently-wrong scores) is not acceptable.
 
@@ -95,7 +96,7 @@ This is **not** the substrate migration (ADR-0023). It hardens the path that exi
 - **Per-tenant scoping** of the switch (global-only in the first cut).
 - **Auto-trip** on the feature-store health-check, with hysteresis / flap protection.
 - **Per-transform neutral values** beyond the `0.0` default — and, per the negative above, **per-`stat_type`** neutrals, which the current per-type tag cannot express.
-- **Operator surface**: the exact endpoint and RBAC for flipping the flag. **rev 1:** the config table shape is no longer deferred (`public.platform_config`, dec 2). The first cut is flipped with a SQL statement by an operator, documented in the runbook; an authenticated admin endpoint is the follow-on, and is deliberately not built here so that a new write surface is not opened on the inference service without an RBAC decision to go with it.
+- **Operator surface**: the exact endpoint and RBAC for flipping the flag. **rev 1:** the config table is no longer deferred (a shared-schema platform configuration table, dec 2). The first cut is flipped with a SQL statement by an operator, documented in the runbook; an authenticated admin endpoint is the follow-on, and is deliberately not built here so that a new write surface is not opened on the inference service without an RBAC decision to go with it.
 
 ## References
 
