@@ -58,8 +58,25 @@ class ProbeResult:
         return not self.ok
 
 
+# What the probe is given of this service's environment: enough to run Python and to READ the
+# artifact from the object store, and nothing else. The probe loads a stranger's artifact, so it is
+# the one process here that must not hold the database password, the token-signing key, the internal
+# service token or the capability store's address — a load that runs author code would have them.
+# An allowlist, so a secret added to the service later is withheld by default rather than inherited.
+_PROBE_ENV = (
+    # the interpreter
+    "PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "PYTHONPATH", "PYTHONUNBUFFERED",
+    # read access to the artifact store
+    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+    "AWS_DEFAULT_REGION", "AWS_REGION", "AWS_CA_BUNDLE",
+    "MLFLOW_S3_ENDPOINT_URL", "MLFLOW_S3_IGNORE_TLS",
+    # trust roots for that TLS connection
+    "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
+)
+
+
 def _worker_env() -> dict:
-    env = dict(os.environ)
+    env = {name: os.environ[name] for name in _PROBE_ENV if name in os.environ}
     # ADR-0030 dec 4, the half a structural check cannot reach: MLflow will deserialise author
     # objects unless told not to, and it defaults to yes. Bound to this process so the upload path
     # gets the refusal and the notebook path keeps its deferral — the audience distinction, honoured

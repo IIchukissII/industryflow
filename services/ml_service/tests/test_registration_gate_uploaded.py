@@ -20,14 +20,16 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
+import config  # noqa: E402
 import extensions  # noqa: E402
 import extensions.builtins_detectors  # noqa: F401,E402  (registers the built-ins)
 import model_compat  # noqa: E402
+import model_loader  # noqa: E402
 import uploaded_model  # noqa: E402
 from routers.models import router, get_company_id_dependency  # noqa: E402
 
 CID = str(uuid.uuid4())
-ARTIFACT = f"s3://mlflow/tenant_{CID.replace('-', '_')}/uploads/u1"
+ARTIFACT = f"s3://mlflow/tenant_{CID.replace('-', '_')}/uploads/u1-admitted-upload-id"
 
 
 class FakeRepo:
@@ -62,6 +64,10 @@ def client(monkeypatch):
 
     monkeypatch.setattr(model_compat, "evaluate_uri", fake_evaluate_uri)
     monkeypatch.setattr(model_compat, "evaluate_run", fake_evaluate_run)
+    # The address checks have their own suite (test_model_admission); here the run is the caller's
+    # and the bucket is the one the artifact names.
+    monkeypatch.setattr(config.config, "UPLOAD_ARTIFACT_BUCKET", "mlflow")
+    monkeypatch.setattr(model_loader, "_run_owned_by", lambda run_id, company_id: True)
     c = TestClient(app)
     c.repo = repo
     return c
@@ -156,3 +162,54 @@ def test_declared_semantics_is_not_persisted_as_a_second_authority(client):
     client.post("/api/models", json=_body(artifact_uri=ARTIFACT, score_semantics="outlier_score"))
     _, stored = client.repo.created[0]
     assert "score_semantics" not in stored
+
+
+# --- the detector the gate chose is the one recorded (ADR-0010 dec 6, ADR-0028 dec 1) ------------
+
+def test_an_uploaded_model_records_the_detector_its_semantics_matched(client):
+    r = client.post("/api/models", json=_body(artifact_uri=ARTIFACT, score_semantics="outlier_score"))
+    assert r.status_code == 201, r.text
+    _, stored = client.repo.created[0]
+    assert stored["detector"] == "outlier"
+
+
+def test_an_upload_may_not_name_a_detector_outside_its_declaration(client):
+    r = client.post("/api/models", json=_body(artifact_uri=ARTIFACT, score_semantics="outlier_score",
+                                              detector="sklearn"))
+    assert r.status_code == 422, r.text
+    assert client.repo.created == []
+
+
+def test_a_kernel_model_defaults_to_the_compatibility_detector(client):
+    client.post("/api/models", json=_body(mlflow_run_id="run-1"))
+    _, stored = client.repo.created[0]
+    assert stored["detector"] == "sklearn"
+
+
+def test_a_kernel_model_records_the_detector_it_names(client):
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-1", detector="direct"))
+    assert r.status_code == 201, r.text
+    _, stored = client.repo.created[0]
+    assert stored["detector"] == "direct"
+
+
+def test_a_kernel_model_naming_an_unknown_detector_is_refused(client):
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-1", detector="nonesuch"))
+    assert r.status_code == 422, r.text
+    assert client.repo.created == []
+
+
+def test_a_kernel_model_naming_a_detector_for_another_flavor_is_refused(client, monkeypatch):
+    async def xgb(run_id):
+        return _compat(flavor="mlflow.xgboost")
+    monkeypatch.setattr(model_compat, "evaluate_run", xgb)
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-1", detector="outlier"))
+    assert r.status_code == 422, r.text
+    assert client.repo.created == []
+
+
+def test_the_description_is_written(client):
+    """It is read, shown, and called load-bearing for an upload — and nothing wrote it."""
+    client.post("/api/models", json=_body(mlflow_run_id="run-1", description="predicts bearing wear"))
+    _, stored = client.repo.created[0]
+    assert stored["description"] == "predicts bearing wear"

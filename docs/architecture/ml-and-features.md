@@ -49,9 +49,14 @@ sample of its training-window distribution — which is the baseline for drift m
    config.
 2. Engineers the feature vector from the incoming sensor data (windowed baselines read from the
    Spark-materialized aggregates, ADR-0023).
-3. **Scores** the features through the **anomaly-detector registry**: the model record's
-   `detector` (default `sklearn`) returns a 0–1 score and a threshold decision. A domain can
-   register a custom or model-free detector without touching the core scorer
+3. **Scores** the features through the **anomaly-detector registry**: the detector the model
+   record names returns a 0–1 score and a threshold decision. The detector is recorded at
+   registration (`ml_models.detector`): a notebook-trained model names one or gets the `sklearn`
+   compatibility detector; an uploaded model gets the one that implements its declared score
+   semantics for its flavor. A model whose record names none is refused, not scored with a default.
+   A model that already emits a 0–1 anomaly score is registered with the `direct` detector — a float
+   output is never read as a score on its own. A domain can register a custom or model-free
+   detector without touching the core scorer
    (**[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)**).
 
    **What the score MEANS is declared, never inferred from the model's output**
@@ -85,9 +90,12 @@ The alert detection worker calls inference for ML-based rules using the shared
 **[authentication.md](../operations/authentication.md)** and
 **[alerting.md](alerting.md)**.
 
-Loaded models are held in a **process-local warm cache** keyed by MLflow run_id, so the
-anomaly detector and the drift evaluator reuse a warm model instead of cold-loading from
-MLflow on every call (bounded LRU, `MODEL_CACHE_SIZE`).
+Loaded models are held in a **process-local warm cache** keyed by tenant, provenance and the
+model's address (its run, or its admitted upload), so the anomaly detector and the drift evaluator
+reuse a warm model instead of cold-loading from MLflow on every call (bounded LRU,
+`MODEL_CACHE_SIZE`). A cold load runs off the event loop, and first holds the record's address to the
+caller's tenant: a run must belong to one of the tenant's experiments, an artifact location must be an
+upload the gateway admitted under the tenant's prefix.
 
 ## Model drift monitoring
 
@@ -102,9 +110,13 @@ model's training distribution?"* — **windowed and statistical, not per-event**
   (optionally including the model's own output scores). A model without one reports *drift
   unavailable* until retrained — honest, rather than guessing a baseline.
 - **Compute.** `POST /api/drift/evaluate` reads a trailing window of the tenant's recent data,
-  compares it against the reference with **`evidently`**, and returns **data drift** (input
-  distributions) and **prediction drift** (the model's output distribution). The primary scalar
-  is the drifted-feature *share*.
+  aligns it into rows (the instants at which every compared sensor reported), compares it against
+  the reference with **`evidently`**, and returns **data drift** (input distributions) and
+  **prediction drift** (the model's output distribution). The current scores for prediction drift
+  are produced by scoring an evenly spaced sample of the window's rows the way `/predict` scores a
+  reading — feature config, then the model's detector — so a reference's prediction column must
+  hold the same 0–1 detector scores. Where they cannot be produced, data drift is still returned
+  with a `prediction_drift_reason`. The primary scalar is the drifted-feature *share*.
 - **Where it lives.** The baseline is the `reference_profile JSONB` column on `ml_models`
   (init script `14-model-drift-reference-profile.sql`), built at registration by the capture helper
   in `ml_service/api/drift/`. The alert-rule API validates that a `statistical` rule binds a model

@@ -46,6 +46,10 @@ Thumbs.db
 *.dump
 *.sql.gz
 *.RData
+# A local MLflow run (file/SQLite store) — a tracking database, never source.
+mlflow.db
+mlruns/
+mlartifacts/
 
 # Temporary files
 *.tmp

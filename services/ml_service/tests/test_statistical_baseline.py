@@ -155,15 +155,32 @@ async def test_missing_sensor_is_neutral():
 
 # --------------------------------------------------------------------------- provider tests
 
+class _FakeTransaction:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        self.conn.in_transaction = True
+        return self
+
+    async def __aexit__(self, *exc):
+        self.conn.in_transaction = False
+        return False
+
+
 class _FakeConn:
     def __init__(self, row=None, raise_on_fetch=False):
         self.row = row
         self.raise_on_fetch = raise_on_fetch
         self.executed = []
         self.fetched = []
+        self.in_transaction = False
+
+    def transaction(self):
+        return _FakeTransaction(self)
 
     async def execute(self, sql, *args):
-        self.executed.append(sql)
+        self.executed.append((sql, args, self.in_transaction))
 
     async def fetchrow(self, sql, *args, timeout=None):
         self.fetched.append(sql)
@@ -275,3 +292,67 @@ async def test_provider_no_row_is_none():
     provider = AggregateBaselineProvider(pool)
     mean = await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "xmeas_1")
     assert mean is None
+
+
+# --------------------------------------------------------------------------- tenant path + cache bound
+
+@pytest.mark.asyncio
+async def test_provider_sets_the_tenant_path_transaction_locally():
+    """ADR-0003 dec 6: a session-scoped SET would leave this tenant's path on the pooled connection
+    for whoever borrows it next. It must be SET LOCAL (set_config(..., true)) inside a transaction."""
+    pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
+    provider = AggregateBaselineProvider(pool)
+    await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "xmeas_1")
+    (sql, args, in_tx), = pool.conn.executed
+    assert "set_config('search_path', $1, true)" in sql
+    assert args[0].startswith("tenant_")
+    assert in_tx, "the path must be set inside the transaction that scopes it"
+    assert not any("SET search_path" in s for s, _, _ in pool.conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_the_cache_is_bounded():
+    """The keys come from the request: a caller naming a fresh equipment on every call must not grow
+    the process's memory without limit."""
+    pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
+    provider = AggregateBaselineProvider(pool, cache_ttl_seconds=60.0, cache_max_entries=8)
+    import uuid as _uuid
+    for _ in range(50):
+        await provider.compute_baseline(COMPANY_ID, str(_uuid.uuid4()), "xmeas_1")
+    assert len(provider._cache) == 8
+
+
+@pytest.mark.asyncio
+async def test_the_cache_evicts_the_least_recently_used():
+    pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
+    provider = AggregateBaselineProvider(pool, cache_ttl_seconds=60.0, cache_max_entries=2)
+    a, b, c = (f"550e8400-e29b-41d4-a716-44665544010{i}" for i in (1, 2, 3))
+    await provider.compute_baseline(COMPANY_ID, a, "s")
+    await provider.compute_baseline(COMPANY_ID, b, "s")
+    await provider.compute_baseline(COMPANY_ID, a, "s")   # a is now the most recent
+    await provider.compute_baseline(COMPANY_ID, c, "s")   # evicts b, not a
+    reads = pool.acquire_count
+    await provider.compute_baseline(COMPANY_ID, a, "s")
+    assert pool.acquire_count == reads, "a was evicted although b was the least recently used"
+
+
+@pytest.mark.asyncio
+async def test_the_cache_is_keyed_by_tenant():
+    """Two tenants naming the same equipment id are two baselines, read from two schemas."""
+    pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
+    provider = AggregateBaselineProvider(pool, cache_ttl_seconds=60.0)
+    other = "660e8400-e29b-41d4-a716-446655440000"
+    await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "xmeas_1")
+    await provider.compute_baseline(other, EQUIPMENT_ID, "xmeas_1")
+    assert pool.acquire_count == 2
+    paths = [args[0] for _, args, _ in pool.conn.executed]
+    assert len(set(paths)) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_value_that_is_not_an_equipment_id_is_neither_queried_nor_cached():
+    pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
+    provider = AggregateBaselineProvider(pool)
+    assert await provider.compute_baseline(COMPANY_ID, "'; drop table x; --", "xmeas_1") is None
+    assert pool.acquire_count == 0
+    assert len(provider._cache) == 0

@@ -46,7 +46,9 @@ def _full_surface_selects(src):
     """
     return [
         columns
-        for columns in re.findall(r"SELECT\s+(.*?)\s+FROM ml_models", src, re.S)
+        # No SELECT inside the list: an earlier, unrelated SELECT must not open a match that runs on
+        # to the next `FROM ml_models` and swallows the code in between.
+        for columns in re.findall(r"SELECT\s+((?:(?!SELECT).)*?)\s+FROM ml_models", src, re.S)
         if re.search(r"\bmlflow_run_id\b", columns)
     ]
 
@@ -137,3 +139,92 @@ def test_every_column_the_writes_persist_can_be_read_back():
     for column in _MUST_ROUND_TRIP:
         if column in written:
             assert column in mapped, f"`{column}` is written but never read back"
+
+
+# --- against the schema itself -------------------------------------------------------------------
+#
+# The checks above compare the repository's lists with each other. Two failures slipped between
+# them: `training_duration_seconds` sat in the insert allowlist for a column no migration ever
+# created (any registration that sent it failed), and `description` was SELECTed, mapped and
+# advertised as load-bearing while nothing wrote it. Both are caught only by reading the schema, and
+# by asking of every column the read path surfaces whether anything can put a value there.
+
+_INIT = os.path.join(os.path.dirname(__file__), "..", "..", "..", "infrastructure", "timescaledb", "init-scripts")
+
+# Columns the server owns: assigned by the database or by a lifecycle transition, never registered.
+_SERVER_OWNED = {"model_id", "created_at", "updated_at", "deployed_at", "deprecated_at"}
+
+
+def _ml_models_columns():
+    import glob
+    columns = set()
+    for path in sorted(glob.glob(os.path.join(_INIT, "*.sql"))):
+        with open(path) as fh:
+            sql = fh.read()
+        create = re.search(r"CREATE TABLE %I\.ml_models \((.*?)\n\s*\)\s*'", sql, re.S)
+        if create:
+            for line in create.group(1).splitlines():
+                m = re.match(r"\s*([a-z_0-9]+)\s+[A-Z]", line)
+                if m:
+                    columns.add(m.group(1))
+        for alter in re.findall(r"ALTER TABLE %I\.ml_models(.*?)'", sql, re.S):
+            columns.update(re.findall(r"ADD COLUMN IF NOT EXISTS (\w+)", alter))
+    return columns
+
+
+def test_the_schema_is_readable_here():
+    cols = _ml_models_columns()
+    assert {"model_id", "model_name", "description", "provenance", "detector"} <= cols, cols
+
+
+def test_every_column_the_write_path_names_exists():
+    missing = _insert_mapping(_source()) - _ml_models_columns()
+    assert not missing, (
+        f"create_model would INSERT into {sorted(missing)}, which no migration creates — every "
+        f"registration that sends one fails"
+    )
+
+
+def test_every_column_the_reads_select_exists():
+    cols = _ml_models_columns()
+    for i, selected in enumerate(_full_surface_selects(_source())):
+        names = set(re.findall(r"\b([a-z_]+)\b", selected))
+        assert names <= cols, f"SELECT list #{i + 1} names {sorted(names - cols)}, which do not exist"
+
+
+def test_every_column_the_read_path_surfaces_can_be_written():
+    """A column the API shows and nothing writes is a promise the platform cannot keep."""
+    surfaced = _row_mapping(_source()) & _ml_models_columns()
+    unwritable = surfaced - _insert_mapping(_source()) - _SERVER_OWNED
+    assert not unwritable, f"{sorted(unwritable)} are read and shown, but registration never writes them"
+
+
+def test_the_detector_round_trips():
+    """Inference dispatches on it (ADR-0010 dec 6); a read that dropped it would score every model
+    by whatever default the caller assumed — which is what happened while no column carried it."""
+    src = _source()
+    assert "detector" in _insert_mapping(src)
+    assert "detector" in _row_mapping(src)
+    for columns in _full_surface_selects(src):
+        assert re.search(r"\bdetector\b", columns)
+
+
+def test_the_api_carries_the_detector():
+    import datetime
+    from routers.models import ModelMetadata
+
+    out = ModelMetadata(
+        model_id="m1", company_id="c1", model_name="n", model_version="1", model_type="outlier",
+        status="production", created_at=datetime.datetime.now(), detector="outlier",
+    ).model_dump()
+    assert out.get("detector") == "outlier"
+
+
+def test_registration_accepts_only_what_the_table_can_hold():
+    """Every registration field is a column, except the one the gate judges and does not store."""
+    from routers.models import ModelCreateRequest
+
+    fields = set(ModelCreateRequest.model_fields)
+    assert {"description", "detector"} <= fields, "registration cannot write them"
+    phantom = fields - _ml_models_columns() - {"score_semantics"}
+    assert not phantom, f"registration accepts {sorted(phantom)}, which no column holds"

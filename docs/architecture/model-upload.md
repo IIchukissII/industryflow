@@ -31,12 +31,39 @@ embedded notebook is meant to carry. The history goes out; the finished model co
                  │                  admitted → server-side copy into tenant_<uuid>/uploads/<id>/
                  │                  refused  → deleted, and the reason is returned
                  ▼
-  client  ──► ml_service            register: declared semantics + compatibility  (dec 5/6)
+  client  ──► ml_service            register: the admitted location, declared semantics +
+                 │                  compatibility                                 (dec 4/5/6)
                  │                  refused at 422 if this deployment cannot honour it
                  ▼
   client  ──► ml_service            deploy: load and score it here               (dec 7)
-                                    refused at 409 if it has not been shown to work
+                 │                  refused at 409 if it has not been shown to work
+                 ▼
+  alert worker ► ml_service         score: loaded from the admitted location, by the detector
+                                    its declaration matched at registration
 ```
+
+## Where the artifact may be, and how it is served
+
+The `artifact_uri` registration takes is the one the commit returned, and **only** that:
+`s3://<bucket>/tenant_<uuid>/uploads/<upload id>`, in the bucket the gateway admits into
+(`UPLOAD_ARTIFACT_BUCKET`, the gateway's `TRACKING_ARTIFACT_BUCKET`) and under the caller's own
+tenant prefix. Every other location is refused — another scheme, another bucket, another tenant's
+prefix, and above all the staging area, whose bytes were never judged. A kernel-authored model is
+addressed by its run instead, and that run must belong to one of the caller's experiments; a model
+naming both a run and an artifact is refused. Both checks run at registration, again at deployment,
+and again on every cold load in serving, so a row registered before they existed cannot be served
+from anywhere it should not.
+
+Registration records the **detector** that implements the declared semantics for the artifact's
+flavor (a caller may name one of those, never another). Serving dispatches on it; a row with none —
+an upload registered before the detector was recorded — is refused until it is registered again.
+
+Scoring loads an uploaded model the way the deployment gate's probe does: the same loader, with the
+uploaded provenance's trust (no skops grant), the artifact downloaded once and its manifest checked
+for anything that would run author-chosen code — code on the import path, a loader module of its own,
+object deserialisation, or an xgboost class that is not one of xgboost's models. The probe itself runs
+with only what reading the artifact needs: interpreter settings and the object-store credential, none
+of the service's secrets.
 
 ## Who decides what, and why it is not all in one place
 
@@ -90,8 +117,13 @@ believe those numbers.
 - **The staging prefix is known in three places** (the gateway, compose, the chart). They are checked
   against each other in the gateway's test suite, because drift there is silent: uploads keep
   working and the expiry quietly applies to a prefix nothing writes to.
-- **Migrations do not re-run on an existing volume.** The provenance columns arrive with migration 19;
-  on a live database apply it by hand, the way every init-script change has to be.
+- **Migrations do not re-run on an existing volume.** The provenance columns arrive with migration 19
+  and the detector with migration 20; on a live database apply them by hand, the way every
+  init-script change has to be. Migration 20 backfills `sklearn` for notebook-trained rows and leaves
+  uploaded rows without a detector, so an upload registered earlier must be registered again before
+  it can be scored.
+- **`UPLOAD_ARTIFACT_BUCKET` must name the gateway's bucket.** Unset, no artifact location can be
+  shown to be an admitted upload, and this deployment registers and serves no uploaded models.
 
 ## Reaching it from the browser (ADR-0030 dec 10)
 

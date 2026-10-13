@@ -56,11 +56,12 @@ BEGIN
     -- ADR-0022: the operator-feedback alert_labels table (defined in 15-*, resolved at call
     -- time). Created before the GRANT block below so it inherits the standard role grants.
     PERFORM add_alert_labels_to_schema(v_schema_name);
-    -- ADR-0027 / ADR-0030: the model compatibility verdict and provenance columns (defined in
-    -- 18-* and 19-*, resolved at call time). Without them a tenant created after init has an
-    -- ml_models table the ML service cannot register a model into.
+    -- ADR-0027 / ADR-0030 / ADR-0028: the model compatibility verdict, provenance and artifact
+    -- location, and the detector (defined in 18-*, 19-*, 20-*, resolved at call time). Without them a
+    -- tenant created after init has an ml_models table the ML service cannot register a model into.
     PERFORM add_compatibility_columns_to_ml_models(v_schema_name);
     PERFORM add_provenance_columns_to_ml_models(v_schema_name);
+    PERFORM add_detector_column_to_ml_models(v_schema_name);
 
     -- Grant table permissions
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO api_gateway_user', v_schema_name);
