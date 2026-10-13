@@ -48,6 +48,8 @@ jobs:
               # change to any of them changes what the round trip proves. tests/config_guards checks
               # this list covers every module the harness imports.
               - 'services/ml_service/api/**'
+              # The shared contracts package those modules import (tenant naming).
+              - 'libs/industryflow_contracts/**'
               - 'infrastructure/mlflow/**'
               - 'clients/python/**'
               - 'scripts/check_model_env_parity.py'
@@ -90,7 +92,7 @@ jobs:
         run: docker build -q -t if-authoring:roundtrip -f services/notebook_hub/Dockerfile.authoring clients/python
 
       - name: Build the ml_service image (where models are served)
-        run: docker build -q -t if-serving:roundtrip -f services/ml_service/api/Dockerfile services/ml_service
+        run: docker build -q -t if-serving:roundtrip --build-context contracts=libs/industryflow_contracts -f services/ml_service/api/Dockerfile services/ml_service
 
       # The kernel and ml_service both reach MLflow over HTTP in production (ADR-0019 puts the
       # tracking gateway in front of this very API), so the harness stands up the real server rather

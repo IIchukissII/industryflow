@@ -420,6 +420,8 @@ services:
     build:
       context: ./services/spark_jobs
       dockerfile: Dockerfile.streaming
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     container_name: industryflow-spark-streaming
     depends_on:
       kafka:
@@ -461,6 +463,8 @@ services:
     build:
       context: ./services/spark_jobs
       dockerfile: Dockerfile.aggregations
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     container_name: industryflow-spark-aggregations
     depends_on:
       kafka:
@@ -506,6 +510,8 @@ services:
     build:
       context: ./services/api_gateway
       dockerfile: Dockerfile
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     ports:
       - "127.0.0.1:${API_GATEWAY_PORT:-8000}:8000"
     environment:
@@ -590,6 +596,8 @@ services:
     build:
       context: ./services/ingestion_service
       dockerfile: Dockerfile
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     # No host port: ingestion is reachable only via the mTLS edge (ADR-0002 dec 3).
     expose:
       - "8003"
@@ -675,6 +683,8 @@ services:
     build:
       context: ./services/alert_service
       dockerfile: worker/Dockerfile
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     container_name: industryflow-alert-service-detector
     environment:
       <<: *db-tls-env
@@ -729,6 +739,8 @@ services:
     build:
       context: ./services/ml_service
       dockerfile: api/Dockerfile
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     container_name: industryflow-ml-service-api
     ports:
       - "127.0.0.1:${ML_SERVICE_PORT}:8002"
@@ -879,6 +891,8 @@ services:
     build:
       context: ./services/notebook_sql_proxy
       dockerfile: Dockerfile
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     image: industryflow-notebook-sql-proxy
     container_name: industryflow-notebook-sql-proxy
     environment:
@@ -916,6 +930,8 @@ services:
     build:
       context: ./services/notebook_tracking_gateway
       dockerfile: Dockerfile
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     image: industryflow-notebook-tracking-gateway
     container_name: industryflow-notebook-tracking-gateway
     environment:
@@ -956,6 +972,8 @@ services:
     build:
       context: ./services/notebook_cold_broker
       dockerfile: Dockerfile
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     image: industryflow-notebook-cold-broker
     container_name: industryflow-notebook-cold-broker
     environment:
@@ -1227,6 +1245,8 @@ services:
     build:
       context: ./services/cold_export
       dockerfile: Dockerfile
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     container_name: industryflow-cold-export
     profiles: ["cold-export"]
     depends_on:

@@ -60,20 +60,22 @@ rebuild_service() {
     log_info "=== Rebuilding ${service} ==="
 
     log_info "Step 1/5: Stopping ${service}..."
-    docker-compose stop "$service" || log_warn "Service not running"
+    docker compose stop "$service" || log_warn "Service not running"
     sleep 2
 
     log_info "Step 2/5: Removing old container(s)..."
-    docker-compose rm -f "$service" 2>/dev/null || true
+    docker compose rm -f "$service" 2>/dev/null || true
 
     log_info "Step 3/5: Removing old image..."
     docker rmi "industryflow-${service}:latest" 2>/dev/null || \
         docker rmi $(docker images -q --filter "reference=*${service}*" | head -1) 2>/dev/null || \
         log_warn "No old image found"
 
-    # set -e stops the script here if the build fails.
+    # set -e stops the script here if the build fails. Compose v2 (`docker compose`): the job images
+    # take the shared contracts package as a named build context (`additional_contexts`), which the
+    # legacy v1 `docker-compose` does not support.
     log_info "Step 4/5: Building new image..."
-    docker-compose build \
+    docker compose build \
         --build-arg BUILD_DATE="$BUILD_DATE" \
         --build-arg VERSION="$VERSION" \
         --build-arg VCS_REF="$VCS_REF" \
@@ -81,16 +83,16 @@ rebuild_service() {
         "$service"
 
     log_info "Step 5/5: Starting ${service}..."
-    docker-compose up -d "$service"
+    docker compose up -d "$service"
 
     # Wait for startup
     sleep 5
 
     log_info "Verifying service status..."
-    docker-compose ps "$service"
+    docker compose ps "$service"
 
     log_info "✅ ${service} rebuilt successfully"
-    log_info "Check logs: sudo docker-compose logs -f ${service}"
+    log_info "Check logs: sudo docker compose logs -f ${service}"
     echo ""
 }
 

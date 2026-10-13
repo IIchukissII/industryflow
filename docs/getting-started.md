@@ -30,10 +30,10 @@ cp .env.example .env   # then edit the values
 
 ```bash
 # Start core infrastructure
-docker-compose up -d
+docker compose up -d
 
 # Wait for services to initialize (~2 minutes)
-docker-compose ps
+docker compose ps
 
 # Check service health
 curl http://localhost:8000/health
@@ -315,8 +315,8 @@ DEVICE_KEY=deploy/device-ca/devices/<company_id>/tep-producer/current.key \
 ```bash
 docker system df
 docker system prune          # if low on disk space
-docker-compose logs <service-name>
-docker-compose restart <service-name>
+docker compose logs <service-name>
+docker compose restart <service-name>
 ```
 
 **Database connection errors**

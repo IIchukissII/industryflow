@@ -14,7 +14,7 @@ resolution is per-audience and never defaults.
 This module is the **pure** policy — the decisions, no I/O:
 
   * resolve a handle of exactly one audience to its tenant (the audience check + the bound tenant);
-  * the tenant namespace for experiment and registered-model **names** (a ``tenant_<uuid>/``
+  * the tenant namespace for experiment and registered-model **names** (a ``tenant_<uuid>.``
     prefix added on the way in, stripped on the way out), and the predicate for "does this
     qualified name belong to the caller's tenant";
   * the tenant prefix for **artifact** object-store keys;
@@ -28,9 +28,10 @@ unit-testable on dicts and strings.
 from __future__ import annotations
 
 import json
-import uuid
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
+
+from industryflow_contracts import tenancy
 
 import staging
 
@@ -87,7 +88,7 @@ async def _resolve_binding(
     try:
         # Canonical, or deny: the tenant becomes every namespace below, and a malformed one must be
         # a refusal rather than a 500 from the first place it is used.
-        company_id = str(uuid.UUID(str(record.get("company_id") or "")))
+        company_id = tenancy.canonical_company_id(record.get("company_id") or "")
     except ValueError:
         return None
     if await aget(f"{_SUSPENDED_PREFIX}{company_id}") is not None:
@@ -118,29 +119,19 @@ async def resolve_upload_binding(
     return await _resolve_binding(aget, handle, AUDIENCE_UPLOAD)
 
 
-def tenant_token(company_id: str) -> str:
-    """The per-tenant base token ``tenant_<uuid>`` (UUID-validated, ADR-0003).
-
-    Public because the token — not one of the prefixes built from it — is what partitions the upload
-    staging area, which sits outside every tenant prefix by design (ADR-0030). Mirrors the serving
-    side's namespace module, which exposes the same rule under the same name. UUID validation is what
-    makes it safe to interpolate: the value becomes a namespace, and a namespace that can be anything
-    is not a boundary.
-    """
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}"
-
-
-# The rule had one caller when it was private; it now has callers outside this module. Kept as an
-# alias so nothing that already imported it breaks.
-_tenant_token = tenant_token
-
-
-def tenant_prefix(company_id: str) -> str:
-    """The per-tenant prefix for experiment + registered-model **names**. Ends in ``.`` rather
-    than ``/`` because MLflow forbids ``/`` and ``:`` in registered-model names (experiments allow
-    both, but one prefix must serve both name spaces)."""
-    return tenant_token(company_id) + "."
+# The tenant's names come from the one tenant-naming module the serving side also uses (ADR-0003
+# dec 5, 7), so the gateway and serving cannot spell a tenant differently. UUID validation there is
+# what makes them safe to interpolate: the value becomes a namespace, and a namespace that can be
+# anything is not a boundary.
+#
+# ``tenant_token`` — the bare ``tenant_<uuid>`` token. Public because the token, not one of the
+# prefixes built from it, is what partitions the upload staging area, which sits outside every
+# tenant prefix by design (ADR-0030).
+tenant_token = tenancy.tenant_token
+# ``tenant_prefix`` — the prefix of experiment + registered-model **names**, ending in ``.`` rather
+# than ``/`` because MLflow forbids ``/`` and ``:`` in registered-model names (experiments allow
+# both, but one prefix must serve both name spaces).
+tenant_prefix = tenancy.mlflow_name_prefix
 
 
 # --------------------------------------------------------------------------- names
@@ -171,10 +162,9 @@ def unqualify_name(company_id: str, qualified: str) -> Optional[str]:
 
 # --------------------------------------------------------------------------- artifacts
 
-def artifact_prefix(company_id: str) -> str:
-    """The object-store key prefix for a tenant's artifacts (decision 5/6). Uses ``/`` — it is a
-    storage path, not an MLflow name, so the ``/``-restriction does not apply."""
-    return tenant_token(company_id) + "/"
+# The object-store key prefix for a tenant's artifacts (decision 5/6). Uses ``/`` — it is a storage
+# path, not an MLflow name, so the ``/``-restriction does not apply.
+artifact_prefix = tenancy.mlflow_artifact_prefix
 
 
 def is_plain_key(key: str) -> bool:
@@ -245,7 +235,7 @@ def scope_artifact_key(company_id: str, key: str) -> str:
 # these on the request and unqualifies them on the response, so the tenant rule lives in one table
 # rather than scattered across handlers. Which endpoints are forwarded at all, and the id-ownership
 # rule each is held to, is ``routes.ROUTES`` (default deny); this table only says which fields are names.
-#   request:  fields in the request body/query to qualify (kernel name -> tenant_<uuid>/name)
+#   request:  fields in the request body/query to qualify (kernel name -> tenant_<uuid>.name)
 #   response: dotted paths in the response to unqualify (drop entries not in the tenant)
 NAME_FIELDS = {
     "experiments/create": {"request": ["name"], "response": []},

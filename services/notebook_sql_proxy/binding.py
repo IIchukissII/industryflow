@@ -31,9 +31,10 @@ import hashlib
 import hmac
 import json
 import re
-import uuid
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
+
+from industryflow_contracts import tenancy
 
 AUDIENCE_SQL = "sql"
 _KEY_PREFIX = "nbcap:"
@@ -77,7 +78,7 @@ async def resolve_sql_binding(
         return None
     try:
         # Canonical, or deny: the tenant becomes a role name and a schema name below.
-        company_id = str(uuid.UUID(str(record.get("company_id") or "")))
+        company_id = tenancy.canonical_company_id(record.get("company_id") or "")
     except ValueError:
         return None
     if await aget(f"{_SUSPENDED_PREFIX}{company_id}") is not None:
@@ -89,20 +90,13 @@ async def resolve_sql_binding(
     )
 
 
-def reader_role(company_id: str) -> str:
-    """The per-tenant read-only role for a tenant (ADR-0011). UUID-validated before use."""
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_reader_{canonical.replace('-', '_')}"
-
-
-def tenant_login_role(company_id: str) -> str:
-    """The per-tenant LOGIN role a kernel's session is opened as (13-notebook-sql-proxy-role.sh).
-
-    Confined by the database to this one tenant: NOINHERIT, a member of its own reader and of
-    nothing that reaches another tenant. UUID-validated, same derivation as the reader role.
-    """
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_sqlproxy_{canonical.replace('-', '_')}"
+# The tenant's role names, from the one tenant-naming module (ADR-0003 dec 5, 7), UUID-validated there.
+# ``reader_role`` — the per-tenant read-only role (ADR-0011).
+reader_role = tenancy.reader_role_name
+# ``tenant_login_role`` — the per-tenant LOGIN role a kernel's session is opened as
+# (13-notebook-sql-proxy-role.sh). Confined by the database to this one tenant: NOINHERIT, a member of
+# its own reader and of nothing that reaches another tenant.
+tenant_login_role = tenancy.sql_login_name
 
 
 # Domain-separates this derivation from any other use of the key. Bumping the version rotates every
@@ -121,7 +115,7 @@ def tenant_login_password(key: bytes, company_id: str) -> str:
     """
     if len(key) < MIN_TENANT_KEY_BYTES:
         raise ValueError(f"the tenant login key must be at least {MIN_TENANT_KEY_BYTES} bytes")
-    canonical = str(uuid.UUID(str(company_id)))
+    canonical = tenancy.canonical_company_id(company_id)
     digest = hmac.new(key, _LOGIN_CONTEXT + canonical.encode("ascii"), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
@@ -137,16 +131,14 @@ def enrol_statement(company_id: str, verifier: str) -> str:
     Both values are validated to a closed character set before they are quoted, so neither can carry
     a quote; the database function re-validates the verifier anyway.
     """
-    canonical = str(uuid.UUID(str(company_id)))
+    canonical = tenancy.canonical_company_id(company_id)
     if not _VERIFIER_RE.match(verifier):
         raise ValueError("not a SCRAM-SHA-256 verifier")
     return f"SELECT public.notebook_sql_proxy_enrol('{canonical}'::uuid, '{verifier}')"
 
 
-def tenant_schema(company_id: str) -> str:
-    """The tenant's schema (ADR-0003). UUID-validated, same derivation as the reader role."""
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}"
+# The tenant's schema (ADR-0003 dec 5), from the same module as the role names.
+tenant_schema = tenancy.schema_name
 
 
 def session_setup_statements(binding: SqlBinding) -> list[str]:

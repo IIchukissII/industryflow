@@ -11,6 +11,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# The platform's shared tenant-naming and window contract (libs/industryflow_contracts; ADR-0003
+# dec 5-7, ADR-0006 dec 7), supplied as the named build context `contracts`.
+COPY --from=contracts . /tmp/industryflow-contracts
+RUN pip install --no-cache-dir /tmp/industryflow-contracts && rm -rf /tmp/industryflow-contracts
+
 # Every module the app imports. An omission here does not fail a test — it ships an image that
 # crashloops on `import`, which is why `tests/test_image_contents.py` checks this list against the
 # directory rather than trusting that it was remembered.

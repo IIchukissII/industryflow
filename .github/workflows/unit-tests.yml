@@ -31,6 +31,7 @@ jobs:
           filters: |
             relevant:
               - 'services/**'
+              - 'libs/**'
               - 'clients/python/**'
               # Read by the parity guards (e.g. the alert worker's config parity test), so an
               # edit on that side alone must run them too.
@@ -88,13 +89,19 @@ jobs:
           - { service: python_client,       path: clients/python/tests, install: "pip install -e 'clients/python[dev]'" }
           # The device CA's issue/renew/revoke, run against a throwaway CA with the runner's openssl.
           - { service: device_ca,           path: scripts/tests/test_device_ca.py, install: "pip install pytest==9.1.1" }
+          # The shared contracts package itself. The repository-wide guards that every service takes
+          # its tenant names and window contract from it live in tests/config_guards.
+          - { service: contracts,           path: libs/industryflow_contracts/tests, install: "pip install './libs/industryflow_contracts[dev]'" }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
+      # A service's own requirements-dev plus the shared contracts package its images install from the
+      # `contracts` build context (a path, so it is installed here rather than pinned in a requirements
+      # file a dependency bot reads).
       - name: Install dependencies
-        run: ${{ matrix.install && matrix.install || format('pip install -r services/{0}/requirements-dev.txt', matrix.service) }}
+        run: ${{ matrix.install && matrix.install || format('pip install ./libs/industryflow_contracts -r services/{0}/requirements-dev.txt', matrix.service) }}
       - name: Run tests
         run: pytest ${{ matrix.path }} ${{ matrix.args }} -v
 

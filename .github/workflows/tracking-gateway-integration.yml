@@ -30,6 +30,7 @@ jobs:
           filters: |
             relevant:
               - 'services/notebook_tracking_gateway/**'
+              - 'libs/industryflow_contracts/**'
               - 'infrastructure/timescaledb/**'
               - 'infrastructure/mlflow/**'
               - 'infrastructure/minio/**'
@@ -135,7 +136,7 @@ jobs:
             -e TRACKING_REDIS_URL=redis://redis:6379/0 \
             -e MLFLOW_DIRECT_URL=http://mlflow:5000 \
             python:3.14-slim bash -c "
-              pip install -q -r services/notebook_tracking_gateway/tests/requirements-integration.txt &&
+              pip install -q ./libs/industryflow_contracts -r services/notebook_tracking_gateway/tests/requirements-integration.txt &&
               pytest services/notebook_tracking_gateway/tests/test_*_integration.py -m integration -v"
 
       - name: Dump service logs on failure

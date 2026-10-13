@@ -4,12 +4,11 @@
 
 """Background task to update Redis cache with latest sensor data."""
 import asyncio
-import uuid
 
+from industryflow_contracts import tenancy
 from sqlalchemy import text
 
 from database import engine
-from dependencies import normalize_company_id_to_schema
 from messaging.redis_client import redis_client
 
 async def update_redis_cache():
@@ -31,21 +30,21 @@ async def update_redis_cache():
                 tenant_schemas = (await conn.execute(text("""
                     SELECT schema_name
                     FROM information_schema.schemata
-                    WHERE schema_name LIKE 'tenant\\_%'
-                """))).mappings().all()
+                    WHERE schema_name LIKE :pattern
+                """), {"pattern": tenancy.SCHEMA_LIKE})).mappings().all()
 
                 total_sensors = 0
 
                 # Query from each tenant schema
                 for schema_row in tenant_schemas:
-                    # Extract company_id from schema name and rebuild the schema through the one
-                    # canonical mapping, so only a UUID-derived identifier reaches the SQL (ADR-0003).
-                    # tenant_550e8400_e29b_41d4_a716_446655440000 -> 550e8400-e29b-41d4-a716-446655440000
+                    # Read the company_id back out of the schema name and rebuild the schema through
+                    # the one canonical mapping, so only a UUID-derived identifier reaches the SQL
+                    # (ADR-0003); a look-alike schema that is not a tenant's is skipped.
                     try:
-                        company_id = str(uuid.UUID(schema_row['schema_name'].removeprefix('tenant_').replace('_', '-')))
+                        company_id = tenancy.company_id_from_schema(schema_row['schema_name'])
                     except ValueError:
                         continue
-                    schema_name = normalize_company_id_to_schema(company_id)
+                    schema_name = tenancy.schema_name(company_id)
 
                     try:
                         # Query latest value for each sensor in this tenant

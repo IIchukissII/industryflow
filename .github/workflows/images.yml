@@ -44,6 +44,8 @@ jobs:
               - 'clients/python/**'
               - 'infrastructure/mlflow/**'
               - 'infrastructure/backup/**'
+              # The named `contracts` context most images install the shared package from.
+              - 'libs/industryflow_contracts/**'
               - '.trivyignore'
               # The edge smoke renders the frontend config from these.
               - 'docker-compose.yml'
@@ -209,6 +211,9 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
+          # The shared contracts package (libs/industryflow_contracts), which a Dockerfile takes with
+          # `COPY --from=contracts`. Offered to every image; the ones that do not use it ignore it.
+          build-contexts: contracts=libs/industryflow_contracts
           push: ${{ github.event_name != 'pull_request' }}
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

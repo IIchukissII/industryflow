@@ -82,10 +82,14 @@ These are three symptoms of one missing decision. There is no single, recorded a
 
 ## Deferred decisions
 
-- **Shared-code packaging.** Whether the single resolution implementation ships as an internal shared library, a vendored module, or another mechanism — given the services are independent deployment units without a shared package today — is an implementation decision left open.
+- ~~**Shared-code packaging.** Whether the single resolution implementation ships as an internal shared library, a vendored module, or another mechanism — given the services are independent deployment units without a shared package today — is an implementation decision left open.~~ *Resolved since acceptance:* see below.
 - **Caching of any residual principal→tenant lookup.** If a lookup remains for some principals, its cache scope, TTL, and invalidation are unspecified here.
 - **Long-term isolation strategy.** Whether IndustryFlow eventually moves from schema-per-tenant to RLS or database-per-tenant (alternatives D/E) is a separate, larger decision for a future ADR if schema-per-tenant scaling or operational cost forces it.
 - **Defense-in-depth schema qualification.** Whether tenant tables are additionally schema-qualified in queries (belt-and-braces over `search_path`) is left to implementation guidance.
+
+## Resolved since acceptance
+
+- **Shared-code packaging (2026-10-13).** The single implementation of decisions 4 and 5 ships as a **shared library that every deployable is built with**. It holds the validation of a `company_id` and every name derived from it — the schema, the tenant's roles, and the tenant's namespaces in the model registry and the object stores — and each deployable takes it in at build time rather than carrying a copy, including the stream-processing jobs, which also hand it to their workers. "One implementation" is therefore guaranteed by the build, not only by review: a check over the codebase refuses any service that derives a tenant name itself, and any deployable whose code uses the library but whose build does not carry it. The database, which cannot share the library, derives the same names itself and is held to the same forms by that check. A tool that runs where the library cannot be installed is an explicit, justified exception, held to the library's names by a test. This changes no decision above; it settles how decision 7 is delivered.
 
 ## References
 

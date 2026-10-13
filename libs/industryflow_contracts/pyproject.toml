@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "industryflow-contracts"
+version = "1.0.0"
+description = "Names and values every IndustryFlow deployment unit must agree on: tenant naming (ADR-0003) and the aggregation-window contract (ADR-0006 dec 7)"
+# The Spark job images run the interpreter their base ships, older than the services' 3.14.
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1"]
+
+[tool.setuptools]
+packages = ["industryflow_contracts"]
