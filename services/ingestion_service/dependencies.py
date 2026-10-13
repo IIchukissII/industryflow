@@ -16,6 +16,8 @@ from cryptography import x509
 import re
 import uuid
 
+from config import DEVICE_IDENTITY_HEADER_CONVENTIONS, get_settings
+
 # Device identity URI SAN: industryflow:tenant/<company_uuid>/device/<device_id> (ADR-0007 dec 3).
 DEVICE_SAN_RE = re.compile(r"^industryflow:tenant/([0-9a-fA-F-]{36})/device/(.+)$")
 
@@ -61,19 +63,25 @@ async def get_ingestion_identity(request: Request) -> dict:
     """
     Resolve the tenant for an ingested write from the verified device certificate (ADR-0002).
 
-    The terminating mTLS edge verifies the client certificate and forwards it in
-    X-Client-Verify / X-Client-Cert; the tenant is read from the verified SAN and is never
-    taken from the request body.
+    The terminating mTLS edge verifies the client certificate and forwards it in the header
+    pair of this deployment's convention (``DEVICE_IDENTITY_HEADERS``): ``<prefix>-verify``
+    and ``<prefix>-cert``. The edge sets those itself, overwriting anything the client sent.
+    Only that convention is read. A request carrying the other convention's headers got them
+    from the client, because no edge in this deployment sets them, so it is refused outright
+    (ADR-0002 dec 3). The tenant is read from the verified SAN, never from the request body.
     """
-    # Accept either edge's header convention: our compose nginx edge sends X-Client-*,
-    # while ingress-nginx (ADR-0009) sends ssl-client-* — same verified-cert meaning.
-    verify = request.headers.get("x-client-verify") or request.headers.get("ssl-client-verify")
+    prefix = get_settings().DEVICE_IDENTITY_HEADERS
+    foreign = tuple(f"{p}-" for p in DEVICE_IDENTITY_HEADER_CONVENTIONS if p != prefix)
+    if any(name.lower().startswith(foreign) for name in request.headers.keys()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unexpected client identity header")
+
+    verify = request.headers.get(f"{prefix}-verify")
     if verify is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No device certificate")
     if verify != "SUCCESS":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Client certificate not verified")
 
-    cert = request.headers.get("x-client-cert") or request.headers.get("ssl-client-cert")
+    cert = request.headers.get(f"{prefix}-cert")
     if not cert:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing client certificate")
     try:

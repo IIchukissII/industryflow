@@ -77,6 +77,7 @@ services:
       retries: 3
     networks:
       - industryflow-network
+      - ingestion-back
     restart: unless-stopped
 
   # Stages the TimescaleDB TLS cert into a postgres-owned volume with 0600 perms (ADR-0017):
@@ -608,6 +609,8 @@ services:
       INGESTION_SERVICE_PORT: 8003
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       KAFKA_TOPIC_SENSOR_DATA: ${KAFKA_TOPIC_SENSOR_DATA}
+      # ingestion-edge forwards the verified cert as X-Client-*; nothing else is read.
+      DEVICE_IDENTITY_HEADERS: x-client
     # Ingestion is stateless: mTLS-authenticated, Kafka-only. No database role (ADR-0002).
     depends_on:
       kafka:
@@ -616,8 +619,11 @@ services:
         # belt-and-suspenders for k8s, where there is no depends_on.)
         condition: service_healthy
     command: uvicorn main:app --host 0.0.0.0 --port 8003 --workers 2
+    # Only the edge reaches it, and it reaches only Kafka (ADR-0002 dec 3). Not on
+    # industryflow-network, where every other container could bypass the edge.
     networks:
-      - industryflow-network
+      - ingestion-front
+      - ingestion-back
     restart: unless-stopped
 
   # mTLS ingestion edge (ADR-0002): verifies device client certs against the device CA +
@@ -636,8 +642,10 @@ services:
       - ./services/ingestion_edge/40-crl-reload.sh:/docker-entrypoint.d/40-crl-reload.sh:ro
     depends_on:
       - ingestion-service
+    # industryflow-network: the published port and Prometheus (metrics-only listener, 9003).
     networks:
       - industryflow-network
+      - ingestion-front
     restart: unless-stopped
 
   # Re-signs the issuing intermediate's CRL before it expires (ADR-0007 dec 8). An expired CRL
@@ -1277,3 +1285,14 @@ networks:
   notebook-kernels:
     name: industryflow-notebook-kernels
     driver: bridge
+  # The ingestion plane (ADR-0002 dec 3): ingestion-service trusts identity headers, so only
+  # the mTLS edge may reach it (ingestion-front), and it reaches only Kafka (ingestion-back).
+  # Both internal: neither needs a route off the host.
+  ingestion-front:
+    name: industryflow-ingestion-front
+    driver: bridge
+    internal: true
+  ingestion-back:
+    name: industryflow-ingestion-back
+    driver: bridge
+    internal: true

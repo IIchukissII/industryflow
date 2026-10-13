@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Held at 0.115.x: fastapi 0.138 wraps included routers in _IncludedRouter objects with
-# no .path, which prometheus-fastapi-instrumentator 6.1.0 cannot introspect (every
-# request, including /health, 500s). Same combo api-gateway/ml-service run.
+# fastapi moves together with prometheus-fastapi-instrumentator (below): fastapi >= 0.138
+# wraps included routers in _IncludedRouter objects with no .path, which instrumentator
+# 6.x could not introspect (every request, including /health, 500'd). Bump them as a pair.
 fastapi==0.143.0
 uvicorn[standard]==0.54.0
 pydantic==2.14.0

@@ -7,7 +7,6 @@ IndustryFlow Ingestion Service
 High-throughput sensor data ingestion endpoint (Port 8003)
 """
 from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from datetime import datetime, timezone
 import logging
@@ -33,15 +32,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS
-origins = settings.CORS_ORIGINS.split(",") if settings.CORS_ORIGINS != "*" else ["*"]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"]
-)
+# No CORS middleware: only devices call this service, over mTLS, never a browser (ADR-0002).
 
 # Prometheus metrics at /metrics (request rate/latency/in-flight — item 7). Scraped in-cluster
 # on the service port; the mTLS edge denies /metrics so it is never exposed to devices.
@@ -140,11 +131,12 @@ async def ingest_sensor_data(
         
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Ingestion error: {e}")
+    except Exception:
+        # The detail stays in the log; the device gets a generic message.
+        logger.exception("Ingestion error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
+            detail="Internal server error"
         )
 
 @app.get("/stats")
