@@ -29,7 +29,9 @@ database functions instead: the API's service identity may execute them and hold
 role-creating privilege of its own. One provisions a tenant — validating its name, generating its
 identifier, and creating its registry entry, schema, tables and grants in one transaction — and one
 changes a tenant's name or active flag; each refuses to run while the shared namespace it resolves
-names in contains objects owned by an untrusted role, so it cannot be steered into calling one.
+names in contains objects owned by an untrusted role, so it cannot be steered into calling one. The
+SQL proxy's per-tenant login identity (ADR-0015 rev 2) is not created there: the proxy enrols it on
+first use, through a privileged function of its own that is all its database identity may execute.
 
 **Ending.** The product's "delete company" action used to remove the registry row and nothing else. The
 schema, its data, the per-tenant read-only principal, the tenant's cold-layer prefix, its namespace in
