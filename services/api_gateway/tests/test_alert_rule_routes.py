@@ -15,7 +15,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
-from dependencies import get_current_user_with_company, get_db_with_tenant
+from dependencies import get_db_with_tenant
+from users import current_active_user
 
 RULE_ID = uuid.uuid4()
 MODEL_ID = uuid.uuid4()
@@ -77,8 +78,9 @@ def client_for():
             yield store
 
         main.app.dependency_overrides[get_db_with_tenant] = _db
-        main.app.dependency_overrides[get_current_user_with_company] = lambda: SimpleNamespace(
-            id=uuid.uuid4(), email="op@example.com", company_id=uuid.uuid4())
+        main.app.dependency_overrides[current_active_user] = lambda: SimpleNamespace(
+            id=uuid.uuid4(), email="op@example.com", company_id=uuid.uuid4(), role="engineer",
+            is_superuser=False, is_active=True)
         return TestClient(main.app), store
 
     yield make

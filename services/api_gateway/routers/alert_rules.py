@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-from dependencies import get_db_with_tenant, get_current_user_with_company
+from dependencies import get_db_with_tenant, get_current_user_with_company, get_writer_with_company
 from models.user import User
 from schemas import RULE_FIELDS, AlertRuleCreate, AlertRuleUpdate, DetectionModeSwitch
 
@@ -106,7 +106,7 @@ async def get_alert_rule(
 async def create_alert_rule(
         rule: AlertRuleCreate,
         db: AsyncSession = Depends(get_db_with_tenant),
-        current_user: User = Depends(get_current_user_with_company)
+        current_user: User = Depends(get_writer_with_company)
 ):
     """Create an alert rule in the caller's tenant schema (the schema is the isolation, ADR-0003)."""
     columns = {**rule.columns(), "created_by": current_user.email}
@@ -129,7 +129,7 @@ async def update_alert_rule(
         rule_id: UUID,
         update: AlertRuleUpdate,
         db: AsyncSession = Depends(get_db_with_tenant),
-        current_user: User = Depends(get_current_user_with_company)
+        current_user: User = Depends(get_writer_with_company)
 ):
     """Apply a partial edit to an alert rule; the edited rule is validated as a whole."""
     changes = update.changes()
@@ -149,7 +149,7 @@ async def switch_detection_mode(
         rule_id: UUID,
         switch: DetectionModeSwitch,
         db: AsyncSession = Depends(get_db_with_tenant),
-        current_user: User = Depends(get_current_user_with_company)
+        current_user: User = Depends(get_writer_with_company)
 ):
     """Switch a rule's detection mode; the switched rule is validated as a whole."""
     previous = (await db.execute(text("SELECT detection_type FROM alert_rules WHERE rule_id = :rule_id"),
@@ -170,7 +170,7 @@ async def switch_detection_mode(
 async def delete_alert_rule(
         rule_id: UUID,
         db: AsyncSession = Depends(get_db_with_tenant),
-        current_user: User = Depends(get_current_user_with_company)
+        current_user: User = Depends(get_writer_with_company)
 ):
     """Delete alert rule (schema-routed)"""
     result = await db.execute(
