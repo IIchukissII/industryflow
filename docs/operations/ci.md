@@ -27,6 +27,7 @@ status, which is what lets it be required without blocking unrelated PRs.
 | `cold-layer-integration-gate` | Cold layer integration |
 | `tracking-gateway-integration-gate` | Tracking gateway integration |
 | `model-artifact-roundtrip-gate` | Model artifact round-trip |
+| `config-guards-gate` | Config guards (silent-omission lists: path filters, image pins, chart/compose wiring; object-store principals against a real MinIO) |
 
 **This list is enforced only in the repository's branch-protection settings, so it can drift
 silently.** A new workflow must end in a gate, and that gate must be added here and to branch
@@ -36,5 +37,5 @@ protection in the same change:
 gh api -X PATCH repos/<owner>/<repo>/branches/main/protection/required_status_checks \
   -f strict=false $(printf -- '-f contexts[]=%s ' unit-tests-gate lint-gate images-gate helm-gate \
   compose-smoke-gate db-tenant-isolation-gate cold-layer-integration-gate \
-  tracking-gateway-integration-gate model-artifact-roundtrip-gate)
+  tracking-gateway-integration-gate model-artifact-roundtrip-gate config-guards-gate)
 ```

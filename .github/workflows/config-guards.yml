@@ -67,3 +67,19 @@ jobs:
       - name: MinIO logs (on failure)
         if: failure()
         run: docker logs minio
+
+  # Stable aggregate status for branch protection, matching the other workflows' gates. No path
+  # filter here, so both jobs always run and the gate passes only when both did.
+  config-guards-gate:
+    name: config-guards-gate
+    needs: [config-guards, object-store-principals]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Gate
+        run: |
+          echo "config-guards=${{ needs.config-guards.result }} object-store-principals=${{ needs.object-store-principals.result }}"
+          if [ "${{ needs.config-guards.result }}" != "success" ] || [ "${{ needs.object-store-principals.result }}" != "success" ]; then
+            echo "::error::a configuration guard failed"; exit 1
+          fi

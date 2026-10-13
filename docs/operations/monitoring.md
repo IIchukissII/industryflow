@@ -214,9 +214,12 @@ IndustryFlow uses a comprehensive monitoring stack built on industry-standard to
 - Table statistics
 
 **Configuration**:
-- Connects to: `timescaledb:5432`
+- Connects to: `timescaledb:5432` over TLS, verifying the server (`verify-full`, ADR-0017)
 - Database: `industryflow`
-- Credentials: Uses `DB_USER` and `DB_PASSWORD` from `.env`
+- Credentials: the read-only monitoring role `metrics_user` (`pg_monitor`), password
+  `METRICS_DB_PASSWORD` from `.env` — never the superuser (ADR-0016 dec 3). A database initialised
+  before the exporter used this role has it without a password; set it once as
+  `init-scripts/12-metrics-role.sql` describes.
 
 #### Redis Exporter
 
@@ -671,7 +674,9 @@ docker-compose restart grafana
 
 - Verify service names in datasource URLs
 - Check network connectivity: `docker exec industryflow-grafana ping prometheus`
-- Verify credentials for TimescaleDB datasource
+- There is deliberately no database datasource: the database holds tenant data, which the shared
+  monitoring plane must not query (ADR-0016 dec 5). Database health comes from the
+  postgres-exporter's metrics, through Prometheus.
 
 ### Loki Issues
 
@@ -726,11 +731,9 @@ docker exec industryflow-promtail cat /etc/promtail/promtail-config.yml
 # Check exporter logs
 docker logs industryflow-postgres-exporter
 
-# Test database connection
-docker exec industryflow-timescaledb psql -U postgres -c "SELECT 1"
+# Test the monitoring role's login (its password is METRICS_DB_PASSWORD in .env)
+docker exec -it industryflow-timescaledb psql "host=localhost dbname=industryflow user=metrics_user sslmode=require" -c "SELECT 1"
 
-# Verify credentials match .env
-grep DB_PASSWORD .env
 ```
 
 **Redis Exporter not working**:
