@@ -3,15 +3,15 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0015: Notebook capability minting and the SQL access proxy (rev 2)
+# ADR-0015: Notebook capability minting and the SQL access proxy (rev 3)
 
 - **ID:** ADR-0015
 - **Status:** Accepted
-- **Date:** 2026-06-27 (rev 1: 2026-07-16; rev 2: 2026-10-13)
+- **Date:** 2026-06-27 (rev 1: 2026-07-16; rev 2: 2026-10-13; rev 3: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0012 (per-session credential delivery), ADR-0011 (embedded notebooks), ADR-0014 (hub single sign-on), ADR-0003 (tenant→schema resolution), ADR-0004 (sessions and transport)
-- **Supersedes:** ADR-0015 rev 0 (2026-06-27 — described every handle as spawn-minted and read-only); rev 1 (2026-07-16 — records demand-minting and writing planes, but kept the SQL proxy's upstream session as one principal able to switch into any tenant's reader; rev 2 confines the session principal itself to one tenant, decision 5)
+- **Supersedes:** ADR-0015 rev 0 (2026-06-27 — described every handle as spawn-minted and read-only); rev 1 (2026-07-16 — records demand-minting and writing planes, but kept the SQL proxy's upstream session as one principal able to switch into any tenant's reader; rev 2 confines the session principal itself to one tenant, decision 5); rev 2 (2026-10-13 — left when a handle is refreshed, when it is revoked, and what happens to a SQL session already open, to the implementation; rev 3 decides them, decisions 2 and 4)
 
 ## Context and problem
 
@@ -24,6 +24,8 @@ The second half is the SQL path. The per-tenant read-only role already exists (A
 **Revision 1 (2026-07-16).** Two of this record's claims stopped being true of every plane. Decision 4's "the spawner is the sole minting authority" cannot absorb a plane whose holder never spawns, and decisions 4 and 7 describe every handle as read-only while the tracking plane has been minted read-write since it existed. Rev 1 records both, and the conditions a non-spawn minter must meet. The capability's shape — opaque handle, store as the authority, revocation by deletion, audiences that never interchange — is unchanged. The rev-1 notes sit under decisions 1, 3, 4 and 7.
 
 **Revision 2 (2026-10-13).** Decision 5 put the tenant boundary for direct SQL in a role switch: the proxy logged in as one shared principal that was a member of every tenant's reader role, and switched the session into the caller's reader before relaying. Review found that the switch is not a boundary, because the session that performs it is then handed to the kernel. A kernel speaking SQL on that session can issue the same switch itself — into another tenant's reader role, which the shared principal is equally entitled to assume — or undo it. The grants on each reader role were correct; the session principal sat above all of them. A boundary a client can step back across is not a boundary, and the property ADR-0011 dec 3 decided — a cross-tenant query *fails*, by privilege, whatever the kernel sends — did not hold on this path. Rev 2 moves the boundary to the session principal itself (decision 5).
+
+**Revision 3 (2026-10-13).** Decision 2 made revocation the normal path and expiry the backstop, then deferred *when* revocation happens and how it reaches the honouring points. Review found the deferral had been filled with less than the decision promised. Handles were kept alive on a timer whether or not the environment holding them still existed; stopping or respawning an environment left its old handles valid until they expired; a platform logout revoked nothing; and a SQL session, once open, was never checked again, so revoking its handle stopped new connections and left the open one working. Separately, the upload plane's demand-minted handle (ADR-0030 dec 3) could be presented more than once within its lifetime, although decision 4 rev 1 says it is consumed. Rev 3 states the lifecycle (decision 2) and what "consumed" means (decision 4). Rev 2's per-tenant session principal is unchanged and not repeated here.
 
 ## Decision drivers
 
@@ -43,6 +45,10 @@ The second half is the SQL path. The per-tenant read-only role already exists (A
 
 2. **Revocation is deletion of the store entry; expiry is the backstop.** Ending a session — logout, an operator stopping an environment, a detected compromise — deletes the handle's entry, and the capability stops working on its next use (ADR-0012 dec 6). The entry also carries a short time-to-live so that a missed deletion still bounds the window; while a session is healthy the spawner keeps the entry alive. The handle in the pod never has to rotate, because its authority is the centrally-controlled entry, not the handle itself.
 
+   > **rev 3 (2026-10-13): the lifecycle, stated.** A spawn-minted handle's entry is **refreshed only while the environment holding it is running**, as the spawner observes it; nothing refreshes the entry of an environment that has gone. Its entries are **revoked when the environment stops, before it is respawned** (so a respawn never leaves its predecessor's handles valid beside the new ones), and **when the user signs out** — the hub's chained logout stops the environment (ADR-0014 rev 1 dec 7), and ending a platform session revokes the user's capabilities directly (ADR-0004 dec 2 rev 2). Revocation also runs the other way: an environment whose handles have all been revoked centrally is stopped at the spawner's next observation, rather than left running with no planes.
+   >
+   > Revocation reaches work already in progress. A SQL session opened under a handle is **re-checked at a bounded interval** for as long as it stays open: the proxy resolves the handle again, and closes the session if it no longer resolves, resolves to a different binding, or cannot be checked because the store is unavailable. Every honouring point fails closed the same way on resolution: an entry that is missing, unreadable, or not a complete binding of its own audience denies. Refresh cadence, lifetime and re-check interval are configuration.
+
 3. **Each plane gets its own audience-bound handle; handles are not interchangeable (ADR-0012 dec 5).** The data-API path and the direct-SQL path receive distinct handles whose store entries record distinct audiences. The data API honours only API-audience handles; the SQL proxy honours only SQL-audience handles. Possession of one never yields the other, and neither can be exchanged for anything broader than its recorded tenant and read-only scope.
 
    > **rev 1 (2026-07-16):** planes have been added to this decision by the records that introduced them, which is the pattern it was written to support and needs no revision. Rev 1 notes only that non-interchangeability has since become **load-bearing in a way rev 0 did not anticipate**: it was written to stop one plane's handle opening another's door. A later plane additionally makes the *audience itself* the fact that decides which admission rules a request faces, so that two populations reaching the same mediator can be held to different standards. Where that is so, collapsing two audiences into one would not merely widen access — it would silently apply one population's rules to the other, in whichever direction happened to be implemented. An audience is now sometimes the only thing distinguishing what a caller *is*, and not just what it may reach.
@@ -56,6 +62,8 @@ The second half is the SQL path. The per-tenant read-only role already exists (A
    > What does **not** change: the kernel still cannot mint, refresh, or widen anything, and no minter — of either mode — hands out the privileged principal behind a plane.
    >
    > **The words "and read-only" in this decision describe the planes rev 0 minted, not a property of minting.** See decision 1's rev-1 note.
+
+   > **rev 3 (2026-10-13): a demand-minted handle is spent by its one operation.** "Consumed immediately" means the handle is **used up** by the step that completes the operation it authorises: that step removes the entry atomically, before acting, so a second presentation is refused even while the handle's lifetime has not run out, and two concurrent presentations cannot both succeed. Steps that only prepare the operation do not spend it. Its lifetime remains the backstop for an operation that is never completed.
 
 5. **Direct SQL is reached through a trusted proxy that resolves the handle and assumes the tenant's read-only role.** The kernel connects to the SQL proxy presenting its SQL-audience handle in place of a password; the proxy resolves the handle in the store to its tenant, and — holding the privileged principal that may assume any tenant's reader role — opens a backend connection and `SET ROLE`s into that tenant's `NOLOGIN` read-only role (ADR-0011) before proxying queries. The database password lives only in the proxy; the kernel presents only its revocable handle (ADR-0012 dec 2, dec 4).
 
@@ -83,6 +91,10 @@ The second half is the SQL path. The per-tenant read-only role already exists (A
 
 **F. Keep one shared upstream principal and stop the kernel from issuing role switches *(rev 2)*.** *Rejected:* it moves the boundary into the proxy's understanding of SQL text. A statement filter must recognise every spelling of a role change, in every protocol path and function that can perform one, and it fails open on the first it misses. The boundary would then rest on the proxy's parsing being perfect — the very dependency the per-tenant grants were chosen to remove. Confining the session principal makes the boundary a property of who is logged in, which the database enforces regardless of what is sent.
 
+**G. Refresh every handle on a timer and rely on expiry for stopped environments *(rev 3)*.** *Rejected:* it makes expiry the control for the commonest way a session ends, which decision 2 and ADR-0012 dec 6 rule out, and it keeps a stopped environment's handles valid for a full lifetime after the environment is gone.
+
+**H. Check a SQL handle only when the connection opens *(rev 3)*.** *Rejected:* a connection can stay open for as long as a kernel likes, so revocation would stop new connections and leave the one that matters working. The periodic re-check bounds how long a revoked handle keeps reach to one interval.
+
 ## Consequences
 
 ### Positive
@@ -99,16 +111,17 @@ The second half is the SQL path. The per-tenant read-only role already exists (A
 - A new trusted, purpose-built SQL proxy must be built, hardened, and kept available; it holds the privileged principal and is the one component that may assume any tenant's role (decisions 5-6).
 - **rev 2:** the proxy holds one database credential per tenant rather than one in total, so tenant provisioning and offboarding must create and remove that identity and its credential alongside the tenant's schema and reader grants, and credential rotation is per tenant.
 - The spawner gains a lifecycle responsibility: minting handles, keeping their entries alive while a session is healthy, and deleting them on session end (decisions 2, 4).
+- **rev 3:** the proxy re-resolves every open SQL session's handle on an interval, so the store sees load proportional to open sessions as well as to new ones, and a store outage closes open SQL sessions rather than leaving them unchecked.
 - Presenting the handle as the database password over the Postgres wire constrains how clients connect and must be documented so notebook tooling uses it correctly (decision 5).
 - Two honouring points — the data API and the SQL proxy — must both resolve handles and both observe revocation, so the revocation path has more than one place to be correct.
 
 ## Deferred decisions
 
-- **Store key schema, time-to-live, and refresh cadence.** The concrete key layout, the capability lifetime, and how often the spawner refreshes a live entry are configuration values owned by the implementation, not this ADR.
+- **Store key schema, time-to-live, and refresh cadence.** The concrete key layout, the capability lifetime, and how often the spawner refreshes a live entry are configuration values owned by the implementation, not this ADR. *(rev 3: when an entry is refreshed and when it is revoked is decided in decision 2; the values stay here.)*
 - **The SQL proxy's wire-level details, optional pooling, and how it stores and rotates the per-tenant credentials (rev 2).** Exactly how the proxy reads the handle from the connection, whether a standard pooler sits behind it, and connection-pool sizing are implementation choices within decisions 5-6.
 - ~~**Experiment-tracking capability.**~~ *Resolved by ADR-0019:* tracking is gated by its own audience-bound handle of the same form, not folded into the API audience.
 - **Capability-use audit.** What record is kept of which handle accessed which tenant, and where, relates to the notebook audit trail deferred in ADR-0011 and is not decided here.
-- **Refresh-on-revocation propagation.** The precise mechanism by which a platform logout (ADR-0014) triggers deletion of the associated handles is an implementation detail of the spawner/session lifecycle.
+- ~~**Refresh-on-revocation propagation.**~~ *Resolved in rev 3, decision 2:* a platform sign-out reaches the handles by the hub's chained logout and by the platform revoking the user's capabilities when the session ends; open SQL sessions observe it at their next re-check.
 
 ## References
 

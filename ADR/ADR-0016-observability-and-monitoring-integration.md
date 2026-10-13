@@ -3,14 +3,15 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0016: Observability and monitoring integration
+# ADR-0016: Observability and monitoring integration (rev 1)
 
 - **ID:** ADR-0016
 - **Status:** Accepted
-- **Date:** 2026-06-27
+- **Date:** 2026-06-27 (rev 1: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing — self-hosted + commercial-managed)
 - **Companions:** ADR-0009 (Kubernetes/Helm packaging — deferred the monitoring stack to here)
+- **Supersedes:** ADR-0016 rev 0 (2026-06-27 — described tenant alerts as passing through a broadcast topic on their way to the tenant's store, and held only the Kubernetes path to the least-privilege monitoring role; rev 1 records the direct path and holds every deployment shape to the role)
 
 ## Context and problem
 
@@ -25,8 +26,8 @@ Kubernetes for **both** deployment models of ADR-0001 (self-hosted and managed).
 platform** plane only: operator-facing, tenant-agnostic infrastructure health (a service is
 down, the database is unreachable, Kafka consumer lag is high). It is **distinct from the
 tenant streaming / sensor-alert plane** — the alert-service's per-tenant threshold/ML
-detections that flow `sensor data → rules engine → sensor-alerts topic → the tenant's schema →
-that tenant's UI`. Sensor alerts are **tenant data** and live entirely inside the
+detections that flow from the rules engine straight into the tenant's own store and from there to
+that tenant's UI *(rev 1; rev 0 routed them through a broadcast topic first)*. Sensor alerts are **tenant data** and live entirely inside the
 tenant-isolated path (ADR-0003); they must never be routed through the shared cluster
 monitoring stack, where an operator dashboard — or worse, another tenant — could see them.
 The two planes have different audiences (operators vs. a single tenant), different stores
@@ -38,6 +39,16 @@ the application chart couples them — every `helm upgrade` of the app touches m
 stack can't be scaled or upgraded independently, and in the managed model (where observability
 is often the provider's: Grafana Cloud, AMP, Datadog) a bundled stack is dead weight or a
 conflict.
+
+**Revision 1 (2026-10-13).** Two statements here stopped matching the system, and one of them
+mattered. The tenant alert plane was described as passing through a shared broadcast topic between
+the rules engine and the tenant's store. Review found that hop carried every tenant's alerts on one
+topic that nothing consumed — the alerts already reached the tenant's store directly — so it was a
+second, shared copy of tenant data with no reader and no owner, outside the tenant-isolated path this
+record insists alerts stay inside. It has been removed. And decision 3 held only the Kubernetes path to
+a least-privilege monitoring role, naming the compose path's superuser as the thing it replaced while
+leaving compose on it. Rev 1 records the direct alert path (decision 5) and holds every deployment
+shape to decision 3.
 
 ## Decision drivers
 
@@ -75,6 +86,12 @@ conflict.
 3. **The database exporter uses a dedicated least-privilege monitoring role** (granted only the
    database's built-in monitoring privileges), never the superuser the compose path used.
 
+   > **rev 1 (2026-10-13): in every deployment shape.** The compose stack monitors the database
+   > with the same dedicated metrics principal as the chart, with its own credential. A monitoring
+   > scrape is the most frequent, least supervised connection to the database of record, and a
+   > superuser there means a compromised exporter is a compromised database — the reason for this
+   > decision does not depend on which orchestrator runs the exporter.
+
 4. **The monitoring backend is run separately** — a Prometheus-operator stack (Prometheus,
    Grafana, Alertmanager) and a log store — installed beside the application chart, not embedded
    in it. The chart's integration objects carry configurable labels so operators can match their
@@ -88,6 +105,12 @@ conflict.
    counts, latencies, queue depths), not per-tenant sensor values or alert contents, so
    scraping into shared Prometheus cannot leak one tenant's data to operators or other tenants.
 
+   > **rev 1 (2026-10-13): tenant alerts take no shared hop.** An alert goes from the rules engine
+   > that raised it directly into the tenant's own store; it is not also published to a topic shared
+   > by all tenants. A shared copy of tenant data is a place isolation must be re-proved, and one
+   > with no consumer is a place nobody would notice it failing. A future consumer that needs alerts
+   > as a stream is a new decision, and must be tenant-scoped like the rest of this plane.
+
 ## Alternatives considered
 
 - **Hand-roll the full stack as plain Deployments inside the app chart.** Turnkey for a demo,
@@ -98,6 +121,10 @@ conflict.
   production backend, but still couples the backend to the app release, makes the chart a heavy
   umbrella, and requires `helm dependency build` (network) to lint/template — breaking the
   self-contained property from ADR-0009. Rejected.
+
+- **Keep the broadcast alert topic for a future consumer *(rev 1)*.** Rejected: it held every
+  tenant's alerts on one shared topic to serve a reader that did not exist. A consumer that needs
+  the stream can be given a tenant-scoped one when it is decided.
 
 ## Consequences
 
