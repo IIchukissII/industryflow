@@ -103,3 +103,38 @@ def test_the_shared_contracts_package_is_copied_and_shipped(dockerfile, script):
         f"`contracts` context (driver), zip it and name the zip in --py-files (executors); "
         f"copies={copies} zipped={zipped} shipped={shipped}"
     )
+
+
+def _app_files(command: str) -> set:
+    return set(re.findall(r"/app/spark_streaming/(\w+\.py)", command))
+
+
+@pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=[d.name for d in DOCKERFILES])
+def test_the_health_check_runs_a_file_the_image_has(dockerfile):
+    """A HEALTHCHECK naming a file the image never COPYs fails only at run time, as an unhealthy
+    container that looks like a broken job."""
+    text = dockerfile.read_text()
+    m = re.search(r"^HEALTHCHECK\b.*?\n\s*CMD\s+(.+)$", text, re.MULTILINE)
+    if not m:
+        pytest.skip(f"{dockerfile.name} declares no HEALTHCHECK")
+    missing = _app_files(m.group(1)) - _copied(text)
+    assert not missing, f"{dockerfile.name} HEALTHCHECK runs {sorted(missing)} it never COPYs"
+
+
+def test_the_job_images_check_compute_not_a_process():
+    """`pgrep` is healthy while the application waits on the master with no executor."""
+    for dockerfile, _ in JOB_IMAGES:
+        text = dockerfile.read_text()
+        assert "pgrep" not in text and "healthcheck.py" in text, dockerfile.name
+
+
+def test_helm_probes_the_jobs_with_a_file_their_images_have():
+    import yaml
+
+    values = yaml.safe_load((JOBS.parents[1] / "deploy/helm/industryflow/values.yaml").read_text())
+    images = {"spark-streaming": "Dockerfile.streaming", "spark-aggregations": "Dockerfile.aggregations"}
+    for app, dockerfile in images.items():
+        command = values["apps"][app].get("livenessExec")
+        assert command, f"Helm {app} has no liveness command"
+        missing = _app_files(" ".join(command)) - _copied((JOBS / dockerfile).read_text())
+        assert _app_files(" ".join(command)) and not missing, f"Helm {app} probe runs {sorted(missing)}"

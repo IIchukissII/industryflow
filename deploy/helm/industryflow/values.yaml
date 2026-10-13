@@ -203,6 +203,8 @@ apps:
     replicas: 1
     port: null
     probe: null
+    # No HTTP probe port; healthy only when the job has compute, not merely a live driver.
+    livenessExec: ["python3", "/app/spark_streaming/healthcheck.py"]
     # Spark's native PrometheusServlet on the driver UI (item 7): a metrics-only Service on 4040,
     # scraped at /metrics/prometheus (driver) + /metrics/executors/prometheus (executors).
     metrics: true
@@ -232,6 +234,8 @@ apps:
     replicas: 1
     port: null
     probe: null
+    # No HTTP probe port; healthy only when the job has compute, not merely a live driver.
+    livenessExec: ["python3", "/app/spark_streaming/healthcheck.py"]
     # Spark PrometheusServlet on the driver UI (item 7) — see spark-streaming above.
     metrics: true
     metricsPort: 4040
