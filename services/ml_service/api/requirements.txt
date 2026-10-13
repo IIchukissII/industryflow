@@ -22,7 +22,7 @@ python-multipart==0.0.32
 
 # MLflow integration
 mlflow==3.17.0
-boto3==1.43.109
+boto3==1.43.111
 
 # ML libraries for inference.
 #
@@ -31,7 +31,7 @@ boto3==1.43.109
 # major / scikit-learn major.minor / pandas major must MATCH the kernel's, and xgboost must be >=
 # the kernel's. `scripts/check_model_env_parity.py` fails the PR that moves one end alone — which is
 # how this gap opened: numpy went to 2 here while the kernel stayed on 1, and nothing was watching.
-numpy==2.5.3
+numpy==2.5.4
 scikit-learn==1.9.1
 # xgboost 3.x is REQUIRED BY sklearn 1.9, not a courtesy bump — and 2.0.3 was ALREADY BROKEN here.
 # sklearn 1.9 removed `_estimator_type` (now `__sklearn_tags__`), which xgboost 2.x's sklearn wrapper
