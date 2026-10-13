@@ -67,12 +67,16 @@ class FakeStore_:
         self.deleted.append(key)
 
 
+async def _never_consumed(_key):
+    raise AssertionError("the tracking plane never consumes a handle")
+
+
 def _client(experiments=None):
     store = FakeStore({f"{policy._KEY_PREFIX}{HANDLE}": json.dumps(
         {"user": "ds", "company_id": CID, "audience": "tracking", "read_only": False})})
     up = FakeUpstream(experiments or {})
     art = FakeStore_()
-    app = gateway.build_app(store.get, up, art)
+    app = gateway.build_app(store.get, up, art, store_consume=_never_consumed)
     c = TestClient(app)
     c.up = up
     c.art = art

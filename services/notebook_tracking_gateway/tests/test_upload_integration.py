@@ -156,9 +156,22 @@ def test_a_non_executing_artifact_round_trips_into_the_tenants_prefix(stack):
 def test_a_committed_upload_leaves_nothing_staged(stack):
     handle, body = _upload(stack["rc"], stack["cid_a"], SAFE_BLOBS)
     assert _commit(handle, body["upload_id"]).status_code == 200
-    # The handle is still valid; the staged bytes are not there any more.
-    again = _commit(handle, body["upload_id"])
+    # The handle authorised one upload and is spent (ADR-0015 dec 4 rev 1)...
+    assert _commit(handle, body["upload_id"]).status_code == 401
+    assert stack["rc"].get(f"{_KEY_PREFIX}{handle}") is None
+    # ...and, asked with a fresh one, the staged bytes are not there any more.
+    again = _commit(_mint(stack["rc"], company_id=stack["cid_a"]), body["upload_id"])
     assert again.status_code == 404, "an admitted artifact must not leave a second copy staged"
+
+
+def test_bytes_re_put_after_judgement_are_not_what_is_admitted(stack):
+    """A staging URL stays valid for its lifetime. Re-PUT a member between stage and commit and the
+    commit judges the new bytes; promotion copies only the version judged (an ETag-conditional copy
+    in the real store)."""
+    handle, body = _upload(stack["rc"], stack["cid_a"], SAFE_BLOBS)
+    _put({"model.skops": body["urls"]["model.skops"]}, {"model.skops": PICKLE_BYTES})
+    r = _commit(handle, body["upload_id"])
+    assert r.status_code == 422, "the re-PUT bytes are what is judged, and they are refused"
 
 
 # --- the refusal, on real bytes -----------------------------------------------------------------
@@ -168,8 +181,8 @@ def test_an_object_serialised_artifact_is_refused_and_discarded(stack):
     r = _commit(handle, body["upload_id"])
     assert r.status_code == 422, f"a pickle must be refused, got {r.status_code}"
     assert "execute author-supplied code" in str(r.json()["detail"])
-    # refused bytes have no reason to persist
-    assert _commit(handle, body["upload_id"]).status_code == 404
+    # refused bytes have no reason to persist (asked with a fresh handle: the first is spent)
+    assert _commit(_mint(stack["rc"], company_id=stack["cid_b"]), body["upload_id"]).status_code == 404
 
 
 def test_an_object_stream_wearing_a_safe_name_is_refused_on_its_bytes(stack):
