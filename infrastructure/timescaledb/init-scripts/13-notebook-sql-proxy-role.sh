@@ -23,11 +23,14 @@
 #     verifier. It is cross-tenant authority, so no kernel byte ever reaches a session opened as it:
 #     the proxy opens one only to enrol, runs the one call, and closes it.
 #
-# The functions are defined unconditionally (create_tenant_schema() resolves them at call time);
-# the principals are created only when NOTEBOOK_SQL_PROXY_DB_PASSWORD is set (the `notebooks`
-# profile). Idempotent and re-runnable: on an existing database, running this script again is the
-# migration from the earlier design, where notebook_sql_proxy was a member of every tenant reader
-# — it revokes every such membership and provisions a login role for every existing tenant.
+# The functions and the tenant logins are created unconditionally: provisioning creates a tenant's
+# login in the same transaction as its schema (create_tenant_schema() resolves
+# ensure_tenant_sql_login() at call time; ADR-0033 dec 1), and this script backfills a login for
+# every tenant that predates that. A login is created without a password, so it cannot authenticate
+# until the proxy enrols its verifier. The enrolment principal is created only when
+# NOTEBOOK_SQL_PROXY_DB_PASSWORD is set (the `notebooks` profile). Idempotent and re-runnable: on an
+# existing database, running this script again is also the migration from the earlier design, where
+# notebook_sql_proxy was a member of every tenant reader — it revokes every such membership.
 
 set -e
 
@@ -114,10 +117,27 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
     REVOKE ALL ON FUNCTION notebook_sql_proxy_enrol(UUID, TEXT) FROM PUBLIC;
     COMMENT ON FUNCTION notebook_sql_proxy_enrol(UUID, TEXT) IS
         'Installs the SCRAM verifier of one tenant SQL login; EXECUTE is granted to notebook_sql_proxy only (ADR-0015 dec 5)';
+
+    -- A login role for every tenant provisioned before provisioning created one (new tenants get
+    -- theirs from create_tenant_schema()). Unconditional, like provisioning itself.
+    DO $$
+    DECLARE
+        r RECORD;
+        n INTEGER := 0;
+    BEGIN
+        FOR r IN SELECT rolname FROM pg_roles WHERE rolname LIKE 'tenant\_reader\_%' LOOP
+            PERFORM ensure_tenant_sql_login(replace(substr(r.rolname, 15), '_', '-')::UUID);
+            n := n + 1;
+        END LOOP;
+        RAISE NOTICE '  ✓ tenant SQL logins ensured: %', n;
+    END
+    $$;
 EOSQL
 
+echo "  ✓ tenant_sqlproxy_<uuid> logins ready (one per tenant, confined to its own reader)"
+
 if [ -z "${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}" ]; then
-  echo "NOTEBOOK_SQL_PROXY_DB_PASSWORD unset — skipping the proxy principals (notebooks profile off)."
+  echo "NOTEBOOK_SQL_PROXY_DB_PASSWORD unset — skipping the enrolment principal (notebooks profile off)."
   exit 0
 fi
 
@@ -138,7 +158,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
     DO $$
     DECLARE
         r RECORD;
-        n INTEGER := 0;
     BEGIN
         -- A member of nothing. The earlier design granted it every tenant reader; that is exactly
         -- the reach a relayed kernel inherited, so every membership goes.
@@ -151,14 +170,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
         LOOP
             EXECUTE format('REVOKE %I FROM notebook_sql_proxy', r.rolname);
         END LOOP;
-
-        -- A login role for every tenant provisioned before this ran (new tenants get theirs from
-        -- create_tenant_schema()).
-        FOR r IN SELECT rolname FROM pg_roles WHERE rolname LIKE 'tenant\_reader\_%' LOOP
-            PERFORM ensure_tenant_sql_login(replace(substr(r.rolname, 15), '_', '-')::UUID);
-            n := n + 1;
-        END LOOP;
-        RAISE NOTICE '  ✓ tenant SQL logins ensured: %', n;
     END
     $$;
 
@@ -166,4 +177,3 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 EOSQL
 
 echo "  ✓ notebook_sql_proxy ready (LOGIN, member of nothing, EXECUTE on notebook_sql_proxy_enrol only)"
-echo "  ✓ tenant_sqlproxy_<uuid> logins ready (one per tenant, confined to its own reader)"

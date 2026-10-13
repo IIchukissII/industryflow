@@ -60,6 +60,7 @@ def tenant():
         yield {"cur": cur, "company_id": company_id, "schema": schema}
     finally:
         cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{str(company_id).replace("-", "_")}"')
         cur.execute(f'DROP ROLE IF EXISTS "{_reader_role(company_id)}"')
         conn.close()
 

@@ -49,6 +49,7 @@ def db():
     for company_id in created:
         suffix = str(company_id).replace("-", "_")
         cur.execute(f'DROP SCHEMA IF EXISTS "tenant_{suffix}" CASCADE')
+        cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
         cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
         cur.execute("DELETE FROM public.companies WHERE company_id = %s", (str(company_id),))
     conn.close()
@@ -93,6 +94,36 @@ def test_provision_creates_the_row_and_the_tenant_schema(db):
     assert cur.fetchone()[0] == 4
     # The gateway can use the new tenant like any other.
     assert _as(cur, "api_gateway_user", f'SELECT count(*) FROM "{schema}".equipment') == [(0,)]
+
+
+def _memberships(cur, role):
+    cur.execute(
+        "SELECT g.rolname FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid "
+        "JOIN pg_roles u ON u.oid = m.member WHERE u.rolname = %s ORDER BY 1", (role,))
+    return [r[0] for r in cur.fetchall()]
+
+
+def test_provision_creates_the_sql_proxy_login_without_a_credential(db):
+    # ADR-0033 dec 1 / ADR-0015 dec 5: the tenant's confined SQL login exists from provisioning on,
+    # not from the proxy's first use, and holds no credential until the proxy enrols its verifier.
+    cur, _ = db
+    company_id, *_ = _provision(db, f"login-{uuid.uuid4()}")
+    suffix = str(company_id).replace("-", "_")
+    login = f"tenant_sqlproxy_{suffix}"
+    cur.execute("SELECT rolcanlogin, rolinherit, rolpassword FROM pg_authid WHERE rolname = %s", (login,))
+    assert cur.fetchone() == (True, False, None)
+    assert _memberships(cur, login) == ["notebook_sql_tenants", f"tenant_reader_{suffix}"]
+
+
+def test_reprovisioning_an_existing_tenant_converges_its_sql_login(db):
+    # A tenant that predates eager creation (or lost its login) gets it back from provisioning.
+    cur, _ = db
+    company_id, company_name, *_ = _provision(db, f"heal-{uuid.uuid4()}")
+    login = "tenant_sqlproxy_" + str(company_id).replace("-", "_")
+    cur.execute(f'DROP ROLE "{login}"')
+    cur.execute("SELECT create_tenant_schema(%s, %s)", (str(company_id), company_name))
+    cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (login,))
+    assert cur.fetchone() is not None
 
 
 def test_duplicate_and_invalid_names_are_refused(db):

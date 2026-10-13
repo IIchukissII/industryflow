@@ -129,9 +129,13 @@ A superuser can also provision through the API (`POST /api/companies`), which us
   every kernel session as it, so the database, not the proxy, confines a kernel to its tenant.
 - `notebook_sql_proxy_enrol(uuid, verifier)` — `SECURITY DEFINER`; installs a tenant login's SCRAM
   verifier. `EXECUTE` is granted to `notebook_sql_proxy` only.
-- With `NOTEBOOK_SQL_PROXY_DB_PASSWORD` set: creates `notebook_sql_proxy` (a member of nothing),
-  revokes any tenant-reader membership it holds, and creates a login for every existing tenant.
-  `create_tenant_schema()` creates the login for new tenants.
+- Creates a login for every existing tenant. `create_tenant_schema()` (and so `provision_company()`)
+  creates the login for a new tenant in the same transaction as its schema, and converges it when
+  re-run for an existing one (ADR-0033 dec 1). A login is created without a password: it cannot
+  authenticate until the proxy installs its verifier, and the proxy's enrolment re-ensures the login,
+  so a tenant that predates eager creation heals on first use.
+- With `NOTEBOOK_SQL_PROXY_DB_PASSWORD` set: creates `notebook_sql_proxy` (a member of nothing) and
+  revokes any tenant-reader membership it holds.
 - **Re-runnable on an existing database** — it is the migration from the earlier design.
 
 ---

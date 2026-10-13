@@ -31,6 +31,11 @@ BEGIN
     -- Check if schema already exists
     IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = v_schema_name) THEN
         RAISE NOTICE 'Schema % already exists, skipping creation', v_schema_name;
+        -- Re-provisioning still converges the tenant's SQL login (ADR-0033 dec 1), so a tenant
+        -- created before provisioning made it gets it here rather than only at the proxy's first use.
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_reader_role) THEN
+            PERFORM ensure_tenant_sql_login(p_company_id);
+        END IF;
         RETURN v_schema_name;
     END IF;
     
@@ -90,14 +95,15 @@ BEGIN
     -- Future tables added to this schema by the creating role are granted SELECT too.
     EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT SELECT ON TABLES TO %I', v_schema_name, v_reader_role);
 
-    -- The notebook SQL proxy (ADR-0015) opens a kernel's session as this tenant's own login
+    -- The notebook SQL proxy (ADR-0015 dec 5) opens a kernel's session as this tenant's own login
     -- (tenant_sqlproxy_<uuid>), which SET ROLEs into this reader and can reach no other tenant.
-    -- Created when the `notebooks` profile is on (13-notebook-sql-proxy-role.sh created the proxy
-    -- principal and defines ensure_tenant_sql_login(), resolved here at call time). The proxy
-    -- itself is never granted the reader: a session it opens carries a kernel's bytes.
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'notebook_sql_proxy') THEN
-        PERFORM ensure_tenant_sql_login(p_company_id);
-    END IF;
+    -- Provisioning creates it in this transaction, whether or not the `notebooks` profile is on
+    -- (ADR-0033 dec 1); ensure_tenant_sql_login() is defined by 13-notebook-sql-proxy-role.sh and
+    -- resolved here at call time. It is created without a password, so it cannot authenticate
+    -- until the proxy installs the SCRAM verifier of a credential only the proxy can derive. The
+    -- proxy's enrolment re-runs the same function, which self-heals a tenant that predates this.
+    -- The proxy itself is never granted the reader: a session it opens carries a kernel's bytes.
+    PERFORM ensure_tenant_sql_login(p_company_id);
 
     -- Cold-layer exporter (ADR-0025): least-privilege read access to raw measurements only. It
     -- never gets INSERT/UPDATE/DELETE and never owns the table; the day's chunk is dropped through
@@ -120,6 +126,7 @@ BEGIN
     RAISE NOTICE '  - ML models and predictions';
     RAISE NOTICE '  - Feature engineering configurations';
     RAISE NOTICE '  - Read-only role % (NOLOGIN, single-schema)', v_reader_role;
+    RAISE NOTICE '  - SQL proxy login tenant_sqlproxy_% (no verifier until the proxy enrols it)', REPLACE(p_company_id::TEXT, '-', '_');
     
     RETURN v_schema_name;
 END;
