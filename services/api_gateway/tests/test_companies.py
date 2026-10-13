@@ -84,7 +84,7 @@ def as_user(monkeypatch):
         revoked.append(user_id)
         return 1
 
-    monkeypatch.setattr(refresh_tokens, "revoke_all_refresh_tokens", revoke_all)
+    monkeypatch.setattr(refresh_tokens, "end_all_sessions", revoke_all)
 
     def make(is_superuser=False, role="admin", db=None):
         db = db or FakeDB()

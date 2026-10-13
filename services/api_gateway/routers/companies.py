@@ -232,6 +232,6 @@ async def delete_company(
     # After the commit: a deactivated user can no longer refresh even if this step fails part way
     # (refresh checks is_active), so revocation here only ends the sessions sooner.
     for user_id in user_ids:
-        await refresh_tokens.revoke_all_refresh_tokens(str(user_id))
+        await refresh_tokens.end_all_sessions(str(user_id))
     logger.info(f"Deactivated company {company_id} and {len(user_ids)} user(s)")
     return _row(row)

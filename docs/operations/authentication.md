@@ -58,11 +58,12 @@ The access JWT carries **`company_id` and `role` claims** (`CompanyClaimJWTStrat
 `services/api_gateway/users.py`); downstream services read the tenant from the claim rather
 than looking it up (**[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**).
 Refresh tokens are **single-use and rotated** on every refresh (reuse is detected and
-rejected) and are **revoked server-side** on logout. They are indexed per user, and **all** of a
-user's sessions are revoked when the password is changed or reset, when the user is deactivated
-(including by deactivating their company) and when the user is deleted. Each refresh token also
-carries a fingerprint of the password hash it was issued under, so a password set outside the
-gateway (the admin CLI) ends the existing sessions at their next refresh.
+rejected) and are **revoked server-side** on logout, together with the user's notebook
+capabilities (ADR-0012 dec 6). They are indexed per user, and **all** of a user's sessions and
+notebook capabilities are revoked when the password is changed or reset, when the user is
+deactivated (including by deactivating their company) and when the user is deleted. Each refresh
+token also carries a fingerprint of the password hash it was issued under, so a password set
+outside the gateway (the admin CLI) ends the existing sessions at their next refresh.
 
 ## Endpoints (API Gateway)
 
