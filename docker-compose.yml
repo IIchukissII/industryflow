@@ -525,6 +525,8 @@ services:
       # Every edge is HTTPS-only (ADR-0004 dec 1), so the session cookies are Secure.
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      COMPANY_STATUS_CACHE_SECONDS: ${COMPANY_STATUS_CACHE_SECONDS:-30}
+      WS_SESSION_RECHECK_SECONDS: ${WS_SESSION_RECHECK_SECONDS:-60}
       CORS_ORIGINS: ${CORS_ORIGINS}
       # Workers x (pool size + overflow) must fit api_gateway_user's CONNECTION LIMIT
       # (services/api_gateway/tests/test_db_connection_budget.py checks it).

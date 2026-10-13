@@ -79,6 +79,10 @@ part, reconciles the written row count against the source, lists the part in the
 nothing if any row arrived, changed or left since the snapshot (a row-count-and-digest check in
 `cold_export_drop_day`); the next run exports it. It is idempotent and self-healing — "export
 everything older than N days not yet exported" — so a failed run re-picks the same days next time.
+Runs never overlap, whatever starts them: a run holds a database advisory lock for its whole
+duration, and a run that finds it held logs that and exits successfully having done nothing (the
+run in progress is doing its work). The lock dies with the holder's session, so a crashed run
+never blocks the next.
 
 A verified part is never rewritten. Rows that arrive for a day after it was dropped land in a new
 chunk and are exported as a further part (`measurements-0001.parquet`, …) with its own reconciled

@@ -31,7 +31,7 @@ import pandas as pd
 from evidently import DataDefinition, Dataset, Report
 from evidently.presets import DataDriftPreset
 
-from .reference_profile import REFERENCE_PROFILE_VERSION
+from .reference_profile import REFERENCE_PROFILE_VERSION, prediction_column_refusal
 
 # Default advisory threshold on the drifted-feature share; the authoritative threshold is
 # the alert rule's (Slice 3).
@@ -162,6 +162,11 @@ def compute_drift(
     Raises:
         ValueError: if the profile schema version is not understood, or the current columns
             are not row-aligned.
+
+    A prediction column that does not hold detector scores on the declared scale is not a
+    baseline (ADR-0021 rev 1 dec 4): prediction drift is then refused — ``prediction_drift`` is
+    ``None`` and ``prediction_drift_reason`` says why — and data drift, which compares inputs, is
+    still reported.
     """
     version = reference_profile.get("schema_version")
     if version != REFERENCE_PROFILE_VERSION:
@@ -169,6 +174,7 @@ def compute_drift(
             f"unsupported reference_profile schema_version {version!r} "
             f"(expected {REFERENCE_PROFILE_VERSION})"
         )
+    prediction_refusal = prediction_column_refusal(reference_profile)
 
     current = {k: list(v) for k, v in current_data.items()}
     lengths = {len(v) for v in current.values()}
@@ -211,6 +217,9 @@ def compute_drift(
     }
 
     prediction_drift = None
+    if prediction_refusal:
+        return {**base, "status": "ok", "data_drift": data_drift, "prediction_drift": None,
+                "prediction_drift_reason": prediction_refusal}
     if current_predictions is not None:
         pred_df = pd.DataFrame({pred_col: list(current_predictions)}) if pred_col else None
     else:

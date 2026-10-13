@@ -50,6 +50,10 @@ _KEY_PREFIX = "nbcap:"
 # Per-user index of minted handles: handle -> the server it was minted for. Shared contract with
 # the data API, which revokes a user's handles at platform logout.
 _USER_INDEX_PREFIX = "nbcap-user:"
+# Present while a company is suspended (ADR-0033 dec 3): nothing is minted for it and none of its
+# handles resolve. Written and removed by the platform API with the company's active flag; shared
+# contract with every verifier (services/api_gateway/capability_auth.py).
+_SUSPENDED_PREFIX = "nbcap-suspended:"
 
 
 class CapabilityStore(Protocol):
@@ -73,6 +77,14 @@ class Binding:
     company_id: str
     audience: str
     read_only: bool = True
+
+
+class CompanySuspended(ValueError):
+    """The tenant is suspended, so no capability is minted for it (ADR-0033 dec 3)."""
+
+
+def is_suspended(store: CapabilityStore, company_id: str) -> bool:
+    return store.get(f"{_SUSPENDED_PREFIX}{company_id}") is not None
 
 
 def _key(handle: str) -> str:
@@ -102,6 +114,8 @@ def mint(
         raise ValueError(f"unknown capability audience: {audience!r}")
     if not user or not company_id:
         raise ValueError("capability requires a user and a tenant")
+    if is_suspended(store, company_id):
+        raise CompanySuspended(f"tenant {company_id} is suspended")
 
     handle = secrets.token_urlsafe(32)
     read_only = audience in _READ_ONLY_AUDIENCES
@@ -134,6 +148,8 @@ def resolve(store: CapabilityStore, handle: str, *, expected_audience: str) -> O
         return None  # non-interchangeable across planes (dec 3)
     if not record.get("company_id") or not record.get("user"):
         return None  # a handle bound to no tenant or no user is a hole, not a capability
+    if is_suspended(store, str(record["company_id"])):
+        return None
     return Binding(
         user=str(record["user"]),
         company_id=str(record["company_id"]),

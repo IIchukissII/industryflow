@@ -107,7 +107,15 @@ A superuser can also provision through the API (`POST /api/companies`), which us
   unqualified. Since `api_gateway_user` may create objects in `public`, they first refuse to run
   while `public` holds any function or operator owned by a role that is neither a superuser nor
   their own owner, so nothing planted there can run with their rights.
-- No teardown: deactivation is `update_company(id, NULL, false)`.
+- No teardown: deactivation is `update_company(id, NULL, false)`. It suspends the tenant's database
+  identity (ADR-0033 dec 3): the SQL proxy login becomes `NOLOGIN`; reactivating restores `LOGIN`.
+- `end_suspended_tenant_sql_sessions(id)`: SECURITY DEFINER, `EXECUTE` for `api_gateway_user`.
+  Ends the open sessions of a suspended tenant's login. `NOLOGIN` takes effect at commit, so the
+  caller runs this in its own transaction after the suspension has committed (the gateway does);
+  a session ended earlier could reconnect in between. It acts only on a committed suspension, so
+  it never disconnects an active tenant. An operator suspending by hand runs it the same way.
+- Grants `ml_service_user` `SELECT` on `public.companies`: the ML service authenticates users
+  itself and refuses a suspended company's users, as the gateway does.
 - Idempotent. On an existing database apply it with
   `psql -v ON_ERROR_STOP=1 -f 21-company-provisioning.sql` as the database superuser.
 
@@ -128,10 +136,16 @@ A superuser can also provision through the API (`POST /api/companies`), which us
   privilege-free `notebook_sql_tenants` group (named by pg_hba) — nothing else. The SQL proxy opens
   every kernel session as it, so the database, not the proxy, confines a kernel to its tenant.
 - `notebook_sql_proxy_enrol(uuid, verifier)` — `SECURITY DEFINER`; installs a tenant login's SCRAM
-  verifier. `EXECUTE` is granted to `notebook_sql_proxy` only.
-- With `NOTEBOOK_SQL_PROXY_DB_PASSWORD` set: creates `notebook_sql_proxy` (a member of nothing),
-  revokes any tenant-reader membership it holds, and creates a login for every existing tenant.
-  `create_tenant_schema()` creates the login for new tenants.
+  verifier. `EXECUTE` is granted to `notebook_sql_proxy` only. Refuses a suspended tenant.
+- `tenant_is_suspended(uuid)` — the registry row is inactive. While it is, `ensure_tenant_sql_login()`
+  keeps the login `NOLOGIN` (its open sessions are ended after commit, see section 21).
+- Creates a login for every existing tenant. `create_tenant_schema()` (and so `provision_company()`)
+  creates the login for a new tenant in the same transaction as its schema, and converges it when
+  re-run for an existing one (ADR-0033 dec 1). A login is created without a password: it cannot
+  authenticate until the proxy installs its verifier, and the proxy's enrolment re-ensures the login,
+  so a tenant that predates eager creation heals on first use.
+- With `NOTEBOOK_SQL_PROXY_DB_PASSWORD` set: creates `notebook_sql_proxy` (a member of nothing) and
+  revokes any tenant-reader membership it holds.
 - **Re-runnable on an existing database** — it is the migration from the earlier design.
 
 ---

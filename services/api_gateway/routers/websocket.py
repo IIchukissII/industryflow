@@ -6,8 +6,10 @@
 
 The socket authenticates from the httpOnly access cookie on the wss:// handshake, never from a
 URL parameter: a token in the URL lands in proxy and server access logs (ADR-0004 dec 3, 7). A
-socket lives no longer than the session that opened it: it closes when the access token expires
-and when its user is deactivated or deleted, so the client reconnects with a fresh cookie.
+socket lives no longer than the session that opened it (ADR-0004 dec 9): it closes when the access
+token expires, and at its periodic re-check (WS_SESSION_RECHECK_SECONDS) once the session it was
+opened in has ended (logout, or all of the user's sessions ended), its user has been deactivated or
+deleted, or its user's company has been suspended. The client then reconnects with a fresh cookie.
 """
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -17,6 +19,8 @@ import asyncio
 import time
 from jose import jwt, JWTError
 from messaging.redis_client import redis_client
+from messaging import refresh_tokens
+import company_status
 from config import get_settings
 from database import AsyncSessionLocal
 from dependencies import normalize_company_id_to_schema
@@ -30,12 +34,13 @@ router = APIRouter(prefix="/ws", tags=["websocket"])
 settings = get_settings()
 SECRET = settings.JWT_SECRET_KEY
 
-# How often an open socket re-checks that its user is still active.
-USER_RECHECK_SECONDS = 60
+# How often an open socket re-checks its session (configuration, ADR-0004 dec 9).
+USER_RECHECK_SECONDS = settings.WS_SESSION_RECHECK_SECONDS
 
-# Close code (application range) for "the access token expired or is missing": the client
-# refreshes its session (POST /auth/refresh) and reconnects. 1008 means the user may not
-# connect at all (deactivated, deleted, no company) and is final.
+# Close code (application range) for "the access token expired, is missing, or its session has
+# ended": the client refreshes its session (POST /auth/refresh) and reconnects, or signs in again.
+# 1008 means the user may not connect at all (deactivated, deleted, no company, company suspended)
+# and is final.
 CLOSE_SESSION_EXPIRED = 4401
 
 # Track active WebSocket connections with their company_id
@@ -110,9 +115,12 @@ async def enrich_sensors_with_names(sensors: dict, company_id: str) -> dict:
 
 @dataclass
 class SocketSession:
-    """The authenticated user of a socket and when its access token expires (epoch seconds)."""
+    """The authenticated user of a socket, when its access token expires (epoch seconds), and the
+    session and time the token was issued in (None for a token that does not carry them)."""
     user: User
     expires_at: float
+    session_id: Optional[str] = None
+    issued_at: Optional[float] = None
 
 
 async def _load_active_user(user_id: str) -> Optional[User]:
@@ -122,6 +130,18 @@ async def _load_active_user(user_id: str) -> Optional[User]:
     if user is None or not user.is_active:
         return None
     return user
+
+
+async def _usable_user(user_id: str) -> Optional[User]:
+    """The user, if they exist, are active, and their company (if any) is not suspended."""
+    user = await _load_active_user(user_id)
+    if user is not None and user.company_id and not await company_status.is_company_active(user.company_id):
+        return None
+    return user
+
+
+async def _session_ended(session: SocketSession) -> bool:
+    return await refresh_tokens.session_ended(str(session.user.id), session.session_id, session.issued_at)
 
 
 def _token_claims(token: str) -> Optional[dict]:
@@ -146,13 +166,15 @@ async def get_user_from_token(token: str) -> Optional[SocketSession]:
     user_id = payload["sub"]
     expires_at = payload["exp"]
     try:
-        user = await _load_active_user(user_id)
+        user = await _usable_user(user_id)
     except Exception as e:
         print(f"❌ Error validating websocket session: {e}")
         return None
     if user is None:
         return None
-    return SocketSession(user=user, expires_at=float(expires_at))
+    issued_at = payload.get("iat")
+    return SocketSession(user=user, expires_at=float(expires_at), session_id=payload.get("sid"),
+                         issued_at=float(issued_at) if isinstance(issued_at, (int, float)) else None)
 
 
 def allowed_origins() -> set[str]:
@@ -204,6 +226,15 @@ async def _authenticate(websocket: WebSocket) -> Optional[SocketSession]:
         await websocket.accept()
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid session or no company")
         return None
+    try:
+        ended = await _session_ended(session)
+    except Exception as e:
+        print(f"❌ Could not check websocket session: {e}")
+        ended = True
+    if ended:
+        await websocket.accept()
+        await websocket.close(code=CLOSE_SESSION_EXPIRED, reason="Session ended")
+        return None
     return session
 
 
@@ -222,11 +253,13 @@ class _SessionWatch:
         if now - self.checked_at >= USER_RECHECK_SECONDS:
             self.checked_at = now
             try:
-                if await _load_active_user(str(self.session.user.id)) is None:
+                if await _usable_user(str(self.session.user.id)) is None:
                     return status.WS_1008_POLICY_VIOLATION
+                if await _session_ended(self.session):
+                    return CLOSE_SESSION_EXPIRED
             except Exception as e:
-                # A transient DB error is not a revocation; check again next interval.
-                print(f"⚠️ Could not re-check websocket user: {e}")
+                # A transient DB/store error is not a revocation; check again next interval.
+                print(f"⚠️ Could not re-check websocket session: {e}")
         return None
 
 

@@ -31,6 +31,10 @@ from typing import Awaitable, Callable, Optional
 
 AUDIENCE_COLD = "cold"  # the broker's copy of the audience (ADR-0025 / ADR-0015 dec 3)
 _KEY_PREFIX = "nbcap:"
+# Present while the handle's company is suspended (ADR-0033 dec 3): its handles do not resolve.
+# Written and removed by the platform API with the company's active flag; shared contract
+# (services/api_gateway/capability_auth.py).
+_SUSPENDED_PREFIX = "nbcap-suspended:"
 
 
 @dataclass(frozen=True)
@@ -48,7 +52,7 @@ async def resolve_cold_binding(
 
     None means the broker refuses the request. A non-cold handle never resolves here (ADR-0015
     dec 3); absent/expired/revoked/malformed all deny (dec 1-2) — the same lookup that authorizes
-    is the one that revokes.
+    is the one that revokes. A handle whose tenant is suspended denies.
     """
     if not handle:
         return None
@@ -65,6 +69,12 @@ async def resolve_cold_binding(
         return None
     company_id = record.get("company_id")
     if not company_id:
+        return None
+    try:
+        canonical = str(uuid.UUID(str(company_id)))
+    except ValueError:
+        return None
+    if await aget(f"{_SUSPENDED_PREFIX}{canonical}") is not None:
         return None
     return ColdBinding(user=record.get("user", ""), company_id=company_id)
 

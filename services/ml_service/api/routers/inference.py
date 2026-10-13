@@ -155,6 +155,7 @@ async def _resolve_company_id(request: Request, request_data: InferenceRequest) 
     # its if_access default is a Cookie(None) marker (truthy) — calling it positionally would make
     # the cookie branch fire on a FieldInfo and 500 instead of cleanly reading the cookie / 401ing.
     user_data = await auth.verify_jwt_token(
+        request=request,
         authorization=request.headers.get("Authorization"),
         if_access=request.cookies.get("if_access"),
     )
@@ -180,7 +181,8 @@ def load_model_for(company_id: str, model_data: Dict[str, Any]):
     """Load a registered model, warm from the process-local cache when already loaded.
 
     The anomaly detector and the drift evaluator both score with the same models repeatedly; the
-    cache avoids a cold fetch on every call (see model_cache). A cold load is the full path in
+    cache avoids a cold fetch on every call (see model_cache). The address's shape is checked on every
+call, hits included; a cold load is the full path in
     `model_loader`: the record's address is held to the caller's tenant, then the artifact is loaded
     with the trust its provenance is granted (ADR-0027 dec 13) — a kernel model through its run, an
     uploaded one from the location the upload gateway admitted it to (ADR-0030 dec 8).
@@ -194,6 +196,12 @@ def load_model_for(company_id: str, model_data: Dict[str, Any]):
         provenance=record_provenance(model_data),
     )
     try:
+        # The address is re-checked before the cache is consulted (ADR-0030 rev 4 dec 8), so a warm
+        # model is never served from an address the current policy refuses.
+        model_loader.check_address(
+            company_id=company_id, mlflow_run_id=address['mlflow_run_id'],
+            artifact_uri=address['artifact_uri'],
+        )
         return model_cache.get_or_load(
             model_loader.cache_key(**address), lambda _key: model_loader.load(**address),
         )

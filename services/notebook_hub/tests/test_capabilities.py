@@ -230,3 +230,23 @@ def test_a_handle_minted_without_a_server_is_not_indexed():
     store = FakeStore()
     cap.mint(store, user="alice", company_id=str(uuid.uuid4()), audience=cap.AUDIENCE_API, ttl_seconds=60)
     assert store.indexes == {}
+
+
+def test_nothing_is_minted_for_a_suspended_tenant():
+    # ADR-0033 dec 3: a suspended company is issued no new capabilities.
+    store = FakeStore()
+    cid = str(uuid.uuid4())
+    store.data[f"nbcap-suspended:{cid}"] = "1"
+    with pytest.raises(cap.CompanySuspended):
+        cap.mint(store, user="u", company_id=cid, audience=cap.AUDIENCE_API, ttl_seconds=60, server_name="")
+    assert [k for k in store.data if k.startswith("nbcap:")] == []
+    assert store.indexes == {}
+
+
+def test_a_suspended_tenants_handle_does_not_resolve():
+    store = FakeStore()
+    cid = str(uuid.uuid4())
+    handle = cap.mint(store, user="u", company_id=cid, audience=cap.AUDIENCE_API, ttl_seconds=60)
+    assert cap.resolve(store, handle, expected_audience=cap.AUDIENCE_API) is not None
+    store.data[f"nbcap-suspended:{cid}"] = "1"
+    assert cap.resolve(store, handle, expected_audience=cap.AUDIENCE_API) is None

@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # development setup.
     COOKIE_SECURE: bool = True
     COOKIE_SAMESITE: str = "lax"
+    # How long a replica may honour its cached view of a company's active flag (company_status.py,
+    # ADR-0033 dec 3). The replica that changes the flag sees the change at once.
+    COMPANY_STATUS_CACHE_SECONDS: int = 30
+    # How often an open live socket re-checks its session: the account, its company, and whether
+    # the session was ended (ADR-0004 dec 9). A socket outlives its session by at most this.
+    WS_SESSION_RECHECK_SECONDS: int = 60
 
     # CORS Configuration
     CORS_ORIGINS: str

@@ -64,8 +64,10 @@ duplicates or corrupt state:
   to **`sensor-data-raw.measurements.dlq`** (`KAFKA_TOPIC_MEASUREMENTS_DLQ`) — the original message,
   the reason, and its topic/partition/offset — before the batch's writes, then writes the rest.
   `spark-aggregations` excludes the same readings with the same definition
-  (`services/spark_jobs/reading_guard.py`) *before* its watermark, so a far-future timestamp cannot
-  drag the watermark ahead and close live windows; it does not publish them a second time. A failure
+  (`services/spark_jobs/reading_guard.py`): the stateless rules *before* its watermark, so a
+  far-future timestamp cannot drag the watermark ahead and close live windows, and the unknown
+  tenant/sensor/equipment rule at write time, on the aggregate's key (which is the readings' key).
+  It does not publish them a second time: both jobs consume `sensor-data-raw`. A failure
   of the database or Kafka itself still fails the batch. Ingestion rejects the far-future timestamp
   at the edge already (HTTP 422).
 - **Aggregation windows are a feature contract.** The window widths and allowed lateness live in

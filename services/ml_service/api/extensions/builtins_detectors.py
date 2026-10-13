@@ -34,6 +34,7 @@ from . import (
     DIRECT_SCORE,
     OUTLIER_SCORE,
     RECONSTRUCTION_ERROR,
+    SCORE_RANGE,
     DetectionResult,
     UninterpretableModel,
     register_detector,
@@ -133,7 +134,8 @@ async def direct_detector(features, model, threshold, ctx) -> DetectionResult:
     number. That is refused, like any other output nothing here can interpret.
     """
     prediction = np.asarray(model.predict(features), dtype=float).ravel()
-    if prediction.size == 0 or not np.isfinite(prediction[0]) or not 0.0 <= prediction[0] <= 1.0:
+    low, high = SCORE_RANGE
+    if prediction.size == 0 or not np.isfinite(prediction[0]) or not low <= prediction[0] <= high:
         raise UninterpretableModel(
             f"this model is registered as emitting a 0-1 anomaly score, but returned "
             f"{prediction[:1].tolist()} — not a score in that range. It is not the model its "
