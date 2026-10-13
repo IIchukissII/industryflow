@@ -102,3 +102,37 @@ def test_image_for_profile_falls_back_to_single_image():
 def test_image_for_profile_requires_some_image():
     with pytest.raises(KeyError):
         ident.image_for_profile(ident.PROFILE_AUTHORING, {})
+
+
+# --- re-checking an established hub login against the identity forwarded now (ADR-0014) ---------
+
+_CID = str(uuid.uuid4())
+_STATE = {"company_id": _CID, "role": "engineer"}
+
+
+def test_reconcile_same_identity():
+    assert ident.reconcile(_headers(user="u-1", company_id=_CID), "u-1", _STATE) == ident.RECONCILE_SAME
+
+
+def test_reconcile_another_user_behind_the_cookie():
+    verdict = ident.reconcile(_headers(user="u-2", company_id=_CID), "u-1", _STATE)
+    assert verdict == ident.RECONCILE_OTHER_USER
+
+
+@pytest.mark.parametrize("over", [{"company_id": str(uuid.uuid4())}, {"role": "operator"}])
+def test_reconcile_same_user_with_other_tenant_or_role(over):
+    headers = _headers(user="u-1", **{"company_id": _CID, **over})
+    assert ident.reconcile(headers, "u-1", _STATE) == ident.RECONCILE_STALE_FACTS
+
+
+def test_reconcile_without_a_forwarded_identity_is_not_a_mismatch():
+    # A single-user server's own API call reaches the hub directly, with no identity headers.
+    assert ident.reconcile({"Authorization": "token x"}, "u-1", _STATE) == ident.RECONCILE_NOT_FORWARDED
+
+
+@pytest.mark.parametrize("headers", [
+    {ident.HEADER_USER: "u-1"},                                                    # partial
+    {ident.HEADER_USER: "u-1", ident.HEADER_COMPANY_ID: "nope", ident.HEADER_ROLE: "engineer"},
+])
+def test_reconcile_unparseable_identity_is_invalid(headers):
+    assert ident.reconcile(headers, "u-1", _STATE) == ident.RECONCILE_INVALID

@@ -19,6 +19,7 @@ unit-tested ``identity.py`` + ``capabilities.py``:
     capabilities, resource limits. Egress is a NetworkPolicy on k8s; on Compose it is a dedicated
     internal network (the documented non-parity, ADR-0018 dec 4).
 """
+import asyncio
 import os
 import sys
 
@@ -30,9 +31,15 @@ import identity as ident  # noqa: E402
 # Kubernetes behaviour; the Compose deployment sets NOTEBOOK_SPAWNER=docker.
 SPAWNER = os.environ.get("NOTEBOOK_SPAWNER", "kube").strip().lower()
 
-# Capability lifetime (ADR-0015 dec 2). The store entry is the backstop; the hub keeps it alive
-# while the session is healthy and deletes it on logout (deferred lifecycle). Config-owned.
-CAPABILITY_TTL_SECONDS = int(os.environ.get("NOTEBOOK_CAPABILITY_TTL_SECONDS", "3600"))
+# Capability lifetime (ADR-0015 dec 2). The store entry's lifetime is only the backstop: the hub
+# refreshes a healthy server's handles on every spawner poll (Spawner.poll_interval, 30s by
+# default) and deletes them when the server stops, is respawned, or its user logs out. So this
+# bounds how long a handle outlives a hub that stopped looking after it, not how long a session
+# may last. Config-owned.
+CAPABILITY_TTL_SECONDS = int(os.environ.get("NOTEBOOK_CAPABILITY_TTL_SECONDS", "900"))
+# How long a hub login is trusted before it is re-checked against the identity the SSO proxy
+# forwards (ADR-0014): a different user, tenant or role behind the same hub cookie ends the login.
+AUTH_REFRESH_SECONDS = int(os.environ.get("NOTEBOOK_AUTH_REFRESH_SECONDS", "60"))
 
 # Per-user durable work storage (ADR-0020): a data scientist's notebooks persist at work/ across
 # the ephemeral container; the rest of the home (incl the read-only examples/ baked into the image)
@@ -113,7 +120,15 @@ class _ProxyHeaderLoginHandler(BaseHandler):
 
 
 class ProxyHeaderAuthenticator(Authenticator):
-    """Header-trusting authenticator; the trusted proxy is the actual verifier (ADR-0014)."""
+    """Header-trusting authenticator; the trusted proxy is the actual verifier (ADR-0014).
+
+    A hub login is established once from the forwarded identity, but the hub cookie outlives the
+    request that set it — so every ``auth_refresh_age`` (and before every spawn) the login is
+    re-checked against the identity the proxy forwards *now* (``refresh_user``). A different user
+    behind the cookie, or the same user with another tenant or role, ends the login; for the same
+    user the running servers are stopped too, because their capabilities were minted against
+    facts that no longer hold.
+    """
 
     enable_auth_state = True
 
@@ -123,8 +138,30 @@ class ProxyHeaderAuthenticator(Authenticator):
     async def authenticate(self, handler, data):  # not used; login is header-driven
         return None
 
+    async def refresh_user(self, user, handler=None):
+        if handler is None:
+            return True  # no request to judge (an internal refresh): nothing has changed
+        verdict = ident.reconcile(
+            handler.request.headers, user.name, await user.get_auth_state() or {}
+        )
+        if verdict == ident.RECONCILE_STALE_FACTS:
+            await _stop_active_servers(handler, user)
+        return verdict in (ident.RECONCILE_SAME, ident.RECONCILE_NOT_FORWARDED)
+
+
+async def _stop_active_servers(handler, user):
+    for name, spawner in list(user.spawners.items()):
+        if spawner.active and not spawner.pending:
+            await handler.stop_single_user(user, name)
+
 
 c.JupyterHub.authenticator_class = ProxyHeaderAuthenticator
+c.Authenticator.auth_refresh_age = AUTH_REFRESH_SECONDS
+c.Authenticator.refresh_pre_spawn = True
+# Logging out of the hub stops the user's servers, and stopping a server revokes its capabilities
+# (post_stop_hook below). The platform's sign-out logs out of the hub before it ends the platform
+# session, and the platform's logout endpoint revokes the user's capabilities centrally as well.
+c.JupyterHub.shutdown_on_logout = True
 
 # ---------------------------------------------------------------------------
 # Spawn profiles — role-driven caps (ADR-0011 dec 5/7), spawner-independent
@@ -135,11 +172,79 @@ PROFILE_RESOURCES = {
 }
 
 
-def _capability_store():
-    """Build the Redis-backed capability store (ADR-0015 dec 7)."""
-    import redis  # runtime dep; imported lazily so config import doesn't require it
+_STORE = None
 
-    return cap.RedisCapabilityStore(redis.Redis.from_url(os.environ["REDIS_URL"]))
+
+def _capability_store():
+    """The Redis-backed capability store (ADR-0015 dec 7), built once per hub process."""
+    global _STORE
+    if _STORE is None:
+        import redis  # runtime dep; imported lazily so config import doesn't require it
+
+        _STORE = cap.RedisCapabilityStore(redis.Redis.from_url(os.environ["REDIS_URL"]))
+    return _STORE
+
+
+async def revoke_server_capabilities(spawner):
+    """post_stop_hook: a stopped server's handles stop working now, not when they expire
+    (ADR-0012 dec 6, ADR-0015 dec 2)."""
+    revoked = await asyncio.to_thread(
+        cap.revoke_server, _capability_store(), spawner.user.name, spawner.name
+    )
+    spawner.log.info("revoked %d capability handle(s) of %s", revoked, spawner._log_name)
+
+
+async def keep_capabilities_alive(spawner) -> bool:
+    """Refresh a running server's handles. Returns False when none is left to refresh.
+
+    None left means they were revoked from outside the hub — the platform's logout revokes all of a
+    user's handles — so the environment holds credentials that no longer work, and the caller stops
+    it. A store that cannot be reached is not that: the server is left alone, and its handles keep
+    their remaining lifetime (the verifiers fail closed on their own).
+    """
+    try:
+        live = await asyncio.to_thread(
+            cap.refresh_server, _capability_store(), spawner.user.name, spawner.name,
+            CAPABILITY_TTL_SECONDS,
+        )
+    except Exception:  # noqa: BLE001 - a store outage must not stop every server
+        spawner.log.exception("could not refresh the capabilities of %s", spawner._log_name)
+        return True
+    return live > 0
+
+
+def with_capability_lifecycle(base):
+    """The deployment's spawner class with the capability lifecycle attached (ADR-0015 dec 2).
+
+    Every poll of a running server refreshes its handles; a server whose handles were all revoked
+    reports itself stopped at its next poll, so the hub takes the same path as for a server that
+    died — route removed, server stopped, post_stop_hook run — and the user's next visit spawns a
+    fresh one with fresh handles.
+    """
+
+    class CapabilityLifecycleSpawner(base):
+        _capabilities_revoked = False
+
+        async def start(self):
+            self._capabilities_revoked = False
+            return await super().start()
+
+        async def poll(self):
+            if self._capabilities_revoked:
+                return 0
+            return await super().poll()
+
+        async def poll_and_notify(self):
+            status = await super().poll_and_notify()
+            if status is None and not await keep_capabilities_alive(self):
+                self.log.warning("capabilities of %s were revoked; stopping it", self._log_name)
+                self._capabilities_revoked = True
+            return status
+
+    CapabilityLifecycleSpawner.__name__ = CapabilityLifecycleSpawner.__qualname__ = (
+        f"CapabilityLifecycle{base.__name__}"
+    )
+    return CapabilityLifecycleSpawner
 
 
 async def bind_identity_and_profile(spawner):
@@ -181,19 +286,24 @@ async def bind_identity_and_profile(spawner):
     if profile == ident.PROFILE_ANALYTICS:
         spawner.default_url = "/voila"
 
-    # Mint per-session, single-tenant, read-only capabilities and inject the handles (ADR-0015):
-    # the kernel's only data credentials — opaque handles, not DB passwords, revocable by deleting
-    # their store entries. Every profile gets the data-API capability; authoring also gets SQL.
+    # Mint per-session, single-tenant capabilities and inject the handles (ADR-0015): the kernel's
+    # only data credentials — opaque handles, not DB passwords, revocable by deleting their store
+    # entries. Every profile gets the data-API capability; authoring also gets SQL. Each is recorded
+    # against this server, so stopping it revokes them and polling it keeps them alive.
     store = _capability_store()
-    spawner.environment["INDUSTRYFLOW_API_CAPABILITY"] = cap.mint(
-        store, user=who.user, company_id=who.company_id,
-        audience=cap.AUDIENCE_API, ttl_seconds=CAPABILITY_TTL_SECONDS,
-    )
-    if profile == ident.PROFILE_AUTHORING:
-        spawner.environment["INDUSTRYFLOW_SQL_CAPABILITY"] = cap.mint(
-            store, user=who.user, company_id=who.company_id,
-            audience=cap.AUDIENCE_SQL, ttl_seconds=CAPABILITY_TTL_SECONDS,
+    # A respawn replaces the environment, so it replaces the credentials: whatever an earlier run of
+    # this server still holds (a stop the hub never saw, e.g. across a hub crash) is revoked first.
+    await asyncio.to_thread(cap.revoke_server, store, who.user, spawner.name)
+
+    def mint(audience):
+        return cap.mint(
+            store, user=who.user, company_id=who.company_id, audience=audience,
+            ttl_seconds=CAPABILITY_TTL_SECONDS, server_name=spawner.name,
         )
+
+    spawner.environment["INDUSTRYFLOW_API_CAPABILITY"] = mint(cap.AUDIENCE_API)
+    if profile == ident.PROFILE_AUTHORING:
+        spawner.environment["INDUSTRYFLOW_SQL_CAPABILITY"] = mint(cap.AUDIENCE_SQL)
         # Where the kernel reaches the SQL access proxy (ADR-0015); the capability above is the
         # password it presents there. Only authoring kernels get SQL, so only they get the URL.
         if os.environ.get("INDUSTRYFLOW_SQL_PROXY_URL"):
@@ -201,10 +311,7 @@ async def bind_identity_and_profile(spawner):
         # Experiment tracking (ADR-0019): a tracking-audience capability the kernel presents to the
         # tracking gateway as its MLflow bearer token. Authoring-only — operators author no models.
         if os.environ.get("INDUSTRYFLOW_TRACKING_URL"):
-            spawner.environment["INDUSTRYFLOW_TRACKING_CAPABILITY"] = cap.mint(
-                store, user=who.user, company_id=who.company_id,
-                audience=cap.AUDIENCE_TRACKING, ttl_seconds=CAPABILITY_TTL_SECONDS,
-            )
+            spawner.environment["INDUSTRYFLOW_TRACKING_CAPABILITY"] = mint(cap.AUDIENCE_TRACKING)
             # MLflow reads these: the gateway endpoint + the capability as MLFLOW_TRACKING_TOKEN.
             spawner.environment["MLFLOW_TRACKING_URI"] = os.environ["INDUSTRYFLOW_TRACKING_URL"]
             spawner.environment["MLFLOW_TRACKING_TOKEN"] = spawner.environment["INDUSTRYFLOW_TRACKING_CAPABILITY"]
@@ -213,10 +320,7 @@ async def bind_identity_and_profile(spawner):
         # operators (analytics) train no models. The broker resolves the handle to this one tenant
         # and vends read-only, prefix-scoped pre-signed GET URLs; the kernel holds no object-store key.
         if os.environ.get("INDUSTRYFLOW_COLD_BROKER_URL"):
-            spawner.environment["INDUSTRYFLOW_COLD_CAPABILITY"] = cap.mint(
-                store, user=who.user, company_id=who.company_id,
-                audience=cap.AUDIENCE_COLD, ttl_seconds=CAPABILITY_TTL_SECONDS,
-            )
+            spawner.environment["INDUSTRYFLOW_COLD_CAPABILITY"] = mint(cap.AUDIENCE_COLD)
             spawner.environment["INDUSTRYFLOW_COLD_BROKER_URL"] = os.environ["INDUSTRYFLOW_COLD_BROKER_URL"]
     # The blessed data path the client uses (ADR-0011 dec 4): the gateway origin, reachable from
     # the single-user environment. Identity-only; the capability above is what authorises it.
@@ -245,6 +349,9 @@ async def bind_identity_and_profile(spawner):
 # work/ (their persistent volume).
 c.Spawner.notebook_dir = NB_HOME
 
+# A stopped server's capabilities are revoked at once (ADR-0015 dec 2), for either spawner.
+c.Spawner.post_stop_hook = revoke_server_capabilities
+
 # Implement ADR-0011 dec 1/7 "reclaimed when idle": cull idle servers with a managed service that
 # holds a MINIMAL scoped token (ADR-0020 dec 2) — least-privilege, not an ambient admin credential.
 c.JupyterHub.services = [
@@ -271,7 +378,9 @@ c.JupyterHub.load_roles = [
 # Spawner wiring — KubeSpawner (pods) or DockerSpawner (containers), per ADR-0018
 # ---------------------------------------------------------------------------
 if SPAWNER == "docker":
-    c.JupyterHub.spawner_class = "dockerspawner.DockerSpawner"
+    from dockerspawner import DockerSpawner  # noqa: E402
+
+    c.JupyterHub.spawner_class = with_capability_lifecycle(DockerSpawner)
     c.DockerSpawner.pre_spawn_hook = bind_identity_and_profile
     # The per-user image is chosen per profile in the hook (above); set a class default so the
     # image is runnable standalone, and the network it shares with the hub + proxy.
@@ -294,7 +403,9 @@ if SPAWNER == "docker":
     c.JupyterHub.hub_connect_ip = os.environ.get("HUB_CONNECT_IP", "notebook-hub")
     c.JupyterHub.bind_url = os.environ.get("HUB_PUBLIC_URL", "http://0.0.0.0:8000")
 else:
-    c.JupyterHub.spawner_class = "kubespawner.KubeSpawner"
+    from kubespawner import KubeSpawner  # noqa: E402
+
+    c.JupyterHub.spawner_class = with_capability_lifecycle(KubeSpawner)
     c.KubeSpawner.pre_spawn_hook = bind_identity_and_profile
     # Containment (ADR-0009 / ADR-0011 dec 7). Network egress is constrained by NetworkPolicy.
     c.KubeSpawner.uid = 1000

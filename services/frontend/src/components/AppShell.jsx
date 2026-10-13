@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import './AppShell.css';
 import api from '../services/api';
+import { signOut } from '../services/session';
 import Icon from './Icon';
 
 // Navigation mirrors the mandala's anatomy: the Core (where streams converge and surface),
@@ -58,7 +59,7 @@ export default function AppShell({ user, title, wsConnected, lastUpdate, childre
   }, []);
 
   const handleLogout = async () => {
-    try { await api.post('/auth/logout'); } catch { /* best-effort revoke */ }
+    await signOut({ post: (url) => api.post(url) });
     localStorage.removeItem('user');
     window.location.href = '/login';
   };
