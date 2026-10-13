@@ -42,6 +42,7 @@ jobs:
               - 'scripts/manage_users.py'
               - 'scripts/seed_users.py'
               - 'scripts/user_admin_db.py'
+              - 'infrastructure/backup/**'
               - '.github/workflows/unit-tests.yml'
 
   pytest:
@@ -81,6 +82,8 @@ jobs:
           # The live proof (test_cold_export_integration.py) is `integration` and excluded here —
           # it needs TimescaleDB + MinIO and would only skip. It runs in cold-layer-integration.yml.
           - { service: cold_export,         path: services/cold_export/tests, args: "--ignore=services/cold_export/tests/test_cold_export_integration.py" }
+          # The backup image's scripts, run under bash against stand-in aws/psql/pg_* binaries.
+          - { service: backup,              path: infrastructure/backup/tests, install: "pip install pytest==9.1.1" }
           # The notebook client is packaged (pyproject extras), so it overrides the install.
           - { service: python_client,       path: clients/python/tests, install: "pip install -e 'clients/python[dev]'" }
           # The device CA's issue/renew/revoke, run against a throwaway CA with the runner's openssl.
