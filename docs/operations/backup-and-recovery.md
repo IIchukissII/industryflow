@@ -70,7 +70,12 @@ By default the target is the **in-cluster MinIO**, which protects against logica
 and accidental drops but **not** against losing the cluster/storage. For genuine disaster
 recovery, point the backup at an **off-site / managed S3 bucket** (different failure domain):
 override `backup.s3.endpoint` + `backup.s3.bucket` (Helm) or `S3_ENDPOINT_URL` + `S3_BUCKET`
-(compose) and supply that bucket's credentials.
+(compose) and supply that bucket's credentials as `BACKUP_STORE_ACCESS_KEY` /
+`BACKUP_STORE_SECRET_KEY`.
+
+The backup job never holds the object store's root key: against the in-cluster MinIO it uses its own
+principal, read/write/delete on the backup bucket only, which `minio-init` creates together with the
+bucket (`infrastructure/minio/minio-init.sh`).
 
 ## Running backups
 
@@ -137,7 +142,8 @@ kubectl run db-restore --rm -it --restart=Never \
 ```
 
 (Adjust env: the script needs `PGHOST PGPORT PGUSER PGPASSWORD S3_BUCKET S3_ENDPOINT_URL
-AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY` — the same values the CronJob sets.)
+AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY` — the same values the CronJob sets, i.e. the backup
+principal's `BACKUP_STORE_*` keys as the `AWS_*` pair.)
 
 ### Full recovery (rebuild a fresh database)
 

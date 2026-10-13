@@ -28,6 +28,7 @@ deploy/helm/industryflow/
     ├── infra-redis.yaml
     ├── infra-minio.yaml
     ├── infra-mlflow.yaml       # Deployment (stateless front to DB + MinIO)
+    ├── job-minio-init.yaml     # buckets + scoped object-store principals (infrastructure/minio)
     ├── ingress.yaml            # the TLS edge (ADR-0002 / ADR-0004)
     └── NOTES.txt
 ```
@@ -108,9 +109,20 @@ Production deployments run images by **immutable digest**, not mutable tags:
    and claim a ReadWriteOnce PVC (`apps.<name>.persistence`); ensure a default StorageClass exists
    or set `storageClass`. **To scale Spark out** (separate executors / a real cluster), move the
    Structured-Streaming checkpoint to a shared store (ADR-0006): set
-   `config.CHECKPOINT_LOCATION=s3a://spark-checkpoints`, add `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`
-   to both spark workloads' `secretKeys`, and set their `persistence.enabled=false`. The images
-   already carry the S3A jars; create the bucket in your object store first.
+   `config.CHECKPOINT_LOCATION=s3a://spark-checkpoints`, add `SPARK_CHECKPOINT_ACCESS_KEY`/
+   `SPARK_CHECKPOINT_SECRET_KEY` to both spark workloads' `secretKeys` with
+   `secretEnv: { MINIO_ACCESS_KEY: SPARK_CHECKPOINT_ACCESS_KEY, MINIO_SECRET_KEY: SPARK_CHECKPOINT_SECRET_KEY }`
+   (the checkpoint-only principal, ADR-0025 dec 11), and set their `persistence.enabled=false`. The
+   images already carry the S3A jars; the in-cluster store's bucket and principal come from the
+   minio-init Job (below), an external store's from you.
+6. **Object store principals** — no workload holds the MinIO root key except the server and the
+   `minio-init` Job, which runs `infrastructure/minio/minio-init.sh` (the script compose runs) after
+   every install/upgrade to create the buckets, the upload-staging expiry and one scoped principal
+   per consumer: `MLFLOW_STORE_*` (the MLflow server), `TRACKING_STORE_*` (the tracking gateway),
+   `MODEL_READ_*` (ml-service, read-only on admitted uploads), `BACKUP_STORE_*`, `SPARK_CHECKPOINT_*`,
+   `COLD_STORE_*` and `COLD_READ_*`. Set each pair in `secrets.data`; access keys must differ from
+   the root's. For an external store (`infra.minio.inCluster=false`) create equivalent principals
+   yourself — the script's policy table is the reference.
 
 ## Known follow-ups (ADR-0009 deferred)
 

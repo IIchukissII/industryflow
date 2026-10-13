@@ -309,54 +309,8 @@ def test_the_build_context_excludes_what_the_image_must_not_carry():
     assert not any(r in ("api/", "api", "**/*.py", "*.py") for r in rules), "it excludes the service itself"
 
 
-# --- the round trip runs when the code it loads through changes -------------------------------------
-
-def _api_module_files(name):
-    if os.path.isdir(os.path.join(API, name)):
-        return [f"services/ml_service/api/{name}/**"]
-    if os.path.exists(os.path.join(API, f"{name}.py")):
-        return [f"services/ml_service/api/{name}.py"]
-    return []
-
-
-def _api_imports(path):
-    with open(path) as fh:
-        tree = ast.parse(fh.read())
-    names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names.update(a.name.split(".")[0] for a in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            names.add(node.module.split(".")[0])
-    return {n for n in names if _api_module_files(n)}
-
-
-def test_the_round_trip_path_filter_covers_the_serving_code_it_loads_through():
-    harness = os.path.join(ROOT, "tests", "model_artifact_roundtrip", "load_in_serving.py")
-    workflow = os.path.join(ROOT, ".github", "workflows", "model-artifact-roundtrip.yml")
-    if not (os.path.exists(harness) and os.path.exists(workflow)):
-        pytest.skip("the round trip is not present in this checkout")
-
-    # The modules the harness imports from the serving image, and what THEY import, transitively.
-    todo, seen = list(_api_imports(harness)), set()
-    while todo:
-        name = todo.pop()
-        if name in seen:
-            continue
-        seen.add(name)
-        src = os.path.join(API, f"{name}.py")
-        if os.path.exists(src):
-            todo.extend(_api_imports(src))
-
-    with open(workflow) as fh:
-        filters = yaml.safe_load(fh)["jobs"]["changes"]["steps"][1]["with"]["filters"]
-    patterns = yaml.safe_load(filters)["relevant"]
-    for name in sorted(seen):
-        for path in _api_module_files(name):
-            assert path in patterns, (
-                f"{path} is code the round trip loads through, but changing it does not run the "
-                f"round trip — add it to the workflow's path filter"
-            )
+# The round-trip workflow's path filter is guarded by tests/config_guards/test_ci_path_filters.py,
+# which follows the harness's imports transitively and matches them with the filter's glob semantics.
 
 
 # --- one bucket, named in two deployments -----------------------------------------------------------

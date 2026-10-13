@@ -43,14 +43,11 @@ jobs:
           filters: |
             relevant:
               - 'services/notebook_hub/Dockerfile.authoring'
-              - 'services/ml_service/api/Dockerfile'
-              - 'services/ml_service/api/requirements.txt'
-              # The serving half loads through ml_service's own code; a change there is a change
-              # to what the round trip proves (guarded by test_roundtrip_path_filter.py).
-              - 'services/ml_service/api/skops_trust.py'
-              - 'services/ml_service/api/uploaded_model.py'
-              - 'services/ml_service/api/model_uri.py'
-              - 'services/ml_service/api/extensions/**'
+              # The whole serving tree, not just its Dockerfile and pins: the harness imports
+              # ml_service's own resolver and loaders (skops_trust, model_uri, uploaded_model), so a
+              # change to any of them changes what the round trip proves. tests/config_guards checks
+              # this list covers every module the harness imports.
+              - 'services/ml_service/api/**'
               - 'infrastructure/mlflow/**'
               - 'clients/python/**'
               - 'scripts/check_model_env_parity.py'

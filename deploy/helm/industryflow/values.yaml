@@ -6,6 +6,10 @@
 
 nameOverride: ""
 fullnameOverride: ""
+# The cluster's DNS domain. The frontend edge names its upstreams by fully-qualified Service name
+# (<svc>.<namespace>.svc.<clusterDomain>), because it re-resolves them per request and a resolver
+# applies no search domains.
+clusterDomain: cluster.local
 
 # The platform's public edge origin (scheme + host, no trailing slash), e.g. https://app.example.
 # Set it for a browser deployment to enable uploading an externally-authored model from the UI
@@ -89,7 +93,7 @@ tls:
     # timescale/timescaledb (Debian) runs postgres as uid 999.
     postgresUser: 999
     # BusyBox image for the cert-init initContainer (copy + chmod 600 + chown the key).
-    initImage: busybox:1.36
+    initImage: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
     # Self-provision the cert + CA with cert-manager: a SelfSigned issuer bootstraps a CA, a CA
     # issuer then signs the DB server cert into secretName. Defaults OFF (needs the cert-manager
     # CRDs, like the observability CRs); enable where cert-manager is installed, otherwise set
@@ -132,9 +136,13 @@ apps:
     enabled: true
     image: industryflow-ml-service-api
     digest: ""
-    # MINIO_* are also exposed as AWS_* (the MLflow client loads model artifacts from MinIO).
     # No MLFLOW_DB_*: ml-service reaches MLflow over its REST API, never the MLflow DB directly.
-    secretKeys: [ML_SERVICE_DB_PASSWORD, JWT_SECRET_KEY, INTERNAL_SERVICE_TOKEN, MINIO_ACCESS_KEY, MINIO_SECRET_KEY]
+    # MODEL_READ_* is a READ-ONLY object-store principal scoped to admitted uploads
+    # (tenant_*/uploads/*): an uploaded artifact is registered by its s3:// location (ADR-0030), so
+    # loading one reads the store directly; the S3 client reads it under the AWS_* names. Tracked
+    # models come through the tracking server and need no credential. Never the root key.
+    secretKeys: [ML_SERVICE_DB_PASSWORD, JWT_SECRET_KEY, INTERNAL_SERVICE_TOKEN, MODEL_READ_ACCESS_KEY, MODEL_READ_SECRET_KEY]
+    secretEnv: { AWS_ACCESS_KEY_ID: MODEL_READ_ACCESS_KEY, AWS_SECRET_ACCESS_KEY: MODEL_READ_SECRET_KEY }
     metrics: true
     hpa:
       enabled: false
@@ -257,6 +265,12 @@ apps:
       minReplicas: 2
       maxReplicas: 6
       targetCPUUtilizationPercentage: 70
+    # The edge's upstreams (EDGE_*) are rendered from this release's Service FQDNs
+    # (industryflow.edgeEnv); the container refuses to start without them.
+    edge: true
+    # The Ingress terminates TLS and reaches 8080 with X-Forwarded-Proto: https, which the edge
+    # serves (plain requests without it are redirected to https). The security headers (HSTS, CSP,
+    # frame/sniff/referrer policy) are set by the edge and pass through the Ingress unchanged.
     port: 8080
     probe: { path: /healthz, port: 8080 }
     ingress: { host: app.industryflow.local, path: / }
@@ -278,9 +292,12 @@ infra:
     storage: 20Gi
     database: industryflow
     external: { host: "", port: 5432 }
+    # Sized for the shared postgresql.conf (infrastructure/timescaledb/config): shared_buffers alone
+    # is 512MB, and max_connections covers every role's connection limit, so the backends need room
+    # above it. Lower postgresql.conf before lowering these.
     resources:
-      requests: { cpu: 250m, memory: 512Mi }
-      limits: { cpu: "1", memory: 1Gi }
+      requests: { cpu: 250m, memory: 1Gi }
+      limits: { cpu: "1", memory: 2Gi }
 
   zookeeper:
     inCluster: true
@@ -324,10 +341,24 @@ infra:
     external: { trackingUri: "" }
 
 # ---------------------------------------------------------------------------
+# Object store bootstrap (in-cluster MinIO only). A post-install/upgrade Job runs
+# infrastructure/minio/minio-init.sh — the same script compose runs — to create these buckets,
+# the upload-staging expiry, and one SCOPED principal per consumer (secrets.data *_ACCESS_KEY /
+# *_SECRET_KEY). Only the MinIO server and that Job hold the root key. For an external store the
+# operator provisions the buckets and principals out of band.
+# ---------------------------------------------------------------------------
+objectStore:
+  buckets:
+    sparkCheckpoint: spark-checkpoints
+  # mc image for the bootstrap Job. The -dev variant carries the shell the script needs.
+  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:207b9a2045f01cef90feda8127a55f769115e060d8350dcb3a29593fc81166ac
+
+# ---------------------------------------------------------------------------
 # Logical database backups (tier-1 DR) — a CronJob dumps each database to S3/MinIO
 # with retention. See docs/operations/backup-and-recovery.md (incl. restore + the
-# tier-2 pgBackRest/PITR path). Credentials reuse the Secret (DB_USER/DB_PASSWORD,
-# MINIO_ACCESS_KEY/MINIO_SECRET_KEY).
+# tier-2 pgBackRest/PITR path). Credentials: DB_USER/DB_PASSWORD, and the backup bucket's own
+# principal BACKUP_STORE_ACCESS_KEY/SECRET_KEY (created by the minio-init Job for the in-cluster
+# store; supply the off-site store's keys when s3.endpoint points elsewhere).
 # ---------------------------------------------------------------------------
 backup:
   enabled: true
@@ -360,7 +391,7 @@ backup:
 # chunk. This is the SOLE authority that drops raw chunks — there is no blind DB retention timer
 # (init script 16 removed it), so the effective raw retention IS horizonDays. The exporter uses a
 # WRITE-SCOPED object-store principal (COLD_STORE_ACCESS_KEY/SECRET), never the root MinIO keys;
-# for in-cluster MinIO a one-shot Job (job-minio-cold-init.yaml) creates the cold bucket and that
+# for in-cluster MinIO the minio-init Job (job-minio-init.yaml) creates the cold bucket and that
 # scoped user. Point store.endpoint/bucket at a managed S3 to archive off-cluster.
 # ---------------------------------------------------------------------------
 coldExport:
@@ -375,9 +406,6 @@ coldExport:
     endpoint: ""                 # "" -> derive the in-cluster MinIO endpoint
     bucket: industryflow-cold
     region: us-east-1
-  # mc image for the in-cluster bucket + principal bootstraps (inCluster MinIO only). The -dev
-  # variant carries the shell the init scripts need. Pinned by digest.
-  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:207b9a2045f01cef90feda8127a55f769115e060d8350dcb3a29593fc81166ac
   resources:
     requests: { cpu: 200m, memory: 512Mi }
     limits: { cpu: "1", memory: 2Gi }
@@ -414,19 +442,20 @@ observability:
     enabled: true
     label: grafana_dashboard
   # Data-store exporters — app-specific (they target our DB/Redis/Kafka). node-exporter and
-  # kube-state-metrics come from the cluster stack, not here.
+  # kube-state-metrics come from the cluster stack, not here. Pinned by tag + digest, identical to
+  # the compose stack's exporters (tests/config_guards checks the two agree).
   exporters:
     postgres:
       enabled: true
-      image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
+      image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
       port: 9187
     redis:
       enabled: true
-      image: oliver006/redis_exporter:v1.67.0
+      image: oliver006/redis_exporter:v1.93.0@sha256:6ca518a72f30f7f576ef92963de1b91d3c3f5fd3aeac949f878bfda183587820
       port: 9121
     kafka:
       enabled: true
-      image: danielqsj/kafka-exporter:v1.8.0
+      image: danielqsj/kafka-exporter:v1.10.0@sha256:346a53c2489a3530790d01f7b96632496d0d58926662f4c35bb65f569db2ab42
       port: 9308
 
 # ---------------------------------------------------------------------------
@@ -453,8 +482,11 @@ config:
   # Spark Structured-Streaming checkpoint (ADR-0006). Default = the per-pod PVC (Helm runs Spark
   # in local mode: driver = executor = one pod, so a local checkpoint is fine). To scale Spark
   # out (a real standalone/k8s cluster with separate executors), move the checkpoint to a shared
-  # store: set this to `s3a://spark-checkpoints`, add MINIO_ACCESS_KEY/MINIO_SECRET_KEY to the
-  # spark-streaming/spark-aggregations `secretKeys`, and set their `persistence.enabled=false`.
+  # store: set this to `s3a://<objectStore.buckets.sparkCheckpoint>`, add SPARK_CHECKPOINT_ACCESS_KEY/
+  # SPARK_CHECKPOINT_SECRET_KEY to the spark-streaming/spark-aggregations `secretKeys` with
+  # `secretEnv: { MINIO_ACCESS_KEY: SPARK_CHECKPOINT_ACCESS_KEY, MINIO_SECRET_KEY:
+  # SPARK_CHECKPOINT_SECRET_KEY }` (the checkpoint-only principal, ADR-0025 dec 11 — never the root
+  # key), and set their `persistence.enabled=false`.
   CHECKPOINT_LOCATION: /opt/spark/checkpoints
   CORS_ORIGINS: "https://app.industryflow.local"
   # The ingress is HTTPS-only (ADR-0004 dec 1), so the api-gateway session cookies are Secure.
@@ -526,14 +558,32 @@ secrets:
     COLD_STORE_ACCESS_KEY: "CHANGE_ME"
     COLD_STORE_SECRET_KEY: "CHANGE_ME"
     # Read side (ADR-0025 dec 5): the cold-store broker's READ-ONLY principal (get/list on the cold
-    # bucket only). Provisioned by the minio-cold-init Job; consumed by the broker when the notebook
+    # bucket only). Provisioned by the minio-init Job; consumed by the broker when the notebook
     # stack is deployed. Distinct from the write principal above.
     COLD_READ_ACCESS_KEY: "CHANGE_ME"
     COLD_READ_SECRET_KEY: "CHANGE_ME"
     JWT_SECRET_KEY: "CHANGE_ME"
     INTERNAL_SERVICE_TOKEN: "CHANGE_ME"
+    # The object store's ROOT credential: held by the MinIO server and the minio-init Job only.
     MINIO_ACCESS_KEY: "CHANGE_ME"
     MINIO_SECRET_KEY: "CHANGE_ME"
+    # One scoped principal per object-store consumer (infrastructure/minio/minio-init.sh). Access
+    # keys must differ from the root's.
+    # The MLflow server's artifact store: read/write on the artifact bucket only.
+    MLFLOW_STORE_ACCESS_KEY: "CHANGE_ME"
+    MLFLOW_STORE_SECRET_KEY: "CHANGE_ME"
+    # The tracking gateway (notebookHub): read/write on the artifact bucket only.
+    TRACKING_STORE_ACCESS_KEY: "CHANGE_ME"
+    TRACKING_STORE_SECRET_KEY: "CHANGE_ME"
+    # ml-service loading admitted uploads: read-only, tenant_*/uploads/* only (ADR-0030).
+    MODEL_READ_ACCESS_KEY: "CHANGE_ME"
+    MODEL_READ_SECRET_KEY: "CHANGE_ME"
+    # The backup CronJob: read/write/delete on the backup bucket only.
+    BACKUP_STORE_ACCESS_KEY: "CHANGE_ME"
+    BACKUP_STORE_SECRET_KEY: "CHANGE_ME"
+    # Spark's S3A checkpoint when scaled out (config.CHECKPOINT_LOCATION): the checkpoint bucket only.
+    SPARK_CHECKPOINT_ACCESS_KEY: "CHANGE_ME"
+    SPARK_CHECKPOINT_SECRET_KEY: "CHANGE_ME"
     # Notebook hub (ADR-0011): shared token between the hub and its proxy, and the hub cookie
     # secret. Only consumed when notebookHub.enabled.
     CONFIGPROXY_AUTH_TOKEN: "CHANGE_ME"
@@ -643,7 +693,7 @@ notebookHub:
       limits: { cpu: 250m, memory: 128Mi }
   # Cold-store broker (ADR-0025 dec 5, read side): authoring kernels present their cold capability
   # to read long-horizon history as Parquet. The broker holds a read-only cold-bucket principal
-  # (provisioned by the minio-cold-init Job) and vends tenant-prefix-scoped pre-signed GET URLs.
+  # (provisioned by the minio-init Job) and vends tenant-prefix-scoped pre-signed GET URLs.
   # Rendered only when coldExport is also enabled (there is no cold layer to read otherwise).
   coldBroker:
     image: industryflow-notebook-cold-broker

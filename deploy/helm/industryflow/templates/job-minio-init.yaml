@@ -1,0 +1,131 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.infra.minio.inCluster }}
+{{- /*
+  Object-store bootstrap for the in-cluster MinIO: runs infrastructure/minio/minio-init.sh (through
+  the files/minio-init.sh symlink — the very script compose's minio-init runs) to create the buckets,
+  the upload-staging expiry (ADR-0030), and one SCOPED principal per consumer deployed in this
+  release (industryflow.objectStorePrincipalKeys). Only this Job and the MinIO server hold the root
+  key. A post-install/upgrade hook, so it converges on every upgrade; the script is idempotent. For
+  an external store the operator provisions the buckets and principals out of band, so it is skipped.
+*/}}
+{{- $secret := include "industryflow.workloadSecretName" (dict "ctx" . "workload" "minio-init") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "industryflow.fullname" . }}-minio-init
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: minio-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  minio-init.sh: |-
+{{ .Files.Get "files/minio-init.sh" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "industryflow.fullname" . }}-minio-init
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: minio-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio-init
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/script: {{ .Files.Get "files/minio-init.sh" | sha256sum }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.securityContext.enabled }}
+      # Non-root + seccomp (admission-policy friendly). fsGroup makes the /tmp emptyDir writable by
+      # the non-root uid so mc can keep its config there under a read-only root FS.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      containers:
+        - name: minio-init
+          image: {{ .Values.objectStore.initImage | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          command: ["/bin/sh", "/opt/minio-init/minio-init.sh"]
+          env:
+            # mc keeps its config and alias here, and the script its policy documents: the writable
+            # /tmp emptyDir, so the root FS stays read-only.
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: MINIO_ENDPOINT
+              value: {{ include "industryflow.minioEndpoint" . | quote }}
+            - name: MINIO_ROOT_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ $secret }}, key: MINIO_ACCESS_KEY }
+            - name: MINIO_ROOT_SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ $secret }}, key: MINIO_SECRET_KEY }
+            - name: SPARK_CHECKPOINT_BUCKET
+              value: {{ .Values.objectStore.buckets.sparkCheckpoint | quote }}
+            # MLflow's --artifacts-destination; the tracking gateway pre-signs against the same.
+            - name: ARTIFACT_BUCKET
+              value: {{ .Values.notebookHub.trackingGateway.artifactBucket | quote }}
+            {{- if and .Values.backup.enabled (not .Values.backup.s3.endpoint) }}
+            - name: BACKUP_BUCKET
+              value: {{ .Values.backup.s3.bucket | quote }}
+            {{- end }}
+            {{- if .Values.coldExport.enabled }}
+            - name: COLD_STORE_BUCKET
+              value: {{ .Values.coldExport.store.bucket | quote }}
+            {{- end }}
+            {{- if and .Values.notebookHub.enabled .Values.notebookHub.trackingGateway.uploadStaging.expiryEnabled }}
+            # Must match the gateway's staging root (the gateway's suite checks the two agree).
+            # expiryEnabled=false where the operator manages bucket lifecycle out of band — then the
+            # expiry is THEIRS to provide, or unadmitted bytes accumulate with nothing to collect them.
+            - name: UPLOAD_STAGING_PREFIX
+              value: {{ .Values.notebookHub.trackingGateway.uploadStaging.prefix | quote }}
+            - name: UPLOAD_STAGING_EXPIRE_DAYS
+              value: {{ .Values.notebookHub.trackingGateway.uploadStaging.expireDays | quote }}
+            {{- end }}
+            {{- range $key := splitList " " (include "industryflow.objectStorePrincipalKeys" .) }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef: { name: {{ $secret }}, key: {{ $key }} }
+            {{- end }}
+          volumeMounts:
+            - name: script
+              mountPath: /opt/minio-init
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: script
+          configMap:
+            name: {{ include "industryflow.fullname" . }}-minio-init
+        - name: tmp
+          emptyDir: {}
+{{- end }}

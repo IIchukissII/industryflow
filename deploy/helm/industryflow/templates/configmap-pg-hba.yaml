@@ -6,6 +6,8 @@
   infrastructure/timescaledb/config via the files/db-config symlink (single source of truth
   with the compose path). Mounted at /etc/postgresql/pg_hba.conf and selected with
   `-c hba_file=…`, replacing the postgres image's permissive default (host all all all).
+  postgresql.conf comes from the same place, so the server is sized and configured exactly as under
+  compose (max_connections covers the per-role connection limits; tests/config_guards checks both).
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -17,4 +19,6 @@ metadata:
 data:
   pg_hba.conf: |
 {{ .Files.Get "files/db-config/pg_hba.conf" | indent 4 }}
+  postgresql.conf: |
+{{ .Files.Get "files/db-config/postgresql.conf" | indent 4 }}
 {{- end }}
