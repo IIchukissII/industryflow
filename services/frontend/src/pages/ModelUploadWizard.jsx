@@ -61,8 +61,11 @@ function ModelUploadWizard({ onClose, onRegistered }) {
   const [phase, setPhase] = useState('declare'); // declare | running | done | error
   const [files, setFiles] = useState([]);
   const [dragOver, setDragOver] = useState(false);
-  const [meta, setMeta] = useState({ name: '', version: '1', type: '', equipment: '', semantics: '' });
+  const [meta, setMeta] = useState({
+    name: '', version: '1', type: '', equipment: '', semantics: '', description: '', featureConfig: '',
+  });
   const [caps, setCaps] = useState(null); // fetched capabilities, or 'error'
+  const [featureConfigs, setFeatureConfigs] = useState(null); // the tenant's feature configs, or 'error'
   const [status, setStatus] = useState({}); // stage.key -> 'run' | 'ok' | 'fail'
   const [transferred, setTransferred] = useState(0);
   const [failure, setFailure] = useState(null); // { stage, msg, refusal }
@@ -83,6 +86,21 @@ function ModelUploadWizard({ onClose, onRegistered }) {
     })();
   }, []);
 
+  // Scoring computes the model's inputs from a feature config; a model registered without one is
+  // stored but can never be scored. Offer the tenant's own configs to bind it to.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch('/api/feature-configs');
+        if (!res.ok) throw new Error();
+        const body = await res.json();
+        setFeatureConfigs(body.configs || []);
+      } catch {
+        setFeatureConfigs('error');
+      }
+    })();
+  }, []);
+
   // The semantics the deployment has a detector for — declaring one it can't score would only earn a
   // refusal at registration, so offer the set that can pass.
   const semanticsOptions = useMemo(() => {
@@ -92,7 +110,8 @@ function ModelUploadWizard({ onClose, onRegistered }) {
   }, [caps]);
 
   const hasManifest = files.some((f) => memberName(f) === MANIFEST_NAME);
-  const canSubmit = files.length > 0 && hasManifest && meta.name.trim() && meta.type.trim() && meta.semantics;
+  const canSubmit = files.length > 0 && hasManifest && meta.name.trim() && meta.type.trim()
+    && meta.description.trim() && meta.semantics;
 
   const addFiles = useCallback((incoming) => {
     setFiles((prev) => {
@@ -173,7 +192,9 @@ function ModelUploadWizard({ onClose, onRegistered }) {
           model_name: meta.name.trim(),
           model_version: meta.version.trim() || '1',
           model_type: meta.type.trim(),
+          description: meta.description.trim(),
           equipment_type: meta.equipment.trim() || null,
+          feature_config_id: meta.featureConfig || null,
           artifact_uri: committed.artifact_uri,
           score_semantics: meta.semantics,
         }),
@@ -267,6 +288,10 @@ function ModelUploadWizard({ onClose, onRegistered }) {
                 <span className="uw-label">Equipment type <span className="uw-opt">optional</span></span>
                 <input className="uw-input" value={meta.equipment} onChange={(e) => setMeta({ ...meta, equipment: e.target.value })} placeholder="grow-cabinet" />
               </label>
+              <label className="uw-field uw-wide">
+                <span className="uw-label">Description <span className="uw-opt">shown to whoever operates it</span></span>
+                <textarea className="uw-input uw-textarea" rows={3} value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} placeholder="What it predicts, what it was trained on, and what its author knows about its limits" />
+              </label>
             </div>
 
             {/* Declared semantics (ADR-0028) — the fact that cannot be recovered from the output. */}
@@ -294,6 +319,48 @@ function ModelUploadWizard({ onClose, onRegistered }) {
                     </button>
                   ))}
                 </div>
+              )}
+            </div>
+
+            {/* Feature config — what turns readings into this model's inputs at scoring time. */}
+            <div className="uw-sem">
+              <span className="uw-label">Feature config <span className="uw-opt">computes its inputs when it scores</span></span>
+              {featureConfigs === null ? (
+                <p className="uw-desc faint">Loading this tenant's feature configs…</p>
+              ) : featureConfigs === 'error' || featureConfigs.length === 0 ? (
+                <p className="uw-warn uw-warn-block">
+                  <Icon name="alert" size={13} color="var(--warn)" />
+                  <span>
+                    {featureConfigs === 'error'
+                      ? "Couldn't load this tenant's feature configs."
+                      : 'This tenant has no feature config yet.'}
+                    {' '}You can still register the model, but it can't be scored without one, and a
+                    registered model can't have one attached later. Create a feature config from a
+                    notebook, then register the model again as a new version that uses it.
+                  </span>
+                </p>
+              ) : (
+                <>
+                  <div className="uw-sem-list">
+                    {featureConfigs.map((fc) => (
+                      <button
+                        key={fc.id}
+                        type="button"
+                        className={`uw-sem-opt${meta.featureConfig === fc.id ? ' on' : ''}`}
+                        onClick={() => setMeta({ ...meta, featureConfig: meta.featureConfig === fc.id ? '' : fc.id })}
+                        aria-pressed={meta.featureConfig === fc.id}
+                      >
+                        <span className="uw-fc-name">{fc.name} <span className="uw-fc-eq mono">{fc.equipment_type}</span></span>
+                        <span className="uw-sem-desc">
+                          {fc.description || `${fc.base_sensors.length} base sensor${fc.base_sensors.length === 1 ? '' : 's'}, ${fc.transformations.length} transformation${fc.transformations.length === 1 ? '' : 's'}`}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  {!meta.featureConfig && (
+                    <p className="uw-warn"><Icon name="alert" size={13} color="var(--warn)" /> Without a feature config the model registers but can't be scored, and one can't be attached later.</p>
+                  )}
+                </>
               )}
             </div>
 
@@ -359,6 +426,12 @@ function ModelUploadWizard({ onClose, onRegistered }) {
                 It passed structural admission, and this environment can serve what it declares. It is
                 not live yet — deploy it from its drawer to run the load-and-score gate before it serves.
               </p>
+              {!meta.featureConfig && (
+                <p className="uw-warn uw-warn-block uw-done-warn">
+                  <Icon name="alert" size={13} color="var(--warn)" />
+                  <span>It has no feature config, so it can't be scored. Register it again as a new version with one.</span>
+                </p>
+              )}
               <div className="uw-actions center">
                 <button className="btn btn-secondary btn-sm" onClick={onClose}>Done</button>
                 <button className="btn btn-primary btn-sm" onClick={() => onRegistered?.(result)}>View model</button>
