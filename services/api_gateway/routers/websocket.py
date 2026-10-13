@@ -155,6 +155,29 @@ async def get_user_from_token(token: str) -> Optional[SocketSession]:
     return SocketSession(user=user, expires_at=float(expires_at))
 
 
+def allowed_origins() -> set[str]:
+    """The gateway's configured origin allowlist (CORS_ORIGINS, ADR-0004 dec 6)."""
+    return {o.strip().rstrip("/") for o in settings.CORS_ORIGINS.split(",") if o.strip()}
+
+
+def origin_allowed(websocket: WebSocket) -> bool:
+    """
+    Cross-site WebSocket hijacking guard. Browsers send the session cookie on a cross-origin
+    wss:// handshake and CORS does not apply to websockets, so the Origin is checked here: it
+    must be in the allowlist, or be exactly the host the request was addressed to (same origin
+    behind an edge that forwards Host). A handshake without Origin is not from a browser, so no
+    ambient cookie of a victim is involved; it still needs a valid session.
+    """
+    origin = websocket.headers.get("origin")
+    if origin is None:
+        return True
+    origin = origin.rstrip("/")
+    if origin in allowed_origins():
+        return True
+    host = websocket.headers.get("host")
+    return bool(host) and origin in (f"https://{host}", f"http://{host}")
+
+
 async def _authenticate(websocket: WebSocket) -> Optional[SocketSession]:
     """
     Authenticate the handshake from the access cookie only. On failure the socket is accepted
@@ -162,6 +185,10 @@ async def _authenticate(websocket: WebSocket) -> Optional[SocketSession]:
     browser only as an opaque 1006): CLOSE_SESSION_EXPIRED when refreshing the session may
     help, 1008 when it cannot. Nothing is sent before the close.
     """
+    if not origin_allowed(websocket):
+        await websocket.accept()
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Origin not allowed")
+        return None
     token = websocket.cookies.get(ACCESS_COOKIE)
     if not token:
         await websocket.accept()

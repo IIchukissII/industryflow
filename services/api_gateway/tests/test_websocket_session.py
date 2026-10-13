@@ -150,3 +150,42 @@ async def test_names_cache_is_bounded(monkeypatch):
     for _ in range(10):
         await ws.enrich_sensors_with_names({"s": {}}, str(uuid.uuid4()))
     assert len(ws._names_cache) == 3
+
+
+# --- Origin (cross-site websocket hijacking, ADR-0004 dec 6) --------------------------------
+
+def _connect_with_origin(world, monkeypatch, origin, path="/ws/sensors"):
+    monkeypatch.setattr(ws.settings, "CORS_ORIGINS", "https://app.example.com, https://ops.example.com")
+    u = world.add_user()
+    client = _client(_token(u.id))
+    headers = {"origin": origin} if origin else {}
+    with client.websocket_connect(path, headers=headers) as s:
+        try:
+            return s.receive_json()["type"]
+        except WebSocketDisconnect as e:
+            return e.code
+
+
+@pytest.mark.parametrize("path", ENDPOINTS)
+def test_foreign_origin_is_refused_even_with_a_valid_cookie(world, monkeypatch, path):
+    assert _connect_with_origin(world, monkeypatch, "https://evil.example", path) == 1008
+
+
+@pytest.mark.parametrize("origin", ["https://app.example.com", "https://ops.example.com/"])
+def test_allowlisted_origin_streams(world, monkeypatch, origin):
+    assert _connect_with_origin(world, monkeypatch, origin) == "sensor_update"
+
+
+def test_same_origin_as_the_addressed_host_streams(world, monkeypatch):
+    # TestClient addresses host "testserver"; the edge forwards the browser's Host the same way.
+    assert _connect_with_origin(world, monkeypatch, "https://testserver") == "sensor_update"
+
+
+def test_lookalike_origin_is_refused(world, monkeypatch):
+    assert _connect_with_origin(world, monkeypatch, "https://app.example.com.evil.example") == 1008
+    assert _connect_with_origin(world, monkeypatch, "https://testserver.evil.example") == 1008
+
+
+def test_no_origin_header_still_needs_a_session(world, monkeypatch):
+    assert _connect_with_origin(world, monkeypatch, None) == "sensor_update"
+    assert _close_code(_client(), "/ws/sensors") == ws.CLOSE_SESSION_EXPIRED

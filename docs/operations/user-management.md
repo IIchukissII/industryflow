@@ -93,7 +93,7 @@ isolated `tenant_<uuid>` schema in one transaction (see
 **[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**). The gateway's database role
 cannot write the tenant registry or create schemas itself. It calls the SECURITY DEFINER functions
 `provision_company()` and `update_company()`
-([`20-company-provisioning.sql`](../../infrastructure/timescaledb/init-scripts/20-company-provisioning.sql)),
+([`21-company-provisioning.sql`](../../infrastructure/timescaledb/init-scripts/21-company-provisioning.sql)),
 which validate the name (1-255 characters, no control characters, unique) and build the schema.
 
 `DELETE /api/companies/{id}` **deactivates** the company: it and all of its users become inactive

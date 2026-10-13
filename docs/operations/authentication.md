@@ -38,6 +38,10 @@ The websockets (`/ws/sensors`, `/ws/sensors/{equipment_id}`) authenticate only f
 end up in access logs. A socket lives no longer than its session: it closes with code **4401** when
 the access token expires (the client refreshes via `/auth/refresh` and reconnects) and with
 **1008** when the user is inactive or deactivated (checked every minute while open).
+Because CORS does not apply to websockets and the browser sends the cookie on any handshake, the
+gateway also checks the handshake's `Origin`: it must be in `CORS_ORIGINS` or be exactly the
+host the request was addressed to, else the socket closes with 1008. List the frontend's public
+origin, port included (e.g. `https://<host>:3443`), in `CORS_ORIGINS`.
 
 `Secure` cookies require HTTPS, which every edge serves. `COOKIE_SECURE` defaults to `true`
 (gateway, compose, `.env.example` and Helm); set it to `false` only for a throwaway plain-HTTP

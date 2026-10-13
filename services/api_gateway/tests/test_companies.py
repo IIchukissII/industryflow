@@ -6,7 +6,7 @@
 Company provisioning goes through the registry's SECURITY DEFINER functions (ADR-0004 dec 5).
 
 The gateway role may only read public.companies, so every write calls provision_company() or
-update_company() (20-company-provisioning.sql; their DB-side behaviour is proven in
+update_company() (21-company-provisioning.sql; their DB-side behaviour is proven in
 infrastructure/timescaledb/tests/test_company_provisioning.py). These tests drive the routes with a
 fake session and check who may do what, and what each route asks the database to do.
 """

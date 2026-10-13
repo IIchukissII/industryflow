@@ -6,7 +6,7 @@
 Companies (tenants) for the admin panel.
 
 The gateway's DB role may only read the tenant registry. Writes go through the SECURITY DEFINER
-functions of 20-company-provisioning.sql, which validate the input and create the tenant schema;
+functions of 21-company-provisioning.sql, which validate the input and create the tenant schema;
 who may call them is decided here (ADR-0004 dec 5):
 
 - create: superuser only. Creates the company and its tenant schema.

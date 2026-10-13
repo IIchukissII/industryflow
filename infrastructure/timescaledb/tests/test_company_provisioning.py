@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Company provisioning through the gateway role (20-company-provisioning.sql).
+Company provisioning through the gateway role (21-company-provisioning.sql).
 
 api_gateway_user may not write the tenant registry or create schemas itself; it provisions a
 tenant only through the SECURITY DEFINER provision_company()/update_company(), which validate
