@@ -50,10 +50,11 @@ gate rather than mis-served; it explicitly handed *how a new flavor becomes serv
 
 **Revision 1 (2026-10-13).** Review found that decision 2 was kept at the front door and broken
 behind it, in three ways. *The detector was not a durable fact.* The record said the registry gains
-it, but serving re-derived which detector applied each time it loaded a model — so the semantics a
-model was admitted under were not necessarily the semantics it was scored under. *`direct_score` had
-no detector.* Decision 1 lists it; nothing implemented it, so a model that honestly declared it could
-only be scored by a detector built for something else. *The compatibility detector still guessed.*
+it, but the model record had nowhere to keep it, and serving assumed the compatibility detector for
+every model when none was named — so the semantics a model was admitted under were not necessarily
+the semantics it was scored under. *`direct_score` had no detector.* Decision 1 lists it; nothing
+declared it, so a model that honestly emitted a score could only reach it through the compatibility
+detector's guess. *The compatibility detector still guessed.*
 Given a model with neither a probability nor an outlier score, it took a continuous prediction as if
 it were a score — which is inferring semantics from a dtype, the act decision 2 forbids. Rev 1 fixes
 when the detector is decided and what serving does with it (decision 1), adds the direct-score
