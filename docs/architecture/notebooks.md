@@ -71,7 +71,7 @@ containment use the Kubernetes profile.
 | 3 | Role-matched single-user images (authoring DS + analytics Voila) | **done** (both built & box-validated, non-root) |
 | 4 | Capability minting + the SQL access proxy | **done** — wire backend + `verify-full` TLS + client SQL helper, **live-validated on the box** |
 | 5 | Experiment-tracking gateway (ADR-0013/0019) | **done** — kernel→gateway tracking capability, tenant-namespaced experiments/models/artifacts, per-object pre-signed artifact URLs, **box-validated** |
-| 6 | Tenant-scoped model browsing in the app | **done** — session-authed `/api/registered-models` read-path (prefix-stripped, source-run metrics) + redesigned Models page; experiment/run browsing still owed |
+| 6 | Tenant-scoped model browsing in the app | **done** — session-authed `/api/registered-models` read-path (prefix-stripped, source-run metrics) + redesigned Models page, and the matching `/api/experiments` experiment/run read-path (ADR-0019 rev 1) |
 | 7 | Per-user work persistence + idle reclamation (ADR-0020) | **done** — authoring `work/` on a per-user volume (Docker) / PVC (k8s); `jupyterhub-idle-culler` with a scoped token; compute stays ephemeral, capabilities re-minted per spawn |
 | 8 | Cold-layer read path (ADR-0025 dec 5) | **built** — `cold`-audience capability → `notebook_cold_broker` (read-only cold principal) → tenant-prefix-scoped pre-signed GETs; `IndustryFlowCold` client (`list_files`/`read_all`). Compose-wired; not yet box-run |
 
@@ -159,6 +159,27 @@ The compose profile runs on the platform's primary live deployment and is **work
 tenant-bound notebook whose only data credentials are capability handles; the kernel read its
 tenant's data via the data API. This **retires the legacy root, auth-disabled, shared-credential
 `jupyter` shim** (ADR-0011 alt A, ADR-0018 dec 5).
+
+## Kernel environment, namespaces and persistence (concrete names)
+
+The ADRs state these decisions abstractly; the names they are realised with live here.
+
+- **What the spawner injects** (ADR-0012, ADR-0015, ADR-0019, ADR-0025): the identity
+  (`INDUSTRYFLOW_USER`, `INDUSTRYFLOW_COMPANY_ID`, `INDUSTRYFLOW_PROFILE`), and per plane an
+  endpoint plus its handle — `INDUSTRYFLOW_API_URL` / `INDUSTRYFLOW_API_CAPABILITY`,
+  `INDUSTRYFLOW_SQL_PROXY_URL` / `INDUSTRYFLOW_SQL_CAPABILITY`, `INDUSTRYFLOW_TRACKING_URL` /
+  `INDUSTRYFLOW_TRACKING_CAPABILITY`, `INDUSTRYFLOW_COLD_BROKER_URL` /
+  `INDUSTRYFLOW_COLD_CAPABILITY`. For the authoring profile the MLflow client is pointed at the
+  tracking gateway with `MLFLOW_TRACKING_URI`, and the tracking handle is sent as its bearer token
+  through `MLFLOW_TRACKING_TOKEN` (ADR-0019 dec 1, 4).
+- **Tenant namespace in the tracking store** (ADR-0019 dec 5): experiment and registered-model
+  names carry a `tenant_<uuid>.` prefix — a dot, because MLflow forbids `/` and `:` in
+  registered-model names — added on write and stripped on read; artifact keys sit under
+  `tenant_<uuid>/` in the object store.
+- **Per-user work persistence** (ADR-0020): the authoring profile's per-user volume (a named
+  Docker volume, or a PVC on Kubernetes) is mounted at `/home/jovyan/work`; the rest of the home
+  comes from the image. The idle culler (`jupyterhub-idle-culler`) holds a token scoped to
+  `list:users`, `read:users:activity`, `read:servers` and `delete:servers`.
 
 ## Embedding in the frontend
 

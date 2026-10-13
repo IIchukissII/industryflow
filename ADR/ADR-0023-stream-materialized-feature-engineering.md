@@ -3,14 +3,15 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0023 — Stream-materialized feature engineering (one windowing substrate, the feature table as the seam)
+# ADR-0023 — Stream-materialized feature engineering (one windowing substrate, the feature table as the seam) (rev 3)
 
 - **ID:** ADR-0023
-- **Status:** Accepted (rev 2 — dec 8's train/serve-skew trigger **has fired** (issue #173); rev 2 settles what "training consumes the aggregate" means for offline data and binds the two sides to one window. Rev 1 — first realization: the rolling-mean baseline is served from the existing Spark aggregates and ml_service's Redis feature store is removed; a dedicated feature table remains deferred)
-- **Date:** 2026-07-06 (rev 1: 2026-07-06; rev 2: 2026-07-12)
+- **Status:** Accepted
+- **Date:** 2026-07-06 (rev 1: 2026-07-06; rev 2: 2026-07-12; rev 3: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (schema-per-tenant routing), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (Kafka delivery semantics), [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (Spark windowing & idempotent writes), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extension/plugin mechanism).
+- **Supersedes:** ADR-0023 rev 0 (2026-07-06, Proposed — direction only, no code until a trigger); rev 1 (2026-07-06 — first realization: the baseline is served from the existing aggregates and the serving side's windowing store is removed); rev 2 (2026-07-12 — the skew trigger fired; offline training re-derives the same window); rev 3 (2026-10-13 — makes decisions 7 and 8 and the deferred list agree with rev 1)
 
 ## Context and problem
 
@@ -23,6 +24,12 @@ The platform computes engineered features in two places that do not know about e
 So there are **two independent windowed-state mechanisms** — Spark's state store and the Redis FeatureStore — computing the same *kind* of thing (a rolling statistic over a window) through unrelated substrates. Two further problems follow from the split. First, **train/serve skew**: training reads history one way and inference reads the Redis ring buffer another, with no guarantee the two agree. Second, `rolling_stat` is unimplemented precisely because there was no stream substrate to compute it against; the Redis buffer is a bounded ring, not a windowing engine.
 
 There is no *bug* here today — `statistical` works off Redis and the aggregation job works off Spark. This ADR does not order a rewrite. It records the **direction** for stateful feature computation so the decision is not re-derived from scratch when the first real windowed feature is built, and states the sharp trigger that should move it from proposed to implemented.
+
+**Revision 1 (2026-07-06).** The first realization: the rolling-mean baseline the `statistical` transform needs is served from the aggregates the Spark job already materializes, and the serving side's own windowing store is removed rather than kept beside it. A dedicated feature table stays deferred (decision 2).
+
+**Revision 2 (2026-07-12).** Decision 8's train/serve-skew trigger fired: a reference model was trained on a whole-run mean while inference served a windowed one. Rev 2 settles what "training consumes the aggregate" means for offline data and binds both sides to one window (decision 9).
+
+**Revision 3 (2026-10-13).** Rev 1 changed decisions 2 and 7 but left decision 8 and the deferred list describing the system before it: decision 8 still said that until a trigger fires there are no code changes and the stateful feature keeps its old windowing store, and a deferred item still asked whether that store would be removed or demoted "when the first feature actually moves". Both were settled by rev 1 — the baseline class moved, and the store was removed from serving. Rev 3 restates decision 8 and closes the deferred item so the record agrees with itself. It also states what decision 7 already implied and the code confirms: the alerting worker's separate latest-value store is a snapshot join, not a windowing computation, and remains outside this decision.
 
 ## Decision drivers
 
@@ -48,7 +55,9 @@ There is no *bug* here today — `statistical` works off Redis and the aggregati
 
 7. **The Redis FeatureStore stops being a windowing substrate.** With the baseline sourced from the Spark aggregates (decision 2), Redis ceases to be a second *computation* path: `compute_rolling_mean` becomes a read of the materialized aggregate. **rev 1:** ml_service's Redis FeatureStore is **removed outright** — its only use was that rolling-mean read. The **alert worker's** separate Redis ring (`services/alert_service/worker`) is a *latest-value snapshot join* — assembling a full multi-sensor reading from per-sensor arrivals before inference — **not** a windowing computation; it is out of this decision's scope and untouched. So Redis is not deleted platform-wide; it stops being a windowing/feature-computation substrate, which is the claim this ADR makes. A cache in front of the aggregate read is a later option, not part of rev 1.
 
-8. **Trigger and scope.** This is recorded now as direction; implementation lands when the **first real windowed feature requires it**, or when train/serve skew is observed, or when the Redis FeatureStore becomes an operational burden. Until a trigger fires there are no code changes: `rolling_stat` stays a stub and `statistical` keeps its current Redis path. This ADR is the sharp failure condition, not a build order. **rev 2:** the skew trigger **has fired** — issue #173 found the TEP reference model trained on a whole-run mean while inference served a windowed one. Decision 9 is what that trigger bought.
+8. **Trigger and scope *(rev 3)*.** The direction was recorded ahead of the code, with three triggers: the first real windowed feature, observed train/serve skew, or the serving side's windowing store becoming an operational burden. **For the baseline class the direction is now realised** (rev 1): the windowed baseline is read from the materialized aggregates, and the serving side holds no windowing store. The skew trigger then fired (rev 2), and decision 9 is what it bought. **What remains trigger-gated** is the rest of this record: computing new windowed features in the stream (decisions 4–6), the dedicated feature table (decision 2), and the unimplemented rolling-statistic transform — each lands when a real feature needs it, not before.
+
+   > *Rev 0 read:* "Until a trigger fires there are no code changes: `rolling_stat` stays a stub and `statistical` keeps its current Redis path." The first half still holds for the rolling statistic; the second stopped being true at rev 1.
 
 9. **Offline training data re-derives the window; it does not invent one. (rev 2)** Decision 2 says training *consumes* the materialized aggregate, which was written for the live-DB case. Reference models train on a static CSV that cannot issue that read, so "consume" is made concrete: training **re-derives the same closed tumbling window, at the same granularity, causally** — a row is described by the most recent window that closed *before* its own, never by its own (still open at serve time) and never by the future. A whole-run or otherwise non-causal mean is **not** an acceptable training equivalent: it is not merely less accurate, it is a quantity inference cannot produce at any window size, so a model trained on it is fed a feature it has never seen. Concretely: `groupby(run).transform('mean')` is prohibited for this feature class; a trailing rolling mean is acceptable **only** where its width equals the configured granularity and it requires a full window.
 
@@ -87,7 +96,7 @@ There is no *bug* here today — `statistical` works off Redis and the aggregati
 
 - **Config-reload mechanism.** Config topic vs broadcast state vs periodic reload for decision 5, and the freshness guarantee a config edit gets, are implementation choices left to the build.
 - **Feature table schema and retention.** Column shape, natural key, and retention/compression for the materialized feature table are a data-model task (companion to the ADR-0006 aggregate tables), not fixed here.
-- **Redis: removed or demoted.** Whether the FeatureStore is deleted or retained as a serving cache over the materialized table (decision 7) is decided when the first feature actually moves.
+- ~~**Redis: removed or demoted.**~~ *Resolved in rev 1 (decision 7), recorded in rev 3:* removed from the serving side outright, with no cache in front of the aggregate read; a cache remains a later option if the read proves costly. The alerting worker's latest-value snapshot store is a different thing and out of scope.
 - **Feature window horizons.** Allowed-lateness and window definitions for feature windows inherit ADR-0006's watermark discussion and are configured with the job, not fixed here.
 
 ## References

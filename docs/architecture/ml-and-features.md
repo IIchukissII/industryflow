@@ -105,6 +105,11 @@ model's training distribution?"* — **windowed and statistical, not per-event**
   compares it against the reference with **`evidently`**, and returns **data drift** (input
   distributions) and **prediction drift** (the model's output distribution). The primary scalar
   is the drifted-feature *share*.
+- **Where it lives.** The baseline is the `reference_profile JSONB` column on `ml_models`
+  (init script `14-model-drift-reference-profile.sql`), built at registration by the capture helper
+  in `ml_service/api/drift/`. The alert-rule API validates that a `statistical` rule binds a model
+  and an in-range drift threshold; cadence and window are service config. Status: unit-tested and
+  running on the compose deployment; not yet run on a Kubernetes cluster (issue #19).
 - **Ownership.** The **alert service owns detection** (one home for threshold/ml/statistical)
   and delegates the statistical compute here — exactly as the real-time ml rules delegate to
   `/api/inference`. The drift signal surfaces through the reserved `statistical` alert lane; see

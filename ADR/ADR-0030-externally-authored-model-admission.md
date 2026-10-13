@@ -3,15 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0030 — Externally-authored models are admitted, but what provenance used to vouch for must be declared and proven
+# ADR-0030 — Externally-authored models are admitted, but what provenance used to vouch for must be declared and proven (rev 3)
 
 - **ID:** ADR-0030
-- **Status:** Accepted (rev 1 — implementation surfaced that rev 0 named *components* and *frameworks* where it should have named a *moment* and a *property*, and each imprecision invites a violation of a decision already on record. Rev 1 fixes what "one door" binds (the write path for bytes, not the enforcement point for admission), names where each check runs, and restores decision 4's refusal to a generic property of the serialisation rather than a list of frameworks. No decision is reversed; each is made precise. rev 2 — closes the transport half of the deferred transfer question for the single-request case. Decision 3 named a browser client, but the realisation only ever served a client already inside the trust network, so the client the record named could not reach the plane. Decision 10 makes the upload plane reachable from the outside without establishing a second writer or breaching a decision already on record; resumability and very-large/multipart transfer stay deferred. rev 3 — the framework's deserialisation switch governs executable formats only; typed formats are loaded by the serving side under its provenance grant, and an upload receives none)
+- **Status:** Accepted
 - **Date:** 2026-07-16 (rev 1: 2026-07-16; rev 2: 2026-07-17; rev 3: 2026-10-11)
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the artifact declares, the serving environment satisfies or refuses — the contract this record extends to artifacts the platform never observed being made)
 - **Companions:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (rev 1 — the tracking gateway, and the only principal permitted to write the artifact store, which is what decision 2 turns on), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (a model declares what its output means; the platform never guesses)
 - **Related:** [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (the durable history that motivates training off-platform), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (notebooks as the analytics surface, and the sandbox that bounds the kernel), [ADR-0021](ADR-0021-model-drift-monitoring.md) (the drift lane, which needs a training baseline an uploaded model has no run to carry), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (audience-bound capabilities)
+- **Supersedes:** ADR-0030 rev 0 (2026-07-16 — named components and frameworks where a moment and a property were meant); rev 1 (2026-07-16 — made each decision precise, reversing none); rev 2 (2026-07-17 — left the upload plane unreachable from outside the trust network; rev 2 adds decision 10); rev 3 (2026-10-11 — extends decision 4: the framework's deserialisation switch governs executable formats only)
 
 ## Context and problem
 
@@ -64,6 +65,8 @@ made.
 So the question this record answers is not "may users upload models" — the requirement is real and
 the platform has already paid for the history that motivates it. It is: **what did the kernel used to
 vouch for, and what must an uploaded artifact do instead?**
+
+**Revisions.** *Rev 1 (2026-07-16):* implementation surfaced that rev 0 named *components* and *frameworks* where it should have named a *moment* and a *property*, and each imprecision invites a violation of a decision already on record. Rev 1 fixes what "one door" binds (the write path for bytes, not the enforcement point for admission), names where each check runs, and restores decision 4's refusal to a generic property of the serialisation rather than a list of frameworks. No decision is reversed; each is made precise. *Rev 2 (2026-07-17):* closes the transport half of the deferred transfer question for the single-request case. Decision 3 named a browser client, but the realisation only ever served a client already inside the trust network, so the client the record named could not reach the plane; decision 10 makes the upload plane reachable from outside without establishing a second writer or breaching a decision already on record. Resumability and very-large/multipart transfer stay deferred. *Rev 3 (2026-10-11):* the framework's deserialisation switch governs executable formats only; typed formats are loaded by the serving side under its provenance grant, and an upload receives none (decision 4). The per-revision detail is in the notes under each decision.
 
 ## Decision drivers
 
@@ -140,7 +143,7 @@ vouch for, and what must an uploaded artifact do instead?**
    > **rev 1 (2026-07-16): "authorised by the platform session" means *derived from* one, not
    > *presented as* one — and the audience is what makes decision 4 enforceable at all.**
    >
-   > **The plane.** This record introduces a fifth capability audience, for uploads, of the same
+   > **The plane.** This record introduces a capability audience of its own, for uploads, of the same
    > opaque, single-tenant, centrally-revocable form as the others (ADR-0015 dec 1, 3) — the pattern
    > every plane before it has extended rather than replaced. It is **not read-only**: it authorises
    > writing one artifact, and its boundary is the tenant namespace its mediator enforces, exactly as
