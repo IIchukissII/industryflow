@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The Spark version is written in five places per image; only one of them is bot-visible.
+"""The Spark version is written in many places; only some of them are bot-visible.
 
 A Spark job image pins its Spark version in the base image tag, and then pins it AGAIN in every
 `--packages` coordinate that resolves the Kafka connector — once in the build-time ivy warm, once in
@@ -18,13 +18,18 @@ coordinates behind, and nothing downstream objects:
 That is the whole failure mode, and it is silent in both directions — which is why it is checked
 here, statically, rather than left to a build that has no reason to complain.
 
-This is a declarative check, in the sense of `check_model_env_parity.py`: it compares what the file
-SAYS, before anything is built. It is not the authority on whether the connector works — the image
-smoke and the box run are. It is the authority on whether the file contradicts itself.
+The same version is written outside the Dockerfiles too, and drifts the same way: the compose file
+runs the stock `apache/spark` image as the cluster master, the test suite pins `pyspark`, and job
+code has carried its own connector coordinate. Every one of them must be the Dockerfiles' version.
+A master on one patch and workers on another is a cluster the images never tested.
 
-The Dockerfiles are found by GLOB, deliberately. Naming them would make this script one more list
-whose omission fails silently: a new `Dockerfile.<job>` added next to the others would simply not be
-checked, and the guard would stay green while the thing it guards drifted.
+This is a declarative check, in the sense of `check_model_env_parity.py`: it compares what the files
+SAY, before anything is built. It is not the authority on whether the connector works — the image
+smoke and the box run are. It is the authority on whether the repository contradicts itself.
+
+Every file set is found by GLOB, deliberately. Naming files would make this script one more list
+whose omission fails silently: a new `Dockerfile.<job>`, compose file or job module added next to the
+others would simply not be checked, and the guard would stay green while the thing it guards drifted.
 """
 
 from __future__ import annotations
@@ -37,6 +42,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 SPARK_DOCKERFILE_GLOB = "services/spark_jobs/Dockerfile.*"
 
+# Everywhere else the Spark version may be written. Each group must match at least one file.
+OTHER_GLOBS = {
+    "compose files": ["docker-compose*.yml"],
+    "deployment manifests": ["deploy/**/*.yaml"],
+    "service and client code": ["services/**/*.py", "clients/**/*.py"],
+    "requirements": ["services/**/requirements*.txt"],
+}
+
 # `FROM apache/spark:4.1.3-python3` -> 4.1.3
 BASE_RE = re.compile(r"^FROM\s+apache/spark:(?P<version>[^-\s]+)-", re.MULTILINE)
 
@@ -45,6 +58,14 @@ BASE_RE = re.compile(r"^FROM\s+apache/spark:(?P<version>[^-\s]+)-", re.MULTILINE
 COORD_RE = re.compile(
     r"org\.apache\.spark:spark-sql-kafka-0-10_(?P<scala>[\d.]+):(?P<version>[^,\"'\s\\]+)"
 )
+
+# Spark versions written outside a Dockerfile: an `apache/spark:<v>` image reference, a connector
+# coordinate, a `pyspark==<v>` pin.
+OTHER_PIN_RES = {
+    "apache/spark image": re.compile(r"apache/spark:(?P<version>\d[^-\s\"']*)"),
+    "Kafka connector coordinate": COORD_RE,
+    "pyspark pin": re.compile(r"^\s*pyspark==(?P<version>[^\s;#]+)", re.MULTILINE),
+}
 
 
 def find_mismatches(text: str) -> list[tuple[int, str, str]]:
@@ -67,41 +88,76 @@ def find_mismatches(text: str) -> list[tuple[int, str, str]]:
     return mismatches
 
 
-def main() -> int:
-    paths = sorted(REPO_ROOT.glob(SPARK_DOCKERFILE_GLOB))
+def find_pins(text: str) -> list[tuple[int, str, str]]:
+    """Return (line number, what, version) for every Spark version a non-Dockerfile writes."""
+    pins = []
+    for what, pattern in OTHER_PIN_RES.items():
+        for match in pattern.finditer(text):
+            pins.append((text.count("\n", 0, match.start()) + 1, what, match.group("version")))
+    return sorted(pins)
+
+
+def check(root: Path = REPO_ROOT) -> list[str]:
+    """Every disagreement in the tree under ``root``, as printable errors (empty when consistent)."""
+    errors = []
+    paths = sorted(root.glob(SPARK_DOCKERFILE_GLOB))
     if not paths:
-        print(
-            f"error: no Spark Dockerfiles matched {SPARK_DOCKERFILE_GLOB!r}.\n"
+        return [
+            f"no Spark Dockerfiles matched {SPARK_DOCKERFILE_GLOB!r}.\n"
             "       Either they moved or this check is pointed at nothing — a check that inspects "
-            "no files passes for the wrong reason.",
-            file=sys.stderr,
-        )
-        return 1
+            "no files passes for the wrong reason."
+        ]
 
-    failed = False
+    bases = {}
     for path in paths:
-        rel = path.relative_to(REPO_ROOT)
+        rel = path.relative_to(root)
+        text = path.read_text()
         try:
-            mismatches = find_mismatches(path.read_text())
+            mismatches = find_mismatches(text)
         except ValueError as exc:
-            print(f"error: {rel}: {exc}", file=sys.stderr)
-            failed = True
+            errors.append(f"{rel}: {exc}")
             continue
-
+        bases[rel] = BASE_RE.search(text).group("version")
         for line, base, coord in mismatches:
-            failed = True
-            print(
-                f"error: {rel}:{line}: base image is Spark {base} but the Kafka connector "
-                f"coordinate asks for {coord}.\n"
+            errors.append(
+                f"{rel}:{line}: base image is Spark {base} but the Kafka connector coordinate asks "
+                f"for {coord}.\n"
                 f"       A version bump moved the FROM tag and left this coordinate behind. Both "
-                f"resolve, so nothing else will fail — set the coordinate to {base}.",
-                file=sys.stderr,
+                f"resolve, so nothing else will fail — set the coordinate to {base}."
             )
 
-    if failed:
-        return 1
+    if len(set(bases.values())) > 1:
+        listing = ", ".join(f"{rel} -> {v}" for rel, v in bases.items())
+        errors.append(f"the Spark images disagree on their base version: {listing}")
+        return errors
+    if not bases:
+        return errors
+    version = next(iter(bases.values()))
 
-    print(f"spark version parity ok ({len(paths)} Dockerfile(s) checked)")
+    for group, patterns in OTHER_GLOBS.items():
+        files = sorted({p for pattern in patterns for p in root.glob(pattern) if p.is_file()})
+        if not files:
+            errors.append(f"no {group} matched {patterns} — this part of the check inspects nothing")
+            continue
+        for path in files:
+            if path.resolve() == Path(__file__).resolve():
+                continue
+            for line, what, pinned in find_pins(path.read_text(errors="replace")):
+                if pinned != version:
+                    errors.append(
+                        f"{path.relative_to(root)}:{line}: {what} is Spark {pinned}, the job images "
+                        f"are Spark {version}. Set it to {version}."
+                    )
+    return errors
+
+
+def main() -> int:
+    errors = check()
+    for error in errors:
+        print(f"error: {error}", file=sys.stderr)
+    if errors:
+        return 1
+    print("spark version parity ok (Dockerfiles, compose, manifests, code, requirements checked)")
     return 0
 
 

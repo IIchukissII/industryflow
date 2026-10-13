@@ -10,17 +10,24 @@ Schema-per-tenant architecture: routes to tenant_<uuid>.sensor_aggregations_*.
 Windowing and writes follow ADR-0006: a watermark bounds the streaming state, each
 window is emitted once (append mode) when it closes, and writes are idempotent upserts on
 (time, sensor_id, equipment_id) so retries and redeliveries do not duplicate rows.
+
+Readings that cannot be written are excluded *before* the watermark by the same definition the
+streaming job applies (reading_guard.py) — a far-future timestamp would otherwise drag the watermark
+forward and close every live window early. The streaming job, which consumes every message, is the
+one that dead-letters them; this job does not publish them a second time. The window widths and
+allowed lateness are the train/serve binding in aggregation_windows.py (ADR-0023 rev 2 dec 9).
 """
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    from_json, col, window, avg, min as spark_min, max as spark_max,
-    stddev, count, to_timestamp, lit
+    col, window, avg, min as spark_min, max as spark_max,
+    stddev, count, lit
 )
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
 import os
-import uuid
 import psycopg2
 from psycopg2.extras import execute_values
+
+from aggregation_windows import AGGREGATION_WINDOWS, table_name, watermark_delay, window_duration
+from reading_guard import company_id_to_schema, parse_readings, rejection_reason
 
 
 # Columns written to each tenant's aggregation table, in order.
@@ -31,18 +38,6 @@ AGG_COLUMNS = [
 ]
 # Natural key used for ON CONFLICT (must match the table's UNIQUE constraint).
 AGG_CONFLICT_KEY = ("time", "sensor_id", "equipment_id")
-
-
-def company_id_to_schema(company_id):
-    """
-    Convert a company_id UUID to its tenant schema name.
-
-    company_id arrives in untrusted Kafka payloads, so it is validated as a UUID before
-    the schema/table name is built; a non-UUID raises ValueError instead of producing an
-    arbitrary JDBC target (defends against injection — see ADR-0003).
-    """
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}"
 
 
 def configure_s3a(builder, checkpoint_location):
@@ -93,41 +88,58 @@ def _db_connection():
     )
 
 
-def write_aggregations_to_db(batch_df, batch_id, aggregation_table):
+def _tenant_exists(cur, schema_name):
+    """Whether the tenant schema exists — a catalog read, so a missing schema is False, not an error."""
+    cur.execute(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = %s)", (schema_name,)
+    )
+    return bool(cur.fetchone()[0])
+
+
+def _upsert_values(cur, target, values):
+    update_cols = [c for c in AGG_COLUMNS if c not in AGG_CONFLICT_KEY]
+    sql = (
+        f"INSERT INTO {target} ({', '.join(AGG_COLUMNS)}) VALUES %s "
+        f"ON CONFLICT ({', '.join(AGG_CONFLICT_KEY)}) DO UPDATE SET "
+        + ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
+    )
+    execute_values(cur, sql, values)
+
+
+def write_aggregations_to_db(batch_df, batch_id, aggregation_table, *,
+                             connect=None, tenant_exists=_tenant_exists, upsert=_upsert_values):
     """
     Idempotently upsert an aggregation batch into each tenant's schema (ADR-0006).
 
     Each window is keyed by (time, sensor_id, equipment_id); on conflict the row is
     updated, so a retried micro-batch (expected under the at-least-once pipeline,
-    ADR-0005) does not create duplicates. Any failure re-raises so Spark fails the batch
-    and retries it, rather than silently dropping data (the upsert makes that retry safe).
+    ADR-0005) does not create duplicates. Each tenant is written in its own transaction. A tenant
+    whose schema does not exist is skipped and logged — the streaming job dead-letters its raw
+    readings, from which an aggregate is derivable — so one unknown tenant cannot fail every
+    tenant's batch. Any other failure re-raises so Spark fails the batch and retries it, rather than
+    silently dropping data (the upsert makes that retry safe; ADR-0006 dec 4).
     """
     rows = batch_df.collect()
     if not rows:
         return
 
-    # Group rows by tenant so each is written to its own schema.
+    # Group rows by tenant so each is written to its own schema. Every row passed reading_guard
+    # before aggregation, so company_id is present and a well-formed UUID.
     by_company = {}
     for r in rows:
-        company_id = r["company_id"]
-        if not company_id:
-            continue
-        by_company.setdefault(company_id, []).append(r)
+        by_company.setdefault(r["company_id"], []).append(r)
 
-    if not by_company:
-        return
-
-    update_cols = [c for c in AGG_COLUMNS if c not in AGG_CONFLICT_KEY]
-    cols_sql = ", ".join(AGG_COLUMNS)
-    set_sql = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
-    conflict_sql = ", ".join(AGG_CONFLICT_KEY)
-
-    conn = _db_connection()
+    conn = (connect or _db_connection)()
     try:
         conn.autocommit = False
-        with conn.cursor() as cur:
-            for company_id, tenant_rows in by_company.items():
-                schema_name = company_id_to_schema(company_id)  # validates the UUID
+        for company_id, tenant_rows in sorted(by_company.items()):
+            schema_name = company_id_to_schema(company_id)  # validates the UUID
+            with conn.cursor() as cur:
+                if not tenant_exists(cur, schema_name):
+                    conn.rollback()
+                    print(f"Batch {batch_id}: skipped {len(tenant_rows)} {aggregation_table} row(s) "
+                          f"for unknown tenant {schema_name} (its raw readings are dead-lettered)")
+                    continue
                 target = f'"{schema_name}"."{aggregation_table}"'
                 values = [
                     (
@@ -137,13 +149,9 @@ def write_aggregations_to_db(batch_df, batch_id, aggregation_table):
                     )
                     for r in tenant_rows
                 ]
-                sql = (
-                    f"INSERT INTO {target} ({cols_sql}) VALUES %s "
-                    f"ON CONFLICT ({conflict_sql}) DO UPDATE SET {set_sql}"
-                )
-                execute_values(cur, sql, values)
-                print(f"Batch {batch_id}: upserted {len(values)} rows into {target}")
-        conn.commit()
+                upsert(cur, target, values)
+            conn.commit()
+            print(f"Batch {batch_id}: upserted {len(values)} rows into {target}")
     except Exception:
         conn.rollback()
         # Re-raise so Spark fails the batch and retries it (ADR-0006). The upsert above is
@@ -153,45 +161,21 @@ def write_aggregations_to_db(batch_df, batch_id, aggregation_table):
         conn.close()
 
 
-def create_aggregation_stream(spark, window_duration, watermark_delay, table_name):
-    """Create a streaming windowed aggregation for one time window."""
+def aggregate_readings(readings_df, granularity):
+    """
+    The windowed aggregation of one granularity over parsed readings (reading_guard.parse_readings).
 
-    # Schema for Kafka messages
-    schema = StructType([
-        StructField("timestamp", StringType(), True),
-        StructField("sensor_id", StringType(), True),
-        StructField("equipment_id", StringType(), True),
-        StructField("site_id", StringType(), True),
-        StructField("company_id", StringType(), True),
-        StructField("value", DoubleType(), True),
-        StructField("unit", StringType(), True),
-        StructField("quality_code", IntegerType(), True)
-    ])
-
-    kafka_bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-
-    df = spark \
-        .readStream \
-        .format("kafka") \
-        .option("kafka.bootstrap.servers", kafka_bootstrap) \
-        .option("subscribe", "sensor-data-raw") \
-        .option("startingOffsets", "latest") \
-        .option("maxOffsetsPerTrigger", "10000") \
-        .load()
-
-    parsed_df = df.select(
-        from_json(col("value").cast("string"), schema).alias("data")
-    ).select("data.*")
-
-    parsed_df = parsed_df.withColumn("time", to_timestamp(col("timestamp")))
-
-    # Watermark bounds the aggregation state and defines how late data may arrive before
-    # its window is closed (ADR-0006). Append mode then emits each window once, when the
-    # watermark passes its end.
-    aggregated_df = parsed_df \
-        .withWatermark("time", watermark_delay) \
+    Rejected readings are removed BEFORE the watermark. The watermark is the maximum event time seen
+    minus the allowed lateness, so one far-future timestamp would otherwise move it ahead and close —
+    then drop as late — every live window. The watermark bounds the aggregation state and defines
+    how late data may arrive before its window is closed (ADR-0006); append mode then emits each
+    window once, when the watermark passes its end.
+    """
+    return readings_df \
+        .filter(rejection_reason().isNull()) \
+        .withWatermark("time", watermark_delay(granularity)) \
         .groupBy(
-            window(col("time"), window_duration),
+            window(col("time"), window_duration(granularity)),
             col("sensor_id"),
             col("equipment_id"),
             col("company_id")
@@ -217,6 +201,23 @@ def create_aggregation_stream(spark, window_duration, watermark_delay, table_nam
             lit(0.0).alias("anomaly_percentage")
         )
 
+
+def create_aggregation_stream(spark, granularity):
+    """Create a streaming windowed aggregation for one granularity (aggregation_windows.py)."""
+    kafka_bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    table = table_name(granularity)
+
+    df = spark \
+        .readStream \
+        .format("kafka") \
+        .option("kafka.bootstrap.servers", kafka_bootstrap) \
+        .option("subscribe", "sensor-data-raw") \
+        .option("startingOffsets", "latest") \
+        .option("maxOffsetsPerTrigger", "10000") \
+        .load()
+
+    aggregated_df = aggregate_readings(parse_readings(df), granularity)
+
     # Durable checkpoint location so a restart resumes from committed offsets/state
     # (ADR-0006). Defaults to the persistent path provisioned in the image, not /tmp.
     checkpoint_base = os.getenv("CHECKPOINT_LOCATION", "/opt/spark/checkpoints")
@@ -224,21 +225,20 @@ def create_aggregation_stream(spark, window_duration, watermark_delay, table_nam
     query = aggregated_df \
         .writeStream \
         .outputMode("append") \
-        .foreachBatch(lambda df, batch_id: write_aggregations_to_db(df, batch_id, table_name)) \
+        .foreachBatch(lambda df, batch_id: write_aggregations_to_db(df, batch_id, table)) \
         .trigger(processingTime='5 seconds') \
-        .option("checkpointLocation", f"{checkpoint_base}/{table_name}") \
+        .option("checkpointLocation", f"{checkpoint_base}/{table}") \
         .start()
 
     return query
 
 
 if __name__ == "__main__":
+    # The Kafka connector comes from the image's spark-submit `--packages`, pinned to the image's
+    # Spark version — not from a coordinate here (scripts/check_spark_version_parity.py).
     builder = SparkSession.builder \
         .appName("IndustryFlow-Aggregations") \
         .master(os.getenv("SPARK_MASTER", "local[*]")) \
-        .config("spark.jars.packages",
-                "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.2,"
-                "org.postgresql:postgresql:42.7.4") \
         .config("spark.sql.shuffle.partitions",
                 os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200")) \
         .config("spark.ui.prometheus.enabled", "true")
@@ -258,18 +258,9 @@ if __name__ == "__main__":
     print("Starting aggregation streaming jobs with schema-per-tenant routing...")
     print("=" * 60)
 
-    # One query per window. Watermark (allowed lateness) is configurable per window.
-    queries = [
-        create_aggregation_stream(
-            spark, "1 minute", os.getenv("WATERMARK_1MIN", "2 minutes"),
-            "sensor_aggregations_1min"),
-        create_aggregation_stream(
-            spark, "5 minutes", os.getenv("WATERMARK_5MIN", "10 minutes"),
-            "sensor_aggregations_5min"),
-        create_aggregation_stream(
-            spark, "1 hour", os.getenv("WATERMARK_1HOUR", "15 minutes"),
-            "sensor_aggregations_1hour"),
-    ]
+    # One query per granularity. Width and allowed lateness are the train/serve binding
+    # (aggregation_windows.py), not per-deployment knobs.
+    queries = [create_aggregation_stream(spark, g) for g in AGGREGATION_WINDOWS]
     print("✓ 1-minute, 5-minute and 1-hour aggregation streams started")
     print("=" * 60)
 

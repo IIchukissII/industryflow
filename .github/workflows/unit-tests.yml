@@ -73,8 +73,10 @@ jobs:
           # filter deselected nothing while implying a skipped body of Redis coverage that never
           # existed. The whole suite runs.
           - { service: ml_service,          path: services/ml_service/tests }
-          # Pure FK-resilience filter test only; test_spark_service.py is a live-DB harness.
-          - { service: spark_jobs,          path: services/spark_jobs/tests/test_upsert_filter.py }
+          # The routing, reading guard and windowing tests run on a local Spark (pyspark from
+          # requirements-dev, the runner's JDK 17). test_spark_service.py is a live-stack harness
+          # (TimescaleDB + the running jobs) and would only fail here, so it is excluded.
+          - { service: spark_jobs,          path: services/spark_jobs/tests, args: "--ignore=services/spark_jobs/tests/test_spark_service.py" }
           # Cold-layer exporter (ADR-0025): orchestration tests drive fakes, no DB/object store.
           # The live proof (test_cold_export_integration.py) is `integration` and excluded here —
           # it needs TimescaleDB + MinIO and would only skip. It runs in cold-layer-integration.yml.

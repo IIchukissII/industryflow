@@ -2,7 +2,11 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Test-only dependencies. The FK-resilience filter test (tests/test_upsert_filter.py) is pure
-# Python — no pyspark or database. (tests/test_spark_service.py is a live-DB integration
-# harness, run manually, not in CI.)
+# Test-only dependencies. The job tests run the routing, the reading guard and the windowing on a
+# local Spark — pyspark at the images' Spark version (scripts/check_spark_version_parity.py holds the
+# pin to the Dockerfiles' base), plus a JDK 17+ from the environment. No Kafka or database.
+# (tests/test_spark_service.py is a live-stack harness, run manually, not in CI.)
+pyspark==4.1.3
+# Imported by the job modules, not exercised: the newest pin with Python 3.14 wheels (CI's runtime).
+psycopg2-binary==2.9.13
 pytest==9.1.1
