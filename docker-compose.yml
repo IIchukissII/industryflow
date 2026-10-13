@@ -39,7 +39,7 @@ services:
 
   # Zookeeper - Kafka coordination
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0@sha256:02f6c042bb9a7844382fc4cedc513a44585d8a5acae873fb9e510e3ca9dcabc6
+    image: confluentinc/cp-zookeeper:7.9.1@sha256:7610a50b13e7e9f6dc0dd00585ffdcb0bbed27392bef6b45791ef4087b2a746c
     container_name: industryflow-zookeeper
     ports:
       - "127.0.0.1:2181:2181"
@@ -60,7 +60,7 @@ services:
 
   # Kafka - Message streaming
   kafka:
-    image: confluentinc/cp-kafka:7.5.0@sha256:fbbb6fa11b258a88b83f54d4f0bddfcffbf2279f99d66a843486e3da7bdfbf41
+    image: confluentinc/cp-kafka:7.9.10@sha256:07c3d60362e67c296f7f34b690b1240e5ecdcde4a84f5e73cab320fb4041f58c
     container_name: industryflow-kafka
     depends_on:
       zookeeper:
@@ -98,7 +98,7 @@ services:
   # server on the old one while clients are handed the new CA. Then it publishes the staged CA to
   # db-ca, the clients' default CA mount, so verify-full works with or without TLS_CERT_DIR.
   db-cert-init:
-    image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    image: alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
     container_name: industryflow-db-cert-init
     command:
       - sh
@@ -131,7 +131,7 @@ services:
 
   # TimescaleDB - Time-series database
   timescaledb:
-    image: timescale/timescaledb:latest-pg15@sha256:d621009854b8519a1bf63f81eebc979c1acc06a16843086f244edd44dcce6eea
+    image: timescale/timescaledb:latest-pg15@sha256:6343bdc87ca132c6b53acb26113a6bad1821d188fa39975a745f32ddd9757634
     container_name: industryflow-timescaledb
     depends_on:
       db-cert-init:
@@ -181,7 +181,7 @@ services:
 
   # Redis - Caching layer
   redis:
-    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     container_name: industryflow-redis
     ports:
       - "127.0.0.1:${REDIS_PORT}:6379"
@@ -205,7 +205,7 @@ services:
   # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
   # CAP_CHOWN, and a no-op when the volume is already owned correctly.
   minio-data-owner:
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:207b9a2045f01cef90feda8127a55f769115e060d8350dcb3a29593fc81166ac
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:799f7e86017c3ee8d00f6372e1ee28dd73453f271d5b306a47af8e8a408a777a
     container_name: industryflow-minio-data-owner
     user: "0:0"
     network_mode: none
@@ -228,7 +228,7 @@ services:
   # a maintained third-party build of the same server (ADR-0025 dec 10, ADR-0009). Non-root (65532),
   # distroless: no curl, so the healthcheck speaks HTTP over bash's /dev/tcp.
   minio:
-    image: cgr.dev/chainguard/minio:latest@sha256:7df55d002b698e4494a131b848dd553361bbe58b7e19f62d9623c29af1ba9ccf
+    image: cgr.dev/chainguard/minio:latest@sha256:dc455cdd4db6e390b1b26514f15ff37681a777bf8dab41aac445a0259f751e56
     depends_on:
       minio-data-owner:
         condition: service_completed_successfully
@@ -259,7 +259,7 @@ services:
   # safe on every `up`; the services that need a bucket or principal gate on it completing.
   minio-init:
     # The -dev variant: the init script needs a shell, grep and mktemp, which the minimal one lacks.
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:207b9a2045f01cef90feda8127a55f769115e060d8350dcb3a29593fc81166ac
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:799f7e86017c3ee8d00f6372e1ee28dd73453f271d5b306a47af8e8a408a777a
     container_name: industryflow-minio-init
     depends_on:
       minio:
@@ -615,7 +615,7 @@ services:
   # mTLS ingestion edge (ADR-0002): verifies device client certs against the device CA +
   # CRL and forwards the verified identity to ingestion-service (the only way in).
   ingestion-edge:
-    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    image: nginx:1.31-alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
     container_name: industryflow-ingestion-edge
     ports:
       - "${INGESTION_MTLS_PORT:-8443}:8443"
@@ -640,7 +640,7 @@ services:
   # `device-ca.sh root-crl`). The healthcheck goes unhealthy when either CRL nears expiry. It holds
   # a signing key, so it has no network at all and runs as the CA dir's owner (DEVICE_CA_UID/GID).
   device-crl-refresh:
-    image: alpine/openssl:3.5.8@sha256:3f25da71f70eba788067daac3f3df03bd1de7a7c52ed89fa93b94ad2c92d986b
+    image: alpine/openssl:3.5.9@sha256:e8a2319d15637db5296c0ff540bb028cfabc480b22fcdd4a020582393d32673f
     container_name: industryflow-device-crl-refresh
     network_mode: none
     user: "${DEVICE_CA_UID:-1000}:${DEVICE_CA_GID:-1000}"
@@ -980,7 +980,7 @@ services:
   # No host port and no cert: it is never reached directly, only through the frontend.
   notebook-sso:
     profiles: ["notebooks"]
-    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    image: nginx:1.31-alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
     container_name: industryflow-notebook-sso
     volumes:
       - ./services/notebook_hub/sso-nginx.conf:/etc/nginx/nginx.conf:ro
@@ -1136,7 +1136,7 @@ services:
 
   # Loki - Log aggregation
   loki:
-    image: grafana/loki:2.9.3@sha256:eb92f1a439171542fd718f929fad38c917b3cad15ec830ba4742e2ba5ab03313
+    image: grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193
     container_name: industryflow-loki
     ports:
       - "127.0.0.1:3100:3100"
@@ -1155,7 +1155,7 @@ services:
 
   # Promtail - Log collector
   promtail:
-    image: grafana/promtail:2.9.3@sha256:b338a29de45ef8ffa96f882f3a36306b1e61262b2a560ff523e0e2633cccbbc4
+    image: grafana/promtail:3.6.8@sha256:6cfa64ec432b24a912d640e2edb940eeae2666f61861a66c121d763dd7241381
     container_name: industryflow-promtail
     command: -config.file=/etc/promtail/promtail-config.yml
     volumes:
