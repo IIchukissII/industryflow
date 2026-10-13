@@ -61,7 +61,7 @@ curl http://localhost:8000/health
 
 # Provision your first tenant + admin (nothing is hardcoded), then sign in
 scripts/create-tenant.sh "Your Company"   # prints a company_id
-#   set ADMIN_USER_1_* in .env, then:  python3 scripts/seed_users.py
+#   set ADMIN_USER_1_* in .env, then seed the admin as in docs/getting-started.md (step 3)
 ```
 
 The frontend is served over HTTPS by its built-in TLS edge. The full setup — TLS, the

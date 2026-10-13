@@ -52,10 +52,18 @@ scripts/create-tenant.sh "Your Company"
 #   ADMIN_USER_1_EMAIL=admin@your-company.example
 #   ADMIN_USER_1_PASSWORD=...
 #   ADMIN_USER_1_COMPANY_ID=<company_id from above>
-python3 scripts/seed_users.py
+# The seeder runs in a one-off api-gateway container (its dependencies, DB settings and CA);
+# -e NAME copies the variable from this shell, so the password is never an argument.
+set -a; . ./.env; set +a
+docker compose run --rm --no-deps -v ./scripts:/scripts:ro -e PYTHONPATH=/app \
+  -e ADMIN_USER_1_EMAIL -e ADMIN_USER_1_PASSWORD -e ADMIN_USER_1_COMPANY_ID -e ADMIN_USER_1_ROLE \
+  -e ADMIN_USER_1_SUPERUSER \
+  api-gateway python /scripts/seed_users.py
 ```
 
-Additional users can be created by an admin through the API / admin UI.
+The seeded admin is a tenant admin. It is a cross-tenant superuser only with
+`ADMIN_USER_1_SUPERUSER=true` (see [user management](operations/user-management.md)). Additional
+users can be created by an admin through the API / admin UI.
 
 ## 4. Access interfaces
 

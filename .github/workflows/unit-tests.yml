@@ -38,6 +38,10 @@ jobs:
               - 'deploy/helm/**'
               - 'scripts/device-ca.sh'
               - 'scripts/tests/test_device_ca.py'
+              # The user CLIs are tested in services/api_gateway/tests/test_user_scripts.py.
+              - 'scripts/manage_users.py'
+              - 'scripts/seed_users.py'
+              - 'scripts/user_admin_db.py'
               - '.github/workflows/unit-tests.yml'
 
   pytest:

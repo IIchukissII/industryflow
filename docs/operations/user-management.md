@@ -57,20 +57,28 @@ curl -k -b jar.txt -H "X-CSRF-Token: $CSRF" -X POST https://<host>/api/users \
 
 The CLI helpers connect to the database as the gateway role (`API_GATEWAY_DB_USER` /
 `API_GATEWAY_DB_PASSWORD`, `DB_HOST`/`DB_PORT`/`DB_NAME`) with the gateway's TLS settings: by
-default `verify-full` against `DB_SSLROOTCERT` (ADR-0017). Run them with the secrets injected into
-the environment (`op run -- ...`), never on the command line. They exit non-zero on any failure.
+default `verify-full` against `DB_SSLROOTCERT` (ADR-0017). They exit non-zero on any failure.
+
+They need the gateway's Python dependencies, its database environment and its CA, so run them in
+a one-off api-gateway container with the scripts mounted. Secrets reach them through the
+environment (`-e NAME` copies a variable from your shell, e.g. under `op run`), never as
+arguments:
 
 ```bash
-# Interactive: the password is prompted for (twice), never passed as an argument.
-python3 scripts/manage_users.py create --email user@example.com --company-id <uuid> --role admin
-python3 scripts/manage_users.py reset-password --email user@example.com
-# Non-interactive: read the password from stdin (one line).
-printf '%s\n' "$NEW_PASSWORD" | python3 scripts/manage_users.py create ... --password-stdin
-python3 scripts/manage_users.py list
-python3 scripts/manage_users.py delete --email user@example.com [--yes]
+RUN='docker compose run --rm --no-deps -v ./scripts:/scripts:ro -e PYTHONPATH=/app'
 
-# Seed the first admins from ADMIN_USER_<n>_{EMAIL,PASSWORD,COMPANY_ID[,ROLE]} in the environment.
-op run -- python3 scripts/seed_users.py
+# Interactive (-it): the password is prompted for, twice, never passed as an argument.
+$RUN -it api-gateway python /scripts/manage_users.py create \
+  --email user@example.com --company-id <uuid> --role admin
+# Non-interactive: read the password from stdin (one line).
+printf '%s\n' "$NEW_PASSWORD" | $RUN -T api-gateway \
+  python /scripts/manage_users.py reset-password --email user@example.com --password-stdin
+$RUN api-gateway python /scripts/manage_users.py list
+$RUN api-gateway python /scripts/manage_users.py delete --email user@example.com --yes
+
+# Seed the first users from ADMIN_USER_<n>_{EMAIL,PASSWORD,COMPANY_ID[,ROLE,SUPERUSER]}.
+op run -- $RUN -e ADMIN_USER_1_EMAIL -e ADMIN_USER_1_PASSWORD -e ADMIN_USER_1_COMPANY_ID \
+  api-gateway python /scripts/seed_users.py
 ```
 
 A user created by the CLI is a tenant user. It becomes a **superuser** only with an explicit
