@@ -79,30 +79,21 @@ spec:
       containers:
         - name: timescaledb
           image: {{ .Values.infra.timescaledb.image | quote }}
-          # Use the hardened pg_hba.conf (mounted below) instead of the image's permissive default.
-          {{- if .Values.tls.db.enabled }}
-          # TLS + SCRAM (ADR-0017): the hardened pg_hba is hostssl+scram, so ssl must be on and
-          # passwords stored as scram-sha-256. Passed as -c flags (the canonical postgresql.conf
-          # lines) so the image's own defaults/entrypoint stay intact.
+          # The canonical postgresql.conf and hardened pg_hba.conf (mounted below, the same files
+          # compose mounts). The config carries TLS + SCRAM (ADR-0017: ssl=on with the staged cert
+          # paths, password_encryption=scram-sha-256) and the connection sizing.
           args:
             - postgres
             - -c
+            - config_file=/etc/postgresql/postgresql.conf
+            - -c
             - hba_file=/etc/postgresql/pg_hba.conf
+            {{- if not .Values.tls.db.enabled }}
+            # No server certificate is staged without TLS. The pg_hba is hostssl-only, so this admits
+            # no TCP client either: tls.db is not a switch to plaintext (see values.yaml tls.db).
             - -c
-            - ssl=on
-            - -c
-            - ssl_cert_file=/etc/postgresql/certs/db.crt
-            - -c
-            - ssl_key_file=/etc/postgresql/certs/db.key
-            - -c
-            - ssl_ca_file=/etc/postgresql/certs/ca.crt
-            - -c
-            - ssl_min_protocol_version=TLSv1.2
-            - -c
-            - password_encryption=scram-sha-256
-          {{- else }}
-          args: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
-          {{- end }}
+            - ssl=off
+            {{- end }}
           ports:
             - name: postgres
               containerPort: 5432
@@ -148,6 +139,10 @@ spec:
             - name: pg-hba
               mountPath: /etc/postgresql/pg_hba.conf
               subPath: pg_hba.conf
+              readOnly: true
+            - name: pg-hba
+              mountPath: /etc/postgresql/postgresql.conf
+              subPath: postgresql.conf
               readOnly: true
             {{- if .Values.tls.db.enabled }}
             - name: db-certs

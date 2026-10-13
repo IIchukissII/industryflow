@@ -292,9 +292,12 @@ infra:
     storage: 20Gi
     database: industryflow
     external: { host: "", port: 5432 }
+    # Sized for the shared postgresql.conf (infrastructure/timescaledb/config): shared_buffers alone
+    # is 512MB, and max_connections covers every role's connection limit, so the backends need room
+    # above it. Lower postgresql.conf before lowering these.
     resources:
-      requests: { cpu: 250m, memory: 512Mi }
-      limits: { cpu: "1", memory: 1Gi }
+      requests: { cpu: 250m, memory: 1Gi }
+      limits: { cpu: "1", memory: 2Gi }
 
   zookeeper:
     inCluster: true
