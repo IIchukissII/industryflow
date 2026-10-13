@@ -699,8 +699,10 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
+      # Ready, not just started: the detector exits when its consumer loop dies (and is restarted),
+      # so starting it before the broker accepts connections only buys a startup restart loop.
       kafka:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
     volumes:

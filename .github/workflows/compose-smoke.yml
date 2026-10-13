@@ -79,6 +79,9 @@ jobs:
           sh scripts/device-ca.sh init
           sh scripts/device-ca.sh issue 00000000-0000-4000-8000-000000000001 smoke-device
           test -f deploy/device-ca/ca-chain.crt && test -f deploy/device-ca/crl/device-ca.crl
+          # Issued per tenant and serial; current.* names the newest (docs/operations/device-mtls.md).
+          dev=deploy/device-ca/devices/00000000-0000-4000-8000-000000000001/smoke-device
+          test -f "$dev/current.chain.crt" && test -f "$dev/current.key"
 
       # ADR-0026 dec 4. Build the seed with the JupyterHub the hub is upgrading FROM, so the schema is
       # genuinely the old one rather than something we assert is old. `new_session_factory` creates the
@@ -233,7 +236,7 @@ jobs:
         run: |
           set -euo pipefail
           ca=deploy/certs/ca.crt
-          dev=deploy/device-ca/devices/smoke-device
+          dev=deploy/device-ca/devices/00000000-0000-4000-8000-000000000001/smoke-device
           curl -fsS http://localhost:3000/healthz
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/alerts)" = 301
           curl -fsS --cacert "$ca" -D headers.txt -o /dev/null https://localhost:3443/health
@@ -246,7 +249,7 @@ jobs:
             "302 https://localhost:3443/login") echo "OK    notebook-sso: unauthenticated -> /login via the gateway" ;;
             *) echo "::error::/jupyter/ through the edge answered '$code', expected a redirect to /login"; exit 1 ;;
           esac
-          curl -fsS --cacert "$ca" --cert "$dev/smoke-device.chain.crt" --key "$dev/smoke-device.key" \
+          curl -fsS --cacert "$ca" --cert "$dev/current.chain.crt" --key "$dev/current.key" \
             https://localhost:8443/health
           if curl -fs --cacert "$ca" -o /dev/null https://localhost:8443/health; then
             echo "::error::the ingestion edge served a client with no certificate"; exit 1

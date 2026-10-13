@@ -74,15 +74,15 @@ def _first_party_closure(script: Path, roots: list[str]) -> set[str]:
                 if top in stdlib:
                     continue
                 for root in roots:
-                    for cand in (ROOT / root / f"{top}.py", ROOT / root / top / "__init__.py"):
-                        if cand.exists():
-                            files = [cand] if cand.suffix == ".py" and cand.name != "__init__.py" \
-                                else list(cand.parent.rglob("*.py"))
-                            for f in files:
-                                rel = _rel(f)
-                                if rel not in seen:
-                                    seen.add(rel)
-                                    todo.append(f)
+                    module, package = ROOT / root / f"{top}.py", ROOT / root / top
+                    # A package counts whole, with or without an __init__.py (namespace package).
+                    files = [module] if module.exists() else \
+                        list(package.rglob("*.py")) if package.is_dir() else []
+                    for f in files:
+                        rel = _rel(f)
+                        if rel not in seen:
+                            seen.add(rel)
+                            todo.append(f)
     return seen
 
 
