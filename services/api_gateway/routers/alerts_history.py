@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 from enum import Enum
 
-from dependencies import get_db_with_tenant, get_current_user_with_company
+from dependencies import get_db_with_tenant, get_current_user_with_company, get_writer_with_company
 from models.user import User
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts History"])
@@ -210,7 +210,7 @@ async def list_critical_alerts(
 async def acknowledge_alert(
         alert_id: UUID,
         db: AsyncSession = Depends(get_db_with_tenant),
-        current_user: User = Depends(get_current_user_with_company)
+        current_user: User = Depends(get_writer_with_company)
 ):
     """Acknowledge an alert (schema-routed)"""
     result = await db.execute(text("""
@@ -242,7 +242,7 @@ async def label_alert(
         alert_id: UUID,
         body: LabelRequest,
         db: AsyncSession = Depends(get_db_with_tenant),
-        current_user: User = Depends(get_current_user_with_company)
+        current_user: User = Depends(get_writer_with_company)
 ):
     """Record an operator's correctness verdict on a fired alert (ADR-0022 decision 1).
 

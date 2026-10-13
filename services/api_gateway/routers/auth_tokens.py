@@ -79,7 +79,7 @@ async def login(
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="LOGIN_BAD_CREDENTIALS")
     access = await get_jwt_strategy().write_token(user)
-    refresh = await refresh_tokens.create_refresh_token(str(user.id))
+    refresh = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password)
     _set_auth_cookies(response, access, refresh)
     return TokenPair(access_token=access, refresh_token=refresh)
 
@@ -95,17 +95,22 @@ async def refresh(
     token = (body.refresh_token if body and body.refresh_token else None) or request.cookies.get(REFRESH_COOKIE)
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
-    result = await refresh_tokens.rotate_refresh_token(token)
-    if result is None:
+    # Single use: the token is consumed here whatever happens next.
+    claim = await refresh_tokens.claim_refresh_token(token)
+    if claim is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
-    user_id, new_refresh = result
     try:
-        user = await user_manager.get(uuid.UUID(user_id))
+        user = await user_manager.get(uuid.UUID(claim.user_id))
     except (UserNotExists, ValueError):
         user = None
     if user is None or not user.is_active:
-        await refresh_tokens.revoke_refresh_token(new_refresh)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+    # The password changed since this session began (possibly outside the gateway): the session
+    # does not survive it. End every other session of the user too.
+    if claim.credential != refresh_tokens.credential_fingerprint(user.hashed_password):
+        await refresh_tokens.end_all_sessions(str(user.id))
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session ended by a credential change")
+    new_refresh = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password)
     access = await get_jwt_strategy().write_token(user)
     _set_auth_cookies(response, access, new_refresh)
     return TokenPair(access_token=access, refresh_token=new_refresh)

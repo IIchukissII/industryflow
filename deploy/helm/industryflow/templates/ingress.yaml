@@ -46,6 +46,15 @@ spec:
 # ingress-nginx controller verify device client certificates against the device CA and
 # forward the verified cert to ingestion-service (ssl-client-cert), realizing the single
 # TLS edge of ADR-0009 dec 5.
+#
+# Identity headers (ADR-0002 dec 3): with auth-tls on, the controller itself sets
+# ssl-client-verify / ssl-client-cert / ssl-client-subject-dn / ssl-client-issuer-dn on every
+# proxied request, overwriting any client-sent value. Those are the only identity headers
+# ingestion-service reads here (config DEVICE_IDENTITY_HEADERS=ssl-client). Other client
+# headers (e.g. X-Client-*) pass through, and the service refuses any request carrying the
+# other convention's headers. No configuration-snippet strips them: snippet annotations are
+# disabled by default in current ingress-nginx, and enabling them is itself a controller-wide
+# risk, so the guarantee lives in the controller's own headers plus the service's refusal.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

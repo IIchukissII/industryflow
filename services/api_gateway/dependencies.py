@@ -37,22 +37,34 @@ async def get_current_user_with_company(
         )
     return current_user
 
-def require_role(required_role: str):
+def require_role(*allowed_roles: str):
     """
-    Dependency factory for role-based access control.
-    Usage: user = Depends(require_role("admin"))
+    Dependency factory for role-based access control: the caller's role must be one of
+    ``allowed_roles``. Usage: user = Depends(require_role("admin"))
     """
     async def role_checker(current_user: User = Depends(current_active_user)) -> User:
-        # Superusers pass any role gate; otherwise the role must match exactly.
+        # Superusers pass any role gate; otherwise the role must be one of those allowed.
         if current_user.is_superuser:
             return current_user
-        if current_user.role != required_role:
+        if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Required role: {required_role}"
+                detail=f"Required role: {' or '.join(allowed_roles)}"
             )
         return current_user
     return role_checker
+
+
+# Roles that may change tenant data (equipment, sensors, alert rules, alert acknowledgement and
+# labels). observer is read-only (docs/operations/user-management.md).
+WRITER_ROLES = ("engineer", "admin")
+
+
+async def get_writer_with_company(
+    current_user: User = Depends(require_role(*WRITER_ROLES)),
+) -> User:
+    """A caller allowed to write tenant data, with a company to route the write to."""
+    return await get_current_user_with_company(current_user)
 
 # ============================================================================
 # Schema-Per-Tenant Database Dependencies

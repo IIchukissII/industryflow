@@ -5,274 +5,154 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Production-ready user management CLI tool.
-Provides commands to create, list, update, and delete users.
+User management CLI for bootstrapping and recovery (docs/operations/user-management.md).
+
+Connects as the API gateway's role with its TLS verification (verify-full by default, ADR-0017).
+Database credentials come from the environment (inject them with `op run`). A password is never
+an argument: it is prompted for, or read from stdin with --password-stdin. Exits non-zero on any
+failure.
 
 Usage:
-    python scripts/manage_users.py create --email user@example.com --password SecurePass123! --company-id UUID --role admin
+    python scripts/manage_users.py create --email user@example.com --company-id UUID --role admin [--superuser]
     python scripts/manage_users.py list
-    python scripts/manage_users.py delete --email user@example.com
-    python scripts/manage_users.py reset-password --email user@example.com --password NewPassword123!
+    python scripts/manage_users.py delete --email user@example.com [--yes]
+    python scripts/manage_users.py reset-password --email user@example.com [--password-stdin]
 """
-import asyncio
 import argparse
-import os
+import asyncio
 import sys
-from pathlib import Path
 from getpass import getpass
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "services" / "api_gateway"))
+from sqlalchemy import text
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from passlib.context import CryptContext
-import uuid
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+import user_admin_db as db
+from user_admin_db import UserAdminError
 
 
-def get_database_url():
-    """Get database URL from environment."""
-    db_host = os.getenv("DB_HOST", "localhost")
-    db_port = os.getenv("DB_PORT", "5432")
-    db_name = os.getenv("DB_NAME", "industryflow")
-    db_user = os.getenv("API_GATEWAY_DB_USER", "api_gateway")
-    db_password = os.getenv("API_GATEWAY_DB_PASSWORD")
-
-    if not db_password:
-        print("❌ Error: API_GATEWAY_DB_PASSWORD environment variable not set")
-        sys.exit(1)
-
-    return f"postgresql+asyncpg://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-
-
-async def create_user(args):
-    """Create a new user."""
-    engine = create_async_engine(get_database_url(), echo=False)
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    # Get password securely if not provided
-    password = args.password
+def read_password(args, prompt: str) -> str:
+    """The new password: one line from stdin with --password-stdin, else prompted for twice."""
+    if args.password_stdin:
+        password = sys.stdin.readline().rstrip("\r\n")
+    else:
+        password = getpass(f"{prompt}: ")
+        if password != getpass(f"Confirm {prompt.lower()}: "):
+            raise UserAdminError("passwords don't match")
     if not password:
-        password = getpass("Enter password: ")
-        password_confirm = getpass("Confirm password: ")
-        if password != password_confirm:
-            print("❌ Passwords don't match")
-            return
-
-    async with async_session() as session:
-        try:
-            # Check if user exists
-            result = await session.execute(
-                f"""SELECT id FROM "user" WHERE email = '{args.email}'"""
-            )
-            if result.fetchone():
-                print(f"❌ User {args.email} already exists")
-                return
-
-            # Validate role
-            valid_roles = ['admin', 'engineer', 'observer']
-            if args.role not in valid_roles:
-                print(f"❌ Invalid role. Must be one of: {', '.join(valid_roles)}")
-                return
-
-            # Hash password
-            hashed_password = pwd_context.hash(password)
-            user_id = str(uuid.uuid4())
-
-            # Insert user
-            await session.execute(
-                f"""
-                INSERT INTO "user" (
-                    id, email, hashed_password, company_id, role,
-                    is_active, is_superuser, is_verified
-                ) VALUES (
-                    '{user_id}',
-                    '{args.email}',
-                    '{hashed_password}',
-                    '{args.company_id}',
-                    '{args.role}',
-                    true,
-                    {args.role == 'admin'},
-                    true
-                )
-                """
-            )
-            await session.commit()
-
-            print("=" * 80)
-            print("✅ User created successfully")
-            print("=" * 80)
-            print(f"Email:      {args.email}")
-            print(f"User ID:    {user_id}")
-            print(f"Company ID: {args.company_id}")
-            print(f"Role:       {args.role}")
-            print("Active:     Yes")
-            print("=" * 80)
-
-        except Exception as e:
-            print(f"❌ Error creating user: {e}")
-            await session.rollback()
-
-    await engine.dispose()
+        raise UserAdminError("empty password")
+    return password
 
 
-async def list_users(args):
-    """List all users."""
-    engine = create_async_engine(get_database_url(), echo=False)
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async def create_user(args) -> None:
+    db.check_user_fields(args.email, args.company_id, args.role)
+    password = read_password(args, "Password")
+    async with db.connect() as conn:
+        user_id = await db.insert_user(
+            conn, email=args.email, password=password, company_id=args.company_id,
+            role=args.role, superuser=args.superuser)
+    print("=" * 80)
+    print("✅ User created")
+    print(f"Email:      {args.email}")
+    print(f"User ID:    {user_id}")
+    print(f"Company ID: {args.company_id}")
+    print(f"Role:       {args.role}")
+    print(f"Superuser:  {'Yes' if args.superuser else 'No'}")
+    print("=" * 80)
 
-    async with async_session() as session:
-        result = await session.execute(
-            """
-            SELECT
-                u.id, u.email, u.company_id, u.role, u.is_active,
-                u.is_superuser, u.is_verified, c.name as company_name
-            FROM "user" u
-            LEFT JOIN company c ON u.company_id = c.id
+
+async def list_users(args) -> None:
+    async with db.connect() as conn:
+        result = await conn.execute(text("""
+            SELECT u.email, c.company_name, u.role, u.is_active, u.is_superuser, u.is_verified
+            FROM public."user" u
+            LEFT JOIN public.companies c ON c.company_id = u.company_id
             ORDER BY u.email
-            """
+        """))
+        users = result.all()
+
+    print("=" * 120)
+    print(f"{'EMAIL':<30} {'COMPANY':<25} {'ROLE':<12} {'ACTIVE':<8} {'SUPERUSER':<12} {'VERIFIED':<10}")
+    print("=" * 120)
+    for email, company_name, role, is_active, is_superuser, is_verified in users:
+        print(
+            f"{email:<30} {company_name or 'N/A':<25} {role:<12} "
+            f"{'Yes' if is_active else 'No':<8} {'Yes' if is_superuser else 'No':<12} "
+            f"{'Yes' if is_verified else 'No':<10}"
         )
-        users = result.fetchall()
-
-        print("=" * 120)
-        print(f"{'EMAIL':<30} {'COMPANY':<25} {'ROLE':<12} {'ACTIVE':<8} {'SUPERUSER':<12} {'VERIFIED':<10}")
-        print("=" * 120)
-
-        for user in users:
-            print(
-                f"{user[1]:<30} {user[7] or 'N/A':<25} {user[3]:<12} "
-                f"{'Yes' if user[4] else 'No':<8} {'Yes' if user[5] else 'No':<12} "
-                f"{'Yes' if user[6] else 'No':<10}"
-            )
-
-        print("=" * 120)
-        print(f"Total users: {len(users)}")
-        print("=" * 120)
-
-    await engine.dispose()
+    print("=" * 120)
+    print(f"Total users: {len(users)}")
 
 
-async def delete_user(args):
-    """Delete a user."""
-    engine = create_async_engine(get_database_url(), echo=False)
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    # Confirm deletion
+async def delete_user(args) -> None:
     if not args.yes:
         confirm = input(f"Are you sure you want to delete user {args.email}? (yes/no): ")
-        if confirm.lower() != 'yes':
-            print("❌ Deletion cancelled")
-            return
-
-    async with async_session() as session:
-        try:
-            result = await session.execute(
-                f"""DELETE FROM "user" WHERE email = '{args.email}' RETURNING id"""
-            )
-            deleted_user = result.fetchone()
-
-            if deleted_user:
-                await session.commit()
-                print(f"✅ User {args.email} deleted successfully")
-            else:
-                print(f"❌ User {args.email} not found")
-
-        except Exception as e:
-            print(f"❌ Error deleting user: {e}")
-            await session.rollback()
-
-    await engine.dispose()
+        if confirm.lower() != "yes":
+            raise UserAdminError("deletion cancelled")
+    async with db.connect() as conn:
+        result = await conn.execute(
+            text('DELETE FROM public."user" WHERE email = :email RETURNING id'), {"email": args.email})
+        if result.first() is None:
+            raise UserAdminError(f"user {args.email} not found")
+    print(f"✅ User {args.email} deleted")
 
 
-async def reset_password(args):
-    """Reset user password."""
-    engine = create_async_engine(get_database_url(), echo=False)
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    # Get password securely if not provided
-    password = args.password
-    if not password:
-        password = getpass("Enter new password: ")
-        password_confirm = getpass("Confirm new password: ")
-        if password != password_confirm:
-            print("❌ Passwords don't match")
-            return
-
-    async with async_session() as session:
-        try:
-            # Hash password
-            hashed_password = pwd_context.hash(password)
-
-            # Update password
-            result = await session.execute(
-                f"""
-                UPDATE "user"
-                SET hashed_password = '{hashed_password}'
-                WHERE email = '{args.email}'
-                RETURNING id
-                """
-            )
-            updated_user = result.fetchone()
-
-            if updated_user:
-                await session.commit()
-                print(f"✅ Password reset successfully for {args.email}")
-            else:
-                print(f"❌ User {args.email} not found")
-
-        except Exception as e:
-            print(f"❌ Error resetting password: {e}")
-            await session.rollback()
-
-    await engine.dispose()
+async def reset_password(args) -> None:
+    password = read_password(args, "New password")
+    async with db.connect() as conn:
+        result = await conn.execute(
+            text('UPDATE public."user" SET hashed_password = :hashed WHERE email = :email RETURNING id'),
+            {"hashed": db.hash_password(password), "email": args.email},
+        )
+        if result.first() is None:
+            raise UserAdminError(f"user {args.email} not found")
+    # The user's refresh tokens carry a fingerprint of the old hash, so existing sessions end at
+    # their next refresh (services/api_gateway/messaging/refresh_tokens.py).
+    print(f"✅ Password reset for {args.email}; existing sessions end at their next refresh")
 
 
-def main():
+COMMANDS = {
+    "create": create_user,
+    "list": list_users,
+    "delete": delete_user,
+    "reset-password": reset_password,
+}
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="User Management CLI")
-    subparsers = parser.add_subparsers(dest='command', help='Commands')
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Create user command
-    create_parser = subparsers.add_parser('create', help='Create a new user')
-    create_parser.add_argument('--email', required=True, help='User email address')
-    create_parser.add_argument('--password', help='User password (will prompt if not provided)')
-    create_parser.add_argument('--company-id', required=True, help='Company UUID')
-    create_parser.add_argument('--role', required=True, choices=['admin', 'engineer', 'observer'], help='User role')
+    create = subparsers.add_parser("create", help="Create a user in an existing company")
+    create.add_argument("--email", required=True)
+    create.add_argument("--company-id", required=True, help="Company UUID")
+    create.add_argument("--role", required=True, choices=db.VALID_ROLES)
+    create.add_argument("--superuser", action="store_true",
+                        help="Grant cross-tenant superuser (never implied by --role admin)")
+    create.add_argument("--password-stdin", action="store_true", help="Read the password from stdin")
 
-    # List users command
-    subparsers.add_parser('list', help='List all users')
+    subparsers.add_parser("list", help="List all users")
 
-    # Delete user command
-    delete_parser = subparsers.add_parser('delete', help='Delete a user')
-    delete_parser.add_argument('--email', required=True, help='User email address')
-    delete_parser.add_argument('--yes', '-y', action='store_true', help='Skip confirmation')
+    delete = subparsers.add_parser("delete", help="Delete a user")
+    delete.add_argument("--email", required=True)
+    delete.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
 
-    # Reset password command
-    reset_parser = subparsers.add_parser('reset-password', help='Reset user password')
-    reset_parser.add_argument('--email', required=True, help='User email address')
-    reset_parser.add_argument('--password', help='New password (will prompt if not provided)')
+    reset = subparsers.add_parser("reset-password", help="Set a user's password")
+    reset.add_argument("--email", required=True)
+    reset.add_argument("--password-stdin", action="store_true", help="Read the password from stdin")
+    return parser
 
-    args = parser.parse_args()
 
-    if not args.command:
-        parser.print_help()
-        return
-
-    # Load environment variables
-    from dotenv import load_dotenv
-    load_dotenv()
-
-    # Run command
-    if args.command == 'create':
-        asyncio.run(create_user(args))
-    elif args.command == 'list':
-        asyncio.run(list_users(args))
-    elif args.command == 'delete':
-        asyncio.run(delete_user(args))
-    elif args.command == 'reset-password':
-        asyncio.run(reset_password(args))
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        asyncio.run(COMMANDS[args.command](args))
+    except UserAdminError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    except Exception as e:  # noqa: BLE001 - any DB/connection failure is a failed run
+        print(f"❌ {args.command} failed: {type(e).__name__}: {e}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

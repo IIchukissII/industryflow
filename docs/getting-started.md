@@ -52,10 +52,18 @@ scripts/create-tenant.sh "Your Company"
 #   ADMIN_USER_1_EMAIL=admin@your-company.example
 #   ADMIN_USER_1_PASSWORD=...
 #   ADMIN_USER_1_COMPANY_ID=<company_id from above>
-python3 scripts/seed_users.py
+# The seeder runs in a one-off api-gateway container (its dependencies, DB settings and CA);
+# -e NAME copies the variable from this shell, so the password is never an argument.
+set -a; . ./.env; set +a
+docker compose run --rm --no-deps -v ./scripts:/scripts:ro -e PYTHONPATH=/app \
+  -e ADMIN_USER_1_EMAIL -e ADMIN_USER_1_PASSWORD -e ADMIN_USER_1_COMPANY_ID -e ADMIN_USER_1_ROLE \
+  -e ADMIN_USER_1_SUPERUSER \
+  api-gateway python /scripts/seed_users.py
 ```
 
-Additional users can be created by an admin through the API / admin UI.
+The seeded admin is a tenant admin. It is a cross-tenant superuser only with
+`ADMIN_USER_1_SUPERUSER=true` (see [user management](operations/user-management.md)). Additional
+users can be created by an admin through the API / admin UI.
 
 ## 4. Access interfaces
 
@@ -114,8 +122,8 @@ scripts/device-ca.sh init                                  # once
 scripts/device-ca.sh issue <company_id> tep-producer
 
 # Terminal 1: stream (data files resolve relative to the script; cert via env)
-DEVICE_CERT=deploy/device-ca/devices/tep-producer/tep-producer.chain.crt \
-DEVICE_KEY=deploy/device-ca/devices/tep-producer/tep-producer.key \
+DEVICE_CERT=deploy/device-ca/devices/<company_id>/tep-producer/current.chain.crt \
+DEVICE_KEY=deploy/device-ca/devices/<company_id>/tep-producer/current.key \
 INGESTION_URL=https://localhost:8443/ingest \
   python3 extensions/tep-reference/producer/stream_tep_data.py
 
@@ -294,8 +302,8 @@ python3 tests/performance/performance_test.py        # see the scripts in tests/
 
 ```bash
 # Reference producer (device mTLS — see step 5 for the cert). Data resolves relative to the script.
-DEVICE_CERT=deploy/device-ca/devices/tep-producer/tep-producer.chain.crt \
-DEVICE_KEY=deploy/device-ca/devices/tep-producer/tep-producer.key \
+DEVICE_CERT=deploy/device-ca/devices/<company_id>/tep-producer/current.chain.crt \
+DEVICE_KEY=deploy/device-ca/devices/<company_id>/tep-producer/current.key \
   python3 extensions/tep-reference/producer/stream_tep_data.py
 ```
 

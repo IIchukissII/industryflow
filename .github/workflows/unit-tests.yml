@@ -36,6 +36,12 @@ jobs:
               # edit on that side alone must run them too.
               - 'docker-compose.yml'
               - 'deploy/helm/**'
+              - 'scripts/device-ca.sh'
+              - 'scripts/tests/test_device_ca.py'
+              # The user CLIs are tested in services/api_gateway/tests/test_user_scripts.py.
+              - 'scripts/manage_users.py'
+              - 'scripts/seed_users.py'
+              - 'scripts/user_admin_db.py'
               - '.github/workflows/unit-tests.yml'
 
   pytest:
@@ -75,6 +81,8 @@ jobs:
           - { service: cold_export,         path: services/cold_export/tests, args: "--ignore=services/cold_export/tests/test_cold_export_integration.py" }
           # The notebook client is packaged (pyproject extras), so it overrides the install.
           - { service: python_client,       path: clients/python/tests, install: "pip install -e 'clients/python[dev]'" }
+          # The device CA's issue/renew/revoke, run against a throwaway CA with the runner's openssl.
+          - { service: device_ca,           path: scripts/tests/test_device_ca.py, install: "pip install pytest==9.1.1" }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

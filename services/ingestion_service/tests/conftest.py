@@ -24,7 +24,7 @@ sys.path.insert(0, SERVICE_DIR)
 os.environ.setdefault("INGESTION_SERVICE_PORT", "8003")
 os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 os.environ.setdefault("KAFKA_TOPIC_SENSOR_DATA", "sensor-data-raw")
-os.environ.setdefault("CORS_ORIGINS", "*")
+os.environ.setdefault("DEVICE_IDENTITY_HEADERS", "x-client")
 
 from cryptography import x509  # noqa: E402
 from cryptography.hazmat.primitives import hashes, serialization  # noqa: E402
@@ -80,6 +80,17 @@ def sample_body():
         "unit": "celsius",
         "quality_code": 0,
     }
+
+
+@pytest.fixture
+def edge(monkeypatch):
+    """Select the deployment's edge header convention for one test: ``edge("ssl-client")``."""
+    import config
+
+    def select(convention: str) -> None:
+        monkeypatch.setattr(config.get_settings(), "DEVICE_IDENTITY_HEADERS", convention)
+
+    return select
 
 
 @pytest.fixture

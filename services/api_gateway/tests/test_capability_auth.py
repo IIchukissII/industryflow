@@ -93,6 +93,13 @@ class FakeRedis:
     async def set(self, key, value, ex=None):
         self.strings[key] = value
 
+    async def getdel(self, key):
+        return self.strings.pop(key, None)
+
+    async def srem(self, key, *members):
+        # The refresh-token per-user index (messaging.refresh_tokens); not modelled here.
+        return 0
+
     async def hkeys(self, key):
         return list(self.hashes.get(key, {}))
 

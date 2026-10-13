@@ -12,7 +12,7 @@ from sqlalchemy import text
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import logging
-from dependencies import get_db_with_tenant, get_current_user_with_company
+from dependencies import get_db_with_tenant, get_current_user_with_company, get_writer_with_company
 from models.user import User
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ async def get_equipment(
 async def create_equipment(
     equipment: EquipmentCreate,
     db: AsyncSession = Depends(get_db_with_tenant),
-    current_user: User = Depends(get_current_user_with_company)
+    current_user: User = Depends(get_writer_with_company)
 ):
     """Create new equipment (schema ensures tenant isolation)"""
     try:
@@ -125,7 +125,7 @@ async def update_equipment(
     equipment_id: str,
     equipment: EquipmentUpdate,
     db: AsyncSession = Depends(get_db_with_tenant),
-    current_user: User = Depends(get_current_user_with_company)
+    current_user: User = Depends(get_writer_with_company)
 ):
     """Update equipment (schema-routed)"""
     updates = []
@@ -161,7 +161,7 @@ async def update_equipment(
 async def delete_equipment(
     equipment_id: str,
     db: AsyncSession = Depends(get_db_with_tenant),
-    current_user: User = Depends(get_current_user_with_company)
+    current_user: User = Depends(get_writer_with_company)
 ):
     """Delete equipment (schema-routed)"""
     result = await db.execute(
@@ -202,7 +202,7 @@ async def add_sensor(
     equipment_id: str,
     sensor: SensorCreate,
     db: AsyncSession = Depends(get_db_with_tenant),
-    current_user: User = Depends(get_current_user_with_company)
+    current_user: User = Depends(get_writer_with_company)
 ):
     """Add sensor to equipment - direct ownership, no junction table"""
     # Verify equipment exists
@@ -243,7 +243,7 @@ async def remove_sensor(
     equipment_id: str,
     sensor_id: str,
     db: AsyncSession = Depends(get_db_with_tenant),
-    current_user: User = Depends(get_current_user_with_company)
+    current_user: User = Depends(get_writer_with_company)
 ):
     """Remove sensor from equipment - direct ownership"""
     # Verify equipment exists
@@ -269,7 +269,7 @@ async def add_sensors_bulk(
     equipment_id: str,
     bulk_data: BulkSensorCreate,
     db: AsyncSession = Depends(get_db_with_tenant),
-    current_user: User = Depends(get_current_user_with_company)
+    current_user: User = Depends(get_writer_with_company)
 ):
     """Add multiple sensors to equipment in a single transaction"""
     # Verify equipment and get sensor_count

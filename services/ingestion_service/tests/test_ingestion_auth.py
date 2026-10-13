@@ -12,6 +12,8 @@ fallback and no database lookup. These tests pin that contract.
 import uuid
 from urllib.parse import quote
 
+import pytest
+
 
 def _headers(pem: str, verify: str = "SUCCESS", *, edge: str = "x"):
     """Build the verified-cert headers an mTLS edge forwards.
@@ -47,8 +49,9 @@ def test_valid_mtls_accepts_and_uses_cert_tenant(client, make_cert, sample_body)
     assert produced[0]["site_id"] == sample_body["site_id"]
 
 
-def test_ingress_nginx_header_variant_also_works(client, make_cert, sample_body):
+def test_ingress_nginx_convention_when_configured(client, edge, make_cert, sample_body):
     c, produced = client
+    edge("ssl-client")
     tenant = str(uuid.uuid4())
     pem = make_cert(f"industryflow:tenant/{tenant}/device/gw-01")
 
@@ -56,6 +59,97 @@ def test_ingress_nginx_header_variant_also_works(client, make_cert, sample_body)
 
     assert r.status_code == 202
     assert produced[0]["company_id"] == tenant
+
+
+# --- Header smuggling (ADR-0002 dec 3) -------------------------------------------------------
+# Each edge overwrites only its OWN convention's headers. Anything of the other convention
+# reached the service because the client sent it, so it must never be read as an identity.
+
+def test_smuggled_x_client_headers_rejected_behind_ingress_nginx(client, edge, make_cert, sample_body):
+    # Tenant-A device, verified by ingress-nginx (ssl-client-*), smuggles a tenant-B identity
+    # in X-Client-*, which ingress-nginx passes through untouched.
+    c, produced = client
+    edge("ssl-client")
+    own = make_cert(f"industryflow:tenant/{uuid.uuid4()}/device/gw-a")
+    forged = make_cert(f"industryflow:tenant/{uuid.uuid4()}/device/gw-b")
+    headers = {**_headers(own, edge="ssl"), **_headers(forged, edge="x")}
+
+    r = c.post("/ingest", json=sample_body, headers=headers)
+
+    assert r.status_code == 400
+    assert produced == []
+
+
+def test_smuggled_x_client_headers_alone_rejected_behind_ingress_nginx(client, edge, make_cert, sample_body):
+    c, produced = client
+    edge("ssl-client")
+    forged = make_cert(f"industryflow:tenant/{uuid.uuid4()}/device/gw-b")
+
+    r = c.post("/ingest", json=sample_body, headers=_headers(forged, edge="x"))
+
+    assert r.status_code == 400
+    assert produced == []
+
+
+def test_smuggled_ssl_client_headers_rejected_behind_compose_edge(client, edge, make_cert, sample_body):
+    c, produced = client
+    edge("x-client")
+    own = make_cert(f"industryflow:tenant/{uuid.uuid4()}/device/gw-a")
+    forged = make_cert(f"industryflow:tenant/{uuid.uuid4()}/device/gw-b")
+    headers = {**_headers(own, edge="x"), **_headers(forged, edge="ssl")}
+
+    r = c.post("/ingest", json=sample_body, headers=headers)
+
+    assert r.status_code == 400
+    assert produced == []
+
+
+def test_any_foreign_prefixed_header_is_refused(client, edge, make_cert, sample_body):
+    # Not just the two names this service reads: e.g. ingress-nginx's ssl-client-subject-dn.
+    c, produced = client
+    edge("x-client")
+    own = make_cert(f"industryflow:tenant/{uuid.uuid4()}/device/gw-a")
+    headers = {**_headers(own, edge="x"), "SSL-Client-Subject-DN": "CN=forged"}
+
+    r = c.post("/ingest", json=sample_body, headers=headers)
+
+    assert r.status_code == 400
+    assert produced == []
+
+
+def test_unknown_convention_fails_at_startup(monkeypatch):
+    import config
+
+    for bad in ("", "x-client,ssl-client", "X-Forwarded"):
+        monkeypatch.setattr(config.Settings, "DEVICE_IDENTITY_HEADERS", bad)
+        with pytest.raises(RuntimeError, match="DEVICE_IDENTITY_HEADERS"):
+            config.Settings()
+
+
+def test_no_cors_on_the_device_only_service(client):
+    # No browser calls ingestion; a credentialed cross-origin preflight gets no CORS grant.
+    c, _ = client
+    r = c.options(
+        "/ingest",
+        headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
+    )
+    assert "access-control-allow-origin" not in r.headers
+    assert "access-control-allow-credentials" not in r.headers
+
+
+def test_internal_error_does_not_leak_detail(client, make_cert, sample_body, monkeypatch):
+    import main
+
+    async def boom(message, topic=None):
+        raise RuntimeError("broker kafka:29092 unreachable")
+
+    monkeypatch.setattr(main, "send_sensor_data", boom)
+    c, _ = client
+    pem = make_cert(f"industryflow:tenant/{uuid.uuid4()}/device/gw-01")
+    r = c.post("/ingest", json=sample_body, headers=_headers(pem))
+    assert r.status_code == 500
+    assert "kafka" not in r.text
+    assert "unreachable" not in r.text
 
 
 def test_no_certificate_is_unauthorized(client, sample_body):

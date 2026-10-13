@@ -3,6 +3,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { WS_URL } from '../config';
+import api from './api';
+
+// Close code the gateway sends when the session's access token has expired (routers/websocket.py).
+const SESSION_EXPIRED = 4401;
 
 /**
  * Single shared sensor WebSocket with a pub/sub fan-out.
@@ -19,6 +23,7 @@ class WebSocketService {
     this.errorListeners = new Set();
     this.reconnectInterval = 3000;
     this.reconnectTimer = null;
+    this.refreshedSinceMessage = false;
   }
 
   _open() {
@@ -35,6 +40,7 @@ class WebSocketService {
       };
 
       this.ws.onmessage = (event) => {
+        this.refreshedSinceMessage = false;
         let data;
         try {
           data = JSON.parse(event.data);
@@ -60,6 +66,20 @@ class WebSocketService {
         // 1008 = policy violation (auth) — do not reconnect; surface it once.
         if (event.code === 1008) {
           this.errorListeners.forEach((fn) => fn(new Error('Authentication failed')));
+          return;
+        }
+        // 4401 = the access cookie expired (the socket lives no longer than it): refresh the
+        // session once and reconnect. A second 4401 before any message means the refresh did
+        // not restore a session, so stop there.
+        if (event.code === SESSION_EXPIRED) {
+          if (this.refreshedSinceMessage) {
+            this.errorListeners.forEach((fn) => fn(new Error('Session expired')));
+            return;
+          }
+          this.refreshedSinceMessage = true;
+          api.post('/auth/refresh')
+            .then(() => this._open())
+            .catch(() => this.errorListeners.forEach((fn) => fn(new Error('Session expired'))));
           return;
         }
         // Reconnect for transient closes as long as anyone is still listening.

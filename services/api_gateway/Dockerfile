@@ -10,7 +10,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy API code
+# Copy API code (.dockerignore keeps tests, dev pins, caches and .env out)
 COPY . .
 
 # Run as a non-root user (uid 10001). Listens on an unprivileged port; writes nothing to the
@@ -21,5 +21,7 @@ USER 10001
 # Expose port
 EXPOSE 8000
 
-# Run API server
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8"]
+# Run API server. API_GATEWAY_WORKERS sets the uvicorn worker count per container; each worker
+# holds its own DB pool, so it is part of the connection budget (database.py).
+ENV API_GATEWAY_WORKERS=2
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers \"$API_GATEWAY_WORKERS\""]

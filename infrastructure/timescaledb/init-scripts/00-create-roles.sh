@@ -121,7 +121,7 @@ EOSQL
 
 echo "✓ api_gateway_user (50 connections)"
 echo "✓ spark_streaming_user (50 connections)"
-echo "✓ alert_service_user (10 connections)"
+echo "✓ alert_service_user (50 connections)"
 echo "✓ ml_service_user (10 connections)"
 echo "✓ mlflow_user (20 connections)"
 echo "✓ cold_export_user (5 connections, SELECT + drop-chunk only)"

@@ -93,6 +93,24 @@ This inserts the company and calls `create_tenant_schema()`. Use the printed
 `company_id` for `ADMIN_USER_*_COMPANY_ID` (then run `scripts/seed_users.py`) or when
 creating users via the API.
 
+A superuser can also provision through the API (`POST /api/companies`), which uses script 21.
+
+### 21 - Company provisioning through the API
+
+**`21-company-provisioning.sql`**
+- `provision_company(name, is_active)` and `update_company(id, name, is_active)`: SECURITY
+  DEFINER, `EXECUTE` granted to `api_gateway_user` only. The gateway role keeps only `SELECT` on
+  `public.companies`; these are its one write path to the registry.
+- They validate the name, write the row (with the canonical `schema_name`) and build the tenant
+  schema with `create_tenant_schema()`, all in the caller's transaction.
+- Their search path is `pg_catalog, public, pg_temp` because the tenant functions call helpers
+  unqualified. Since `api_gateway_user` may create objects in `public`, they first refuse to run
+  while `public` holds any function or operator owned by a role that is neither a superuser nor
+  their own owner, so nothing planted there can run with their rights.
+- No teardown: deactivation is `update_company(id, NULL, false)`.
+- Idempotent. On an existing database apply it with
+  `psql -v ON_ERROR_STOP=1 -f 21-company-provisioning.sql` as the database superuser.
+
 ### 08 - ML Alert Integration (Permissions)
 
 **`08-ml-alert-permissions-migration.sql`**
