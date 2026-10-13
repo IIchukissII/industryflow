@@ -17,8 +17,11 @@
 # Subcommands
 #   init                                  create root + issuing intermediate + empty CRL
 #   issue <company_uuid> <device_id> [csr]  sign a device cert (CSR if given; else generate
-#                                           a TEST key+CSR — local/test producers only)
-#   revoke <device_id>                    revoke a device cert and refresh the CRL
+#                                           a TEST key+CSR — local/test producers only), stored as
+#                                           devices/<uuid>/<device_id>/<serial>.{crt,chain.crt,key}
+#                                           with current.* naming the newest
+#   revoke <company_uuid> <device_id>     revoke every valid cert of that tenant's device
+#                                           (renewals included) and refresh the CRL
 #   crl                                   re-sign the intermediate's CRL (routine; no root key)
 #   root-crl                              re-sign the root's CRL (offline-root ceremony only)
 #   check [crl] [chain]                   fail if a published CRL is close to expiry
@@ -141,38 +144,80 @@ cmd_init() {
   echo "Keep $ROOT/root.key offline; the intermediate is the day-to-day signer."
 }
 
+identity_args() {
+  # Validates <company_uuid> <device_id> and sets $company (lower-case canonical) and $device.
+  # The tenant must be a UUID before it is vouched into a SAN or matched (ADR-0003). The
+  # device_id lands in the SAN, the CSR subject and a directory name: no '/', no leading dot.
+  echo "$1" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+    || die "company_uuid is not a UUID: $1"
+  echo "$2" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' \
+    || die "device_id must match [A-Za-z0-9][A-Za-z0-9._-]{0,127}: $2"
+  company=$(echo "$1" | tr 'A-F' 'a-f'); device="$2"
+}
+
 cmd_issue() {
-  company="$1"; device="$2"; csr="$3"
-  [ -n "$company" ] && [ -n "$device" ] || die "usage: device-ca.sh issue <company_uuid> <device_id> [csr.pem]"
-  # Validate the tenant is a well-formed UUID before it is vouched into the SAN (ADR-0003).
-  echo "$company" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
-    || die "company_uuid is not a UUID: $company"
+  [ -n "$1" ] && [ -n "$2" ] || die "usage: device-ca.sh issue <company_uuid> <device_id> [csr.pem]"
+  identity_args "$1" "$2"; csr="$3"
   [ -f "$INT/intermediate.crt" ] || die "CA not initialized — run: device-ca.sh init"
-  out="$DEV/$device"; mkdir -p "$out"
+  # One directory per tenant and device, one file set per certificate serial: a renewal is a new
+  # serial beside the old one, never an overwrite, and the same device_id under two tenants is two
+  # directories. current.* points at the newest, for producers that read a fixed path.
+  out="$DEV/$company/$device"; mkdir -p "$out"
+  tmp=$(mktemp -d "$out/.issue.XXXXXX")
 
   if [ -z "$csr" ]; then
     echo "[issue] TEST mode: generating device key on the CA host (NOT for real devices)"
-    openssl genrsa -out "$out/$device.key" 2048
-    openssl req -new -key "$out/$device.key" -subj "/CN=$device" -out "$out/$device.csr"
-    csr="$out/$device.csr"; chmod 600 "$out/$device.key"
+    openssl genrsa -out "$tmp/device.key" 2048
+    chmod 600 "$tmp/device.key"
+    openssl req -new -key "$tmp/device.key" -subj "/CN=$device" -out "$tmp/device.csr"
+    csr="$tmp/device.csr"
   fi
 
   write_int_cnf "URI:${SAN_PREFIX}/${company}/device/${device}"
   openssl ca -config "$CNF" -batch -notext \
-    -in "$csr" -out "$out/$device.crt" -extensions device_cert
-  rm -f "$out/$device.csr"
+    -in "$csr" -out "$tmp/device.crt" -extensions device_cert
+  serial=$(openssl x509 -in "$tmp/device.crt" -noout -serial | sed 's/^serial=//')
+  mv "$tmp/device.crt" "$out/$serial.crt"
+  [ -f "$tmp/device.key" ] && mv "$tmp/device.key" "$out/$serial.key"
+  rm -rf "$tmp"
   # Full chain for the device to present (leaf + intermediate).
-  cat "$out/$device.crt" "$INT/intermediate.crt" > "$out/$device.chain.crt"
-  echo "issued: $out/$device.crt   SAN=URI:${SAN_PREFIX}/${company}/device/${device}"
+  cat "$out/$serial.crt" "$INT/intermediate.crt" > "$out/$serial.chain.crt"
+  for ext in crt chain.crt key; do
+    rm -f "$out/current.$ext"
+    if [ -f "$out/$serial.$ext" ]; then ln -s "$serial.$ext" "$out/current.$ext"; fi
+  done
+  echo "issued: $out/$serial.crt   serial=$serial   SAN=URI:${SAN_PREFIX}/${company}/device/${device}"
+}
+
+san_names() {
+  # The identity this CA vouched for in a certificate's URI SAN: prints "<tenant>/<device>",
+  # tenant lower-cased (certificates issued before canonicalization may carry upper case).
+  openssl x509 -in "$1" -noout -ext subjectAltName 2>/dev/null | tr ',' '\n' \
+    | sed -n "s|^[[:space:]]*URI:${SAN_PREFIX}/\([0-9A-Fa-f-]\{36\}\)/device/\(.*\)$|\1 \2|p" \
+    | while read -r t d; do echo "$(echo "$t" | tr 'A-F' 'a-f')/$d"; done
 }
 
 cmd_revoke() {
-  device="$1"; [ -n "$device" ] || die "usage: device-ca.sh revoke <device_id>"
-  [ -f "$DEV/$device/$device.crt" ] || die "no issued cert for device: $device"
+  # Revokes EVERY still-valid certificate the CA issued for this tenant's device: renewals
+  # included, and nothing of another tenant's device that shares the device_id. The match is on
+  # the SAN of each issued certificate (new_certs_dir keeps them all), not on a file path.
+  [ -n "$1" ] && [ -n "$2" ] || die "usage: device-ca.sh revoke <company_uuid> <device_id>"
+  identity_args "$1" "$2"
+  [ -f "$INT/index.txt" ] || die "CA not initialized — run: device-ca.sh init"
   write_int_cnf
-  openssl ca -config "$CNF" -revoke "$DEV/$device/$device.crt"
+  n=0
+  for serial in $(awk -F '\t' '$1 == "V" { print $4 }' "$INT/index.txt"); do
+    cert="$INT/newcerts/$serial.pem"
+    [ -f "$cert" ] || die "issued cert $serial is missing from $INT/newcerts"
+    if san_names "$cert" | grep -qxF "$company/$device"; then
+      openssl ca -config "$CNF" -revoke "$cert"
+      echo "revoked serial $serial"
+      n=$((n + 1))
+    fi
+  done
+  [ "$n" -gt 0 ] || die "no valid certificate for tenant $company device $device"
   cmd_crl
-  echo "revoked: $device (CRL refreshed)"
+  echo "revoked: $n certificate(s) of $company/$device (CRL refreshed)"
 }
 
 publish_bundle() {
@@ -248,5 +293,5 @@ case "$sub" in
   root-crl) cmd_root_crl ;;
   check)  cmd_check "$@" ;;
   chain)  cmd_chain ;;
-  *) echo "usage: device-ca.sh {init|issue <uuid> <device_id> [csr]|revoke <device_id>|crl|root-crl|check [crl] [chain]|chain}" >&2; exit 1 ;;
+  *) echo "usage: device-ca.sh {init|issue <uuid> <device_id> [csr]|revoke <uuid> <device_id>|crl|root-crl|check [crl] [chain]|chain}" >&2; exit 1 ;;
 esac

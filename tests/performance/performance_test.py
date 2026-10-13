@@ -7,6 +7,7 @@ Performance Test Script for IndustryFlow
 Tests throughput with configurable msg/sec rate
 Logs: throughput, latency, errors, system metrics
 """
+import os
 import pandas as pd
 import json
 import time
@@ -21,10 +22,15 @@ import csv
 # Configuration
 CSV_FILE = '../../extensions/tep-reference/producer/data/tep_streaming_data.csv'
 SENSORS_MAPPING = '../../extensions/tep-reference/producer/data/sensors_mapping.json'
-INGESTION_URL = 'http://localhost:8003/ingest'
+# Device mTLS through the ingestion edge (ADR-0002): ingestion-service itself is reachable only
+# from the edge. Use a device certificate from scripts/device-ca.sh issue (docs/operations/device-mtls.md).
+INGESTION_URL = os.getenv('INGESTION_URL', 'https://localhost:8443/ingest')
+DEVICE_CERT = os.getenv('DEVICE_CERT', '')
+DEVICE_KEY = os.getenv('DEVICE_KEY', '')
+# Verify the edge's server certificate against this CA bundle; empty = skip (local self-signed).
+INGEST_CA = os.getenv('INGEST_CA', '')
 EQUIPMENT_ID = '550e8400-e29b-41d4-a716-446655440100'
 SITE_ID = 'factory-tep'
-JWT_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiZDZhOGE0NC1lMDE4LTQwNDItODUzOS1jODRjZjY3MTU5MjEiLCJhdWQiOlsiZmFzdGFwaS11c2VyczphdXRoIl0sImV4cCI6MTc2MzY2NDU5OH0.2sZ5gp5MNM77-vXbJ2-52XGacqtsLaO6CLy_mmDLeRY'
 
 # Test parameters (set these before running)
 TARGET_MSG_PER_SEC = 500  # messages per second
@@ -86,7 +92,8 @@ def send_measurement(sensor_id, value, unit, timestamp, headers, monitor):
     
     start = time.time()
     try:
-        response = requests.post(INGESTION_URL, json=payload, headers=headers, timeout=5)
+        response = requests.post(INGESTION_URL, json=payload, headers=headers, timeout=5,
+                                 cert=(DEVICE_CERT, DEVICE_KEY), verify=INGEST_CA or False)
         latency_ms = (time.time() - start) * 1000
         
         if response.status_code == 202:
@@ -118,9 +125,10 @@ def main():
     df = pd.read_csv(CSV_FILE)
     print(f"✓ Loaded {len(sensors)} sensors, {len(df):,} rows")
     
-    # Prepare headers
+    if not (DEVICE_CERT and DEVICE_KEY):
+        raise SystemExit("set DEVICE_CERT and DEVICE_KEY to a device certificate from scripts/device-ca.sh issue")
+    # No bearer token: the client certificate is the credential.
     headers = {
-        'Authorization': f'Bearer {JWT_TOKEN}',
         'Content-Type': 'application/json'
     }
     

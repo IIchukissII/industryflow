@@ -28,9 +28,16 @@ device ──mTLS (client cert)──▶ ingestion edge (nginx) ──verified c
 2. The edge verifies the certificate against the device-CA chain and the CRL
    (`ssl_verify_client on`). An absent, untrusted, or revoked certificate is rejected at
    the handshake (HTTP 400).
-3. The edge forwards the request to `ingestion-service` (which has **no host port** — it is
-   reachable only via the edge) with the verified certificate in `X-Client-Cert`. These
-   headers are set by the proxy, so a client cannot spoof them.
+3. The edge forwards the request to `ingestion-service` with the verified certificate in its
+   identity headers. The service has **no host port** and sits on networks only the edge and
+   Kafka share, so the edge is the only way in. The edge sets the identity headers itself,
+   overwriting anything the client sent.
+
+   Each deployment uses one header convention, named by `DEVICE_IDENTITY_HEADERS`: the Compose
+   edge sets `X-Client-Verify`/`X-Client-Cert` (`x-client`), and ingress-nginx on Kubernetes sets
+   `ssl-client-verify`/`ssl-client-cert` (`ssl-client`). The service reads only its
+   deployment's convention and refuses any request that carries the other one's headers, since
+   only a client could have put them there.
 4. Ingestion reads `company_id` + `device_id` from the certificate's URI SAN
    (`industryflow:tenant/<uuid>/device/<id>`), UUID-validates the tenant, and uses it to
    route the write. The body never carries a tenant.
@@ -57,23 +64,32 @@ For a local/test producer (key generated on the CA host — never for real devic
 
 ```sh
 scripts/device-ca.sh issue <company_uuid> <device_id>
-# -> deploy/device-ca/devices/<device_id>/{<id>.crt,<id>.key,<id>.chain.crt}
+# -> deploy/device-ca/devices/<company_uuid>/<device_id>/<serial>.{crt,key,chain.crt}
+#    and current.{crt,key,chain.crt} pointing at the newest
 ```
+
+Certificates are stored per tenant and per serial. Renewing a device (issuing again, from a
+fresh key/CSR) adds a new serial next to the old one and moves `current.*`; nothing is
+overwritten. The same `device_id` under two tenants is two separate devices.
 
 Point a producer at the edge with its certificate:
 
 ```sh
 INGESTION_URL=https://<host>:8443/ingest \
-DEVICE_CERT=deploy/device-ca/devices/<id>/<id>.chain.crt \
-DEVICE_KEY=deploy/device-ca/devices/<id>/<id>.key \
+DEVICE_CERT=deploy/device-ca/devices/<company_uuid>/<device_id>/current.chain.crt \
+DEVICE_KEY=deploy/device-ca/devices/<company_uuid>/<device_id>/current.key \
   python3 extensions/tep-reference/producer/stream_tep_data.py
 ```
 
 ## Revoke a device
 
 ```sh
-scripts/device-ca.sh revoke <device_id>         # refreshes the CRL
+scripts/device-ca.sh revoke <company_uuid> <device_id>   # refreshes the CRL
 ```
+
+This revokes **every** still-valid certificate the CA issued for that tenant's device, renewals
+included. It finds them by the identity in each issued certificate's SAN, so another tenant's
+device with the same `device_id` is untouched.
 
 On Compose the edge reloads itself within a minute of the CRL changing. A revoked device is then
 refused at the edge, without waiting for its certificate to expire. On Kubernetes, publish the

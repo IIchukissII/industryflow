@@ -114,8 +114,8 @@ scripts/device-ca.sh init                                  # once
 scripts/device-ca.sh issue <company_id> tep-producer
 
 # Terminal 1: stream (data files resolve relative to the script; cert via env)
-DEVICE_CERT=deploy/device-ca/devices/tep-producer/tep-producer.chain.crt \
-DEVICE_KEY=deploy/device-ca/devices/tep-producer/tep-producer.key \
+DEVICE_CERT=deploy/device-ca/devices/<company_id>/tep-producer/current.chain.crt \
+DEVICE_KEY=deploy/device-ca/devices/<company_id>/tep-producer/current.key \
 INGESTION_URL=https://localhost:8443/ingest \
   python3 extensions/tep-reference/producer/stream_tep_data.py
 
@@ -294,8 +294,8 @@ python3 tests/performance/performance_test.py        # see the scripts in tests/
 
 ```bash
 # Reference producer (device mTLS — see step 5 for the cert). Data resolves relative to the script.
-DEVICE_CERT=deploy/device-ca/devices/tep-producer/tep-producer.chain.crt \
-DEVICE_KEY=deploy/device-ca/devices/tep-producer/tep-producer.key \
+DEVICE_CERT=deploy/device-ca/devices/<company_id>/tep-producer/current.chain.crt \
+DEVICE_KEY=deploy/device-ca/devices/<company_id>/tep-producer/current.key \
   python3 extensions/tep-reference/producer/stream_tep_data.py
 ```
 

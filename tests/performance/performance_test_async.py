@@ -6,6 +6,8 @@
 Async Performance Test Script for IndustryFlow
 Tests throughput with concurrent async requests
 """
+import os
+import ssl
 import pandas as pd
 import json
 import time
@@ -20,10 +22,27 @@ import csv
 # Configuration
 CSV_FILE = '../../extensions/tep-reference/producer/data/tep_streaming_data.csv'
 SENSORS_MAPPING = '../../extensions/tep-reference/producer/data/sensors_mapping.json'
-INGESTION_URL = 'http://localhost:8003/ingest'
+# Device mTLS through the ingestion edge (ADR-0002): ingestion-service itself is reachable only
+# from the edge. Use a device certificate from scripts/device-ca.sh issue (docs/operations/device-mtls.md).
+INGESTION_URL = os.getenv('INGESTION_URL', 'https://localhost:8443/ingest')
+DEVICE_CERT = os.getenv('DEVICE_CERT', '')
+DEVICE_KEY = os.getenv('DEVICE_KEY', '')
+# Verify the edge's server certificate against this CA bundle; empty = skip (local self-signed).
+INGEST_CA = os.getenv('INGEST_CA', '')
 EQUIPMENT_ID = '550e8400-e29b-41d4-a716-446655440100'
 SITE_ID = 'factory-tep'
-JWT_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiZDZhOGE0NC1lMDE4LTQwNDItODUzOS1jODRjZjY3MTU5MjEiLCJhdWQiOlsiZmFzdGFwaS11c2VyczphdXRoIl0sImV4cCI6MTc2MzY2NDU5OH0.2sZ5gp5MNM77-vXbJ2-52XGacqtsLaO6CLy_mmDLeRY'
+
+
+def client_ssl_context() -> ssl.SSLContext:
+    """TLS context presenting the device certificate to the mTLS edge."""
+    if not (DEVICE_CERT and DEVICE_KEY):
+        raise SystemExit("set DEVICE_CERT and DEVICE_KEY to a device certificate from scripts/device-ca.sh issue")
+    ctx = ssl.create_default_context(cafile=INGEST_CA or None)
+    if not INGEST_CA:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    ctx.load_cert_chain(DEVICE_CERT, DEVICE_KEY)
+    return ctx
 
 # Test parameters
 TARGET_MSG_PER_SEC = 1500
@@ -131,9 +150,9 @@ async def main():
     df = pd.read_csv(CSV_FILE)
     print(f"✓ Loaded {len(sensors)} sensors, {len(df):,} rows")
     
-    # Prepare headers
+    # No bearer token: the client certificate is the credential.
+    connector = aiohttp.TCPConnector(ssl=client_ssl_context())
     headers = {
-        'Authorization': f'Bearer {JWT_TOKEN}',
         'Content-Type': 'application/json'
     }
     
@@ -159,7 +178,7 @@ async def main():
     # Create queue and workers
     queue = asyncio.Queue(maxsize=CONCURRENT_REQUESTS * 2)
     
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(connector=connector) as session:
         # Start workers
         workers = [asyncio.create_task(worker(queue, session, headers, monitor)) 
                    for _ in range(CONCURRENT_REQUESTS)]
