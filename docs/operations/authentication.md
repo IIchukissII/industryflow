@@ -36,8 +36,11 @@ requests — bearer/API clients are exempt, and `/auth/*` is exempt.
 The websockets (`/ws/sensors`, `/ws/sensors/{equipment_id}`) authenticate only from the same
 `if_access` cookie on the `wss://` handshake. A `?token=` in the URL is not accepted, since URLs
 end up in access logs. A socket lives no longer than its session: it closes with code **4401** when
-the access token expires (the client refreshes via `/auth/refresh` and reconnects) and with
-**1008** when the user is inactive or deactivated (checked every minute while open).
+the access token expires or the session it was opened in has ended — by a logout of that session, or
+by anything that ends all of the user's sessions (the client refreshes via `/auth/refresh` and
+reconnects, or signs in again) — and with **1008** when the user is inactive or deactivated or their
+company is suspended. An open socket re-checks every `WS_SESSION_RECHECK_SECONDS` (default 60), so
+it outlives the end of its session by at most that.
 Because CORS does not apply to websockets and the browser sends the cookie on any handshake, the
 gateway also checks the handshake's `Origin`: it must be in `CORS_ORIGINS` or be exactly the
 host the request was addressed to, else the socket closes with 1008. List the frontend's public
@@ -61,9 +64,25 @@ Refresh tokens are **single-use and rotated** on every refresh (reuse is detecte
 rejected) and are **revoked server-side** on logout, together with the user's notebook
 capabilities (ADR-0012 dec 6). They are indexed per user, and **all** of a user's sessions and
 notebook capabilities are revoked when the password is changed or reset, when the user is
-deactivated (including by deactivating their company) and when the user is deleted. Each refresh
-token also carries a fingerprint of the password hash it was issued under, so a password set
-outside the gateway (the admin CLI) ends the existing sessions at their next refresh.
+deactivated, when their company is deactivated (by `PUT /api/companies/{id}` with
+`is_active: false` or by `DELETE`, which take the same path) and when the user is deleted. Each
+refresh token also carries a fingerprint of the password hash it was issued under, so a password
+set outside the gateway (the admin CLI) ends the existing sessions at their next refresh.
+
+A refresh token carries the id of its session from rotation to rotation, and every access token
+minted in the session names it (`sid`) along with its issue time (`iat`). Ending a session records
+that it ended, and ending all of a user's sessions records when; both records live for one
+access-token lifetime, which is as long as any token issued before them can. That is what an open
+socket re-checks.
+
+**Suspended companies.** A user whose company is inactive is refused at sign-in, on every
+session-authenticated request, at refresh, on a socket and on a notebook capability. The gateway
+reads the company's flag through a per-process cache held for `COMPANY_STATUS_CACHE_SECONDS`
+(default 30); the replica that changes the flag sees it at once. Deactivating also writes a
+suspension marker (`nbcap-suspended:<company_id>`) into the capability store, which the SQL proxy,
+the tracking gateway, the cold-store broker, the hub and the model-upload minter all consult, so
+no handle bound to the company resolves or is minted anywhere from that moment. Reactivating
+removes the marker; it restores no session.
 
 ## Endpoints (API Gateway)
 

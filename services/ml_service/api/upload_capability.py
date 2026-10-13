@@ -55,6 +55,15 @@ DEFAULT_TTL_SECONDS = 600
 _HANDLE_BYTES = 32
 
 
+# Present while a company is suspended (ADR-0033 dec 3): nothing is minted for it. Shared contract
+# with the platform API, which writes it (services/api_gateway/capability_auth.py).
+_SUSPENDED_PREFIX = "nbcap-suspended:"
+
+
+def suspended_key(company_id: str) -> str:
+    return f"{_SUSPENDED_PREFIX}{company_id}"
+
+
 def store_key(handle: str) -> str:
     return f"{_KEY_PREFIX}{handle}"
 

@@ -388,6 +388,11 @@ async def mint_upload_capability(
         # No tenant, or no user. A handle bound to nothing is not a weaker capability; it is a hole.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # A suspended company is issued nothing (ADR-0033 dec 3); the platform API keeps this marker
+    # with the company's active flag, and every verifier refuses the company's handles by it.
+    if await store.get(upload_capability.suspended_key(record["company_id"])) is not None:
+        raise HTTPException(status_code=403, detail="This company is suspended.")
+
     await store.set(
         upload_capability.store_key(handle),
         json.dumps(record),

@@ -136,3 +136,44 @@ def test_the_record_holds_bound_facts_and_nothing_resembling_a_secret():
     uc.mint(s.set, user="alice", company_id=CID)
     _, rec, _ = _minted(s)
     assert set(rec) == {"user", "company_id", "audience", "read_only"}
+
+
+# --- a suspended company is issued nothing (ADR-0033 dec 3) ------------------------------------
+
+def _mint_route(store):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import auth
+    from routers import models
+
+    app = FastAPI()
+    app.include_router(models.router)
+    app.state.capability_store = store
+    app.dependency_overrides[auth.verify_jwt_token] = lambda: {"payload": {"sub": "user-1"}}
+    app.dependency_overrides[models.get_company_id_dependency] = lambda: CID
+    return TestClient(app).post("/api/models/upload-capability")
+
+
+class FakeAsyncStore:
+    def __init__(self, mapping=None):
+        self.kv = dict(mapping or {})
+
+    async def get(self, key):
+        return self.kv.get(key)
+
+    async def set(self, key, value, ex=None):
+        self.kv[key] = value
+
+
+def test_the_route_mints_for_an_active_tenant():
+    store = FakeAsyncStore()
+    r = _mint_route(store)
+    assert r.status_code == 201, r.text
+    assert f"nbcap:{r.json()['capability']}" in store.kv
+
+
+def test_the_route_refuses_a_suspended_tenant():
+    store = FakeAsyncStore({uc.suspended_key(CID): "1"})
+    r = _mint_route(store)
+    assert r.status_code == 403
+    assert not [k for k in store.kv if k.startswith("nbcap:") and not k.startswith("nbcap-suspended:")]

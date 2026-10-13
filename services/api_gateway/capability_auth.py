@@ -25,6 +25,14 @@ AUDIENCE_API = "api"
 _KEY_PREFIX = "nbcap:"
 # The hub's per-user index of the handles it minted (handle -> server).
 _USER_INDEX_PREFIX = "nbcap-user:"
+# Present while a company is suspended (ADR-0033 dec 3): no handle bound to it resolves or is
+# minted. Written by the gateway when a company is deactivated, removed when it is reactivated
+# (company_status.py). Shared contract with every other verifier and minter of handles.
+SUSPENDED_PREFIX = "nbcap-suspended:"
+
+
+def suspended_key(company_id: str) -> str:
+    return f"{SUSPENDED_PREFIX}{company_id}"
 
 
 @dataclass(frozen=True)
@@ -45,7 +53,8 @@ async def resolve_capability(
 
     ``aget`` is an async getter over the store (e.g. ``redis.get``) returning the stored value
     or None. None / unknown / wrong-audience / malformed all deny — including a record that is not
-    an object or whose tenant is missing or not a UUID, which must be a refusal, not a 500.
+    an object or whose tenant is missing or not a UUID, which must be a refusal, not a 500 — and so
+    does a handle whose tenant is suspended.
     """
     if not handle:
         return None
@@ -66,6 +75,8 @@ async def resolve_capability(
         # Canonical, or deny: the tenant scopes every query this request makes (ADR-0003).
         company_id = str(uuid.UUID(str(record.get("company_id") or "")))
     except ValueError:
+        return None
+    if await aget(suspended_key(company_id)) is not None:
         return None
     return CapabilityBinding(
         user=str(record.get("user", "")),

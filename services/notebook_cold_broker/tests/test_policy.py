@@ -80,3 +80,16 @@ def test_owns_key_rejects_other_tenant():
     other = str(uuid.uuid4())
     assert not policy.owns_key(CID, f"tenant_{other}/x")
     assert policy.owns_key(CID, f"tenant_{CID}/x")
+
+
+def test_a_suspended_tenants_handle_is_denied():
+    # ADR-0033 dec 3: while the platform marks the company suspended, none of its handles resolve.
+    store = {"nbcap:h": json.dumps({"user": "u", "company_id": CID, "audience": "cold"})}
+    assert _resolve(store, "h") is not None
+    store[f"nbcap-suspended:{CID}"] = "1"
+    assert _resolve(store, "h") is None
+
+
+def test_a_handle_with_a_malformed_tenant_is_denied():
+    store = {"nbcap:h": json.dumps({"user": "u", "company_id": "not-a-uuid", "audience": "cold"})}
+    assert _resolve(store, "h") is None

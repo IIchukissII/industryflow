@@ -117,3 +117,13 @@ def test_setup_statements_without_read_only():
     cid = str(uuid.uuid4())
     stmts = b.session_setup_statements(b.SqlBinding(user="u", company_id=cid, read_only=False))
     assert stmts == [f'SET ROLE "{b.reader_role(cid)}"', f'SET search_path TO "{b.tenant_schema(cid)}"']
+
+
+@pytest.mark.asyncio
+async def test_a_suspended_tenants_handle_is_denied():
+    # ADR-0033 dec 3: while the platform marks the company suspended, none of its handles resolve.
+    cid = str(uuid.uuid4())
+    store = FakeAsyncStore({f"{b._KEY_PREFIX}h": _rec(cid)})
+    assert await b.resolve_sql_binding(store.get, "h") is not None
+    store.mapping[f"nbcap-suspended:{cid}"] = "1"
+    assert await b.resolve_sql_binding(store.get, "h") is None

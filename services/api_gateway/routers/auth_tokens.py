@@ -24,6 +24,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users.exceptions import UserNotExists
 from pydantic import BaseModel
 
+import company_status
 from capability_auth import revoke_user_capabilities
 from config import get_settings
 from users import get_user_manager, get_jwt_strategy, ACCESS_COOKIE
@@ -78,8 +79,9 @@ async def login(
     user = await user_manager.authenticate(credentials)
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="LOGIN_BAD_CREDENTIALS")
-    access = await get_jwt_strategy().write_token(user)
-    refresh = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password)
+    session_id = refresh_tokens.new_session_id()
+    access = await get_jwt_strategy().write_token(user, session_id)
+    refresh = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, session_id)
     _set_auth_cookies(response, access, refresh)
     return TokenPair(access_token=access, refresh_token=refresh)
 
@@ -110,8 +112,15 @@ async def refresh(
     if claim.credential != refresh_tokens.credential_fingerprint(user.hashed_password):
         await refresh_tokens.end_all_sessions(str(user.id))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session ended by a credential change")
-    new_refresh = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password)
-    access = await get_jwt_strategy().write_token(user)
+    # The company was suspended (ADR-0033 dec 3). Its sessions were ended when it was; this one
+    # slipped past that (or the flag was set elsewhere), so end what is left of the user's.
+    if user.company_id and not await company_status.is_company_active(user.company_id):
+        await refresh_tokens.end_all_sessions(str(user.id))
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+    # The rotation continues the session; a token from before sessions had ids starts one.
+    session_id = claim.session_id or refresh_tokens.new_session_id()
+    new_refresh = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, session_id)
+    access = await get_jwt_strategy().write_token(user, session_id)
     _set_auth_cookies(response, access, new_refresh)
     return TokenPair(access_token=access, refresh_token=new_refresh)
 
@@ -122,7 +131,8 @@ async def logout(request: Request, response: Response, body: Optional[RefreshReq
     the auth cookies.
 
     Ending the platform session ends what was minted against it (ADR-0012 dec 6): every notebook
-    capability of the user stops working now, and the hub stops their server at its next poll.
+    capability of the user stops working now, and the hub stops their server at its next poll. The
+    session is recorded as ended, so a socket opened in it closes at its next re-check.
     """
     token = (body.refresh_token if body and body.refresh_token else None) or request.cookies.get(REFRESH_COOKIE)
     if token:

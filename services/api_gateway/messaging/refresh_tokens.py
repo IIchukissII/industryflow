@@ -13,10 +13,17 @@ Every token is also indexed under its user, so all of a user's sessions can be r
 on a password change or reset, on deactivation and on deletion (users.UserManager). The
 password fingerprint covers what the index cannot see: a password set outside the gateway (the
 admin CLI writes the database directly) no longer matches, so the old sessions cannot refresh.
+
+A session has an id that its refresh tokens carry from rotation to rotation and that every access
+token minted in it names (``sid``). Ending a session records that it ended, and ending all of a
+user's sessions records when; both records outlive every access token issued before them, and that
+is what a live socket re-checks (``session_ended``, ADR-0004 dec 9): a socket closes within its
+re-check interval of its session ending, rather than only when its access token expires.
 """
 import hashlib
 import json
 import secrets
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -27,12 +34,18 @@ settings = get_settings()
 
 _PREFIX = "refresh:"
 _USER_PREFIX = "refresh-user:"
+# A session that was ended (logout, or one of the user's sessions ended all at once).
+_ENDED_SESSION_PREFIX = "session-ended:"
+# When all of a user's sessions were last ended (epoch seconds).
+_USER_ENDED_PREFIX = "sessions-ended-at:"
 
 
 @dataclass(frozen=True)
 class RefreshClaim:
     user_id: str
     credential: str
+    # None for a token issued before sessions had ids: its rotation starts a new session.
+    session_id: Optional[str] = None
 
 
 def _key(token: str) -> str:
@@ -52,10 +65,25 @@ def _ttl() -> int:
     return settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
 
 
-async def create_refresh_token(user_id: str, hashed_password: str) -> str:
-    """Issue a new opaque refresh token for a user, store it with a TTL and index it by user."""
+def _ended_ttl() -> int:
+    """How long an ended-session record must live: past the expiry of any access token issued
+    before it (one access-token lifetime, plus a minute of clock skew)."""
+    return settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60 + 60
+
+
+def new_session_id() -> str:
+    return secrets.token_urlsafe(16)
+
+
+async def create_refresh_token(user_id: str, hashed_password: str, session_id: Optional[str] = None) -> str:
+    """Issue a new opaque refresh token for a user, store it with a TTL and index it by user.
+
+    ``session_id`` is the session the token continues (a rotation); without one it starts a new
+    session.
+    """
     token = secrets.token_urlsafe(48)
-    value = json.dumps({"uid": str(user_id), "cred": credential_fingerprint(hashed_password)})
+    value = json.dumps({"uid": str(user_id), "cred": credential_fingerprint(hashed_password),
+                        "sid": session_id or new_session_id()})
     async with redis_client.redis.pipeline(transaction=True) as pipe:
         pipe.set(_key(token), value, ex=_ttl())
         pipe.sadd(_user_key(str(user_id)), token)
@@ -79,8 +107,10 @@ async def claim_refresh_token(token: str) -> Optional[RefreshClaim]:
         raw = raw.decode()
     try:
         data = json.loads(raw)
-        claim = RefreshClaim(user_id=str(data["uid"]), credential=str(data["cred"]))
-    except (ValueError, KeyError, TypeError):
+        sid = data.get("sid")
+        claim = RefreshClaim(user_id=str(data["uid"]), credential=str(data["cred"]),
+                             session_id=str(sid) if sid else None)
+    except (ValueError, KeyError, TypeError, AttributeError):
         # Pre-fingerprint tokens held only a user id: they cannot prove the password is unchanged.
         return None
     await redis_client.redis.srem(_user_key(claim.user_id), token)
@@ -99,12 +129,25 @@ async def revoke_refresh_token(token: str) -> Optional[str]:
         return None
     if isinstance(raw, bytes):
         raw = raw.decode()
-    try:
-        user_id = str(json.loads(raw)["uid"])
-    except (ValueError, KeyError, TypeError):
-        user_id = raw
+    user_id, session_id = _owner(raw)
+    if session_id:
+        await _record_session_ended(session_id)
     await redis_client.redis.srem(_user_key(user_id), token)
     return user_id
+
+
+def _owner(raw: str) -> tuple[str, Optional[str]]:
+    """The user and session a stored token value names; a pre-fingerprint value is the bare user id."""
+    try:
+        data = json.loads(raw)
+        sid = data.get("sid")
+        return str(data["uid"]), (str(sid) if sid else None)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return raw, None
+
+
+async def _record_session_ended(session_id: str) -> None:
+    await redis_client.redis.set(f"{_ENDED_SESSION_PREFIX}{session_id}", "1", ex=_ended_ttl())
 
 
 async def revoke_all_refresh_tokens(user_id: str) -> int:
@@ -113,17 +156,50 @@ async def revoke_all_refresh_tokens(user_id: str) -> int:
     tokens = await redis_client.redis.smembers(index)
     if not tokens:
         return 0
-    live = await redis_client.redis.delete(*(_key(t.decode() if isinstance(t, bytes) else t) for t in tokens))
+    live = 0
+    for t in tokens:
+        raw = await redis_client.redis.getdel(_key(t.decode() if isinstance(t, bytes) else t))
+        if raw is None:
+            continue
+        live += 1
+        _, session_id = _owner(raw.decode() if isinstance(raw, bytes) else raw)
+        if session_id:
+            await _record_session_ended(session_id)
     # Remove exactly what was revoked: a token issued meanwhile stays indexed (and revocable).
     await redis_client.redis.srem(index, *tokens)
-    return int(live)
+    return live
 
 
 async def end_all_sessions(user_id: str) -> None:
     """End everything a user is signed in with: every refresh token (platform session) and every
     notebook capability minted against them (ADR-0012 dec 6). Used on password change or reset,
-    deactivation and deletion, as logout does for one session."""
+    deactivation, deletion and the deactivation of the user's company, as logout does for one
+    session. The time is recorded first, so an access token issued before this call can be told
+    from one issued after it (``session_ended``)."""
     from capability_auth import revoke_user_capabilities
 
+    await redis_client.redis.set(f"{_USER_ENDED_PREFIX}{user_id}", repr(time.time()), ex=_ended_ttl())
     await revoke_all_refresh_tokens(str(user_id))
     await revoke_user_capabilities(redis_client.redis, str(user_id))
+
+
+async def session_ended(user_id: str, session_id: Optional[str], issued_at: Optional[float]) -> bool:
+    """Whether the session an access token was issued in has since ended.
+
+    True if that session was ended by itself (logout), or all of the user's sessions were ended at
+    or after the token's issue time. A token with no issue time cannot be placed after such an end,
+    so it counts as ended by it. Whole seconds round towards ended: a token issued in the same
+    second as the end is treated as issued before it, and its holder refreshes.
+    """
+    if session_id and await redis_client.redis.get(f"{_ENDED_SESSION_PREFIX}{session_id}") is not None:
+        return True
+    ended_at = await redis_client.redis.get(f"{_USER_ENDED_PREFIX}{user_id}")
+    if ended_at is None:
+        return False
+    if isinstance(ended_at, bytes):
+        ended_at = ended_at.decode()
+    try:
+        ended = float(ended_at)
+    except ValueError:
+        return True
+    return issued_at is None or float(issued_at) <= ended

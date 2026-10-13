@@ -43,6 +43,10 @@ AUDIENCE_TRACKING = "tracking"  # the gateway's copy of the audience (ADR-0019 /
 # them, or uploads escape the refusal that is the precondition for admitting them at all.
 AUDIENCE_UPLOAD = "upload"
 _KEY_PREFIX = "nbcap:"
+# Present while the handle's company is suspended (ADR-0033 dec 3): its handles do not resolve.
+# Written and removed by the platform API with the company's active flag; shared contract
+# (services/api_gateway/capability_auth.py).
+_SUSPENDED_PREFIX = "nbcap-suspended:"
 
 
 @dataclass(frozen=True)
@@ -62,7 +66,8 @@ async def _resolve_binding(
 
     None means the gateway refuses. Absent/expired/revoked/malformed all deny (ADR-0015 dec 1-2),
     and the audience must match exactly — possession of one plane's handle never yields another's
-    (dec 3). The audience is compared, never defaulted: a record with no audience denies.
+    (dec 3). The audience is compared, never defaulted: a record with no audience denies. A handle
+    whose tenant is suspended denies.
     """
     if not handle:
         return None
@@ -84,6 +89,8 @@ async def _resolve_binding(
         # a refusal rather than a 500 from the first place it is used.
         company_id = str(uuid.UUID(str(record.get("company_id") or "")))
     except ValueError:
+        return None
+    if await aget(f"{_SUSPENDED_PREFIX}{company_id}") is not None:
         return None
     return TrackingBinding(
         user=record.get("user", ""), company_id=company_id, audience=expected_audience
