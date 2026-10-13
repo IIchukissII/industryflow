@@ -144,8 +144,8 @@ vouch for, and what must an uploaded artifact do instead?**
    > and a read-only principal is not a second writer.
    >
    > The sentence above that it "holds no object-store credential at all" is superseded. It reflected a
-   > platform in which every service shared the store's root credential and the only way to hold less
-   > was to hold nothing. Every platform service that reaches the object store now holds a principal
+   > platform in which the services that reached the store did so with broad, shared credentials, so
+   > the only way to hold less was to hold nothing. Every platform service that reaches the object store now holds a principal
    > **scoped to what it does** — its own buckets or prefixes, and only the verbs it uses — and only the
    > object store itself and its one bootstrap hold the root credential. Least privilege, not absence,
    > is what bounds a compromised component.
