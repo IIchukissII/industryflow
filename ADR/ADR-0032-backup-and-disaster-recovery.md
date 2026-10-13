@@ -18,8 +18,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 The platform backs up its databases and its cold bucket and nothing else, and no record says why that set is the right one.
 
 What exists was built as operations work, not decided: a scheduled job dumps each database and the
-cluster's role definitions to the object store and prunes old copies, the same job mirrors the cold
-bucket, and a restore tool reloads a dump
+cluster's role definitions to the object store and prunes old copies; the same job mirrors the cold
+bucket; and a restore tool reloads a dump
 with the time-series extension's restore protocol. By default the target is the deployment's own object
 store — the same cluster, the same storage, the same failure domain as the database it protects. A
 continuous-archiving tier for point-in-time recovery is described as planned. That is a reasonable first

@@ -24,15 +24,24 @@ however, inserted only the registry row: a tenant created through the API had no
 request for it failed until an operator ran the script by hand. The obvious repair — have the API
 service create the schema itself — would give a long-running, internet-reachable service the right to
 create schemas and roles in the database of record, which is the opposite of the per-service least
-privilege the platform is built on (ADR-0002, ADR-0003). A concurrent change instead routes API
-provisioning through a privileged database function the service may only execute.
+privilege the platform is built on (ADR-0002, ADR-0003). API provisioning now goes through privileged
+database functions instead: the API's service identity may execute them and holds no schema- or
+role-creating privilege of its own. One provisions a tenant — validating its name, generating its
+identifier, and creating its registry entry, schema, tables and grants in one transaction — and one
+changes a tenant's name or active flag; each refuses to run while the shared namespace it resolves
+names in contains objects owned by an untrusted role, so it cannot be steered into calling one.
 
-**Ending.** The product's "delete company" action removes the registry row and nothing else. The
+**Ending.** The product's "delete company" action used to remove the registry row and nothing else. The
 schema, its data, the per-tenant read-only principal, the tenant's cold-layer prefix, its namespace in
-the tracking store and its model artifacts, its users' notebook volumes — all survive, unreachable by
-the tenant and invisible to the platform, which no longer has a registry row to find them by. That is
-not deletion; it is orphaning. The registry also carries an *active* flag that nothing reads, so there is
-no way to suspend a tenant short of destroying its row.
+the tracking store and its model artifacts, its users' notebook volumes — all survived, unreachable by
+the tenant and invisible to the platform, which no longer had a registry row to find them by. That is
+not deletion; it is orphaning. It now **deactivates** instead: the company is marked inactive, every one
+of its users is deactivated, and all of their sessions — and the notebook capabilities derived from them
+— are ended (ADR-0004 dec 2 rev 2). Nothing is dropped and the registry row stays, so nothing is
+orphaned. That is decision 3's suspend step in substance, offered under the name of a delete, and it is
+not yet all of suspend: the tenant's per-tenant database identity is not disabled, nothing reads the
+company's active flag at request time (the users' flags do the work), and changing the active flag
+directly does not yet end the users' sessions. Delete in decision 4's sense does not exist.
 
 Tenant data now lives in more places than the schema: the cold layer (ADR-0025), the tracking store
 (ADR-0019), per-user volumes (ADR-0020), the capability store, and backups (ADR-0032). Any decision about
@@ -126,6 +135,8 @@ latencies and failure modes; a request that times out halfway leaves exactly the
 - **Who may trigger each step** beyond "platform operator", including any tenant-admin request flow.
 - **Legal holds** that must block deletion.
 - **Reconciling existing orphans** left by the registry-only delete.
+- **Renaming the existing action.** The action the product calls "delete" now suspends (Context);
+  whether it keeps that name until decision 4 exists, and how the two are presented, is open.
 
 ## References
 
