@@ -3,14 +3,15 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0026 — Release model: one trunk, and what `main` is allowed to mean
+# ADR-0026 — Release model: one trunk, and what `main` is allowed to mean (rev 1)
 
 - **ID:** ADR-0026
 - **Status:** Accepted
-- **Date:** 2026-07-13
+- **Date:** 2026-07-13 (rev 1: 2026-07-13, recorded 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0000 (decision records and the single-source-of-truth discipline)
 - **Companions:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (the images this gate certifies, and the digest pinning that consumes them), [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (the deployment profile a whole-stack gate must stand up)
+- **Supersedes:** ADR-0026 rev 0 (2026-07-13 — decision 3 made any non-zero restart count the failure signal; rev 1 makes it continued restarting after convergence)
 - **Related:** [ADR-0017](ADR-0017-database-tls-and-authentication.md) (whose "validated live on the box" language this ADR finally gives a definition to)
 
 ## Context and problem
@@ -42,6 +43,8 @@ A `dev` branch would have caught neither failure. It is a *place* to run a test,
 were found by starting the thing — one by a live proof that already existed, one by a human typing
 `docker compose up`. What was missing was never a branch. It was a check that runs the artifact instead
 of describing it.
+
+**Revision 1 (2026-07-13; recorded 2026-10-13).** Rev 0's decision 3 said a non-zero restart count *is* the signal of a crash-looping service. The first runs of the gate refuted it: on a cold start, services come up before the database and the message broker accept connections, exit, and are restarted until their dependencies are there — ordinary, and already proven harmless by the stack converging to healthy. Under rev 0 every such run failed. The criterion was changed the same day to the one decision 3 now states — convergence, then stability over an interval — by editing the accepted decision in place. This revision records that change as one.
 
 ## Decision drivers
 
@@ -77,6 +80,10 @@ of describing it.
    accept connections and then settles has not failed. So the property the gate must establish is
    *convergence and then stability*, and the question it must answer is **not "did it restart?" but "is
    it still restarting?"**
+
+   > *Rev 0 read:* "A non-zero restart count *is* the signal." *(rev 1)* That fails every cold start that
+   > races its dependencies, so it would either be disabled or be ignored — and a gate that is routinely
+   > red teaches nothing.
 
 4. **The gate exercises the upgrade path: stateful components are started against state written by the
    version being upgraded from.** A gate that only ever meets empty volumes cannot see an upgrade
@@ -131,6 +138,11 @@ wearing a gate's clothes.
 earn their keep — one of them is what caught MLflow on 3.14. But each stands up only the slice its own ADR
 needed, so a service outside every slice (the hub) had no proof at all. The gap was not that they were
 weak; it was that nothing covered the system as a whole.
+
+**E. A zero-restart criterion, with longer start-up waits to hide the race *(rev 1)*.** *Rejected.* It
+tunes the gate to the speed of one runner: a slower runner, or a dependency that grows, brings the race
+back, and the wait only delays the run. Asking whether a service is *still* restarting is correct at any
+speed.
 
 ## Consequences
 

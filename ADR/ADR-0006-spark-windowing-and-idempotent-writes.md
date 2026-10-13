@@ -3,14 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0006: Spark windowing and idempotent writes — bounded state, write-once aggregates, fail-fast batches
+# ADR-0006: Spark windowing and idempotent writes — bounded state, write-once aggregates, fail-fast batches (rev 1)
 
 - **ID:** ADR-0006
 - **Status:** Accepted
-- **Date:** 2026-06-26
+- **Date:** 2026-06-26 (rev 1: 2026-06-27, recorded 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0005 (Kafka delivery semantics)
+- **Refined by:** ADR-0029 (checkpoint cutover across a Spark major)
+- **Supersedes:** ADR-0006 rev 0 (2026-06-26 — decision 5 put each checkpoint on a persistent volume and left the storage medium deferred; rev 1 requires storage visible to every node that runs the query, which for a multi-node pool is the object store, and closes the deferral)
 
 ## Context and problem
 
@@ -22,6 +24,8 @@ The Spark layer reads sensor readings from Kafka and writes them to TimescaleDB 
 - **Ephemeral checkpoints.** The query checkpoint location falls back to container-ephemeral `/tmp`, so a restart cannot recover offsets/state and reprocesses or loses position.
 
 These are facets of one missing decision: how windowed aggregation bounds its state, how often and how idempotently it writes, and what a failed batch does. ADR-0005 made the pipeline at-least-once, which means redelivery and batch retries are now *expected*; that guarantee is only safe if the Spark sinks are idempotent, which today they are not. This ADR decides the windowing and write discipline that makes the Spark layer both correct and a well-behaved at-least-once consumer.
+
+**Revision 1 (2026-06-27; recorded 2026-10-13).** Rev 0's decision 5 placed each streaming query's checkpoint on a persistent volume and deferred the medium. Within a day the deferral was decided by the work that scaled the worker pool: a stateful query's state store is written by the executors and read by the driver, so once executors run on more than one node, a node-local volume — however durable — is the wrong place, and the checkpoint has to sit on one store every node can see. The platform already ran an object store, so the checkpoint moved there. That change was made by editing decision 5 in place after acceptance, with the deferred item left open beside it — the silent edit ADR-0000 dec 5 forbids. This revision records it honestly: decision 5 is restated, the deferred item is closed, and the history is named here rather than reconstructed from version control.
 
 ## Decision drivers
 
@@ -41,7 +45,9 @@ These are facets of one missing decision: how windowed aggregation bounds its st
 
 4. **A write failure fails the batch — uniformly across both jobs.** On a sink error the batch raises, so Spark does not commit offsets and retries it; neither job swallows write exceptions. The streaming and aggregation jobs share this fail-fast policy. Combined with decision 3, a retried batch is safe because the writes are idempotent.
 
-5. **Checkpoints live on durable, shared storage.** Each streaming query's checkpoint location is configured explicitly (never container-ephemeral `/tmp`), so a restart resumes from the committed offsets and state. Because the stateful queries keep a *state store* that the executor writes and the driver reads, the checkpoint must sit on **one store visible to every node**: a multi-worker standalone cluster (or spark-on-k8s) uses **MinIO via S3A** (`CHECKPOINT_LOCATION=s3a://…`), not a node-local volume, which is what lets the worker pool scale horizontally. A local path remains valid for single-node/local-mode runs. (Medium choice expanded from the deferral below; see `docs/architecture/stream-processing.md`.)
+5. **Checkpoints live on durable storage that every node running the query can reach *(rev 1)*.** Each streaming query's checkpoint location is configured explicitly, never left to a container-ephemeral default, so a restart resumes from the committed offsets and state. Because a stateful query keeps a state store that the executors write and the driver reads, the checkpoint must sit on **one store visible to all of them**: when executors run on more than one node, that is the platform's object store, never a node-local volume, and that is what lets the worker pool scale horizontally. Where driver and executor share one process, a durable local volume satisfies the same property. The concrete location and the access configuration are owned by deployment configuration; `docs/architecture/stream-processing.md` describes them.
+
+   > *Rev 0 read:* "Each streaming query's checkpoint location is a persistent volume, not container-ephemeral `/tmp` … configured explicitly rather than relying on a default." A persistent volume is still acceptable for the single-process case; it is excluded where the query spans nodes.
 
 6. **A failed query takes the process down.** The jobs await all streaming queries (e.g. `awaitAnyTermination`) so that if any query dies the process exits and the container's restart policy and healthcheck observe it, rather than one dead query being masked by a still-running sibling.
 
@@ -57,6 +63,8 @@ These are facets of one missing decision: how windowed aggregation bounds its st
 
 **E. Leave the two jobs with different error policies (stream fail-fast, aggregation continue).** *Rejected:* the aggregation "continue" policy is silent data loss and contradicts ADR-0005. Both jobs are at-least-once consumers and must fail the batch on a write error so it is retried.
 
+**F. Keep the checkpoint on a per-node persistent volume and pin each stateful query to one node *(rev 1)*.** *Rejected:* it satisfies durability but forbids the horizontal worker pool, and a node loss strands the checkpoint with the node. The object store is already operated, is visible to every node, and survives the loss of any one of them.
+
 ## Consequences
 
 ### Positive
@@ -71,13 +79,13 @@ These are facets of one missing decision: how windowed aggregation bounds its st
 - A watermark means data later than the allowed lateness is dropped from its window — a deliberate correctness/completeness trade that must be tuned per window (the late-data policy is deferred below).
 - Idempotent upserts require a unique constraint on the aggregation tables and are somewhat more expensive per write than blind appends.
 - Write-once-on-close raises end-to-end latency for an aggregate: a window's row appears when the window closes (plus watermark lag), not continuously as it fills.
-- Durable checkpoints need a provisioned, backed-up volume; a corrupted or lost checkpoint becomes its own recovery concern.
+- Durable checkpoints need provisioned, durable storage — the object store for a multi-node pool (rev 1); a corrupted or lost checkpoint becomes its own recovery concern, and the object store becomes a dependency of the streaming path.
 
 ## Deferred decisions
 
 - **Watermark horizon and window sizes.** The exact allowed-lateness per window and the window definitions (1 min / 5 min / 1 hour) are configuration owned by the jobs/`.env`, not fixed here.
 - **Late-data handling.** Whether data beyond the watermark is simply dropped or routed to a side output / late-correction path is left open.
-- **Checkpoint storage medium.** The concrete durable location (named volume, object store, etc.) is an infrastructure/compose decision.
+- ~~**Checkpoint storage medium.**~~ *Resolved in rev 1, decision 5:* storage visible to every node that runs the query — the object store for a multi-node pool, a durable local volume for a single process. The concrete location remains configuration.
 - **Streaming vs cluster execution.** Whether these jobs continue to run `local[*]` or submit to the provisioned Spark cluster is a separate deployment decision (noted in the review) and is not decided here.
 
 ## References

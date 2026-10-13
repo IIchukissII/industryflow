@@ -81,3 +81,49 @@ host's IP (which is in the cert SAN) — `https://<host-ip>` — or add a `hosts
   restart the frontend. The CA is unchanged, so clients need no action.
 - **Rotate the CA** (compromise, or a fresh trust anchor): delete `deploy/ca/`, re-run the
   script, and reinstall the new `ca.crt` on every client.
+
+## Database TLS (ADR-0017)
+
+The decision — full server verification, SCRAM, the internal CA as the database's root, a staged
+rollout — is [ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md). This section is
+how it is realised.
+
+### Compose (single host)
+
+- `scripts/gen-internal-ca.sh` also issues the database server certificate, `db.crt` / `db.key`,
+  from the same internal CA as the edge. Its SAN covers the names clients use
+  (`DB_CERT_SAN`, default `timescaledb`, `localhost`, `industryflow.local`, `127.0.0.1`).
+- The `db-cert-init` one-shot copies the certificate and key into a postgres-owned volume with
+  mode `0600` before TimescaleDB starts — Postgres refuses a key with looser permissions.
+- Clients read `DB_SSLMODE` (default `verify-full`) and `DB_SSLROOTCERT` (the mounted `ca.crt`).
+- `pg_hba.conf` (one canonical file, shared with the chart) requires `hostssl` with
+  `scram-sha-256`; the in-container Unix socket (`local … trust`, used by the init scripts) is the
+  only plaintext path.
+
+### Kubernetes (Helm)
+
+- The chart consumes a Secret holding `tls.crt` / `tls.key` / `ca.crt`, named by
+  `tls.db.secretName`. The TimescaleDB pod mounts all three (an initContainer stages the key with
+  `0600` and the postgres uid); every database client mounts only `ca.crt`.
+- `DB_SSLMODE` / `DB_SSLROOTCERT` come from the shared ConfigMap.
+- With `tls.db.certManager.enabled` the chart provisions the Secret itself through cert-manager
+  (`templates/db-tls-certificate.yaml`: a SelfSigned issuer → internal CA → server certificate).
+  Otherwise the operator supplies the Secret from their own PKI. Without it the database and its
+  clients stay pending, and `NOTES.txt` says so.
+- The monitoring role (`metrics_user`, used by postgres-exporter) has its own `hostssl` rule.
+
+### Staged rollout (how TLS was turned on without an outage)
+
+1. **Server capable.** `ssl=on` with the certificate; `pg_hba` stays `host`, so TLS is offered
+   but not required.
+2. **Clients verify.** Every client sets `sslmode=verify-full` and `sslrootcert`; still accepted
+   under `host`, now over TLS.
+3. **Enforce.** `pg_hba` `host` → `hostssl` and `md5` → `scram-sha-256`; plaintext is rejected.
+
+Validate each stage before the next. The compose path is enforced and validated on a live
+deployment; the Helm path is render-validated (`helm lint` / `helm template`).
+
+### Rotating the database certificate
+
+Re-run `scripts/gen-internal-ca.sh` (the CA is reused, so clients need no change) and restart
+TimescaleDB. On Kubernetes, renew or replace the Secret and restart the database pod.
