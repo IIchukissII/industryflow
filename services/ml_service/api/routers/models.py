@@ -24,6 +24,7 @@ import model_compat
 import model_loader
 import upload_capability
 import uploaded_model
+from drift.reference_profile import prediction_column_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -446,6 +447,18 @@ async def create_model(
                 "establish what it is (ADR-0030)."
             ),
         )
+
+    # A reference profile's prediction column is a baseline only if it holds the declared detector's
+    # scores on their scale (ADR-0021 rev 1 dec 4). One that does not would raise prediction drift on
+    # a model that has not moved, so it is refused here rather than stored and found out later.
+    if payload.get("reference_profile"):
+        refusal = prediction_column_refusal(payload["reference_profile"])
+        if refusal:
+            raise HTTPException(status_code=422, detail={
+                "message": refusal,
+                "hint": ("capture the training window's scores as the model's detector produces "
+                         "them (what /api/inference/predict returns), or omit prediction_scores"),
+            })
 
     await _admit_address_or_refuse(
         company_id, payload.get("mlflow_run_id"), payload.get("artifact_uri"), on_refused=422,

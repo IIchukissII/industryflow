@@ -27,6 +27,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import numpy as np
 
+from extensions import SCORE_RANGE
+
 # Bumped when the on-disk profile shape changes so the scorer refuses a shape it does not
 # understand rather than silently mis-comparing. v2 = evidently reference sample
 # (v1 was a histogram snapshot, superseded before release to keep the compute engine
@@ -57,6 +59,43 @@ def _clean_column(values: Sequence[float], idx: np.ndarray) -> List[Optional[flo
     return out
 
 
+def _score_refusal(values: Sequence[Any]) -> Optional[str]:
+    """Why ``values`` are not detector scores on the declared scale, or ``None`` if they are."""
+    low, high = SCORE_RANGE
+    if not values:
+        return "it holds no scores"
+    for v in values:
+        if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
+            return f"it holds {v!r}, which is not a score"
+        if not math.isfinite(float(v)):
+            return f"it holds {v!r}, which is not a finite score"
+        if not low <= float(v) <= high:
+            return (f"it holds {v!r}, outside the detector's declared scale [{low:g}, {high:g}] — "
+                    f"a label, a raw model output or another quantity, not a detector score")
+    return None
+
+
+def prediction_column_refusal(profile: Mapping[str, Any]) -> Optional[str]:
+    """Why ``profile``'s prediction column is not a prediction-drift baseline — ``None`` if it is one,
+    or if the profile carries no prediction column (data drift needs none).
+
+    ADR-0021 rev 1 dec 4: the column holds what the current side holds — the declared detector's
+    scores, on its declared scale. Two distributions are comparable only on the same scale, so a
+    column of labels or raw outputs would raise prediction drift on a model that has not moved.
+    """
+    pred_col = profile.get("prediction_column")
+    if not pred_col:
+        return None
+    sample = profile.get("sample")
+    values = sample.get(pred_col) if isinstance(sample, Mapping) else None
+    if not isinstance(values, list):
+        return f"the reference profile names prediction column {pred_col!r} but carries no values for it"
+    reason = _score_refusal(values)
+    if reason:
+        return f"the reference profile's prediction column {pred_col!r} is not a baseline: {reason}"
+    return None
+
+
 def build_reference_profile(
     data: Mapping[str, Iterable[float]],
     *,
@@ -75,7 +114,8 @@ def build_reference_profile(
             stored as ``prediction_column`` so the endpoint can measure prediction drift. They
             must be the model's 0-1 anomaly scores as its detector produces them (what
             ``/api/inference/predict`` returns): the endpoint scores the current window that way,
-            and two different quantities would differ without anything having drifted.
+            and two different quantities would differ without anything having drifted. Values
+            off that scale, or not finite, are refused (ADR-0021 rev 1 dec 4).
         prediction_column: name for the prediction column (default ``prediction_score``).
         max_sample_rows: cap on stored rows (default 5000); larger windows are evenly
             down-sampled.
@@ -87,7 +127,8 @@ def build_reference_profile(
 
     Raises:
         ValueError: if ``data`` is empty, columns differ in length, or
-            ``prediction_scores`` length does not match the feature rows.
+            ``prediction_scores`` length does not match the feature rows or holds a value that
+            is not a finite score on the detector's declared scale.
     """
     if not data:
         raise ValueError("cannot build a reference profile from no features")
@@ -111,6 +152,9 @@ def build_reference_profile(
             raise ValueError(
                 f"prediction_scores length {len(pred_list)} != feature rows {n_rows}"
             )
+        reason = _score_refusal(pred_list)
+        if reason:
+            raise ValueError(f"prediction_scores are not detector scores: {reason}")
 
     idx = _sample_indices(n_rows, max_sample_rows)
 

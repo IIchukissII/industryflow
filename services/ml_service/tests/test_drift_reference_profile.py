@@ -19,7 +19,9 @@ from drift import build_reference_profile, REFERENCE_PROFILE_VERSION  # noqa: E4
 from drift.reference_profile import (  # noqa: E402
     DEFAULT_PREDICTION_COLUMN,
     _sample_indices,
+    prediction_column_refusal,
 )
+from extensions import SCORE_RANGE  # noqa: E402
 
 
 def test_basic_shape_and_versioning():
@@ -92,3 +94,45 @@ def test_bad_max_sample_raises():
 def test_profile_is_json_round_trippable():
     prof = build_reference_profile({"a": [1.0, 2.0], "b": [3.0, 4.0]})
     assert json.loads(json.dumps(prof))["columns"] == ["a", "b"]
+
+
+# --- the prediction column holds detector scores on the declared scale (ADR-0021 rev 1 dec 4) ----
+
+@pytest.mark.parametrize("scores", [
+    [-1.0, 1.0, 1.0],          # an IsolationForest's labels
+    [0.1, 1.7, 0.5],           # a raw output past the bounded scale
+    [0.1, float("nan"), 0.5],  # not a score at all
+])
+def test_scores_off_the_declared_scale_are_refused_at_capture(scores):
+    with pytest.raises(ValueError, match="not detector scores"):
+        build_reference_profile({"a": [1.0, 2.0, 3.0]}, prediction_scores=scores)
+
+
+def test_the_scale_bounds_are_the_detector_contracts():
+    low, high = SCORE_RANGE
+    prof = build_reference_profile({"a": [1.0, 2.0]}, prediction_scores=[low, high])
+    assert prediction_column_refusal(prof) is None
+
+
+@pytest.mark.parametrize("values, why", [
+    ([0, 1, -1, 1], "outside the detector's declared scale"),
+    ([0.2, None, 0.4], "not a score"),
+    ([0.2, True, 0.4], "not a score"),
+    ([], "holds no scores"),
+])
+def test_a_stored_prediction_column_off_the_scale_is_not_a_baseline(values, why):
+    prof = build_reference_profile({"a": [1.0, 2.0]})
+    prof["prediction_column"] = DEFAULT_PREDICTION_COLUMN
+    prof["sample"][DEFAULT_PREDICTION_COLUMN] = values
+    reason = prediction_column_refusal(prof)
+    assert reason and why in reason, reason
+
+
+def test_a_named_prediction_column_with_no_values_is_not_a_baseline():
+    prof = build_reference_profile({"a": [1.0, 2.0]})
+    prof["prediction_column"] = DEFAULT_PREDICTION_COLUMN
+    assert "carries no values" in prediction_column_refusal(prof)
+
+
+def test_a_profile_without_a_prediction_column_needs_none():
+    assert prediction_column_refusal(build_reference_profile({"a": [1.0, 2.0]})) is None

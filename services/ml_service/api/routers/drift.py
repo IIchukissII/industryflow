@@ -28,7 +28,9 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, ConfigDict
 
-from drift import align_readings, compute_drift, DEFAULT_DRIFT_SHARE_THRESHOLD, MIN_ROWS
+from drift import (
+    align_readings, compute_drift, prediction_column_refusal, DEFAULT_DRIFT_SHARE_THRESHOLD, MIN_ROWS,
+)
 from extensions import DetectorContext, UninterpretableModel
 from feature_engineering import FeatureEngineeringEngine
 from .inference import _resolve_company_id, detector_for, load_model_or_refuse
@@ -70,6 +72,10 @@ async def _current_predictions(
     profile = model.get("reference_profile") or {}
     if not profile.get("prediction_column"):
         return None, "the reference profile captured no prediction scores"
+    refusal = prediction_column_refusal(profile)
+    if refusal:
+        # Not a baseline, so nothing is scored against it (ADR-0021 rev 1 dec 4).
+        return None, refusal
 
     repository = request.app.state.ml_repository
     feature_config_id = model.get("feature_config_id")
@@ -213,7 +219,7 @@ async def evaluate_drift(request_data: DriftEvaluateRequest, request: Request):
 
     result["model_id"] = request_data.model_id
     result["window_minutes"] = request_data.window_minutes
-    if result.get("prediction_drift") is None and prediction_reason:
+    if result.get("prediction_drift") is None and prediction_reason and not result.get("prediction_drift_reason"):
         result["prediction_drift_reason"] = prediction_reason
     logger.info(
         "Drift evaluated model=%s status=%s share=%s",

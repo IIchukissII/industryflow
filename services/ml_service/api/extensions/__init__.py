@@ -114,6 +114,12 @@ class DetectorContext:
     reconstruction_scale: Any = None
 
 
+# The scale every detector's score is declared on (ADR-0028 dec 1): bounded, 0 normal, 1 anomalous.
+# One place, because more than the detectors hold numbers to it — a drift reference profile's
+# prediction column must be on the same scale as the scores it will be compared with (ADR-0021 dec 4).
+SCORE_RANGE = (0.0, 1.0)
+
+
 @dataclass
 class DetectionResult:
     """A detector's verdict: a 0–1 anomaly score and whether it crosses the threshold."""
