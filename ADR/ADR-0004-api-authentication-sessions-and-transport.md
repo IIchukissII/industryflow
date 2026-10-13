@@ -3,16 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0004: API authentication, session model, and transport security (rev 1)
+# ADR-0004: API authentication, session model, and transport security (rev 2)
 
 - **ID:** ADR-0004
 - **Status:** Accepted
-- **Date:** 2026-06-28
+- **Date:** 2026-06-28 (rev 2: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0002 (ingestion authentication & device identity), ADR-0003 (tenant→schema resolution)
 - **Related:** ADR-0009 (rev 1 — the managed/self-hosted deployment shapes that decision 8 keys the edge certificate to), ADR-0017 (the self-hosted internal CA whose root the database cert shares)
-- **Supersedes:** ADR-0004 rev 0 (2026-06-26 — left "server-certificate issuance" deferred and stated decision 1 as if the edge certificate were always a public ACME cert; rev 1 resolves that deferred item as decision 8: public ACME for the managed edge, an internal CA for self-hosting)
+- **Supersedes:** ADR-0004 rev 0 (2026-06-26 — left "server-certificate issuance" deferred and stated decision 1 as if the edge certificate were always a public ACME cert; rev 1 resolves that deferred item as decision 8: public ACME for the managed edge, an internal CA for self-hosting); rev 1 (2026-06-28 — named logout and compromise as what ends a session, and said nothing of credential and account changes or of live sockets; rev 2 extends decision 2 and adds decision 9)
 
 ## Context and problem
 
@@ -29,6 +29,8 @@ The HTTP API is the human/service trust domain (the frontend, operators, service
 These are not seven unrelated bugs; they are the consequence of never deciding how the API authenticates a caller, how a session lives and dies, how the browser holds the credential, and how the traffic is protected in transit. This ADR makes those decisions for the API trust domain. It is a companion to ADR-0002 (which owns the device domain and introduces the TLS-terminating reverse proxy this ADR reuses) and to ADR-0003 (which relies on the access token carrying the tenant claim).
 
 **Revision 1 (2026-06-28).** Rev 0 stated decision 1 as if the browser-facing certificate were always a publicly-trusted ACME cert, and listed "server-certificate issuance" as a deferred decision. That left a real gap: a **self-hosted single-host deployment** (ADR-0009 rev 1) serves an internal hostname such as `industryflow.local`, for which no public CA will issue a certificate — so in practice self-hosting uses an **internal** CA (an issuing script on Compose; a certificate controller on Kubernetes), and ADR-0017 already reuses that same internal root for the database cert. The deferred item and the ACME-only wording therefore drifted from how the platform actually runs, and the "self-hosted edge uses an internal CA" decision had no single home — it was being asserted inside ADR-0017's context and the glossary rather than owned here. Rev 1 resolves the deferred item as **decision 8**, keying the edge certificate's issuer to the deployment shape, and tightens decision 1 to defer to it.
+
+**Revision 2 (2026-10-13).** Review found two places where a session outlived the reason it should have ended. First, decision 2 named logout and compromise as what revokes a session, and nothing else did: a password change or reset, deactivating or deleting an account, and removing a company all left every existing session refreshable, and left the notebook capabilities minted from it (ADR-0012, ADR-0015) working. A password change is the act a user takes *because* they think a credential leaked; a session that survives it defeats the act. Second, the live socket that streams readings to the browser was a channel decision 2 never reached: it accepted its credential in the URL as well as the cookie, checked the origin of nobody, and once open lived for as long as the connection did, whatever happened to the session behind it. Rev 2 extends decision 2 to every credential and account change and to everything derived from a session, and adds decision 9 for live sockets.
 
 ## Decision drivers
 
@@ -48,6 +50,10 @@ These are not seven unrelated bugs; they are the consequence of never deciding h
 ### Session model
 
 2. **Authentication issues a short-lived access token plus a rotating refresh token, with server-side revocation.** The access token (a JWT, lifetime on the order of minutes) carries the tenant claim relied on by ADR-0003. A longer-lived refresh token is tracked server-side (in a session/denylist store) and rotated on each use; logout or a compromise revokes it immediately, ending the session. Stateless seven-day tokens with no revocation are retired.
+
+   > **rev 2 (2026-10-13): a session ends on any credential or account change, and ending it ends everything derived from it.** Besides logout and compromise, every one of these ends all of the affected user's sessions: a **password change or reset** (including a password set outside the API, which is detected the next time a session tries to refresh), **deactivating** the account, **deleting** it, and **deactivating the user's company** — which is also what removing a company does (ADR-0033). Ending a session covers every token derived from it: its refresh credentials are revoked, and so are the **notebook capabilities** minted from the user's identity (ADR-0012 dec 6, ADR-0015 dec 2), so a running environment loses its data planes rather than keeping them until expiry. Logout likewise revokes the user's capabilities.
+   >
+   > The short-lived access token is not revoked individually; it lapses within its lifetime, which is the bound this decision already accepts. A deactivated or deleted account does not wait for that: every request re-reads the account, and an inactive or missing one is refused at once.
 
 ### Browser credential storage
 
@@ -69,6 +75,10 @@ These are not seven unrelated bugs; they are the consequence of never deciding h
 
 8. **The browser-facing certificate's issuing authority is keyed to the deployment shape (ADR-0009 rev 1).** The **managed** offering, served on a public hostname, uses a **publicly-trusted ACME / Let's Encrypt** certificate, auto-renewed. A **self-hosted** deployment, typically served on an internal hostname for which no public CA will issue (e.g. `industryflow.local`), uses an **internal CA**: a project-provided issuing script on single-host Compose, or a certificate-controller issuer on Kubernetes (the in-cluster equivalent). The internal CA's root certificate is installed as a trusted root on client devices once (procedure: `docs/operations/tls.md`). This is the same internal root ADR-0017 reuses for the TimescaleDB server certificate, so a self-hosted operator runs **one internal CA for both the API edge and the database**. In all cases the edge certificate authenticates the *server* and remains distinct from ADR-0002's device-mTLS client CA (decision 1). A self-hoster with a public hostname *may* opt into ACME instead; the internal CA is the default because it works without one.
 
+### Live sockets *(rev 2)*
+
+9. **A live socket is held to the same session as any request: cookie-authenticated, origin-checked, and closed when its credential expires.** The handshake authenticates with the session cookie **only** — never a credential carried in the URL, where it lands in logs and history and has to be readable by page script, which decision 3 exists to prevent. Because the browser sends that cookie automatically and cross-origin rules do not cover socket handshakes, the handshake is **origin-checked** against the same explicit allowlist as decision 6, and a handshake from any other origin is refused; this is the socket's CSRF control. Once open, the socket lives no longer than the credential it was opened with: it closes when that credential expires, and since ending a session stops the credential being renewed, a socket never outlives its session by more than one access-token lifetime. It is also **re-checked periodically**, and closes at once if the account has been deactivated or removed. The re-check interval is configuration.
+
 ## Alternatives considered
 
 **A. Keep the stateless long-lived JWT with no revocation.** *Rejected:* a leaked token is then valid for its full week and cannot be cancelled — the defect this ADR exists to fix.
@@ -85,6 +95,10 @@ These are not seven unrelated bugs; they are the consequence of never deciding h
 
 **G. Issue the self-hosted edge certificate from a fresh, edge-only internal CA, separate from the database CA *(rev 1)*.** *Rejected:* it would create two internal roots a self-hoster must install and rotate where one suffices. The edge and the database instead share the single internal root of the self-hosted trust domain — see ADR-0017 for the rationale of why one internal root serving both is the right trade-off.
 
+**H. End sessions only on logout, and let other account changes take effect at the next login *(rev 2)*.** *Rejected:* "the next login" never comes for a session that refreshes itself, so a password change made because a credential leaked would leave the leaked session alive indefinitely, and a deactivated user's notebook would keep its capabilities. The cost of ending sessions on every change is one revocation per change; the cost of not doing so is that the user's own remedy does nothing.
+
+**I. Keep a token-in-URL fallback for sockets *(rev 2)*.** *Rejected:* it existed for clients that could not send the cookie, and it is a second credential channel the cookie decision was made to close — readable by script, written to access logs, and not subject to the cookie's attributes. A client that cannot present the cookie does not get a socket.
+
 ## Consequences
 
 ### Positive
@@ -94,6 +108,7 @@ These are not seven unrelated bugs; they are the consequence of never deciding h
 - An XSS can no longer read the session token, because httpOnly cookies are invisible to script.
 - No endpoint returns data without authentication, and no authenticated caller can reach another tenant's data; the cross-tenant leak and the cross-tenant admin defects are closed.
 - CORS no longer reflects arbitrary origins with credentials, and secrets no longer leak to logs.
+- **rev 2:** a password change, a reset, a deactivation or a company's removal ends the affected sessions and the notebook capabilities derived from them, and a live socket cannot outlast its session's credential or be opened from a foreign origin.
 
 ### Negative
 
@@ -101,6 +116,7 @@ These are not seven unrelated bugs; they are the consequence of never deciding h
 - httpOnly cookies introduce CSRF exposure that must be mitigated (a CSRF token and/or strict `SameSite`), and they change the frontend auth flow from reading a bearer token to relying on the cookie.
 - HTTPS requires a server certificate and its renewal for the API/frontend edge — operational machinery distinct from the device CA. Per decision 8 this is ACME auto-renewal (managed) or an internal-CA root that self-hosters install on clients once (self-hosted); local development still needs a TLS story (e.g. mkcert / the internal CA) or an explicit, clearly-scoped HTTP dev exception.
 - Tightening every endpoint to be authenticated and tenant-scoped is a cross-service change with regression risk that must be done deliberately.
+- **rev 2:** ending a session on every account change logs the user out of every device when they change their own password, and a socket closes on credential expiry, so the client must reconnect after a refresh. Both are deliberate.
 
 ## Deferred decisions
 

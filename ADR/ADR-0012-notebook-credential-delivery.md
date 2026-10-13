@@ -3,16 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0012: Per-session credential delivery for notebook environments (rev 1)
+# ADR-0012: Per-session credential delivery for notebook environments (rev 2)
 
 - **ID:** ADR-0012
 - **Status:** Accepted
-- **Date:** 2026-06-27 (rev 1: 2026-10-13)
+- **Date:** 2026-06-27 (rev 1: 2026-10-13; rev 2: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0011 (embedded notebooks for analytics and experimentation), ADR-0003 (tenant→schema resolution), ADR-0004 (API authentication, sessions and transport)
 - **Refined by:** ADR-0015 (the capability form, the minting modes and the SQL proxy's binding that realise this record), ADR-0030 (a demand-minted, writing upload plane)
-- **Supersedes:** ADR-0012 rev 0 (2026-06-27 — stated decisions 1 and 5 as properties of every capability; rev 1 narrows them to the spawn-minted kernel planes they were written for, and defers the demand-minted and writing planes to the records that introduced them)
+- **Supersedes:** ADR-0012 rev 0 (2026-06-27 — stated decisions 1 and 5 as properties of every capability; rev 1 narrows them to the spawn-minted kernel planes they were written for, and defers the demand-minted and writing planes to the records that introduced them); rev 1 (2026-10-13 — decision 4 still described the proxy as one privileged principal binding each connection to a tenant's role; rev 2 has it open each connection as that tenant's own confined identity, as ADR-0015 rev 2 decided)
 
 ## Context and problem
 
@@ -23,6 +23,8 @@ The difficulty is that a kernel is a hostile place to keep a secret. Whatever cr
 There is a model already in the codebase for how to do this. The API gateway holds the privileged tenant-data role and scopes each request to the caller's tenant in trusted code (ADR-0003, ADR-0004); the caller never holds the database credential, only a session that the gateway exchanges for scoped access per request. The kernel's direct-SQL path has the same shape — an untrusted caller that needs tenant-scoped data — and should be solved the same way, rather than by handing the untrusted caller the database credential the rest of the platform is careful never to expose.
 
 **Revision 1 (2026-10-13).** Two decisions here were written when every capability belonged to a kernel and every plane only read. Decision 1 names the spawner as "the sole minting authority", and decision 5 lists "read-only intent" among the facts every capability carries. Both have since stopped describing the system. The experiment-tracking plane (ADR-0019) is minted read-write, because logging a run and registering a model are writes; ADR-0015 rev 1 recorded that, and recorded a second minting mode — *demand-minting*, by a designated trusted component, for a holder that is a person rather than a kernel. ADR-0030 then introduced such a plane: an upload handle minted on demand by the serving side, authorising one write. ADR-0015 was revised; this record, which both of those planes cite as the rule they follow, was not, so it went on asserting the opposite of what they do. Rev 1 narrows decisions 1 and 5 to the planes they were written for — the spawn-minted kernel planes — and points at the records that govern the rest. What a kernel may hold is unchanged.
+
+**Revision 2 (2026-10-13).** Decision 4 described the SQL proxy as holding *the* privileged credential and binding each kernel connection to the tenant's role. ADR-0015 rev 2 found that this shape is not a boundary: a session opened as one principal entitled to every tenant's role, and narrowed by a statement on that same session, is handed to the kernel, which can issue the statement again into another tenant. ADR-0015 rev 2 moved the boundary to the identity the session is opened as. This record, which ADR-0015 realises, still described the old shape; rev 2 restates decision 4 to match. The kernel side — a revocable capability, no database password — is unchanged.
 
 ## Decision drivers
 
@@ -44,6 +46,8 @@ There is a model already in the codebase for how to do this. The API gateway hol
 
 4. **Direct SQL is served through an authenticating proxy that holds the privileged principal; the kernel presents only its per-session capability.** For the authoring direct-database path of ADR-0011 decision 6, the kernel connects not to the database but to a trusted SQL proxy, presenting the same kind of per-session capability as decision 3. The proxy — trusted code — holds the privileged credential and binds each kernel connection to the single-tenant, read-only role for that session (the SQL analogue of how the API gateway scopes a request, ADR-0003). The database password lives only in the proxy; the "may act as any tenant" privilege lives only in the proxy; the kernel holds neither.
 
+   > **rev 2 (2026-10-13): the proxy opens each connection as the tenant's own confined identity, not by binding a shared session.** For each kernel connection the proxy resolves the capability to its tenant and opens the upstream session **as that tenant's login identity** — one per tenant, whose grants reach only that tenant's data, read-only, and which belongs to no other tenant's role. The proxy's own database identity holds no tenant role at all. Whatever the kernel then sends on the session, the most it can reach is the one tenant its capability was bound to (ADR-0015 rev 2 dec 5). "The privileged credential" therefore reads as *the per-tenant credentials, which only the proxy can present*: "may act as any tenant" is still a privilege of the proxy alone, held as many single-tenant identities rather than one identity that contains them all. The kernel still holds neither a database password nor anything that yields one.
+
 5. **Capabilities are minimal and non-escalatable.** A minted capability carries exactly the tenant, the identity, the single data plane it is for (API or SQL proxy), and read-only intent. It cannot be presented to a different service, broadened to another tenant, or exchanged for a longer-lived or higher-privilege credential. Possession of one capability never yields another.
 
    > **rev 1 (2026-10-13): read-only is a bound fact of a plane, not of every capability.** The planes this decision was written for — the data API and the SQL proxy — are read-only, and remain so. A plane that writes (experiment tracking, ADR-0019; a model upload, ADR-0030) carries read-only as *false* on its binding, and its boundary is the tenant namespace its trusted mediator enforces, as ADR-0015 rev 1 dec 1 records. That is never a widening: a writing capability still reaches exactly one tenant and one plane, cannot be presented elsewhere, and cannot be exchanged for anything broader.
@@ -61,6 +65,8 @@ There is a model already in the codebase for how to do this. The API gateway hol
 **D. Serve all data over an HTTP query service and have no direct-SQL path at all.** A trusted service executes read-only queries and streams results, so no database-facing credential of any kind reaches the kernel. *Rejected as a replacement:* ADR-0011 decision 6 already decided that authors get direct database access through a real single-tenant principal, and a query-over-HTTP service does not satisfy "direct SQL" for the tools data scientists use. It remains fully compatible as an *additional* convenience and a possible future path, but it does not discharge the decision this ADR resolves.
 
 **E. Keep decisions 1 and 5 universal, and refuse any plane that writes or whose holder never spawns *(rev 1)*.** *Rejected:* tracking and upload are product requirements already decided (ADR-0013, ADR-0019, ADR-0030), and each was built to the same shape — opaque, single-tenant, audience-bound, revocable — that this record's drivers actually demand. Universality was an accident of the first two planes, not a driver. Leaving the text universal while the system is not would be the silent contradiction ADR-0000 dec 4 forbids.
+
+**F. Keep one shared proxy principal and narrow each session after login *(rev 2)*.** *Rejected,* by ADR-0015 rev 2 alternative F: the narrowing is a statement on the session the kernel then drives, so the kernel can repeat or undo it.
 
 ## Consequences
 
@@ -82,7 +88,7 @@ There is a model already in the codebase for how to do this. The API gateway hol
 ## Deferred decisions
 
 - **Capability format and issuance internals.** Whether the minted capabilities are signed tokens, opaque references checked against a store, or another form, and how they are signed/validated, is an implementation concern owned by the relevant service, not this ADR.
-- **SQL proxy selection and the tenant-binding mechanism.** Whether the proxy is an existing connection pooler extended with per-session role binding or a purpose-built component, and exactly how it assumes the single-tenant role per connection, is left to implementation within the property fixed by decision 4.
+- ~~**SQL proxy selection and the tenant-binding mechanism.**~~ *Resolved by ADR-0015 (dec 6: a purpose-built proxy) and ADR-0015 rev 2 (dec 5: the session is opened as the tenant's confined identity); see rev 2, decision 4.*
 - **Lifetimes and revocation transport.** Concrete capability lifetimes and the precise mechanism by which a session ending propagates revocation to the API and the proxy are operational values owned by configuration and the implementing services.
 - **Audit of credential use.** What record is kept of which capability accessed which tenant's data, and where, is desirable and unspecified here; it relates to the notebook-execution audit trail already deferred in ADR-0011.
 - **A future query-over-HTTP data service.** Whether to also offer the result-streaming service of alternative D as an additional convenience is a separate decision, not foreclosed by this one.

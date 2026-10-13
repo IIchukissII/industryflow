@@ -3,15 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0028 — A model declares what its output means; the platform never guesses
+# ADR-0028 — A model declares what its output means; the platform never guesses (rev 1)
 
 - **ID:** ADR-0028
 - **Status:** Accepted
-- **Date:** 2026-07-14
+- **Date:** 2026-07-14 (rev 1: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (whose deferred **model-adapter contract** — *"a third contract … its signature is not fixed here"* — this closes)
 - **Companions:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the gate that refuses what this environment cannot honour; this ADR says what "can honour" means for *scoring*), [ADR-0008](ADR-0008-extension-and-plugin-interface.md) (which names *model adapters* as a plugin category, and whose in-process default this inherits)
 - **Related:** [ADR-0021](ADR-0021-model-drift-monitoring.md) (the lane that trusts these scores enough to alert on them), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (the operator who labels those alerts), [ADR-0001](ADR-0001-industryflow-framing.md) (why a self-hoster who never trains a torch model must not carry a CUDA layer)
+- **Supersedes:** ADR-0028 rev 0 (2026-07-14 — made the detector a fact of the model record without saying when it is fixed, listed `direct_score` with no detector implementing it, and left the compatibility detector able to read a continuous output as a score; rev 1 decides all three, decisions 1 and 3)
 
 ## Context and problem
 
@@ -47,6 +48,18 @@ The platform must serve autoencoders, and torch models, and whatever a data scie
 next. ADR-0027 established that an artifact the serving environment cannot honour is refused at the
 gate rather than mis-served; it explicitly handed *how a new flavor becomes servable* to this record.
 
+**Revision 1 (2026-10-13).** Review found that decision 2 was kept at the front door and broken
+behind it, in three ways. *The detector was not a durable fact.* The record said the registry gains
+it, but the model record had nowhere to keep it, and serving assumed the compatibility detector for
+every model when none was named — so the semantics a model was admitted under were not necessarily
+the semantics it was scored under. *`direct_score` had no detector.* Decision 1 lists it; nothing
+declared it, so a model that honestly emitted a score could only reach it through the compatibility
+detector's guess. *The compatibility detector still guessed.*
+Given a model with neither a probability nor an outlier score, it took a continuous prediction as if
+it were a score — which is inferring semantics from a dtype, the act decision 2 forbids. Rev 1 fixes
+when the detector is decided and what serving does with it (decision 1), adds the direct-score
+detector, and closes the compatibility detector's last guess (decision 3).
+
 ## Decision drivers
 
 - **A wrong score is worse than no score.** ADR-0021 raises alerts on these numbers and ADR-0022 asks
@@ -75,6 +88,17 @@ gate rather than mis-served; it explicitly handed *how a new flavor becomes serv
 
    The list is open: a new semantics is a new registration, not a core edit (ADR-0010 dec 1).
 
+   > **rev 1 (2026-10-13): the detector is persisted per model at registration, and serving
+   > dispatches on it.** Which detector scores a model is decided **once, at registration**, from what
+   > the registration declares — a named detector, or for an uploaded model its declared semantics and
+   > flavor (ADR-0030 dec 5) — and only if that detector is registered in this deployment and handles
+   > the model's flavor. The choice is then **recorded on the model** as a first-class fact, and the
+   > detector *is* the record of the model's semantics. Serving reads it and dispatches to it; it
+   > never re-derives the choice from the artifact or its output. A model with no recorded detector,
+   > or one naming a detector this deployment no longer has, is refused at deployment and at scoring
+   > rather than scored by a substitute. Models registered before this revision are recorded with the
+   > compatibility detector of decision 3, which is what every one of them named.
+
 2. **The platform never infers semantics from a prediction's value or dtype, and this is the decision,
    not an implementation preference.** Sniffing is what produced #236, and it could not have produced
    anything else — the information required is not present in the output. A detector that cannot
@@ -87,6 +111,17 @@ gate rather than mis-served; it explicitly handed *how a new flavor becomes serv
    compatibility name — every model registered before this ADR names it — but it now *dispatches on
    what the model can actually do* rather than on what its output happens to look like, and it never
    again maps two opposite labels to the same score.
+
+   > **rev 1 (2026-10-13): the compatibility detector refuses undeclared continuous output; a
+   > direct-score detector exists for declared bounded scores.** The compatibility detector scores a
+   > model only through a capability whose meaning is fixed by the capability itself — a class
+   > probability, or a continuous outlier score — and **refuses** any model that offers neither. In
+   > particular it never reads a continuous prediction as a score: a float is a dtype, not a meaning,
+   > and treating it as one is the inference decision 2 forbids. A model whose output already *is* a
+   > 0–1 anomaly score says so by declaring `direct_score`, and is scored by a **direct-score
+   > detector**, which passes the value through only if it is finite and on the declared bounded
+   > scale, and refuses it otherwise — it never clamps an out-of-range value into range. Every
+   > semantics on decision 1's list now has a detector that implements it.
 
 4. **An adapter declares which artifact flavors it can score.** ADR-0027's gate asks "can this
    environment satisfy what the artifact declares?"; this closes the loop by also asking **"is there
@@ -143,6 +178,16 @@ an image, a routing rule and a Helm story in order to deliver something that alr
 The sidecar's real driver is torch/GPU, and it should be designed when that is the requirement being
 paid for, not smuggled in behind a requirement it does not serve.
 
+**E. Re-select the detector at load, from the artifact *(rev 1)*.** *Rejected:* it keeps the
+registry and serving in agreement only for as long as the selection logic does not change, and makes
+the semantics a model was admitted under different from the semantics it may be scored under. A
+fact decided once and recorded cannot drift between the two.
+
+**F. Let the compatibility detector read a float prediction as a score, as a last resort
+*(rev 1)*.** *Rejected:* it is decision 2's sniffing in its last remaining form. A model that means
+its output as a score can declare `direct_score` and be held to the bounds; one that cannot declare
+it is exactly the model whose output the platform has no basis to interpret.
+
 ## Consequences
 
 ### Positive
@@ -169,6 +214,9 @@ paid for, not smuggled in behind a requirement it does not serve.
   data), not a constant. Where a model does not carry one, the detector must say so rather than invent
   one — which means some autoencoders will be registered but not yet scoreable. Deferred below.
 - **Torch is still not servable.** This ADR makes its absence honest; it does not close it.
+- **rev 1:** a model that was being scored from a raw continuous prediction is now refused until it
+  is re-registered with a declared semantics, and changing a model's detector means registering it
+  again rather than editing a heuristic.
 
 ## Deferred decisions
 

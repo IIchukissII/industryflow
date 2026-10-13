@@ -114,9 +114,10 @@ invariant, `naming.py` the one tenant-prefix mapping); the role, the `SECURITY D
 `cold_export_drop_day` and the removal of the blind raw retention policy in init script
 `16-cold-layer-raw-retention.sql` (with matching grants in `04-complete-tenant-creation.sql`,
 `00-create-roles.sh` and `pg_hba.conf`); the broker in `services/notebook_cold_broker/`; the
-`cold` audience in `services/notebook_hub/capabilities.py`; the CronJob and the write-scoped and
-read-only object-store principals in the Helm chart (`cronjob-cold-export.yaml`,
-`job-minio-cold-init.yaml`) and the compose `cold-export` profile.
+`cold` audience in `services/notebook_hub/capabilities.py`; the CronJob in the Helm chart
+(`cronjob-cold-export.yaml`) and the compose `cold-export` profile; the cold bucket and its
+write-scoped and read-only principals are created by the object store's bootstrap job, the one
+place that holds the store's root credential.
 
 ADR-0025 deliberately deferred parts of the cold layer to a future trigger (a table format, a
 distributed Spark exporter, the concrete retention horizon). Those triggers, the signals that

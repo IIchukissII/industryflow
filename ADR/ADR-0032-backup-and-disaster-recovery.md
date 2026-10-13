@@ -15,10 +15,11 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 ## Context and problem
 
-The platform backs up its databases and nothing else, and no record says why that set is the right one.
+The platform backs up its databases and its cold bucket and nothing else, and no record says why that set is the right one.
 
 What exists was built as operations work, not decided: a scheduled job dumps each database and the
-cluster's role definitions to the object store and prunes old copies, and a restore tool reloads a dump
+cluster's role definitions to the object store and prunes old copies; the same job mirrors the cold
+bucket; and a restore tool reloads a dump
 with the time-series extension's restore protocol. By default the target is the deployment's own object
 store — the same cluster, the same storage, the same failure domain as the database it protects. A
 continuous-archiving tier for point-in-time recovery is described as planned. That is a reasonable first
@@ -29,8 +30,10 @@ What it does not protect against has grown since it was built:
 - **The cold layer is now the only copy of raw history.** ADR-0025 shortened the hot store's raw
   retention and made the export → verify → drop ordering the only thing between an ageing chunk and
   lost data. Past the hot horizon, the Parquet in the object store is not a copy of anything; it is the
-  data. ADR-0025's negative consequences say so in as many words. A database dump does not contain it,
-  and a backup that lives in the same object store does not survive the loss of that store.
+  data. ADR-0025's negative consequences say so in as many words. A database dump does not contain it.
+  The backup job now mirrors the cold bucket — append-only, reading it with a principal that cannot
+  write or delete it (ADR-0025 dec 13) — but by default into the same object store, and a backup that
+  lives in the same object store does not survive the loss of that store.
 - **Model artifacts live only in the object store.** The tracking database records runs and versions;
   the bytes of every registered model live under the tracking store's prefix. A database restore without
   them restores a registry that points at nothing.
@@ -43,8 +46,9 @@ than an oversight: the capability store holds only short-lived, revocable handle
 (ADR-0015); the message broker is transport, not a store of record (ADR-0005); streaming checkpoints can
 be rebuilt by reprocessing within the broker's retention, at the cost ADR-0029 already weighs.
 
-A concurrent change adds a backup of the cold bucket. This record gives that change, and the gaps it
-does not close, a decision to conform to.
+The cold bucket's mirror was added before this record; this record gives it, and the gaps it does not
+close, a decision to conform to. Under decision 4 the mirror is the right shape; under decision 3 it is
+undo until its target is a separate failure domain.
 
 ## Decision drivers
 
@@ -137,6 +141,8 @@ can lose; backing up checkpoints would preserve exactly the state ADR-0029 may c
 - **The concrete objectives and schedules** per store — operations configuration.
 - **Continuous archiving / point-in-time recovery** for the database: the tool and its operation.
 - **Backups of model artifacts and authored notebooks:** the mechanism and its cadence.
+- **The cold mirror's off-site target:** the mirror exists; which separate failure domain a deployment
+  points it at, and its retention, are operations configuration under decisions 3 and 4.
 - **Encryption and key management** for backups at rest, beyond what the target store provides.
 - **Tenant-granular restore:** restoring one tenant's schema and objects without the others.
 - **Deleting a tenant from backups:** expiry versus per-tenant keys — owed jointly with ADR-0033.

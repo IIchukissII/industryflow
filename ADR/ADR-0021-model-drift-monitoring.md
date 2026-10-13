@@ -3,14 +3,15 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0021 — Model drift monitoring (the `statistical` alert lane)
+# ADR-0021 — Model drift monitoring (the `statistical` alert lane) (rev 1)
 
 - **ID:** ADR-0021
 - **Status:** Accepted
-- **Date:** 2026-06-28
+- **Date:** 2026-06-28 (rev 1: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md)/[ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (model registry + tracking). Realizes the alert-rule schema's reserved `statistical` detection type.
+- **Supersedes:** ADR-0021 rev 0 (2026-06-28 — said prediction drift compares the model's output distribution over time without saying which output, or what the baseline's output column holds; rev 1 binds both sides to the declared detector's scores, decisions 1 and 4)
 
 ## Context and problem
 
@@ -24,6 +25,8 @@ Two facts already in the codebase shape the answer:
 
 So this is mostly *wiring foundations that already exist*, not new infrastructure. What is undecided — and what this ADR fixes — is the shape: what drift we detect, who owns it, how it surfaces, and what the baseline is.
 
+**Revision 1 (2026-10-13).** Decision 1 defined prediction drift as a shift in "the model's own output distribution (anomaly rate / score distribution)" and left open which output that is. ADR-0028 has since established that a model's raw output has no meaning the platform may assume — the same integer is normal for one family and anomalous for another — and that only the model's declared detector turns output into a score. Review found prediction drift had never been computed from that score: the current side was not produced at all, and nothing constrained what the reference profile's prediction column held. Two distributions are comparable only if they measure the same quantity on the same scale; a raw label on one side and a score on the other is a drift alarm waiting to happen on a model that has not moved. Rev 1 binds both sides to the detector (decisions 1 and 4).
+
 ## Decision drivers
 
 - **Reuse the existing surfaces.** The `statistical` alert lane, `evidently`, the model metadata, and the alert history/severity/notification machinery should carry drift — not a parallel system.
@@ -36,11 +39,15 @@ So this is mostly *wiring foundations that already exist*, not new infrastructur
 
 1. **v1 detects label-free drift: data drift + prediction drift.** *Data drift* — the input-feature distribution of a recent window vs the model's training baseline (`evidently`). *Prediction drift* — a shift in the model's own output distribution (anomaly rate / score distribution) over time. Both need no ground truth. **Performance/concept drift** (precision/recall decay) needs operator labels and is **deferred** (see below).
 
+   > **rev 1 (2026-10-13): current prediction scores come from scoring the window through the model's declared detector.** The "output" whose distribution is compared is the anomaly score the model's **declared detector** produces (ADR-0028 dec 1), on its declared scale — never the model's raw prediction, which ADR-0028 dec 2 forbids interpreting. For each evaluation the current side is obtained by scoring the trailing window's readings through that detector, exactly as live inference would score them; a model whose detector refuses to score cannot report prediction drift, and says so rather than substituting another quantity. How much of the window is scored is configuration.
+
 2. **Drift surfaces through the reserved `statistical` alert lane.** A drift rule (`detection_type='statistical'`, bound to a model + a drift threshold) raises a normal alert — *"model `vpd-forecaster` input drift 0.42 > 0.30 — consider retraining"* — into the same alert history, severity, and notification path as threshold/ml alerts. No new alerting surface; the Models page may later show a drift indicator from the same signal.
 
 3. **The alert service owns drift detection; ml-service computes the drift score.** A **scheduled drift evaluator runs in the alert service beside the real-time rules engine** — keeping all detection (threshold/ml/statistical) in one home: it schedules evaluations, applies each rule's threshold, and fires the alert. The **statistical computation is delegated to ml-service** over an internal endpoint (windowed tenant data + reference profile → `evidently` → drift score), exactly mirroring how the real-time ml rules already delegate scoring to ml-service's inference endpoint. The alert service stays the decision/alert home without duplicating `evidently` or the tenant data path.
 
 4. **A reference profile is captured at training time and stored with the model.** Drift is meaningless without a baseline, so when a model is trained/registered the platform records a compact distribution snapshot (column statistics / an `evidently` reference) over the training window, stored **with the model and tenant-scoped** — an MLflow artifact for tracked models (via the ADR-0019 gateway), or the `ml_models` training metadata otherwise. A model with no reference profile reports *drift unavailable* until retrained with one, rather than guessing a baseline from possibly-compacted history.
+
+   > **rev 1 (2026-10-13): the reference prediction column holds detector scores on the declared scale.** Where a reference profile carries the model's predictions over its training window, that column holds what decision 1's current side holds: the declared detector's scores, on its declared scale — not labels, not raw outputs, not another model's scores. A profile whose prediction column was produced any other way is not a baseline for prediction drift. Data drift is unaffected: it compares input features, aligned on the instants at which every compared input was observed.
 
 5. **Windowed and periodic, not per-event.** Drift is evaluated on a schedule (cadence configurable) over a trailing window, independent of the per-reading anomaly path. The two never share a code path; they share only the alert sink.
 
@@ -53,6 +60,8 @@ So this is mostly *wiring foundations that already exist*, not new infrastructur
 - **Compute drift entirely inside the alert service.** *Rejected:* it would duplicate `evidently` and the tenant data-read path that already live in ml-service; delegating the score (as the real-time ml rules do) keeps one ML home.
 - **Fuse drift into the Spark aggregation layer.** *Considered:* attractive if drift windows align with the heavy aggregations, but it splits detection ownership away from the alert service and couples drift cadence to the Spark job; kept as a possible compute backend, not the v1 owner.
 - **Ship labelled performance drift now.** *Rejected for v1:* it needs an operator feedback/labelling loop and a label store — a separate, larger initiative; data+prediction drift delivers value without it.
+
+- **Compare raw model outputs on both sides *(rev 1)*.** *Rejected:* raw output means different things for different model families (ADR-0028), and for a model that emits a label the distribution of labels is a coarse proxy for what the detector actually alerts on. Comparing the score the alert lane acts on is the only comparison whose movement means what the alert says.
 
 ## Consequences
 
@@ -78,7 +87,8 @@ So this is mostly *wiring foundations that already exist*, not new infrastructur
 
 - **Implementation.** Every decision above is realised; no decision changed in doing so. The "rev 1"
   that this record's status line once carried was this implementation note, not a revision of a
-  decision, and is not one under ADR-0000 dec 5. Where each decision lives in code, and its validation
+  decision, and is not one under ADR-0000 dec 5; the revision now numbered rev 1 is the one recorded
+  above (2026-10-13). Where each decision lives in code, and its validation
   status, is in `docs/architecture/ml-and-features.md` and `docs/architecture/alerting.md`.
 - **Reference-profile serialization** (deferred above) is resolved for the in-platform path: the
   profile is stored with the model as a compact, down-sampled sample that the drift library consumes
