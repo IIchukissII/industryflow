@@ -438,6 +438,10 @@ config:
   MLFLOW_DB_USER: mlflow_user
   SPARK_STREAMING_DB_USER: spark_streaming_user
   KAFKA_TOPIC_SENSOR_DATA: sensor-data-raw
+  # ingestion-service reads the verified device cert only from the headers the mTLS ingress
+  # sets: ingress-nginx's ssl-client-* (ADR-0002 dec 3). It refuses any X-Client-* header,
+  # which ingress-nginx passes through from the client. Change only with the ingress controller.
+  DEVICE_IDENTITY_HEADERS: ssl-client
   KAFKA_GROUP_ID: alert-detector
   # Spark Structured-Streaming checkpoint (ADR-0006). Default = the per-pod PVC (Helm runs Spark
   # in local mode: driver = executor = one pod, so a local checkpoint is fine). To scale Spark
@@ -446,6 +450,14 @@ config:
   # spark-streaming/spark-aggregations `secretKeys`, and set their `persistence.enabled=false`.
   CHECKPOINT_LOCATION: /opt/spark/checkpoints
   CORS_ORIGINS: "https://app.industryflow.local"
+  # The ingress is HTTPS-only (ADR-0004 dec 1), so the api-gateway session cookies are Secure.
+  COOKIE_SECURE: "true"
+  # api-gateway DB footprint: (replicas, or hpa.maxReplicas) x workers x (pool size + overflow)
+  # must fit api_gateway_user's CONNECTION LIMIT (50). One worker per pod: Kubernetes scales
+  # with pods. services/api_gateway/tests/test_db_connection_budget.py checks these defaults.
+  API_GATEWAY_WORKERS: "1"
+  API_GATEWAY_DB_POOL_SIZE: "5"
+  API_GATEWAY_DB_MAX_OVERFLOW: "2"
   ENVIRONMENT: production
   # Extension plugin modules the ML service loads at startup (ADR-0008/0010); empty = built-ins.
   EXTENSION_MODULES: ""

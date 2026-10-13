@@ -5,11 +5,18 @@
 import os
 from functools import lru_cache
 
+# The header conventions a terminating mTLS edge uses to forward the verified client
+# certificate (ADR-0002 dec 2): our compose nginx edge sets X-Client-*, ingress-nginx
+# (ADR-0009) sets ssl-client-*. A deployment names exactly one; the other is foreign there.
+DEVICE_IDENTITY_HEADER_CONVENTIONS = ("x-client", "ssl-client")
+
+
 class Settings:
     """Configuration for Ingestion Service - NO DEFAULTS.
 
     Ingestion is device-only and stateless: it authenticates producers by mTLS and produces
-    to Kafka. It holds no database role and no JWT secret (ADR-0002).
+    to Kafka. It holds no database role, no JWT secret and no CORS policy (ADR-0002): no
+    browser ever calls it.
     """
 
     # Server
@@ -19,8 +26,17 @@ class Settings:
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
     KAFKA_TOPIC_SENSOR_DATA: str = os.getenv("KAFKA_TOPIC_SENSOR_DATA", "sensor-data-raw")
 
-    # CORS
-    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*")
+    # Which edge header convention carries the verified certificate in this deployment
+    # (one of DEVICE_IDENTITY_HEADER_CONVENTIONS). Required: guessing it, or accepting
+    # either, would let a header the edge does not set reach the identity check.
+    DEVICE_IDENTITY_HEADERS: str = os.getenv("DEVICE_IDENTITY_HEADERS", "")
+
+    def __init__(self):
+        if self.DEVICE_IDENTITY_HEADERS not in DEVICE_IDENTITY_HEADER_CONVENTIONS:
+            raise RuntimeError(
+                "DEVICE_IDENTITY_HEADERS must be one of "
+                f"{', '.join(DEVICE_IDENTITY_HEADER_CONVENTIONS)} (got {self.DEVICE_IDENTITY_HEADERS!r})"
+            )
 
     @property
     def kafka_bootstrap_servers(self) -> str:

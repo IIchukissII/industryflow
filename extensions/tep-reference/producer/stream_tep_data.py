@@ -25,8 +25,11 @@ SITE_ID = os.getenv('SITE_ID', 'factory-tep')
 # Device mTLS (ADR-0002): connect to the ingestion edge and present a client certificate
 # issued by scripts/device-ca.sh. No bearer token — the tenant comes from the cert SAN.
 INGESTION_URL = os.getenv('INGESTION_URL', 'https://localhost:8443/ingest')
-DEVICE_CERT = os.getenv('DEVICE_CERT', 'deploy/device-ca/devices/mock-tep/mock-tep.chain.crt')
-DEVICE_KEY = os.getenv('DEVICE_KEY', 'deploy/device-ca/devices/mock-tep/mock-tep.key')
+# Issued per tenant: deploy/device-ca/devices/<company_id>/<device_id>/current.{chain.crt,key}.
+DEVICE_CERT = os.getenv('DEVICE_CERT', '')
+DEVICE_KEY = os.getenv('DEVICE_KEY', '')
+if not (DEVICE_CERT and DEVICE_KEY):
+    raise SystemExit("set DEVICE_CERT and DEVICE_KEY to a device certificate from scripts/device-ca.sh issue")
 CLIENT_CERT = (DEVICE_CERT, DEVICE_KEY)
 # Verify the edge's server certificate against this CA bundle; empty = skip (local self-signed).
 INGEST_CA = os.getenv('INGEST_CA', '')

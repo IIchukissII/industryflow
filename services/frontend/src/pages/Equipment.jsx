@@ -6,8 +6,11 @@ import { useState, useEffect, useCallback } from 'react';
 import EquipmentConfigModal from '../components/EquipmentConfigModal';
 import { getEquipment, getEquipmentById, deleteEquipment } from '../services/equipmentApi';
 import './Equipment.css';
+import { canWrite } from '../utils/roles';
 
 function Equipment() {
+  // Creating, editing and deleting equipment needs engineer or admin (observer is read-only).
+  const [writable] = useState(() => canWrite());
   const [equipment, setEquipment] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -83,9 +86,11 @@ function Equipment() {
             <h1>Equipment Management</h1>
             <p className="equipment-subtitle">Manage industrial equipment and sensor configurations</p>
           </div>
-          <button className="btn-create" onClick={handleCreateNew}>
-            + Create New Equipment
-          </button>
+          {writable && (
+            <button className="btn-create" onClick={handleCreateNew}>
+              + Create New Equipment
+            </button>
+          )}
         </div>
 
         <div className="equipment-grid">
@@ -129,18 +134,22 @@ function Equipment() {
                 >
                   View Details
                 </button>
-                <button 
-                  className="btn-edit"
-                  onClick={() => handleEdit(equip)}
-                >
-                  Edit
-                </button>
-                <button 
-                  className="btn-delete"
-                  onClick={() => handleDelete(equip.equipment_id)}
-                >
-                  Delete
-                </button>
+                {writable && (
+                  <>
+                    <button
+                      className="btn-edit"
+                      onClick={() => handleEdit(equip)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="btn-delete"
+                      onClick={() => handleDelete(equip.equipment_id)}
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))}
@@ -149,9 +158,11 @@ function Equipment() {
         {equipment.length === 0 && (
           <div className="equipment-empty">
             <p>No equipment configured</p>
-            <button className="btn-primary" onClick={handleCreateNew}>
-              Create Your First Equipment
-            </button>
+            {writable && (
+              <button className="btn-primary" onClick={handleCreateNew}>
+                Create Your First Equipment
+              </button>
+            )}
           </div>
         )}
 

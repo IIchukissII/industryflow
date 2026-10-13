@@ -15,7 +15,8 @@ from routers import (
     training_data, alerts_history, companies,
     equipment, alert_rules, auth_tokens, auth_verify, user_admin
 )
-from database import init_db_pool, close_db_pool, create_user_table
+from database import AsyncSessionLocal, close_engine, create_user_table
+from sqlalchemy import text
 from messaging.redis_client import redis_client
 from messaging.cache_updater import update_redis_cache
 
@@ -33,7 +34,6 @@ async def lifespan(_app: FastAPI):
     """Manage application lifespan events."""
     # Startup
     await redis_client.connect()
-    await init_db_pool()
 
     # Initialize user authentication table
     await create_user_table()
@@ -53,7 +53,7 @@ async def lifespan(_app: FastAPI):
 
 
     await redis_client.disconnect()
-    await close_db_pool()
+    await close_engine()
 
 
 app = FastAPI(
@@ -163,25 +163,16 @@ async def root():
 @app.get("/api/users", tags=["users"])
 async def list_all_users(current_user: User = Depends(current_active_user)):
     """List users in the caller's company (all companies if superuser)."""
-    from database import get_db_pool
-
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
+    columns = 'SELECT id, email, company_id, role, is_active, is_superuser, is_verified FROM public."user"'
+    async with AsyncSessionLocal() as session:
         if current_user.is_superuser:
-            rows = await conn.fetch("""
-                SELECT id, email, company_id, role, is_active, is_superuser, is_verified
-                FROM "user"
-                ORDER BY email
-            """)
+            result = await session.execute(text(f"{columns} ORDER BY email"))
         else:
-            rows = await conn.fetch("""
-                SELECT id, email, company_id, role, is_active, is_superuser, is_verified
-                FROM "user"
-                WHERE company_id = $1
-                ORDER BY email
-            """, current_user.company_id)
-
-        return [dict(row) for row in rows]
+            result = await session.execute(
+                text(f"{columns} WHERE company_id = :company_id ORDER BY email"),
+                {"company_id": current_user.company_id},
+            )
+        return [dict(row) for row in result.mappings().all()]
 
 
 if __name__ == "__main__":

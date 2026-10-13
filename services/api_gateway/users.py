@@ -14,6 +14,7 @@ from fastapi_users import FastAPIUsers
 from models.user import User
 from database import get_user_db
 from config import get_settings
+from messaging import refresh_tokens
 
 from fastapi_users.authentication import (
     AuthenticationBackend,
@@ -60,6 +61,20 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         and is never logged (ADR-0004 dec 7)."""
         print(f"User {user.id} requested verification")
 
+    # A session must not outlive the credential or the account it was opened with (ADR-0004
+    # dec 2): a password change, a password reset, deactivation and deletion end every one of
+    # the user's sessions (refresh tokens). Access tokens are short-lived, and the per-request
+    # user load refuses an inactive or deleted user, so nothing else stays usable.
+    async def on_after_update(self, user: User, update_dict: dict, request: Optional[Request] = None):
+        if "password" in update_dict or update_dict.get("is_active") is False:
+            await refresh_tokens.end_all_sessions(str(user.id))
+
+    async def on_after_reset_password(self, user: User, request: Optional[Request] = None):
+        await refresh_tokens.end_all_sessions(str(user.id))
+
+    async def on_after_delete(self, user: User, request: Optional[Request] = None):
+        await refresh_tokens.end_all_sessions(str(user.id))
+
 
 async def get_user_manager(user_db=Depends(get_user_db)):
     """Dependency to get User Manager instance"""
@@ -89,8 +104,9 @@ class CompanyClaimJWTStrategy(JWTStrategy):
 
 def get_jwt_strategy() -> JWTStrategy:
     """
-    JWT strategy with a 1-week token lifetime. (ADR-0004 will shorten this and add
-    refresh/revocation in a later step of the auth-model refactor.)
+    The short-lived access-token strategy (JWT_ACCESS_TOKEN_EXPIRE_MINUTES, default 30). The
+    session's longevity and revocation live in the refresh token (ADR-0004 dec 2,
+    routers/auth_tokens.py).
     """
     return CompanyClaimJWTStrategy(
         secret=SECRET,

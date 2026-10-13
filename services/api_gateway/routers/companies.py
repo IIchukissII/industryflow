@@ -3,31 +3,45 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Companies management endpoints for admin panel
+Companies (tenants) for the admin panel.
+
+The gateway's DB role may only read the tenant registry. Writes go through the SECURITY DEFINER
+functions of 21-company-provisioning.sql, which validate the input and create the tenant schema;
+who may call them is decided here (ADR-0004 dec 5):
+
+- create: superuser only. Creates the company and its tenant schema.
+- update: a tenant admin may rename their own company; (de)activating one is superuser-only.
+- delete: superuser only, and it DEACTIVATES. The company and all of its users are made inactive
+  and their sessions revoked; the schema and its data stay. Nothing in the API drops a tenant.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from pydantic import BaseModel
+from sqlalchemy.exc import DBAPIError
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 from uuid import UUID
 import logging
 
 from dependencies import get_db_with_tenant, require_role
+from messaging import refresh_tokens
 from models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/companies", tags=["companies"])
 
+# The registry's own limit (public.companies.company_name VARCHAR(255)); the DB re-checks it.
+CompanyName = Field(min_length=1, max_length=255)
+
 
 class CompanyCreate(BaseModel):
-    company_name: str
+    company_name: str = CompanyName
     is_active: bool = True
 
 
 class CompanyUpdate(BaseModel):
-    company_name: Optional[str] = None
+    company_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     is_active: Optional[bool] = None
 
 
@@ -53,6 +67,30 @@ def _assert_own_company(current_user: User, company_id: UUID) -> None:
         raise HTTPException(status_code=404, detail="Company not found")
 
 
+def _sqlstate(e: DBAPIError) -> Optional[str]:
+    return getattr(e.orig, "sqlstate", None) or getattr(e.orig, "pgcode", None)
+
+
+def _provisioning_error(e: DBAPIError) -> HTTPException:
+    """Map what the provisioning functions refuse to a client answer; anything else is a 500."""
+    state = _sqlstate(e)
+    if state == "23505":  # unique_violation: the name is taken
+        return HTTPException(status_code=409, detail="A company with this name already exists")
+    if state == "23514":  # check_violation: the name failed the registry's validation
+        return HTTPException(status_code=422, detail="Invalid company name")
+    logger.error(f"Company provisioning failed: {e}")
+    return HTTPException(status_code=500, detail="Company provisioning failed")
+
+
+def _row(row) -> dict:
+    return {
+        "company_id": row.company_id,
+        "company_name": row.company_name,
+        "is_active": row.is_active,
+        "created_at": row.created_at,
+    }
+
+
 @router.get("", response_model=List[CompanyResponse])
 async def list_companies(
     db: AsyncSession = Depends(get_db_with_tenant),
@@ -73,16 +111,7 @@ async def list_companies(
             ORDER BY company_name
         """), {"company_id": current_user.company_id})
 
-    rows = result.fetchall()
-    return [
-        {
-            "company_id": row.company_id,
-            "company_name": row.company_name,
-            "is_active": row.is_active,
-            "created_at": row.created_at
-        }
-        for row in rows
-    ]
+    return [_row(row) for row in result.fetchall()]
 
 
 @router.get("/{company_id}", response_model=CompanyResponse)
@@ -101,59 +130,33 @@ async def get_company(
         """),
         {"company_id": company_id}
     )
-    
+
     row = result.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Company not found")
-    
-    return {
-        "company_id": row.company_id,
-        "company_name": row.company_name,
-        "is_active": row.is_active,
-        "created_at": row.created_at
-    }
+    return _row(row)
 
 
-@router.post("", response_model=CompanyResponse)
+@router.post("", response_model=CompanyResponse, status_code=201)
 async def create_company(
     company: CompanyCreate,
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(require_role("admin"))
 ):
-    """Create a new company/tenant (superuser only — this is a provisioning action)."""
+    """Create a company and its isolated tenant schema (superuser only — provisioning)."""
     _require_superuser(current_user)
-    # Check if company name already exists
-    result = await db.execute(
-        text("SELECT company_id FROM public.companies WHERE company_name = :name"),
-        {"name": company.company_name}
-    )
-    
-    if result.fetchone():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Company '{company.company_name}' already exists"
+    try:
+        result = await db.execute(
+            text("SELECT * FROM public.provision_company(:name, :is_active)"),
+            {"name": company.company_name, "is_active": company.is_active},
         )
-    
-    # Create company
-    result = await db.execute(
-        text("""
-            INSERT INTO public.companies (company_name, is_active)
-            VALUES (:name, :is_active)
-            RETURNING company_id, company_name, is_active, created_at
-        """),
-        {"name": company.company_name, "is_active": company.is_active}
-    )
-    
-    row = result.fetchone()
-    await db.commit()
-    
-    logger.info(f"Created company: {company.company_name}")
-    return {
-        "company_id": row.company_id,
-        "company_name": row.company_name,
-        "is_active": row.is_active,
-        "created_at": row.created_at
-    }
+        row = result.fetchone()
+        await db.commit()
+    except DBAPIError as e:
+        raise _provisioning_error(e)
+
+    logger.info(f"Created company {row.company_id}")
+    return _row(row)
 
 
 @router.put("/{company_id}", response_model=CompanyResponse)
@@ -163,77 +166,72 @@ async def update_company(
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(require_role("admin"))
 ):
-    """Update a company (own company only, unless superuser)."""
+    """Rename a company (own company only, unless superuser). (De)activating is superuser-only."""
     _assert_own_company(current_user, company_id)
-    # Build update query
-    updates = []
-    params = {"company_id": company_id}
-    
-    if company.company_name is not None:
-        updates.append("company_name = :company_name")
-        params["company_name"] = company.company_name
-    
-    if company.is_active is not None:
-        updates.append("is_active = :is_active")
-        params["is_active"] = company.is_active
-    
-    if not updates:
+    is_active = company.is_active
+    if is_active is not None and not current_user.is_superuser:
+        # The edit form sends the flag back unchanged; only an actual change is a privilege request.
+        current = await db.execute(
+            text("SELECT is_active FROM public.companies WHERE company_id = :company_id"),
+            {"company_id": company_id},
+        )
+        current_row = current.fetchone()
+        if current_row is not None and current_row.is_active == is_active:
+            is_active = None
+        else:
+            _require_superuser(current_user)
+    if company.company_name is None and is_active is None:
         raise HTTPException(status_code=400, detail="No fields to update")
-    
-    query = f"""
-        UPDATE public.companies
-        SET {', '.join(updates)}
-        WHERE company_id = :company_id
-        RETURNING company_id, company_name, is_active, created_at
-    """
-    
-    result = await db.execute(text(query), params)
-    row = result.fetchone()
-    
-    if not row:
-        raise HTTPException(status_code=404, detail="Company not found")
-    
-    await db.commit()
+
+    try:
+        result = await db.execute(
+            text("SELECT * FROM public.update_company(:company_id, :name, :is_active)"),
+            {"company_id": company_id, "name": company.company_name, "is_active": is_active},
+        )
+        row = result.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Company not found")
+        await db.commit()
+    except DBAPIError as e:
+        raise _provisioning_error(e)
+
     logger.info(f"Updated company: {company_id}")
-    
-    return {
-        "company_id": row.company_id,
-        "company_name": row.company_name,
-        "is_active": row.is_active,
-        "created_at": row.created_at
-    }
+    return _row(row)
 
 
-@router.delete("/{company_id}")
+@router.delete("/{company_id}", response_model=CompanyResponse)
 async def delete_company(
     company_id: UUID,
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(require_role("admin"))
 ):
-    """Delete a company/tenant (superuser only — this is a provisioning action)."""
+    """
+    Deactivate a company (superuser only). The company and every one of its users become
+    inactive and the users' sessions are revoked; the tenant schema and its data are kept.
+    """
     _require_superuser(current_user)
-    # Check if company has users
-    result = await db.execute(
-        text('SELECT COUNT(*) FROM public."user" WHERE company_id = :company_id'),
-        {"company_id": company_id}
-    )
-    user_count = result.scalar()
-    
-    if user_count > 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot delete company with {user_count} users. Delete users first."
+    if str(current_user.company_id) == str(company_id):
+        raise HTTPException(status_code=400, detail="Cannot deactivate your own company")
+    try:
+        result = await db.execute(
+            text("SELECT * FROM public.update_company(:company_id, NULL, false)"),
+            {"company_id": company_id},
         )
-    
-    # Delete company
-    result = await db.execute(
-        text("DELETE FROM public.companies WHERE company_id = :company_id"),
-        {"company_id": company_id}
-    )
-    
-    if result.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Company not found")
-    
-    await db.commit()
-    logger.info(f"Deleted company: {company_id}")
-    return {"message": "Company deleted successfully"}
+        row = result.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Company not found")
+        users = await db.execute(
+            text('UPDATE public."user" SET is_active = false WHERE company_id = :company_id RETURNING id'),
+            {"company_id": company_id},
+        )
+        user_ids = [r.id for r in users.fetchall()]
+        await db.commit()
+    except DBAPIError as e:
+        raise _provisioning_error(e)
+
+    # After the commit: a deactivated user can no longer refresh even if this step fails part way
+    # (refresh checks is_active), so revocation here only ends the sessions sooner.
+    for user_id in user_ids:
+        await refresh_tokens.end_all_sessions(str(user_id))
+    logger.info(f"Deactivated company {company_id} and {len(user_ids)} user(s)")
+    return _row(row)

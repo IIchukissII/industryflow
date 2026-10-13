@@ -3,10 +3,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 from config import get_settings
+from db_tls import db_ssl_context
 from sqlalchemy import text
-import asyncpg
 from fastapi import Depends
 from fastapi_users.db import SQLAlchemyUserDatabase
 from models.user import User
@@ -14,35 +14,17 @@ from models.user import User
 settings = get_settings()
 
 
-def _db_ssl():
-    """SSLContext for DB connections per DB_SSLMODE (ADR-0017). Default verify-full: encrypt +
-    verify the server cert against DB_SSLROOTCERT (the internal CA) with hostname checking."""
-    import os
-    import ssl
-    mode = (os.getenv("DB_SSLMODE") or "verify-full").lower()
-    if mode in ("disable", "allow", ""):
-        return None
-    ca = os.getenv("DB_SSLROOTCERT") or None
-    if ca and not os.path.exists(ca):
-        ca = None
-    ctx = ssl.create_default_context(cafile=ca)
-    if mode in ("require", "prefer"):
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-    elif mode == "verify-ca":
-        ctx.check_hostname = False
-    return ctx  # verify-full uses create_default_context defaults (CERT_REQUIRED + hostname)
-
-
-# Create async engine with optimized connection pool
-# 8 workers × 18 connections per worker = 144 connections (fits in 150 allocated)
+# The gateway's ONE connection pool. Each uvicorn worker holds its own, so the role's footprint
+# is replicas x workers x (pool_size + max_overflow), which must stay within api_gateway_user's
+# CONNECTION LIMIT (00-create-roles.sh). tests/test_db_connection_budget.py checks that sum for
+# the compose and Helm defaults.
 engine = create_async_engine(
     settings.database_url,
     echo=False,
-    pool_size=18,
-    max_overflow=2,
+    pool_size=settings.API_GATEWAY_DB_POOL_SIZE,
+    max_overflow=settings.API_GATEWAY_DB_MAX_OVERFLOW,
     pool_pre_ping=True,
-    connect_args={"ssl": _db_ssl()},
+    connect_args={"ssl": db_ssl_context()},
 )
 
 # Create async session factory
@@ -75,40 +57,9 @@ async def test_connection():
         result = await session.execute(text("SELECT 1"))
         return result.scalar() == 1
 
-# ============================================================================
-# AsyncPG Connection Pool
-# ============================================================================
-_db_pool: Optional[asyncpg.Pool] = None
-
-async def get_db_pool() -> asyncpg.Pool:
-    """
-    Get or create asyncpg database connection pool.
-    """
-    global _db_pool
-    if _db_pool is None:
-        _db_pool = await asyncpg.create_pool(
-            host=settings.timescaledb_host,
-            port=settings.timescaledb_port,
-            user=settings.timescaledb_user,
-            password=settings.timescaledb_password,
-            database=settings.timescaledb_database,
-            min_size=5,
-            max_size=20,
-            command_timeout=60,
-            ssl=_db_ssl(),
-        )
-    return _db_pool
-
-async def close_db_pool():
-    """Close asyncpg database pool on shutdown"""
-    global _db_pool
-    if _db_pool:
-        await _db_pool.close()
-        _db_pool = None
-
-async def init_db_pool():
-    """Initialize asyncpg database pool on startup"""
-    await get_db_pool()
+async def close_engine():
+    """Close the pool's connections on shutdown."""
+    await engine.dispose()
 
 async def get_user_db(session: AsyncSession = Depends(get_db)):
     """

@@ -5,122 +5,84 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Production-ready user seeding script.
-Creates initial admin users from environment variables.
+Seed the first users of a deployment from the environment (inject it with `op run`).
+
+    ADMIN_USER_<n>_EMAIL, ADMIN_USER_<n>_PASSWORD, ADMIN_USER_<n>_COMPANY_ID   (n = 1..9)
+    ADMIN_USER_<n>_ROLE        admin | engineer | observer (default admin)
+    ADMIN_USER_<n>_SUPERUSER   true to grant cross-tenant superuser (default false)
+
+A user that already exists is skipped. Connects as the API gateway's role with its TLS
+verification (ADR-0017). Exits non-zero if nothing is configured or any user could not be
+created.
+
 Usage: python scripts/seed_users.py
 """
 import asyncio
 import os
 import sys
-from pathlib import Path
 
-# Add parent directory to path to import from services
-sys.path.insert(0, str(Path(__file__).parent.parent / "services" / "api_gateway"))
+import user_admin_db as db
+from user_admin_db import UserAdminError
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from passlib.context import CryptContext
-import uuid
-
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_TRUE = ("1", "true", "yes")
 
 
-async def seed_users():
-    """Seed initial admin users from environment variables."""
+def configured_users(env=os.environ) -> list[dict]:
+    users = []
+    for i in range(1, 10):
+        email = env.get(f"ADMIN_USER_{i}_EMAIL")
+        password = env.get(f"ADMIN_USER_{i}_PASSWORD")
+        company_id = env.get(f"ADMIN_USER_{i}_COMPANY_ID")
+        if not (email or password or company_id):
+            continue
+        if not (email and password and company_id):
+            raise UserAdminError(f"ADMIN_USER_{i}_* is incomplete: EMAIL, PASSWORD and COMPANY_ID are all required")
+        users.append({
+            "email": email,
+            "password": password,
+            "company_id": company_id,
+            "role": env.get(f"ADMIN_USER_{i}_ROLE") or "admin",
+            # Cross-tenant power is opt-in, never implied by the per-tenant admin role (ADR-0004 dec 5).
+            "superuser": (env.get(f"ADMIN_USER_{i}_SUPERUSER") or "").strip().lower() in _TRUE,
+        })
+    return users
 
-    # Database connection
-    db_host = os.getenv("DB_HOST", "localhost")
-    db_port = os.getenv("DB_PORT", "5432")
-    db_name = os.getenv("DB_NAME", "industryflow")
-    db_user = os.getenv("API_GATEWAY_DB_USER", "api_gateway")
-    db_password = os.getenv("API_GATEWAY_DB_PASSWORD")
 
-    if not db_password:
-        print("❌ Error: API_GATEWAY_DB_PASSWORD environment variable not set")
-        return
-
-    database_url = f"postgresql+asyncpg://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-
-    # Create engine
-    engine = create_async_engine(database_url, echo=False)
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    print("=" * 80)
-    print("USER SEEDING - Production Ready")
-    print("=" * 80)
-
-    # Get admin users from environment
-    admin_users = []
-
-    # Support multiple admin users via numbered env vars
-    for i in range(1, 10):  # Support up to 9 admin users
-        email = os.getenv(f"ADMIN_USER_{i}_EMAIL")
-        password = os.getenv(f"ADMIN_USER_{i}_PASSWORD")
-        company_id = os.getenv(f"ADMIN_USER_{i}_COMPANY_ID")
-        role = os.getenv(f"ADMIN_USER_{i}_ROLE", "admin")
-
-        if email and password and company_id:
-            admin_users.append({
-                "email": email,
-                "password": password,
-                "company_id": company_id,
-                "role": role
-            })
-
-    if not admin_users:
-        print("⚠️  No admin users configured in environment variables")
-        print("   Set ADMIN_USER_1_EMAIL, ADMIN_USER_1_PASSWORD, ADMIN_USER_1_COMPANY_ID")
-        return
-
-    async with async_session() as session:
-        for user_data in admin_users:
-            try:
-                # Check if user already exists
-                result = await session.execute(
-                    f"""SELECT id FROM "user" WHERE email = '{user_data['email']}'"""
-                )
-                existing_user = result.fetchone()
-
-                if existing_user:
-                    print(f"⏭️  User {user_data['email']} already exists, skipping...")
+async def seed(users: list[dict]) -> int:
+    """Create each user in its own transaction. Returns how many failed."""
+    failed = 0
+    for user in users:
+        try:
+            db.check_user_fields(user["email"], user["company_id"], user["role"])
+            async with db.connect() as conn:
+                if await db.user_exists(conn, user["email"]):
+                    print(f"⏭️  {user['email']} already exists, skipped")
                     continue
+                await db.insert_user(conn, **user)
+            print(f"✅ Created {user['email']} (role: {user['role']}, superuser: {user['superuser']})")
+        except Exception as e:  # noqa: BLE001 - report each user, then fail the run
+            failed += 1
+            print(f"❌ {user['email']}: {type(e).__name__}: {e}", file=sys.stderr)
+    return failed
 
-                # Hash password
-                hashed_password = pwd_context.hash(user_data['password'])
-                user_id = str(uuid.uuid4())
 
-                # Insert user
-                await session.execute(
-                    f"""
-                    INSERT INTO "user" (
-                        id, email, hashed_password, company_id, role,
-                        is_active, is_superuser, is_verified
-                    ) VALUES (
-                        '{user_id}',
-                        '{user_data['email']}',
-                        '{hashed_password}',
-                        '{user_data['company_id']}',
-                        '{user_data['role']}',
-                        true,
-                        {user_data['role'] == 'admin'},
-                        true
-                    )
-                    """
-                )
-                await session.commit()
-
-                print(f"✅ Created user: {user_data['email']} (role: {user_data['role']})")
-
-            except Exception as e:
-                print(f"❌ Error creating user {user_data['email']}: {e}")
-                await session.rollback()
-
-    await engine.dispose()
-    print("=" * 80)
-    print("✅ User seeding completed")
-    print("=" * 80)
+def main() -> int:
+    try:
+        users = configured_users()
+    except UserAdminError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    if not users:
+        print("❌ No users configured: set ADMIN_USER_1_EMAIL, ADMIN_USER_1_PASSWORD, ADMIN_USER_1_COMPANY_ID",
+              file=sys.stderr)
+        return 1
+    failed = asyncio.run(seed(users))
+    if failed:
+        print(f"❌ {failed} of {len(users)} user(s) not created", file=sys.stderr)
+        return 1
+    print(f"✅ Seeding completed ({len(users)} user(s))")
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(seed_users())
+    sys.exit(main())
