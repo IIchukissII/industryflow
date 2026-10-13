@@ -58,7 +58,8 @@ _UPLOAD_PREFIX = "/api/2.0/industryflow-upload"
 # Enough of each member to frame what it is; the gateway reads heads, never artifacts.
 _HEAD_BYTES = 16
 # A manifest is a small declaration. A larger one is not a manifest this rule can read, and reading
-# unbounded caller-supplied bytes into the mediator is the shape of the problem, not a solution.
+# unbounded caller-supplied bytes into the mediator is the shape of the problem, not a solution. One
+# byte more than this is read, so a larger manifest is refused rather than judged truncated.
 _MANIFEST_MAX_BYTES = 256 * 1024
 # MLflow's proxied-artifact API. With the server's default-artifact-root set to `mlflow-artifacts:/`,
 # the client uploads/downloads/lists artifacts here instead of touching the object store directly —
@@ -86,15 +87,20 @@ class ArtifactStore(Protocol):
     def presign(self, method: str, key: str) -> str: ...
     def list_files(self, prefix: str) -> list: ...      # [{"path","is_dir","file_size"}], paths relative to prefix
     def delete(self, key: str) -> None: ...
-    def head(self, key: str, length: int) -> Optional[bytes]: ...   # first `length` bytes, or None if absent
-    def copy(self, src: str, dst: str) -> None: ...                 # server-side; the bytes never transit the gateway
+    # The first `length` bytes and the object's ETag (the version those bytes are of), or None if absent.
+    def head(self, key: str, length: int) -> Optional[Tuple[bytes, str]]: ...
+    # Server-side copy of `src` only if it is still the version `if_match` names; False if it is not.
+    # The bytes never transit the gateway.
+    def copy(self, src: str, dst: str, if_match: str) -> bool: ...
     def list_keys(self, prefix: str) -> list: ...                   # absolute keys under prefix
 
 
 StoreGet = Callable[[str], Awaitable[Optional[object]]]
+# Deletes a store key and reports how many were deleted: the atomic claim that consumes a handle.
+StoreConsume = Callable[[str], Awaitable[int]]
 
 def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
-              bucket: str = "") -> FastAPI:
+              bucket: str = "", *, store_consume: StoreConsume) -> FastAPI:
     app = FastAPI(title="IndustryFlow notebook tracking gateway")
 
     async def tenant(request: Request) -> policy.TrackingBinding:
@@ -116,6 +122,10 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
     async def artifact_object(artifact_path: str, request: Request,
                               binding: policy.TrackingBinding = Depends(tenant)):
         key = _artifact_key(binding.company_id, artifact_path)  # force under tenant prefix
+        if request.method in ("PUT", "DELETE") and policy.is_upload_reserved(binding.company_id, key):
+            # Admitted uploads were judged on their bytes (ADR-0030 dec 4); a kernel rewriting them
+            # afterwards would serve bytes nothing judged. The upload plane is their only writer.
+            raise HTTPException(status_code=403, detail="uploaded artifacts are written only by the upload plane")
         if request.method == "DELETE":
             artifacts.delete(key)
             return JSONResponse({})
@@ -143,6 +153,7 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
         binding = await policy.resolve_upload_binding(store_get, handle)
         if binding is None:
             raise HTTPException(status_code=401, detail="upload capability refused")
+        request.state.upload_handle = handle
         return binding
 
     @app.post(_UPLOAD_PREFIX + "/stage")
@@ -196,26 +207,56 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
         if not keys:
             raise HTTPException(status_code=404, detail="nothing staged for this upload")
 
-        manifest_key = prefix + admission.MANIFEST_NAME
-        manifest_bytes = artifacts.head(manifest_key, _MANIFEST_MAX_BYTES)
-        manifest_text = manifest_bytes.decode("utf-8", "replace") if manifest_bytes else None
+        # The handle authorised one upload (ADR-0015 dec 4 rev 1: a demand-minted handle's lifetime is
+        # one operation). Claimed atomically before judging, so two commits cannot both proceed on it
+        # and it buys no further stage/commit cycle whatever the verdict.
+        if not await store_consume(policy.store_key(request.state.upload_handle)):
+            raise HTTPException(status_code=401, detail="upload capability refused")
 
-        heads = [(key[len(prefix):], artifacts.head(key, _HEAD_BYTES) or b"") for key in keys]
+        def discard(*key_lists):
+            # Refused bytes have no reason to persist, and the staging area is not a quarantine to be
+            # curated.
+            for key_list in key_lists:
+                for key in key_list:
+                    artifacts.delete(key)
+
+        # One read per member: its opening bytes and the version (ETag) those bytes are of. Promotion
+        # copies exactly those versions, so bytes re-PUT through a still-valid staging URL after the
+        # judgement are never what is admitted.
+        manifest_key = prefix + admission.MANIFEST_NAME
+        reads = {}
+        for key in keys:
+            reads[key] = artifacts.head(key, _MANIFEST_MAX_BYTES + 1 if key == manifest_key else _HEAD_BYTES)
+        manifest = reads.get(manifest_key)
+        if manifest is not None and len(manifest[0]) > _MANIFEST_MAX_BYTES:
+            # Truncating it would judge a declaration the caller did not make.
+            discard(keys)
+            raise HTTPException(
+                status_code=422,
+                detail=f"the {admission.MANIFEST_NAME} manifest is larger than {_MANIFEST_MAX_BYTES} bytes",
+            )
+        manifest_text = manifest[0].decode("utf-8", "replace") if manifest else None
+
+        heads = [(key[len(prefix):], (reads[key] or (b"", ""))[0][:_HEAD_BYTES]) for key in keys]
         verdict = admission.evaluate(manifest_text, heads)
 
         if verdict.refused:
-            # Discard rather than leave it lying about: refused bytes have no reason to persist, and
-            # the staging area is not a quarantine to be curated.
-            for key in keys:
-                artifacts.delete(key)
+            discard(keys)
             raise HTTPException(status_code=422, detail=verdict.reason)
 
         artifact_prefix = policy.artifact_prefix(binding.company_id)
+        admitted = []
         for key in keys:
             member = key[len(prefix):]
-            artifacts.copy(key, staging.admitted_key(artifact_prefix, upload_id, member))
-        for key in keys:
-            artifacts.delete(key)
+            dst = staging.admitted_key(artifact_prefix, upload_id, member)
+            read = reads[key]
+            if read is None or not artifacts.copy(key, dst, read[1]):
+                # The member changed (or vanished) after it was judged: what is staged now is not
+                # what was judged. Admit nothing of it.
+                discard(admitted, keys)
+                raise HTTPException(status_code=409, detail="the upload changed while it was being judged")
+            admitted.append(dst)
+        discard(keys)
 
         return JSONResponse({
             "upload_id": upload_id,
@@ -506,11 +547,20 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
                 if e.response.get("Error", {}).get("Code") in ("NoSuchKey", "404", "InvalidRange"):
                     return None
                 raise
-            return resp["Body"].read(length)
+            return resp["Body"].read(length), resp["ETag"]
 
-        def copy(self, src, dst):
-            # Server-side: promotion moves an admitted artifact without the bytes transiting here.
-            s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": src}, Key=dst)
+        def copy(self, src, dst, if_match):
+            # Server-side: promotion moves an admitted artifact without the bytes transiting here —
+            # and only the version that was judged: the store refuses the copy if the source's ETag
+            # is no longer the one read at judgement.
+            try:
+                s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": src}, Key=dst,
+                               CopySourceIfMatch=if_match)
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") in ("PreconditionFailed", "412", "NoSuchKey", "404"):
+                    return False
+                raise
+            return True
 
         def list_keys(self, prefix):
             out, token = [], None
@@ -525,7 +575,7 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
                 token = resp.get("NextContinuationToken")
             return out
 
-    app = build_app(store.get, _HttpUpstream(), _S3Store(), bucket=bucket)
+    app = build_app(store.get, _HttpUpstream(), _S3Store(), bucket=bucket, store_consume=store.delete)
     uvicorn.run(app, host=os.environ.get("TRACKING_HOST", "0.0.0.0"), port=int(os.environ.get("TRACKING_PORT", "5050")))
 
 

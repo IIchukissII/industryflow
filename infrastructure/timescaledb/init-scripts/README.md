@@ -102,6 +102,20 @@ creating users via the API.
 - Required for equipment-level ML alert evaluation
 - **Auto-applies to all existing tenant schemas**
 
+### 13 - Notebook SQL Proxy Principals
+
+**`13-notebook-sql-proxy-role.sh`** (ADR-0015 dec 5)
+- `ensure_tenant_sql_login(uuid)` — one `LOGIN NOINHERIT` role per tenant
+  (`tenant_sqlproxy_<uuid>`), a member of its own `tenant_reader_<uuid>` and of the
+  privilege-free `notebook_sql_tenants` group (named by pg_hba) — nothing else. The SQL proxy opens
+  every kernel session as it, so the database, not the proxy, confines a kernel to its tenant.
+- `notebook_sql_proxy_enrol(uuid, verifier)` — `SECURITY DEFINER`; installs a tenant login's SCRAM
+  verifier. `EXECUTE` is granted to `notebook_sql_proxy` only.
+- With `NOTEBOOK_SQL_PROXY_DB_PASSWORD` set: creates `notebook_sql_proxy` (a member of nothing),
+  revokes any tenant-reader membership it holds, and creates a login for every existing tenant.
+  `create_tenant_schema()` creates the login for new tenants.
+- **Re-runnable on an existing database** — it is the migration from the earlier design.
+
 ---
 
 ## Schema Structure

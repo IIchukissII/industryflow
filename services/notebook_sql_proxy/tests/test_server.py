@@ -6,8 +6,9 @@
 Tests for the frontend handshake (ADR-0015). The kernel↔proxy protocol is driven over in-memory
 asyncio pipes, so the handshake — declining SSL, reading the StartupMessage, requesting a
 password, extracting the capability handle — is validated without a database. The upstream
-``PostgresBackend`` (live relay) is the cluster-bound part and is exercised by the issue #19
-integration test, not here.
+``PostgresBackend`` against a real Postgres is exercised by test_sql_proxy_integration.py; its
+protocol-level behaviour (enrolment on a refused login, cancellation, ending a revoked session) is
+driven against a small fake Postgres in test_backend.py.
 """
 import asyncio
 import json
@@ -106,13 +107,12 @@ async def test_relay_sends_parameterstatus_after_auth_ok():
     cid = str(uuid.uuid4())
     backend = server.PostgresBackend(
         b.SqlBinding(user="u", company_id=cid),
-        _eof_reader(), _CaptureWriter(),
-        host="h", port=1, user="x", password="p", database="d",
+        _eof_reader(), _CaptureWriter(), _config(),
     )
-    # Simulate what connect_privileged buffers: an upstream ParameterStatus, then a closed link.
-    backend._startup_params = bytearray(wire.build_message(wire.MSG_PARAMETER_STATUS, b"server_version\x0015\x00"))
-    backend._up_reader = _eof_reader()
-    backend._up_writer = _CaptureWriter()
+    # Simulate what connect buffers: an upstream ParameterStatus, then a closed link.
+    backend._upstream.startup_params = bytearray(wire.build_message(wire.MSG_PARAMETER_STATUS, b"server_version\x0015\x00"))
+    backend._upstream.reader = _eof_reader()
+    backend._upstream.writer = _CaptureWriter()
 
     await backend.relay()
 
@@ -123,6 +123,14 @@ async def test_relay_sends_parameterstatus_after_auth_ok():
         types.append(t)
     # AuthenticationOk, then ParameterStatus, then ReadyForQuery — in that exact order.
     assert types == [wire.MSG_AUTHENTICATION, wire.MSG_PARAMETER_STATUS, wire.MSG_READY_FOR_QUERY]
+
+
+def _config(host="127.0.0.1", port=1):
+    return server.UpstreamConfig(
+        host=host, port=port, database="industryflow",
+        enrol_user="notebook_sql_proxy", enrol_password="enrol-pw", tenant_key=b"k" * 32,
+        ssl_context=None, require_tls=False,
+    )
 
 
 def _eof_reader():
@@ -213,13 +221,13 @@ async def test_handle_client_authorizes_valid_handle_and_builds_backend():
         def __init__(self, binding):
             built["binding"] = binding
 
-        async def connect_privileged(self):
+        async def connect(self):
             built["connected"] = True
 
         async def execute(self, sql):
             built.setdefault("sql", []).append(sql)
 
-        async def relay(self):
+        async def relay(self, still_authorized):
             built["relayed"] = True
 
         async def close(self):

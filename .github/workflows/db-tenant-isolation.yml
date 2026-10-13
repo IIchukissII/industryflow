@@ -99,6 +99,9 @@ jobs:
           PGPORT: "5432"
           PGUSER: postgres
           PGDATABASE: industryflow
+          # The notebook SQL login proof (test_notebook_sql_login_isolation.py) fails rather than
+          # skips when its database or principals are missing.
+          IF_REQUIRE_LIVE_STACK: "1"
         run: |
           export PGPASSWORD="$(grep -E '^DB_PASSWORD=' .env | cut -d= -f2-)"
           pytest infrastructure/timescaledb/tests/ -v

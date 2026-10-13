@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Notebook SQL access proxy (ADR-0015). REFERENCE — renders via `helm template` but the live
-# upstream relay is NOT cluster-validated (see services/notebook_sql_proxy README / issue #19).
-# Authoring kernels connect with a normal Postgres driver, presenting their SQL capability handle
-# as the password; the proxy resolves it, logs in to TimescaleDB as the privileged
-# `notebook_sql_proxy` role (NOINHERIT), SET ROLEs into the tenant's read-only role, and relays.
-# The single-user egress NetworkPolicy (networkpolicy.yaml) permits the kernel→proxy hop.
+# Notebook SQL access proxy (ADR-0015). Authoring kernels connect with a normal Postgres driver,
+# presenting their SQL capability handle as the password; the proxy resolves it, logs in to
+# TimescaleDB as that tenant's own login (tenant_sqlproxy_<uuid>, confined to the tenant by the
+# database — enrolling its verifier through the `notebook_sql_proxy` role on first use), SET ROLEs
+# into the tenant's read-only role, and relays. The single-user egress NetworkPolicy
+# (networkpolicy.yaml) permits the kernel→proxy hop. One replica: cancellation keys are
+# process-local, so a kernel's CancelRequest must reach the replica holding its session.
 {{- if .Values.notebookHub.enabled }}
 {{- $fullname := include "industryflow.fullname" . }}
 {{- $svc := printf "%s-notebook-sql-proxy" $fullname }}
@@ -83,7 +84,7 @@ spec:
               value: {{ .Values.infra.timescaledb.port | quote }}
             - name: SQL_PROXY_DB_NAME
               value: {{ .Values.infra.timescaledb.database | quote }}
-            # The privileged login role created by 13-notebook-sql-proxy-role.sh.
+            # The enrolment role created by 13-notebook-sql-proxy-role.sh (a member of nothing).
             - name: SQL_PROXY_DB_USER
               value: "notebook_sql_proxy"
             - name: SQL_PROXY_DB_PASSWORD
@@ -91,6 +92,12 @@ spec:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-sql-proxy") }}
                   key: NOTEBOOK_SQL_PROXY_DB_PASSWORD
+            # Derives each per-tenant login's password; never given to the database.
+            - name: SQL_PROXY_TENANT_LOGIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-sql-proxy") }}
+                  key: NOTEBOOK_SQL_PROXY_TENANT_KEY
             # Upstream TLS to TimescaleDB (ADR-0017): verify the server cert against the same
             # internal CA every DB client trusts, mounted below at tls.db.mountPath.
             {{- if .Values.tls.db.enabled }}

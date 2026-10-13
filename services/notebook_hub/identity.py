@@ -76,6 +76,35 @@ def parse_identity(headers: Mapping[str, str]) -> Identity:
     return Identity(user=user, company_id=company_id, role=role)
 
 
+# Outcomes of re-checking an established hub login against the identity forwarded now.
+RECONCILE_SAME = "same"                    # the login still describes who is behind it
+RECONCILE_NOT_FORWARDED = "not-forwarded"  # no forwarded identity: not browser traffic via the proxy
+RECONCILE_INVALID = "invalid"              # a forwarded identity that does not parse
+RECONCILE_OTHER_USER = "other-user"        # someone else is behind the hub cookie now
+RECONCILE_STALE_FACTS = "stale-facts"      # same user, but another tenant or role
+
+
+def reconcile(headers: Mapping[str, str], hub_user: str, auth_state: Mapping[str, str]) -> str:
+    """Compare an established hub login with the identity the proxy forwards on this request.
+
+    Browser traffic always reaches the hub through the SSO proxy, which always forwards the
+    verified identity (ADR-0014 dec 2-3). A request carrying none of it is not browser traffic —
+    it is a token-authenticated call from inside the deployment (a single-user server reporting
+    activity) — and there is nothing to compare, which is not the same as a mismatch.
+    """
+    if not any(_header(headers, h).strip() for h in (HEADER_USER, HEADER_COMPANY_ID, HEADER_ROLE)):
+        return RECONCILE_NOT_FORWARDED
+    try:
+        who = parse_identity(headers)
+    except ValueError:
+        return RECONCILE_INVALID
+    if who.user != hub_user:
+        return RECONCILE_OTHER_USER
+    if who.company_id != auth_state.get("company_id") or who.role != auth_state.get("role"):
+        return RECONCILE_STALE_FACTS
+    return RECONCILE_SAME
+
+
 def select_profile(role: str, authoring_roles: frozenset[str] = DEFAULT_AUTHORING_ROLES) -> str:
     """Map a role to a spawn profile (ADR-0011 dec 5). Unknown roles get least privilege."""
     return PROFILE_AUTHORING if role in authoring_roles else PROFILE_ANALYTICS

@@ -73,6 +73,8 @@ def tenants():
     finally:
         for _cid, schema in (a, b):
             cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            # The notebook SQL login create_tenant_schema() adds on the notebooks profile.
+            cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{str(_cid).replace("-", "_")}"')
             cur.execute(f'DROP ROLE IF EXISTS "{_reader_role(_cid)}"')
         conn.close()
 

@@ -10,7 +10,8 @@ Refresh-token auth endpoints (ADR-0004 decisions 2 & 3).
                        as httpOnly cookies (for browsers), plus a JS-readable CSRF cookie.
 - POST /auth/refresh : rotate the refresh token (from body or cookie) and mint a new access
                        JWT; refreshes the cookies.
-- POST /auth/logout  : revoke the refresh token and clear the cookies.
+- POST /auth/logout  : revoke the refresh token and the user's notebook capabilities, and clear
+                       the cookies.
 
 The existing fastapi-users /auth/jwt/login remains for backward compatibility.
 """
@@ -23,9 +24,11 @@ from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users.exceptions import UserNotExists
 from pydantic import BaseModel
 
+from capability_auth import revoke_user_capabilities
 from config import get_settings
 from users import get_user_manager, get_jwt_strategy, ACCESS_COOKIE
 from messaging import refresh_tokens
+from messaging.redis_client import redis_client
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -110,8 +113,15 @@ async def refresh(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(request: Request, response: Response, body: Optional[RefreshRequest] = None):
-    """Revoke the refresh token (from body or cookie) and clear the auth cookies."""
+    """Revoke the refresh token (from body or cookie), the user's notebook capabilities, and clear
+    the auth cookies.
+
+    Ending the platform session ends what was minted against it (ADR-0012 dec 6): every notebook
+    capability of the user stops working now, and the hub stops their server at its next poll.
+    """
     token = (body.refresh_token if body and body.refresh_token else None) or request.cookies.get(REFRESH_COOKIE)
     if token:
-        await refresh_tokens.revoke_refresh_token(token)
+        user_id = await refresh_tokens.revoke_refresh_token(token)
+        if user_id:
+            await revoke_user_capabilities(redis_client.redis, user_id)
     _clear_auth_cookies(response)

@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# SQL access proxy image (ADR-0015). The Postgres-wire entry point (server.py) is present; the
-# live upstream relay is not yet cluster-validated (see README / issue #19).
+# SQL access proxy image (ADR-0015). The module list below is explicit; tests/test_image_contents.py
+# fails if a module in this directory is missing from it.
 FROM python:3.14-slim
 
 WORKDIR /app
