@@ -31,10 +31,18 @@ def _files_under(rel_dir: str) -> list[str]:
 
 def test_every_image_build_context_is_in_the_pr_filter():
     globs = workflow_filter("images.yml")
-    matrix = load_yaml(".github/workflows/images.yml")["jobs"]["build-scan"]["strategy"]["matrix"]["include"]
+    job = load_yaml(".github/workflows/images.yml")["jobs"]["build-scan"]
+    matrix = job["strategy"]["matrix"]["include"]
+    # Named build contexts (`COPY --from=<name>`) the build step offers every image, e.g. the shared
+    # contracts package: an image that takes one is built from it too.
+    build = next(s for s in job["steps"] if s.get("uses", "").startswith("docker/build-push-action"))
+    named = dict(line.split("=", 1) for line in (build["with"].get("build-contexts") or "").split())
+    assert named, "the build step offers no named context any more — revisit this guard"
     missed = []
     for entry in matrix:
-        for path in [entry["file"], *_files_under(entry["context"])]:
+        dockerfile = (ROOT / entry["file"]).read_text()
+        extra = [f for name, path in named.items() if f"--from={name} " in dockerfile for f in _files_under(path)]
+        for path in [entry["file"], *_files_under(entry["context"]), *extra]:
             if not covered(path, globs):
                 missed.append(f"{entry['name']}: {path}")
     assert not missed, "images.yml PR filter misses files an image is built from:\n" + "\n".join(missed)
@@ -52,7 +60,8 @@ def test_a_push_to_main_publishes_regardless_of_the_filter():
 
 # Where each harness script runs, i.e. which source tree its first-party imports resolve against.
 _HARNESS_PATHS = {
-    "load_in_serving.py": ["services/ml_service/api"],   # the serving image's /app
+    # the serving image's /app, and the shared contracts package it installs
+    "load_in_serving.py": ["services/ml_service/api", "libs/industryflow_contracts"],
     "train_in_kernel.py": ["clients/python"],            # the authoring image installs the client
 }
 

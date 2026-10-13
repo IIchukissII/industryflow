@@ -145,3 +145,28 @@ def test_dedup_statement_checks_the_window_both_ways_and_no_ops_an_exact_replay(
     assert "ON CONFLICT (alert_id, triggered_at) DO NOTHING" in sql
     assert "condition IS DISTINCT FROM 'retrain_recommended'" in repository._ALERT_SCOPE
     assert "condition = 'retrain_recommended'" in repository._RETRAIN_SCOPE
+
+
+def test_rules_load_only_for_schemas_that_are_exactly_a_tenants():
+    """The worker enumerates tenants from the catalog (it serves them all). A schema that merely starts
+    like one — role-shaped or a hand-made look-alike — is not a tenant, and its "company_id" must not be
+    invented by string surgery on the name (ADR-0003 dec 5: one mapping, inverted strictly)."""
+    names = (SCHEMA, "tenant_reader_0b2f503a_6e59_4f4f_b0cd_b82547a20cf2", "tenant_registry", SCHEMA.upper())
+
+    class CatalogConn(Conn):
+        async def fetch(self, sql, *args):
+            self._record(sql, args)
+            if "information_schema.schemata" in sql:
+                return [{"schema_name": n} for n in names]
+            return []
+
+    class CatalogPool(Pool):
+        @asynccontextmanager
+        async def acquire(self):
+            yield CatalogConn(self.log)
+
+    pool = CatalogPool()
+    rules = asyncio.run(repository.RuleRepository(pool).load_all_tenant_rules())
+    assert rules == {CO: []}
+    listing = next(e for e in _statements(pool.log) if "information_schema.schemata" in e[0])
+    assert listing[1] == (repository.tenancy.SCHEMA_LIKE,), "the LIKE pattern is bound, escaped, from the mapping"

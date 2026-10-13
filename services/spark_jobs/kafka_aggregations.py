@@ -17,7 +17,9 @@ forward and close every live window early. The streaming job, which consumes eve
 one that dead-letters them; this job does not publish them a second time. A reading naming a
 tenant, sensor or equipment the platform does not know is excluded the same way, at write time: its
 key is the aggregate's key, so dropping the aggregate excludes exactly those readings. The window widths and
-allowed lateness are the train/serve binding in aggregation_windows.py (ADR-0023 rev 2 dec 9).
+allowed lateness are the train/serve binding (ADR-0023 rev 2 dec 9), defined once in the shared
+window contract (industryflow_contracts.windows, ADR-0006 dec 7); aggregation_windows.py only adapts
+it to Spark's duration strings.
 """
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
@@ -212,7 +214,7 @@ def aggregate_readings(readings_df, granularity):
 
 
 def create_aggregation_stream(spark, granularity):
-    """Create a streaming windowed aggregation for one granularity (aggregation_windows.py)."""
+    """Create a streaming windowed aggregation for one granularity (the shared window contract)."""
     kafka_bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     table = table_name(granularity)
 
@@ -267,8 +269,8 @@ if __name__ == "__main__":
     print("Starting aggregation streaming jobs with schema-per-tenant routing...")
     print("=" * 60)
 
-    # One query per granularity. Width and allowed lateness are the train/serve binding
-    # (aggregation_windows.py), not per-deployment knobs.
+    # One query per granularity. Width and allowed lateness are the train/serve binding, read from
+    # the shared window contract (industryflow_contracts.windows), not per-deployment knobs.
     queries = [create_aggregation_stream(spark, g) for g in AGGREGATION_WINDOWS]
     print("✓ 1-minute, 5-minute and 1-hour aggregation streams started")
     print("=" * 60)

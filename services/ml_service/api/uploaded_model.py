@@ -33,9 +33,10 @@ enumerate frameworks: the flavor question is asked of the registry, which is dis
 from __future__ import annotations
 
 import re
-import uuid
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence
+
+from industryflow_contracts import tenancy
 
 # Provenance (ADR-0030 dec 8). A fact about the model, recorded because it is true — not a
 # decoration. The platform never fabricates a run to make an uploaded artifact fit the shape the
@@ -100,15 +101,16 @@ def admitted_artifact_refusal(artifact_uri: Optional[str], company_id: str, buck
         return ("this deployment does not name the bucket uploads are admitted into, so no artifact "
                 "location can be shown to be an admitted upload")
     try:
-        token = "tenant_" + str(uuid.UUID(str(company_id))).replace("-", "_")
+        # The gateway admits into the tenant's artifact prefix (ADR-0003 dec 5, 7: one mapping).
+        prefix = tenancy.mlflow_artifact_prefix(company_id)
     except (ValueError, AttributeError, TypeError):
         return "the caller's tenant is not a valid company id"
 
-    expected = rf"s3://{re.escape(bucket)}/{token}/{re.escape(ADMITTED_ROOT)}{_UPLOAD_ID}/?"
+    expected = rf"s3://{re.escape(bucket)}/{re.escape(prefix)}{re.escape(ADMITTED_ROOT)}{_UPLOAD_ID}/?"
     if not re.fullmatch(expected, artifact_uri):
         return (
             "the artifact location is not an upload this tenant's gateway admitted. Register the "
-            f"`artifact_uri` the upload commit returned (s3://{bucket}/{token}/{ADMITTED_ROOT}<upload>); "
+            f"`artifact_uri` the upload commit returned (s3://{bucket}/{prefix}{ADMITTED_ROOT}<upload>); "
             "nothing else is accepted, because nothing else was judged (ADR-0030 dec 4)."
         )
     return None

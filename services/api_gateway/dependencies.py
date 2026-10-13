@@ -12,8 +12,8 @@ from users import current_active_user, fastapi_users
 from database import AsyncSessionLocal
 from capability_auth import resolve_capability, AUDIENCE_API
 import company_status
+from industryflow_contracts import tenancy
 import logging
-import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -71,17 +71,10 @@ async def get_writer_with_company(
 # Schema-Per-Tenant Database Dependencies
 # ============================================================================
 
-def normalize_company_id_to_schema(company_id: str) -> str:
-    """
-    Convert a company_id UUID to its tenant schema name.
-
-    company_id is validated as a UUID first, so the result is safe to interpolate into a
-    SET search_path statement; a non-UUID raises ValueError instead of reaching SQL
-    (defends against injection — see ADR-0003).
-    Example: '550e8400-e29b-41d4-a716-446655440000' -> 'tenant_550e8400_e29b_41d4_a716_446655440000'
-    """
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}"
+# The one company_id -> schema mapping (ADR-0003 dec 5, 7), under the name this service imports it
+# by. The company_id is validated as a UUID first, so the result is safe to emit in a SET LOCAL
+# search_path statement; a non-UUID raises ValueError instead of reaching SQL.
+normalize_company_id_to_schema = tenancy.schema_name
 
 async def get_db_with_tenant(
     current_user: User = Depends(current_active_user)

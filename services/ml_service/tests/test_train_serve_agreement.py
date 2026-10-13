@@ -109,27 +109,27 @@ def _ctx(provider):
 # ------------------------------------------------------------------ the definitions cannot drift
 
 def test_granularities_agree_between_training_and_serving():
-    """Both sides key their window off the same names, with the same widths.
+    """Both sides key their window off the same names.
 
     A granularity added to one side and not the other would let a config name a window that only one
     side understands — skew reintroduced by omission. This fails CI instead.
     """
     assert set(offline_baseline.GRANULARITY_SECONDS) == set(baseline_provider._AGG_TABLES)
-    assert offline_baseline.GRANULARITY_SECONDS == baseline_provider.GRANULARITY_SECONDS
     assert offline_baseline.DEFAULT_GRANULARITY == baseline_provider.DEFAULT_GRANULARITY
 
 
 def test_window_and_lateness_agree_with_the_spark_job():
     """The producer decides which window is newest at serve time; both consumers must use its numbers.
 
-    The Spark job's width and allowed lateness (aggregation_windows.py) fix the lag between a row and
-    the newest written window. A table here that disagrees with the job's is train/serve skew again.
+    The width and allowed lateness fix the lag between a row and the newest written window. All three
+    read them from the one window contract (ADR-0006 dec 7) — tests/config_guards fails on any
+    restated table — and this holds what each side derives
+    from it to what the Spark job derives. A disagreement is train/serve skew again.
     """
     produced = aggregation_windows.AGGREGATION_WINDOWS
     assert {g: t for g, (t, _, _) in produced.items()} == baseline_provider._AGG_TABLES
-    for side in (offline_baseline, baseline_provider):
-        assert side.GRANULARITY_SECONDS == {g: w for g, (_, w, _) in produced.items()}
-        assert side.WATERMARK_SECONDS == {g: lag for g, (_, _, lag) in produced.items()}
+    assert offline_baseline.GRANULARITY_SECONDS == {g: w for g, (_, w, _) in produced.items()}
+    assert offline_baseline.WATERMARK_SECONDS == {g: lag for g, (_, _, lag) in produced.items()}
 
 
 def test_training_reads_the_window_serving_has_written():

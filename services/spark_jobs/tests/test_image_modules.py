@@ -72,4 +72,34 @@ def test_every_imported_module_is_copied_and_shipped(dockerfile, script):
     assert needed <= copied, f"{dockerfile.name} does not COPY {sorted(needed - copied)}"
     shipped = _py_files(text)
     assert needed <= shipped, f"{dockerfile.name} --py-files lacks {sorted(needed - shipped)}"
-    assert shipped <= copied, f"{dockerfile.name} ships {sorted(shipped - copied)} it never COPYs"
+    assert shipped - {CONTRACTS_ZIP} <= copied, f"{dockerfile.name} ships {sorted(shipped - copied)} it never COPYs"
+
+
+CONTRACTS_ZIP = "industryflow_contracts.zip"
+
+
+def _imports_contracts(path: Path) -> bool:
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Import) and any(a.name.split(".")[0] == "industryflow_contracts" for a in node.names):
+            return True
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] == "industryflow_contracts":
+            return True
+    return False
+
+
+@pytest.mark.parametrize("dockerfile,script", JOB_IMAGES, ids=[d.name for d, _ in JOB_IMAGES])
+def test_the_shared_contracts_package_is_copied_and_shipped(dockerfile, script):
+    """The shared package (libs/industryflow_contracts) comes from the `contracts` build context, not
+    from this directory, so the list above cannot see it: it is checked here, on both sides."""
+    text = dockerfile.read_text()
+    modules = [JOBS / script] + [JOBS / m for m in _local_imports(JOBS / script)]
+    needs = any(_imports_contracts(m) for m in modules)
+    copies = bool(re.search(r"^COPY\s+--from=contracts\s+industryflow_contracts/\s+/app/spark_streaming/industryflow_contracts/\s*$", text, re.M))
+    zipped = f"-m zipfile -c {CONTRACTS_ZIP} industryflow_contracts/" in text
+    shipped = CONTRACTS_ZIP in _py_files(text)
+    assert needs, f"{script} no longer imports the contracts package — drop it from {dockerfile.name}"
+    assert copies and zipped and shipped, (
+        f"{dockerfile.name}: the job imports industryflow_contracts, so the image must COPY it from the "
+        f"`contracts` context (driver), zip it and name the zip in --py-files (executors); "
+        f"copies={copies} zipped={zipped} shipped={shipped}"
+    )

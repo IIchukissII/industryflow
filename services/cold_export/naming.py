@@ -6,40 +6,25 @@
 Canonical tenant/partition naming for the cold layer (ADR-0025 decision 5, write side).
 
 The object store carries the schema-per-tenant isolation the platform already fixed for the
-database (ADR-0003). This module is the exporter's *single* definition of both tenant mappings:
-`company_id -> object-store prefix` and `company_id -> database schema` (ADR-0003 dec 5). Both
-validate company_id as a UUID before building any name, so a malformed or malicious id raises
-instead of producing an arbitrary prefix or SQL identifier. The exporter derives the schema it
-reads and drops from the company_id; the registry's stored ``schema_name`` is only checked against
-that derivation, never used on its own. There must be no second definition in this package.
+database (ADR-0003). Both tenant mappings the exporter needs — `company_id -> object-store prefix`
+and `company_id -> database schema` — are the platform's one tenant-naming module
+(``industryflow_contracts.tenancy``, ADR-0003 dec 5, 7), which the notebook broker reads the same
+prefix from. Both validate company_id as a UUID before building any name, so a malformed or
+malicious id raises instead of producing an arbitrary prefix or SQL identifier. The exporter
+derives the schema it reads and drops from the company_id; the registry's stored ``schema_name`` is
+only checked against that derivation, never used on its own.
 """
 from __future__ import annotations
 
-import uuid
 from datetime import date
 
+from industryflow_contracts import tenancy
 
-def company_id_to_prefix(company_id) -> str:
-    """
-    Map a company_id UUID to its cold-store prefix, e.g. ``tenant_<uuid>``.
-
-    company_id is validated as a UUID first; a non-UUID raises ValueError rather than yielding
-    an arbitrary object-store path. Each tenant's Parquet lives under its own prefix — tenants
-    are never pooled into a shared path keyed by a column (ADR-0025 dec 5, alternative F).
-    """
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical}"
-
-
-def company_id_to_schema(company_id) -> str:
-    """
-    Map a company_id UUID to its tenant schema, e.g. ``tenant_<uuid with underscores>``.
-
-    The same mapping every service applies (ADR-0003 dec 4, 5): the UUID is parsed first and only
-    its canonical form reaches the identifier. A non-UUID raises ValueError.
-    """
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}"
+# ``tenant_<uuid>`` (hyphenated): each tenant's Parquet lives under its own prefix — tenants are
+# never pooled into a shared path keyed by a column (ADR-0025 dec 5, alternative F).
+company_id_to_prefix = tenancy.cold_object_prefix
+# ``tenant_<uuid with underscores>``: the schema every service routes the tenant to.
+company_id_to_schema = tenancy.schema_name
 
 
 def day_partition(prefix: str, day: date) -> str:

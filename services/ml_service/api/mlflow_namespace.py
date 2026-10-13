@@ -13,20 +13,15 @@ and strips the prefix for kernels. The frontend read-path reuses these rules so 
 same clean, tenant-isolated view.
 """
 from typing import Any, Dict, List, Optional
-import uuid
 
+from industryflow_contracts import tenancy
 
-def tenant_token(company_id: str) -> str:
-    """The UUID-validated ``tenant_<uuid>`` token. Matches ``repository.normalize_company_id_to_schema``
-    and the gateway's ``policy._tenant_token`` (ADR-0003); validation makes it safe to interpolate
-    into a SQL/MLflow-search fragment."""
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}"
-
-
-def tenant_prefix(company_id: str) -> str:
-    """The registered-model / experiment name prefix for a tenant: ``tenant_<uuid>.``."""
-    return tenant_token(company_id) + "."
+# The tenant's MLflow namespace, from the one tenant-naming module the tracking gateway also uses
+# (ADR-0003 dec 5, 7): the UUID-validated ``tenant_<uuid>`` token, and the ``tenant_<uuid>.`` prefix
+# of its experiment and registered-model names. Validation makes both safe to interpolate into an
+# MLflow search filter.
+tenant_token = tenancy.tenant_token
+tenant_prefix = tenancy.mlflow_name_prefix
 
 
 def is_safe_name(name: str) -> bool:

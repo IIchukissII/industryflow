@@ -70,12 +70,16 @@ duplicates or corrupt state:
   It does not publish them a second time: both jobs consume `sensor-data-raw`. A failure
   of the database or Kafka itself still fails the batch. Ingestion rejects the far-future timestamp
   at the edge already (HTTP 422).
-- **Aggregation windows are a feature contract.** The window widths and allowed lateness live in
-  `services/spark_jobs/aggregation_windows.py`, not in environment overrides: with append-mode
-  emission the newest aggregate row at time *t* is window `floor((t − lateness) / width) − 1`, and the
-  offline training re-derivation reproduces exactly that window
-  (**[ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md)** rev 2 dec 9). A test
-  holds the Spark job, the serving provider and the offline module to one table.
+- **Aggregation windows are a feature contract** (ADR-0006 rev 2 dec 7). The window widths and
+  allowed lateness are defined once, in `libs/industryflow_contracts` (`industryflow_contracts.windows`),
+  not in environment overrides: with append-mode emission the newest aggregate row at time *t* is
+  window `floor((t − lateness) / width) − 1`, and the offline training re-derivation reproduces
+  exactly that window
+  (**[ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md)** rev 2 dec 9). The
+  Spark job (`aggregation_windows.py` adapts it to Spark's duration strings), the serving provider
+  and the offline module all read that one table; `tests/config_guards` fails on any service that
+  restates it. The job images ship the package to their executors as
+  `industryflow_contracts.zip` in `--py-files`.
 - **Checkpoints** are durable, so a restart resumes the stream rather than reprocessing from the
   beginning. The **stateful** aggregation queries (windowed) keep a *state store* in the
   checkpoint that the executor writes and the driver reads, so the checkpoint must live on **one

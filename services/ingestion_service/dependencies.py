@@ -14,23 +14,13 @@ from fastapi import HTTPException, status, Request
 from urllib.parse import unquote
 from cryptography import x509
 import re
-import uuid
+
+from industryflow_contracts import tenancy
 
 from config import DEVICE_IDENTITY_HEADER_CONVENTIONS, get_settings
 
 # Device identity URI SAN: industryflow:tenant/<company_uuid>/device/<device_id> (ADR-0007 dec 3).
 DEVICE_SAN_RE = re.compile(r"^industryflow:tenant/([0-9a-fA-F-]{36})/device/(.+)$")
-
-
-def normalize_company_id_to_schema(company_id: str) -> str:
-    """
-    Validate a company_id as a UUID and return its tenant schema name.
-
-    The UUID validation is the security-relevant part here: a non-UUID raises ValueError
-    instead of flowing on toward tenant routing (defends against injection — see ADR-0003).
-    """
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}"
 
 
 def _identity_from_client_cert(escaped_pem: str) -> dict:
@@ -52,9 +42,10 @@ def _identity_from_client_cert(escaped_pem: str) -> dict:
         m = DEVICE_SAN_RE.match(uri)
         if m:
             company_id, device_id = m.group(1), m.group(2)
-            # UUID-validate before the tenant reaches schema resolution (raises ValueError).
-            normalize_company_id_to_schema(company_id)
-            return {"company_id": str(uuid.UUID(company_id)), "device_id": device_id, "source": "mtls"}
+            # UUID-validate before the tenant reaches schema resolution (raises ValueError), and
+            # route by the canonical form only (ADR-0003 dec 4).
+            company_id = tenancy.canonical_company_id(company_id)
+            return {"company_id": company_id, "device_id": device_id, "source": "mtls"}
 
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Certificate has no IndustryFlow device identity")
 

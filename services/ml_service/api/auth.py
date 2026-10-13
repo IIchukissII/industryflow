@@ -4,10 +4,11 @@
 
 """
 Authentication and Authorization
-JWT token validation with database company_id lookup
+JWT token validation; the tenant is the token's signed company_id claim
 """
 import asyncpg
 from fastapi import Cookie, Header, HTTPException, Depends, Request
+from industryflow_contracts import tenancy
 from jose import jwt, JWTError
 from typing import Optional
 import logging
@@ -105,60 +106,23 @@ async def verify_jwt_token(
     return {"user_id": user_id, "payload": payload}
 
 
-async def get_company_id(
-    current_user: dict = Depends(verify_jwt_token),
-    db_pool: asyncpg.Pool = None
-) -> str:
+def company_id_of(current_user: dict) -> str:
+    """The caller's tenant: the ``company_id`` claim of their verified token, canonicalized.
+
+    The gateway signs the tenant into every access token it issues (ADR-0003 dec 2, ADR-0004 dec 2),
+    so the tenant is read from the credential — never discovered by scanning tenant schemas for the
+    user (review finding X2), and never taken from the request. A token without the claim, or with
+    one that is not a UUID, names no tenant and is refused.
     """
-    Resolve company_id from user_id by searching all tenant schemas
+    claim = current_user.get("payload", {}).get("company_id")
+    if not claim:
+        raise HTTPException(status_code=401, detail="Token carries no tenant")
+    try:
+        return tenancy.canonical_company_id(claim)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Token carries an invalid tenant")
 
-    Args:
-        current_user: User information from JWT token
-        db_pool: Database connection pool (injected as dependency)
 
-    Returns:
-        company_id as string (UUID)
-
-    Raises:
-        HTTPException: 404 if user not found in any tenant schema
-    """
-    user_id = current_user["user_id"]
-
-    # Get pool from app state if not provided
-    if db_pool is None:
-        raise HTTPException(status_code=500, detail="Database pool not available")
-
-    async with db_pool.acquire() as conn:
-        # Get all tenant schemas
-        schemas = await conn.fetch("""
-            SELECT schema_name
-            FROM information_schema.schemata
-            WHERE schema_name LIKE 'tenant_%'
-            ORDER BY schema_name
-        """)
-
-        # Search each tenant schema for the user
-        for schema_row in schemas:
-            schema_name = schema_row['schema_name']
-
-            # Transaction-local, so the path is discarded when this lookup ends instead of
-            # riding the pooled connection to its next borrower (ADR-0003 dec 6).
-            async with conn.transaction():
-                await conn.execute(
-                    "SELECT set_config('search_path', $1, true)", f"{schema_name}, public"
-                )
-                company_id = await conn.fetchval(
-                    'SELECT company_id FROM "user" WHERE id = $1',
-                    user_id
-                )
-
-            if company_id:
-                logger.debug(f"User {user_id} found in schema {schema_name}")
-                return str(company_id)
-
-        # User not found in any schema
-        logger.warning(f"User {user_id} not found in any tenant schema")
-        raise HTTPException(
-            status_code=404,
-            detail="User not found or not associated with any company"
-        )
+async def get_company_id(current_user: dict = Depends(verify_jwt_token)) -> str:
+    """Dependency: the verified caller's tenant (see ``company_id_of``)."""
+    return company_id_of(current_user)

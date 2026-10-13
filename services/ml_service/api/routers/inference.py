@@ -6,7 +6,7 @@
 Inference Router
 Real-time ML inference endpoint for anomaly detection in sensor data
 """
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Request
 from prometheus_client import Counter
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -16,9 +16,10 @@ import mlflow
 import mlflow.pyfunc
 import os
 import hmac
-import uuid
 
 import json
+
+from industryflow_contracts import tenancy
 
 import auth
 import model_cache
@@ -78,55 +79,6 @@ class InferenceResponse(BaseModel):
 # Dependency Injection
 # ============================================================================
 
-async def _company_id_from_user(request: Request, user_id: str) -> str:
-    """Look up a user's company_id across the tenant schemas."""
-    db_pool = request.app.state.db_pool
-
-    async with db_pool.acquire() as conn:
-        # Get all tenant schemas
-        schemas = await conn.fetch("""
-            SELECT schema_name
-            FROM information_schema.schemata
-            WHERE schema_name LIKE 'tenant_%'
-            ORDER BY schema_name
-        """)
-
-        # Search each tenant schema for the user
-        for schema_row in schemas:
-            schema_name = schema_row['schema_name']
-
-            # Transaction-local, so the path is discarded when this lookup ends instead of
-            # riding the pooled connection to its next borrower (ADR-0003 dec 6).
-            async with conn.transaction():
-                await conn.execute(
-                    "SELECT set_config('search_path', $1, true)", f"{schema_name}, public"
-                )
-                company_id = await conn.fetchval(
-                    'SELECT company_id FROM "user" WHERE id = $1',
-                    user_id
-                )
-
-            if company_id:
-                return str(company_id)
-
-        raise HTTPException(
-            status_code=404,
-            detail="User not found or not associated with any company"
-        )
-
-
-async def get_company_id_dependency(
-    request: Request,
-    current_user: dict = Depends(auth.verify_jwt_token)
-) -> str:
-    """Resolve the caller's company_id from their verified JWT."""
-    # Prefer the company_id claim (ADR-0003 dec 2; avoids the X2 tenant-schema scan).
-    claim = current_user.get("payload", {}).get("company_id")
-    if claim:
-        return str(claim)
-    return await _company_id_from_user(request, current_user["user_id"])
-
-
 async def _resolve_company_id(request: Request, request_data: InferenceRequest) -> str:
     """
     Resolve the tenant for an inference request — authentication required.
@@ -145,7 +97,7 @@ async def _resolve_company_id(request: Request, request_data: InferenceRequest) 
         if not request_data.company_id:
             raise HTTPException(status_code=400, detail="company_id required for internal service calls")
         try:
-            return str(uuid.UUID(str(request_data.company_id)))
+            return tenancy.canonical_company_id(request_data.company_id)
         except (ValueError, AttributeError, TypeError):
             raise HTTPException(status_code=400, detail="company_id must be a valid UUID")
 
@@ -159,10 +111,7 @@ async def _resolve_company_id(request: Request, request_data: InferenceRequest) 
         authorization=request.headers.get("Authorization"),
         if_access=request.cookies.get("if_access"),
     )
-    claim = user_data.get("payload", {}).get("company_id")
-    if claim:
-        return str(claim)
-    return await _company_id_from_user(request, user_data["user_id"])
+    return auth.company_id_of(user_data)
 
 
 # ============================================================================
