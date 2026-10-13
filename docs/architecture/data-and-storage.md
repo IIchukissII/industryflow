@@ -73,17 +73,27 @@ parallel with column and partition pruning.
 The exporter (`services/cold_export/`) is a single-node columnar writer — **not** Spark — run as
 a Kubernetes CronJob (on the box: `docker compose --profile cold-export up cold-export`). Its one
 invariant is the ordering **export → verify → drop**, enforced in the script, never in the
-orchestrator: for each tenant it writes a day's Parquet, reconciles the written row count against
-the source, and only then drops the chunk. It is idempotent and self-healing — "export everything
-older than N days not yet exported" — so a failed run re-picks the same days next time (a
-per-day `_manifest.json` is the "verified" marker).
+orchestrator: for each tenant it reads a day from one database snapshot, writes it as a Parquet
+part, reconciles the written row count against the source, lists the part in the day's
+`_manifest.json`, and only then drops the chunk. The drop re-reads the day under a lock and drops
+nothing if any row arrived, changed or left since the snapshot (a row-count-and-digest check in
+`cold_export_drop_day`); the next run exports it. It is idempotent and self-healing — "export
+everything older than N days not yet exported" — so a failed run re-picks the same days next time.
+
+A verified part is never rewritten. Rows that arrive for a day after it was dropped land in a new
+chunk and are exported as a further part (`measurements-0001.parquet`, …) with its own reconciled
+count; a row whose natural key the archive already holds is not exported twice. The manifest lists
+every verified part of the day, and readers read exactly the listed parts. Whether a listed part's
+drop committed is recorded by the database in the drop's own transaction
+(`public.cold_export_drops`), so a crash on either side of the drop resumes correctly.
 
 Isolation carries into the object store under the *existing* policy, not a new one:
 
 - **Write side (ADR-0003).** Tenants come from the verified `public.companies` registry; each
   tenant's Parquet lives under its own `tenant_<uuid>/…` prefix via the single canonical
   `company_id → prefix` mapping (`services/cold_export/naming.py`) — never a shared path keyed by
-  a column. The exporter connects as the least-privilege `cold_export_user` (SELECT on raw only)
+  a column. The schema it reads and drops is derived from the `company_id` by the canonical
+  mapping; a registry `schema_name` that disagrees is refused, not used. The exporter connects as the least-privilege `cold_export_user` (SELECT on raw only)
   and drops chunks through a `SECURITY DEFINER` function, so it never owns the table. Its
   object-store principal is **write-scoped** to the cold bucket (put/get/list), never the root
   MinIO keys.
@@ -119,6 +129,6 @@ Each service that touches the database connects as its own least-privilege role
 (`api_gateway_user`, `spark_streaming_user`, `alert_service_user`, `ml_service_user`,
 `cold_export_user`), and `create_tenant_schema()` grants each role only the access it needs
 within every tenant schema (e.g. Spark insert, the gateway full CRUD, cold-export SELECT on raw
-plus EXECUTE on `cold_export_drop_day`). Ingestion is mTLS-only and holds no database role at
+plus EXECUTE on `cold_export_day_fingerprint` and `cold_export_drop_day`). Ingestion is mTLS-only and holds no database role at
 all — it produces to Kafka and Spark performs the writes (ADR-0002). Role connection limits
 apply — size service connection pools (workers × pool size) within them.
