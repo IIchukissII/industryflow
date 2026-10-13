@@ -90,6 +90,10 @@ def probe(model_uri: str) -> dict:
     try:
         model = skops_trust.load_pyfunc(model_uri, uploaded_model.PROVENANCE_UPLOADED)
     except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, skops_trust.UnsafeArtifact):
+            return {"ok": False, "stage": "trust",
+                    "error": "loading this model would run code its author chose, which an uploaded "
+                             f"model may never do (ADR-0030 dec 4): {exc}"}
         if skops_trust.is_untrusted_types_error(exc):
             return {"ok": False, "stage": "trust",
                     "error": "the model deserialises into types this platform trusts only for models "

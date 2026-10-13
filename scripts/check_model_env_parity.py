@@ -201,6 +201,30 @@ def kernel_pin_sources() -> list[Path]:
     return [dockerfile] + [REPO_ROOT / KERNEL_BUILD_CONTEXT / c for c in copies]
 
 
+def violations(kernel: dict[str, str], serving: dict[str, str]) -> dict[str, str]:
+    """Every RULES package that breaks the contract, with the reason — the whole verdict, no IO.
+
+    A package missing from EITHER side is a violation, not a skip. Every package in RULES is on the
+    shared artifact path by definition — that is what being listed there means — so an absent pin is
+    not "a flavor one side does not support". It is a pin this check can no longer see: renamed,
+    moved to a file the Dockerfile does not COPY, or dropped. Skipping it printed `--` and exited 0,
+    which is a gate that passes by not looking. A flavor genuinely leaving one image is a decision,
+    and it is recorded by removing it from RULES (ADR-0027 dec 3), not by this check going quiet.
+    """
+    found: dict[str, str] = {}
+    for package, rule in RULES.items():
+        k, s = kernel.get(package), serving.get(package)
+        if k is None or s is None:
+            where = " and ".join(side for side, pin in (("the kernel", k), ("serving", s)) if pin is None)
+            found[package] = (
+                f"not pinned in {where}, so this check cannot compare it. If it really left the "
+                f"artifact path, remove it from RULES deliberately (ADR-0027 dec 3)."
+            )
+        elif reason := rule.check(k, s):
+            found[package] = reason
+    return found
+
+
 def main() -> int:
     kernel_files = kernel_pin_sources()
     serving_file = serving_requirements_path()
@@ -215,23 +239,15 @@ def main() -> int:
     print(f"serving (loads):  {serving_file.relative_to(REPO_ROOT)}  [read from the Dockerfile COPY]")
     print()
 
-    failures = 0
-    for package, rule in RULES.items():
-        k, s = kernel.get(package), serving.get(package)
-        if k is None or s is None:
-            # Not a violation. A library only one side carries is not a broken contract — it is a
-            # flavor the serving image does not support, which ml_service refuses at the gate with a
-            # reason (ADR-0027 dec 1-2). Say so, and keep going.
-            where = "the kernel" if k is None else "serving"
-            print(f"  --  {package}: not pinned in {where}; not on the shared artifact path")
-            continue
-
-        if reason := rule.check(k, s):
+    found = violations(kernel, serving)
+    for package in RULES:
+        if package in found:
+            reason = found[package]
             print(f"  FAIL {package}: {reason}")
             print(f"::error file={kernel_files[-1].relative_to(REPO_ROOT)}::ADR-0027 train/serve parity — {package}: {reason}")
-            failures += 1
         else:
-            print(f"  ok   {package}: kernel {k} / serving {s}")
+            print(f"  ok   {package}: kernel {kernel[package]} / serving {serving[package]}")
+    failures = len(found)
 
     print()
     if failures:

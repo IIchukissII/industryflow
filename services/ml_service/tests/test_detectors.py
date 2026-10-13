@@ -188,3 +188,81 @@ class TestTheRegistryIsTheDeclaration:
         # The honest state of the world: this image cannot serve a torch model, and says so, rather
         # than loading it and guessing at what its output means.
         assert detectors_for_flavor("mlflow.pytorch") == []
+
+
+class TestThroughMlflowsWrapper:
+    """Detectors meet models as MLflow loads them, not as bare estimators. Every test above hands
+    them a bare estimator, which is how an xgboost classifier came to be scored without ever being
+    asked for its probability: the private reach into the wrapper found sklearn's estimator and
+    stopped at xgboost's wrapper, which exposes only `predict`."""
+
+    @pytest.fixture
+    def xgb_classifier(self, tmp_path):
+        xgboost = pytest.importorskip("xgboost")
+        import mlflow.pyfunc
+        import mlflow.xgboost
+
+        y = (np.linalg.norm(TRAIN, axis=1) > 2.5).astype(int)  # 1 == anomalous
+        clf = xgboost.XGBClassifier(n_estimators=10, max_depth=2, random_state=0).fit(TRAIN, y)
+        path = str(tmp_path / "xgb")
+        mlflow.xgboost.save_model(clf, path)
+        return clf, mlflow.pyfunc.load_model(path)
+
+    @pytest.mark.asyncio
+    async def test_an_xgboost_classifier_is_scored_from_its_probability(self, xgb_classifier):
+        clf, loaded = xgb_classifier
+        result = await get_detector("sklearn")(OUTLIER, loaded, 0.5, DetectorContext())
+        assert result.detail["semantics"] == ANOMALY_PROBABILITY
+        assert result.score == pytest.approx(float(clf.predict_proba(OUTLIER)[0][1]), abs=1e-6)
+
+    @pytest.mark.asyncio
+    async def test_an_sklearn_model_is_still_reached_through_its_wrapper(self, tmp_path):
+        import mlflow.pyfunc
+        import mlflow.sklearn
+
+        forest = IsolationForest(random_state=0).fit(TRAIN)
+        path = str(tmp_path / "if")
+        mlflow.sklearn.save_model(forest, path, serialization_format="skops",
+                                  skops_trusted_types=["sklearn.tree._tree.Tree"])
+        import skops_trust  # the serving loader, with the kernel's grant
+        loaded = skops_trust.load_pyfunc(path, "kernel")
+        result = await get_detector("sklearn")(NORMAL, loaded, 0.5, DetectorContext())
+        assert result.detail["semantics"] == OUTLIER_SCORE
+        assert result.is_anomaly is False
+
+
+class TestAFloatIsNotADeclaration:
+    """ADR-0028 dec 2: the platform never infers semantics from a prediction's dtype. A float output
+    was read as a 0-1 anomaly score and clamped — a regressor's 37.2 became a certain anomaly."""
+
+    class FloatModel:
+        def __init__(self, value):
+            self.value = value
+
+        def predict(self, X):
+            return np.array([self.value])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("value", [0.3, 37.2, -4.0])
+    async def test_the_compatibility_detector_refuses_an_undeclared_float(self, value):
+        with pytest.raises(UninterpretableModel):
+            await get_detector("sklearn")(NORMAL, self.FloatModel(value), 0.5, DetectorContext())
+
+    @pytest.mark.asyncio
+    async def test_a_model_registered_as_direct_is_scored_from_its_output(self):
+        result = await get_detector("direct")(NORMAL, self.FloatModel(0.9), 0.85, DetectorContext())
+        assert result.score == pytest.approx(0.9)
+        assert result.is_anomaly is True
+        assert result.detail["semantics"] == "direct_score"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("value", [1.5, -0.1, float("nan")])
+    async def test_a_direct_score_outside_0_1_is_refused_not_clamped(self, value):
+        with pytest.raises(UninterpretableModel, match="not a score in that range"):
+            await get_detector("direct")(NORMAL, self.FloatModel(value), 0.5, DetectorContext())
+
+    def test_direct_score_is_now_implemented_by_something(self):
+        """It was in the vocabulary with no detector behind it, so an upload declaring it could only
+        ever be refused."""
+        from extensions import detectors_for
+        assert "direct" in detectors_for("direct_score", "mlflow.sklearn")

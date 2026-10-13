@@ -315,7 +315,9 @@ async def evaluate_run(mlflow_run_id: str) -> Compatibility:
     """
     from model_uri import resolve_model_uri
 
-    return await asyncio.to_thread(evaluate, resolve_model_uri(mlflow_run_id))
+    # Resolution asks the tracking store too, so it runs in the worker thread with the read — not
+    # on the event loop, where a slow store would stall every request this process is serving.
+    return await asyncio.to_thread(lambda: evaluate(resolve_model_uri(mlflow_run_id)))
 
 
 async def evaluate_uri(model_uri: str) -> Compatibility:

@@ -23,6 +23,7 @@ from importlib.metadata import PackageNotFoundError, version as installed_versio
 from fastapi import APIRouter
 
 from extensions import EXTENSION_API_VERSION, detector_capabilities, registered_transforms
+from model_compat import FLAVOR_LIBRARY
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +31,9 @@ router = APIRouter(prefix="/api/ml", tags=["Capabilities"])
 
 # The artifact flavors this image could load if asked. Presence of the flavor's own library is what
 # decides it — the same question ADR-0027's gate asks of an artifact's declared requirements, asked
-# here of the environment itself, so the two answers cannot disagree.
-_FLAVOR_LIBRARIES = {
-    "mlflow.sklearn": "scikit-learn",
-    "mlflow.xgboost": "xgboost",
-    "mlflow.pytorch": "torch",
-    "mlflow.keras": "keras",
-    "mlflow.lightgbm": "lightgbm",
-}
+# here of the environment itself. It is the GATE'S OWN map, not a copy: a second list kept here had
+# already drifted from it (it lacked tensorflow), so this endpoint and the gate gave two answers.
+_FLAVOR_LIBRARIES = FLAVOR_LIBRARY
 
 
 def _installed(package: str) -> str | None:
