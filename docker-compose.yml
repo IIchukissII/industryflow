@@ -4,13 +4,15 @@
 
 # IndustryFlow - Docker Compose
 
-# DB TLS (ADR-0017): clients verify the TimescaleDB server cert against the internal CA. The CA
-# is mounted read-only into each DB client; DB_SSLMODE is overridable (.env) — default
-# verify-full, set 'disable' for a bare dev stack with no generated certs.
+# DB TLS (ADR-0017): clients verify the TimescaleDB server cert against the internal CA, which is
+# mounted read-only into each DB client. With TLS_CERT_DIR set that is the internal CA from
+# scripts/gen-internal-ca.sh; unset (a bare `docker compose up`), it is the db-ca volume, where
+# db-cert-init publishes the CA of the cert it staged. The server accepts TLS only (pg_hba is
+# hostssl), so there is no sslmode that skips it.
 x-db-tls-env: &db-tls-env
   DB_SSLMODE: ${DB_SSLMODE:-verify-full}
   DB_SSLROOTCERT: /etc/ssl/industryflow/ca.crt
-x-ca-mount: &ca-mount "${TLS_CERT_DIR:-frontend-certs}:/etc/ssl/industryflow:ro"
+x-ca-mount: &ca-mount "${TLS_CERT_DIR:-db-ca}:/etc/ssl/industryflow:ro"
 
 # Spark checkpoint on object storage (ADR-0006). The driver reads/writes the same checkpoint as
 # the executors, so on a multi-worker cluster it must live on ONE store visible to all — MinIO
@@ -82,8 +84,11 @@ services:
 
   # Stages the TimescaleDB TLS cert into a postgres-owned volume with 0600 perms (ADR-0017):
   # Postgres refuses a key it doesn't own / that is group-readable, which a bind mount can't
-  # satisfy. Uses the CA-signed db.crt/db.key from TLS_CERT_DIR if present, else self-signs a
-  # dev cert so `ssl=on` never breaks a bare `docker compose up`.
+  # satisfy. Uses the CA-signed db.crt/db.key from TLS_CERT_DIR if present; else keeps the cert an
+  # earlier run staged; else self-signs one, so `ssl=on` never breaks a bare `docker compose up`.
+  # Reusing matters: this runs on every `up`, and a fresh cert per run would leave a running
+  # server on the old one while clients are handed the new CA. Then it publishes the staged CA to
+  # db-ca, the clients' default CA mount, so verify-full works with or without TLS_CERT_DIR.
   db-cert-init:
     image: alpine:3.20
     container_name: industryflow-db-cert-init
@@ -95,6 +100,8 @@ services:
           cp /src/db.crt /dst/db.crt; cp /src/db.key /dst/db.key
           { [ -f /src/ca.crt ] && cp /src/ca.crt /dst/ca.crt; } || cp /src/db.crt /dst/ca.crt
           echo "staged CA-signed DB cert"
+        elif [ -f /dst/db.key ] && [ -f /dst/db.crt ] && [ -f /dst/ca.crt ]; then
+          echo "keeping the DB cert staged by an earlier run"
         else
           apk add --no-cache openssl >/dev/null
           openssl req -x509 -nodes -newkey rsa:2048 -days 825 -keyout /dst/db.key -out /dst/db.crt \
@@ -103,9 +110,13 @@ services:
           echo "generated self-signed DB cert (dev fallback)"
         fi
         chown -R 70:70 /dst && chmod 600 /dst/db.key && chmod 644 /dst/db.crt /dst/ca.crt
+        cp /dst/ca.crt /ca/ca.crt && chmod 644 /ca/ca.crt
+        echo "published the DB CA to the client CA volume"
     volumes:
+      # Only TLS_CERT_DIR is a real source; the frontend-certs fallback never holds db.* files.
       - "${TLS_CERT_DIR:-frontend-certs}:/src:ro"
       - db-certs:/dst
+      - db-ca:/ca
     restart: "no"
     networks:
       - industryflow-network
@@ -135,11 +146,10 @@ services:
       NOTEBOOK_SQL_PROXY_DB_PASSWORD: ${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}
       # Cold-layer exporter role (ADR-0025) — created at init; the exporter connects as it.
       COLD_EXPORT_DB_PASSWORD: ${COLD_EXPORT_DB_PASSWORD:-}
-
-      # Postgres configuration - HIGH THROUGHPUT
-      POSTGRES_SHARED_BUFFERS: 512MB
-      POSTGRES_EFFECTIVE_CACHE_SIZE: 2GB
-      POSTGRES_MAX_CONNECTIONS: 400
+      # Read-only monitoring role (pg_monitor) the postgres-exporter connects as (ADR-0016 dec 3).
+      METRICS_DB_PASSWORD: ${METRICS_DB_PASSWORD}
+    # Server settings (connections, memory) live in postgresql.conf, mounted below; the image reads
+    # no POSTGRES_* tuning variables.
     command:
       - postgres
       - -c
@@ -906,7 +916,7 @@ services:
       SQL_PROXY_TENANT_LOGIN_KEY: ${NOTEBOOK_SQL_PROXY_TENANT_KEY:-}
       SQL_PROXY_DB_NAME: ${DB_NAME}
       # Upstream TLS to the hardened DB (ADR-0017): verify the server cert against the same
-      # internal CA every DB client trusts. Set DB_SSLMODE=disable for a dev DB without certs.
+      # internal CA every DB client trusts.
       SQL_PROXY_DB_SSLMODE: ${DB_SSLMODE:-verify-full}
       SQL_PROXY_DB_SSLROOTCERT: /etc/ssl/industryflow/ca.crt
     volumes:
@@ -1068,14 +1078,15 @@ services:
       - industryflow-network
     restart: unless-stopped
 
-  # PostgreSQL Exporter - Database metrics
+  # PostgreSQL Exporter - Database metrics. Connects as the read-only monitoring role (pg_monitor),
+  # never the superuser (ADR-0016 dec 3) — the same role and TLS mode as the Helm exporter.
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:latest
     container_name: industryflow-postgres-exporter
     environment:
-      DATA_SOURCE_USER: ${DB_USER}
-      DATA_SOURCE_PASS: ${DB_PASSWORD}
-      DATA_SOURCE_URI: "timescaledb:${DB_PORT}/${DB_NAME}?sslmode=verify-full&sslrootcert=/etc/ssl/industryflow/ca.crt"
+      DATA_SOURCE_USER: metrics_user
+      DATA_SOURCE_PASS: ${METRICS_DB_PASSWORD}
+      DATA_SOURCE_URI: "timescaledb:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSLMODE:-verify-full}&sslrootcert=/etc/ssl/industryflow/ca.crt"
     ports:
       - "127.0.0.1:9187:9187"
     volumes:
@@ -1083,7 +1094,8 @@ services:
     networks:
       - industryflow-network
     depends_on:
-      - timescaledb
+      timescaledb:
+        condition: service_healthy
     restart: unless-stopped
 
   # Redis Exporter - Cache metrics
@@ -1124,7 +1136,6 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_INSTALL_PLUGINS: ""
-      DB_PASSWORD: ${DB_PASSWORD}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./infrastructure/grafana/provisioning/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
@@ -1134,7 +1145,6 @@ services:
     networks:
       - industryflow-network
     depends_on:
-      - timescaledb
       - prometheus
       - loki
     restart: unless-stopped
@@ -1266,6 +1276,8 @@ volumes:
   redis-data:
   minio-data:
   db-certs:
+  # The DB CA db-cert-init publishes for clients when TLS_CERT_DIR is unset (x-ca-mount).
+  db-ca:
   ml-models:
     driver: local
   notebook-hub-data:
