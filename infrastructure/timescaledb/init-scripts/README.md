@@ -107,7 +107,9 @@ A superuser can also provision through the API (`POST /api/companies`), which us
   unqualified. Since `api_gateway_user` may create objects in `public`, they first refuse to run
   while `public` holds any function or operator owned by a role that is neither a superuser nor
   their own owner, so nothing planted there can run with their rights.
-- No teardown: deactivation is `update_company(id, NULL, false)`.
+- No teardown: deactivation is `update_company(id, NULL, false)`. It suspends the tenant's database
+  identity (ADR-0033 dec 3): the SQL proxy login becomes `NOLOGIN` and its open sessions are
+  terminated; reactivating restores `LOGIN`.
 - Idempotent. On an existing database apply it with
   `psql -v ON_ERROR_STOP=1 -f 21-company-provisioning.sql` as the database superuser.
 
@@ -128,7 +130,9 @@ A superuser can also provision through the API (`POST /api/companies`), which us
   privilege-free `notebook_sql_tenants` group (named by pg_hba) — nothing else. The SQL proxy opens
   every kernel session as it, so the database, not the proxy, confines a kernel to its tenant.
 - `notebook_sql_proxy_enrol(uuid, verifier)` — `SECURITY DEFINER`; installs a tenant login's SCRAM
-  verifier. `EXECUTE` is granted to `notebook_sql_proxy` only.
+  verifier. `EXECUTE` is granted to `notebook_sql_proxy` only. Refuses a suspended tenant.
+- `tenant_is_suspended(uuid)` — the registry row is inactive. While it is, `ensure_tenant_sql_login()`
+  keeps the login `NOLOGIN` and terminates its sessions.
 - Creates a login for every existing tenant. `create_tenant_schema()` (and so `provision_company()`)
   creates the login for a new tenant in the same transaction as its schema, and converges it when
   re-run for an existing one (ADR-0033 dec 1). A login is created without a password: it cannot

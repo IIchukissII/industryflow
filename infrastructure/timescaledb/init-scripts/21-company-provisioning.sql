@@ -122,23 +122,38 @@ AS $$
 #variable_conflict use_column
 DECLARE
     v_name TEXT;
+    v_found BOOLEAN;
 BEGIN
     PERFORM public.company_provisioning_guard();
     IF p_company_name IS NOT NULL THEN
         v_name := public.company_name_checked(p_company_name);
     END IF;
 
+    UPDATE public.companies c
+    SET company_name = coalesce(v_name, c.company_name),
+        is_active = coalesce(p_is_active, c.is_active)
+    WHERE c.company_id = p_company_id;
+    v_found := FOUND;
+
+    -- Suspend / resume the tenant's database identity with the flag (ADR-0033 dec 3): its SQL
+    -- login is NOLOGIN with no open session while inactive, LOGIN again once reactivated. The
+    -- reader role is NOLOGIN either way, so the SQL login is the tenant's only login identity.
+    -- A registry row without a provisioned tenant has no identity to change.
+    IF p_is_active IS NOT NULL AND v_found AND EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'tenant_reader_' || replace(p_company_id::text, '-', '_')
+    ) THEN
+        PERFORM public.ensure_tenant_sql_login(p_company_id);
+    END IF;
+
     RETURN QUERY
-        UPDATE public.companies c
-        SET company_name = coalesce(v_name, c.company_name),
-            is_active = coalesce(p_is_active, c.is_active)
-        WHERE c.company_id = p_company_id
-        RETURNING c.company_id, c.company_name, c.is_active, c.created_at;
+        SELECT c.company_id, c.company_name, c.is_active, c.created_at
+        FROM public.companies c WHERE c.company_id = p_company_id;
 END;
 $$;
 
 COMMENT ON FUNCTION public.update_company(UUID, TEXT, BOOLEAN) IS
-    'Renames and/or (de)activates a company (SECURITY DEFINER); no row = unknown company';
+    'Renames and/or (de)activates a company, suspending or resuming its SQL login (SECURITY DEFINER); no row = unknown company';
 
 -- SECURITY DEFINER hardening: no ambient EXECUTE; only the gateway role may call them.
 REVOKE ALL ON FUNCTION public.provision_company(TEXT, BOOLEAN) FROM PUBLIC;

@@ -166,3 +166,62 @@ def test_a_function_planted_in_public_stops_provisioning(db):
             _as(cur, "api_gateway_user", "SELECT * FROM public.provision_company(%s, true)", (f"x-{uuid.uuid4()}",))
     finally:
         cur.execute("DROP FUNCTION public.create_base_tables(VARCHAR)")
+
+
+# --- Suspension (ADR-0033 dec 3): the tenant's database identity follows its active flag ---------
+
+_SCRIPTS = os.path.join(os.path.dirname(__file__), "..", "init-scripts")
+
+
+def _function_body(script, signature):
+    sql = open(os.path.join(_SCRIPTS, script)).read()
+    start = sql.index(f"CREATE OR REPLACE FUNCTION {signature}")
+    return sql[start:sql.index("$$;", start)]
+
+
+def test_update_company_reasserts_the_sql_login_when_the_flag_changes():
+    body = _function_body("21-company-provisioning.sql", "public.update_company(")
+    assert "PERFORM public.ensure_tenant_sql_login(p_company_id)" in body, (
+        "deactivating a company leaves its SQL login able to log in")
+
+
+def test_the_sql_login_is_nologin_and_disconnected_while_suspended():
+    body = _function_body("13-notebook-sql-proxy-role.sh", "ensure_tenant_sql_login(")
+    assert "tenant_is_suspended(p_company_id)" in body
+    assert "THEN 'NOLOGIN' ELSE 'LOGIN'" in body, "the login's LOGIN attribute ignores suspension"
+    assert "'CREATE ROLE %I LOGIN" not in body and "'ALTER ROLE %I LOGIN" not in body
+    assert "pg_terminate_backend" in body, "a suspended tenant's open SQL sessions survive"
+
+
+def test_the_proxy_does_not_enrol_a_suspended_tenant():
+    body = _function_body("13-notebook-sql-proxy-role.sh", "notebook_sql_proxy_enrol(")
+    assert body.index("tenant_is_suspended(p_company_id)") < body.index("ensure_tenant_sql_login"), (
+        "enrolment must refuse a suspended tenant before it touches the login")
+
+
+def _can_login(cur, role):
+    cur.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname = %s", (role,))
+    return cur.fetchone()[0]
+
+
+def test_deactivation_disables_the_sql_login_and_reactivation_restores_it(db):
+    cur, _ = db
+    company_id, *_ = _provision(db, f"suspend-{uuid.uuid4()}")
+    login = "tenant_sqlproxy_" + str(company_id).replace("-", "_")
+    assert _can_login(cur, login) is True
+    _as(cur, "api_gateway_user", "SELECT * FROM public.update_company(%s, NULL, false)", (str(company_id),))
+    assert _can_login(cur, login) is False
+    # Re-asserting the login (backfill, enrolment's helper) keeps a suspended tenant NOLOGIN.
+    cur.execute("SELECT ensure_tenant_sql_login(%s)", (str(company_id),))
+    assert _can_login(cur, login) is False
+    _as(cur, "api_gateway_user", "SELECT * FROM public.update_company(%s, NULL, true)", (str(company_id),))
+    assert _can_login(cur, login) is True
+
+
+def test_enrolment_refuses_a_suspended_tenant(db):
+    cur, _ = db
+    company_id, *_ = _provision(db, f"suspend-enrol-{uuid.uuid4()}")
+    _as(cur, "api_gateway_user", "SELECT * FROM public.update_company(%s, NULL, false)", (str(company_id),))
+    verifier = "SCRAM-SHA-256$4096:c2FsdA==$c3RvcmVk:c2VydmVy"
+    with pytest.raises(errors.InsufficientPrivilege, match="suspended"):
+        cur.execute("SELECT notebook_sql_proxy_enrol(%s, %s)", (str(company_id), verifier))
