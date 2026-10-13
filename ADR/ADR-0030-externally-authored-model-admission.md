@@ -3,16 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0030 — Externally-authored models are admitted, but what provenance used to vouch for must be declared and proven (rev 3)
+# ADR-0030 — Externally-authored models are admitted, but what provenance used to vouch for must be declared and proven (rev 4)
 
 - **ID:** ADR-0030
 - **Status:** Accepted
-- **Date:** 2026-07-16 (rev 1: 2026-07-16; rev 2: 2026-07-17; rev 3: 2026-10-11)
+- **Date:** 2026-07-16 (rev 1: 2026-07-16; rev 2: 2026-07-17; rev 3: 2026-10-11; rev 4: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the artifact declares, the serving environment satisfies or refuses — the contract this record extends to artifacts the platform never observed being made)
 - **Companions:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (rev 1 — the tracking gateway, and the only principal permitted to write the artifact store, which is what decision 2 turns on), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (a model declares what its output means; the platform never guesses)
 - **Related:** [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (the durable history that motivates training off-platform), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (notebooks as the analytics surface, and the sandbox that bounds the kernel), [ADR-0021](ADR-0021-model-drift-monitoring.md) (the drift lane, which needs a training baseline an uploaded model has no run to carry), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (audience-bound capabilities)
-- **Supersedes:** ADR-0030 rev 0 (2026-07-16 — named components and frameworks where a moment and a property were meant); rev 1 (2026-07-16 — made each decision precise, reversing none); rev 2 (2026-07-17 — left the upload plane unreachable from outside the trust network; rev 2 adds decision 10); rev 3 (2026-10-11 — extends decision 4: the framework's deserialisation switch governs executable formats only)
+- **Supersedes:** ADR-0030 rev 0 (2026-07-16 — named components and frameworks where a moment and a property were meant); rev 1 (2026-07-16 — made each decision precise, reversing none); rev 2 (2026-07-17 — left the upload plane unreachable from outside the trust network; rev 2 adds decision 10); rev 3 (2026-10-11 — extends decision 4: the framework's deserialisation switch governs executable formats only); rev 4 (2026-10-13 — said the serving side holds no object-store credential, which it cannot while it loads uploads itself, and left an uploaded model's address and any author code it carries unchecked; rev 4 corrects decision 2 and extends decisions 4 and 8)
 
 ## Context and problem
 
@@ -66,7 +66,7 @@ So the question this record answers is not "may users upload models" — the req
 the platform has already paid for the history that motivates it. It is: **what did the kernel used to
 vouch for, and what must an uploaded artifact do instead?**
 
-**Revisions.** *Rev 1 (2026-07-16):* implementation surfaced that rev 0 named *components* and *frameworks* where it should have named a *moment* and a *property*, and each imprecision invites a violation of a decision already on record. Rev 1 fixes what "one door" binds (the write path for bytes, not the enforcement point for admission), names where each check runs, and restores decision 4's refusal to a generic property of the serialisation rather than a list of frameworks. No decision is reversed; each is made precise. *Rev 2 (2026-07-17):* closes the transport half of the deferred transfer question for the single-request case. Decision 3 named a browser client, but the realisation only ever served a client already inside the trust network, so the client the record named could not reach the plane; decision 10 makes the upload plane reachable from outside without establishing a second writer or breaching a decision already on record. Resumability and very-large/multipart transfer stay deferred. *Rev 3 (2026-10-11):* the framework's deserialisation switch governs executable formats only; typed formats are loaded by the serving side under its provenance grant, and an upload receives none (decision 4). The per-revision detail is in the notes under each decision.
+**Revisions.** *Rev 1 (2026-07-16):* implementation surfaced that rev 0 named *components* and *frameworks* where it should have named a *moment* and a *property*, and each imprecision invites a violation of a decision already on record. Rev 1 fixes what "one door" binds (the write path for bytes, not the enforcement point for admission), names where each check runs, and restores decision 4's refusal to a generic property of the serialisation rather than a list of frameworks. No decision is reversed; each is made precise. *Rev 2 (2026-07-17):* closes the transport half of the deferred transfer question for the single-request case. Decision 3 named a browser client, but the realisation only ever served a client already inside the trust network, so the client the record named could not reach the plane; decision 10 makes the upload plane reachable from outside without establishing a second writer or breaching a decision already on record. Resumability and very-large/multipart transfer stay deferred. *Rev 3 (2026-10-11):* the framework's deserialisation switch governs executable formats only; typed formats are loaded by the serving side under its provenance grant, and an upload receives none (decision 4). *Rev 4 (2026-10-13):* review found three gaps between the record and a servable upload. Decision 2 said the serving side holds no object-store credential and reaches every artifact through the tracking server; but rev 3 has the serving side load typed formats itself under a provenance grant, and an upload is loaded from its admitted address, so the serving side needs read access to those addresses — with none, uploads were admissible and not servable. Nothing checked that a model's recorded address was one the caller's tenant was entitled to, so a registration could name another tenant's artifact. And the refusal of executable serialisation did not reach author-supplied *code*, which a model can carry without any pickle at all. Rev 4 corrects decision 2, and extends decisions 4 and 8. The per-revision detail is in the notes under each decision.
 
 ## Decision drivers
 
@@ -133,6 +133,22 @@ vouch for, and what must an uploaded artifact do instead?**
    The gateway was built for interactive tracking rather than artifact ingestion, so the cost is
    real and is paid deliberately: a component takes on a shape it was not designed for, in exchange
    for the number of privileged writers remaining at one.
+
+   > **rev 4 (2026-10-13): the serving side holds a read-only principal scoped to admitted uploads —
+   > not "no credential".** The serving side loads an admitted upload **directly from its admitted
+   > address**, and checks and loads the same bytes it fetched (decision 4, rev 3), so it cannot do
+   > without access to that address. It therefore holds one object-store principal that can **read
+   > only, and only the tenants' upload areas** of the artifact store: it can neither write nor delete,
+   > and it cannot read kernel-authored artifacts, which it still reaches through the tracking server.
+   > Decision 2's ground is unchanged — **write authority over the artifact store is still singular**,
+   > and a read-only principal is not a second writer.
+   >
+   > The sentence above that it "holds no object-store credential at all" is superseded. It reflected a
+   > platform in which every service shared the store's root credential and the only way to hold less
+   > was to hold nothing. Every platform service that reaches the object store now holds a principal
+   > **scoped to what it does** — its own buckets or prefixes, and only the verbs it uses — and only the
+   > object store itself and its one bootstrap hold the root credential. Least privilege, not absence,
+   > is what bounds a compromised component.
 
 3. **An upload is authorised by the platform session, under its own audience — never by a tracking
    capability.** ADR-0019 dec 3 mints tracking capabilities for the authoring kernel; they are
@@ -220,6 +236,15 @@ vouch for, and what must an uploaded artifact do instead?**
    Refusing pickle is therefore not hardening on this path. It is the **precondition for admitting
    uploads at all**, and if it cannot be enforced, the rest of this record does not apply.
 
+   > **rev 4 (2026-10-13): serving refuses author code for uploads.** Executable serialisation is one
+   > way an artifact runs its author's code on load; it is not the only one. An artifact can also name
+   > a loader of its author's choosing, ship code the loader imports, or wrap the model in an
+   > author-defined class. For an uploaded artifact the serving side **refuses every one of these**,
+   > at registration, at deployment and before every load: an upload is loaded only by the platform's
+   > own loaders, from data, never by running anything its author supplied. The reasoning is decision
+   > 4's, unchanged — for an author with no foothold, code that runs on load is the platform granting
+   > one.
+
 5. **The artifact's output semantics are declared explicitly by the uploader, and the declaration is
    judged at the serving side's registration gate — or the model is refused there.**
    ADR-0028 dec 1 made declared semantics a first-class fact and dec 2 forbade inferring them from a
@@ -277,6 +302,15 @@ vouch for, and what must an uploaded artifact do instead?**
    baseline that an uploaded model has no run to carry, so an uploaded model is either accompanied by
    a declared baseline or is **visibly** un-monitorable. Visibly is the decision; silently is the
    failure.
+
+   > **rev 4 (2026-10-13): the admitted-address rule.** Provenance fixes where an uploaded model's
+   > artifact may be. An upload is admitted only at an address **in the artifact store, under the
+   > caller's tenant's own uploads area, naming one upload** — the place the mediator's commit put it
+   > (decision 10). Any other address — another tenant's, a kernel run's, another bucket, a path that
+   > names more than one upload — is refused. The rule is checked against the **caller's tenant** at
+   > registration, again at deployment, and again every time the artifact is loaded from the store, so
+   > a model record that came to name some other address could not be served from it. A loaded model
+   > is cached only under the tenant, provenance and address it was checked for.
 
 9. **This record does not admit torch, or any flavor outside ADR-0027's supported set.** An upload
    path makes an unsupported flavor *more likely to arrive*, not more servable. Such an artifact is
@@ -363,6 +397,12 @@ vouch for, and what must an uploaded artifact do instead?**
   standing bet.
 - **E. Accept uploads, defer the semantics declaration, infer it for now.** Directly contradicts
   ADR-0028 dec 2, and #236 is what inference costs.
+
+- **F. Keep the serving side credential-less and serve uploads through the tracking server
+  *(rev 4)*.** Rejected: the tracking server serves artifacts it recorded, and an upload has no run
+  there (decision 8 forbids synthesising one). Routing upload bytes through it would require exactly
+  the fabricated run decision 8 refuses, and would make the tracking server a reader of every tenant's
+  uploads on the serving side's behalf — a broader principal than the scoped read it replaces.
 
 ## Consequences
 
