@@ -19,7 +19,9 @@ from .offline_baseline import (
     add_window_features,
     feature_config,
     window_index,
-    GRANULARITY_SECONDS
+    latest_written_window,
+    GRANULARITY_SECONDS,
+    WATERMARK_SECONDS
 )
 
 __all__ = [
@@ -31,7 +33,9 @@ __all__ = [
     'add_window_features',
     'feature_config',
     'window_index',
-    'GRANULARITY_SECONDS'
+    'latest_written_window',
+    'GRANULARITY_SECONDS',
+    'WATERMARK_SECONDS'
 ]
 
 __version__ = '1.0.0'

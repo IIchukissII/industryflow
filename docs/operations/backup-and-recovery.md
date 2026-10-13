@@ -36,6 +36,34 @@ The `db-backup` image (`infrastructure/backup/`, `postgres:15-alpine` + `aws-cli
 
 Keys are UTC-timestamped (`YYYYMMDDTHHMMSSZ`) so lexical order is chronological.
 
+### The cold layer (raw history older than the export horizon)
+
+The cold-export job drops a day of raw `sensor_measurements` from the database once that day is
+archived as Parquet in the cold bucket ([ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md)).
+From then on **the cold bucket is the only copy of that history** — a database dump no longer
+contains it. So the same backup run also mirrors the cold bucket into the backup target, under
+`s3://<backup-bucket>/cold/…` (same keys as the source):
+
+- **incremental** — an object is copied when the mirror lacks it or holds a different size; each
+  day's `_manifest.json` is re-copied every run (it grows when late rows add a part);
+- **append-only** — nothing is ever deleted from the mirror, so a deleted or overwritten object on
+  the source cannot propagate into the backup; the mirror is not pruned (it is history);
+- **verified** — each copied object's size is read back from the mirror, and a mismatch fails the
+  run;
+- **least privilege** — the source is read with the cold layer's **read-only** principal
+  (`COLD_READ_ACCESS_KEY`), the mirror written with the backup credentials. Source and target may be
+  different stores (objects stream through the job), so an off-site backup target mirrors an
+  in-cluster cold bucket directly.
+
+Helm: on by default when `coldExport.enabled` (`backup.cold.enabled`, `backup.cold.prefix`); the
+source is `coldExport.store.*`. Compose: the `db-backup` service mirrors `COLD_STORE_BUCKET` on the
+in-stack MinIO (`COLD_SOURCE_*` env; empty read keys fall back to the backup keys). Unset
+`COLD_SOURCE_BUCKET` to skip the mirror.
+
+To restore the cold layer, copy the mirror back into the cold bucket with the same keys (e.g.
+`aws s3 sync s3://<backup-bucket>/cold/ s3://<cold-bucket>/`), with the cold exporter stopped. The
+manifests come back with their parts, so readers see the same verified days.
+
 ### Off-site is what makes it DR
 
 By default the target is the **in-cluster MinIO**, which protects against logical corruption
@@ -83,6 +111,12 @@ docker compose run --rm db-backup                       # one backup run
 
 `infrastructure/backup/db-restore.sh` downloads a dump and restores it **TimescaleDB-aware**
 (wraps `pg_restore` in `timescaledb_pre_restore()`/`timescaledb_post_restore()`).
+
+`pg_restore` runs without `--exit-on-error`, because the dump re-issues the `timescaledb`
+extension's statements, which collide with the extension the restore creates first — an expected
+error. The script excuses **that collision and nothing else**: any other failed statement (or a
+failure that names no statement) fails the restore with a non-zero exit, after leaving
+pre-restore mode, and the restored database must not be cut over to.
 
 > **Destructive:** restoring into an existing database drops and recreates it. Restore the
 > **globals first** when rebuilding a fresh cluster, then each database.

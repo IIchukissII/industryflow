@@ -18,12 +18,18 @@ store. pandas/pyarrow are imported lazily (heavy, and optional extras).
 """
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
 # The env the notebook hub injects into an authoring kernel at spawn (jupyterhub_config.py).
 BROKER_URL_ENV = "INDUSTRYFLOW_COLD_BROKER_URL"
 CAPABILITY_ENV = "INDUSTRYFLOW_COLD_CAPABILITY"
+
+# The exporter's layout (services/cold_export/naming.py): each day directory holds a manifest that
+# lists the day's verified Parquet parts.
+MANIFEST_NAME = "_manifest.json"
+FIRST_PART = "measurements.parquet"
 
 
 class IndustryFlowCold:
@@ -93,20 +99,59 @@ class IndustryFlowCold:
         return pd.read_parquet(io.BytesIO(self.open(path)))
 
     def read_all(self, path: str = "", *, suffix: str = ".parquet"):
-        """Read every Parquet object under ``path`` into one concatenated DataFrame.
+        """Read every verified Parquet part under ``path`` into one concatenated DataFrame.
 
-        This is the "give me years, all columns" read: it lists the tenant's tree, reads each
-        matching file directly from the object store, and concatenates. For large histories,
-        prefer narrowing ``path`` (e.g. ``"year=2026/month=07"``) to prune partitions.
+        This is the "give me years, all columns" read: it lists the tenant's tree and reads each
+        day's parts directly from the object store. A day's ``_manifest.json`` names the verified
+        parts that make up the day — the first export plus any rows that arrived later — and exactly
+        those are read. Parquet in a day with no manifest is an export still being written and
+        verified, and is not read. For large histories, prefer narrowing ``path`` (e.g.
+        ``"year=2026/month=07"``) to prune partitions.
         """
         import pandas as pd  # lazy; heavy
 
-        files = [f["path"] for f in self.list_files(path) if f["path"].endswith(suffix)]
+        files = [self._join(path, p) for p in self.verified_parts(path) if p.endswith(suffix)]
         if not files:
             return pd.DataFrame()
-        base = path.rstrip("/")
-        frames = [self.read_parquet(f"{base}/{f}" if base else f) for f in files]
-        return pd.concat(frames, ignore_index=True)
+        return pd.concat([self.read_parquet(f) for f in files], ignore_index=True)
+
+    def verified_parts(self, path: str = "") -> list:
+        """The verified Parquet parts under ``path``, relative to it, in partition order."""
+        listed = [f["path"] for f in self.list_files(path)]
+        by_dir: dict = {}
+        for rel in listed:
+            directory, _, name = rel.rpartition("/")
+            by_dir.setdefault(directory, set()).add(name)
+        parts = []
+        for directory in sorted(by_dir):
+            if MANIFEST_NAME not in by_dir[directory]:
+                continue
+            manifest = json.loads(self.open(self._join(path, _rel(directory, MANIFEST_NAME))))
+            for name in manifest_part_files(manifest):
+                if name not in by_dir[directory]:
+                    raise RuntimeError(
+                        f"cold manifest {_rel(directory, MANIFEST_NAME)!r} lists {name!r}, "
+                        "which is not in the store"
+                    )
+                parts.append(_rel(directory, name))
+        return parts
+
+    @staticmethod
+    def _join(base: str, rel: str) -> str:
+        base = base.strip("/")
+        return f"{base}/{rel}" if base else rel
+
+
+def _rel(directory: str, name: str) -> str:
+    return f"{directory}/{name}" if directory else name
+
+
+def manifest_part_files(manifest: dict) -> list:
+    """The Parquet files a day's manifest lists. A manifest written before a day could hold more
+    than one part lists none: it stands for the day's single first file."""
+    if "parts" in manifest:
+        return [str(p["file"]) for p in manifest["parts"]]
+    return [FIRST_PART]
 
 
 def read_all(path: str = ""):

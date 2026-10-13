@@ -13,8 +13,16 @@ any other way is train/serve skew, which is what this module exists to prevent.
 
 The re-derivation, per row at time ``t``:
 
-    window(t)   = floor(t / W)                     — W = the granularity's width in seconds
-    baseline(t) = statistic over window(t) - 1     — the most recent *closed* window
+    closed(t)   = floor((t - L) / W) - 1    — W = the granularity's width, L = its allowed lateness
+                                              (the aggregation watermark delay), both in seconds
+    baseline(t) = statistic over the newest window <= closed(t) that holds samples
+
+``closed(t)`` is the newest window whose row the Spark job has written by time ``t``. It emits a
+window once (append mode, ADR-0006 dec 2), when the watermark — the latest event time minus ``L`` —
+passes the window's end; so for 1-minute windows with 2 minutes of lateness, serving reads
+``window(t) - 3``, not ``window(t) - 1``. W and L are the producer's
+(services/spark_jobs/aggregation_windows.py); a test holds this module, the serving provider and the
+Spark job to one table.
 
 It is therefore **causal**: a row is described by samples that strictly precede its own window,
 never by its own window (still open at serve time) and never by the future. A mean over a whole
@@ -22,8 +30,8 @@ history (``groupby(...).transform('mean')``) is neither — it averages samples 
 it describes, so inference cannot reproduce it at any window size, and a model trained on it is fed
 a feature it never sees in production. That is the defect this replaces (issue #173).
 
-Rows in the first window of a history have no closed predecessor and get the neutral ``0.0`` the
-serving transform degrades to when no aggregate row exists yet, so the two agree on cold start too.
+Rows with no written window yet (the start of a history) get the neutral ``0.0`` the serving
+transform degrades to when no aggregate row exists, so the two agree on cold start too.
 """
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -38,6 +46,14 @@ GRANULARITY_SECONDS: Dict[str, int] = {
     "5min": 300,
     "1hour": 3600,
 }
+# Allowed lateness (watermark delay) per granularity: how long after a window ends its row is
+# written. Must equal the Spark job's (services/spark_jobs/aggregation_windows.py) and the serving
+# side's WATERMARK_SECONDS; a test asserts all three agree.
+WATERMARK_SECONDS: Dict[str, int] = {
+    "1min": 120,
+    "5min": 600,
+    "1hour": 900,
+}
 DEFAULT_GRANULARITY = "1min"
 
 # stat_type -> (feature-name suffix, aggregate to read)
@@ -48,14 +64,22 @@ _STATS = {
 }
 
 
-def window_index(timestamps: pd.Series, granularity: str = DEFAULT_GRANULARITY) -> pd.Series:
-    """Tumbling-window index of each timestamp — the same bucketing Spark's windowing applies."""
-    width = GRANULARITY_SECONDS[granularity]
+def _epoch_seconds(timestamps: pd.Series) -> pd.Series:
     # Convert to seconds by *casting the resolution*, not by dividing raw integers: the integer
     # backing a datetime64 is nanoseconds on pandas 2 but can be milliseconds or microseconds on
     # pandas 3, so a hardcoded 1e9 divisor silently buckets every row into one window there.
-    epoch_seconds = pd.to_datetime(timestamps).astype("datetime64[s]").astype("int64")
-    return epoch_seconds // width
+    return pd.to_datetime(timestamps).astype("datetime64[s]").astype("int64")
+
+
+def window_index(timestamps: pd.Series, granularity: str = DEFAULT_GRANULARITY) -> pd.Series:
+    """Tumbling-window index of each timestamp — the same bucketing Spark's windowing applies."""
+    return _epoch_seconds(timestamps) // GRANULARITY_SECONDS[granularity]
+
+
+def latest_written_window(timestamps: pd.Series, granularity: str = DEFAULT_GRANULARITY) -> pd.Series:
+    """Index of the newest window whose aggregate row exists at each timestamp: ``closed(t)``."""
+    width, lateness = GRANULARITY_SECONDS[granularity], WATERMARK_SECONDS[granularity]
+    return (_epoch_seconds(timestamps) - lateness) // width - 1
 
 
 def add_window_features(
@@ -100,18 +124,22 @@ def add_window_features(
     original_index = df.index
     df = df.sort_values(group_cols + [timestamp_col])
     df["_window"] = window_index(df[timestamp_col], granularity)
+    df["_closed"] = latest_written_window(df[timestamp_col], granularity)
 
     transformations: List[dict] = []
     for sensor in sensor_cols:
-        # The statistic of each closed window, then shifted onto the rows of the NEXT window: a row
-        # reads the window before its own, which is exactly the "most recent closed window" the
-        # serving provider selects. With no group_cols the frame is one continuous history, so the
-        # shift runs straight down it — `groupby([])` is not a no-op, it raises.
-        per_window = df.groupby(group_cols + ["_window"])[sensor].agg(["mean", "std"])
-        closed = per_window.groupby(group_cols).shift(1) if group_cols else per_window.shift(1)
-        aligned = df[group_cols + ["_window"]].merge(
-            closed, left_on=group_cols + ["_window"], right_index=True, how="left",
-        )
+        # The statistic of each window, matched to each row as the newest window at or before the
+        # row's closed(t) — the row the serving provider reads: the latest one written (a window with
+        # no samples is never written, so the one before it is). merge_asof needs both sides sorted
+        # on the key; `by` keeps each equipment's windows to itself.
+        per_window = (df.groupby(group_cols + ["_window"])[sensor].agg(["mean", "std"])
+                      .reset_index().sort_values("_window"))
+        rows = df[group_cols + ["_closed"]].reset_index(drop=True)
+        rows["_pos"] = range(len(rows))
+        aligned = pd.merge_asof(
+            rows.sort_values("_closed"), per_window, left_on="_closed", right_on="_window",
+            by=group_cols or None, direction="backward",
+        ).sort_values("_pos")  # back to df's (sorted) row order, positionally
 
         for stat_type in stats:
             suffix, aggregate = _STATS[stat_type]
@@ -120,12 +148,12 @@ def add_window_features(
                 column = df[sensor] - baseline
             else:
                 column = baseline
-            # No closed predecessor (a run's first window), or a single-sample window with no
+            # No written window yet (the start of a history), or a single-sample window with no
             # stddev: the neutral value the serving transform degrades to.
             df[f"{sensor}{suffix}"] = column.fillna(0.0)
             transformations.append(feature_config(sensor, stat_type, granularity))
 
-    df = df.drop(columns="_window").reindex(original_index)
+    df = df.drop(columns=["_window", "_closed"]).reindex(original_index)
     return df, transformations
 
 

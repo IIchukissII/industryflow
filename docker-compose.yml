@@ -393,7 +393,7 @@ services:
 
   # Spark Master
   spark-master:
-    image: apache/spark:4.1.2-python3
+    image: apache/spark:4.1.3-python3
     container_name: industryflow-spark-master
     ports:
       - "127.0.0.1:7077:7077"
@@ -1207,6 +1207,13 @@ services:
       S3_PREFIX: ${BACKUP_S3_PREFIX:-timescaledb}
       DATABASES: ${BACKUP_DATABASES:-industryflow mlflow}
       RETAIN_PER_DB: ${BACKUP_RETAIN_PER_DB:-14}
+      # Cold-layer mirror (ADR-0025): the cold bucket is the only copy of raw history older than the
+      # export horizon. Read with the read-only cold principal; empty keys fall back to the ones above.
+      COLD_SOURCE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
+      COLD_SOURCE_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
+      COLD_SOURCE_ACCESS_KEY_ID: ${COLD_READ_ACCESS_KEY:-}
+      COLD_SOURCE_SECRET_ACCESS_KEY: ${COLD_READ_SECRET_KEY:-}
+      COLD_BACKUP_PREFIX: ${BACKUP_COLD_PREFIX:-cold}
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
