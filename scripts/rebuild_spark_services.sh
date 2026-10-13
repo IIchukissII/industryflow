@@ -5,8 +5,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # rebuild_spark_services.sh
-# Rebuild Spark Streaming and Aggregations services with updated code
-# Usage: ./rebuild_spark_services.sh [streaming|aggregations|both]
+# Rebuild the Spark services (job drivers and the executor pool) with updated code
+# Usage: ./rebuild_spark_services.sh [streaming|aggregations|worker|all]
+#   all (default) rebuilds the worker pool as well as both jobs: the executors run on spark-worker,
+#   so a change to its image (Dockerfile.worker, patch-spark-jars.sh, the Spark version) reaches the
+#   cluster only when the worker is rebuilt too. "both" is kept as an alias of "all".
 
 set -euo pipefail  # Exit on error, undefined variable, or pipe failure
 
@@ -33,11 +36,10 @@ log_error() {
 if [ "$EUID" -ne 0 ]; then
     log_info "Script requires sudo privileges. Re-executing with sudo..."
     exec sudo bash "$0" "$@"
-    exit $?
 fi
 
 # Determine what to rebuild
-SERVICE="${1:-both}"
+SERVICE="${1:-all}"
 
 # Version info
 BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
@@ -51,118 +53,66 @@ log_info "Git Commit: $VCS_REF"
 log_info "Rebuilding: $SERVICE"
 echo ""
 
-# Function to rebuild streaming service
-rebuild_streaming() {
-    log_info "=== Rebuilding Spark Streaming Service ==="
+# Rebuild one compose service: stop, remove container and image, build without cache, start.
+# spark-worker is a scalable pool with no container_name, so it is addressed by service name only.
+rebuild_service() {
+    local service="$1"
+    log_info "=== Rebuilding ${service} ==="
 
-    # Step 1: Stop the service
-    log_info "Step 1/5: Stopping spark-streaming container..."
-    docker-compose stop spark-streaming || log_warn "Service not running"
+    log_info "Step 1/5: Stopping ${service}..."
+    docker-compose stop "$service" || log_warn "Service not running"
     sleep 2
 
-    # Step 2: Remove old container
-    log_info "Step 2/5: Removing old container..."
-    docker-compose rm -f spark-streaming 2>/dev/null || true
+    log_info "Step 2/5: Removing old container(s)..."
+    docker-compose rm -f "$service" 2>/dev/null || true
 
-    # Step 3: Remove old image
     log_info "Step 3/5: Removing old image..."
-    docker rmi industryflow-spark-streaming:latest 2>/dev/null || \
-        docker rmi $(docker images -q --filter "reference=*spark-streaming*" | head -1) 2>/dev/null || \
+    docker rmi "industryflow-${service}:latest" 2>/dev/null || \
+        docker rmi $(docker images -q --filter "reference=*${service}*" | head -1) 2>/dev/null || \
         log_warn "No old image found"
 
-    # Step 4: Build new image with version info
+    # set -e stops the script here if the build fails.
     log_info "Step 4/5: Building new image..."
     docker-compose build \
         --build-arg BUILD_DATE="$BUILD_DATE" \
         --build-arg VERSION="$VERSION" \
         --build-arg VCS_REF="$VCS_REF" \
         --no-cache \
-        spark-streaming
+        "$service"
 
-    if [ $? -ne 0 ]; then
-        log_error "Build failed!"
-        exit 1
-    fi
-
-    # Step 5: Start the service
-    log_info "Step 5/5: Starting spark-streaming service..."
-    docker-compose up -d spark-streaming
+    log_info "Step 5/5: Starting ${service}..."
+    docker-compose up -d "$service"
 
     # Wait for startup
     sleep 5
 
-    # Verify
     log_info "Verifying service status..."
-    docker ps | grep spark-streaming
+    docker-compose ps "$service"
 
-    log_info "✅ Spark Streaming rebuilt successfully"
-    log_info "Check logs: sudo docker logs -f industryflow-spark-streaming"
+    log_info "✅ ${service} rebuilt successfully"
+    log_info "Check logs: sudo docker-compose logs -f ${service}"
     echo ""
 }
 
-# Function to rebuild aggregations service
-rebuild_aggregations() {
-    log_info "=== Rebuilding Spark Aggregations Service ==="
-
-    # Step 1: Stop the service
-    log_info "Step 1/5: Stopping spark-aggregations container..."
-    docker-compose stop spark-aggregations || log_warn "Service not running"
-    sleep 2
-
-    # Step 2: Remove old container
-    log_info "Step 2/5: Removing old container..."
-    docker-compose rm -f spark-aggregations 2>/dev/null || true
-
-    # Step 3: Remove old image
-    log_info "Step 3/5: Removing old image..."
-    docker rmi industryflow-spark-aggregations:latest 2>/dev/null || \
-        docker rmi $(docker images -q --filter "reference=*spark-aggregations*" | head -1) 2>/dev/null || \
-        log_warn "No old image found"
-
-    # Step 4: Build new image with version info
-    log_info "Step 4/5: Building new image..."
-    docker-compose build \
-        --build-arg BUILD_DATE="$BUILD_DATE" \
-        --build-arg VERSION="$VERSION" \
-        --build-arg VCS_REF="$VCS_REF" \
-        --no-cache \
-        spark-aggregations
-
-    if [ $? -ne 0 ]; then
-        log_error "Build failed!"
-        exit 1
-    fi
-
-    # Step 5: Start the service
-    log_info "Step 5/5: Starting spark-aggregations service..."
-    docker-compose up -d spark-aggregations
-
-    # Wait for startup
-    sleep 5
-
-    # Verify
-    log_info "Verifying service status..."
-    docker ps | grep spark-aggregations
-
-    log_info "✅ Spark Aggregations rebuilt successfully"
-    log_info "Check logs: sudo docker logs -f industryflow-spark-aggregations"
-    echo ""
-}
-
-# Main logic
+# Main logic. The worker goes first: the job drivers register with the cluster and ask it for
+# executors, which should already run the new worker image.
 case $SERVICE in
     streaming)
-        rebuild_streaming
+        rebuild_service spark-streaming
         ;;
     aggregations)
-        rebuild_aggregations
+        rebuild_service spark-aggregations
         ;;
-    both)
-        rebuild_streaming
-        rebuild_aggregations
+    worker)
+        rebuild_service spark-worker
+        ;;
+    all|both)
+        rebuild_service spark-worker
+        rebuild_service spark-streaming
+        rebuild_service spark-aggregations
         ;;
     *)
-        log_error "Invalid argument. Use: streaming, aggregations, or both"
+        log_error "Invalid argument. Use: streaming, aggregations, worker, or all"
         exit 1
         ;;
 esac
@@ -172,4 +122,4 @@ log_info ""
 log_info "Next steps:"
 log_info "1. Check logs for any errors"
 log_info "2. Verify data is flowing to TimescaleDB"
-log_info "3. Monitor Spark UI at http://localhost:8080 (if master running)"
+log_info "3. Monitor the Spark master UI at http://localhost:8083 (compose publishes the master's 8080 on 8083)"

@@ -64,10 +64,12 @@ COPY metrics.properties /opt/spark/conf/metrics.properties
 # Redirect ivy's --packages cache to a writable, image-baked dir (see the file's own comment).
 COPY spark-defaults.conf /opt/spark/conf/spark-defaults.conf
 
-# Copy the spark aggregations script
-COPY kafka_aggregations.py /app/spark_streaming/
+# Copy the spark aggregations script + the local modules it imports (also shipped to executors via
+# --py-files). tests/test_image_modules.py holds this list, the chmod and --py-files to the imports.
+COPY kafka_aggregations.py aggregation_windows.py reading_guard.py /app/spark_streaming/
 RUN chown -R spark:spark /app/spark_streaming && \
-    chmod 644 /app/spark_streaming/kafka_aggregations.py
+    chmod 644 /app/spark_streaming/kafka_aggregations.py /app/spark_streaming/aggregation_windows.py \
+        /app/spark_streaming/reading_guard.py
 
 # Switch to spark user to pre-download dependencies
 USER spark
@@ -94,4 +96,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 CMD ["/opt/spark/bin/spark-submit", \
      "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.3,org.postgresql:postgresql:42.7.4", \
      "--conf", "spark.sql.streaming.checkpointLocation=/opt/spark/checkpoints", \
+     "--py-files", "/app/spark_streaming/aggregation_windows.py,/app/spark_streaming/reading_guard.py", \
      "/app/spark_streaming/kafka_aggregations.py"]

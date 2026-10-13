@@ -91,6 +91,27 @@ spec:
                   value: {{ .Values.backup.databases | quote }}
                 - name: RETAIN_PER_DB
                   value: {{ .Values.backup.retainPerDatabase | quote }}
+                {{- if and .Values.coldExport.enabled .Values.backup.cold.enabled }}
+                # Cold-layer mirror (ADR-0025): the cold bucket is the only copy of raw history older
+                # than the export horizon, so it is backed up too — read with the read-only cold
+                # principal, written with the backup credentials above.
+                - name: COLD_SOURCE_BUCKET
+                  value: {{ .Values.coldExport.store.bucket | quote }}
+                - name: COLD_SOURCE_ENDPOINT_URL
+                  value: {{ .Values.coldExport.store.endpoint | default (include "industryflow.minioEndpoint" .) | quote }}
+                - name: COLD_SOURCE_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
+                      key: COLD_READ_ACCESS_KEY
+                - name: COLD_SOURCE_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
+                      key: COLD_READ_SECRET_KEY
+                - name: COLD_BACKUP_PREFIX
+                  value: {{ .Values.backup.cold.prefix | quote }}
+                {{- end }}
                 {{- if .Values.tls.db.enabled }}
                 # pg_dump over TLS (ADR-0017); libpq reads PGSSLMODE/PGSSLROOTCERT.
                 - name: PGSSLMODE

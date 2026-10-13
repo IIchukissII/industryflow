@@ -118,3 +118,20 @@ def test_read_only_no_write_verbs():
     c = _client(m, FakeColdStore())
     assert c.put("/cold/object/x.parquet", headers=_auth(tok)).status_code == 405
     assert c.delete("/cold/object/x.parquet", headers=_auth(tok)).status_code == 405
+
+
+def test_every_part_of_a_day_is_listed_and_readable():
+    # A day topped up with late rows holds a further part next to the first (cold export). The
+    # broker lists and presigns every object under the tenant prefix, so the reader can read each
+    # part the day's manifest names.
+    m = {}; tok = _handle(m); cold = FakeColdStore()
+    cold.objects[PREFIX + "year=2026/month=07/day=06/measurements-0001.parquet"] = 812
+    c = _client(m, cold)
+    files = {f["path"] for f in c.get("/cold/files", headers=_auth(tok)).json()["files"]}
+    assert {"year=2026/month=07/day=06/measurements.parquet",
+            "year=2026/month=07/day=06/measurements-0001.parquet",
+            "year=2026/month=07/day=06/_manifest.json"} <= files
+    r = c.get("/cold/object/year=2026/month=07/day=06/measurements-0001.parquet",
+              headers=_auth(tok), follow_redirects=False)
+    assert r.status_code == 307
+    assert cold.presigned == [PREFIX + "year=2026/month=07/day=06/measurements-0001.parquet"]

@@ -14,14 +14,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Iterator, Optional, Protocol
+from typing import ContextManager, Iterator, Optional, Protocol
 
 import pyarrow as pa
 
 
 @dataclass(frozen=True)
 class Tenant:
-    """A tenant to export, resolved from the verified `public.companies` registry (ADR-0025 dec 5)."""
+    """A tenant to export, as the `public.companies` registry lists it (ADR-0025 dec 5).
+
+    ``schema_name`` is the registry's stored claim. The exporter does not use it: it derives the
+    schema from ``company_id`` and refuses the tenant if the two disagree.
+    """
 
     company_id: str
     schema_name: str
@@ -29,13 +33,41 @@ class Tenant:
 
 @dataclass(frozen=True)
 class WriteResult:
-    """Outcome of writing one day's Parquet: the number of rows the writer actually emitted."""
+    """Outcome of writing one Parquet part: the number of rows the writer actually emitted."""
 
     rows: int
 
 
+class DaySnapshot(Protocol):
+    """One day of a tenant's raw measurements, read from a single consistent database snapshot.
+
+    ``rows`` and ``fingerprint`` describe exactly the rows `batches` streams. Rows may still change
+    in the live table while the export runs; `drop` checks that they did not before it drops.
+    """
+
+    rows: int
+    """Source row count of the day in the snapshot."""
+
+    fingerprint: str
+    """An order-independent digest of the day's rows in the snapshot (computed by the database)."""
+
+    def batches(self) -> Iterator[pa.RecordBatch]:
+        """Stream the day's rows ordered by ``equipment_id, time`` (ADR-0025 dec 6, within-file sort)."""
+        ...
+
+    def drop(self, part: str) -> bool:
+        """Drop the day's rows and record that ``part`` completed the day, atomically.
+
+        Under a lock on the day, the database re-reads the day's count and fingerprint; if either
+        differs from the snapshot — a row arrived, changed or left after it was read — nothing is
+        dropped and False is returned. Called ONLY after the part is verified and listed in the
+        manifest (ADR-0025 dec 3).
+        """
+        ...
+
+
 class MeasurementSource(Protocol):
-    """The hot store (TimescaleDB) as the exporter sees it: read raw, then drop the chunk."""
+    """The hot store (TimescaleDB) as the exporter sees it."""
 
     def list_tenants(self) -> list[Tenant]:
         """Enumerate tenants from the trusted registry, not from any request (ADR-0025 dec 5)."""
@@ -45,36 +77,37 @@ class MeasurementSource(Protocol):
         """Distinct days (ascending) that hold measurements strictly older than ``older_than``."""
         ...
 
-    def count_day(self, schema_name: str, day: date) -> int:
-        """Authoritative source row count for one day — the number the export must reconcile to."""
+    def snapshot_day(self, schema_name: str, day: date) -> ContextManager[DaySnapshot]:
+        """Open one day for export. Leaving the context without `drop` drops nothing."""
         ...
 
-    def read_day(self, schema_name: str, day: date) -> Iterator[pa.RecordBatch]:
-        """Stream one day's rows ordered by ``equipment_id, time`` (ADR-0025 dec 6, within-file sort)."""
-        ...
-
-    def drop_day(self, schema_name: str, day: date) -> None:
-        """Drop the day's hypertable chunk. Called ONLY after a verified export (ADR-0025 dec 3)."""
+    def drop_recorded(self, schema_name: str, day: date, part: str) -> bool:
+        """Whether a drop that completed ``part`` was committed (the database's own record)."""
         ...
 
 
 class ColdStore(Protocol):
-    """The object store as the exporter sees it: write Parquet + manifest, verify by read-back."""
+    """The object store as the exporter sees it: write Parquet parts + manifest, verify by read-back."""
 
     def read_manifest(self, prefix: str, day: date) -> Optional[dict]:
-        """Return the day's manifest, or None if no verified export exists yet (idempotency signal)."""
+        """Return the day's manifest, or None if no verified export exists yet."""
         ...
 
-    def write_parquet(self, prefix: str, day: date, batches: Iterator[pa.RecordBatch]) -> WriteResult:
-        """Write the day's measurements Parquet (partitioned by time, sorted within file)."""
+    def write_part(self, prefix: str, day: date, part: str,
+                   batches: Iterator[pa.RecordBatch]) -> WriteResult:
+        """Write one Parquet part of the day (partitioned by time, sorted within the file)."""
         ...
 
-    def parquet_row_count(self, prefix: str, day: date) -> int:
-        """Row count from the *written* Parquet footer — read back for verification, not trusted."""
+    def part_row_count(self, prefix: str, day: date, part: str) -> int:
+        """Row count from the *written* part's footer — read back for verification, not trusted."""
+        ...
+
+    def read_part_keys(self, prefix: str, day: date, part: str) -> pa.Table:
+        """The natural key columns (``time``, ``sensor_id``) of one written part."""
         ...
 
     def write_manifest(self, prefix: str, day: date, manifest: dict) -> None:
-        """Write the verification manifest. Its presence marks the day as verifiably exported."""
+        """Write the day's manifest: the list of verified parts readers read."""
         ...
 
 

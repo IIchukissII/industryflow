@@ -7,6 +7,8 @@ Wiring tests for the cold-layer helper (ADR-0025 dec 5, read side) — the capab
 plumbing, list/open/read_all ergonomics, with an injected fake transport so no broker or object
 store is needed.
 """
+import json
+
 import pytest
 
 from industryflow import IndustryFlowCold
@@ -36,11 +38,15 @@ class _FakeSession:
             {"path": "year=2026/month=07/day=06/_manifest.json", "size": 2},
         ]
         self.content = b"PARQUET-BYTES"
+        self.manifests = {"year=2026/month=07/day=06/_manifest.json": {"rows": 10}}
 
     def get(self, url, params=None, verify=True, timeout=None):
         self.calls.append({"url": url, "params": params})
         if url.endswith("/cold/files"):
             return _Resp(200, json_data={"files": self.files})
+        key = url.split("/cold/object/", 1)[-1]
+        if key in self.manifests:
+            return _Resp(200, content=json.dumps(self.manifests[key]).encode())
         return _Resp(200, content=self.content)
 
 
@@ -97,6 +103,74 @@ def test_read_all_selects_parquet_and_concatenates(monkeypatch):
 
     monkeypatch.setattr(cold, "read_parquet", fake_read_parquet)
     df = cold.read_all()
-    # Only the .parquet file is read (the _manifest.json is skipped), path joined under the query.
+    # Only the part the (single-file) manifest stands for is read; the manifest itself is not a part.
     assert read_paths == ["year=2026/month=07/day=06/measurements.parquet"]
     assert list(df["path"]) == ["year=2026/month=07/day=06/measurements.parquet"]
+
+
+def _reader(monkeypatch, files, manifests):
+    import pandas as pd
+
+    s = _FakeSession()
+    s.files = [{"path": f, "size": 1} for f in files]
+    s.manifests = manifests
+    cold = IndustryFlowCold("http://broker:5060", "cap", session=s)
+    read_paths = []
+
+    def fake_read_parquet(path):
+        read_paths.append(path)
+        return pd.DataFrame({"path": [path]})
+
+    monkeypatch.setattr(cold, "read_parquet", fake_read_parquet)
+    return cold, read_paths
+
+
+DAY6 = "year=2026/month=07/day=06"
+DAY7 = "year=2026/month=07/day=07"
+
+
+def test_read_all_reads_every_part_a_manifest_lists(monkeypatch):
+    # A day exported, dropped, and later topped up with late rows holds two parts. Both are history;
+    # reading only the first would silently lose the late rows.
+    cold, read_paths = _reader(
+        monkeypatch,
+        [f"{DAY6}/measurements.parquet", f"{DAY6}/measurements-0001.parquet", f"{DAY6}/_manifest.json"],
+        {f"{DAY6}/_manifest.json": {"format": 2, "rows": 7, "parts": [
+            {"file": "measurements.parquet", "rows": 5}, {"file": "measurements-0001.parquet", "rows": 2}]}},
+    )
+    cold.read_all()
+    assert read_paths == [f"{DAY6}/measurements.parquet", f"{DAY6}/measurements-0001.parquet"]
+
+
+def test_read_all_skips_parquet_no_manifest_lists(monkeypatch):
+    # A part being written (no manifest entry yet), and a day whose export is not verified yet.
+    cold, read_paths = _reader(
+        monkeypatch,
+        [f"{DAY6}/measurements.parquet", f"{DAY6}/measurements-0001.parquet", f"{DAY6}/_manifest.json",
+         f"{DAY7}/measurements.parquet"],
+        {f"{DAY6}/_manifest.json": {"format": 2, "rows": 5,
+                                     "parts": [{"file": "measurements.parquet", "rows": 5}]}},
+    )
+    cold.read_all()
+    assert read_paths == [f"{DAY6}/measurements.parquet"]
+
+
+def test_read_all_under_a_narrowed_path(monkeypatch):
+    cold, read_paths = _reader(
+        monkeypatch,
+        ["day=06/measurements.parquet", "day=06/_manifest.json"],
+        {"year=2026/month=07/day=06/_manifest.json": {"rows": 3}},
+    )
+    cold.read_all("year=2026/month=07")
+    assert read_paths == ["year=2026/month=07/day=06/measurements.parquet"]
+
+
+def test_read_all_refuses_a_manifest_naming_a_missing_part(monkeypatch):
+    cold, _ = _reader(
+        monkeypatch,
+        [f"{DAY6}/measurements.parquet", f"{DAY6}/_manifest.json"],
+        {f"{DAY6}/_manifest.json": {"format": 2, "rows": 7, "parts": [
+            {"file": "measurements.parquet", "rows": 5}, {"file": "measurements-0001.parquet", "rows": 2}]}},
+    )
+    with pytest.raises(RuntimeError, match="not in the store"):
+        cold.read_all()

@@ -46,6 +46,17 @@ GRANULARITY_SECONDS = {
     "1hour": 3600,
 }
 
+# Allowed lateness of each granularity: the Spark job writes a window's row only once its watermark
+# (latest event time minus this) passes the window's end, so the newest row this provider reads at
+# time t is window floor((t - lateness) / width) - 1, not the window just before t's. Training
+# reproduces that same window (offline_baseline.latest_written_window); a test holds this, the
+# offline map and the Spark job's (services/spark_jobs/aggregation_windows.py) equal.
+WATERMARK_SECONDS = {
+    "1min": 120,
+    "5min": 600,
+    "1hour": 900,
+}
+
 
 # Entries the baseline cache may hold. A live entry is one (tenant, equipment, sensor, window), so
 # this covers a large fleet several times over; beyond it the least recently used entry goes.

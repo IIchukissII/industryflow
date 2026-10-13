@@ -343,6 +343,13 @@ backup:
     bucket: industryflow-backups
     region: us-east-1
     prefix: timescaledb
+  # Mirror the cold-layer bucket (ADR-0025) into the backup target under this prefix. After the
+  # cold export drops a day from the database the cold bucket is the only copy of that raw history,
+  # so a database dump alone no longer backs it up. Incremental and append-only (nothing is deleted
+  # from the mirror). Applies when coldExport is enabled; reads with the read-only cold principal.
+  cold:
+    enabled: true
+    prefix: cold
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }

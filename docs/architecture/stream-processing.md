@@ -56,6 +56,24 @@ duplicates or corrupt state:
   the hypertable partition column). Writes go through `foreachPartition` with a per-executor
   connection, and an error re-raises so Spark retries safely
   (**[ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md)**).
+- **Unwritable readings are dead-lettered, not retried forever and not dropped silently**
+  (ADR-0005 dec 3). A reading that is malformed, lacks a required field, carries an id that is not a
+  UUID, is stamped more than 5 minutes ahead of the clock, or names a tenant schema, sensor or
+  equipment that does not exist can never be written; failing the batch for it would replay the
+  batch forever and halt ingestion for every tenant. `spark-streaming` publishes each such reading
+  to **`sensor-data-raw.measurements.dlq`** (`KAFKA_TOPIC_MEASUREMENTS_DLQ`) — the original message,
+  the reason, and its topic/partition/offset — before the batch's writes, then writes the rest.
+  `spark-aggregations` excludes the same readings with the same definition
+  (`services/spark_jobs/reading_guard.py`) *before* its watermark, so a far-future timestamp cannot
+  drag the watermark ahead and close live windows; it does not publish them a second time. A failure
+  of the database or Kafka itself still fails the batch. Ingestion rejects the far-future timestamp
+  at the edge already (HTTP 422).
+- **Aggregation windows are a feature contract.** The window widths and allowed lateness live in
+  `services/spark_jobs/aggregation_windows.py`, not in environment overrides: with append-mode
+  emission the newest aggregate row at time *t* is window `floor((t − lateness) / width) − 1`, and the
+  offline training re-derivation reproduces exactly that window
+  (**[ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md)** rev 2 dec 9). A test
+  holds the Spark job, the serving provider and the offline module to one table.
 - **Checkpoints** are durable, so a restart resumes the stream rather than reprocessing from the
   beginning. The **stateful** aggregation queries (windowed) keep a *state store* in the
   checkpoint that the executor writes and the driver reads, so the checkpoint must live on **one

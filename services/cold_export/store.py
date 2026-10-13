@@ -5,8 +5,8 @@
 """
 Object-store adapter for the cold-layer exporter (ADR-0025 dec 10, dec 11).
 
-Writes each day's measurements as a single partitioned Parquet file plus a JSON manifest, using
-the exporter's write-scoped principal. Verification reads the Parquet footer back from the store
+Writes each day's measurements as one or more partitioned Parquet parts plus a JSON manifest that
+lists them, using the exporter's write-scoped principal. Verification reads the Parquet footer back from the store
 (the copy that will actually be kept), not an in-memory number — so a truncated or corrupt
 upload is caught before the source chunk is dropped.
 """
@@ -22,7 +22,7 @@ import pyarrow.parquet as pq
 from pyarrow import fs
 
 from .config import StoreConfig
-from .naming import manifest_key, parquet_key
+from .naming import manifest_key, part_key
 from .ports import WriteResult
 
 logger = logging.getLogger(__name__)
@@ -49,9 +49,13 @@ def _split_endpoint(endpoint: str) -> tuple[str, str]:
 class S3ColdStore:
     """Concrete ColdStore over pyarrow.fs.S3FileSystem (see ports.ColdStore)."""
 
-    def __init__(self, cfg: StoreConfig):
-        host, scheme = _split_endpoint(cfg.endpoint)
+    def __init__(self, cfg: StoreConfig, filesystem: Optional[fs.FileSystem] = None):
+        """``filesystem`` replaces the S3 client (tests run the adapter over a local directory)."""
         self._bucket = cfg.bucket
+        if filesystem is not None:
+            self._fs = filesystem
+            return
+        host, scheme = _split_endpoint(cfg.endpoint)
         # MinIO serves buckets path-style, not virtual-host — so addressing is stated here rather
         # than inherited from a library default that a future upgrade could flip under us.
         self._fs = fs.S3FileSystem(
@@ -74,15 +78,18 @@ class S3ColdStore:
         with self._fs.open_input_file(path) as f:
             return json.loads(f.read().decode("utf-8"))
 
-    def write_parquet(self, prefix: str, day: date, batches: Iterator[pa.RecordBatch]) -> WriteResult:
-        path = self._path(parquet_key(prefix, day))
+    def write_part(self, prefix: str, day: date, part: str,
+                   batches: Iterator[pa.RecordBatch]) -> WriteResult:
+        path = self._path(part_key(prefix, day, part))
         it = iter(batches)
         try:
             first = next(it)
         except StopIteration:
-            # export_day only writes when the source day is non-empty, so this is defensive.
-            raise ValueError(f"no rows to write for {prefix} {day.isoformat()}")
+            # export_day only writes a part that holds rows, so this is defensive.
+            raise ValueError(f"no rows to write for {prefix} {day.isoformat()} {part}")
         rows = 0
+        # The object appears only when the upload completes, so a crash mid-write leaves whatever
+        # was under this key before — never a truncated part.
         with self._fs.open_output_stream(path) as sink:
             writer = pq.ParquetWriter(
                 sink, first.schema,
@@ -99,10 +106,15 @@ class S3ColdStore:
         logger.info("Wrote cold Parquet: %s (%d rows)", path, rows)
         return WriteResult(rows=rows)
 
-    def parquet_row_count(self, prefix: str, day: date) -> int:
-        path = self._path(parquet_key(prefix, day))
+    def part_row_count(self, prefix: str, day: date, part: str) -> int:
+        path = self._path(part_key(prefix, day, part))
         with self._fs.open_input_file(path) as f:
             return pq.ParquetFile(f).metadata.num_rows
+
+    def read_part_keys(self, prefix: str, day: date, part: str) -> pa.Table:
+        path = self._path(part_key(prefix, day, part))
+        with self._fs.open_input_file(path) as f:
+            return pq.read_table(f, columns=["time", "sensor_id"])
 
     def write_manifest(self, prefix: str, day: date, manifest: dict) -> None:
         path = self._path(manifest_key(prefix, day))

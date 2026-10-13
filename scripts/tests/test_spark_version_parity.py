@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from check_spark_version_parity import find_mismatches  # noqa: E402
+from check_spark_version_parity import check, find_mismatches  # noqa: E402
 
 # The shape of the real file, reduced to the three lines that carry a version.
 DOCKERFILE = """\
@@ -74,3 +74,52 @@ class TestWhatMustNotBeMistakenForAgreement:
         # to say so — returning "no mismatches" would be a green tick over an uninspected file.
         with pytest.raises(ValueError):
             find_mismatches('CMD ["--packages", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.3"]')
+
+
+class TestTheRestOfTheRepository:
+    """The version is also written outside the Dockerfiles: the compose master image, connector
+    coordinates in job code, the test suite's pyspark pin. Each drifted once in this repository."""
+
+    @staticmethod
+    def tree(tmp_path, *, compose="4.1.3", code=None, pyspark="4.1.3", bases=("4.1.3",)):
+        jobs = tmp_path / "services" / "spark_jobs"
+        jobs.mkdir(parents=True)
+        for i, base in enumerate(bases):
+            (jobs / f"Dockerfile.job{i}").write_text(DOCKERFILE.format(base=base, warm=base, cmd=base))
+        (tmp_path / "docker-compose.yml").write_text(
+            f"services:\n  spark-master:\n    image: apache/spark:{compose}-python3\n")
+        (tmp_path / "deploy" / "helm").mkdir(parents=True)
+        (tmp_path / "deploy" / "helm" / "values.yaml").write_text("image: {}\n")
+        coordinate = f'"org.apache.spark:spark-sql-kafka-0-10_2.13:{code}"' if code else '"none"'
+        (jobs / "job.py").write_text(f"PACKAGES = {coordinate}\n")
+        (jobs / "requirements-dev.txt").write_text(f"pyspark=={pyspark}\npytest==9.1.1\n")
+        (tmp_path / "clients").mkdir()
+        return tmp_path
+
+    def test_a_consistent_tree_passes(self, tmp_path):
+        assert check(self.tree(tmp_path)) == []
+
+    def test_the_compose_master_left_behind_is_caught(self, tmp_path):
+        # What the base bump left behind: workers on 4.1.3, the master still on 4.1.2.
+        errors = check(self.tree(tmp_path, compose="4.1.2"))
+        assert len(errors) == 1 and "docker-compose.yml:3" in errors[0]
+
+    def test_a_coordinate_in_job_code_is_caught(self, tmp_path):
+        errors = check(self.tree(tmp_path, code="4.1.2"))
+        assert len(errors) == 1 and "job.py:1" in errors[0]
+
+    def test_the_pyspark_pin_is_caught(self, tmp_path):
+        errors = check(self.tree(tmp_path, pyspark="4.1.2"))
+        assert len(errors) == 1 and "requirements-dev.txt:1" in errors[0]
+
+    def test_images_that_disagree_with_each_other_are_caught(self, tmp_path):
+        errors = check(self.tree(tmp_path, bases=("4.1.3", "4.1.2")))
+        assert len(errors) == 1 and "disagree" in errors[0]
+
+    def test_a_group_matching_no_file_is_an_error_not_a_pass(self, tmp_path):
+        root = self.tree(tmp_path)
+        (root / "docker-compose.yml").unlink()
+        assert any("no compose files matched" in e for e in check(root))
+
+    def test_the_repository_itself_is_consistent(self):
+        assert check() == []

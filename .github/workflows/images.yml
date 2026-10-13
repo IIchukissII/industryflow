@@ -24,6 +24,9 @@ jobs:
     outputs:
       # A manual dispatch builds everything; there is no diff to filter on.
       relevant: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.relevant == 'true' }}
+      # The Spark version is also written outside the images (compose, manifests, code, test pins);
+      # a change there runs the parity check without building every image.
+      spark_parity: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.spark_parity == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -39,16 +42,26 @@ jobs:
               - 'scripts/tests/test_spark_version_parity.py'
               - 'scripts/check_jupyterhub_parity.py'
               - 'scripts/tests/test_jupyterhub_parity.py'
+            spark_parity:
+              - 'docker-compose*.yml'
+              - 'deploy/**'
+              - 'services/**/*.py'
+              - 'clients/**/*.py'
+              - '**/requirements*.txt'
+              - '**/Dockerfile*'
+              - 'scripts/check_spark_version_parity.py'
+              - 'scripts/tests/test_spark_version_parity.py'
+              - '.github/workflows/images.yml'
 
   # Seconds, and it gates the matrix below: a Spark image whose base tag and Kafka connector
   # coordinate disagree is not worth building, because building it is exactly what will NOT catch
   # the disagreement. The older connector still resolves, and the smoke asserts `version 4.1`, which
   # any 4.1.x base satisfies — so the image builds, starts, scans clean, and ships a Spark running a
   # connector built for a different Spark. The version lives in five places per image and a bot can
-  # see one of them; this reads the other four.
+  # see one of them; this reads the other four, and every copy outside the images.
   spark-version-parity:
     needs: changes
-    if: needs.changes.outputs.relevant == 'true'
+    if: needs.changes.outputs.relevant == 'true' || needs.changes.outputs.spark_parity == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -68,7 +81,8 @@ jobs:
         run: python scripts/check_jupyterhub_parity.py && pytest scripts/tests/test_jupyterhub_parity.py -q
 
   build-scan:
-    needs: spark-version-parity
+    needs: [changes, spark-version-parity]
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

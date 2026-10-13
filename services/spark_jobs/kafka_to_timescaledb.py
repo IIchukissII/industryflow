@@ -6,17 +6,28 @@
 Spark Structured Streaming Job: Kafka to TimescaleDB
 Reads sensor data from Kafka and writes to TimescaleDB in real-time
 Schema-per-tenant architecture: Routes data to tenant_<uuid>.sensor_measurements
+
+Readings that can never be written are dead-lettered, not retried forever and not dropped silently
+(ADR-0005 dec 3; see reading_guard.py). This job is the dead-letter owner for invalid readings on
+``sensor-data-raw``: it consumes every message from the earliest offset, and the aggregation job
+excludes the same readings by the same definition without publishing them a second time.
 """
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, to_timestamp
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
+from pyspark.sql.functions import broadcast, col
 import logging
 import os
-import uuid
+
+from reading_guard import (  # shipped via --py-files
+    DEFAULT_DLQ_TOPIC, SOURCE_COLUMNS, UNKNOWN_TENANT, canonical_uuid, classify_references,
+    company_id_to_schema,
+    parse_readings, publish_dead_letters, rejection_reason,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+DLQ_CONSUMER = "spark-streaming"
 
 
 def configure_s3a(builder, checkpoint_location):
@@ -57,14 +68,13 @@ def configure_s3a(builder, checkpoint_location):
 def create_spark_session(app_name="IndustryFlow-Streaming"):
     """Create and configure Spark session with Kafka support"""
     # SPARK_MASTER is the single source of truth for the master (spark-submit no longer passes
-    # --master); defaults to local[*] when unset.
+    # --master); defaults to local[*] when unset. The Kafka connector is NOT named here: the image's
+    # spark-submit `--packages` provides it, pinned to the image's Spark version (a coordinate in
+    # code would be one more copy of that version to drift — scripts/check_spark_version_parity.py).
     checkpoint_location = os.getenv("CHECKPOINT_LOCATION", "/opt/spark/checkpoints")
     builder = SparkSession.builder \
         .appName(app_name) \
         .master(os.getenv("SPARK_MASTER", "local[*]")) \
-        .config("spark.jars.packages",
-                "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.2,"
-                "org.postgresql:postgresql:42.7.4") \
         .config("spark.sql.streaming.checkpointLocation", checkpoint_location) \
         .config("spark.streaming.stopGracefullyOnShutdown", "true") \
         .config("spark.sql.shuffle.partitions",
@@ -84,95 +94,11 @@ def create_spark_session(app_name="IndustryFlow-Streaming"):
     return spark
 
 
-def define_sensor_schema():
-    """Define the schema for incoming sensor messages from Kafka"""
-    return StructType([
-        StructField("timestamp", StringType(), False),
-        StructField("sensor_id", StringType(), False),
-        StructField("equipment_id", StringType(), False),
-        StructField("site_id", StringType(), False),
-        StructField("company_id", StringType(), True),
-        StructField("value", DoubleType(), False),
-        StructField("unit", StringType(), True),
-        StructField("quality_code", IntegerType(), True)
-    ])
-
-
-def company_id_to_schema(company_id):
-    """
-    Convert a company_id UUID to its tenant schema name.
-
-    company_id arrives in untrusted Kafka payloads, so it is validated as a UUID before
-    the schema/table name is built; a non-UUID raises ValueError instead of producing an
-    arbitrary JDBC target (defends against injection — see ADR-0003).
-    """
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}"
-
-
 MEASUREMENT_COLUMNS = ["time", "sensor_id", "equipment_id", "site_id", "value", "unit", "quality_code"]
 
 
-def _make_measurement_upsert(db_cfg, schema_name):
-    """
-    Build a foreachPartition function that upserts measurement rows into a tenant schema
-    with ON CONFLICT (time, sensor_id) DO NOTHING — so a retried or redelivered batch does
-    not duplicate readings (ADR-0006). It runs on the executors, one connection per
-    partition, which keeps this high-volume write distributed (not collected to the driver).
-    """
-    cols = ", ".join(MEASUREMENT_COLUMNS)
-    sql = (
-        f'INSERT INTO "{schema_name}".sensor_measurements ({cols}) VALUES %s '
-        f'ON CONFLICT (time, sensor_id) DO NOTHING'
-    )
-
-    def _upsert(rows):
-        import psycopg2
-        from psycopg2.extras import execute_values
-        from upsert_filter import split_known_sensors  # shipped via --py-files
-
-        conn = psycopg2.connect(**db_cfg)
-        try:
-            conn.autocommit = False
-            with conn.cursor() as cur:
-                # Drop rows whose sensor_id is not provisioned, so one orphan FK row does not
-                # abort the whole batch and wedge the stream (ADR-0006). The valid set is read
-                # per partition so newly-created sensors are picked up on the next batch.
-                cur.execute(f'SELECT sensor_id FROM "{schema_name}".sensors')
-                valid = {str(r[0]) for r in cur.fetchall()}
-                tuples = [
-                    (r["time"], r["sensor_id"], r["equipment_id"],
-                     r["site_id"], r["value"], r["unit"], r["quality_code"])
-                    for r in rows
-                ]
-                kept, skipped = split_known_sensors(tuples, valid)
-                for i in range(0, len(kept), 5000):
-                    execute_values(cur, sql, kept[i:i + 5000])
-            conn.commit()
-            if skipped:
-                logger.warning(
-                    "%s: skipped %d measurement row(s) with unknown sensor_id "
-                    "(not provisioned)", schema_name, skipped
-                )
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-
-    return _upsert
-
-
-def write_to_timescaledb(batch_df, batch_id):
-    """
-    Write each micro-batch to TimescaleDB with schema-per-tenant routing, idempotently.
-
-    Rows are routed by company_id to the tenant schema and upserted with ON CONFLICT
-    (time, sensor_id) DO NOTHING via a distributed foreachPartition, so a Spark batch retry
-    or an at-least-once redelivery (ADR-0005) does not create duplicate readings (ADR-0006).
-    A write failure re-raises so Spark fails and retries the batch.
-    """
-    db_cfg = {
+def _db_config():
+    return {
         "host": os.getenv("TIMESCALEDB_HOST", "localhost"),
         "port": os.getenv("TIMESCALEDB_PORT", "5432"),
         "dbname": os.getenv("TIMESCALEDB_DB", "industryflow"),
@@ -183,24 +109,156 @@ def write_to_timescaledb(batch_df, batch_id):
         "sslrootcert": os.getenv("DB_SSLROOTCERT", "/etc/ssl/industryflow/ca.crt"),
     }
 
-    company_ids = [
-        r["company_id"]
-        for r in batch_df.select("company_id").distinct().collect()
-        if r["company_id"]
-    ]
-    if not company_ids:
-        logger.info(f"Batch {batch_id} is empty, skipping write")
-        return
 
-    for company_id in company_ids:
-        schema_name = company_id_to_schema(company_id)  # validates the UUID
-        tenant_data = batch_df.filter(col("company_id") == company_id).select(*MEASUREMENT_COLUMNS)
+def _make_measurement_upsert(db_cfg, schema_name):
+    """
+    Build a foreachPartition function that writes measurement rows into a tenant schema with
+    ON CONFLICT (time, sensor_id) DO NOTHING — the table's natural key — so a retried or
+    redelivered batch does not duplicate readings (ADR-0006 dec 3). A raw reading is written once
+    and never rewritten: a redelivery under ADR-0005 carries the same reading. It runs on the
+    executors, one connection per partition, which keeps this high-volume write distributed (not
+    collected to the driver). Every row reaching it has passed reading_guard, so a failure here is
+    an infrastructure failure and re-raises (ADR-0006 dec 4).
+    """
+    cols = ", ".join(MEASUREMENT_COLUMNS)
+    sql = (
+        f'INSERT INTO "{schema_name}".sensor_measurements ({cols}) VALUES %s '
+        f'ON CONFLICT (time, sensor_id) DO NOTHING'
+    )
+
+    def _upsert(rows):
+        import psycopg2
+        from psycopg2.extras import execute_values
+
+        tuples = [
+            (r["time"], r["sensor_id"], r["equipment_id"],
+             r["site_id"], r["value"], r["unit"], r["quality_code"])
+            for r in rows
+        ]
+        if not tuples:
+            return
+        conn = psycopg2.connect(**db_cfg)
         try:
-            tenant_data.foreachPartition(_make_measurement_upsert(db_cfg, schema_name))
-            logger.info(f"Batch {batch_id}: upserted measurements into {schema_name}.sensor_measurements")
-        except Exception as e:
-            logger.error(f"Batch {batch_id}: failed writing to {schema_name}.sensor_measurements: {e}")
+            conn.autocommit = False
+            with conn.cursor() as cur:
+                for i in range(0, len(tuples), 5000):
+                    execute_values(cur, sql, tuples[i:i + 5000])
+            conn.commit()
+        except Exception:
+            conn.rollback()
             raise
+        finally:
+            conn.close()
+
+    return _upsert
+
+
+def lookup_references(db_cfg, keys):
+    """
+    Read, once per tenant per batch, what `classify_references` needs: whether the tenant's schema
+    exists and which of the batch's sensor/equipment ids exist in it. Catalog reads, so a tenant
+    with no schema yields False rather than an error.
+    """
+    import psycopg2
+
+    by_company = {}
+    for company_id, sensor_id, equipment_id in keys:
+        sensors, equipment = by_company.setdefault(company_id, (set(), set()))
+        sensors.add(canonical_uuid(sensor_id))
+        equipment.add(canonical_uuid(equipment_id))
+
+    tenant_exists, known_sensors, known_equipment = {}, {}, {}
+    conn = psycopg2.connect(**db_cfg)
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            for company_id, (sensors, equipment) in by_company.items():
+                schema = company_id_to_schema(company_id)
+                cur.execute(
+                    "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c "
+                    "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = %s AND c.relname = 'sensor_measurements')",
+                    (schema,),
+                )
+                tenant_exists[company_id] = bool(cur.fetchone()[0])
+                if not tenant_exists[company_id]:
+                    continue
+                cur.execute(f'SELECT sensor_id::text FROM "{schema}".sensors '
+                            f'WHERE sensor_id = ANY(%s::uuid[])', (sorted(sensors),))
+                known_sensors[company_id] = {r[0] for r in cur.fetchall()}
+                cur.execute(f'SELECT equipment_id::text FROM "{schema}".equipment '
+                            f'WHERE equipment_id = ANY(%s::uuid[])', (sorted(equipment),))
+                known_equipment[company_id] = {r[0] for r in cur.fetchall()}
+    finally:
+        conn.close()
+    return tenant_exists, known_sensors, known_equipment
+
+
+def process_batch(batch_df, batch_id, *, lookup, dead_letter, upsert):
+    """
+    Route one micro-batch: dead-letter what cannot be written, then write the rest per tenant.
+
+    ``batch_df`` carries the parsed readings and their stateless ``reject_reason``. ``lookup(keys)``
+    returns the referential facts for the batch's keys, ``dead_letter(df)`` publishes rejected rows,
+    and ``upsert(tenant_df, schema)`` writes one tenant's rows; they are injected so the routing is
+    testable without a database or a broker. Dead letters are published first: if that fails the
+    batch fails and nothing advances. Any failure re-raises so Spark retries the batch.
+    """
+    batch_df = batch_df.persist()
+    try:
+        rejected = batch_df.filter(col("reject_reason").isNotNull())
+        valid = batch_df.filter(col("reject_reason").isNull()).drop("reject_reason")
+
+        keys = [tuple(r) for r in valid.select("company_id", "sensor_id", "equipment_id")
+                .distinct().collect()]
+        refused = classify_references(keys, *lookup(keys)) if keys else []
+        if refused:
+            spark = batch_df.sparkSession
+            refused_df = spark.createDataFrame(
+                refused, "company_id string, sensor_id string, equipment_id string, reject_reason string")
+            tagged = valid.join(broadcast(refused_df), ["company_id", "sensor_id", "equipment_id"], "left")
+            rejected = rejected.unionByName(tagged.filter(col("reject_reason").isNotNull()))
+            valid = tagged.filter(col("reject_reason").isNull()).drop("reject_reason")
+
+        if not rejected.isEmpty():
+            counts = {r["reject_reason"]: r["count"]
+                      for r in rejected.groupBy("reject_reason").count().collect()}
+            dead_letter(rejected)
+            logger.warning(f"Batch {batch_id}: dead-lettered readings by reason: {counts}")
+
+        no_schema = {r[0] for r in refused if r[3] == UNKNOWN_TENANT}
+        for company_id in sorted({k[0] for k in keys} - no_schema):
+            schema_name = company_id_to_schema(company_id)
+            tenant_data = valid.filter(col("company_id") == company_id).select(*MEASUREMENT_COLUMNS)
+            try:
+                upsert(tenant_data, schema_name)
+                logger.info(f"Batch {batch_id}: upserted measurements into {schema_name}.sensor_measurements")
+            except Exception as e:
+                logger.error(f"Batch {batch_id}: failed writing to {schema_name}.sensor_measurements: {e}")
+                raise
+    finally:
+        batch_df.unpersist()
+
+
+def write_to_timescaledb(batch_df, batch_id):
+    """foreachBatch entry point: `process_batch` wired to TimescaleDB and the dead-letter topic."""
+    db_cfg = _db_config()
+    bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    dlq_topic = os.getenv("KAFKA_TOPIC_MEASUREMENTS_DLQ", DEFAULT_DLQ_TOPIC)
+    process_batch(
+        batch_df, batch_id,
+        lookup=lambda keys: lookup_references(db_cfg, keys),
+        dead_letter=lambda df: publish_dead_letters(df, DLQ_CONSUMER, bootstrap, dlq_topic),
+        upsert=lambda df, schema: df.foreachPartition(_make_measurement_upsert(db_cfg, schema)),
+    )
+
+
+def build_readings(kafka_df):
+    """Parsed readings, each with its stateless ``reject_reason`` (null when writable)."""
+    return parse_readings(kafka_df).withColumn("reject_reason", rejection_reason()).select(
+        *SOURCE_COLUMNS, "time", "sensor_id", "equipment_id", "site_id", "company_id",
+        "value", "unit", "quality_code", "reject_reason",
+    )
 
 
 def main():
@@ -210,9 +268,6 @@ def main():
 
     # Create Spark session
     spark = create_spark_session()
-
-    # Define schema
-    sensor_schema = define_sensor_schema()
 
     # Get Kafka config from environment
     kafka_bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
@@ -231,29 +286,11 @@ def main():
 
     logger.info("Successfully connected to Kafka")
 
-    # Parse JSON data and transform
-    # Note: to_timestamp() automatically parses ISO8601 format with timezone
-    parsed_stream = raw_stream \
-        .selectExpr("CAST(value AS STRING) as json_string") \
-        .select(from_json(col("json_string"), sensor_schema).alias("data")) \
-        .select("data.*") \
-        .withColumn("time", to_timestamp(col("timestamp"))) \
-        .select(
-            col("time"),
-            col("sensor_id"),
-            col("equipment_id"),
-            col("site_id"),
-            col("company_id"),
-            col("value"),
-            col("unit"),
-            col("quality_code")
-        )
-
     # Write to TimescaleDB using foreachBatch with tenant routing. Durable checkpoint
     # location so a restart resumes from committed offsets, not /tmp (ADR-0006).
     checkpoint_base = os.getenv("CHECKPOINT_LOCATION", "/opt/spark/checkpoints")
 
-    query = parsed_stream \
+    query = build_readings(raw_stream) \
         .writeStream \
         .outputMode("append") \
         .foreachBatch(write_to_timescaledb) \

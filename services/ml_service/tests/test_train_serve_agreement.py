@@ -15,8 +15,12 @@ must not drift apart.
 The defect this guards (issue #173): training computed a mean over a whole history
 (``groupby(...).transform('mean')``), which averages samples taken *after* the row it describes,
 while serving computed a deviation from a recent closed window. The model was fed a feature it had
-never seen.
+never seen. And its sequel: training then read the window just before a row's own, while serving
+reads the newest window the Spark job has *written* — which, with append-mode emission behind a
+watermark, is two windows older still. The serving model below takes that emission rule from the
+Spark job itself, not from the module under test.
 """
+import importlib.util
 import os
 import sys
 
@@ -32,6 +36,15 @@ from extensions import get_transform, TransformContext  # noqa: E402
 from feature_engineering import baseline_provider  # noqa: E402
 import offline_baseline  # noqa: E402
 
+# The producer's window table (services/spark_jobs/aggregation_windows.py), loaded by path: it is a
+# separate deployment unit, but the binding is one table and this test reads it.
+_spec = importlib.util.spec_from_file_location(
+    "aggregation_windows",
+    os.path.join(os.path.dirname(__file__), "..", "..", "spark_jobs", "aggregation_windows.py"),
+)
+aggregation_windows = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(aggregation_windows)
+
 STATISTICAL = get_transform("statistical")
 EQUIPMENT_ID = "550e8400-e29b-41d4-a716-446655440100"
 COMPANY_ID = "11111111-2222-3333-4444-555555555555"
@@ -42,7 +55,7 @@ COMPANY_ID = "11111111-2222-3333-4444-555555555555"
 GROUP_COLS = ["equipment_id"]
 
 
-def _frame(n_samples=150, interval_seconds=1, equipments=("eq-1",)):
+def _frame(n_samples=600, interval_seconds=1, equipments=("eq-1",)):
     """A training frame shaped like history: one row per (equipment, sample), timestamps at a fixed
     interval, each equipment on its own day — and shuffled, as training frames usually arrive."""
     rows = []
@@ -62,19 +75,24 @@ def _frame(n_samples=150, interval_seconds=1, equipments=("eq-1",)):
 class _ProviderOver:
     """The serving provider, answering from the same data the offline re-derivation saw.
 
-    It does what ``AggregateBaselineProvider`` does — return the most recent *closed* window's
-    aggregate — but sourced from the frame instead of the aggregate table, so the test compares the
-    two *computations* rather than re-testing the SQL. The window it serves is chosen by `now`: the
-    caller sets the current time, and the provider answers with the window before it.
+    It does what ``AggregateBaselineProvider`` does — return the newest row of the aggregate table —
+    but sourced from the frame instead of the table, so the test compares the two *computations*
+    rather than re-testing the SQL. Which rows exist at `now` is the Spark job's emission rule
+    (aggregation_windows.latest_emitted_window): a window's row is written once the watermark passes
+    its end, and a window with no samples is never written.
     """
 
     def __init__(self, df, now, granularity="1min", sensor="xmeas_1", equipment="eq-1"):
-        width = offline_baseline.GRANULARITY_SECONDS[granularity]
-        current_window = int(now.timestamp()) // width
-        window = df[(df["equipment_id"] == equipment)
-                    & (offline_baseline.window_index(df["timestamp"], granularity)
-                       == current_window - 1)]
-        self.baseline = None if window.empty else {
+        width = aggregation_windows.AGGREGATION_WINDOWS[granularity][1]
+        written_up_to = aggregation_windows.latest_emitted_window(int(now.timestamp()), granularity)
+        mine = df[df["equipment_id"] == equipment]
+        windows = (mine["timestamp"].astype("datetime64[s]").astype("int64") // width)
+        written = windows[windows <= written_up_to]
+        if written.empty:
+            self.baseline = None
+            return
+        window = mine[windows == written.max()]
+        self.baseline = {
             "mean": float(window[sensor].mean()),
             "std": None if len(window) < 2 else float(window[sensor].std()),
         }
@@ -99,6 +117,26 @@ def test_granularities_agree_between_training_and_serving():
     assert set(offline_baseline.GRANULARITY_SECONDS) == set(baseline_provider._AGG_TABLES)
     assert offline_baseline.GRANULARITY_SECONDS == baseline_provider.GRANULARITY_SECONDS
     assert offline_baseline.DEFAULT_GRANULARITY == baseline_provider.DEFAULT_GRANULARITY
+
+
+def test_window_and_lateness_agree_with_the_spark_job():
+    """The producer decides which window is newest at serve time; both consumers must use its numbers.
+
+    The Spark job's width and allowed lateness (aggregation_windows.py) fix the lag between a row and
+    the newest written window. A table here that disagrees with the job's is train/serve skew again.
+    """
+    produced = aggregation_windows.AGGREGATION_WINDOWS
+    assert {g: t for g, (t, _, _) in produced.items()} == baseline_provider._AGG_TABLES
+    for side in (offline_baseline, baseline_provider):
+        assert side.GRANULARITY_SECONDS == {g: w for g, (_, w, _) in produced.items()}
+        assert side.WATERMARK_SECONDS == {g: lag for g, (_, _, lag) in produced.items()}
+
+
+def test_training_reads_the_window_serving_has_written():
+    """At 10:05:30 with 1-minute windows and 2 minutes of lateness, the newest written row is 10:02's."""
+    t = pd.Series([pd.Timestamp("2026-01-01 10:05:30")])
+    assert offline_baseline.latest_written_window(t, "1min").iloc[0] == \
+        offline_baseline.window_index(pd.Series([pd.Timestamp("2026-01-01 10:02:00")]), "1min").iloc[0]
 
 
 def test_window_index_buckets_by_wall_clock_seconds():
