@@ -3,14 +3,15 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0014: Notebook hub single sign-on from the platform session
+# ADR-0014: Notebook hub single sign-on from the platform session (rev 1)
 
 - **ID:** ADR-0014
 - **Status:** Accepted
-- **Date:** 2026-06-27
+- **Date:** 2026-06-27 (rev 1: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0011 (embedded notebooks), ADR-0012 (per-session credential delivery), ADR-0004 (API authentication, sessions and transport), ADR-0002 (verified-identity edge and anti-spoofing)
+- **Supersedes:** ADR-0014 rev 0 (2026-06-27 — deferred how a hub login re-validates against the platform and how a platform logout reaches the hub; rev 1 decides both, decision 7)
 
 ## Context and problem
 
@@ -21,6 +22,8 @@ The platform already authenticates every other request the same way: a short-liv
 The platform also already has a pattern for letting a service trust an identity it did not verify itself. The ingestion edge verifies a hard credential and forwards a *verified identity* to an internal service that is reachable only through that edge, and the edge overwrites any identity headers a client tried to smuggle (ADR-0002). The hub is the same situation — an untrusted-facing surface that needs a trustworthy identity without re-doing the verification — and should reuse that pattern rather than invent a new one. The alternative, giving the hub the session-verification key so it can validate the cookie itself, both duplicates the verification ADR-0000 wants kept singular and widens where that key lives.
 
 There is one thing this ADR is *not*. Authenticating the user to the hub ("who are you") is distinct from minting the credentials the kernel later uses to reach data ("what may this kernel touch"), which ADR-0012 already decided are minted per session by the spawner. This ADR decides the first; it hands the spawner a verified identity to mint against. It does not redesign the platform session (ADR-0004) nor the capability model (ADR-0012).
+
+**Revision 1 (2026-10-13).** This record deferred the relationship between a short platform session and a long-running hub session, and the deferral turned out to be load-bearing. The hub took the forwarded identity once, at login, and kept it: a user whose role or tenant changed kept the environment they had spawned under the old facts, and signing out of the platform left the hub login, its running environments and their capabilities in place. A notebook session that outlives the platform session it was derived from is a second session, which is exactly what decision 1 says the hub does not have. Rev 1 decides re-validation and logout (decision 7) and closes the deferred item.
 
 ## Decision drivers
 
@@ -44,6 +47,10 @@ There is one thing this ADR is *not*. Authenticating the user to the hub ("who a
 
 6. **No new public authentication surface is introduced.** The hub authenticates behind the same edge and origin as the rest of the product (ADR-0011 dec 8); there is no separately exposed hub login endpoint to attack, and the proxy is the existing trusted entry, not a new one.
 
+7. **The hub re-checks the platform identity, and a platform sign-out ends the hub session and the capabilities derived from it *(rev 1)*.** A hub login is not a standing grant. The hub re-checks the identity the trusted proxy forwards whenever its copy is older than a bounded age, and always before spawning. If the same user now carries a different tenant or role, the facts the running environments were spawned and minted under are stale, so those environments are stopped and the login continues under the new facts; if the identity is a different user, or no longer valid, the hub login ends. Because the proxy validates the platform session on every request (decision 2), a hub whose user no longer holds a platform session receives no further traffic for that user.
+
+   Logout is **chained**: signing out of the platform signs the user out of the hub as well, and signing out of the hub stops the user's environments. Stopping an environment revokes every capability minted for it (ADR-0015 dec 2), and ending the platform session revokes the user's capabilities in its own right (ADR-0004 dec 2 rev 2), so a sign-out does not depend on any one of these steps completing to withdraw the kernel's reach. The re-check age is configuration.
+
 ## Alternatives considered
 
 **A. The hub verifies the session cookie itself (a custom token authenticator holding the verification key).** *Rejected:* this duplicates the platform's session-token verification into the hub — a second place to keep audience, expiry, and signature checks correct, which ADR-0000 exists to prevent — and distributes the verification key to the hub. Consuming the result of the one existing verification (decision 2) achieves the same authentication without either cost.
@@ -53,6 +60,8 @@ There is one thing this ADR is *not*. Authenticating the user to the hub ("who a
 **C. Give the hub its own login and user store.** *Rejected:* a second login and a second set of accounts is precisely what ADR-0011 dec 8 forbids — it duplicates identity, asks an already-authenticated user to authenticate again, and creates an account store to keep in sync with the platform's.
 
 **D. Have the hub trust a client-supplied identity header without restricting who can send it.** *Rejected:* an identity header that any caller can set is trivially forged — the header-smuggling risk ADR-0002 dec 3 calls out. The identity is trustworthy only when the hub is reachable only through the proxy and the proxy overwrites client-supplied identity (decision 3); without that, header-based identity is an open door.
+
+**E. Tie the hub session's lifetime to the platform session's expiry, and do nothing else *(rev 1)*.** *Rejected:* expiry is the backstop, not the control (ADR-0012 dec 6). A role change or a sign-out would still take effect only when a timer ran out, and an environment spawned for one tenant would keep running for a user who had moved to another.
 
 ## Consequences
 
@@ -68,13 +77,13 @@ There is one thing this ADR is *not*. Authenticating the user to the hub ("who a
 
 - The hub's trust now rests on the proxy boundary being correct: if the hub becomes reachable other than through the proxy, or the proxy fails to overwrite client-supplied identity, forged identity becomes possible (decision 3). This is the same residual risk as the ingestion edge and must be enforced and tested as such.
 - A trusted proxy step sits in front of the hub on every request, adding a hop and an availability dependency (decision 2).
-- The platform session is short-lived and refreshed (ADR-0004) while a notebook session is long-running, so the relationship between session expiry, hub session lifetime, and logout propagation must be worked out rather than assumed (see Deferred decisions).
+- The platform session is short-lived and refreshed (ADR-0004) while a notebook session is long-running, so the relationship between session expiry, hub session lifetime, and logout propagation must be worked out rather than assumed. **rev 1:** decision 7 works it out; its price is a periodic re-check on hub traffic, and a role or tenant change that stops the user's running environments.
 - Reusing the platform session for hub entry ties the hub to ADR-0004's session model; a future move to an external IdP (alternative B) would be a real change, not a configuration toggle.
 
 ## Deferred decisions
 
 - **The verification handoff contract.** Whether the proxy authenticates hub requests via a subrequest to an existing platform verification endpoint or another trusted mechanism, and the exact shape of the forwarded identity (a set of headers versus a signed short-lived hub-audience assertion for integrity independent of the network boundary), is an implementation decision left to its own resolution.
-- **Hub session lifetime, re-validation, and logout propagation.** How long a hub session lives relative to the platform session, whether and how often it re-checks the platform session, and how a platform logout tears down hub sessions and running environments are deferred.
+- ~~**Hub session lifetime, re-validation, and logout propagation.**~~ *Resolved in rev 1, decision 7:* the hub re-checks the forwarded identity at a bounded age and before every spawn, logout is chained, and a sign-out revokes the capabilities derived from the session. The re-check age is configuration.
 - **Role-to-profile mapping configuration.** The concrete mapping from role to spawn profile (ADR-0011 dec 5) is owned by deployment configuration, not this ADR.
 - **CSRF and same-origin embedding specifics.** How the hub entry interacts with the platform's CSRF protection (ADR-0004) and the iframe embedding (ADR-0011) is an implementation concern.
 - **Per-session capability minting.** What the spawner mints once identity is established is decided in ADR-0012, not here.
