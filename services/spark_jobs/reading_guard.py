@@ -100,6 +100,31 @@ def classify_references(keys, tenant_exists, known_sensors, known_equipment):
     return rejected
 
 
+def read_tenant_references(cur, schema_name, sensor_ids, equipment_ids):
+    """
+    One tenant's referential facts, read on ``cur``: ``(exists, known_sensors, known_equipment)``.
+
+    ``exists`` is whether the tenant's schema carries its measurements table — a catalog read, so a
+    tenant with no schema is False rather than an error. The id arguments are canonical UUIDs; the
+    known sets are the subset present in the tenant's tables, canonical too.
+    """
+    cur.execute(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c "
+        "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = %s AND c.relname = 'sensor_measurements')",
+        (schema_name,),
+    )
+    if not cur.fetchone()[0]:
+        return False, set(), set()
+    cur.execute(f'SELECT sensor_id::text FROM "{schema_name}".sensors '
+                f'WHERE sensor_id = ANY(%s::uuid[])', (sorted(sensor_ids),))
+    known_sensors = {r[0] for r in cur.fetchall()}
+    cur.execute(f'SELECT equipment_id::text FROM "{schema_name}".equipment '
+                f'WHERE equipment_id = ANY(%s::uuid[])', (sorted(equipment_ids),))
+    known_equipment = {r[0] for r in cur.fetchall()}
+    return True, known_sensors, known_equipment
+
+
 # ------------------------------------------------------------------------------------ Spark helpers
 
 def reading_schema():

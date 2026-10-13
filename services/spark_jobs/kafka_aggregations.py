@@ -14,7 +14,9 @@ window is emitted once (append mode) when it closes, and writes are idempotent u
 Readings that cannot be written are excluded *before* the watermark by the same definition the
 streaming job applies (reading_guard.py) — a far-future timestamp would otherwise drag the watermark
 forward and close every live window early. The streaming job, which consumes every message, is the
-one that dead-letters them; this job does not publish them a second time. The window widths and
+one that dead-letters them; this job does not publish them a second time. A reading naming a
+tenant, sensor or equipment the platform does not know is excluded the same way, at write time: its
+key is the aggregate's key, so dropping the aggregate excludes exactly those readings. The window widths and
 allowed lateness are the train/serve binding in aggregation_windows.py (ADR-0023 rev 2 dec 9).
 """
 from pyspark.sql import SparkSession
@@ -27,7 +29,10 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 from aggregation_windows import AGGREGATION_WINDOWS, table_name, watermark_delay, window_duration
-from reading_guard import company_id_to_schema, parse_readings, rejection_reason
+from reading_guard import (
+    canonical_uuid, classify_references, company_id_to_schema, parse_readings,
+    read_tenant_references, rejection_reason,
+)
 
 
 # Columns written to each tenant's aggregation table, in order.
@@ -88,14 +93,6 @@ def _db_connection():
     )
 
 
-def _tenant_exists(cur, schema_name):
-    """Whether the tenant schema exists — a catalog read, so a missing schema is False, not an error."""
-    cur.execute(
-        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = %s)", (schema_name,)
-    )
-    return bool(cur.fetchone()[0])
-
-
 def _upsert_values(cur, target, values):
     update_cols = [c for c in AGG_COLUMNS if c not in AGG_CONFLICT_KEY]
     sql = (
@@ -107,16 +104,17 @@ def _upsert_values(cur, target, values):
 
 
 def write_aggregations_to_db(batch_df, batch_id, aggregation_table, *,
-                             connect=None, tenant_exists=_tenant_exists, upsert=_upsert_values):
+                             connect=None, references=read_tenant_references, upsert=_upsert_values):
     """
     Idempotently upsert an aggregation batch into each tenant's schema (ADR-0006).
 
     Each window is keyed by (time, sensor_id, equipment_id); on conflict the row is
     updated, so a retried micro-batch (expected under the at-least-once pipeline,
     ADR-0005) does not create duplicates. Each tenant is written in its own transaction. A tenant
-    whose schema does not exist is skipped and logged — the streaming job dead-letters its raw
-    readings, from which an aggregate is derivable — so one unknown tenant cannot fail every
-    tenant's batch. Any other failure re-raises so Spark fails the batch and retries it, rather than
+    whose schema does not exist, and an aggregate whose sensor or equipment the tenant does not
+    know, are skipped and logged — they are the readings the streaming job dead-letters
+    (reading_guard.classify_references, one definition for both jobs; ADR-0006 rev 2 dec 4) — so
+    one unknown key cannot fail every tenant's batch. Any other failure re-raises so Spark fails the batch and retries it, rather than
     silently dropping data (the upsert makes that retry safe; ADR-0006 dec 4).
     """
     rows = batch_df.collect()
@@ -135,10 +133,21 @@ def write_aggregations_to_db(batch_df, batch_id, aggregation_table, *,
         for company_id, tenant_rows in sorted(by_company.items()):
             schema_name = company_id_to_schema(company_id)  # validates the UUID
             with conn.cursor() as cur:
-                if not tenant_exists(cur, schema_name):
+                keys = sorted({(r["company_id"], r["sensor_id"], r["equipment_id"]) for r in tenant_rows})
+                exists, known_sensors, known_equipment = references(
+                    cur, schema_name,
+                    {canonical_uuid(k[1]) for k in keys}, {canonical_uuid(k[2]) for k in keys})
+                refused = {k[:3]: k[3] for k in classify_references(
+                    keys, {company_id: exists}, {company_id: known_sensors},
+                    {company_id: known_equipment})}
+                if refused:
+                    tenant_rows = [r for r in tenant_rows
+                                   if (r["company_id"], r["sensor_id"], r["equipment_id"]) not in refused]
+                    print(f"Batch {batch_id}: excluded {len(refused)} {aggregation_table} key(s) in "
+                          f"{schema_name} ({', '.join(sorted(set(refused.values())))}; "
+                          f"their raw readings are dead-lettered)")
+                if not tenant_rows:
                     conn.rollback()
-                    print(f"Batch {batch_id}: skipped {len(tenant_rows)} {aggregation_table} row(s) "
-                          f"for unknown tenant {schema_name} (its raw readings are dead-lettered)")
                     continue
                 target = f'"{schema_name}"."{aggregation_table}"'
                 values = [
