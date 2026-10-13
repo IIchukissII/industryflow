@@ -119,7 +119,15 @@ outlast any single access token. *(ADR-0004 dec 2)*
 more than once. Safe only because the sinks are idempotent. *(ADR-0005)*
 
 **Idempotent write** — a sink write that produces the same end state whether applied once or
-many times (e.g. upsert by key), so at-least-once duplicates are harmless. *(ADR-0005, ADR-0006)*
+many times, so at-least-once duplicates are harmless. It is keyed on the record's natural key, and
+what a conflict means depends on what is written: a raw measurement is **first-write-wins** (a later
+write of the same key is ignored), an aggregate is **replace-on-conflict** (the latest computation of
+a window is kept). *(ADR-0005, ADR-0006 dec 3 rev 2)*
+
+**Dead-letter** — the destination a message goes to when no retry could ever process it — malformed,
+naming an unknown tenant or device, or otherwise unwritable — kept with its reason for inspection
+instead of failing the batch forever. Each consumer has its own; only infrastructure failures fail a
+batch, because only they are fixed by retrying. *(ADR-0005 dec 3; ADR-0006 dec 4 rev 2)*
 
 **Stateful transform** — a feature transform that reads an external substrate (today, the
 windowed aggregates) rather than being a pure function of the current reading. The class is
@@ -129,7 +137,13 @@ the kill-switch neutralizes. *(ADR-0024 dec 1; ADR-0023)*
 **Cold layer** — the third storage layer: raw measurements exported from the hot store into an
 open columnar format in the object store, before hot retention drops them, for training and
 long-horizon analysis — never a live-query path. Past the hot horizon it holds the only copy of raw
-history. *(ADR-0025)*
+history, which is why it is itself backed up. *(ADR-0025; ADR-0032 dec 4)*
+
+**Archived part** — one immutable unit of a day's raw history in the cold layer. A day may be
+archived in several parts, because rows can reach the hot store for a day after it was exported; each
+part has its own fingerprint and its own recorded drop, and once its drop is recorded it is never
+overwritten — later rows become a further part. Readers read every part of a day.
+*(ADR-0025 dec 3-4 rev 2)*
 
 **Watermark** — the Spark streaming bound on how late an event may arrive, which lets a time
 window be declared closed so its aggregation state can be released — without it, streaming state
@@ -152,8 +166,10 @@ It carries no authority itself: its authority is a short-lived, centrally revoca
 shared capability store, bound to one user, one tenant and one **audience**, with read-only
 recorded as a fact of the binding rather than assumed. A handle held by a kernel is
 **spawn-minted** and lives for the session; a handle a person obtains for one operation is
-**demand-minted** and lives for that operation. Every handle is redeemed only by the mediator of
-its own audience. *(ADR-0012, ADR-0015 dec 1-4)*
+**demand-minted** and is spent by that operation. A spawn-minted handle is kept alive only while its
+environment runs, and is revoked when the environment stops or respawns and when the user's session
+ends; an entry that is missing or incomplete denies. Every handle is redeemed only by the mediator of
+its own audience. *(ADR-0012, ADR-0015 dec 1-4, rev 3)*
 
 **Audience** — the plane a capability handle is bound to, recorded in its store entry. A mediator
 honours only handles of its own audience, so one plane's handle never opens another's, and on a
@@ -172,20 +188,23 @@ hub entry, and injecting them into the environment. The only way a kernel receiv
 
 **Demand-minting** — a trusted component minting a handle at the moment a person asks for one, for
 a plane whose holder never spawns. Permitted only for the minter the plane's record designates,
-with the tenant taken from a verified platform session, the handle consumed at once, and no session
-secret distributed to enforce it. *(ADR-0015 dec 4 rev 1; instance: ADR-0030 dec 3)*
+with the tenant taken from a verified platform session, the handle spent by the one operation it
+authorises, and no session secret distributed to enforce it. *(ADR-0015 dec 4 rev 1, rev 3;
+instance: ADR-0030 dec 3)*
 
 **SQL proxy** — the mediator a notebook's queries pass through; it redeems the SQL-audience handle
-and opens the database session as the caller's tenant's own read-only identity, which can reach
-nothing outside that tenant whatever the kernel sends. The kernel never holds a DB credential.
-*(ADR-0015 dec 5-6, rev 2)*
+and opens each database session as the caller's tenant's own login identity, which can reach nothing
+outside that tenant whatever the kernel sends, and it re-checks the handle while the session stays
+open, closing it once the handle is revoked. The proxy's own database identity holds no tenant's role,
+and the kernel never holds a DB credential. *(ADR-0012 dec 4 rev 2; ADR-0015 dec 2, 5-6, rev 2-3)*
 
 **Per-tenant read-only role** — the **standing**, per-tenant database principal whose grants
-reach one tenant's schema, read-only. It is shared by that tenant's sessions and held only by the
-SQL proxy; the per-session, short-lived property belongs to the capability handle, not the role.
-How the proxy's session is confined to it, and why a role switch is not enough, is ADR-0015 rev 2;
-its name and grants are owned by the database init scripts, not this file. *(ADR-0011 dec 3, 6;
-ADR-0015 dec 5)*
+reach one tenant's schema, read-only. It is shared by that tenant's sessions and reached only
+through the SQL proxy, which logs in as the tenant's own login identity — a member of this role and
+of no other tenant's — so the confinement is a property of who is logged in, not of a statement on
+the session. The per-session, short-lived property belongs to the capability handle, not the role.
+Why a role switch alone is not enough is ADR-0015 rev 2; names and grants are owned by the database
+init scripts, not this file. *(ADR-0011 dec 3, 6; ADR-0012 dec 4 rev 2; ADR-0015 dec 5)*
 
 ---
 
@@ -217,7 +236,8 @@ reason**, and the out-of-process serving boundary it would need is ADR-0028's ow
 *(ADR-0028)*
 
 **Score semantics** — what a model's output MEANS: `anomaly_probability`, `outlier_score`,
-`reconstruction_error`, or `direct_score`. **Declared by the detector, never inferred from the output** —
+`reconstruction_error`, or `direct_score`. **Declared by the detector, never inferred from the output**, and fixed per model when it is
+registered, by recording its detector (ADR-0028 dec 1 rev 1) —
 it cannot be inferred, because the information is not there: `predict() == 1` means *normal* to an
 IsolationForest and *anomaly* to an XGBoost classifier, and an autoencoder emits no verdict at all. A
 model whose semantics cannot be established is **refused, not scored** — a confident wrong score is worse
