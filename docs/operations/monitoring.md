@@ -346,6 +346,27 @@ Filter by service:
 
 ---
 
+## Kubernetes integration (Helm, ADR-0016)
+
+The decision is [ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md); the
+names it is realised with:
+
+- **ServiceMonitors** — the chart renders one for every entry under `apps` with `metrics: true`.
+- **PrometheusRules** — platform rules on `up`, `pg_up`, `redis_up` and
+  `kafka_consumergroup_lag`.
+- **Grafana dashboards** — ConfigMaps labelled for the Grafana sidecar, single-sourced from the
+  compose dashboards.
+- These are toggled under `observability:` in `values.yaml`. `serviceMonitors` and
+  `prometheusRules` **default off**, because they need the Prometheus Operator CRDs; their
+  `labels` let you match your operator's selectors. `dashboards` are plain ConfigMaps and default
+  on.
+- **Exporters** — postgres/redis/kafka exporters ship with the chart. The postgres-exporter
+  connects as `metrics_user` (granted `pg_monitor`), which has its own `hostssl` rule.
+- **Backend** — `kube-prometheus-stack` (Prometheus Operator, Grafana, Alertmanager) and Loki run
+  separately; see `deploy/observability/README.md`.
+
+---
+
 ## Runbook: the stateful-feature kill-switch
 
 **What it is.** Some feature transforms (`statistical`, `rolling_stat`) are *stateful*: to compute a

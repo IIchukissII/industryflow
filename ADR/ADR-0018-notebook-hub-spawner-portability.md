@@ -3,15 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0018: Notebook hub spawner portability (compose and Kubernetes)
+# ADR-0018: Notebook hub spawner portability (compose and Kubernetes) (rev 1)
 
 - **ID:** ADR-0018
 - **Status:** Accepted
-- **Date:** 2026-06-28
+- **Date:** 2026-06-28 (rev 1: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0011 (embedded notebooks — the shape this refines)
 - **Companions:** ADR-0009 (Kubernetes deployment and packaging), ADR-0014 (notebook hub SSO), ADR-0015 (capability minting + SQL proxy)
 - **Related:** ADR-0001 (self-hosted vs managed deployment), ADR-0002 (network-boundary posture)
+- **Supersedes:** ADR-0018 rev 0 (2026-06-28 — decision 2 restated ADR-0011 rev 0's "short-lived single-tenant read-only principal"; rev 1 restates it as ADR-0011 rev 1 and ADR-0015 rev 2 decide it)
 
 ## Context and problem
 
@@ -39,6 +40,8 @@ The question is whether per-user, tenant-isolated notebooks are inherently a Kub
 or whether the isolation model ADR-0011/0012/0014/0015 built is independent of *how* the per-user
 environment is placed — and if so, how to record that so a compose deployment is a conforming
 realization rather than a divergence.
+
+**Revision 1 (2026-10-13).** Decision 2 enumerated ADR-0011's invariants by restating them, and so carried ADR-0011 rev 0's wording for direct SQL — a *short-lived* single-tenant principal — after that wording had been reversed: the principal is standing and per tenant, and the short-lived, revocable element is the capability the kernel presents (ADR-0011 rev 1). ADR-0015 rev 2 has since moved the SQL path's tenant boundary onto the identity the proxy logs in as. Rev 1 restates decision 2 to match both. Nothing about spawner portability changes: the restated invariants are as spawner-independent as the old ones.
 
 ## Decision drivers
 
@@ -71,9 +74,11 @@ realization rather than a divergence.
 
 2. **Every isolation invariant of ADR-0011 is binding under both spawners and is enforced above the
    spawner.** One ephemeral environment per user (dec 1); no ambient, tenant-crossing credential in
-   the kernel (dec 2); tenant isolation by database privilege via a `tenant_reader_<uuid>` role
-   (dec 3, ADR-0012); data reached only through the tenant-scoped API and, for authoring, a
-   short-lived single-tenant read-only principal via the SQL proxy (dec 4/6, ADR-0015); SSO from
+   the kernel (dec 2); tenant isolation by database privilege via a per-tenant read-only principal
+   (dec 3, ADR-0012); data reached only through the tenant-scoped API and, for authoring, through
+   the SQL proxy, which runs the session as that tenant's standing read-only identity while the
+   kernel presents only a short-lived, revocable handle (dec 4/6 as revised by ADR-0011 rev 1,
+   ADR-0015 rev 2) *(rev 1)*; SSO from
    the platform session with no second login (dec 8, ADR-0014). These are identical across spawners
    because they are produced by the SSO handoff, the capability store, and the database grants — all
    of which are spawner-independent. The spawner only *places* the environment and *injects* the

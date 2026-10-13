@@ -11,7 +11,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (whose deferred *"notebook and package supply chain"* this resolves, for the artifact path and no further)
 - **Companions:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (the gateway the artifact crosses), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (whose gate discipline decision 5 applies to a second class of failure)
-- **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (the in-process registry that loads the artifact, and the **deferred model-adapter contract** decision 4 hands the open framework set to), [ADR-0008](ADR-0008-extension-and-plugin-interface.md) (which already names *model adapters* as a plugin category), [ADR-0021](ADR-0021-model-drift-monitoring.md) / [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (the alert lane decision 8 declines to reuse), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (why a kernel stack bump reaches every user), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (provenance, which decision 13 grants trust by)
+- **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (the in-process registry that loads the artifact), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (the **model-adapter contract** decision 4 hands the open framework set to, which ADR-0010 had deferred), [ADR-0008](ADR-0008-extension-and-plugin-interface.md) (which already names *model adapters* as a plugin category), [ADR-0021](ADR-0021-model-drift-monitoring.md) / [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (the alert lane decision 8 declines to reuse), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (why a kernel stack bump reaches every user), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (provenance, which decision 13 grants trust by)
 - **Supersedes:** ADR-0027 rev 0 (2026-07-14 — deferred the trust half of the boundary; rev 1 resolves it for typed deserialisation on the kernel-authored path as decision 13); rev 1 (2026-10-11 — rev 2 records who carries the controls once the serving side, not the framework, performs the typed load)
 
 ## Context and problem
@@ -198,7 +198,10 @@ records what moves with it.
    in-process-versus-sidecar policy, the packaging of optional flavor sidecars.
 
    That is ADR-0010's deferred model-adapter contract, and it is now **live work, not future work**: the
-   product requires the open set. This ADR is the door frame; that ADR is the door. They are separate
+   product requires the open set. This ADR is the door frame; that ADR is the door. *(Resolved since
+   acceptance: ADR-0028 writes that contract — a detector declares the score semantics it implements and
+   the artifact flavors it scores — and carries the out-of-process serving boundary as its own
+   deferral.)* They are separate
    because they answer different questions — *what must match, and what happens when it does not?* versus
    *how do you add a new thing that can match?*
 
@@ -251,9 +254,10 @@ records what moves with it.
    operator whose job is to label them, and would corrode the one signal ADR-0022 was built to make
    trustworthy.
 
-9. **`services/ml_service/requirements.txt` is removed.** It is installed by no image, referenced by no
-   Dockerfile, and cited by no ADR — the serving image builds from `services/ml_service/api/requirements.txt`.
-   Yet it lists numpy, scikit-learn, pandas and scipy, so it *reads* like the service's dependency manifest,
+9. **A dependency manifest that no image installs is removed from the serving service.** The service carried
+   one beside the manifest its image actually builds from: installed by no image, referenced by no build, and
+   cited by no ADR. Yet it listed numpy, scikit-learn, pandas and scipy, so it *read* like the service's
+   dependency manifest,
    and the repo-wide resolvability gate keeps it green forever. **It is the file that made both the
    architecture review and this ADR's first draft get xgboost wrong** — they concluded xgboost was absent
    from serving, when it is present, pinned, and dispatched by name in the detector.
@@ -431,10 +435,10 @@ is a **trust** decision, not a parity one, and it is deferred below.
 
 ## Deferred decisions
 
-- **The model-adapter contract (ADR-0010's, now come due).** How a flavor is *added*: the adapter signature,
-  in-process versus out-of-process policy per flavor, packaging of optional flavor sidecars, and how the
-  supported set is declared to an operator. **This is the live requirement behind torch and autoencoders**
-  (decision 4). It is deferred from *this* record, not from the project's work.
+- ~~**The model-adapter contract (ADR-0010's, now come due).**~~ *Resolved by ADR-0028:* how a flavor is
+  *added* — a detector declaring its score semantics and the flavors it scores, in-process by default. What
+  ADR-0028 leaves open (the out-of-process serving boundary a framework this image does not carry would
+  need, and the packaging of optional flavor sidecars) is deferred there, not here.
 - **Refusing pickle artifacts outright (the rest of the *trust* half of this boundary).** Trust in typed
   deserialisation is resolved in rev 1 as decision 13; what remains is the pickle path. Alternative F. sklearn
   models are already skops; but MLflow will still deserialize a pickle when it meets one

@@ -3,14 +3,15 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0017: Database TLS and authentication
+# ADR-0017: Database TLS and authentication (rev 1)
 
 - **ID:** ADR-0017
 - **Status:** Accepted
-- **Date:** 2026-06-27
+- **Date:** 2026-06-27 (rev 1: 2026-06-27, recorded 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0004 (API edge TLS — in the self-hosted deployment its edge cert shares the internal CA this DB cert uses), ADR-0007 (device PKI — referenced for the signing pattern; its device CA is a *separate* root, not this one), ADR-0003 (per-tenant schemas), production-readiness item 4
+- **Supersedes:** ADR-0017 rev 0 (2026-06-27 — decided the database certificate for the single-host deployment only; rev 1 adds decision 7, how the Kubernetes deployment sources and distributes it)
 
 ## Context and problem
 
@@ -23,100 +24,104 @@ database (no server authentication). Two weaknesses remain: passive sniffing of 
 network segment, and an active MITM / a rogue process impersonating the DB. `md5` password
 hashing is also deprecated in favour of SCRAM.
 
+**Revision 1 (2026-06-27; recorded 2026-10-13).** Rev 0 decided the database certificate for the single-host deployment, where the certificate can be issued beside the database at start. The Kubernetes deployment cannot do that: its clients are separate workloads that must all trust the same root, so the certificate and its root must exist before any of them start. Decision 7 answering that was added to this record after acceptance by an in-place edit; this revision records it as the decision it is.
+
 ## Decision drivers
 
 - **System of record.** DB traffic carries credentials and all tenant data; best practice for
   it is encryption **and** server authentication, not encryption alone.
-- **An internal CA already exists** — `scripts/gen-internal-ca.sh` generates the internal CA and
-  server cert for the **frontend TLS edge** in the self-hosted/compose deployment (the
+- **An internal CA already exists** — the self-hosted deployment already runs an internal CA that
+  issues the server certificate for the **frontend TLS edge** (the
   internal-CA path ADR-0004 dec 8 decides for the self-hosted edge, as distinct from the
   public ACME cert used by the managed edge). Reusing that same internal root for the DB server
   cert means self-hosted clients trust **one internal CA for both the API edge and the
   database**. This is *not* ADR-0007's device CA: that is a separate client-auth root that signs
-  CSRs and never holds a server private key; it is referenced here only as the PKI precedent.
-- **The change is cross-cutting and breaking if rushed.** `ssl=on` needs a DB restart, four
-  client drivers must opt in (asyncpg ×, SQLAlchemy+asyncpg, psycopg2, libpq/env), and
-  flipping `pg_hba` to `hostssl` rejects any client still on plaintext — so it must roll out
-  clients-first, then enforce.
-- **Postgres is strict about key permissions** (key must be `0600`, owned by the DB user or
-  root), which bind mounts and k8s Secret mounts don't satisfy by default.
+  CSRs and never holds a device's private key; it is referenced here only as the PKI precedent.
+- **The change is cross-cutting and breaking if rushed.** Turning TLS on needs a database
+  restart, every client driver in the platform must opt in, and requiring TLS rejects any client
+  still on plaintext — so it must roll out clients-first, then enforce.
+- **Postgres is strict about private-key file ownership and permissions**, which host bind mounts
+  and orchestrator secret mounts do not satisfy by default.
 
 ## Decision
 
-1. **`verify-full`, not encrypt-only.** Clients connect with `sslmode=verify-full` and
-   `sslrootcert=<internal CA>`: the connection is encrypted **and** the server certificate is
-   verified against the internal CA with hostname checking. Encrypt-only (`require`) was
-   rejected — it leaves MITM/impersonation open, and the CA to do verification already exists.
+1. **Clients verify the server, not merely encrypt.** Every client connects with full
+   verification: the connection is encrypted **and** the server certificate is checked against
+   the internal CA, hostname included. Encrypt-only was rejected — it leaves MITM and
+   impersonation open, and the CA to verify against already exists.
 
-2. **`scram-sha-256` for password auth.** Roles are created with SCRAM verifiers
-   (`password_encryption = scram-sha-256`) and `pg_hba` uses the `scram-sha-256` method,
-   replacing `md5`.
+2. **Password authentication uses SCRAM, not MD5.** Roles carry SCRAM verifiers and the database
+   accepts only the SCRAM method, retiring the deprecated MD5 hashing.
 
-3. **Server certificate from the internal CA** (`gen-internal-ca.sh` issues `db.crt`/`db.key`),
-   SAN = the hostname clients connect to (`timescaledb`, plus `localhost`/`industryflow.local`)
-   so `verify-full` passes. The CA's `ca.crt` is distributed to clients as `sslrootcert`.
+3. **The database server certificate is issued by the self-hosted internal CA,** with subject
+   names covering every hostname clients use to reach the database, so full verification passes.
+   The CA's root is distributed to clients as their trust anchor for the database.
 
-4. **Key permissions are fixed in-container, not on the host.** A `db-cert-init` one-shot
-   (compose) / an **initContainer** (Helm) copies the cert into a postgres-owned volume with
-   `0600`, so the strict key check is satisfied reproducibly without host root.
+4. **Key ownership and permissions are fixed inside the deployment, not on the host.** A one-shot
+   step that runs before the database copies the certificate and key into database-owned storage
+   with the permissions Postgres requires, so the strict key check is satisfied reproducibly
+   without host root, in both deployment shapes.
 
-5. **Staged, non-breaking rollout** (each stage validated on the live box):
-   - **A — server capable:** `ssl=on` + cert; `pg_hba` stays `host` (TLS offered, not required).
-   - **B — clients verify:** every client sets `sslmode=verify-full` + `sslrootcert`; still
-     accepted under `host`, now over TLS.
-   - **C — enforce:** `pg_hba` `host`→`hostssl` and `md5`→`scram-sha-256`; plaintext now rejected.
+5. **The rollout is staged so that no step breaks a running client:** first the server offers TLS
+   without requiring it; then every client switches to full verification while plaintext is still
+   accepted; only then does the server require TLS and SCRAM, rejecting plaintext. Each stage is
+   validated before the next. (The stage-by-stage procedure is in `docs/operations/tls.md`.)
 
-6. **Scope.** The local Unix-socket path (`local ... trust`, used by the init scripts inside
-   the container) stays plaintext — it never crosses the network. The mTLS *device* edge
+6. **Scope.** The database's local socket path, used only by initialisation inside the database
+   container, stays plaintext — it never crosses the network. The mTLS *device* edge
    (ADR-0002) and the API HTTPS edge (ADR-0004) are unchanged; this ADR is about
    service→database transport.
 
-7. **Helm cert source: a Secret, provisioned by cert-manager.** In k8s the server cert + CA
-   cannot be self-signed at DB-pod start the way compose does it — clients are separate pods and
-   must mount the *same* CA. So the chart consumes a Secret (`tls.crt`/`tls.key`/`ca.crt`,
-   `tls.db.secretName`): the TimescaleDB pod mounts all three (the initContainer stages them with
-   `0600`/postgres-uid), every DB client mounts just `ca.crt`, and `DB_SSLMODE`/`DB_SSLROOTCERT`
-   come from the shared ConfigMap. The chart can self-provision that Secret with **cert-manager**
-   (`tls.db.certManager.enabled` — a SelfSigned issuer → internal CA → server cert, the k8s
-   equivalent of `gen-internal-ca.sh`), or the operator supplies one from their own PKI. Because
-   the hardened `pg_hba` is `hostssl`, DB TLS is **mandatory** for an in-cluster TimescaleDB, not
-   optional. The monitoring role (`metrics_user`, postgres-exporter) gets its own `hostssl` rule.
+7. **On Kubernetes the certificate comes from a cluster secret, provisioned by a certificate
+   controller or supplied by the operator *(rev 1)*.** Clients there are separate workloads that
+   must all trust the *same* root, so the certificate cannot be self-issued at database start as on
+   a single host. The database mounts the certificate, key and root from one secret; every client
+   mounts only the root; the verification mode and root location reach clients through shared
+   configuration. The chart can self-provision that secret with a certificate controller (a
+   self-signed issuer → internal CA → server certificate, the in-cluster equivalent of the
+   single-host internal CA), or the operator supplies one from their own PKI. Because the hardened
+   access rules require TLS, database TLS is **mandatory** for an in-cluster database, not optional;
+   every role that connects over the network, monitoring included, is held to the same rule.
 
 ## Alternatives considered
 
-- **Encrypt-only (`sslmode=require`).** Simpler (no CA distribution), but no server
+- **Encrypt-only.** Simpler (no CA distribution), but no server
   authentication — rejected per driver 1.
-- **mTLS client certificates to the DB** (`clientcert=verify-full`) instead of passwords.
+- **mTLS client certificates to the DB** instead of passwords.
   Stronger, but a large per-service cert-issuance/rotation burden; deferred. SCRAM over
   `verify-full` server TLS is the chosen balance.
 - **Leave it plaintext, rely on network scoping.** Rejected: defence-in-depth for the system
   of record; network controls alone don't stop an on-network MITM or sniffer.
+- **On Kubernetes, issue the certificate at database start as on a single host *(rev 1)*.**
+  Rejected: clients are separate workloads that need the root before the database exists to hand
+  it to them; a root minted inside the database pod has no way to reach them that is not a second,
+  ad hoc distribution channel. A cluster secret is the orchestrator's own distribution channel.
 
 ## Consequences
 
 ### Positive
 
 - All service→DB traffic is encrypted and the server is authenticated; credentials never cross
-  the network in the clear, and SCRAM replaces md5.
-- Both deployment models share one mechanism: the same canonical `pg_hba.conf` (via the chart's
-  `files/db-config` symlink) and the same in-container key-permission fix.
+  the network in the clear, and SCRAM replaces MD5.
+- Both deployment shapes share one mechanism: one canonical set of database access rules and the
+  same in-deployment key-permission fix.
 
 ### Negative
 
-- Every client carries the CA (`sslrootcert`) and a `DB_SSLMODE` setting; cert rotation is via
-  the internal CA (reissue `db.crt`, restart the DB).
-- A failed cert/permission/rotation breaks DB connectivity, so changes are staged and validated.
-- k8s adds an initContainer for key perms.
-- The Helm chart now requires a DB-cert Secret (cert-manager or operator-supplied); a plain
-  `helm install` without it leaves the DB + clients pending — surfaced in `NOTES.txt`.
-- The compose path is enforced and validated live; the Helm path is render-validated only (no
-  cluster yet — the live deployment is docker-compose).
+- Every client carries the CA root and a verification setting; certificate rotation goes through
+  the internal CA (reissue the server certificate, restart the database).
+- A failed certificate, permission or rotation breaks database connectivity, so changes are staged
+  and validated.
+- Kubernetes adds an init step for key permissions.
+- The chart requires a database-certificate secret (controller-provisioned or operator-supplied);
+  an install without one leaves the database and its clients pending — the chart says so at
+  install time.
 
 ## References
 
-- ADR-0004 — the API/frontend TLS edge whose self-hosted internal CA (`gen-internal-ca.sh`)
-  this DB server cert shares; the managed edge instead uses a public ACME cert. ADR-0007 — the
-  *device* CA; a separate root, referenced for the signing pattern, not reused here.
-- `scripts/gen-internal-ca.sh` — issues the DB server cert (compose); the Helm equivalent is
-  `templates/db-tls-certificate.yaml` (cert-manager) under `tls.db` in `values.yaml`.
-- `docs/operations/production-readiness.md` — item 4 (the remaining "DB TLS").
+- ADR-0004 — the API/frontend TLS edge whose self-hosted internal CA this database certificate
+  shares; the managed edge instead uses a public ACME certificate. ADR-0007 — the *device* CA; a
+  separate root, referenced for the signing pattern, not reused here.
+- `docs/operations/tls.md` — how the certificate is issued in each deployment shape, the
+  configuration names, the staged rollout procedure, and rotation.
+- `docs/operations/production-readiness.md` — item 4 (database TLS).

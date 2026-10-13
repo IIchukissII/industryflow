@@ -6,8 +6,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0022 — Concept-drift operator feedback (alert labels, precision-over-time, retrain recommendation)
 
 - **ID:** ADR-0022
-- **Status:** Accepted (implemented — label store + precision-over-time + retrain recommendation + operator UI; box-validated) — rev 2
-- **Date:** 2026-07-05 (rev 2: 2026-07-05)
+- **Status:** Accepted
+- **Date:** 2026-07-05
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring.md) (model drift monitoring — realizes its top deferred decision)
 - **Companions:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md)/[ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (model registry + tracking).
@@ -32,7 +32,7 @@ So the undecided shape is: what an operator labels, where the label lives (given
 
 ## Decision
 
-1. **Operators label a fired alert with a correctness verdict — `true_positive` | `false_positive` | `unsure` — distinct from acknowledge.** Acknowledge means "I have seen this"; a label means "this alert was (not) a real event." One current verdict per alert, re-labelable (an upsert), with an optional free-text note and the acting operator recorded. The write mirrors the existing `PATCH /api/alerts/{alert_id}/acknowledge` on the api_gateway surface the frontend already talks to.
+1. **Operators label a fired alert with a correctness verdict — `true_positive` | `false_positive` | `unsure` — distinct from acknowledge.** Acknowledge means "I have seen this"; a label means "this alert was (not) a real event." One current verdict per alert, re-labelable (an upsert), with an optional free-text note and the acting operator recorded. The write mirrors the existing acknowledge action on the alert surface the frontend already talks to.
 
 2. **Labels persist in a dedicated per-tenant `alert_labels` table, never as columns on the `alerts` hypertable.** The alerts hypertable drops chunks at 90 days; the label must survive that. `alert_labels` is an ordinary (non-hypertable, no-retention) per-tenant table keyed by `alert_id`, and it **denormalizes** the labelled alert's `rule_id`, `model_id`, `detection_type`, and `severity` at label time so the verdict stays self-describing and groupable after the source alert row has aged out.
 
@@ -42,7 +42,7 @@ So the undecided shape is: what an operator labels, where the label lives (given
 
 5. **Same split of homes as ADR-0021.** The label write and the precision-over-time read live on the api_gateway alert surface (tenant-scoped, authenticated operator); the retrain-recommendation evaluator is a sibling of the scheduled drift evaluator in the alert service, reusing its internal→ml-service auth path. No new service.
 
-6. **Tenant-scoped and attributed throughout.** Every label, metric, and recommendation is for one tenant, written through the existing schema-routed path with the acting operator recorded in `labeled_by`. No cross-tenant read or aggregation.
+6. **Tenant-scoped and attributed throughout.** Every label, metric, and recommendation is for one tenant, written through the existing schema-routed path with the acting operator recorded on the label. No cross-tenant read or aggregation.
 
 ## Alternatives considered
 
@@ -70,16 +70,14 @@ So the undecided shape is: what an operator labels, where the label lives (given
 - **Automated retrain execution.** A training service the recommendation could invoke — its own ADR (registry write, MLflow run creation, the tenant data/training path, reference-profile emission).
 - **Recommendation thresholds + cadence.** How much sustained drift and how much precision decay trigger a recommendation, and how often the evaluator runs — configuration, tuned after the label store has real data.
 
-## Implementation status (rev 2)
+## Resolved since acceptance
 
-All slices implemented and **box-validated** on the live compose stack (label + label-metrics exercised end-to-end over HTTP; the retrain evaluator runs on the drift schedule):
-
-- **Slice 1 — label store.** `alert_labels` per-tenant table (migration `15-alert-labels.sql`), wired into `create_tenant_schema()` and backfilled onto existing tenants; verdict `CHECK`-constrained, denormalized rule/model/detection/severity, one re-labelable verdict per alert. `PATCH /api/alerts/{alert_id}/label` (mirrors acknowledge) + the label surfaced on the alert read path.
-- **Slice 2 — precision over time (dec 3).** `GET /api/alerts/label-metrics` buckets labels by time and returns precision + false-positive rate, per bucket and overall, scoped by model/rule. Recall is deliberately absent (a `note` says so); `unsure` is excluded from the denominator.
-- **Slice 3 — retrain recommendation (dec 4).** A scheduled evaluator in the alert worker (sibling of the drift evaluator, same cadence) raises a distinct high-severity `statistical` alert (`condition='retrain_recommended'`) when a model shows BOTH sustained drift (recent drift alerts) AND label-derived precision decay — model-scoped cooldown so it does not repeat every cycle. It recommends; it does not train (no training service — dec 4).
-- **Slice 4 — operator UI.** The Alert History page has a per-alert three-way label control (Real / False / Unsure → `PATCH …/label`) and a "Precision (labelled)" KPI reading `label-metrics`; the same page also wires the acknowledge action. Distinct from acknowledge; worded, not colour-only.
-
-Still open (not built): the surfaced retrain flag beside the model on the Models page (the recommendation lands in alert history today).
+- **Implementation.** Every decision above is realised and validated end-to-end on the compose
+  deployment; no decision changed in doing so. This record's status line once read "rev 1" and then
+  "rev 2"; both were implementation-progress notes, not revisions of a decision, and there is no
+  revision of this record under ADR-0000 dec 5. The slices, their storage and their validation are in
+  `docs/architecture/alerting.md`. The one surface not built is a retrain flag shown beside the model
+  on the models view; the recommendation is surfaced in alert history.
 
 ## References
 - ADR-0021 (model drift monitoring) — parent; this realizes its deferred operator-feedback decision.

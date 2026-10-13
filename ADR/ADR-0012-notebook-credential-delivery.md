@@ -3,14 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0012: Per-session credential delivery for notebook environments
+# ADR-0012: Per-session credential delivery for notebook environments (rev 1)
 
 - **ID:** ADR-0012
 - **Status:** Accepted
-- **Date:** 2026-06-27
+- **Date:** 2026-06-27 (rev 1: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0011 (embedded notebooks for analytics and experimentation), ADR-0003 (tenant→schema resolution), ADR-0004 (API authentication, sessions and transport)
+- **Refined by:** ADR-0015 (the capability form, the minting modes and the SQL proxy's binding that realise this record), ADR-0030 (a demand-minted, writing upload plane)
+- **Supersedes:** ADR-0012 rev 0 (2026-06-27 — stated decisions 1 and 5 as properties of every capability; rev 1 narrows them to the spawn-minted kernel planes they were written for, and defers the demand-minted and writing planes to the records that introduced them)
 
 ## Context and problem
 
@@ -19,6 +21,8 @@ ADR-0011 decided that notebooks run as per-user isolated environments executing 
 The difficulty is that a kernel is a hostile place to keep a secret. Whatever credential the kernel holds, the user's code can read, copy, and use — that is the definition of an environment that runs arbitrary code. So the question is not "how do we hide a secret from the user" (we cannot) but "what is the smallest, most quickly revocable, least transferable credential that still lets a notebook do its job," and "what must never be placed there at all." Two things make this tractable rather than hopeless. First, ADR-0011 decision 7 already confines a notebook environment's network reach to an egress allowlist, so a leaked credential is useless from outside the cluster. Second, ADR-0011 decision 3 already scopes notebook data access to a single tenant, read-only, so the worst a user can do with their own credential is read data they are already entitled to read. The credential-delivery design must preserve both of those containments and add a third the deferred decision named explicitly: a *raw database password must never enter the kernel at all*, because a database password is a transferable, durable, hard-to-revoke secret of a kind categorically worse than a narrowly scoped capability.
 
 There is a model already in the codebase for how to do this. The API gateway holds the privileged tenant-data role and scopes each request to the caller's tenant in trusted code (ADR-0003, ADR-0004); the caller never holds the database credential, only a session that the gateway exchanges for scoped access per request. The kernel's direct-SQL path has the same shape — an untrusted caller that needs tenant-scoped data — and should be solved the same way, rather than by handing the untrusted caller the database credential the rest of the platform is careful never to expose.
+
+**Revision 1 (2026-10-13).** Two decisions here were written when every capability belonged to a kernel and every plane only read. Decision 1 names the spawner as "the sole minting authority", and decision 5 lists "read-only intent" among the facts every capability carries. Both have since stopped describing the system. The experiment-tracking plane (ADR-0019) is minted read-write, because logging a run and registering a model are writes; ADR-0015 rev 1 recorded that, and recorded a second minting mode — *demand-minting*, by a designated trusted component, for a holder that is a person rather than a kernel. ADR-0030 then introduced such a plane: an upload handle minted on demand by the serving side, authorising one write. ADR-0015 was revised; this record, which both of those planes cite as the rule they follow, was not, so it went on asserting the opposite of what they do. Rev 1 narrows decisions 1 and 5 to the planes they were written for — the spawn-minted kernel planes — and points at the records that govern the rest. What a kernel may hold is unchanged.
 
 ## Decision drivers
 
@@ -32,6 +36,8 @@ There is a model already in the codebase for how to do this. The API gateway hol
 
 1. **Every credential a notebook environment holds is minted per session, at spawn time, by the trusted spawner, scoped to exactly one user and one tenant, short-lived, and centrally revocable.** The kernel receives nothing standing, nothing shared across users or sessions, and nothing whose scope exceeds the single tenant and identity that opened the environment. The spawner validates the platform session (ADR-0004) and is the sole minting authority; a kernel cannot mint, refresh, or exchange its credentials for broader ones.
 
+   > **rev 1 (2026-10-13): "sole minting authority" binds the kernel planes, not every plane.** Everything a *kernel* holds is still minted at spawn by the spawner, and a kernel still cannot mint, refresh, or exchange anything. A plane whose holder is a person rather than a kernel has no spawn to hang minting on; ADR-0015 rev 1 dec 4 permits *demand-minting* for such a plane, under conditions it fixes (tenant from a verified session only, one designated minter named by the record that introduces the plane, a handle consumed at once, no session secret distributed to enforce it). ADR-0030 dec 3 is the instance. The other properties of this decision — one user, one tenant, short-lived, centrally revocable, nothing standing or shared — bind every plane, however minted.
+
 2. **The kernel never holds a raw database password.** The durable, transferable database credential is categorically excluded from the environment. This is the hard line the deferred decision named, and decision 4 is how the SQL path is served without crossing it.
 
 3. **The default data path is a per-session capability that authenticates to the data API as the user.** For the API path of ADR-0011 decision 4, the environment carries a narrow bearer capability — audience-restricted to the data API, scoped to the one tenant and identity, short-lived — that is *not* the user's session cookie and cannot be refreshed or exchanged into a full session. It authorizes reading the user's own tenant data through the existing API and nothing else.
@@ -39,6 +45,8 @@ There is a model already in the codebase for how to do this. The API gateway hol
 4. **Direct SQL is served through an authenticating proxy that holds the privileged principal; the kernel presents only its per-session capability.** For the authoring direct-database path of ADR-0011 decision 6, the kernel connects not to the database but to a trusted SQL proxy, presenting the same kind of per-session capability as decision 3. The proxy — trusted code — holds the privileged credential and binds each kernel connection to the single-tenant, read-only role for that session (the SQL analogue of how the API gateway scopes a request, ADR-0003). The database password lives only in the proxy; the "may act as any tenant" privilege lives only in the proxy; the kernel holds neither.
 
 5. **Capabilities are minimal and non-escalatable.** A minted capability carries exactly the tenant, the identity, the single data plane it is for (API or SQL proxy), and read-only intent. It cannot be presented to a different service, broadened to another tenant, or exchanged for a longer-lived or higher-privilege credential. Possession of one capability never yields another.
+
+   > **rev 1 (2026-10-13): read-only is a bound fact of a plane, not of every capability.** The planes this decision was written for — the data API and the SQL proxy — are read-only, and remain so. A plane that writes (experiment tracking, ADR-0019; a model upload, ADR-0030) carries read-only as *false* on its binding, and its boundary is the tenant namespace its trusted mediator enforces, as ADR-0015 rev 1 dec 1 records. That is never a widening: a writing capability still reaches exactly one tenant and one plane, cannot be presented elsewhere, and cannot be exchanged for anything broader.
 
 6. **Revocation is central and immediate; lifetime is the backstop.** Ending a session invalidates its capabilities at the point that honours them — the API and the SQL proxy reject a revoked capability — without waiting for the short lifetime to lapse. The lifetime bounds the damage if central revocation is somehow missed; it is not the primary control.
 
@@ -51,6 +59,8 @@ There is a model already in the codebase for how to do this. The API gateway hol
 **C. Reuse the user's actual platform session (cookie/JWT) inside the kernel.** *Rejected:* the session is a long-lived, refreshable, full-capability browser credential delivered as an httpOnly cookie precisely so that code cannot read it (ADR-0004). Copying it into a server-side environment running user code would hand the kernel the user's entire authenticated surface rather than a minimal read-only data capability, and would make "revoke the notebook" mean "kill the user's web session." The minted, narrowly-scoped capability of decision 3 is the deliberate opposite.
 
 **D. Serve all data over an HTTP query service and have no direct-SQL path at all.** A trusted service executes read-only queries and streams results, so no database-facing credential of any kind reaches the kernel. *Rejected as a replacement:* ADR-0011 decision 6 already decided that authors get direct database access through a real single-tenant principal, and a query-over-HTTP service does not satisfy "direct SQL" for the tools data scientists use. It remains fully compatible as an *additional* convenience and a possible future path, but it does not discharge the decision this ADR resolves.
+
+**E. Keep decisions 1 and 5 universal, and refuse any plane that writes or whose holder never spawns *(rev 1)*.** *Rejected:* tracking and upload are product requirements already decided (ADR-0013, ADR-0019, ADR-0030), and each was built to the same shape — opaque, single-tenant, audience-bound, revocable — that this record's drivers actually demand. Universality was an accident of the first two planes, not a driver. Leaving the text universal while the system is not would be the silent contradiction ADR-0000 dec 4 forbids.
 
 ## Consequences
 

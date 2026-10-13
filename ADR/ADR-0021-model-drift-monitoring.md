@@ -6,8 +6,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0021 — Model drift monitoring (the `statistical` alert lane)
 
 - **ID:** ADR-0021
-- **Status:** Accepted (implemented; live cluster validation pending) — rev 1
-- **Date:** 2026-06-28 (rev 1: 2026-07-04)
+- **Status:** Accepted
+- **Date:** 2026-06-28
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md)/[ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (model registry + tracking). Realizes the alert-rule schema's reserved `statistical` detection type.
@@ -38,7 +38,7 @@ So this is mostly *wiring foundations that already exist*, not new infrastructur
 
 2. **Drift surfaces through the reserved `statistical` alert lane.** A drift rule (`detection_type='statistical'`, bound to a model + a drift threshold) raises a normal alert — *"model `vpd-forecaster` input drift 0.42 > 0.30 — consider retraining"* — into the same alert history, severity, and notification path as threshold/ml alerts. No new alerting surface; the Models page may later show a drift indicator from the same signal.
 
-3. **The alert service owns drift detection; ml-service computes the drift score.** A **scheduled drift evaluator runs in the alert service beside the real-time rules engine** — keeping all detection (threshold/ml/statistical) in one home: it schedules evaluations, applies each rule's threshold, and fires the alert. The **statistical computation is delegated to ml-service** over an internal endpoint (windowed tenant data + reference profile → `evidently` → drift score), exactly mirroring how the real-time ml rules already delegate scoring to ml-service `/api/inference`. The alert service stays the decision/alert home without duplicating `evidently` or the tenant data path.
+3. **The alert service owns drift detection; ml-service computes the drift score.** A **scheduled drift evaluator runs in the alert service beside the real-time rules engine** — keeping all detection (threshold/ml/statistical) in one home: it schedules evaluations, applies each rule's threshold, and fires the alert. The **statistical computation is delegated to ml-service** over an internal endpoint (windowed tenant data + reference profile → `evidently` → drift score), exactly mirroring how the real-time ml rules already delegate scoring to ml-service's inference endpoint. The alert service stays the decision/alert home without duplicating `evidently` or the tenant data path.
 
 4. **A reference profile is captured at training time and stored with the model.** Drift is meaningless without a baseline, so when a model is trained/registered the platform records a compact distribution snapshot (column statistics / an `evidently` reference) over the training window, stored **with the model and tenant-scoped** — an MLflow artifact for tracked models (via the ADR-0019 gateway), or the `ml_models` training metadata otherwise. A model with no reference profile reports *drift unavailable* until retrained with one, rather than guessing a baseline from possibly-compacted history.
 
@@ -74,27 +74,16 @@ So this is mostly *wiring foundations that already exist*, not new infrastructur
 - **Models-page drift indicator.** Surfacing the same signal in the Models UI beside metrics/versions.
 - **Compute backend.** Whether the ml-service endpoint computes inline or offloads heavy windows to Spark.
 
-## Implementation status (rev 1)
+## Resolved since acceptance
 
-Implemented behind this decision (unit-tested; live cluster validation pending, tracked with
-the notebook cluster work in issue #19):
-
-- **Reference profile** — `reference_profile JSONB` on `ml_models` (migration
-  `14-model-drift-reference-profile.sql`); a pure capture helper builds a compact,
-  down-sampled evidently-consumable sample at registration (`ml_service/api/drift/`).
-- **Compute** — `POST /api/drift/evaluate` scores data + prediction drift with `evidently`
-  over the reference sample vs a trailing tenant window; `evidently`/`pandas` added to the ml
-  API image (verified against the pinned `fastapi`). Loaded models are served from a warm
-  cache shared with the anomaly detector.
-- **Decision + sink** — a scheduled evaluator in the alert worker delegates the compute and
-  fires `statistical` alerts through the existing sink; the `statistical` lane needed no
-  schema change. Per-reading statistical evaluation is a deliberate no-op.
-- **Config surface** — the alert-rule API validates that a `statistical` rule binds a model
-  and an in-range drift threshold; cadence/window are service config.
-
-Note on the compute engine: the reference profile is stored as an evidently-consumable
-**sample** (not raw training rows nor a bare histogram), so `evidently` computes the score
-directly — the decision-3 engine, unchanged.
+- **Implementation.** Every decision above is realised; no decision changed in doing so. The "rev 1"
+  that this record's status line once carried was this implementation note, not a revision of a
+  decision, and is not one under ADR-0000 dec 5. Where each decision lives in code, and its validation
+  status, is in `docs/architecture/ml-and-features.md` and `docs/architecture/alerting.md`.
+- **Reference-profile serialization** (deferred above) is resolved for the in-platform path: the
+  profile is stored with the model as a compact, down-sampled sample that the drift library consumes
+  directly — not raw training rows and not a bare histogram — so decision 3's compute engine is
+  unchanged.
 
 ## References
 - Reserved `statistical` detection type: `infrastructure/timescaledb/init-scripts/02-tenant-alert-tables.sql`.

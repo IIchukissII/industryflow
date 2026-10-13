@@ -99,6 +99,15 @@ Isolation carries into the object store under the *existing* policy, not a new o
   `read_all`). A data scientist on tenant A can no more read tenant B's Parquet than tenant B's
   schema.
 
+Where it lives: the exporter in `services/cold_export/` (`exporter.py` holds the ordering
+invariant, `naming.py` the one tenant-prefix mapping); the role, the `SECURITY DEFINER`
+`cold_export_drop_day` and the removal of the blind raw retention policy in init script
+`16-cold-layer-raw-retention.sql` (with matching grants in `04-complete-tenant-creation.sql`,
+`00-create-roles.sh` and `pg_hba.conf`); the broker in `services/notebook_cold_broker/`; the
+`cold` audience in `services/notebook_hub/capabilities.py`; the CronJob and the write-scoped and
+read-only object-store principals in the Helm chart (`cronjob-cold-export.yaml`,
+`job-minio-cold-init.yaml`) and the compose `cold-export` profile.
+
 ADR-0025 deliberately deferred parts of the cold layer to a future trigger (a table format, a
 distributed Spark exporter, the concrete retention horizon). Those triggers, the signals that
 detect them, and what to build when they fire are tracked in
