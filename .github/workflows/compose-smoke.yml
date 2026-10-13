@@ -63,9 +63,22 @@ jobs:
       - name: Generate the internal CA (the DB clients verify against it)
         run: |
           bash scripts/gen-internal-ca.sh
+          # The edges run nginx as uid/gid 101 and read tls.key through its group, which the script
+          # sets only when it may (it says so); the operator does this once, and so does the gate.
+          sudo chgrp 101 deploy/certs/tls.key
           sed -i "s|^TLS_CERT_DIR=.*|TLS_CERT_DIR=${PWD}/deploy/certs|" .env
           grep -E '^(TLS_CERT_DIR|DB_SSLMODE)=' .env
           test -f deploy/certs/ca.crt || { echo "::error::the CA was not generated"; exit 1; }
+
+      # The mTLS ingestion edge verifies device certificates against the device CA and its CRL
+      # (ADR-0002, ADR-0007) and will not start without them. Issue one TEST device certificate, as
+      # an operator enrolling a device would, so the probe below can prove a verified device gets
+      # through and an anonymous client does not.
+      - name: Initialise the device CA and enrol a test device
+        run: |
+          sh scripts/device-ca.sh init
+          sh scripts/device-ca.sh issue 00000000-0000-4000-8000-000000000001 smoke-device
+          test -f deploy/device-ca/ca-chain.crt && test -f deploy/device-ca/crl/device-ca.crl
 
       # ADR-0026 dec 4. Build the seed with the JupyterHub the hub is upgrading FROM, so the schema is
       # genuinely the old one rather than something we assert is old. `new_session_factory` creates the
@@ -117,16 +130,18 @@ jobs:
       # --wait blocks until every container with a healthcheck reports healthy, and fails if one exits.
       # A hub that crash-loops on the seeded schema fails HERE, which is the whole purpose of this job.
       #
-      # SCOPE, stated honestly: the application services, the notebooks profile, and (via depends_on)
-      # the infrastructure they need. NOT the monitoring stack (grafana/prometheus/loki/exporters) and
-      # NOT the Spark JVMs — a 2-vCPU runner cannot converge 31 containers, and neither of those is on
-      # the failure path this gate exists for (a Python dependency that breaks a service on start).
+      # SCOPE, stated honestly: the application services, the three edges every outside request
+      # crosses (the frontend TLS edge, the notebook SSO proxy behind it, the mTLS ingestion edge),
+      # the notebooks profile, and (via depends_on) the infrastructure they need. NOT the monitoring
+      # stack (grafana/prometheus/loki/exporters) and NOT the Spark JVMs — a 2-vCPU runner cannot
+      # converge 31 containers, and neither of those is on the failure path this gate exists for.
       # A Spark-image break is therefore still only caught by its own build, which is a known limit.
       - name: Start the stack (notebooks profile included — the hub is the point)
         run: |
           docker compose --profile notebooks up -d --build --wait --wait-timeout 900 \
             api-gateway ingestion-service ml-service-api alert-service-detector \
-            mlflow notebook-hub notebook-sql-proxy notebook-tracking-gateway notebook-cold-broker
+            mlflow notebook-hub notebook-sql-proxy notebook-tracking-gateway notebook-cold-broker \
+            frontend notebook-sso ingestion-edge
 
       # The signal is not WHETHER a container restarted — it is whether it KEEPS restarting.
       #
@@ -204,6 +219,39 @@ jobs:
           PY
           docker compose cp probe.py api-gateway:/tmp/probe.py
           docker compose exec -T api-gateway python /tmp/probe.py
+
+      # The edges are what an outside client actually talks to, and each proxies by name to a service
+      # behind it — a config that names the wrong upstream starts happily and fails every request.
+      # So each is probed from the host, through its real listener and certificate:
+      #   frontend   /healthz (its own probe), and /health PROXIED to the gateway over TLS, with the
+      #              security headers present; plain HTTP is redirected to https.
+      #   notebook-sso  /jupyter/ through the frontend: with no session the SSO proxy asks the gateway,
+      #              is refused, and sends the browser to /login — which proves all three hops.
+      #   ingestion-edge  /health PROXIED to ingestion with the test device's certificate, and the
+      #              handshake refused without one.
+      - name: Probe the edges from outside
+        run: |
+          set -euo pipefail
+          ca=deploy/certs/ca.crt
+          dev=deploy/device-ca/devices/smoke-device
+          curl -fsS http://localhost:3000/healthz
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/alerts)" = 301
+          curl -fsS --cacert "$ca" -D headers.txt -o /dev/null https://localhost:3443/health
+          for h in Strict-Transport-Security Content-Security-Policy X-Content-Type-Options; do
+            grep -qi "^$h:" headers.txt || { echo "::error::frontend sends no $h"; cat headers.txt; exit 1; }
+          done
+          echo "OK    frontend: probe, redirect, /health via the gateway, security headers"
+          code=$(curl -s --cacert "$ca" -o /dev/null -w '%{http_code} %{redirect_url}' https://localhost:3443/jupyter/hub/home)
+          case "$code" in
+            "302 https://localhost:3443/login") echo "OK    notebook-sso: unauthenticated -> /login via the gateway" ;;
+            *) echo "::error::/jupyter/ through the edge answered '$code', expected a redirect to /login"; exit 1 ;;
+          esac
+          curl -fsS --cacert "$ca" --cert "$dev/smoke-device.chain.crt" --key "$dev/smoke-device.key" \
+            https://localhost:8443/health
+          if curl -fs --cacert "$ca" -o /dev/null https://localhost:8443/health; then
+            echo "::error::the ingestion edge served a client with no certificate"; exit 1
+          fi
+          echo "OK    ingestion-edge: verified device reaches ingestion, anonymous client refused"
 
       # ADR-0018 dec 4: a kernel is untrusted code on a dedicated network that holds only the hub, the
       # trusted mediators and the object store. Both halves are asserted, because each fails silently:

@@ -116,3 +116,22 @@ def test_helm_filter_covers_what_the_chart_reads_through_symlinks():
         missed += [f"{link.relative_to(ROOT)} -> {_rel(f)}"
                    for f in files if not covered(_rel(f), globs)]
     assert not missed, "helm.yml filter misses files the chart renders:\n" + "\n".join(missed)
+
+
+# --- compose-smoke.yml ----------------------------------------------------------------------------
+
+
+def test_compose_smoke_starts_every_edge():
+    # The edges proxy by name to services behind them; a wrong upstream starts happily and fails
+    # every request, so the smoke must start (and probe) each one.
+    services = load_yaml("docker-compose.yml")["services"]
+    edges = {
+        name for name, svc in services.items()
+        if str(svc.get("image", "")).startswith("nginx:")
+        or svc.get("build", {}).get("context") == "./services/frontend"
+    }
+    assert {"frontend", "notebook-sso", "ingestion-edge"} <= edges, edges
+    steps = load_yaml(".github/workflows/compose-smoke.yml")["jobs"]["compose-smoke"]["steps"]
+    up = next(s["run"] for s in steps if "docker compose" in s.get("run", "") and " up " in s["run"])
+    missing = sorted(e for e in edges if e not in up.split())
+    assert not missing, f"compose-smoke never starts the edge(s) {missing}"
