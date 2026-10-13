@@ -32,6 +32,34 @@ The resolved UUID is validated and applied with `SET LOCAL search_path TO tenant
 public` **inside a transaction**, so the tenant path never lingers on a pooled connection.
 See **[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**.
 
+### One tenant-naming module
+
+Every name derived from a tenant lives in one place, `libs/industryflow_contracts`
+(`industryflow_contracts.tenancy`), which every service image installs and the Spark jobs ship to
+their executors with `--py-files`. Each function parses the `company_id` as a UUID first and builds
+from its canonical form only:
+
+| Name | Function | Form |
+|---|---|---|
+| Schema | `schema_name` | `tenant_<uuid with underscores>` |
+| Read-only role (ADR-0011) | `reader_role_name` | `tenant_reader_<uuid with underscores>` |
+| SQL-proxy login (ADR-0015) | `sql_login_name` | `tenant_sqlproxy_<uuid with underscores>` |
+| MLflow names (ADR-0019) | `mlflow_name_prefix` | `tenant_<uuid with underscores>.` |
+| MLflow artifacts, admitted uploads | `mlflow_artifact_prefix` | `tenant_<uuid with underscores>/` |
+| Cold archive (ADR-0025) | `cold_object_prefix` | `tenant_<uuid>` (canonical hyphens) |
+
+The two spellings are deliberate. The identifier form needs underscores because a hyphen is not
+legal in an unquoted SQL identifier, and the tracking plane reuses it so a tenant has one name
+across the database and the model registry. The cold archive's prefix is a storage path, and every
+archive already exported sits under the hyphenated form. Background jobs that enumerate tenants
+read the catalog with `SCHEMA_LIKE` and accept only names `company_id_from_schema` maps back.
+
+No service builds a tenant name itself: `tests/config_guards` scans every service's source and fails
+on one, and checks that every image whose code imports the package carries it. Images get it from
+the named build context `contracts` (`additional_contexts` in compose, `build-contexts` in CI). The
+database cannot import Python, so its own SQL derivations (tenant creation, provisioning, the role
+scripts) are held by the same guards to the shapes that agree with the package.
+
 ## Tables (per tenant schema)
 
 - `equipment`, `sensors` — the asset model (generic; domain entities live in
@@ -95,7 +123,7 @@ Isolation carries into the object store under the *existing* policy, not a new o
 
 - **Write side (ADR-0003).** Tenants come from the verified `public.companies` registry; each
   tenant's Parquet lives under its own `tenant_<uuid>/…` prefix via the single canonical
-  `company_id → prefix` mapping (`services/cold_export/naming.py`) — never a shared path keyed by
+  `company_id → prefix` mapping (`cold_object_prefix`, which the read-side broker uses too) — never a shared path keyed by
   a column. The schema it reads and drops is derived from the `company_id` by the canonical
   mapping; a registry `schema_name` that disagrees is refused, not used. The exporter connects as the least-privilege `cold_export_user` (SELECT on raw only)
   and drops chunks through a `SECURITY DEFINER` function, so it never owns the table. Its

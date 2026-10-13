@@ -26,11 +26,14 @@ Two kinds of check, both here so the two jobs apply one definition:
   * referential — whether the tenant schema, the sensor and the equipment exist; decided on the
     driver from one lookup per tenant per batch (`classify_references`, pure).
 
-The pure parts import nothing beyond the standard library; the Spark helpers import pyspark lazily.
+The pure parts import nothing beyond the standard library and the platform's shared contracts
+package (itself standard-library only); the Spark helpers import pyspark lazily.
 """
 from __future__ import annotations
 
 import uuid
+
+from industryflow_contracts import tenancy
 
 # How far ahead of the processing clock an event timestamp may be. Ingestion rejects anything further
 # ahead at the edge (services/ingestion_service/schemas.py carries the same bound; a test holds them
@@ -59,16 +62,11 @@ UUID_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 SOURCE_COLUMNS = ("json_string", "kafka_topic", "kafka_partition", "kafka_offset")
 
 
-def company_id_to_schema(company_id) -> str:
-    """
-    Convert a company_id UUID to its tenant schema name — the one definition both Spark jobs use.
-
-    company_id arrives in untrusted Kafka payloads, so it is validated as a UUID before the
-    schema/table name is built; a non-UUID raises ValueError instead of producing an arbitrary
-    target (ADR-0003 dec 4, 5).
-    """
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}"
+# The tenant schema of a company_id: the platform's one canonical mapping (ADR-0003 dec 5, 7), under
+# the name both Spark jobs import it by. company_id arrives in untrusted Kafka payloads, so it is
+# validated as a UUID before the schema/table name is built; a non-UUID raises ValueError instead of
+# producing an arbitrary target (dec 4).
+company_id_to_schema = tenancy.schema_name
 
 
 def canonical_uuid(value) -> str:

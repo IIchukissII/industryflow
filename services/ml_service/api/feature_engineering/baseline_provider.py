@@ -25,37 +25,18 @@ import uuid
 from collections import OrderedDict
 from typing import Optional
 
+from industryflow_contracts import tenancy, windows
+
 logger = logging.getLogger(__name__)
 
-# Aggregate granularities the Spark job materializes (ADR-0006). Allow-listed because the
-# granularity selects a TABLE NAME, which cannot be a bound query parameter — this is the
-# injection guard for that interpolation.
-_AGG_TABLES = {
-    "1min": "sensor_aggregations_1min",
-    "5min": "sensor_aggregations_5min",
-    "1hour": "sensor_aggregations_1hour",
-}
-DEFAULT_GRANULARITY = "1min"
-
-# Window width of each granularity. This is the binding between the serving read and the offline
-# training re-derivation (ADR-0023 rev 2 dec 9): training reproduces the closed window of exactly
-# this width, so the two sides cannot compute different quantities. Keys must match _AGG_TABLES.
-GRANULARITY_SECONDS = {
-    "1min": 60,
-    "5min": 300,
-    "1hour": 3600,
-}
-
-# Allowed lateness of each granularity: the Spark job writes a window's row only once its watermark
-# (latest event time minus this) passes the window's end, so the newest row this provider reads at
-# time t is window floor((t - lateness) / width) - 1, not the window just before t's. Training
-# reproduces that same window (offline_baseline.latest_written_window); a test holds this, the
-# offline map and the Spark job's (services/spark_jobs/aggregation_windows.py) equal.
-WATERMARK_SECONDS = {
-    "1min": 120,
-    "5min": 600,
-    "1hour": 900,
-}
+# Aggregate granularities the Spark job materializes, and their tables, from the one window contract
+# the job and the offline training re-derivation also use (ADR-0006 dec 7, ADR-0023 rev 2 dec 9): the
+# newest row this provider reads at time t is window floor((t - lateness) / width) - 1, and training
+# reproduces that same window from the same numbers. Allow-listed because the granularity selects a
+# TABLE NAME, which cannot be a bound query parameter — this is the injection guard for that
+# interpolation.
+_AGG_TABLES = {granularity: w.table for granularity, w in windows.WINDOWS.items()}
+DEFAULT_GRANULARITY = windows.DEFAULT_GRANULARITY
 
 
 # Entries the baseline cache may hold. A live entry is one (tenant, equipment, sensor, window), so
@@ -63,15 +44,10 @@ WATERMARK_SECONDS = {
 DEFAULT_CACHE_MAX_ENTRIES = 4096
 
 
-def _schema_for(company_id: str) -> str:
-    """Tenant schema name for a company_id, validated as a UUID before interpolation (ADR-0003).
-
-    Mirrors repository.normalize_company_id_to_schema; kept local so the provider has no import
-    coupling to the repository layer. A non-UUID raises ValueError rather than yielding an
-    arbitrary schema name.
-    """
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}"
+# Tenant schema name for a company_id: the one canonical mapping (ADR-0003 dec 5, 7), taken from the
+# shared module rather than the repository layer so the provider has no import coupling to it. A
+# non-UUID raises ValueError rather than yielding an arbitrary schema name.
+_schema_for = tenancy.schema_name
 
 
 class AggregateBaselineProvider:

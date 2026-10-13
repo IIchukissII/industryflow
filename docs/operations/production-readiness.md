@@ -28,7 +28,8 @@ engineering, the Helm path, backups, and HA/scaling.
 
 ADR-consistency drift (tracked separately): see the per-ADR audit. Top items — reset/verification
 token logging (ADR-0004, fixed), `KAFKA_GROUP_ID` compose↔helm fork (ADR-0000, fixed), the
-`company_id→schema` mapping still re-implemented in several services instead of the one canonical function (ADR-0003 dec 5/7, open; consolidation is planned code work).
+`company_id→schema` mapping re-implemented in several services (ADR-0003 dec 5/7, fixed: every service
+now takes its tenant names from `libs/industryflow_contracts`, and a repository guard fails on an inline copy).
 
 ## Strengths (keep)
 

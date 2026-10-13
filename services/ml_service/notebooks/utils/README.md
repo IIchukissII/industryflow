@@ -10,7 +10,14 @@ Helper utilities for data scientists working with IndustryFlow ML Service in Jup
 
 ## Installation
 
-These utilities are automatically available in the Jupyter Lab environment. No installation required!
+These utilities are not baked into a notebook image. Put this directory on the kernel's path and
+install the platform's shared contracts package beside it: `offline_baseline` reads the aggregation
+window widths and lateness from it, the same definition the Spark job and the serving provider use
+(ADR-0006 dec 7).
+
+```bash
+pip install <repo>/libs/industryflow_contracts
+```
 
 ## Usage
 

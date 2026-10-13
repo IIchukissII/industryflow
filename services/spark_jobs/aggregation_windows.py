@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-The aggregation windows the Spark job materializes, and when each window's row appears.
+The aggregation windows the Spark job materializes, in the form Spark's API takes them.
 
 This is the producer's half of the train/serve binding (ADR-0023 rev 2 dec 9). The serving baseline
 reads the most recent row of ``sensor_aggregations_<granularity>``; with append-mode emission
@@ -14,42 +14,36 @@ window just before ``t``'s own, but
     closed(t) = floor((t - watermark) / width) - 1
 
 and training must describe a row by that same window. Both numbers that decide it, the width and the
-allowed lateness, are fixed here and nowhere else in this job; the offline re-derivation
-(services/ml_service/notebooks/utils/offline_baseline.py) and the serving provider carry the same
-table, and a test asserts the three agree. Changing a value is a feature-contract change, made here
-where review sees it — not an environment override.
+allowed lateness, are the window contract (``industryflow_contracts.windows``, ADR-0006 dec 7), which
+the serving provider and the offline re-derivation read too. This module only adapts it to the
+strings ``window()`` and ``withWatermark()`` take; it holds no numbers of its own. Changing a value is
+a feature-contract change, made in the contract where review sees it — not an environment override.
 
-Kept dependency-free so it is importable without pyspark.
+Kept free of pyspark so it is importable without it.
 """
 from __future__ import annotations
 
-# granularity -> (table, window width in seconds, allowed lateness (watermark delay) in seconds)
+from industryflow_contracts import windows
+
+# granularity -> (table, window width in seconds, allowed lateness (watermark delay) in seconds),
+# a view of the contract in the shape this job iterates.
 AGGREGATION_WINDOWS = {
-    "1min": ("sensor_aggregations_1min", 60, 120),
-    "5min": ("sensor_aggregations_5min", 300, 600),
-    "1hour": ("sensor_aggregations_1hour", 3600, 900),
+    granularity: (w.table, w.width_seconds, w.lateness_seconds)
+    for granularity, w in windows.WINDOWS.items()
 }
+
+latest_emitted_window = windows.latest_emitted_window
 
 
 def window_duration(granularity: str) -> str:
     """The Spark ``window()`` duration of a granularity."""
-    return f"{AGGREGATION_WINDOWS[granularity][1]} seconds"
+    return f"{windows.window(granularity).width_seconds} seconds"
 
 
 def watermark_delay(granularity: str) -> str:
     """The Spark ``withWatermark()`` delay of a granularity."""
-    return f"{AGGREGATION_WINDOWS[granularity][2]} seconds"
+    return f"{windows.window(granularity).lateness_seconds} seconds"
 
 
 def table_name(granularity: str) -> str:
-    return AGGREGATION_WINDOWS[granularity][0]
-
-
-def latest_emitted_window(epoch_seconds: int, granularity: str) -> int:
-    """Index of the newest window whose row has been written by event time ``epoch_seconds``.
-
-    A window ``m`` covers ``[m * width, (m + 1) * width)`` and is emitted once the watermark
-    (``epoch_seconds - lateness``) reaches its end.
-    """
-    _, width, lateness = AGGREGATION_WINDOWS[granularity]
-    return (epoch_seconds - lateness) // width - 1
+    return windows.window(granularity).table

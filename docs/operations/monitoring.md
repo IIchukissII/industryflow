@@ -667,7 +667,7 @@ ls -la infrastructure/grafana/provisioning/*.json
 
 # Fix permissions if needed
 chmod 644 infrastructure/grafana/provisioning/*.json
-docker-compose restart grafana
+docker compose restart grafana
 ```
 
 **Datasource connection errors**:
@@ -757,7 +757,7 @@ docker ps --filter "name=prometheus\|grafana\|loki\|promtail" --format "table {{
 **Restart monitoring stack**:
 
 ```bash
-docker-compose restart prometheus grafana loki promtail
+docker compose restart prometheus grafana loki promtail
 ```
 
 **View resource usage**:
@@ -848,7 +848,7 @@ docker run -v prometheus-data:/data -v $(pwd)/backup:/backup \
   busybox tar xzf /backup/prometheus-backup.tar.gz -C /
 
 # Restart services
-docker-compose restart prometheus grafana
+docker compose restart prometheus grafana
 ```
 
 ---

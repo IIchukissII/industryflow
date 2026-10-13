@@ -20,9 +20,9 @@ The re-derivation, per row at time ``t``:
 ``closed(t)`` is the newest window whose row the Spark job has written by time ``t``. It emits a
 window once (append mode, ADR-0006 dec 2), when the watermark — the latest event time minus ``L`` —
 passes the window's end; so for 1-minute windows with 2 minutes of lateness, serving reads
-``window(t) - 3``, not ``window(t) - 1``. W and L are the producer's
-(services/spark_jobs/aggregation_windows.py); a test holds this module, the serving provider and the
-Spark job to one table.
+``window(t) - 3``, not ``window(t) - 1``. W and L come from the one window contract
+(``industryflow_contracts.windows``, ADR-0006 dec 7) that the Spark job and the serving provider read
+too, so the three cannot hold different numbers.
 
 It is therefore **causal**: a row is described by samples that strictly precede its own window,
 never by its own window (still open at serve time) and never by the future. A mean over a whole
@@ -36,25 +36,13 @@ transform degrades to when no aggregate row exists, so the two agree on cold sta
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
+from industryflow_contracts import windows
 
-# Window width per granularity. Must equal the serving side's GRANULARITY_SECONDS
-# (services/ml_service/api/feature_engineering/baseline_provider.py) — a test asserts the two maps
-# are identical, so a granularity added on one side and not the other fails CI rather than silently
-# reintroducing skew.
-GRANULARITY_SECONDS: Dict[str, int] = {
-    "1min": 60,
-    "5min": 300,
-    "1hour": 3600,
-}
-# Allowed lateness (watermark delay) per granularity: how long after a window ends its row is
-# written. Must equal the Spark job's (services/spark_jobs/aggregation_windows.py) and the serving
-# side's WATERMARK_SECONDS; a test asserts all three agree.
-WATERMARK_SECONDS: Dict[str, int] = {
-    "1min": 120,
-    "5min": 600,
-    "1hour": 900,
-}
-DEFAULT_GRANULARITY = "1min"
+# Window width and allowed lateness (watermark delay) per granularity, read from the window contract
+# (ADR-0006 dec 7): views of it for callers that index by granularity, never a second table.
+GRANULARITY_SECONDS: Dict[str, int] = {g: w.width_seconds for g, w in windows.WINDOWS.items()}
+WATERMARK_SECONDS: Dict[str, int] = {g: w.lateness_seconds for g, w in windows.WINDOWS.items()}
+DEFAULT_GRANULARITY = windows.DEFAULT_GRANULARITY
 
 # stat_type -> (feature-name suffix, aggregate to read)
 _STATS = {
@@ -78,8 +66,7 @@ def window_index(timestamps: pd.Series, granularity: str = DEFAULT_GRANULARITY) 
 
 def latest_written_window(timestamps: pd.Series, granularity: str = DEFAULT_GRANULARITY) -> pd.Series:
     """Index of the newest window whose aggregate row exists at each timestamp: ``closed(t)``."""
-    width, lateness = GRANULARITY_SECONDS[granularity], WATERMARK_SECONDS[granularity]
-    return (_epoch_seconds(timestamps) - lateness) // width - 1
+    return windows.latest_emitted_window(_epoch_seconds(timestamps), granularity)
 
 
 def add_window_features(

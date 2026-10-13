@@ -41,6 +41,7 @@ jobs:
               - 'services/notebook_sql_proxy/**'
               - 'services/api_gateway/dependencies.py'
               - 'services/alert_service/worker/repository.py'
+              - 'libs/industryflow_contracts/**'
               - 'docker-compose.yml'
               - 'docker-compose.ci-notebooks.yml'
               - '.env.example'
@@ -91,7 +92,7 @@ jobs:
       - name: Install test dependencies
         run: |
           pip install -r infrastructure/timescaledb/tests/requirements.txt
-          pip install -r services/notebook_sql_proxy/tests/requirements-integration.txt
+          pip install ./libs/industryflow_contracts -r services/notebook_sql_proxy/tests/requirements-integration.txt
 
       - name: Run DB reader-role isolation proof (GRANT boundary)
         env:

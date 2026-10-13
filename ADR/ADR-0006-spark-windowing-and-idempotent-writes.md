@@ -3,16 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0006: Spark windowing and idempotent writes — bounded state, write-once aggregates, fail-fast batches (rev 2)
+# ADR-0006: Spark windowing and idempotent writes — bounded state, write-once aggregates, fail-fast batches (rev 3)
 
 - **ID:** ADR-0006
 - **Status:** Accepted
-- **Date:** 2026-06-26 (rev 1: 2026-06-27, recorded 2026-10-13; rev 2: 2026-10-13)
+- **Date:** 2026-06-26 (rev 1: 2026-06-27, recorded 2026-10-13; rev 2: 2026-10-13; rev 3: 2026-10-13)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0005 (Kafka delivery semantics)
 - **Refined by:** ADR-0029 (checkpoint cutover across a Spark major)
-- **Supersedes:** ADR-0006 rev 0 (2026-06-26 — decision 5 put each checkpoint on a persistent volume and left the storage medium deferred; rev 1 requires storage visible to every node that runs the query, which for a multi-node pool is the object store, and closes the deferral); rev 1 (2026-06-27 — wrote raw measurements and aggregates with the same replace-on-conflict rule, failed the batch on any reading that could not be written, and left window width and lateness to deployment configuration; rev 2 restates decisions 3 and 4 and adds decision 7)
+- **Supersedes:** ADR-0006 rev 0 (2026-06-26 — decision 5 put each checkpoint on a persistent volume and left the storage medium deferred; rev 1 requires storage visible to every node that runs the query, which for a multi-node pool is the object store, and closes the deferral); rev 1 (2026-06-27 — wrote raw measurements and aggregates with the same replace-on-conflict rule, failed the batch on any reading that could not be written, and left window width and lateness to deployment configuration; rev 2 restates decisions 3 and 4 and adds decision 7); rev 2 (2026-10-13 — let each component that needs the window values state its own copy, held equal by a test; rev 3 restates decision 7 so the values have one shared definition and no copies)
 
 ## Context and problem
 
@@ -28,6 +28,8 @@ These are facets of one missing decision: how windowed aggregation bounds its st
 **Revision 1 (2026-06-27; recorded 2026-10-13).** Rev 0's decision 5 placed each streaming query's checkpoint on a persistent volume and deferred the medium. Within a day the deferral was decided by the work that scaled the worker pool: a stateful query's state store is written by the executors and read by the driver, so once executors run on more than one node, a node-local volume — however durable — is the wrong place, and the checkpoint has to sit on one store every node can see. The platform already ran an object store, so the checkpoint moved there. That change was made by editing decision 5 in place after acceptance, with the deferred item left open beside it — the silent edit ADR-0000 dec 5 forbids. This revision records it honestly: decision 5 is restated, the deferred item is closed, and the history is named here rather than reconstructed from version control.
 
 **Revision 2 (2026-10-13).** Review found three places where the write discipline was right in spirit and wrong in a case it had not separated out. *Idempotency* (decision 3) applied replace-on-conflict to raw measurements as well as aggregates. For an aggregate that is correct — a window's value is a computation, and the latest computation is the one to keep. For a raw reading it is not: a reading is a fact recorded once, a redelivery carries the same fact, and replacing on conflict lets any later message with the same key rewrite history that alerts have already fired on and the cold layer may already have archived (ADR-0025). *Fail-fast* (decision 4) failed the batch on every write error, including a reading that can never be written — malformed, naming an unknown tenant or device, or timestamped in the future. Retrying such a batch fails it again, forever, and stalls every tenant behind one bad message; fail-fast was meant for failures a retry can fix. A reading stamped far in the future did worse than fail: it advanced the watermark and closed every open window early, so real readings were then dropped as late. *Window width and allowed lateness* were deferred to deployment configuration, but a model's features are computed over those windows (ADR-0023 dec 9), so changing either silently changes what every served feature means. Rev 2 restates decisions 3 and 4 and adds decision 7.
+
+**Revision 3 (2026-10-13).** Rev 2's decision 7 fixed the window values with the code, but where more than one component needed them it let each state its own copy and relied on a test to hold the copies equal. Three components need them — the job that writes the windows, the service that serves features from them, and the offline re-derivation that trains on them — so the contract existed three times, and the one thing that kept it whole was a test that had to know every copy. A copy the test did not know about could drift, and the test would stay green. The deployables now share one library that every one of them is built with (ADR-0003 dec 7 records the same answer for tenant naming), so there is no longer a reason to copy the values at all. Rev 3 restates decision 7: one shared definition, and no copies.
 
 ## Decision drivers
 
@@ -59,6 +61,8 @@ These are facets of one missing decision: how windowed aggregation bounds its st
 
 7. **Window width and allowed lateness are a feature contract, not deployment settings *(rev 2)*.** Each aggregation granularity has one width and one allowed lateness, and they are fixed with the code that defines the granularity rather than set per deployment. Features served to models and the data they were trained on are computed over these windows (ADR-0023 dec 9), so a deployment that changed either would silently change the meaning of every feature its models were trained against. Where more than one component needs the values, each side states them and a test holds the copies equal; changing them is a reviewed change to the contract, never a configuration edit.
 
+   > **rev 3 (2026-10-13): one shared definition, no copies.** The width and allowed lateness of each granularity are defined once, in the shared library every deployable is built with, and every component that needs them — the job that writes the windows, the service that serves features from them, the offline re-derivation that trains on them — reads them from there. No component restates them, and copies held equal by a test are no longer the mechanism: a check over the codebase refuses any restatement instead. Changing a value is still a reviewed change to the contract, never a configuration edit.
+
 ## Alternatives considered
 
 **A. Keep `update` mode and deduplicate aggregate rows downstream.** *Rejected:* it pushes the hundreds-of-partials-per-window problem onto every reader and onto storage, and still leaves state unbounded without a watermark. Writing each window once at the source is cheaper and correct; cleaning up after a known-bad write pattern is not.
@@ -77,6 +81,8 @@ These are facets of one missing decision: how windowed aggregation bounds its st
 
 **H. Keep failing the batch on every write error, and let an operator remove the bad message *(rev 2)*.** *Rejected:* one poison reading then halts ingestion for every tenant until a person intervenes, and at-least-once delivery guarantees it will be redelivered after every restart. Dead-lettering preserves it for inspection without letting it hold the pipeline.
 
+**I. Let each component state the window values and hold the copies equal with a test *(rev 3)*.** *Rejected:* it was rev 2's mechanism. A test of equality is only as complete as its list of copies, and a copy added outside that list drifts silently; the values also had to be changed in every copy at once. A single definition that every component reads leaves nothing to keep equal.
+
 ## Consequences
 
 ### Positive
@@ -86,6 +92,7 @@ These are facets of one missing decision: how windowed aggregation bounds its st
 - The Spark sinks are idempotent, which is what makes ADR-0005's at-least-once guarantee safe end-to-end: retries and redeliveries no longer duplicate data.
 - Failures are visible and recoverable: a write error retries instead of vanishing, a dead query takes the process down to be restarted, and a restart resumes from durable checkpoints.
 - **rev 2:** a reading cannot be rewritten once landed, one bad reading cannot stall the pipeline, and a future timestamp cannot close windows early.
+- **rev 3:** the window values exist once, so the writer, the server and the trainer cannot disagree about them.
 
 ### Negative
 
@@ -93,6 +100,7 @@ These are facets of one missing decision: how windowed aggregation bounds its st
 - Idempotent upserts require a unique constraint on the aggregation tables and are somewhat more expensive per write than blind appends.
 - Write-once-on-close raises end-to-end latency for an aggregate: a window's row appears when the window closes (plus watermark lag), not continuously as it fills.
 - **rev 2:** a genuine correction to a raw reading cannot arrive through the stream; it is an explicit operation outside it. Rejected readings accumulate in the dead-letter destination and need watching (ADR-0005). Changing a window's width or lateness is a code change that invalidates models trained on the old windows.
+- **rev 3:** every deployable that needs the window values must be built with the shared library; one that cannot carry it cannot use the values.
 - Durable checkpoints need provisioned, durable storage — the object store for a multi-node pool (rev 1); a corrupted or lost checkpoint becomes its own recovery concern, and the object store becomes a dependency of the streaming path.
 
 ## Deferred decisions

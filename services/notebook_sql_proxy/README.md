@@ -73,7 +73,7 @@ are in `infrastructure/timescaledb/init-scripts/13-notebook-sql-proxy-role.sh`.
 ## Develop
 
 ```bash
-pip install -r requirements-dev.txt
+pip install ../../libs/industryflow_contracts -r requirements-dev.txt
 pytest tests/ --ignore=tests/test_sql_proxy_integration.py
 ```
 
@@ -89,7 +89,7 @@ the proxy** (the handle in place of the password).
 docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml \
   --profile notebooks up -d --build timescaledb redis notebook-sql-proxy
 
-pip install -r requirements-dev.txt -r tests/requirements-integration.txt
+pip install ../../libs/industryflow_contracts -r requirements-dev.txt -r tests/requirements-integration.txt
 PGHOST=localhost PGPASSWORD=<db-password> \
   PROXY_HOST=localhost PROXY_PORT=6432 \
   SQL_PROXY_REDIS_URL=redis://localhost:6379/0 \

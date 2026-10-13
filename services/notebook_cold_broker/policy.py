@@ -16,18 +16,19 @@ decisions, no I/O:
 The live boto3 pre-signing + listing and the FastAPI wiring live in ``broker.py``; this layer is
 fully unit-testable on dicts and strings.
 
-CANONICAL-PREFIX CONTRACT: the prefix here MUST equal the exporter's write-side mapping,
-``services/cold_export/naming.company_id_to_prefix`` (``tenant_<canonical-uuid>`` with hyphens),
-plus a trailing ``/``. The exporter writes `tenant_0b2f503a-6e59-.../year=…`; the broker must read
-the same bytes. This is the object-store analogue of ADR-0003's single ``company_id → schema``
-mapping — note it is HYPHENATED, unlike the underscore schema/role names in the SQL/tracking planes.
+CANONICAL-PREFIX CONTRACT: the prefix here is the exporter's write-side prefix plus a trailing ``/``.
+Both take it from the one tenant-naming module, ``industryflow_contracts.tenancy.cold_object_prefix``
+(``tenant_<canonical-uuid>`` with hyphens): the exporter writes `tenant_0b2f503a-6e59-.../year=…`,
+and the broker reads the same bytes. It is HYPHENATED, unlike the underscore schema/role names in the
+SQL/tracking planes; the tenancy module documents why the two spellings are distinct.
 """
 from __future__ import annotations
 
 import json
-import uuid
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
+
+from industryflow_contracts import tenancy
 
 AUDIENCE_COLD = "cold"  # the broker's copy of the audience (ADR-0025 / ADR-0015 dec 3)
 _KEY_PREFIX = "nbcap:"
@@ -71,7 +72,7 @@ async def resolve_cold_binding(
     if not company_id:
         return None
     try:
-        canonical = str(uuid.UUID(str(company_id)))
+        canonical = tenancy.canonical_company_id(company_id)
     except ValueError:
         return None
     if await aget(f"{_SUSPENDED_PREFIX}{canonical}") is not None:
@@ -82,11 +83,10 @@ async def resolve_cold_binding(
 def tenant_prefix(company_id: str) -> str:
     """The tenant's cold-store key prefix, e.g. ``tenant_<uuid>/`` (UUID-validated).
 
-    Must match the exporter's write path (services/cold_export/naming.company_id_to_prefix) — a
-    hyphenated canonical UUID — or the broker would read an empty prefix.
+    The exporter's write prefix (the shared ``cold_object_prefix``) plus the separator, so a
+    sibling ``tenant_<other>`` can never pass a prefix test against it.
     """
-    canonical = str(uuid.UUID(str(company_id)))
-    return f"tenant_{canonical}/"
+    return tenancy.cold_object_prefix(company_id) + "/"
 
 
 def owns_key(company_id: str, key: str) -> bool:

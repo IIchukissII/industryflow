@@ -53,6 +53,6 @@ are signed for the public edge, so the test container must trust the edge's CA
 ## Develop
 
 ```bash
-pip install -r requirements-dev.txt
+pip install ../../libs/industryflow_contracts -r requirements-dev.txt
 pytest tests/
 ```

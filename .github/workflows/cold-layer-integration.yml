@@ -34,6 +34,7 @@ jobs:
             relevant:
               - 'services/cold_export/**'
               - 'services/notebook_cold_broker/**'
+              - 'libs/industryflow_contracts/**'
               - 'infrastructure/timescaledb/**'
               - 'infrastructure/minio/**'
               - 'docker-compose.yml'
@@ -80,7 +81,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install cold-export integration deps
-        run: pip install -r services/cold_export/tests/requirements-integration.txt
+        run: pip install ./libs/industryflow_contracts -r services/cold_export/tests/requirements-integration.txt
 
       # WRITE-PATH proof, host-side: the exporter's real adapters reach TimescaleDB (localhost:5432,
       # sslmode=require — pg_hba is hostssl) and MinIO (localhost:9000). IF_REQUIRE_LIVE_STACK=1
@@ -116,7 +117,7 @@ jobs:
             -e COLD_STORE_BUCKET=industryflow-cold \
             -e COLD_STORE_ACCESS_KEY="$AK" -e COLD_STORE_SECRET_KEY="$SK" \
             python:3.14-slim bash -c "
-              pip install -q -r services/notebook_cold_broker/tests/requirements-integration.txt &&
+              pip install -q ./libs/industryflow_contracts -r services/notebook_cold_broker/tests/requirements-integration.txt &&
               pytest services/notebook_cold_broker/tests/test_cold_broker_integration.py -m integration -v"
 
       - name: Dump service logs on failure

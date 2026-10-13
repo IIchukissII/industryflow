@@ -19,10 +19,10 @@ verifier and minter of capability handles consults (capability_auth.SUSPENDED_PR
 contract), so no handle for a suspended company resolves or is minted, at once and everywhere.
 """
 import time
-import uuid
 from collections import OrderedDict
 from typing import Optional
 
+from industryflow_contracts import tenancy
 from sqlalchemy import text
 
 from capability_auth import suspended_key
@@ -53,7 +53,7 @@ async def _read_is_active(company_id: str) -> bool:
 
 def _canonical(company_id) -> Optional[str]:
     try:
-        return str(uuid.UUID(str(company_id)))
+        return tenancy.canonical_company_id(company_id)
     except (ValueError, TypeError):
         return None
 

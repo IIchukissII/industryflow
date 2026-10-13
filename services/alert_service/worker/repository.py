@@ -14,20 +14,15 @@ from typing import List, Dict, Optional, Tuple
 import uuid as uuid_module
 import logging
 
+from industryflow_contracts import tenancy
+
 logger = logging.getLogger(__name__)
 
 
-def normalize_company_id_to_schema(company_id: str) -> str:
-    """
-    Convert a company_id to its tenant schema name.
-
-    Validates company_id as a UUID first so the result is safe to interpolate into a
-    SET search_path statement; a non-UUID raises ValueError instead of reaching SQL
-    (defends against injection — see ADR-0003). This path is reachable from untrusted
-    Kafka payloads, so the validation is load-bearing.
-    """
-    canonical = str(uuid_module.UUID(str(company_id)))
-    return f"tenant_{canonical.replace('-', '_')}"
+# The one company_id -> schema mapping (ADR-0003 dec 5, 7), under the name this module's callers use.
+# It validates company_id as a UUID first, so a non-UUID raises ValueError instead of reaching SQL.
+# This path is reachable from untrusted Kafka payloads, so the validation is load-bearing.
+normalize_company_id_to_schema = tenancy.schema_name
 
 
 # Dedup scopes for save_alert_once ($n are the insert's own parameters). An alert's scope is
@@ -183,21 +178,26 @@ class AlertRepository:
         return inserted, row['prior_at']
 
     async def get_tenant_schemas(self) -> List[str]:
-        """Get all active tenant schemas"""
+        """Get all tenant schemas: the catalog's candidates that are exactly a tenant's schema name."""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT schema_name 
-                FROM information_schema.schemata 
-                WHERE schema_name LIKE 'tenant_%'
+                SELECT schema_name
+                FROM information_schema.schemata
+                WHERE schema_name LIKE $1
                 ORDER BY schema_name
-            """)
-            return [row['schema_name'] for row in rows]
-    
+            """, tenancy.SCHEMA_LIKE)
+        schemas = []
+        for row in rows:
+            try:
+                tenancy.company_id_from_schema(row['schema_name'])
+            except ValueError:
+                continue
+            schemas.append(row['schema_name'])
+        return schemas
+
     async def get_company_id_from_schema(self, schema_name: str) -> str:
-        """Convert schema name back to company_id (UUID format)"""
-        # tenant_550e8400_e29b_41d4_a716_446655440000 -> 550e8400-e29b-41d4-a716-446655440000
-        uuid_part = schema_name.replace('tenant_', '').replace('_', '-')
-        return uuid_part
+        """The company_id a tenant schema was built from (the inverse of the canonical mapping)."""
+        return tenancy.company_id_from_schema(schema_name)
 
     async def get_sensor_name(self, sensor_id: str, company_id: str) -> Optional[str]:
         """Get sensor name from sensor UUID"""
