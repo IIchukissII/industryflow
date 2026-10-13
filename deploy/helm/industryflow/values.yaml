@@ -89,7 +89,7 @@ tls:
     # timescale/timescaledb (Debian) runs postgres as uid 999.
     postgresUser: 999
     # BusyBox image for the cert-init initContainer (copy + chmod 600 + chown the key).
-    initImage: busybox:1.36
+    initImage: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
     # Self-provision the cert + CA with cert-manager: a SelfSigned issuer bootstraps a CA, a CA
     # issuer then signs the DB server cert into secretName. Defaults OFF (needs the cert-manager
     # CRDs, like the observability CRs); enable where cert-manager is installed, otherwise set
@@ -414,19 +414,20 @@ observability:
     enabled: true
     label: grafana_dashboard
   # Data-store exporters — app-specific (they target our DB/Redis/Kafka). node-exporter and
-  # kube-state-metrics come from the cluster stack, not here.
+  # kube-state-metrics come from the cluster stack, not here. Pinned by tag + digest, identical to
+  # the compose stack's exporters (tests/config_guards checks the two agree).
   exporters:
     postgres:
       enabled: true
-      image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
+      image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
       port: 9187
     redis:
       enabled: true
-      image: oliver006/redis_exporter:v1.67.0
+      image: oliver006/redis_exporter:v1.93.0@sha256:6ca518a72f30f7f576ef92963de1b91d3c3f5fd3aeac949f878bfda183587820
       port: 9121
     kafka:
       enabled: true
-      image: danielqsj/kafka-exporter:v1.8.0
+      image: danielqsj/kafka-exporter:v1.10.0@sha256:346a53c2489a3530790d01f7b96632496d0d58926662f4c35bb65f569db2ab42
       port: 9308
 
 # ---------------------------------------------------------------------------
