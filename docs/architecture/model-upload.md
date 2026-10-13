@@ -133,6 +133,12 @@ Decision 3 named a browser client; decision 10 (rev 2) made it reachable. The Mo
 surfaces each gate's verdict where it happens. It stops at registration: deploying (the load-and-score
 gate, dec 7) is a separate control on the model's drawer, because the two gates have two remedies.
 
+Registration also carries the model's **description** (required by the wizard: it is what the operator
+reads about a model nobody watched being made) and the **feature config** that computes its inputs,
+picked from the tenant's own. A model registered without a feature config is stored but cannot be
+scored, and nothing attaches one to a registered model afterwards; the wizard says so, and the remedy
+is to create a feature config and register a new version that uses it.
+
 What makes it reachable is one setting and one routing rule, and it holds the decision's invariants:
 
 - **`PUBLIC_BASE_URL`** is the platform's public edge origin. Set it and two things follow: the gateway
