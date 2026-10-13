@@ -58,3 +58,12 @@ def test_the_ml_route_that_mints_consults_the_marker():
     # upload_capability.py holds the rule; the route that writes the handle is where it is applied.
     route = open(os.path.join(SERVICES, "ml_service", "api", "routers", "models.py"), encoding="utf-8").read()
     assert "upload_capability.suspended_key(" in route
+
+
+def test_the_upload_index_is_the_one_the_gateway_revokes():
+    # The minter writes each upload handle into a per-user index; ending the user's sessions revokes
+    # by that same index. If the two copies of its name drift, revocation silently misses them.
+    minter = open(os.path.join(SERVICES, "ml_service", "api", "upload_capability.py"), encoding="utf-8").read()
+    route = open(os.path.join(SERVICES, "ml_service", "api", "routers", "models.py"), encoding="utf-8").read()
+    assert f'_UPLOAD_INDEX_PREFIX = "{capability_auth._UPLOAD_INDEX_PREFIX}"' in minter
+    assert "upload_capability.user_index_key(" in route

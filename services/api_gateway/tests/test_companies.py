@@ -209,7 +209,7 @@ def test_deactivating_through_update_takes_the_delete_path(as_user, store):
     assert params["is_active"] is False
     assert revoked == [str(i) for i in db.user_ids]
     assert suspended_key(str(OTHER)) in store.kv
-    assert db.commits == 1
+    assert db.commits == 2  # the suspension, then ending its SQL sessions
 
 
 def test_reactivating_lifts_the_suspension_and_ends_nothing(as_user, store):
@@ -261,3 +261,33 @@ def test_no_route_writes_the_registry_directly():
     path = os.path.join(os.path.dirname(__file__), "..", "routers", "companies.py")
     src = open(path, encoding="utf-8").read()
     assert not re.search(r"(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+public\.companies", src, re.I)
+
+
+def test_open_sql_sessions_are_ended_after_the_suspension_commits(as_user):
+    # NOLOGIN takes effect at commit, so the tenant's SQL sessions are ended in a later transaction.
+    for method, body in (("put", {"is_active": False}), ("delete", None)):
+        c, db, _ = as_user(is_superuser=True)
+        r = c.request(method.upper(), f"/api/companies/{OTHER}", json=body)
+        assert r.status_code == 200
+        sqls = [sql for sql, _ in db.sql]
+        suspend = next(i for i, sql in enumerate(sqls) if "update_company" in sql)
+        (end, params), = [(i, p) for i, (sql, p) in enumerate(db.sql) if "end_suspended_tenant_sql_sessions" in sql]
+        assert end > suspend and params == {"company_id": OTHER}
+        assert db.commits == 2  # the suspension's commit, then the termination's own
+
+
+def test_reactivation_and_rename_end_no_sql_session(as_user):
+    c, db, _ = as_user(is_superuser=True, db=FakeDB(active=False))
+    assert c.put(f"/api/companies/{OTHER}", json={"is_active": True, "company_name": "N"}).status_code == 200
+    assert _calls(db, "end_suspended_tenant_sql_sessions") == []
+
+
+def test_lifecycle_actions_leave_a_structured_record(as_user, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="routers.companies")
+    c, _, _ = as_user(is_superuser=True)
+    assert c.put(f"/api/companies/{OTHER}", json={"is_active": False}).status_code == 200
+    records = [r.company_lifecycle for r in caplog.records if hasattr(r, "company_lifecycle")]
+    assert records and records[-1]["action"] == "deactivate"
+    assert records[-1]["company_id"] == str(OTHER) and records[-1]["actor"]

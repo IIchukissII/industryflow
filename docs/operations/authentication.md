@@ -62,7 +62,8 @@ The access JWT carries **`company_id` and `role` claims** (`CompanyClaimJWTStrat
 than looking it up (**[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**).
 Refresh tokens are **single-use and rotated** on every refresh (reuse is detected and
 rejected) and are **revoked server-side** on logout, together with the user's notebook
-capabilities (ADR-0012 dec 6). They are indexed per user, and **all** of a user's sessions and
+capabilities (ADR-0012 dec 6), including any model-upload handle minted for them (indexed per user
+by the ML service). They are indexed per user, and **all** of a user's sessions and
 notebook capabilities are revoked when the password is changed or reset, when the user is
 deactivated, when their company is deactivated (by `PUT /api/companies/{id}` with
 `is_active: false` or by `DELETE`, which take the same path) and when the user is deleted. Each

@@ -54,8 +54,10 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
     REVOKE ALL ON FUNCTION tenant_is_suspended(UUID) FROM PUBLIC;
 
     -- One tenant's SQL login, created or re-asserted with exactly the memberships it may hold.
-    -- A suspended tenant's login is NOLOGIN and has no open session; re-asserting it for an active
-    -- tenant restores LOGIN, so suspension is reversible (ADR-0033 dec 3).
+    -- A suspended tenant's login is NOLOGIN; re-asserting it for an active tenant restores LOGIN,
+    -- so suspension is reversible (ADR-0033 dec 3). Open sessions are not ended here: NOLOGIN only
+    -- takes effect when this transaction commits, so a session ended now could reconnect before
+    -- then. public.end_suspended_tenant_sql_sessions() ends them, called after the commit.
     CREATE OR REPLACE FUNCTION ensure_tenant_sql_login(p_company_id UUID)
     RETURNS TEXT
     LANGUAGE plpgsql
@@ -104,13 +106,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
         END LOOP;
         EXECUTE format('GRANT %I TO %I', v_reader, v_login);
         EXECUTE format('GRANT notebook_sql_tenants TO %I', v_login);
-
-        -- NOLOGIN stops new sessions only; a suspended tenant's open sessions end here too.
-        IF v_suspended THEN
-            PERFORM pg_terminate_backend(a.pid)
-            FROM pg_stat_activity a
-            WHERE a.usename = v_login AND a.pid <> pg_backend_pid();
-        END IF;
 
         RETURN v_login;
     END;

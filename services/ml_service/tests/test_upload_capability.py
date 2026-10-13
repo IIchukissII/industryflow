@@ -164,12 +164,27 @@ class FakeAsyncStore:
     async def set(self, key, value, ex=None):
         self.kv[key] = value
 
+    async def sadd(self, key, *members):
+        self.kv.setdefault(key, set()).update(members)
+
+    async def expire(self, key, ttl):
+        self.kv.setdefault(f"ttl:{key}", ttl)
+
 
 def test_the_route_mints_for_an_active_tenant():
     store = FakeAsyncStore()
     r = _mint_route(store)
     assert r.status_code == 201, r.text
     assert f"nbcap:{r.json()['capability']}" in store.kv
+
+
+def test_the_route_indexes_the_handle_under_its_user():
+    # Ending the user's sessions revokes it with their other capabilities (ADR-0004 dec 2 rev 2).
+    store = FakeAsyncStore()
+    r = _mint_route(store)
+    assert store.kv[uc.user_index_key("user-1")] == {r.json()["capability"]}
+    assert store.kv[f"ttl:{uc.user_index_key('user-1')}"] == uc.DEFAULT_TTL_SECONDS
+    assert uc.user_index_key("user-1") == "nbcap-upload-user:user-1"
 
 
 def test_the_route_refuses_a_suspended_tenant():

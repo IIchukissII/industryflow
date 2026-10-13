@@ -25,6 +25,9 @@ AUDIENCE_API = "api"
 _KEY_PREFIX = "nbcap:"
 # The hub's per-user index of the handles it minted (handle -> server).
 _USER_INDEX_PREFIX = "nbcap-user:"
+# The model-upload minter's per-user index of the upload handles it demand-minted (a set).
+# Shared contract with services/ml_service/api/upload_capability.py.
+_UPLOAD_INDEX_PREFIX = "nbcap-upload-user:"
 # Present while a company is suspended (ADR-0033 dec 3): no handle bound to it resolves or is
 # minted. Written by the gateway when a company is deactivated, removed when it is reactivated
 # (company_status.py). Shared contract with every other verifier and minter of handles.
@@ -90,11 +93,18 @@ async def revoke_user_capabilities(redis, user_id: str) -> int:
     """Revoke every notebook capability minted for a user — the platform's logout (ADR-0012 dec 6).
 
     The hub records each handle it mints in a per-user index (services/notebook_hub/capabilities.py,
-    the minter's copy of this contract). Deleting the handles ends them at every verifier at once;
-    the hub notices at its next poll of the user's server and stops it. Returns how many were revoked.
+    the minter's copy of this contract), and the model-upload minter each upload handle in one of its
+    own (services/ml_service/api/upload_capability.py). Deleting the handles ends them at every
+    verifier at once; the hub notices at its next poll of the user's server and stops it. Returns
+    how many were revoked.
     """
+    def _s(h):
+        return h.decode() if isinstance(h, (bytes, bytearray)) else h
+
     index = f"{_USER_INDEX_PREFIX}{user_id}"
-    handles = await redis.hkeys(index)
-    keys = [f"{_KEY_PREFIX}{h.decode() if isinstance(h, (bytes, bytearray)) else h}" for h in handles]
-    await redis.delete(index, *keys)
+    upload_index = f"{_UPLOAD_INDEX_PREFIX}{user_id}"
+    handles = [_s(h) for h in await redis.hkeys(index)]
+    handles += [_s(h) for h in await redis.smembers(upload_index)]
+    keys = [f"{_KEY_PREFIX}{h}" for h in handles]
+    await redis.delete(index, upload_index, *keys)
     return len(keys)

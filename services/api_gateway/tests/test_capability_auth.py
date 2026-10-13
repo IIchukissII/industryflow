@@ -85,7 +85,10 @@ class FakeRedis:
     """Strings and hashes, async, decode_responses=True — as messaging.redis_client connects."""
 
     def __init__(self):
-        self.strings, self.hashes = {}, {}
+        self.strings, self.hashes, self.sets = {}, {}, {}
+
+    async def smembers(self, key):
+        return set(self.sets.get(key, set()))
 
     async def get(self, key):
         return self.strings.get(key)
@@ -106,7 +109,8 @@ class FakeRedis:
     async def delete(self, *keys):
         n = 0
         for key in keys:
-            n += int(self.strings.pop(key, None) is not None or self.hashes.pop(key, None) is not None)
+            n += int(self.strings.pop(key, None) is not None or self.hashes.pop(key, None) is not None
+                     or self.sets.pop(key, None) is not None)
         return n
 
 
@@ -165,3 +169,21 @@ async def test_logout_with_an_unknown_refresh_token_revokes_nothing(monkeypatch)
 
     await auth_tokens.logout(SimpleNamespace(cookies={auth_tokens.REFRESH_COOKIE: "stale"}), Response(), None)
     assert set(redis.strings) == {"nbcap:a1"}
+
+
+@pytest.mark.asyncio
+async def test_revoking_a_user_also_revokes_their_upload_handles():
+    # The model-upload minter indexes each handle it demand-mints under its user, so ending the
+    # user's sessions ends those too (ADR-0004 dec 2 rev 2).
+    from capability_auth import revoke_user_capabilities
+
+    redis = FakeRedis()
+    _seed(redis, "alice", ["a1"])
+    redis.strings["nbcap:u1"] = _record(str(uuid.uuid4()), audience="upload")
+    redis.sets["nbcap-upload-user:alice"] = {"u1"}
+    redis.strings["nbcap:u2"] = _record(str(uuid.uuid4()), audience="upload")
+    redis.sets["nbcap-upload-user:bob"] = {"u2"}
+
+    assert await revoke_user_capabilities(redis, "alice") == 2
+    assert set(redis.strings) == {"nbcap:u2"}
+    assert set(redis.sets) == {"nbcap-upload-user:bob"}

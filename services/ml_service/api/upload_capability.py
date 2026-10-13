@@ -55,6 +55,16 @@ DEFAULT_TTL_SECONDS = 600
 _HANDLE_BYTES = 32
 
 
+# Every upload handle is indexed under the user it was minted for (a set), so that ending the
+# user's sessions revokes it with the rest of their capabilities (ADR-0004 dec 2 rev 2). Shared
+# contract with the platform API, which revokes by it (services/api_gateway/capability_auth.py).
+_UPLOAD_INDEX_PREFIX = "nbcap-upload-user:"
+
+
+def user_index_key(user: str) -> str:
+    return f"{_UPLOAD_INDEX_PREFIX}{user}"
+
+
 # Present while a company is suspended (ADR-0033 dec 3): nothing is minted for it. Shared contract
 # with the platform API, which writes it (services/api_gateway/capability_auth.py).
 _SUSPENDED_PREFIX = "nbcap-suspended:"

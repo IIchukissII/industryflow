@@ -394,6 +394,11 @@ async def mint_upload_capability(
     if await store.get(upload_capability.suspended_key(record["company_id"])) is not None:
         raise HTTPException(status_code=403, detail="This company is suspended.")
 
+    # Index first: a handle that exists but is not indexed is one ending the user's sessions cannot
+    # revoke. The index lives as long as its newest handle.
+    index = upload_capability.user_index_key(record["user"])
+    await store.sadd(index, handle)
+    await store.expire(index, upload_capability.DEFAULT_TTL_SECONDS)
     await store.set(
         upload_capability.store_key(handle),
         json.dumps(record),

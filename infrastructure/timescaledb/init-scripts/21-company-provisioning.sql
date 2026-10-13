@@ -136,9 +136,10 @@ BEGIN
     v_found := FOUND;
 
     -- Suspend / resume the tenant's database identity with the flag (ADR-0033 dec 3): its SQL
-    -- login is NOLOGIN with no open session while inactive, LOGIN again once reactivated. The
-    -- reader role is NOLOGIN either way, so the SQL login is the tenant's only login identity.
-    -- A registry row without a provisioned tenant has no identity to change.
+    -- login is NOLOGIN while inactive, LOGIN again once reactivated. The reader role is NOLOGIN
+    -- either way, so the SQL login is the tenant's only login identity. A registry row without a
+    -- provisioned tenant has no identity to change. Open sessions are ended by the caller after
+    -- this commits (end_suspended_tenant_sql_sessions), when no new one can start.
     IF p_is_active IS NOT NULL AND v_found AND EXISTS (
         SELECT 1 FROM pg_catalog.pg_roles
         WHERE rolname = 'tenant_reader_' || replace(p_company_id::text, '-', '_')
@@ -155,11 +156,51 @@ $$;
 COMMENT ON FUNCTION public.update_company(UUID, TEXT, BOOLEAN) IS
     'Renames and/or (de)activates a company, suspending or resuming its SQL login (SECURITY DEFINER); no row = unknown company';
 
+-- =============================================================================
+-- END A SUSPENDED TENANT'S OPEN SQL SESSIONS, after the suspension has committed.
+-- =============================================================================
+-- NOLOGIN takes effect at commit. Ending the sessions inside the suspending transaction would
+-- leave a window in which a terminated client reconnects with the login still able to log in, so
+-- the caller runs this in a transaction of its own once update_company() has committed. It acts
+-- only when the committed state says the tenant is suspended and its login cannot log in, so it
+-- can never be used to disconnect an active tenant. Idempotent; returns how many it ended.
+
+CREATE OR REPLACE FUNCTION public.end_suspended_tenant_sql_sessions(p_company_id UUID)
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+    v_login TEXT := 'tenant_sqlproxy_' || replace(p_company_id::text, '-', '_');
+    v_ended INTEGER := 0;
+BEGIN
+    PERFORM public.company_provisioning_guard();
+    IF NOT EXISTS (SELECT 1 FROM public.companies c
+                   WHERE c.company_id = p_company_id AND NOT c.is_active) THEN
+        RETURN 0;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles
+                   WHERE rolname = v_login AND NOT rolcanlogin) THEN
+        RETURN 0;
+    END IF;
+    SELECT count(*) FILTER (WHERE pg_terminate_backend(a.pid)) INTO v_ended
+    FROM pg_catalog.pg_stat_activity a
+    WHERE a.usename = v_login AND a.pid <> pg_backend_pid();
+    RETURN v_ended;
+END;
+$$;
+
+COMMENT ON FUNCTION public.end_suspended_tenant_sql_sessions(UUID) IS
+    'Ends the open sessions of a suspended tenant''s NOLOGIN SQL login; run after the suspension commits (SECURITY DEFINER)';
+
 -- SECURITY DEFINER hardening: no ambient EXECUTE; only the gateway role may call them.
 REVOKE ALL ON FUNCTION public.provision_company(TEXT, BOOLEAN) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.update_company(UUID, TEXT, BOOLEAN) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.end_suspended_tenant_sql_sessions(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.provision_company(TEXT, BOOLEAN) TO api_gateway_user;
 GRANT EXECUTE ON FUNCTION public.update_company(UUID, TEXT, BOOLEAN) TO api_gateway_user;
+GRANT EXECUTE ON FUNCTION public.end_suspended_tenant_sql_sessions(UUID) TO api_gateway_user;
 
 -- The ML service authenticates users itself and must refuse a suspended company's users as the
 -- gateway does (ADR-0033 dec 3), so it reads the registry's active flag. Granted here rather than

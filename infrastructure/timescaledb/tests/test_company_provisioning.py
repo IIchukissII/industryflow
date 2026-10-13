@@ -185,12 +185,25 @@ def test_update_company_reasserts_the_sql_login_when_the_flag_changes():
         "deactivating a company leaves its SQL login able to log in")
 
 
-def test_the_sql_login_is_nologin_and_disconnected_while_suspended():
+def test_the_sql_login_is_nologin_while_suspended():
     body = _function_body("13-notebook-sql-proxy-role.sh", "ensure_tenant_sql_login(")
     assert "tenant_is_suspended(p_company_id)" in body
     assert "THEN 'NOLOGIN' ELSE 'LOGIN'" in body, "the login's LOGIN attribute ignores suspension"
     assert "'CREATE ROLE %I LOGIN" not in body and "'ALTER ROLE %I LOGIN" not in body
-    assert "pg_terminate_backend" in body, "a suspended tenant's open SQL sessions survive"
+
+
+def test_open_sessions_are_ended_only_after_the_suspension_commits():
+    # NOLOGIN takes effect at commit: a session ended inside the suspending transaction could
+    # reconnect before it. So neither function that runs in that transaction terminates anything.
+    for script, fn in (("13-notebook-sql-proxy-role.sh", "ensure_tenant_sql_login("),
+                       ("21-company-provisioning.sql", "public.update_company(")):
+        assert "pg_terminate_backend" not in _function_body(script, fn), f"{fn} terminates in-transaction"
+    body = _function_body("21-company-provisioning.sql", "public.end_suspended_tenant_sql_sessions(")
+    assert "pg_terminate_backend" in body
+    assert "NOT c.is_active" in body and "NOT rolcanlogin" in body, (
+        "the terminator must act only on a committed suspension")
+    sql = open(os.path.join(_SCRIPTS, "21-company-provisioning.sql")).read()
+    assert "GRANT EXECUTE ON FUNCTION public.end_suspended_tenant_sql_sessions(UUID) TO api_gateway_user;" in sql
 
 
 def test_the_proxy_does_not_enrol_a_suspended_tenant():
@@ -216,6 +229,49 @@ def test_deactivation_disables_the_sql_login_and_reactivation_restores_it(db):
     assert _can_login(cur, login) is False
     _as(cur, "api_gateway_user", "SELECT * FROM public.update_company(%s, NULL, true)", (str(company_id),))
     assert _can_login(cur, login) is True
+
+
+def _login_connection(cur, login):
+    # The proxy's verifier is not available here, so the test gives the login a password itself.
+    password = f"pw-{uuid.uuid4()}"
+    cur.execute(f'ALTER ROLE "{login}" PASSWORD %s', (password,))
+    conn = psycopg2.connect(
+        host=os.getenv("PGHOST", "localhost"), port=int(os.getenv("PGPORT", "5432")),
+        dbname=os.getenv("PGDATABASE", os.getenv("DB_NAME", "industryflow")),
+        user=login, password=password, connect_timeout=5)
+    conn.autocommit = True
+    return conn, password
+
+
+def test_suspension_ends_open_sessions_after_commit_and_none_can_start(db):
+    cur, _ = db
+    company_id, *_ = _provision(db, f"suspend-race-{uuid.uuid4()}")
+    login = "tenant_sqlproxy_" + str(company_id).replace("-", "_")
+    try:
+        conn, password = _login_connection(cur, login)
+    except psycopg2.OperationalError as e:
+        pytest.skip(f"the tenant login cannot connect here: {e}")
+
+    # The gateway's sequence: suspend and commit, then end the sessions in a transaction of its own.
+    _as(cur, "api_gateway_user", "SELECT * FROM public.update_company(%s, NULL, false)", (str(company_id),))
+    conn.cursor().execute("SELECT 1")  # still open: nothing is ended inside the suspension
+    rows = _as(cur, "api_gateway_user", "SELECT public.end_suspended_tenant_sql_sessions(%s)",
+               (str(company_id),))
+    assert rows[0][0] >= 1
+    with pytest.raises(psycopg2.Error):
+        conn.cursor().execute("SELECT 1")
+    with pytest.raises(psycopg2.OperationalError):
+        psycopg2.connect(host=os.getenv("PGHOST", "localhost"), port=int(os.getenv("PGPORT", "5432")),
+                         dbname=os.getenv("PGDATABASE", os.getenv("DB_NAME", "industryflow")),
+                         user=login, password=password, connect_timeout=5)
+
+
+def test_the_terminator_never_touches_an_active_tenant(db):
+    cur, _ = db
+    company_id, *_ = _provision(db, f"active-{uuid.uuid4()}")
+    rows = _as(cur, "api_gateway_user", "SELECT public.end_suspended_tenant_sql_sessions(%s)",
+               (str(company_id),))
+    assert rows[0][0] == 0
 
 
 def test_enrolment_refuses_a_suspended_tenant(db):
