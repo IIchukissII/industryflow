@@ -7,6 +7,8 @@ Repository layer for Alert Service Worker
 Schema-per-tenant architecture
 """
 import asyncpg
+import hashlib
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 import uuid as uuid_module
@@ -59,19 +61,40 @@ _SAVE_ALERT_ONCE = """
 """
 
 
+def dedup_lock_key(schema_name: str, scope: Tuple) -> int:
+    """64-bit advisory-lock key for one dedup scope in one tenant schema.
+
+    Two writers in the same scope (two replicas' ML passes, or a redelivery racing the original)
+    serialise on it, so the window check and the insert cannot interleave. A hash collision
+    between scopes only serialises two unrelated inserts; it never suppresses one.
+    """
+    name = schema_name + '|' + '|'.join('' if part is None else str(part) for part in scope)
+    return int.from_bytes(hashlib.blake2b(name.encode(), digest_size=8).digest(), 'big', signed=True)
+
+
 class AlertRepository:
     """Repository for alert operations with schema-per-tenant"""
-    
+
     def __init__(self, db_pool: asyncpg.Pool):
         self.pool = db_pool
-    
+
+    @asynccontextmanager
+    async def _tenant(self, schema_name: str):
+        """A pooled connection inside a transaction whose search_path is the tenant's.
+
+        SET LOCAL ends with the transaction (ADR-0003 dec 6), so the connection goes back to the
+        pool without a tenant path, whether the block commits or raises.
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(f"SET LOCAL search_path TO {schema_name}, public")
+                yield conn
+
     async def get_active_rules(self, company_id: str) -> List[Dict]:
         """Get active alert rules for a tenant"""
         schema_name = normalize_company_id_to_schema(company_id)
         
-        async with self.pool.acquire() as conn:
-            # Set search path to tenant schema
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with self._tenant(schema_name) as conn:
             
             # Query without company_id filter (schema routing handles isolation)
             rows = await conn.fetch("""
@@ -118,12 +141,23 @@ class AlertRepository:
         deterministic (alert_id, triggered_at) makes an exact replay a no-op even if two consumers
         race (ADR-0005 dec 6). Needs no schema change: the window lookup is bounded by the
         hypertable's time index.
+
+        Two inserts in the same scope with different event times (two replicas, or a redelivery
+        racing the original) would each find no prior row under READ COMMITTED and both insert.
+        A transaction-scoped advisory lock on the scope serialises them: the second statement
+        starts after the first commits, so its window check sees the first row. That is what
+        makes the cooldown hold across replicas, not only across restarts.
         """
         schema_name = normalize_company_id_to_schema(alert_data['company_id'])
-        scope_sql = _RETRAIN_SCOPE if retrain else _ALERT_SCOPE
+        if retrain:
+            scope_sql = _RETRAIN_SCOPE
+            scope = ('retrain', alert_data.get('model_id'))
+        else:
+            scope_sql = _ALERT_SCOPE
+            scope = ('alert', alert_data['rule_id'], alert_data.get('sensor_id'), alert_data.get('equipment_id'))
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with self._tenant(schema_name) as conn:
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", dedup_lock_key(schema_name, scope))
             row = await conn.fetchrow(
                 _SAVE_ALERT_ONCE.format(scope=scope_sql),
                 alert_data['alert_id'],
@@ -169,9 +203,7 @@ class AlertRepository:
         """Get sensor name from sensor UUID"""
         schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            # Set search path to tenant schema
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with self._tenant(schema_name) as conn:
 
             # Query sensor name
             sensor_name = await conn.fetchval(
@@ -185,9 +217,7 @@ class AlertRepository:
         """Get feature engineering config by ID"""
         schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            # Set search path to tenant schema
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with self._tenant(schema_name) as conn:
 
             # Query feature config
             row = await conn.fetchrow(
@@ -205,9 +235,7 @@ class AlertRepository:
         """Get ML model metadata by ID"""
         schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            # Set search_path to tenant schema
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with self._tenant(schema_name) as conn:
 
             # Query model
             row = await conn.fetchrow(
@@ -240,8 +268,7 @@ class AlertRepository:
         schema_name = normalize_company_id_to_schema(company_id)
         model_uuid = uuid_module.UUID(str(model_id))
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with self._tenant(schema_name) as conn:
 
             label_row = await conn.fetchrow(
                 """

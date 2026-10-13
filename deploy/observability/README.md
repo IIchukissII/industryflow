@@ -62,7 +62,7 @@ ignores the objects.
 |--------|--------|-------|
 | ServiceMonitor (per app) | generated for any `apps.<name>.metrics: true` | api-gateway, ml-service-api today |
 | ServiceMonitor (per exporter) | postgres/redis/kafka exporters | `observability.exporters.*` |
-| PrometheusRule | `observability.prometheusRules` | target-down, pg/redis down, Kafka lag |
+| PrometheusRule | `observability.prometheusRules` | target-down, pg/redis down, Kafka lag, dead-lettered readings (`*.dlq` growth) |
 | Grafana dashboards | `infrastructure/grafana/provisioning/*.json` | shipped as labelled ConfigMaps |
 | postgres/redis/kafka exporters | `observability.exporters.*` | postgres-exporter uses the `metrics_user` (`pg_monitor`) role, not the superuser |
 

@@ -151,14 +151,16 @@ apps:
       limits: { cpu: "1", memory: 1Gi }
 
   alert-service-detector:
-    # Kafka consumer worker — no HTTP port/Service.
+    # Kafka consumer worker — no HTTP port/Service. It verifies no user tokens, so no JWT key.
     enabled: true
     image: industryflow-alert-service-detector
     digest: ""
-    secretKeys: [ALERT_SERVICE_DB_PASSWORD, JWT_SECRET_KEY, INTERNAL_SERVICE_TOKEN]
+    secretKeys: [ALERT_SERVICE_DB_PASSWORD, INTERNAL_SERVICE_TOKEN]
     replicas: 1
     port: null
     probe: null
+    # No HTTP port, so liveness is the consumer loop's heartbeat file (stale = nothing consuming).
+    livenessExec: ["python", "healthcheck.py"]
     resources:
       requests: { cpu: 100m, memory: 256Mi }
       limits: { cpu: 500m, memory: 512Mi }
@@ -398,6 +400,8 @@ observability:
     targetDownFor: 5m
     kafkaConsumerLagThreshold: 1000
     kafkaConsumerLagFor: 10m
+    # Any reading dead-lettered within this window raises IndustryFlowDeadLetteredReadings.
+    deadLetterWindow: 15m
   dashboards:
     # ConfigMaps labelled for the Grafana sidecar; harmless (just ConfigMaps) without it.
     enabled: true
@@ -434,7 +438,6 @@ config:
   MLFLOW_DB_USER: mlflow_user
   SPARK_STREAMING_DB_USER: spark_streaming_user
   KAFKA_TOPIC_SENSOR_DATA: sensor-data-raw
-  KAFKA_TOPIC_ALERTS: sensor-alerts
   KAFKA_GROUP_ID: alert-detector
   # Spark Structured-Streaming checkpoint (ADR-0006). Default = the per-pod PVC (Helm runs Spark
   # in local mode: driver = executor = one pod, so a local checkpoint is fine). To scale Spark

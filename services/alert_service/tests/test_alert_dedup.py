@@ -16,7 +16,6 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 sys.path.insert(0, os.path.dirname(__file__))
 
-import rules_engine  # noqa: E402
 from fake_alert_store import FakeAlertStore  # noqa: E402
 from rules_engine import RulesEngine, as_utc, deterministic_alert_id  # noqa: E402
 
@@ -112,9 +111,8 @@ def test_retrain_recommendation_cooldown_survives_restart():
     assert len(store.saved) == 1
 
 
-def test_dedup_cache_is_bounded(monkeypatch):
-    monkeypatch.setattr(rules_engine, "DEDUP_CACHE_MAX", 3)
-    engine = RulesEngine({CO: []}, alert_repo=FakeAlertStore())
+def test_dedup_cache_is_bounded():
+    engine = RulesEngine({CO: []}, alert_repo=FakeAlertStore(), dedup_cache_max=3)
     for i in range(10):
         alert = {"company_id": CO, "rule_id": f"r{i}", "sensor_id": SENSOR, "triggered_at": T0,
                  "detection_type": "threshold", "severity": "low", "message": "m"}

@@ -40,6 +40,7 @@ jobs:
               - 'infrastructure/timescaledb/**'
               - 'services/notebook_sql_proxy/**'
               - 'services/api_gateway/dependencies.py'
+              - 'services/alert_service/worker/repository.py'
               - 'docker-compose.yml'
               - 'docker-compose.ci-notebooks.yml'
               - '.env.example'

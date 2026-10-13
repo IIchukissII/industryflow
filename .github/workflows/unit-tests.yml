@@ -32,6 +32,10 @@ jobs:
             relevant:
               - 'services/**'
               - 'clients/python/**'
+              # Read by the parity guards (e.g. the alert worker's config parity test), so an
+              # edit on that side alone must run them too.
+              - 'docker-compose.yml'
+              - 'deploy/helm/**'
               - '.github/workflows/unit-tests.yml'
 
   pytest:
