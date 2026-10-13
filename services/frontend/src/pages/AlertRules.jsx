@@ -5,8 +5,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import './AlertRules.css';
 import authFetch from '../services/http';
+import { canWrite } from '../utils/roles';
 
 function AlertRules() {
+  // Creating, editing and deleting rules needs engineer or admin (observer is read-only).
+  const [writable] = useState(() => canWrite());
   const [activeTab, setActiveTab] = useState('all');
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -161,9 +164,11 @@ function AlertRules() {
               Configure threshold and ML-based alert rules for sensor monitoring
             </p>
           </div>
-          <button className="btn-primary" onClick={() => setShowForm(true)}>
-            + New Rule
-          </button>
+          {writable && (
+            <button className="btn-primary" onClick={() => setShowForm(true)}>
+              + New Rule
+            </button>
+          )}
         </div>
 
         <div className="tabs">
@@ -261,19 +266,23 @@ function AlertRules() {
                       </span>
                     </td>
                     <td>
-                      <button
-                        className="btn-action"
-                        onClick={() => handleEdit(rule)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="btn-action"
-                        style={{ marginLeft: '5px' }}
-                        onClick={() => handleDelete(rule.rule_id)}
-                      >
-                        Delete
-                      </button>
+                      {writable && (
+                        <>
+                          <button
+                            className="btn-action"
+                            onClick={() => handleEdit(rule)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="btn-action"
+                            style={{ marginLeft: '5px' }}
+                            onClick={() => handleDelete(rule.rule_id)}
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}

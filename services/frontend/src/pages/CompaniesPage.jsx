@@ -69,15 +69,15 @@ function CompaniesPage() {
   };
 
   const handleDelete = async (companyId) => {
-    if (!window.confirm('Are you sure you want to delete this company? This cannot be undone.')) {
+    if (!window.confirm('Deactivate this company? It and all of its users become inactive and are signed out. Its data is kept, and a superuser can reactivate it.')) {
       return;
     }
     try {
       await api.delete(`/api/companies/${companyId}`);
       fetchCompanies();
     } catch (error) {
-      console.error('Error deleting company:', error);
-      alert('Error deleting company: ' + (error.response?.data?.detail || error.message));
+      console.error('Error deactivating company:', error);
+      alert('Error deactivating company: ' + (error.response?.data?.detail || error.message));
     }
   };
 
@@ -121,7 +121,7 @@ function CompaniesPage() {
                     Edit
                   </button>
                   <button className="btn-delete" onClick={() => handleDelete(company.company_id)}>
-                    Delete
+                    Deactivate
                   </button>
                 </td>
               </tr>

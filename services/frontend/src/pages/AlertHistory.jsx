@@ -7,6 +7,7 @@ import { useSearchParams } from 'react-router-dom';
 import Icon from '../components/Icon';
 import './AlertHistory.css';
 import authFetch from '../services/http';
+import { canWrite, READ_ONLY_HINT } from '../utils/roles';
 
 // Severity → status token. Maps the five levels onto the platform's status palette so the page
 // reads as one system with the rest of the app (no ad-hoc hex).
@@ -28,7 +29,7 @@ const VERDICTS = [
 
 // A compact three-way label control per alert. The active verdict is highlighted, so it doubles
 // as the verdict display — colour is never the only signal (each button is also worded).
-function LabelControl({ alert, onLabel }) {
+function LabelControl({ alert, onLabel, readOnly }) {
   const [busy, setBusy] = useState(false);
   const current = alert.label_verdict || null;
 
@@ -47,9 +48,9 @@ function LabelControl({ alert, onLabel }) {
           type="button"
           className={`alh-verdict alh-verdict-${v.tone}${current === v.key ? ' active' : ''}`}
           onClick={() => set(v.key)}
-          disabled={busy}
+          disabled={busy || readOnly}
           aria-pressed={current === v.key}
-          title={`Mark this alert as ${v.label.toLowerCase()}`}
+          title={readOnly ? READ_ONLY_HINT : `Mark this alert as ${v.label.toLowerCase()}`}
         >
           {v.label}
         </button>
@@ -79,6 +80,8 @@ function PrecisionSparkline({ series }) {
 }
 
 function AlertHistory() {
+  // Acknowledging and labelling change tenant data: engineer or admin only (observer is read-only).
+  const [writable] = useState(() => canWrite());
   const [alerts, setAlerts] = useState([]);
   const [alertRules, setAlertRules] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -359,12 +362,12 @@ function AlertHistory() {
                 </div>
                 <div className="alh-alert-right">
                   <span className="badge alh-sev-badge">{alert.severity}</span>
-                  <LabelControl alert={alert} onLabel={labelAlert} />
+                  <LabelControl alert={alert} onLabel={labelAlert} readOnly={!writable} />
                   {alert.acknowledged ? (
                     <span className="alh-ack-done" title={alert.acknowledged_at ? `Acknowledged ${formatDate(alert.acknowledged_at)}` : 'Acknowledged'}>
                       <Icon name="check" size={12} /> Ack
                     </span>
-                  ) : (
+                  ) : writable && (
                     <button className="alh-ack-btn" onClick={() => acknowledgeAlert(alert.alert_id)}>Acknowledge</button>
                   )}
                 </div>
