@@ -32,6 +32,7 @@ jobs:
               - 'services/notebook_tracking_gateway/**'
               - 'infrastructure/timescaledb/**'
               - 'infrastructure/mlflow/**'
+              - 'infrastructure/minio/**'
               - 'docker-compose.yml'
               - 'docker-compose.ci-notebooks.yml'
               - '.env.example'

@@ -35,6 +35,7 @@ jobs:
               - 'services/cold_export/**'
               - 'services/notebook_cold_broker/**'
               - 'infrastructure/timescaledb/**'
+              - 'infrastructure/minio/**'
               - 'docker-compose.yml'
               - '.env.example'
               - '.github/workflows/cold-layer-integration.yml'

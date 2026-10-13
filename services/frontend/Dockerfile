@@ -9,17 +9,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Build the app. By default the API base URLs are empty (same-origin), so the app talks to
-# the nginx proxy in front of it; override these build args for a direct/dev setup.
+# Build the app. The image is always served behind this edge, same-origin with the API, so it
+# takes no base-URL build args: src/config.js defaults to same-origin. VITE_* overrides are for
+# `npm run dev` against a gateway elsewhere (see README).
 COPY . .
-ARG REACT_APP_API_URL=""
-ARG REACT_APP_ALERT_URL=""
-ARG REACT_APP_ML_URL=""
-ARG REACT_APP_WS_URL=""
-ENV REACT_APP_API_URL=$REACT_APP_API_URL \
-    REACT_APP_ALERT_URL=$REACT_APP_ALERT_URL \
-    REACT_APP_ML_URL=$REACT_APP_ML_URL \
-    REACT_APP_WS_URL=$REACT_APP_WS_URL
 RUN npm run build
 
 # ---- serve stage ----
@@ -28,13 +21,19 @@ RUN npm run build
 FROM nginxinc/nginx-unprivileged:1.31-alpine
 USER root
 RUN apk add --no-cache openssl
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-# TLS cert bootstrap runs before nginx starts (the image runs /docker-entrypoint.d/*.sh).
+# The edge config is a TEMPLATE: 10-edge-config.sh renders it into conf.d at start from the
+# EDGE_* upstreams the deployment passes (compose: service names; Helm: the release's Service
+# FQDNs), and refuses to start without them. It is kept out of /etc/nginx/templates so the stock
+# envsubst step, which substitutes every environment variable, never touches it.
+COPY nginx.conf.template /etc/nginx/edge/default.conf.template
+# TLS cert bootstrap and the config render run before nginx starts (/docker-entrypoint.d/*.sh).
 COPY docker-entrypoint-tls.sh /docker-entrypoint.d/00-tls.sh
+COPY docker-entrypoint-edge.sh /docker-entrypoint.d/10-edge-config.sh
 # Make the cert dir writable by uid 101 so the dev self-sign works (a compose named volume or
-# k8s emptyDir mounted here inherits this ownership); a real cert mounted here overrides it.
-RUN chmod +x /docker-entrypoint.d/00-tls.sh \
- && mkdir -p /etc/nginx/certs && chown -R 101:101 /etc/nginx/certs
+# k8s emptyDir mounted here inherits this ownership); a real cert mounted here overrides it. The
+# rendered config is written over the stock conf.d/default.conf, which the base already gives 101.
+RUN chmod +x /docker-entrypoint.d/00-tls.sh /docker-entrypoint.d/10-edge-config.sh \
+ && mkdir -p /etc/nginx/certs && chown -R 101:101 /etc/nginx/certs /etc/nginx/conf.d
 COPY --from=build /app/build /usr/share/nginx/html
 USER 101
 EXPOSE 8080 8443

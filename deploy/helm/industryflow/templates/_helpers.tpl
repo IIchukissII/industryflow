@@ -79,6 +79,22 @@ stringData:
 {{- end }}
 {{- end -}}
 
+{{/*
+The per-service role passwords the in-cluster TimescaleDB consumes at first init (00-create-roles.sh
+and 13-notebook-sql-proxy-role.sh create one role from each). ONE list for both consumers: the
+timescaledb scoped Secret carries exactly these keys and the StatefulSet passes exactly these into
+the container, so a role cannot be put in one and forgotten in the other (it would be created with
+no password). Returned space-separated; callers `splitList " "` it.
+*/}}
+{{- define "industryflow.timescaledbRoleKeys" -}}
+{{- $keys := list "API_GATEWAY_DB_PASSWORD" "SPARK_STREAMING_DB_PASSWORD" "ALERT_SERVICE_DB_PASSWORD" "ML_SERVICE_DB_PASSWORD" "MLFLOW_DB_PASSWORD" "METRICS_DB_PASSWORD" -}}
+{{- /* The notebook SQL proxy role (ADR-0015). */ -}}
+{{- if .Values.notebookHub.enabled }}{{ $keys = append $keys "NOTEBOOK_SQL_PROXY_DB_PASSWORD" }}{{ end -}}
+{{- /* The cold_export_user role (ADR-0025). */ -}}
+{{- if .Values.coldExport.enabled }}{{ $keys = append $keys "COLD_EXPORT_DB_PASSWORD" }}{{ end -}}
+{{- join " " $keys -}}
+{{- end -}}
+
 {{/* Resolve the TimescaleDB host: in-cluster service name or external host. */}}
 {{- define "industryflow.dbHost" -}}
 {{- if .Values.infra.timescaledb.inCluster -}}
@@ -122,4 +138,52 @@ stringData:
 {{- else -}}
 {{- required "infra.mlflow.external.trackingUri is required when inCluster=false" .Values.infra.mlflow.external.trackingUri -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+The cluster-internal FQDN of one of this release's Services. Call with a dict: ctx, name (the
+suffix after the fullname). Fully qualified because the edge re-resolves its upstreams through a
+resolver, and a resolver applies no search domains.
+*/}}
+{{- define "industryflow.serviceFqdn" -}}
+{{- $ctx := .ctx -}}
+{{- printf "%s-%s.%s.svc.%s" (include "industryflow.fullname" $ctx) .name $ctx.Release.Namespace $ctx.Values.clusterDomain -}}
+{{- end -}}
+
+{{/*
+The frontend edge's upstreams (services/frontend/nginx.conf.template): the release's Service FQDNs.
+The container refuses to start without every one of them, so this list and the template's
+variables move together (tests/config_guards renders both and compares).
+*/}}
+{{- define "industryflow.edgeEnv" -}}
+{{- $apps := .Values.apps -}}
+- name: EDGE_API_GATEWAY
+  value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "api-gateway")) (index $apps "api-gateway").port | quote }}
+- name: EDGE_ML_SERVICE
+  value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "ml-service-api")) (index $apps "ml-service-api").port | quote }}
+- name: EDGE_NOTEBOOK_SSO
+  value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "notebook-sso")) .Values.notebookHub.ssoProxy.port | quote }}
+- name: EDGE_TRACKING_GATEWAY
+  value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "notebook-tracking-gateway")) .Values.notebookHub.trackingGateway.port | quote }}
+- name: EDGE_OBJECT_STORE_URL
+  {{- if .Values.infra.minio.inCluster }}
+  value: {{ printf "http://%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "minio")) .Values.infra.minio.apiPort | quote }}
+  {{- else }}
+  value: {{ .Values.infra.minio.external.endpoint | quote }}
+  {{- end }}
+{{- end -}}
+
+{{/*
+The object-store principals the minio-init Job provisions in this release, as their secret key
+names (space-separated; callers `splitList " "` it). ONE list for the Job's Secret and its env, so a
+principal is never half-wired. Each is created only where its consumer is deployed.
+*/}}
+{{- define "industryflow.objectStorePrincipalKeys" -}}
+{{- $keys := list "SPARK_CHECKPOINT_ACCESS_KEY" "SPARK_CHECKPOINT_SECRET_KEY" -}}
+{{- if .Values.infra.mlflow.inCluster }}{{ $keys = concat $keys (list "MLFLOW_STORE_ACCESS_KEY" "MLFLOW_STORE_SECRET_KEY") }}{{ end -}}
+{{- if (index .Values.apps "ml-service-api").enabled }}{{ $keys = concat $keys (list "MODEL_READ_ACCESS_KEY" "MODEL_READ_SECRET_KEY") }}{{ end -}}
+{{- if .Values.notebookHub.enabled }}{{ $keys = concat $keys (list "TRACKING_STORE_ACCESS_KEY" "TRACKING_STORE_SECRET_KEY") }}{{ end -}}
+{{- if and .Values.backup.enabled (not .Values.backup.s3.endpoint) }}{{ $keys = concat $keys (list "BACKUP_STORE_ACCESS_KEY" "BACKUP_STORE_SECRET_KEY") }}{{ end -}}
+{{- if .Values.coldExport.enabled }}{{ $keys = concat $keys (list "COLD_STORE_ACCESS_KEY" "COLD_STORE_SECRET_KEY" "COLD_READ_ACCESS_KEY" "COLD_READ_SECRET_KEY") }}{{ end -}}
+{{- join " " $keys -}}
 {{- end -}}

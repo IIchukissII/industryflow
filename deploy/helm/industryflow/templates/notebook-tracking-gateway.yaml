@@ -90,18 +90,18 @@ spec:
             # in-cluster client can follow the URL, which is the pre-change behaviour.
             - name: TRACKING_S3_PRESIGN_ENDPOINT_URL
               value: {{ .Values.publicBaseUrl | default "" | quote }}
-            # The object-store principal for the MLflow artifact bucket. The kernel never sees it —
-            # bytes move via tenant-scoped pre-signed URLs (ADR-0019 dec 6).
+            # The gateway's own artifact-bucket principal (created by the minio-init Job). The kernel
+            # never sees it — bytes move via tenant-scoped pre-signed URLs (ADR-0019 dec 6).
             - name: TRACKING_S3_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-tracking-gateway") }}
-                  key: MINIO_ACCESS_KEY
+                  key: TRACKING_STORE_ACCESS_KEY
             - name: TRACKING_S3_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-tracking-gateway") }}
-                  key: MINIO_SECRET_KEY
+                  key: TRACKING_STORE_SECRET_KEY
           resources:
             {{- toYaml .Values.notebookHub.trackingGateway.resources | nindent 12 }}
 {{- end }}

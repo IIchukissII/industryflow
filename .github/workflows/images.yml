@@ -4,8 +4,10 @@
 
 # Build, scan, and (on main) publish every service image to GHCR.
 # - PRs: build + Trivy scan (no push) — catches build breaks and CRITICAL CVEs before merge.
-# - push to main: build + scan + push, tagged :latest and :sha-<short> (immutable).
-# Scoped to image-relevant changes so ordinary code/test PRs don't trigger 13 builds.
+# - push to main: build + scan + push, tagged :latest and :sha-<short> (immutable). ALWAYS: a merge
+#   that changes only a service's code changes what its image serves, so main never skips a publish.
+# PRs are scoped to the paths images are built from (every build context below), so a docs-only PR
+# does not trigger 17 builds; tests/config_guards checks the filter covers every context.
 name: Images
 
 on:
@@ -22,8 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      # A manual dispatch builds everything; there is no diff to filter on.
-      relevant: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.relevant == 'true' }}
+      # A manual dispatch builds everything; there is no diff to filter on. A push to main publishes
+      # everything: the filter exists to spare PRs, and a code-only merge (#314, #315) that skipped it
+      # left GHCR serving the previous code under the new commit's name.
+      relevant: ${{ github.event_name != 'pull_request' || steps.filter.outputs.relevant == 'true' }}
       # The Spark version is also written outside the images (compose, manifests, code, test pins);
       # a change there runs the parity check without building every image.
       spark_parity: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.spark_parity == 'true' }}
@@ -34,9 +38,17 @@ jobs:
         with:
           filters: |
             relevant:
-              - '**/Dockerfile*'
-              - '**/requirements*.txt'
-              - 'services/frontend/package*.json'
+              # Every build context in the matrix below, whole: an image is everything its context
+              # COPYs, not only its Dockerfile and pins.
+              - 'services/**'
+              - 'clients/python/**'
+              - 'infrastructure/mlflow/**'
+              - 'infrastructure/backup/**'
+              - '.trivyignore'
+              # The edge smoke renders the frontend config from these.
+              - 'docker-compose.yml'
+              - 'deploy/helm/**'
+              - 'scripts/edge_env.py'
               - '.github/workflows/images.yml'
               - 'scripts/check_spark_version_parity.py'
               - 'scripts/tests/test_spark_version_parity.py'
@@ -81,6 +93,8 @@ jobs:
         run: python scripts/check_jupyterhub_parity.py && pytest scripts/tests/test_jupyterhub_parity.py -q
 
   build-scan:
+    # `relevant` is checked here too, not only inherited through spark-version-parity: the build must
+    # run exactly when the change detector says so, whatever happens to the gating job's own `if`.
     needs: [changes, spark-version-parity]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
@@ -103,6 +117,7 @@ jobs:
               smoke: "env DB_HOST=x DB_PORT=5432 DB_NAME=x API_GATEWAY_DB_USER=x API_GATEWAY_DB_PASSWORD=x REDIS_HOST=x REDIS_PORT=6379 REDIS_DB=0 JWT_SECRET_KEY=smoke-only-not-a-secret-0123456789abcdef CORS_ORIGINS=https://x python -c \"import main; print('api-gateway serves', main.app.title)\"" }
           - { name: ingestion-service,      context: services/ingestion_service, file: services/ingestion_service/Dockerfile,
               smoke: "env INGESTION_SERVICE_PORT=8003 KAFKA_BOOTSTRAP_SERVERS=x:9092 DEVICE_IDENTITY_HEADERS=x-client python -c \"import main; print('ingestion serves', main.app.title)\"" }
+          # No `smoke`: the edge has its own smoke step below (nginx -t per deployment + behaviour).
           - { name: frontend,               context: services/frontend,        file: services/frontend/Dockerfile }
           # numpy/sklearn/xgboost are C-extension stacks: an ABI mismatch is invisible to a resolve and
           # fatal on import (this is the pyarrow-14-under-numpy-2 break, #209).
@@ -221,6 +236,63 @@ jobs:
           echo "$SMOKE"
           docker run --rm --entrypoint sh "$IMAGE" -c "$SMOKE"
           echo "::endgroup::"
+
+      # The frontend has no Python to import; its smoke is the edge itself. The image renders its
+      # nginx config at start from the upstreams the deployment passes, so `nginx -t` runs on the
+      # config each deployment actually produces — compose's service names and the chart's
+      # rendered Service FQDNs — and the running edge is probed for the behaviour both rely on:
+      # plain requests redirect, a TLS-terminating proxy's X-Forwarded-Proto: https is served (the
+      # Ingress path), the security headers are present, and a missing upstream refuses to start.
+      - uses: actions/setup-python@v7
+        if: github.event_name == 'pull_request' && matrix.name == 'frontend'
+        with:
+          python-version: "3.14"
+      - uses: azure/setup-helm@v5
+        if: github.event_name == 'pull_request' && matrix.name == 'frontend'
+        with:
+          version: v3.16.3
+      - name: Smoke — the edge config each deployment renders passes nginx -t and behaves
+        if: github.event_name == 'pull_request' && matrix.name == 'frontend'
+        env:
+          IMAGE: ${{ env.REGISTRY }}/industryflow-${{ matrix.name }}:${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          pip install --quiet pyyaml==6.0.3
+          python scripts/edge_env.py compose > compose.env
+          python scripts/edge_env.py helm --set notebookHub.enabled=true > helm.env
+          for env in compose helm; do
+            echo "::group::nginx -t with the ${env} upstreams"
+            cat "${env}.env"
+            docker run --rm --env-file "${env}.env" "$IMAGE" nginx -t
+            echo "::endgroup::"
+          done
+          grep -v '^EDGE_ML_SERVICE=' compose.env > incomplete.env
+          if docker run --rm --env-file incomplete.env "$IMAGE" nginx -t; then
+            echo "::error::the edge started without an upstream"; exit 1
+          fi
+          # A stand-in gateway that echoes the Host it receives, to check what the edge forwards.
+          docker network create edgenet
+          docker run -d --name api-gateway --network edgenet python:3.14-slim python -c "
+          import http.server
+          class H(http.server.BaseHTTPRequestHandler):
+              def do_GET(self):
+                  self.send_response(200); self.end_headers(); self.wfile.write(('host=' + self.headers['Host']).encode())
+          http.server.HTTPServer(('', 8000), H).serve_forever()"
+          docker run -d --name edge --network edgenet --env-file compose.env -p 18080:8080 -p 18443:8443 "$IMAGE"
+          trap 'docker logs edge; docker rm -f edge api-gateway' EXIT
+          for i in $(seq 1 30); do curl -fsS http://localhost:18080/healthz >/dev/null 2>&1 && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18080/)" = 301
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' http://localhost:18080/)" = 200
+          headers=$(curl -sk -D - -o /dev/null https://localhost:18443/)
+          for h in Strict-Transport-Security Content-Security-Policy X-Content-Type-Options X-Frame-Options Referrer-Policy; do
+            echo "$headers" | grep -qi "^$h:" || { echo "::error::missing $h"; echo "$headers"; exit 1; }
+          done
+          # The gateway's WebSocket Origin check compares Origin with the host, port included.
+          for path in /ws/sensors /api/alerts; do
+            got=$(curl -sk "https://localhost:18443$path")
+            test "$got" = "host=localhost:18443" || { echo "::error::$path forwarded '$got'"; exit 1; }
+          done
+          echo "edge ok"
 
       - name: Install Trivy
         # A pinned release, checksum-verified. The previous `curl … main/install.sh | sh` ran an

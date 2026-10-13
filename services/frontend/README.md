@@ -39,5 +39,22 @@ Point the dev server at a running gateway by editing the `server.proxy` targets 
 ## Build & serve (container)
 
 The multi-stage `Dockerfile` runs `npm ci && npm run build` on `node:22-alpine`, then copies
-`build/` into `nginxinc/nginx-unprivileged`. `nginx.conf` reverse-proxies the API prefixes to the
-gateway/ml-service and serves the SPA (`try_files … /index.html`).
+`build/` into `nginxinc/nginx-unprivileged`. `nginx.conf.template` reverse-proxies the API prefixes
+to the gateway/ml-service and serves the SPA (`try_files … /index.html`) with the edge's security
+headers (HSTS, CSP, frame/sniff/referrer policy).
+
+The config is rendered at container start by `docker-entrypoint-edge.sh` from the deployment's
+upstreams, and the container refuses to start if one is missing:
+
+| Variable | Compose | Helm |
+|---|---|---|
+| `EDGE_API_GATEWAY` | `api-gateway:8000` | the release's api-gateway Service FQDN |
+| `EDGE_ML_SERVICE` | `ml-service-api:8002` | the ml-service-api Service FQDN |
+| `EDGE_NOTEBOOK_SSO` | `notebook-sso:8080` | the notebook SSO proxy Service FQDN |
+| `EDGE_TRACKING_GATEWAY` | `notebook-tracking-gateway:5050` | the tracking gateway Service FQDN |
+| `EDGE_OBJECT_STORE_URL` | `http://minio:9000` | the in-cluster store Service FQDN URL, or `infra.minio.external.endpoint` |
+| `EDGE_RESOLVER` | optional (default: the container's nameservers) | same |
+
+Kubernetes names must be fully qualified: upstreams are re-resolved per request through the
+resolver, which applies no search domains. TLS terminates on 8443, or in front of 8080 when the
+proxy says so with `X-Forwarded-Proto: https` (the Ingress); other plain requests are redirected.

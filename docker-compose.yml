@@ -4,23 +4,33 @@
 
 # IndustryFlow - Docker Compose
 
-# DB TLS (ADR-0017): clients verify the TimescaleDB server cert against the internal CA. The CA
-# is mounted read-only into each DB client; DB_SSLMODE is overridable (.env) — default
-# verify-full, set 'disable' for a bare dev stack with no generated certs.
+# DB TLS (ADR-0017): clients verify the TimescaleDB server cert against the internal CA, which is
+# mounted read-only into each DB client. With TLS_CERT_DIR set that is the internal CA from
+# scripts/gen-internal-ca.sh; unset (a bare `docker compose up`), it is the db-ca volume, where
+# db-cert-init publishes the CA of the cert it staged. The server accepts TLS only (pg_hba is
+# hostssl), so there is no sslmode that skips it.
 x-db-tls-env: &db-tls-env
   DB_SSLMODE: ${DB_SSLMODE:-verify-full}
   DB_SSLROOTCERT: /etc/ssl/industryflow/ca.crt
-x-ca-mount: &ca-mount "${TLS_CERT_DIR:-frontend-certs}:/etc/ssl/industryflow:ro"
+x-ca-mount: &ca-mount "${TLS_CERT_DIR:-db-ca}:/etc/ssl/industryflow:ro"
 
 # Spark checkpoint on object storage (ADR-0006). The driver reads/writes the same checkpoint as
 # the executors, so on a multi-worker cluster it must live on ONE store visible to all — MinIO
 # via S3A, not a local volume (docs/architecture/stream-processing.md). The job's SparkSession
 # enables S3A when CHECKPOINT_LOCATION is an s3a:// URI. Set it to a local path to opt out.
+# The jobs authenticate with the checkpoint-only principal minio-init creates, never the root key:
+# it reaches the checkpoint bucket and nothing else (ADR-0025 dec 11). The job reads it under the
+# MINIO_* names.
 x-spark-s3a-env: &spark-s3a-env
   CHECKPOINT_LOCATION: ${SPARK_CHECKPOINT_LOCATION:-s3a://spark-checkpoints}
   MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
-  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+  MINIO_ACCESS_KEY: ${SPARK_CHECKPOINT_ACCESS_KEY}
+  MINIO_SECRET_KEY: ${SPARK_CHECKPOINT_SECRET_KEY}
+
+# Third-party images are pinned by tag AND digest, exactly as the Helm chart pins the same image
+# (ADR-0009, ADR-0016: no :latest). A tag alone is a moving pointer; the digest is what ran.
+# tests/config_guards fails on an unpinned image or on a compose/Helm mismatch, so a bump (Dependabot
+# updates this file) has to land in both deployments together.
 
 services:
   # ==========================================================================
@@ -29,7 +39,7 @@ services:
 
   # Zookeeper - Kafka coordination
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
+    image: confluentinc/cp-zookeeper:7.5.0@sha256:02f6c042bb9a7844382fc4cedc513a44585d8a5acae873fb9e510e3ca9dcabc6
     container_name: industryflow-zookeeper
     ports:
       - "127.0.0.1:2181:2181"
@@ -50,7 +60,7 @@ services:
 
   # Kafka - Message streaming
   kafka:
-    image: confluentinc/cp-kafka:7.5.0
+    image: confluentinc/cp-kafka:7.5.0@sha256:fbbb6fa11b258a88b83f54d4f0bddfcffbf2279f99d66a843486e3da7bdfbf41
     container_name: industryflow-kafka
     depends_on:
       zookeeper:
@@ -82,10 +92,13 @@ services:
 
   # Stages the TimescaleDB TLS cert into a postgres-owned volume with 0600 perms (ADR-0017):
   # Postgres refuses a key it doesn't own / that is group-readable, which a bind mount can't
-  # satisfy. Uses the CA-signed db.crt/db.key from TLS_CERT_DIR if present, else self-signs a
-  # dev cert so `ssl=on` never breaks a bare `docker compose up`.
+  # satisfy. Uses the CA-signed db.crt/db.key from TLS_CERT_DIR if present; else keeps the cert an
+  # earlier run staged; else self-signs one, so `ssl=on` never breaks a bare `docker compose up`.
+  # Reusing matters: this runs on every `up`, and a fresh cert per run would leave a running
+  # server on the old one while clients are handed the new CA. Then it publishes the staged CA to
+  # db-ca, the clients' default CA mount, so verify-full works with or without TLS_CERT_DIR.
   db-cert-init:
-    image: alpine:3.20
+    image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
     container_name: industryflow-db-cert-init
     command:
       - sh
@@ -95,6 +108,8 @@ services:
           cp /src/db.crt /dst/db.crt; cp /src/db.key /dst/db.key
           { [ -f /src/ca.crt ] && cp /src/ca.crt /dst/ca.crt; } || cp /src/db.crt /dst/ca.crt
           echo "staged CA-signed DB cert"
+        elif [ -f /dst/db.key ] && [ -f /dst/db.crt ] && [ -f /dst/ca.crt ]; then
+          echo "keeping the DB cert staged by an earlier run"
         else
           apk add --no-cache openssl >/dev/null
           openssl req -x509 -nodes -newkey rsa:2048 -days 825 -keyout /dst/db.key -out /dst/db.crt \
@@ -103,16 +118,20 @@ services:
           echo "generated self-signed DB cert (dev fallback)"
         fi
         chown -R 70:70 /dst && chmod 600 /dst/db.key && chmod 644 /dst/db.crt /dst/ca.crt
+        cp /dst/ca.crt /ca/ca.crt && chmod 644 /ca/ca.crt
+        echo "published the DB CA to the client CA volume"
     volumes:
+      # Only TLS_CERT_DIR is a real source; the frontend-certs fallback never holds db.* files.
       - "${TLS_CERT_DIR:-frontend-certs}:/src:ro"
       - db-certs:/dst
+      - db-ca:/ca
     restart: "no"
     networks:
       - industryflow-network
 
   # TimescaleDB - Time-series database
   timescaledb:
-    image: timescale/timescaledb:latest-pg15
+    image: timescale/timescaledb:latest-pg15@sha256:d621009854b8519a1bf63f81eebc979c1acc06a16843086f244edd44dcce6eea
     container_name: industryflow-timescaledb
     depends_on:
       db-cert-init:
@@ -135,11 +154,10 @@ services:
       NOTEBOOK_SQL_PROXY_DB_PASSWORD: ${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}
       # Cold-layer exporter role (ADR-0025) — created at init; the exporter connects as it.
       COLD_EXPORT_DB_PASSWORD: ${COLD_EXPORT_DB_PASSWORD:-}
-
-      # Postgres configuration - HIGH THROUGHPUT
-      POSTGRES_SHARED_BUFFERS: 512MB
-      POSTGRES_EFFECTIVE_CACHE_SIZE: 2GB
-      POSTGRES_MAX_CONNECTIONS: 400
+      # Read-only monitoring role (pg_monitor) the postgres-exporter connects as (ADR-0016 dec 3).
+      METRICS_DB_PASSWORD: ${METRICS_DB_PASSWORD}
+    # Server settings (connections, memory) live in postgresql.conf, mounted below; the image reads
+    # no POSTGRES_* tuning variables.
     command:
       - postgres
       - -c
@@ -163,7 +181,7 @@ services:
 
   # Redis - Caching layer
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     container_name: industryflow-redis
     ports:
       - "127.0.0.1:${REDIS_PORT}:6379"
@@ -234,98 +252,51 @@ services:
       - notebook-kernels
     restart: unless-stopped
 
-  # MinIO bucket bootstrap — one-shot that creates the buckets the platform needs (the Spark
-  # S3A checkpoint store, plus the MLflow artifact bucket) and exits. Idempotent: `mc mb -p`
-  # is a no-op if a bucket already exists, so it is safe on every `up`. Spark jobs gate on this
-  # completing (depends_on: service_completed_successfully).
+  # Object-store bootstrap (infrastructure/minio/minio-init.sh — the same script the Helm chart's
+  # minio-init Job runs): the buckets, the upload-staging expiry, and one SCOPED principal per
+  # consumer. The root key is used here and by the server only; every service below authenticates
+  # with its own principal, scoped to the bucket (or prefix) its job touches. Idempotent, so it is
+  # safe on every `up`; the services that need a bucket or principal gate on it completing.
   minio-init:
-    # The -dev variant: the init script needs a shell, grep and cat, which the minimal one lacks.
+    # The -dev variant: the init script needs a shell, grep and mktemp, which the minimal one lacks.
     image: cgr.dev/chainguard/minio-client:latest-dev@sha256:207b9a2045f01cef90feda8127a55f769115e060d8350dcb3a29593fc81166ac
     container_name: industryflow-minio-init
     depends_on:
       minio:
         condition: service_healthy
     environment:
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_SECRET_KEY: ${MINIO_SECRET_KEY}
       SPARK_CHECKPOINT_BUCKET: ${SPARK_CHECKPOINT_BUCKET:-spark-checkpoints}
-      # Where an uploaded artifact rests while it is judged (ADR-0030). It shares the artifact
-      # bucket but sits OUTSIDE every tenant prefix, which is what makes it unreachable through the
-      # artifact plane — that plane rewrites every key under the caller's own prefix. The expiry is
-      # the only thing that collects an upload nobody ever committed. Must match the gateway's
-      # staging root.
-      UPLOAD_STAGING_BUCKET: ${UPLOAD_STAGING_BUCKET:-mlflow}
+      # MLflow's --artifacts-destination and the tracking gateway's TRACKING_ARTIFACT_BUCKET.
+      ARTIFACT_BUCKET: mlflow
+      BACKUP_BUCKET: ${BACKUP_S3_BUCKET:-industryflow-backups}
+      COLD_STORE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
+      # Where an uploaded artifact rests while it is judged (ADR-0030): the artifact bucket, OUTSIDE
+      # every tenant prefix, which is what makes it unreachable through the artifact plane. The
+      # expiry collects an upload nobody ever committed. Must match the gateway's staging root.
       UPLOAD_STAGING_PREFIX: ${UPLOAD_STAGING_PREFIX:-_upload-staging/}
       UPLOAD_STAGING_EXPIRE_DAYS: ${UPLOAD_STAGING_EXPIRE_DAYS:-1}
-      # Cold layer (ADR-0025): bucket + a WRITE-SCOPED principal the exporter uses (never the root
-      # keys). Created here so the box mirrors the Helm minio-cold-init Job.
-      COLD_STORE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
+      # One principal per consumer (see the script's table).
+      SPARK_CHECKPOINT_ACCESS_KEY: ${SPARK_CHECKPOINT_ACCESS_KEY}
+      SPARK_CHECKPOINT_SECRET_KEY: ${SPARK_CHECKPOINT_SECRET_KEY}
+      MLFLOW_STORE_ACCESS_KEY: ${MLFLOW_STORE_ACCESS_KEY}
+      MLFLOW_STORE_SECRET_KEY: ${MLFLOW_STORE_SECRET_KEY}
+      MODEL_READ_ACCESS_KEY: ${MODEL_READ_ACCESS_KEY}
+      MODEL_READ_SECRET_KEY: ${MODEL_READ_SECRET_KEY}
+      BACKUP_STORE_ACCESS_KEY: ${BACKUP_STORE_ACCESS_KEY}
+      BACKUP_STORE_SECRET_KEY: ${BACKUP_STORE_SECRET_KEY}
+      # Profile-scoped consumers (notebooks, cold-export): provisioned when their keys are set.
+      TRACKING_STORE_ACCESS_KEY: ${TRACKING_STORE_ACCESS_KEY:-}
+      TRACKING_STORE_SECRET_KEY: ${TRACKING_STORE_SECRET_KEY:-}
       COLD_STORE_ACCESS_KEY: ${COLD_STORE_ACCESS_KEY:-}
       COLD_STORE_SECRET_KEY: ${COLD_STORE_SECRET_KEY:-}
-      # Read-only cold principal the cold-store broker uses to vend pre-signed GETs (ADR-0025 read
-      # side) — separate from the write principal above and from the root keys.
       COLD_READ_ACCESS_KEY: ${COLD_READ_ACCESS_KEY:-}
       COLD_READ_SECRET_KEY: ${COLD_READ_SECRET_KEY:-}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -e
-        mc alias set local http://minio:9000 "$$MINIO_ACCESS_KEY" "$$MINIO_SECRET_KEY"
-        mc mb -p "local/$$SPARK_CHECKPOINT_BUCKET"
-        mc mb -p local/mlflow
-        mc mb -p "local/$$COLD_STORE_BUCKET"
-        # Expire abandoned uploads (ADR-0030). An artifact is staged before it is judged, so
-        # unadmitted bytes have a home — one no tenant can address and nothing loads. An upload that
-        # is staged and never committed is a certainty rather than an edge case (a closed laptop is
-        # enough), and nothing in the request path will ever come back to clean it up: the only
-        # actor who knew about it has gone. Admitted and refused uploads are both cleared at commit;
-        # this is for the third case, where commit never happens.
-        # Idempotent by CHECKING, not by hoping `add` fails: it does not — it happily adds a second
-        # rule for the same prefix, and this init runs on every `up`. Found by counting the rules on
-        # a box that had run it twice.
-        if mc ilm rule ls "local/$$UPLOAD_STAGING_BUCKET" 2>/dev/null | grep -q "$$UPLOAD_STAGING_PREFIX"; then
-          echo "upload-staging expiry already present on $$UPLOAD_STAGING_BUCKET"
-        else
-          mc ilm rule add "local/$$UPLOAD_STAGING_BUCKET" \
-            --prefix "$$UPLOAD_STAGING_PREFIX" \
-            --expire-days "$$UPLOAD_STAGING_EXPIRE_DAYS"
-          echo "upload-staging expiry set: $$UPLOAD_STAGING_BUCKET/$$UPLOAD_STAGING_PREFIX after $${UPLOAD_STAGING_EXPIRE_DAYS}d"
-        fi
-        # Write-scoped cold-export principal: put/get/list on ONLY the cold bucket. Only set up
-        # when its keys are provided (cold-export profile); tolerate re-runs (mc create/user add
-        # error if they already exist).
-        if [ -n "$$COLD_STORE_ACCESS_KEY" ] && [ -n "$$COLD_STORE_SECRET_KEY" ]; then
-          cat > /tmp/cold-rw.json <<EOF
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET"]},
-            {"Effect": "Allow", "Action": ["s3:PutObject", "s3:GetObject"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET/*"]}
-          ]
-        }
-        EOF
-          mc admin policy create local cold-export-rw /tmp/cold-rw.json || true
-          mc admin user add local "$$COLD_STORE_ACCESS_KEY" "$$COLD_STORE_SECRET_KEY" || true
-          mc admin policy attach local cold-export-rw --user "$$COLD_STORE_ACCESS_KEY" || true
-          echo "cold write principal ready on $$COLD_STORE_BUCKET"
-        fi
-        # Read-only cold principal for the broker: get/list on ONLY the cold bucket, NO put/delete.
-        if [ -n "$$COLD_READ_ACCESS_KEY" ] && [ -n "$$COLD_READ_SECRET_KEY" ]; then
-          cat > /tmp/cold-ro.json <<EOF
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET"]},
-            {"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": ["arn:aws:s3:::$$COLD_STORE_BUCKET/*"]}
-          ]
-        }
-        EOF
-          mc admin policy create local cold-broker-ro /tmp/cold-ro.json || true
-          mc admin user add local "$$COLD_READ_ACCESS_KEY" "$$COLD_READ_SECRET_KEY" || true
-          mc admin policy attach local cold-broker-ro --user "$$COLD_READ_ACCESS_KEY" || true
-          echo "cold read principal ready on $$COLD_STORE_BUCKET"
-        fi
-        echo "buckets ready: $$SPARK_CHECKPOINT_BUCKET, mlflow, $$COLD_STORE_BUCKET"
+    entrypoint: ["/bin/sh", "/opt/minio-init.sh"]
+    volumes:
+      - ./infrastructure/minio/minio-init.sh:/opt/minio-init.sh:ro
     networks:
       - industryflow-network
     restart: "no"
@@ -346,8 +317,9 @@ services:
       PGSSLMODE: ${DB_SSLMODE:-verify-full}
       PGSSLROOTCERT: /etc/ssl/industryflow/ca.crt
       MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
-      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      # The artifact-bucket principal minio-init creates (read/write on that bucket only).
+      AWS_ACCESS_KEY_ID: ${MLFLOW_STORE_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MLFLOW_STORE_SECRET_KEY}
     # List form (not a folded scalar): the `&` in a URI query string truncates a `command: >`
     # block, which silently dropped --host/--port and left MLflow bound to localhost. TLS to the
     # DB is supplied by PGSSLMODE/PGSSLROOTCERT above, so the URI needs no query params.
@@ -372,8 +344,9 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      # The artifact bucket and this server's principal exist only once minio-init has run.
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       # Slim image has no curl — use the Python stdlib. Longer start_period: mlflow boots slowly.
       test: [ "CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/health').status==200 else 1)" ]
@@ -393,7 +366,10 @@ services:
 
   # Spark Master
   spark-master:
-    image: apache/spark:4.1.3-python3
+    # The stock image on the SAME Spark as the job/worker images' base (services/spark_jobs/
+    # Dockerfile.*); a master behind its workers is a mixed-version cluster. Guarded by
+    # scripts/check_spark_version_parity.py.
+    image: apache/spark:4.1.3-python3@sha256:bf9d035a7c32a8ca46aa58d6348182ffd7d2dff6409206ecfbb3915ff1fef211
     container_name: industryflow-spark-master
     ports:
       - "127.0.0.1:7077:7077"
@@ -458,8 +434,8 @@ services:
       <<: [*db-tls-env, *spark-s3a-env]
       # Spark configuration
       SPARK_MASTER: spark://spark-master:7077
-      SPARK_DRIVER_MEMORY: 2g
-      SPARK_EXECUTOR_MEMORY: 2g
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-2g}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-2g}
       # Resource budget on the shared worker (ADR-0006): cores capped so streaming +
       # aggregations coexist (sum <= SPARK_WORKER_CORES). Raise these / add workers to scale.
       SPARK_CORES_MAX: ${SPARK_STREAMING_CORES_MAX:-1}
@@ -499,8 +475,8 @@ services:
       <<: [*db-tls-env, *spark-s3a-env]
       # Spark configuration
       SPARK_MASTER: spark://spark-master:7077
-      SPARK_DRIVER_MEMORY: 2g
-      SPARK_EXECUTOR_MEMORY: 2g
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-2g}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-2g}
       # Aggregations runs 3 windowed streams; give it the larger share of the worker
       # (sum with streaming <= SPARK_WORKER_CORES). Raise / add workers to scale.
       SPARK_CORES_MAX: ${SPARK_AGG_CORES_MAX:-3}
@@ -579,14 +555,19 @@ services:
     build:
       context: ./services/frontend
       dockerfile: Dockerfile
-      args:
-        REACT_APP_API_URL: ${REACT_APP_API_URL:-}
-        REACT_APP_WS_URL: ${REACT_APP_WS_URL:-}
     container_name: industryflow-frontend
     environment:
       # Extra SANs for the self-signed dev cert, e.g. the host LAN IP
       # ("IP:<host-ip>"). Ignored when a real cert is mounted at /etc/nginx/certs.
       CERT_EXTRA_SAN: ${CERT_EXTRA_SAN:-}
+      # The edge's upstreams (services/frontend/nginx.conf.template); the container refuses to
+      # start without them. Re-resolved per request through Docker's embedded DNS, so a recreated
+      # service is followed and the opt-in notebooks plane answers 502 while it is down.
+      EDGE_API_GATEWAY: api-gateway:8000
+      EDGE_ML_SERVICE: ml-service-api:8002
+      EDGE_NOTEBOOK_SSO: notebook-sso:8080
+      EDGE_TRACKING_GATEWAY: notebook-tracking-gateway:5050
+      EDGE_OBJECT_STORE_URL: ${MINIO_ENDPOINT:-http://minio:9000}
     ports:
       # Unprivileged nginx listens on 8443/8080 inside the container; host ports unchanged.
       - "${FRONTEND_HTTPS_PORT:-3443}:8443"
@@ -634,7 +615,7 @@ services:
   # mTLS ingestion edge (ADR-0002): verifies device client certs against the device CA +
   # CRL and forwards the verified identity to ingestion-service (the only way in).
   ingestion-edge:
-    image: nginx:1.27-alpine
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     container_name: industryflow-ingestion-edge
     ports:
       - "${INGESTION_MTLS_PORT:-8443}:8443"
@@ -718,8 +699,10 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
+      # Ready, not just started: the detector exits when its consumer loop dies (and is restarted),
+      # so starting it before the broker accepts connections only buys a startup restart loop.
       kafka:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
@@ -777,9 +760,11 @@ services:
       MODEL_CACHE_SIZE: ${MODEL_CACHE_SIZE:-8}
       # Extension plugin modules to import at startup (ADR-0010); empty = generic built-ins.
       EXTENSION_MODULES: ${EXTENSION_MODULES:-}
-      # MinIO/S3 credentials for loading models from MLflow
-      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      # Read-only object-store principal, scoped to admitted uploads (tenant_*/uploads/*): an
+      # uploaded artifact is registered by its s3:// location (ADR-0030), so loading it reads the
+      # store directly. Tracked models are reached through the tracking server and need nothing.
+      AWS_ACCESS_KEY_ID: ${MODEL_READ_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MODEL_READ_SECRET_KEY}
       MLFLOW_S3_ENDPOINT_URL: ${MINIO_ENDPOINT}
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
@@ -906,7 +891,7 @@ services:
       SQL_PROXY_TENANT_LOGIN_KEY: ${NOTEBOOK_SQL_PROXY_TENANT_KEY:-}
       SQL_PROXY_DB_NAME: ${DB_NAME}
       # Upstream TLS to the hardened DB (ADR-0017): verify the server cert against the same
-      # internal CA every DB client trusts. Set DB_SSLMODE=disable for a dev DB without certs.
+      # internal CA every DB client trusts.
       SQL_PROXY_DB_SSLMODE: ${DB_SSLMODE:-verify-full}
       SQL_PROXY_DB_SSLROOTCERT: /etc/ssl/industryflow/ca.crt
     volumes:
@@ -944,12 +929,17 @@ services:
       # the store; unset, pre-signing falls back to the interior endpoint and only an in-cluster
       # client can follow the URL — the pre-change behaviour, unaffected.
       TRACKING_S3_PRESIGN_ENDPOINT_URL: ${PUBLIC_BASE_URL:-}
-      TRACKING_S3_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      TRACKING_S3_SECRET_KEY: ${MINIO_SECRET_KEY}
+      # The gateway's own artifact-bucket principal (ADR-0030 dec 2: the one writer on the upload
+      # path); provisioned by minio-init when these are set.
+      TRACKING_S3_ACCESS_KEY: ${TRACKING_STORE_ACCESS_KEY:-}
+      TRACKING_S3_SECRET_KEY: ${TRACKING_STORE_SECRET_KEY:-}
     depends_on:
-      - redis
-      - mlflow
-      - minio
+      redis:
+        condition: service_started
+      mlflow:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
     networks:
       - industryflow-network
       - notebook-kernels
@@ -990,7 +980,7 @@ services:
   # No host port and no cert: it is never reached directly, only through the frontend.
   notebook-sso:
     profiles: ["notebooks"]
-    image: nginx:1.27-alpine
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     container_name: industryflow-notebook-sso
     volumes:
       - ./services/notebook_hub/sso-nginx.conf:/etc/nginx/nginx.conf:ro
@@ -1007,7 +997,7 @@ services:
 
   # Prometheus - Metrics collection and storage
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
     container_name: industryflow-prometheus
     ports:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
@@ -1032,7 +1022,7 @@ services:
 
   # cAdvisor - Container metrics
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
+    image: gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
     container_name: industryflow-cadvisor
     privileged: true
     volumes:
@@ -1051,7 +1041,7 @@ services:
 
   # Node Exporter - System metrics
   node-exporter:
-    image: prom/node-exporter:latest
+    image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
     container_name: industryflow-node-exporter
     command:
       - '--path.procfs=/host/proc'
@@ -1068,14 +1058,15 @@ services:
       - industryflow-network
     restart: unless-stopped
 
-  # PostgreSQL Exporter - Database metrics
+  # PostgreSQL Exporter - Database metrics. Connects as the read-only monitoring role (pg_monitor),
+  # never the superuser (ADR-0016 dec 3) — the same role and TLS mode as the Helm exporter.
   postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:latest
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
     container_name: industryflow-postgres-exporter
     environment:
-      DATA_SOURCE_USER: ${DB_USER}
-      DATA_SOURCE_PASS: ${DB_PASSWORD}
-      DATA_SOURCE_URI: "timescaledb:${DB_PORT}/${DB_NAME}?sslmode=verify-full&sslrootcert=/etc/ssl/industryflow/ca.crt"
+      DATA_SOURCE_USER: metrics_user
+      DATA_SOURCE_PASS: ${METRICS_DB_PASSWORD}
+      DATA_SOURCE_URI: "timescaledb:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSLMODE:-verify-full}&sslrootcert=/etc/ssl/industryflow/ca.crt"
     ports:
       - "127.0.0.1:9187:9187"
     volumes:
@@ -1083,12 +1074,13 @@ services:
     networks:
       - industryflow-network
     depends_on:
-      - timescaledb
+      timescaledb:
+        condition: service_healthy
     restart: unless-stopped
 
   # Redis Exporter - Cache metrics
   redis-exporter:
-    image: oliver006/redis_exporter:latest
+    image: oliver006/redis_exporter:v1.93.0@sha256:6ca518a72f30f7f576ef92963de1b91d3c3f5fd3aeac949f878bfda183587820
     container_name: industryflow-redis-exporter
     environment:
       REDIS_ADDR: "redis:6379"
@@ -1102,7 +1094,7 @@ services:
 
   # Kafka Exporter - Kafka metrics
   kafka-exporter:
-    image: danielqsj/kafka-exporter:latest
+    image: danielqsj/kafka-exporter:v1.10.0@sha256:346a53c2489a3530790d01f7b96632496d0d58926662f4c35bb65f569db2ab42
     container_name: industryflow-kafka-exporter
     command:
       - '--kafka.server=kafka:29092'
@@ -1116,7 +1108,7 @@ services:
 
   # Grafana - Monitoring & Dashboards
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
     container_name: industryflow-grafana
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
@@ -1124,7 +1116,6 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_INSTALL_PLUGINS: ""
-      DB_PASSWORD: ${DB_PASSWORD}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./infrastructure/grafana/provisioning/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
@@ -1134,7 +1125,6 @@ services:
     networks:
       - industryflow-network
     depends_on:
-      - timescaledb
       - prometheus
       - loki
     restart: unless-stopped
@@ -1146,7 +1136,7 @@ services:
 
   # Loki - Log aggregation
   loki:
-    image: grafana/loki:2.9.3
+    image: grafana/loki:2.9.3@sha256:eb92f1a439171542fd718f929fad38c917b3cad15ec830ba4742e2ba5ab03313
     container_name: industryflow-loki
     ports:
       - "127.0.0.1:3100:3100"
@@ -1165,7 +1155,7 @@ services:
 
   # Promtail - Log collector
   promtail:
-    image: grafana/promtail:2.9.3
+    image: grafana/promtail:2.9.3@sha256:b338a29de45ef8ffa96f882f3a36306b1e61262b2a560ff523e0e2633cccbbc4
     container_name: industryflow-promtail
     command: -config.file=/etc/promtail/promtail-config.yml
     volumes:
@@ -1199,8 +1189,10 @@ services:
       PGPORT: ${DB_PORT}
       PGUSER: ${DB_USER}
       PGPASSWORD: ${DB_PASSWORD}
-      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      # The backup bucket's own principal (read/write/delete there only), created by minio-init
+      # together with the bucket.
+      AWS_ACCESS_KEY_ID: ${BACKUP_STORE_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_STORE_SECRET_KEY}
       AWS_DEFAULT_REGION: ${BACKUP_S3_REGION:-us-east-1}
       S3_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
       S3_BUCKET: ${BACKUP_S3_BUCKET:-industryflow-backups}
@@ -1208,12 +1200,16 @@ services:
       DATABASES: ${BACKUP_DATABASES:-industryflow mlflow}
       RETAIN_PER_DB: ${BACKUP_RETAIN_PER_DB:-14}
       # Cold-layer mirror (ADR-0025): the cold bucket is the only copy of raw history older than the
-      # export horizon. Read with the read-only cold principal; empty keys fall back to the ones above.
+      # export horizon. Read with the read-only cold principal (minio-init.sh cold-broker-ro); the
+      # backup principal above cannot read the cold bucket.
       COLD_SOURCE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
       COLD_SOURCE_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
       COLD_SOURCE_ACCESS_KEY_ID: ${COLD_READ_ACCESS_KEY:-}
       COLD_SOURCE_SECRET_ACCESS_KEY: ${COLD_READ_SECRET_KEY:-}
       COLD_BACKUP_PREFIX: ${BACKUP_COLD_PREFIX:-cold}
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
@@ -1266,6 +1262,8 @@ volumes:
   redis-data:
   minio-data:
   db-certs:
+  # The DB CA db-cert-init publishes for clients when TLS_CERT_DIR is unset (x-ca-mount).
+  db-ca:
   ml-models:
     driver: local
   notebook-hub-data:

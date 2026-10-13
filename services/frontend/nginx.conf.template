@@ -1,0 +1,185 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The platform's TLS edge (ADR-0004 dec 1): serves the SPA and reverse-proxies the API same-origin.
+#
+# TEMPLATE. /docker-entrypoint.d/10-edge-config.sh renders it at container start, substituting ONLY
+# the ${EDGE_*} upstreams below (nginx's own $variables pass through untouched) and refusing to
+# start if one is unset. The deployment names its own upstreams: compose passes its service names,
+# the Helm chart passes the release's Service FQDNs. Every upstream is a variable resolved per
+# request through ${EDGE_RESOLVER} (default: the container's own nameservers, so Docker's embedded
+# DNS under compose and the cluster DNS under Kubernetes): a recreated service is followed rather
+# than pinned to the address nginx saw at boot, and an opt-in plane (notebooks) that is not
+# deployed answers 502 instead of stopping the edge from starting. Because a resolver does not
+# apply search domains, the Kubernetes names must be fully qualified.
+
+# TLS is terminated either HERE (8443) or by a proxy in front that says so (the Kubernetes Ingress
+# reaches 8080 with X-Forwarded-Proto: https). Anything else on 8080 is plain HTTP from a client and
+# is redirected (ADR-0004 dec 1) — except the probe. A client that forges the header on 8080 only
+# chooses plaintext for itself; it gains nothing it could not get by not following the redirect.
+map "$scheme:$http_x_forwarded_proto:$uri" $edge_redirect_to_https {
+    default            1;
+    "~^https:"         0;
+    "~^http:https:"    0;
+    "~^http:[^:]*:/healthz$" 0;
+}
+
+# The SPA's Content-Security-Policy (ADR-0004). It allows exactly what the built app loads: its own
+# bundle, the inline <style> in index.html, the Google Fonts stylesheet and font files theme.css
+# imports, same-origin API/WebSocket calls (connect-src 'self' covers ws(s): on the same host) and
+# the same-origin notebook iframe. The hub under /jupyter/ and the gateway's /docs page are other
+# applications with their own needs (the hub sets its own policy), so the edge sets none there.
+map $uri $edge_csp {
+    default "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'";
+    ~^/jupyter/ "";
+    ~^/docs     "";
+}
+map $uri $edge_frame_options {
+    default     SAMEORIGIN;
+    ~^/jupyter/ "";
+}
+
+server {
+    # Unprivileged nginx listens on high ports; the published host ports are the deployment's.
+    listen 8080;
+    listen 8443 ssl;
+    http2 on;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # TLS: a real certificate is mounted at /etc/nginx/certs in production; the entrypoint
+    # generates a self-signed one for local development if none is present.
+    ssl_certificate     /etc/nginx/certs/tls.crt;
+    ssl_certificate_key /etc/nginx/certs/tls.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    resolver ${EDGE_RESOLVER} valid=10s ipv6=off;
+
+    if ($edge_redirect_to_https) {
+        return 301 https://$host$request_uri;
+    }
+
+    # Security headers on every response (ADR-0004). Set here, at server level, ONLY: nginx drops
+    # inherited add_header directives in any location that declares one of its own, so no location
+    # below may use add_header. An empty value (the maps above) sends no header.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header X-Frame-Options $edge_frame_options always;
+    add_header Content-Security-Policy $edge_csp always;
+
+    # The container probe (plain HTTP, so it does not depend on the certificate).
+    location = /healthz {
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # The Host exactly as the client sent it, port included ($http_host, not $host): the gateway's
+    # WebSocket Origin check compares the Origin with the request host, and a browser on a
+    # non-default port (compose's :3443) sends both with the port.
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+
+    set $api_gateway        ${EDGE_API_GATEWAY};
+    set $ml_service         ${EDGE_ML_SERVICE};
+    set $notebook_sso       ${EDGE_NOTEBOOK_SSO};
+    set $tracking_gateway   ${EDGE_TRACKING_GATEWAY};
+    set $artifact_store     ${EDGE_OBJECT_STORE_URL};
+
+    # ML service owns the model-registry, experiment and feature-config API surfaces; they live on
+    # the ML service, not the gateway. These more-specific prefixes win over the generic /api/
+    # below, keeping the app same-origin (ADR-0004 / ADR-0009). The tracking gateway serves the
+    # *kernel's* MLflow traffic (ADR-0019); these are the browser's tenant-scoped read-paths.
+    location /api/models             { proxy_pass http://$ml_service; }
+    location /api/registered-models  { proxy_pass http://$ml_service; }
+    location /api/experiments        { proxy_pass http://$ml_service; }
+    location /api/feature-configs    { proxy_pass http://$ml_service; }
+    # What this deployment can load and interpret (ADR-0027/0028): the upload wizard reads the
+    # score-semantics vocabulary and servable flavors from here rather than keeping its own copy,
+    # which would drift the first time an operator installed an adapter.
+    location /api/ml/                { proxy_pass http://$ml_service; }
+    # On-demand model-drift evaluation (ADR-0021): windowed evidently compute can run tens of
+    # seconds, so give it a longer read timeout than the default 60s and keep it same-origin.
+    location /api/drift {
+        proxy_pass http://$ml_service;
+        proxy_read_timeout 120s;
+    }
+
+    # Reverse-proxy the rest of the API to the gateway so the app is same-origin: cookies
+    # are first-party and no CORS is needed (ADR-0004 / ADR-0009).
+    location /api/         { proxy_pass http://$api_gateway; }
+    location /auth/        { proxy_pass http://$api_gateway; }
+    location /users/       { proxy_pass http://$api_gateway; }
+    location = /health     { proxy_pass http://$api_gateway; }
+    location /docs         { proxy_pass http://$api_gateway; }
+    location /openapi.json { proxy_pass http://$api_gateway; }
+
+    # WebSocket (sensor stream) — wss:// terminates here, proxied to the gateway.
+    # Declaring proxy_set_header here drops every inherited one (nginx inheritance), so the
+    # forwarding headers are restated: without them the gateway saw Host = its own upstream name.
+    location /ws/ {
+        proxy_pass http://$api_gateway;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+    }
+
+    # Embedded notebooks (ADR-0014 single-origin): the hub is mounted under /jupyter/ via its SSO
+    # proxy, so it is same-origin with the app — the session cookie is first-party and the
+    # /notebooks page can iframe it without cross-origin framing. The SSO proxy validates the
+    # session against the gateway and forwards the verified identity to the hub. WebSocket-heavy
+    # (Lab/kernel channels).
+    location /jupyter/ {
+        proxy_pass http://$notebook_sso;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+    }
+
+    # Upload plane (ADR-0030 dec 10): the tracking gateway's stage/commit reachable at the edge, so
+    # the browser decision 3 named can drive an upload — not only an in-cluster kernel. Same-origin,
+    # so the upload capability rides a first-party request and no CORS is needed (ADR-0004 / ADR-0009).
+    location /api/2.0/industryflow-upload/ {
+        proxy_pass http://$tracking_gateway;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # The pre-admission staging area of the artifact store, reachable at the edge for the direct
+    # pre-signed PUT the gateway hands the client. ADR-0019 dec 6 keeps the bytes off the mediator;
+    # ADR-0030 dec 10 keeps them at the same edge, so the browser's PUT is same-origin. Access is
+    # pre-signed-only — the bucket is not public, so the store refuses an unsigned request — and the
+    # location is SCOPED to the pre-admission prefix, so nothing already admitted into a tenant
+    # namespace is reachable here. The Host the browser sends is the one the URL was signed against,
+    # so the store recomputes the same signature. Streamed (not buffered) and uncapped: an
+    # externally-trained model is the largest artifact the platform handles.
+    location /mlflow/_upload-staging/ {
+        proxy_pass $artifact_store;
+        # As sent, port included: the pre-signed signature covers the host:port it was signed for.
+        proxy_set_header Host $http_host;
+        client_max_body_size 0;
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    # Single-page app: serve index.html for any non-file route (client-side routing).
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

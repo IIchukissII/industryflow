@@ -90,5 +90,6 @@ def test_staging_shares_the_artifact_bucket_and_is_kept_out_by_prefix_not_by_buc
     not from a separate bucket. A future change that moved staging into a tenant's prefix would keep
     every test green except the ones that say why it must not."""
     env = _minio_init_env()
-    assert _default_of(str(env["UPLOAD_STAGING_BUCKET"])) == "mlflow"
+    # minio-init applies the staging expiry to the artifact bucket (infrastructure/minio/minio-init.sh).
+    assert _default_of(str(env["ARTIFACT_BUCKET"])) == "mlflow"
     assert not staging.STAGING_ROOT.startswith("tenant_")
