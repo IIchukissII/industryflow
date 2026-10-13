@@ -26,7 +26,8 @@ counts: the database records it in the same transaction as the drop (`drop_recor
 
 The run is idempotent and self-healing (decision 4): "export everything older than N days not
 yet exported." A failure raises, failing the run, and the next run picks the day up again — the
-orchestrator is almost incidental.
+orchestrator is almost incidental. Runs never overlap (`run_export` holds a run-wide lock): two runs
+racing on one day could both take its next part for unwritten and one overwrite a committed part.
 """
 from __future__ import annotations
 
@@ -57,7 +58,23 @@ def run_export(source: MeasurementSource, store: ColdStore, horizon_days: int, t
     One tenant failing does not abort the others: its error is logged and the run continues, but
     the overall run still reports failures so the orchestrator surfaces a non-zero result. The
     per-day ordering guarantee is unaffected — a failing tenant simply drops nothing.
+
+    Runs never overlap: the whole run holds the source's run lock. A run that finds another one
+    holding it exports nothing and returns ``{"skipped_overlapping_run": 1}`` without failing. The
+    run in progress is doing exactly this run's work (the job is "export everything not yet
+    exported"), so the overlap is not a fault; failing would only make the orchestrator retry
+    against the same held lock and report an error where there is none.
     """
+    with source.exclusive_run() as acquired:
+        if not acquired:
+            logger.warning("Cold export skipped: another export run holds the run lock; "
+                           "nothing exported or dropped by this run")
+            return {"skipped_overlapping_run": 1}
+        return _run_export_locked(source, store, horizon_days, today)
+
+
+def _run_export_locked(source: MeasurementSource, store: ColdStore, horizon_days: int,
+                       today: date) -> dict:
     cutoff = today - timedelta(days=horizon_days)
     tally: dict[str, int] = {}
     failures = 0

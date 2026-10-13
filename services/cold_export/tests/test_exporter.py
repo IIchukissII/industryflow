@@ -92,6 +92,7 @@ class FakeSource:
         self.during_read = None      # callback run while the export streams (a concurrent writer)
         self.batch_schema = SCHEMA_OF_ROW
         self.crash_before_drop = 0   # how many upcoming drops die before committing
+        self.run_lock = {"held": False}  # the database's run-wide advisory lock
 
     def add_tenant(self, company_id, day_rows):
         schema = company_id_to_schema(company_id)
@@ -111,6 +112,17 @@ class FakeSource:
     def exportable_days(self, schema_name, older_than):
         self.exportable_calls.append((schema_name, older_than))
         return sorted(d for d, rows in self.days.get(schema_name, {}).items() if rows)
+
+    @contextmanager
+    def exclusive_run(self):
+        if self.run_lock["held"]:
+            yield False
+            return
+        self.run_lock["held"] = True
+        try:
+            yield True
+        finally:
+            self.run_lock["held"] = False
 
     @contextmanager
     def snapshot_day(self, schema_name, day):
@@ -544,3 +556,45 @@ def test_run_export_isolates_tenant_failure_but_still_fails_run():
     # B succeeded despite A's failure; A dropped nothing.
     assert (schema_b, DAY, "measurements.parquet") in src.dropped
     assert all(schema != schema_a for schema, _, _ in src.dropped)
+
+
+# --- runs never overlap (dec 4: a committed part is never written again) ------------------------
+
+def test_overlapping_run_exports_nothing_and_does_not_fail():
+    src, store = _setup(_rows(5))
+    src.tenants.append(Tenant(company_id=CID, schema_name=SCHEMA))
+    src.run_lock["held"] = True  # another run is in progress
+    assert run_export(src, store, horizon_days=30, today=date(2026, 3, 1)) == \
+        {"skipped_overlapping_run": 1}
+    assert src.events == [] and store.writes == [] and src.dropped == []
+    assert len(src.rows(SCHEMA, DAY)) == 5
+
+
+def test_run_started_during_another_never_rewrites_its_committed_part():
+    # A second run starts while the first is streaming the day. Unlocked, it would export and drop
+    # the day, and the first would then write the same part name over the now-committed part.
+    src, store = _setup(_rows(5))
+    src.tenants.append(Tenant(company_id=CID, schema_name=SCHEMA))
+    nested = []
+
+    def _second_run(schema, day):
+        src.during_read = None
+        nested.append(run_export(src, store, horizon_days=30, today=date(2026, 3, 1)))
+
+    src.during_read = _second_run
+    run_export(src, store, horizon_days=30, today=date(2026, 3, 1))
+
+    assert [w[2] for w in store.writes] == ["measurements.parquet"]
+    assert nested == [{"skipped_overlapping_run": 1}]
+    assert src.dropped == [(SCHEMA, DAY, "measurements.parquet")]
+
+
+def test_run_lock_is_released_after_a_run_even_a_failed_one():
+    src, store = _setup(_rows(6))
+    src.tenants.append(Tenant(company_id=CID, schema_name=SCHEMA))
+    src.count_overrides[(SCHEMA, DAY)] = 10
+    with pytest.raises(ExportError):
+        run_export(src, store, horizon_days=30, today=date(2026, 3, 1))
+    assert src.run_lock["held"] is False
+    del src.count_overrides[(SCHEMA, DAY)]
+    assert run_export(src, store, horizon_days=30, today=date(2026, 3, 1)) == {"exported": 1}

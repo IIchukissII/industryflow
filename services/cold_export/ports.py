@@ -69,6 +69,16 @@ class DaySnapshot(Protocol):
 class MeasurementSource(Protocol):
     """The hot store (TimescaleDB) as the exporter sees it."""
 
+    def exclusive_run(self) -> ContextManager[bool]:
+        """Hold the one run-wide export lock for the context's duration; yields whether it was taken.
+
+        Two overlapping runs could each see a day's last part as not yet written and write it, so
+        one would overwrite a part the other's drop has already made immutable (ADR-0025 dec 4).
+        The lock is never waited on: a run that cannot take it yields False and must do nothing.
+        It is released when the context exits, or by the database if the holder dies.
+        """
+        ...
+
     def list_tenants(self) -> list[Tenant]:
         """Enumerate tenants from the trusted registry, not from any request (ADR-0025 dec 5)."""
         ...

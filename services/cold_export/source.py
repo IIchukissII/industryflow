@@ -48,6 +48,10 @@ COLD_SCHEMA = pa.schema([
 
 _READ_BATCH = 50_000
 
+# The run-wide advisory lock key (two int4 halves, so it cannot collide with a single-bigint key
+# another component takes). The first half namespaces the platform, the second the exporter.
+RUN_LOCK_KEY = (0x49464C57, 0x434F4C44)  # "IFLW", "COLD"
+
 
 def _day_bounds(day: date) -> tuple[datetime, datetime]:
     start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
@@ -125,6 +129,24 @@ class PostgresMeasurementSource:
         conn = psycopg2.connect(**self._db.dsn_kwargs())
         conn.autocommit = True
         return conn
+
+    @contextmanager
+    def exclusive_run(self) -> Iterator[bool]:
+        # A session-level advisory lock on its own connection, held for the whole run. It is not a
+        # transaction lock, so the per-day snapshot and drop transactions on other connections do
+        # not release it; if this process dies the server ends the session and frees the lock, so a
+        # crashed run never blocks the next one.
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_try_advisory_lock(%s, %s)", RUN_LOCK_KEY)
+                acquired = bool(cur.fetchone()[0])
+            yield acquired
+            if acquired:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT pg_advisory_unlock(%s, %s)", RUN_LOCK_KEY)
+        finally:
+            conn.close()
 
     def list_tenants(self) -> list[Tenant]:
         with closing(self._connect()) as conn, conn.cursor() as cur:
