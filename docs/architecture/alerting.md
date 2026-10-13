@@ -63,7 +63,31 @@ still *correct*. That needs a human verdict (**[ADR-0022](../../ADR/ADR-0022-con
 
 The worker consumes Kafka **at-least-once** (manual commits, bounded retry, dead-letter — see
 [stream processing](stream-processing.md) and
-**[ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md)**). Because at-least-once means a
+**[ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md)**). A reading that cannot be handled
+is treated by *why*:
+
+- **The reading is bad** — not JSON, no `company_id`, no `sensor_id` or numeric `value`, an id that
+  is not a UUID, an unparseable time. No retry can fix it, so it goes straight to the dead-letter
+  topic (`KAFKA_TOPIC_DLQ`, default `<sensor topic>.dlq`) with the error, and the batch commits.
+- **The platform under it is down** — the database, its pool, the network. The reading is fine,
+  so it is **never** dead-lettered: the batch is rewound to the last commit and retried, backing off
+  from `KAFKA_RETRY_BACKOFF_SECONDS` and doubling up to `KAFKA_MAX_BACKOFF_SECONDS`, until the
+  dependency is back.
+- **Anything else** is retried `KAFKA_MAX_RETRIES` times, then dead-lettered.
+
+A commit lost to a consumer-group rebalance rewinds the same way and carries on (the batch is
+redelivered, and the writes are idempotent). Any other Kafka error ends the loop, and a loop that
+ends — consumer, rule reload, ML or drift evaluation — makes the process exit non-zero, so it is
+restarted rather than left running with nothing consuming. Liveness is a heartbeat file the
+consumer touches on every poll; `healthcheck.py` fails once it is older than
+`HEARTBEAT_MAX_AGE_SECONDS` (the compose healthcheck and the chart's exec liveness probe).
+
+Dead letters are visible to operators: the chart's `IndustryFlowDeadLetteredReadings` rule fires
+when any `*.dlq` topic grows (the kafka exporter's offset series). A dead-lettered reading raised
+no alert, so it needs a look.
+
+The worker publishes nothing else to Kafka: alerts are written to the tenant schema, which is where
+the API and the UI read them. Because at-least-once means a
 reading can be seen more than once, the worker **deduplicates / cools down** alerts: a repeat
 condition keyed by `(company_id, rule_id, sensor_id, equipment_id)` is suppressed within
 `ALERT_COOLDOWN_SECONDS` of its **event time**, so a replay or burst does not produce duplicate
@@ -71,10 +95,24 @@ alerts. Retrain recommendations are keyed by model, with their own `RETRAIN_*` c
 
 The cooldown is enforced **in the database**, so it holds across restarts and replicas: the
 insert writes only if no alert in the same key sits within the cooldown of the reading's event
-time. The `alert_id` is derived from the key and the event time, never random, so an exact replay
-collides on the primary key and is dropped (`ON CONFLICT DO NOTHING`). A bounded in-memory cache
-(`ALERT_DEDUP_CACHE_MAX`) in front of it spares the query while an anomaly persists. No schema
-change was needed: the hypertable's time index bounds the lookup.
+time. Two writers in one key at once (two replicas' ML passes, or a redelivery racing the
+original) would each see no prior row, so the insert first takes a transaction-scoped advisory
+lock on the key; the second writer's check runs after the first commits and sees its row. The
+`alert_id` is derived from the key and the event time, never random, so an exact replay collides
+on the primary key and is dropped (`ON CONFLICT DO NOTHING`). An ML alert's event time is its
+snapshot's newest reading, not the wall clock, so re-scoring the same snapshot is such a replay.
+A bounded in-memory cache (`ALERT_DEDUP_CACHE_MAX`) in front of it spares the query while an
+anomaly persists. No schema change was needed: the hypertable's time index bounds the lookup.
+
+## ML snapshot
+
+ML rules score an equipment's full sensor set, assembled from per-sensor arrivals in a Redis
+latest-value store (`REDIS_URL`, required; the worker will not start without it). Keys are
+`features:{company_id}:{equipment_id}:{sensor_name}`, so the tenant is part of the key. A sensor
+whose latest reading is older than `FEATURE_MAX_AGE_SECONDS` (by its own event time) is treated as
+missing, and an incomplete snapshot is not scored. When the ML service reports that it scored with
+the stateful feature class neutralized (`degraded`, ADR-0024), the alert message says so and names
+the features, so the operator labelling it sees a lower-confidence score.
 
 ## Tenant scoping
 
@@ -82,4 +120,5 @@ Both the API and the worker resolve the tenant from the verified `company_id` an
 within that tenant's schema. The API reads it from the JWT; the worker reads it from the Kafka
 message, where ingestion stamped it from the device certificate's SAN (ADR-0002) (**[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**).
 The worker reads feature configs and ML models from the tenant schema (granted SELECT by the
-init scripts) to evaluate ML rules.
+init scripts) to evaluate ML rules. Every tenant query runs in a transaction that sets the tenant
+`search_path` with `SET LOCAL`, so a pooled connection never carries it past the query (ADR-0003).

@@ -141,6 +141,15 @@ spec:
               port: {{ $app.probe.port }}
             initialDelaySeconds: 10
             periodSeconds: 10
+          {{- else if $app.livenessExec }}
+          {{- /* Port-less workers: a command that fails when the worker has stopped working. */}}
+          livenessProbe:
+            exec:
+              command: {{ toJson $app.livenessExec }}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
           {{- end }}
           {{- with $app.resources }}
           resources:

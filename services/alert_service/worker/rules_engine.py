@@ -7,23 +7,29 @@ Rules Engine - Evaluates sensor data against alert rules
 Schema-per-tenant architecture - UUID-based matching only
 """
 import logging
+import math
 from collections import OrderedDict
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 import uuid
 import aiohttp
-import os
+
+from errors import MessageValidationError
 
 logger = logging.getLogger(__name__)
 
-ML_SERVICE_URL = os.getenv('ML_SERVICE_URL', 'http://ml-service-api:8002')
+# Defaults only: the worker passes the configured values in (config.py is the one reader of the
+# environment).
+DEFAULT_ML_SERVICE_URL = 'http://ml-service-api:8002'
+DEFAULT_COOLDOWN_SECONDS = 300.0
+DEFAULT_FEATURE_MAX_AGE_SECONDS = 300.0
 
 # Namespace for deterministic alert ids: the same alert key at the same event time always maps to
 # the same alert_id, so a redelivered reading collides on the primary key instead of duplicating.
 ALERT_ID_NAMESPACE = uuid.UUID('6f1c2a4e-7d3b-5e8a-9c0f-1b2d3e4f5a6b')
 
 # The in-memory dedup state is only a cache in front of the database check, so it is safe to bound.
-DEDUP_CACHE_MAX = int(os.getenv('ALERT_DEDUP_CACHE_MAX', '10000'))
+DEFAULT_DEDUP_CACHE_MAX = 10000
 
 
 def as_utc(ts: Any) -> datetime:
@@ -35,6 +41,54 @@ def as_utc(ts: Any) -> datetime:
     if ts.tzinfo is None:
         return ts.replace(tzinfo=timezone.utc)
     return ts.astimezone(timezone.utc)
+
+
+def _uuid_field(reading: Dict[str, Any], field: str, *, required: bool) -> Optional[str]:
+    raw = reading.get(field)
+    if raw is None or raw == '':
+        if required:
+            raise MessageValidationError(f"reading has no {field}")
+        return None
+    try:
+        return str(uuid.UUID(str(raw)))
+    except (ValueError, AttributeError, TypeError):
+        raise MessageValidationError(f"{field} is not a UUID: {raw!r}") from None
+
+
+def parse_reading(sensor_data: Any, company_id: Any) -> Dict[str, Any]:
+    """Validate one sensor reading; return it with canonical ids, a float value and UTC times.
+
+    Raises MessageValidationError for anything the engine cannot evaluate, so the consumer
+    dead-letters it (ADR-0005 dec 3) instead of committing past it as if it had been handled.
+    """
+    if not isinstance(sensor_data, dict):
+        raise MessageValidationError(f"reading is not an object: {type(sensor_data).__name__}")
+    _uuid_field({'company_id': company_id}, 'company_id', required=True)
+
+    reading = dict(sensor_data)
+    reading['sensor_id'] = _uuid_field(sensor_data, 'sensor_id', required=True)
+    reading['equipment_id'] = _uuid_field(sensor_data, 'equipment_id', required=False)
+
+    value = sensor_data.get('value')
+    if value is None or isinstance(value, bool):
+        raise MessageValidationError(f"reading has no numeric value: {value!r}")
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise MessageValidationError(f"value is not a number: {value!r}") from None
+    if not math.isfinite(value):
+        raise MessageValidationError(f"value is not finite: {value!r}")
+    reading['value'] = value
+
+    for field in ('time', 'timestamp'):
+        ts = sensor_data.get(field)
+        if ts is None:
+            continue
+        try:
+            reading[field] = as_utc(ts).isoformat()
+        except (ValueError, TypeError, AttributeError):
+            raise MessageValidationError(f"{field} is not an ISO 8601 time: {ts!r}") from None
+    return reading
 
 
 def deterministic_alert_id(scope: Tuple, triggered_at: datetime) -> str:
@@ -77,7 +131,18 @@ def should_recommend_retrain(
 class RulesEngine:
     """Evaluates sensor data against alert rules with schema-per-tenant"""
 
-    def __init__(self, tenant_rules: Dict[str, List[Dict]], alert_repo, feature_store=None):
+    def __init__(
+        self,
+        tenant_rules: Dict[str, List[Dict]],
+        alert_repo,
+        feature_store=None,
+        *,
+        ml_service_url: str = DEFAULT_ML_SERVICE_URL,
+        internal_service_token: Optional[str] = None,
+        cooldown_seconds: float = DEFAULT_COOLDOWN_SECONDS,
+        dedup_cache_max: int = DEFAULT_DEDUP_CACHE_MAX,
+        feature_max_age_seconds: Optional[float] = DEFAULT_FEATURE_MAX_AGE_SECONDS,
+    ):
         """
         Initialize with rules organized by tenant
         tenant_rules: {company_id: [rules]}
@@ -85,12 +150,15 @@ class RulesEngine:
         self.tenant_rules = tenant_rules
         self.alert_repo = alert_repo
         self.feature_store = feature_store
-        self.ml_detectors = {}  # model_id -> detector (lazy loaded)
+        self.ml_service_url = ml_service_url
+        self.internal_service_token = internal_service_token
+        self.feature_max_age_seconds = feature_max_age_seconds
         self.sensor_name_cache = {}  # {company_id: {sensor_uuid: sensor_name}}
         # Dedup/cooldown cache: {scope: event time of the last alert known in the DB}. The DB is the
         # source of truth (see _emit); this only spares it a query while an anomaly persists.
         self._last_emit: OrderedDict = OrderedDict()
-        self._cooldown_seconds = float(os.getenv("ALERT_COOLDOWN_SECONDS", "300"))
+        self._cooldown_seconds = float(cooldown_seconds)
+        self._dedup_cache_max = int(dedup_cache_max)
 
         # Log loaded rules
         total = sum(len(rules) for rules in tenant_rules.values())
@@ -116,14 +184,12 @@ class RulesEngine:
         else:
             self.sensor_name_cache[company_id] = {}
 
-        # Query database
-        try:
-            sensor_name = await self.alert_repo.get_sensor_name(sensor_id, company_id)
-            if sensor_name:
-                self.sensor_name_cache[company_id][sensor_id] = sensor_name
-                return sensor_name
-        except Exception as e:
-            logger.warning(f"Failed to get sensor name for {sensor_id}: {e}")
+        # Query database. A failure propagates: a database outage must stall the reading (the
+        # consumer retries it), not quietly key it under its UUID where no ML rule looks for it.
+        sensor_name = await self.alert_repo.get_sensor_name(sensor_id, company_id)
+        if sensor_name:
+            self.sensor_name_cache[company_id][sensor_id] = sensor_name
+            return sensor_name
 
         # Fallback: use sensor_id if name not found
         return sensor_id
@@ -135,7 +201,7 @@ class RulesEngine:
     def _remember(self, scope: Tuple, at: datetime) -> None:
         self._last_emit[scope] = at
         self._last_emit.move_to_end(scope)
-        while len(self._last_emit) > DEDUP_CACHE_MAX:
+        while len(self._last_emit) > self._dedup_cache_max:
             self._last_emit.popitem(last=False)
 
     async def _emit(self, alert: Dict[str, Any], *, retrain: bool = False,
@@ -179,32 +245,32 @@ class RulesEngine:
         """
         Evaluate sensor data against rules for the tenant
         Returns list of triggered alerts
-        """
-        sensor_id = sensor_data.get('sensor_id')
-        equipment_id = sensor_data.get('equipment_id')
-        value = sensor_data.get('value')
-        timestamp = sensor_data.get('timestamp')
 
-        if not sensor_id or value is None:
-            logger.warning(f"Invalid sensor data: {sensor_data}")
-            return []
+        Raises MessageValidationError for a reading that cannot be evaluated (see parse_reading).
+        """
+        sensor_data = parse_reading(sensor_data, company_id)
+        sensor_id = sensor_data['sensor_id']
+        equipment_id = sensor_data['equipment_id']
+        value = sensor_data['value']
+        timestamp = sensor_data.get('timestamp') or sensor_data.get('time')
 
         # Store reading in Feature Store for ML inference
         if self.feature_store and equipment_id:
+            # Get sensor name from UUID for Feature Store key (a DB failure propagates)
+            sensor_name = await self._get_sensor_name(sensor_id, company_id)
             try:
-                # Get sensor name from UUID for Feature Store key
-                sensor_name = await self._get_sensor_name(sensor_id, company_id)
-
                 await self.feature_store.store_reading(
+                    company_id=company_id,
                     equipment_id=equipment_id,
                     sensor_name=sensor_name,
-                    timestamp=timestamp or datetime.now().isoformat(),
-                    value=float(value)
+                    timestamp=timestamp or datetime.now(timezone.utc).isoformat(),
+                    value=value
                 )
                 logger.debug(f"Stored {sensor_name}={value} in Feature Store for equipment {equipment_id[:8]}...")
             except Exception as e:
+                # The snapshot store only feeds the ML rules; a Redis outage must not stop the
+                # threshold rules. The ML pass then finds the snapshot stale or incomplete and skips.
                 logger.error(f"Failed to store reading in Feature Store: {e}")
-                # Continue with rule evaluation even if Feature Store fails
 
         # Get rules for this tenant
         rules = self.tenant_rules.get(company_id, [])
@@ -304,23 +370,28 @@ class RulesEngine:
 
                 # Query Feature Store for current snapshot of all required sensors
                 logger.info(f"Querying Feature Store for {len(base_sensors)} sensors...")
-                snapshot = await self.feature_store.get_current_snapshot(
+                snapshot, as_of = await self.feature_store.get_current_snapshot(
+                    company_id=company_id,
                     equipment_id=equipment_id,
-                    sensor_names=base_sensors
+                    sensor_names=base_sensors,
+                    max_age_seconds=self.feature_max_age_seconds,
                 )
                 logger.info(f"Feature Store returned {len(snapshot)} sensors")
 
                 if len(snapshot) < len(base_sensors):
-                    logger.info(f"Incomplete sensor snapshot for equipment {equipment_id[:8]}...: {len(snapshot)}/{len(base_sensors)} sensors available")
-                    # Skip if we don't have enough sensors
+                    logger.info(f"Incomplete sensor snapshot for equipment {equipment_id[:8]}...: {len(snapshot)}/{len(base_sensors)} fresh sensors available")
+                    # Skip if we don't have enough fresh sensors
                     continue
 
                 # Add equipment_id to snapshot for ML inference
                 snapshot['equipment_id'] = equipment_id
 
-                # Create sensor_data dict for ML evaluation
+                # Create sensor_data dict for ML evaluation. The event time is the snapshot's own
+                # (its newest reading), not the wall clock, so the same snapshot evaluated again —
+                # by a later pass or by another replica — maps to the same alert.
+                event_time = timestamp or (as_of.isoformat() if as_of else None)
                 sensor_data = {
-                    'timestamp': timestamp or datetime.now(timezone.utc).isoformat(),
+                    'timestamp': event_time or datetime.now(timezone.utc).isoformat(),
                     'equipment_id': equipment_id,
                     **snapshot  # All sensor values
                 }
@@ -369,8 +440,9 @@ class RulesEngine:
             sensor_uuid = uuid.UUID(sensor_id) if isinstance(sensor_id, str) else sensor_id
             equipment_uuid = uuid.UUID(equipment_id) if isinstance(equipment_id, str) and equipment_id else None
         except (ValueError, AttributeError):
-            logger.warning(f"Invalid UUID format: sensor={sensor_id}, equipment={equipment_id}")
-            return []
+            raise MessageValidationError(
+                f"Invalid UUID format: sensor={sensor_id!r}, equipment={equipment_id!r}"
+            ) from None
 
         for rule in rules:
             # Check if rule is enabled
@@ -516,7 +588,7 @@ class RulesEngine:
 
             # Call ML inference endpoint (authenticated service-to-service call).
             async with aiohttp.ClientSession() as session:
-                inference_url = f"{ML_SERVICE_URL}/api/inference/predict"
+                inference_url = f"{self.ml_service_url}/api/inference/predict"
 
                 payload = {
                     "model_id": str(model_id),
@@ -528,9 +600,8 @@ class RulesEngine:
                 # Authenticate as an internal service so the ML endpoint trusts the
                 # company_id in the body. Without the shared token the call fails closed.
                 headers = {}
-                internal_token = os.getenv("INTERNAL_SERVICE_TOKEN")
-                if internal_token:
-                    headers["X-Internal-Service-Token"] = internal_token
+                if self.internal_service_token:
+                    headers["X-Internal-Service-Token"] = self.internal_service_token
 
                 async with session.post(inference_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
                     if response.status == 404:
@@ -560,6 +631,17 @@ class RulesEngine:
             # Use rule's sensor_id if available, otherwise None (equipment-level alert)
             sensor_id = sensor_data.get('sensor_id') or rule.get('sensor_id')
 
+            message = (f"ML anomaly detected: {rule['name']} - Anomaly score {anomaly_score:.4f} "
+                       f"exceeds threshold {anomaly_threshold}")
+            # ADR-0024 dec 5: a score computed with the stateful feature class neutralized is
+            # lower-confidence, and the operator labelling this alert (ADR-0022) must see that.
+            neutralized = list(result.get('neutralized_features') or [])
+            degraded = bool(result.get('degraded')) or bool(neutralized)
+            if degraded:
+                detail = f": {', '.join(map(str, neutralized))}" if neutralized else ""
+                message += (f" [DEGRADED: scored with stateful features neutralized{detail}; "
+                            f"treat as lower-confidence]")
+
             alert = {
                 'company_id': company_id,
                 'rule_id': str(rule['rule_id']),
@@ -574,7 +656,9 @@ class RulesEngine:
                 'threshold_value': anomaly_threshold,
                 'condition': 'ml_anomaly',
                 'severity': rule.get('severity', 'medium'),
-                'message': f"ML anomaly detected: {rule['name']} - Anomaly score {anomaly_score:.4f} exceeds threshold {anomaly_threshold}"
+                'degraded': degraded,
+                'neutralized_features': neutralized,
+                'message': message,
             }
 
             logger.info(f"ML alert triggered: {alert['message']}")
@@ -659,7 +743,7 @@ class RulesEngine:
 
         try:
             async with aiohttp.ClientSession() as session:
-                drift_url = f"{ML_SERVICE_URL}/api/drift/evaluate"
+                drift_url = f"{self.ml_service_url}/api/drift/evaluate"
                 payload = {
                     "model_id": str(model_id),
                     "company_id": company_id,
@@ -667,9 +751,8 @@ class RulesEngine:
                     "drift_share_threshold": threshold,
                 }
                 headers = {}
-                internal_token = os.getenv("INTERNAL_SERVICE_TOKEN")
-                if internal_token:
-                    headers["X-Internal-Service-Token"] = internal_token
+                if self.internal_service_token:
+                    headers["X-Internal-Service-Token"] = self.internal_service_token
 
                 # Drift compute (windowed read + evidently) is heavier than per-event
                 # inference; allow a longer budget than the 10s inference timeout.
