@@ -38,7 +38,7 @@ This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0
 
 1. **Two-tier hierarchy: an offline root CA and an online issuing intermediate.** The root CA is kept offline and signs only intermediate certificates; an online issuing intermediate signs device certificates. If the issuing intermediate is compromised, it is revoked and replaced at the root without re-rooting trust on every device. The root is the long-lived anchor distributed to the verifying proxy; the intermediate is the operational signer.
 
-2. **Devices generate their own keys; the CA signs CSRs and never holds a private key.** A device generates its keypair inside its secure element, emits a certificate signing request (CSR) for the public key, and the CA issues a certificate binding that public key to the device's identity. The CA neither generates nor stores device private keys.
+2. **Devices generate their own keys; the CA signs CSRs and never holds a device's private key.** A device generates its keypair inside its secure element, emits a certificate signing request (CSR) for the public key, and the CA issues a certificate binding that public key to the device's identity. The CA neither generates nor stores device private keys.
 
 3. **Tenant and device identity are encoded in a URI SAN, not the Common Name.** The certificate carries the tenant `company_id` and the `device_id` in a Subject Alternative Name URI (a scheme such as `industryflow:tenant/<company_uuid>/device/<device_id>`). The verified tenant that ADR-0003 consumes is read from this SAN. The Common Name, if present, is a human label only and is never used for authorization (CN-as-identity is deprecated).
 
