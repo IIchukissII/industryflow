@@ -20,7 +20,7 @@ import os
 from reading_guard import (  # shipped via --py-files
     DEFAULT_DLQ_TOPIC, SOURCE_COLUMNS, UNKNOWN_TENANT, canonical_uuid, classify_references,
     company_id_to_schema,
-    parse_readings, publish_dead_letters, rejection_reason,
+    parse_readings, publish_dead_letters, read_tenant_references, rejection_reason,
 )
 
 # Configure logging
@@ -173,22 +173,9 @@ def lookup_references(db_cfg, keys):
         conn.autocommit = True
         with conn.cursor() as cur:
             for company_id, (sensors, equipment) in by_company.items():
-                schema = company_id_to_schema(company_id)
-                cur.execute(
-                    "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c "
-                    "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
-                    "WHERE n.nspname = %s AND c.relname = 'sensor_measurements')",
-                    (schema,),
-                )
-                tenant_exists[company_id] = bool(cur.fetchone()[0])
-                if not tenant_exists[company_id]:
-                    continue
-                cur.execute(f'SELECT sensor_id::text FROM "{schema}".sensors '
-                            f'WHERE sensor_id = ANY(%s::uuid[])', (sorted(sensors),))
-                known_sensors[company_id] = {r[0] for r in cur.fetchall()}
-                cur.execute(f'SELECT equipment_id::text FROM "{schema}".equipment '
-                            f'WHERE equipment_id = ANY(%s::uuid[])', (sorted(equipment),))
-                known_equipment[company_id] = {r[0] for r in cur.fetchall()}
+                (tenant_exists[company_id], known_sensors[company_id],
+                 known_equipment[company_id]) = read_tenant_references(
+                    cur, company_id_to_schema(company_id), sensors, equipment)
     finally:
         conn.close()
     return tenant_exists, known_sensors, known_equipment

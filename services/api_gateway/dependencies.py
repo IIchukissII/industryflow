@@ -11,6 +11,7 @@ from models.user import User
 from users import current_active_user, fastapi_users
 from database import AsyncSessionLocal
 from capability_auth import resolve_capability, AUDIENCE_API
+import company_status
 import logging
 import uuid
 
@@ -151,13 +152,17 @@ async def resolve_tenant_context(
 
     A logged-in user resolves to their tenant (full access, as today). Otherwise the request
     must carry a valid API-audience capability (ADR-0015), which resolves to a single tenant
-    with read-only intent. Neither present → 401.
+    with read-only intent. Neither present, or the tenant suspended → 401.
     """
     if user is not None and getattr(user, "company_id", None):
         return TenantContext(company_id=str(user.company_id), user=str(user.id), read_only=False, source="session")
 
     handle = request.headers.get(CAPABILITY_HEADER, "")
     binding = await resolve_capability(_capability_get, handle, expected_audience=AUDIENCE_API)
+    # A suspended company's handles are refused here as its sessions are (ADR-0033 dec 3): by the
+    # store's suspension marker inside resolve_capability, and by the registry's flag here.
+    if binding is not None and not await company_status.is_company_active(binding.company_id):
+        binding = None
     if binding is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

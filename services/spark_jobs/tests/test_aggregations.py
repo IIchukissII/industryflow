@@ -126,10 +126,20 @@ class _Rows:
         return self._rows
 
 
-def _agg_row(company_id):
-    return {"time": datetime(2026, 1, 1, tzinfo=timezone.utc), "sensor_id": SID, "equipment_id": EID,
-            "company_id": company_id, "avg_value": 1.0, "min_value": 1.0, "max_value": 1.0,
-            "stddev_value": None, "count_values": 1, "anomaly_count": 0, "anomaly_percentage": 0.0}
+def _agg_row(company_id, sensor_id=SID, equipment_id=EID):
+    return {"time": datetime(2026, 1, 1, tzinfo=timezone.utc), "sensor_id": sensor_id,
+            "equipment_id": equipment_id, "company_id": company_id, "avg_value": 1.0,
+            "min_value": 1.0, "max_value": 1.0, "stddev_value": None, "count_values": 1,
+            "anomaly_count": 0, "anomaly_percentage": 0.0}
+
+
+def _known(*schemas):
+    """A references reader for which only ``schemas`` exist, each knowing SID and EID."""
+    def references(cur, schema_name, sensor_ids, equipment_ids):
+        if schema_name not in schemas:
+            return False, set(), set()
+        return True, {SID} & sensor_ids, {EID} & equipment_ids
+    return references
 
 
 def test_an_unknown_tenant_is_skipped_and_the_others_are_written():
@@ -140,12 +150,39 @@ def test_an_unknown_tenant_is_skipped_and_the_others_are_written():
     job.write_aggregations_to_db(
         _Rows([_agg_row(ghost), _agg_row(CID), _agg_row(other)]), 0, "sensor_aggregations_1min",
         connect=lambda: conn,
-        tenant_exists=lambda cur, schema: schema != company_id_to_schema(ghost),
+        references=_known(company_id_to_schema(CID), company_id_to_schema(other)),
         upsert=lambda cur, target, values: written.append(target),
     )
     assert written == [f'"{company_id_to_schema(CID)}"."sensor_aggregations_1min"',
                        f'"{company_id_to_schema(other)}"."sensor_aggregations_1min"']
     assert conn.commits == 2  # one transaction per tenant
+
+
+def test_an_unknown_sensor_or_equipment_is_excluded_like_the_streaming_job_rejects_it():
+    # ADR-0006 rev 2 dec 4: the aggregation excludes the readings the streaming job dead-letters,
+    # by the same definition. A known tenant's aggregate for a sensor or equipment it does not know
+    # is such a reading; only the known key is written.
+    ghost_sensor = "aaaaaaaa-0000-0000-0000-00000000dead"
+    ghost_equipment = "eeeeeeee-0000-0000-0000-00000000dead"
+    written = []
+    job.write_aggregations_to_db(
+        _Rows([_agg_row(CID), _agg_row(CID, sensor_id=ghost_sensor),
+               _agg_row(CID, equipment_id=ghost_equipment)]), 0, "sensor_aggregations_1min",
+        connect=_Conn, references=_known(company_id_to_schema(CID)),
+        upsert=lambda cur, target, values: written.extend(values),
+    )
+    assert [(v[1], v[2]) for v in written] == [(SID, EID)]
+
+
+def test_a_tenant_whose_every_key_is_unknown_writes_nothing():
+    conn = _Conn()
+    job.write_aggregations_to_db(
+        _Rows([_agg_row(CID, sensor_id="aaaaaaaa-0000-0000-0000-00000000dead")]), 0,
+        "sensor_aggregations_1min", connect=lambda: conn,
+        references=_known(company_id_to_schema(CID)),
+        upsert=lambda cur, target, values: pytest.fail("nothing to write"),
+    )
+    assert conn.commits == 0
 
 
 def test_a_write_failure_still_fails_the_batch():
@@ -154,7 +191,8 @@ def test_a_write_failure_still_fails_the_batch():
 
     with pytest.raises(RuntimeError, match="database unreachable"):
         job.write_aggregations_to_db(_Rows([_agg_row(CID)]), 0, "sensor_aggregations_1min",
-                                     connect=_Conn, tenant_exists=lambda cur, schema: True, upsert=boom)
+                                     connect=_Conn, references=_known(company_id_to_schema(CID)),
+                                     upsert=boom)
 
 
 # --- the windows are the declared binding --------------------------------------------------------

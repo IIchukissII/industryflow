@@ -74,3 +74,26 @@ def fake_session(monkeypatch):
     session = FakeSession()
     monkeypatch.setattr(dependencies, "AsyncSessionLocal", lambda: session, raising=True)
     return session
+
+
+@pytest.fixture(autouse=True)
+def company_flags(monkeypatch):
+    """Every company is active unless a test suspends it, and the registry is never contacted.
+
+    Add a company id (str) to ``inactive`` to suspend it; ``reads`` records each registry read
+    the cache let through. The real reader is kept as ``real_read``.
+    """
+    from types import SimpleNamespace
+
+    import company_status
+
+    state = SimpleNamespace(inactive=set(), reads=[], real_read=company_status._read_is_active)
+
+    async def read(company_id):
+        state.reads.append(company_id)
+        return company_id not in state.inactive
+
+    monkeypatch.setattr(company_status, "_read_is_active", read)
+    company_status.clear()
+    yield state
+    company_status.clear()

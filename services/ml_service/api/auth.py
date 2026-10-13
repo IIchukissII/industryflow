@@ -7,10 +7,11 @@ Authentication and Authorization
 JWT token validation with database company_id lookup
 """
 import asyncpg
-from fastapi import Cookie, Header, HTTPException, Depends
+from fastapi import Cookie, Header, HTTPException, Depends, Request
 from jose import jwt, JWTError
 from typing import Optional
 import logging
+import uuid
 
 import config
 
@@ -20,7 +21,31 @@ logger = logging.getLogger(__name__)
 ACCESS_COOKIE = "if_access"
 
 
+# The account behind a token, re-read on every request: whether the user exists and is active,
+# and whether their company (if any) is. One round trip; the company flag rides on the user read.
+_ACCOUNT_SQL = """
+    SELECT u.is_active AS user_active, u.company_id, c.is_active AS company_active
+    FROM public."user" u
+    LEFT JOIN public.companies c ON c.company_id = u.company_id
+    WHERE u.id = $1
+"""
+
+
+async def _account_is_usable(pool, user_id: str) -> bool:
+    """False for a missing or inactive user, or a user whose company is missing or suspended."""
+    try:
+        uid = uuid.UUID(str(user_id))
+    except ValueError:
+        return False
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(_ACCOUNT_SQL, uid)
+    if row is None or not row["user_active"]:
+        return False
+    return row["company_id"] is None or bool(row["company_active"])
+
+
 async def verify_jwt_token(
+    request: Request,
     authorization: Optional[str] = Header(None),
     if_access: Optional[str] = Cookie(None),
 ) -> dict:
@@ -31,11 +56,16 @@ async def verify_jwt_token(
     clients) or, for same-origin browser requests behind the TLS edge, the httpOnly
     if_access cookie (ADR-0004 dec 3).
 
+    A valid signature is not enough: every request re-reads the account, and a deactivated or
+    deleted user, or a user of a suspended company, is refused at once rather than when the
+    token expires (ADR-0004 dec 2 rev 2, ADR-0033 dec 3).
+
     Returns:
         dict with user_id and other claims
 
     Raises:
-        HTTPException: 401 if token invalid or missing
+        HTTPException: 401 if token invalid or missing, or the account is not usable;
+        503 if the account cannot be read
     """
     if authorization and authorization.startswith('Bearer '):
         token = authorization.replace('Bearer ', '')
@@ -54,16 +84,25 @@ async def verify_jwt_token(
             algorithms=[config.config.JWT_ALGORITHM],
             options={"verify_aud": False}
         )
-        
+
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token payload")
-        
-        return {"user_id": user_id, "payload": payload}
-        
     except JWTError as e:
         logger.error(f"JWT validation error: {e}")
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Account store not available")
+    try:
+        usable = await _account_is_usable(pool, user_id)
+    except (asyncpg.PostgresError, OSError) as e:
+        logger.error(f"Account check failed: {e}")
+        raise HTTPException(status_code=503, detail="Account store not available")
+    if not usable:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    return {"user_id": user_id, "payload": payload}
 
 
 async def get_company_id(
@@ -72,36 +111,36 @@ async def get_company_id(
 ) -> str:
     """
     Resolve company_id from user_id by searching all tenant schemas
-    
+
     Args:
         current_user: User information from JWT token
         db_pool: Database connection pool (injected as dependency)
-    
+
     Returns:
         company_id as string (UUID)
-    
+
     Raises:
         HTTPException: 404 if user not found in any tenant schema
     """
     user_id = current_user["user_id"]
-    
+
     # Get pool from app state if not provided
     if db_pool is None:
         raise HTTPException(status_code=500, detail="Database pool not available")
-    
+
     async with db_pool.acquire() as conn:
         # Get all tenant schemas
         schemas = await conn.fetch("""
-            SELECT schema_name 
-            FROM information_schema.schemata 
+            SELECT schema_name
+            FROM information_schema.schemata
             WHERE schema_name LIKE 'tenant_%'
             ORDER BY schema_name
         """)
-        
+
         # Search each tenant schema for the user
         for schema_row in schemas:
             schema_name = schema_row['schema_name']
-            
+
             # Transaction-local, so the path is discarded when this lookup ends instead of
             # riding the pooled connection to its next borrower (ADR-0003 dec 6).
             async with conn.transaction():
@@ -112,11 +151,11 @@ async def get_company_id(
                     'SELECT company_id FROM "user" WHERE id = $1',
                     user_id
                 )
-            
+
             if company_id:
                 logger.debug(f"User {user_id} found in schema {schema_name}")
                 return str(company_id)
-        
+
         # User not found in any schema
         logger.warning(f"User {user_id} not found in any tenant schema")
         raise HTTPException(

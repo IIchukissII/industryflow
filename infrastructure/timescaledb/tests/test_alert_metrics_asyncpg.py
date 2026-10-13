@@ -101,6 +101,7 @@ async def _run():
         finally:
             await conn.execute("RESET search_path")
             await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            await conn.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{str(company_id).replace("-", "_")}"')
             await conn.execute(f'DROP ROLE IF EXISTS "tenant_reader_{str(company_id).replace("-", "_")}"')
     finally:
         await conn.close()

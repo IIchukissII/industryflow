@@ -137,9 +137,9 @@ running cluster.
   user is what bounds a kernel: the tenant login is `NOINHERIT` and a member of its own reader
   only, so `SET ROLE` into another tenant, `RESET ROLE`, `set_config('role', …)` and
   `SET SESSION AUTHORIZATION` are refused **by Postgres**. Its password is an HMAC of the tenant
-  under a key only the proxy holds; the proxy installs the SCRAM verifier on first use through
-  `notebook_sql_proxy`, an enrolment role that is a member of nothing and never carries a kernel's
-  session. Each open session **re-checks its handle** (`SQL_PROXY_REVALIDATE_SECONDS`) and is
+  under a key only the proxy holds. Provisioning creates the login with no password; the proxy
+  installs its SCRAM verifier on first use through `notebook_sql_proxy`, an enrolment role that
+  is a member of nothing and never carries a kernel's session. Each open session **re-checks its handle** (`SQL_PROXY_REVALIDATE_SECONDS`) and is
   ended once it is revoked, and a notebook interrupt (CancelRequest) is forwarded to the upstream
   query through a proxy-issued key. Proven against a real database by
   `test_notebook_sql_login_isolation.py` and end-to-end through the running proxy by

@@ -24,6 +24,7 @@ import model_compat
 import model_loader
 import upload_capability
 import uploaded_model
+from drift.reference_profile import prediction_column_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -388,6 +389,16 @@ async def mint_upload_capability(
         # No tenant, or no user. A handle bound to nothing is not a weaker capability; it is a hole.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # A suspended company is issued nothing (ADR-0033 dec 3); the platform API keeps this marker
+    # with the company's active flag, and every verifier refuses the company's handles by it.
+    if await store.get(upload_capability.suspended_key(record["company_id"])) is not None:
+        raise HTTPException(status_code=403, detail="This company is suspended.")
+
+    # Index first: a handle that exists but is not indexed is one ending the user's sessions cannot
+    # revoke. The index lives as long as its newest handle.
+    index = upload_capability.user_index_key(record["user"])
+    await store.sadd(index, handle)
+    await store.expire(index, upload_capability.DEFAULT_TTL_SECONDS)
     await store.set(
         upload_capability.store_key(handle),
         json.dumps(record),
@@ -441,6 +452,18 @@ async def create_model(
                 "establish what it is (ADR-0030)."
             ),
         )
+
+    # A reference profile's prediction column is a baseline only if it holds the declared detector's
+    # scores on their scale (ADR-0021 rev 1 dec 4). One that does not would raise prediction drift on
+    # a model that has not moved, so it is refused here rather than stored and found out later.
+    if payload.get("reference_profile"):
+        refusal = prediction_column_refusal(payload["reference_profile"])
+        if refusal:
+            raise HTTPException(status_code=422, detail={
+                "message": refusal,
+                "hint": ("capture the training window's scores as the model's detector produces "
+                         "them (what /api/inference/predict returns), or omit prediction_scores"),
+            })
 
     await _admit_address_or_refuse(
         company_id, payload.get("mlflow_run_id"), payload.get("artifact_uri"), on_refused=422,

@@ -212,3 +212,33 @@ def test_a_genuine_fault_is_still_a_500(monkeypatch, loads):
     model.decision_function = broken
     r = _predict(_client(monkeypatch, _row(detector="outlier")))
     assert r.status_code == 500
+
+
+# --- the address is checked on every load, warm hits included (ADR-0030 rev 4 dec 8) ------------
+
+def test_a_policy_tightening_refuses_an_already_warm_upload(monkeypatch, loads):
+    """A cached model is not a standing admission: once the uploads bucket the deployment admits
+    changes, the warm copy is refused at once rather than served until it falls out of the cache."""
+    seen, _ = loads
+    row = _row(mlflow_run_id=None, artifact_uri=ADMITTED, provenance="uploaded", detector="outlier")
+    client = _client(monkeypatch, row)
+    assert _predict(client).status_code == 200
+    assert len(seen) == 1 and model_cache.info()["size"] == 1, "the first call did not warm the cache"
+
+    monkeypatch.setattr(config.config, "UPLOAD_ARTIFACT_BUCKET", "admitted-elsewhere")
+    r = _predict(client)
+    assert r.status_code == 422, r.text
+    assert len(seen) == 1, "the refusal came from a cold load, not from the check on the hit"
+
+
+def test_a_warm_hit_still_runs_the_address_check(monkeypatch, loads):
+    seen, _ = loads
+    client = _client(monkeypatch, _row())
+    assert _predict(client).status_code == 200
+
+    checked = []
+    real = model_loader.check_address
+    monkeypatch.setattr(model_loader, "check_address", lambda **kw: (checked.append(kw), real(**kw)))
+    assert _predict(client).status_code == 200
+    assert len(seen) == 1, "the second call was not a warm hit"
+    assert checked == [{"company_id": CID, "mlflow_run_id": "run-mine", "artifact_uri": None}]

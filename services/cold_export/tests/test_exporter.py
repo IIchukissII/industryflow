@@ -60,6 +60,10 @@ class FakeSnapshot:
             yield pa.RecordBatch.from_pylist(self._rows, schema=self._source.batch_schema)
 
     def drop(self, part):
+        if self._source.crash_before_drop:
+            # The process dies between the listed export and the drop's commit: nothing recorded.
+            self._source.crash_before_drop -= 1
+            raise SystemExit("crash before the drop committed")
         now = self._source.rows(self._schema, self._day)
         # cold_export_drop_day: under the lock, the day must still be exactly the exported snapshot.
         if len(now) != self.rows or _fingerprint(now) != self.fingerprint:
@@ -87,6 +91,8 @@ class FakeSource:
         self.events = []
         self.during_read = None      # callback run while the export streams (a concurrent writer)
         self.batch_schema = SCHEMA_OF_ROW
+        self.crash_before_drop = 0   # how many upcoming drops die before committing
+        self.run_lock = {"held": False}  # the database's run-wide advisory lock
 
     def add_tenant(self, company_id, day_rows):
         schema = company_id_to_schema(company_id)
@@ -108,6 +114,17 @@ class FakeSource:
         return sorted(d for d, rows in self.days.get(schema_name, {}).items() if rows)
 
     @contextmanager
+    def exclusive_run(self):
+        if self.run_lock["held"]:
+            yield False
+            return
+        self.run_lock["held"] = True
+        try:
+            yield True
+        finally:
+            self.run_lock["held"] = False
+
+    @contextmanager
     def snapshot_day(self, schema_name, day):
         self.events.append("snapshot")
         try:
@@ -126,6 +143,7 @@ class FakeStore:
         self.footer_overrides = {}   # (prefix, day, part) -> forced footer count
         self.writes = []             # (prefix, day, part, rows)
         self._events = source.events if source else []
+        self.crash_before_manifest = 0  # how many upcoming manifest writes die before landing
 
     def read_manifest(self, prefix, day):
         m = self.manifests.get((prefix, day))
@@ -147,6 +165,9 @@ class FakeStore:
         return self.objects[(prefix, day, part)].select(["time", "sensor_id"])
 
     def write_manifest(self, prefix, day, manifest):
+        if self.crash_before_manifest:
+            self.crash_before_manifest -= 1
+            raise SystemExit("crash before the manifest was written")
         self.manifests[(prefix, day)] = dict(manifest)
         self._events.append("manifest")
 
@@ -349,6 +370,79 @@ def test_legacy_manifest_late_rows_are_appended():
     assert store.manifests[(PREFIX, DAY)]["rows"] == 8
 
 
+def _archive_keys(store):
+    return [(r["time"], r["sensor_id"]) for r in store.archive(PREFIX, DAY)]
+
+
+def _export_crashing(src, store):
+    with pytest.raises(SystemExit):
+        export_day(src, store, SCHEMA, PREFIX, DAY)
+
+
+def test_crash_before_a_late_parts_drop_never_duplicates_rows_across_parts():
+    # Day exported and dropped (part 0, committed). Late rows arrive and are exported as part 1,
+    # listed, and then the run dies before the drop commits — twice, with more late rows arriving in
+    # between. Part 1's rows are still in the source each time; exporting them again as a further
+    # part would archive them twice. Part 1 is re-exported in place instead.
+    original, late, later = _rows(5), _rows(3, start_minute=600), _rows(2, start_minute=900)
+    src, store = _setup(original)
+    export_day(src, store, SCHEMA, PREFIX, DAY)
+    src.insert(SCHEMA, DAY, late)
+    src.crash_before_drop = 1
+    _export_crashing(src, store)
+    assert [p["file"] for p in manifest_parts(store.read_manifest(PREFIX, DAY))] == \
+        ["measurements.parquet", "measurements-0001.parquet"]
+
+    src.insert(SCHEMA, DAY, later)
+    src.crash_before_drop = 1
+    _export_crashing(src, store)
+
+    outcome = export_day(src, store, SCHEMA, PREFIX, DAY)
+    keys = _archive_keys(store)
+    assert len(keys) == len(set(keys)) == 10
+    assert sorted(keys) == sorted((r["time"], r["sensor_id"]) for r in original + late + later)
+    assert outcome == "reexported"
+    assert store.manifests[(PREFIX, DAY)]["parts"] == [{"file": "measurements.parquet", "rows": 5},
+                                                       {"file": "measurements-0001.parquet", "rows": 5}]
+    assert store.objects[(PREFIX, DAY, "measurements.parquet")].num_rows == 5  # history untouched
+    assert src.rows(SCHEMA, DAY) == []
+    assert export_day(src, store, SCHEMA, PREFIX, DAY) == "already_done"
+
+
+def test_crash_before_the_first_parts_drop_then_late_rows_never_duplicates_rows():
+    # The first export dies before its drop commits; late rows join the day before the next run.
+    # The unrecorded first part is rewritten in place with the whole day, not followed by a part
+    # that repeats its rows.
+    src, store = _setup(_rows(5))
+    src.crash_before_drop = 1
+    _export_crashing(src, store)
+    src.insert(SCHEMA, DAY, _rows(2, start_minute=600))
+
+    outcome = export_day(src, store, SCHEMA, PREFIX, DAY)
+    keys = _archive_keys(store)
+    assert len(keys) == len(set(keys)) == 7
+    assert outcome == "reexported"
+    assert store.manifests[(PREFIX, DAY)]["parts"] == [{"file": "measurements.parquet", "rows": 7}]
+
+
+def test_crash_between_writing_a_part_and_listing_it_never_duplicates_rows():
+    # The late part is written but the run dies before the manifest lists it: an unlisted object no
+    # reader reads. The next run writes the same part name again, so the archive holds each row once.
+    src, store = _setup(_rows(5))
+    export_day(src, store, SCHEMA, PREFIX, DAY)
+    src.insert(SCHEMA, DAY, _rows(3, start_minute=600))
+    store.crash_before_manifest = 1
+    _export_crashing(src, store)
+    assert len(manifest_parts(store.read_manifest(PREFIX, DAY))) == 1
+
+    outcome = export_day(src, store, SCHEMA, PREFIX, DAY)
+    keys = _archive_keys(store)
+    assert len(keys) == len(set(keys)) == 8
+    assert outcome == "late_rows_exported"
+    assert [w[2] for w in store.writes] == ["measurements.parquet", "measurements-0001.parquet",
+                                            "measurements-0001.parquet"]
+
+
 # --- verification failures MUST block the drop (dec 3) ------------------------------------------
 
 def test_writer_count_mismatch_blocks_drop():
@@ -462,3 +556,45 @@ def test_run_export_isolates_tenant_failure_but_still_fails_run():
     # B succeeded despite A's failure; A dropped nothing.
     assert (schema_b, DAY, "measurements.parquet") in src.dropped
     assert all(schema != schema_a for schema, _, _ in src.dropped)
+
+
+# --- runs never overlap (dec 4: a committed part is never written again) ------------------------
+
+def test_overlapping_run_exports_nothing_and_does_not_fail():
+    src, store = _setup(_rows(5))
+    src.tenants.append(Tenant(company_id=CID, schema_name=SCHEMA))
+    src.run_lock["held"] = True  # another run is in progress
+    assert run_export(src, store, horizon_days=30, today=date(2026, 3, 1)) == \
+        {"skipped_overlapping_run": 1}
+    assert src.events == [] and store.writes == [] and src.dropped == []
+    assert len(src.rows(SCHEMA, DAY)) == 5
+
+
+def test_run_started_during_another_never_rewrites_its_committed_part():
+    # A second run starts while the first is streaming the day. Unlocked, it would export and drop
+    # the day, and the first would then write the same part name over the now-committed part.
+    src, store = _setup(_rows(5))
+    src.tenants.append(Tenant(company_id=CID, schema_name=SCHEMA))
+    nested = []
+
+    def _second_run(schema, day):
+        src.during_read = None
+        nested.append(run_export(src, store, horizon_days=30, today=date(2026, 3, 1)))
+
+    src.during_read = _second_run
+    run_export(src, store, horizon_days=30, today=date(2026, 3, 1))
+
+    assert [w[2] for w in store.writes] == ["measurements.parquet"]
+    assert nested == [{"skipped_overlapping_run": 1}]
+    assert src.dropped == [(SCHEMA, DAY, "measurements.parquet")]
+
+
+def test_run_lock_is_released_after_a_run_even_a_failed_one():
+    src, store = _setup(_rows(6))
+    src.tenants.append(Tenant(company_id=CID, schema_name=SCHEMA))
+    src.count_overrides[(SCHEMA, DAY)] = 10
+    with pytest.raises(ExportError):
+        run_export(src, store, horizon_days=30, today=date(2026, 3, 1))
+    assert src.run_lock["held"] is False
+    del src.count_overrides[(SCHEMA, DAY)]
+    assert run_export(src, store, horizon_days=30, today=date(2026, 3, 1)) == {"exported": 1}

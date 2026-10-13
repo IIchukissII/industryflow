@@ -184,6 +184,35 @@ def test_a_model_nothing_can_interpret_still_reports_data_drift(evaluate):
     assert "cannot be scored" in res["prediction_drift_reason"]
 
 
+def test_a_reference_of_labels_is_not_a_prediction_baseline(evaluate, monkeypatch):
+    """A stored profile whose prediction column holds labels, not detector scores (ADR-0021 rev 1
+    dec 4): prediction drift is refused with the reason, nothing is scored against it, and data
+    drift — which compares inputs — is still reported."""
+    rng = np.random.default_rng(6)
+    model = _model(rng)
+    model["reference_profile"]["sample"]["prediction_score"] = rng.choice([-1.0, 1.0], size=N).tolist()
+    scored = []
+    monkeypatch.setattr(drift_router, "_score_rows", lambda *a: scored.append(a) or [])
+    res = evaluate(model, _fleet(rng))
+    assert res["status"] == "ok", res
+    assert res["data_drift"]["n_columns"] == 2
+    assert res["prediction_drift"] is None
+    assert "outside the detector's declared scale" in res["prediction_drift_reason"]
+    assert scored == [], "the window was scored against a profile that is not a baseline"
+
+
+def test_compute_refuses_prediction_drift_on_an_off_scale_reference():
+    rng = np.random.default_rng(7)
+    prof = build_reference_profile({"a": rng.normal(size=N).tolist()},
+                                   prediction_scores=rng.uniform(0, 0.2, size=N).tolist())
+    prof["sample"]["prediction_score"] = (rng.uniform(0, 0.2, size=N) * 40).tolist()
+    res = compute_drift(prof, {"a": rng.normal(size=N).tolist()},
+                        current_predictions=rng.uniform(0, 0.2, size=120).tolist())
+    assert res["status"] == "ok"
+    assert res["prediction_drift"] is None
+    assert "not a baseline" in res["prediction_drift_reason"]
+
+
 def test_evidently_runs_off_the_event_loop(evaluate):
     rng = np.random.default_rng(5)
     evaluate(_model(rng), _fleet(rng))

@@ -106,3 +106,15 @@ def test_an_encoded_artifact_uri_key_is_not_owned():
     cid = str(uuid.uuid4())
     assert p.owns_artifact_key(cid, p.artifact_prefix(cid) + "%2e%2e/x") is False
     assert p.scope_artifact_key(cid, "dir/") == p.artifact_prefix(cid) + "dir/"
+
+
+@pytest.mark.parametrize("audience, resolve", [
+    ("tracking", p.resolve_tracking_binding), ("upload", p.resolve_upload_binding)])
+@pytest.mark.asyncio
+async def test_a_suspended_tenants_handle_is_denied(audience, resolve):
+    # ADR-0033 dec 3: while the platform marks the company suspended, none of its handles resolve.
+    cid = str(uuid.uuid4())
+    store = FakeAsyncStore({"nbcap:h": _rec(cid, audience=audience)})
+    assert await resolve(store.get, "h") is not None
+    store.mapping[f"nbcap-suspended:{cid}"] = "1"
+    assert await resolve(store.get, "h") is None

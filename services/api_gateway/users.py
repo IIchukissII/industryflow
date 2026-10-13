@@ -3,18 +3,21 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # src/api/users.py
+import time
 import uuid
 from typing import Optional
 
 from fastapi import Depends, Request
 from fastapi_users import BaseUserManager, UUIDIDMixin
 from fastapi_users import FastAPIUsers
+from fastapi.security import OAuth2PasswordRequestForm
 
 
 from models.user import User
 from database import get_user_db
 from config import get_settings
 from messaging import refresh_tokens
+import company_status
 
 from fastapi_users.authentication import (
     AuthenticationBackend,
@@ -61,6 +64,14 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         and is never logged (ADR-0004 dec 7)."""
         print(f"User {user.id} requested verification")
 
+    async def authenticate(self, credentials: OAuth2PasswordRequestForm) -> Optional[User]:
+        """A user of a suspended company cannot sign in (ADR-0033 dec 3); refused like a bad
+        password, so the answer does not reveal the company's state."""
+        user = await super().authenticate(credentials)
+        if user is not None and user.company_id and not await company_status.is_company_active(user.company_id):
+            return None
+        return user
+
     # A session must not outlive the credential or the account it was opened with (ADR-0004
     # dec 2): a password change, a password reset, deactivation and deletion end every one of
     # the user's sessions (refresh tokens). Access tokens are short-lived, and the per-request
@@ -90,16 +101,31 @@ class CompanyClaimJWTStrategy(JWTStrategy):
     (ADR-0003 decision 2; closes review finding X2).
     """
 
-    async def write_token(self, user) -> str:
+    async def write_token(self, user, session_id: Optional[str] = None) -> str:
+        """``session_id`` names the refresh-token session the token is minted in, and ``iat``
+        when: together they let a live socket notice that its session has ended (ADR-0004 dec 9,
+        messaging/refresh_tokens.session_ended)."""
         data = {
             "sub": str(user.id),
             "aud": self.token_audience,
+            "iat": int(time.time()),
             "company_id": str(user.company_id) if user.company_id else None,
             "role": getattr(user, "role", None),
         }
+        if session_id:
+            data["sid"] = session_id
         return generate_jwt(
             data, self.encode_key, self.lifetime_seconds, algorithm=self.algorithm
         )
+
+    async def read_token(self, token, user_manager):
+        """The token's user, unless that user's company is suspended (ADR-0004 dec 2 rev 2,
+        ADR-0033 dec 3): every session-authenticated request is refused for it, through the
+        cached company flag (company_status.py)."""
+        user = await super().read_token(token, user_manager)
+        if user is not None and user.company_id and not await company_status.is_company_active(user.company_id):
+            return None
+        return user
 
 
 def get_jwt_strategy() -> JWTStrategy:

@@ -14,7 +14,8 @@ S3 kwarg, the missing pg_hba entry, the SECURITY DEFINER search_path) would fail
 
 It also proves what only a real database can: rows arriving for an exported-and-dropped day become
 a further part without touching the archive; a row inserted between the verify and the drop is not
-dropped unexported; and the drop function refuses a day that is not the exported snapshot.
+dropped unexported; the drop function refuses a day that is not the exported snapshot; and a run
+that overlaps another (the advisory run lock held) exports and drops nothing.
 
 It stands up nothing itself — it expects a live stack via env (TimescaleDB with the init scripts,
 MinIO with the cold bucket + write principal). It SKIPS when unreachable; the IF_REQUIRE_LIVE_STACK
@@ -34,7 +35,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from cold_export.config import DbConfig, ExportConfig, StoreConfig  # noqa: E402
 from cold_export.exporter import run_export  # noqa: E402
 from cold_export.naming import company_id_to_prefix, manifest_key, parquet_key, part_file  # noqa: E402
-from cold_export.source import PostgresMeasurementSource  # noqa: E402
+from cold_export.source import RUN_LOCK_KEY, PostgresMeasurementSource  # noqa: E402
 from cold_export.store import S3ColdStore  # noqa: E402
 
 pytestmark = pytest.mark.integration
@@ -255,3 +256,20 @@ def test_drop_refuses_a_day_that_is_not_the_exported_snapshot(tenant):
     finally:
         conn.close()
     assert _count_day(tenant["cur"], schema, day) == 5
+
+
+def test_overlapping_run_is_refused_by_the_run_lock(tenant):
+    # Another session holds the exporter's advisory lock, as a run in progress would: this run
+    # exports and drops nothing; once the lock is released, the next run proceeds.
+    cur, cid, schema, day = tenant["cur"], tenant["cid"], tenant["schema"], tenant["day"]
+    source, store = _adapters()
+    cur.execute("SELECT pg_advisory_lock(%s, %s)", RUN_LOCK_KEY)
+    try:
+        assert run_export(source, store, horizon_days=1, today=date.today()) == \
+            {"skipped_overlapping_run": 1}
+        assert _count_day(cur, schema, day) == 5
+        assert store.read_manifest(company_id_to_prefix(cid), day) is None
+    finally:
+        cur.execute("SELECT pg_advisory_unlock(%s, %s)", RUN_LOCK_KEY)
+    run_export(source, store, horizon_days=1, today=date.today())
+    assert _count_day(cur, schema, day) == 0

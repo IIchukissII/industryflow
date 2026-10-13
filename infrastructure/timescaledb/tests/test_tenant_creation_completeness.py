@@ -43,3 +43,16 @@ def test_create_tenant_schema_applies_every_shape_migration():
     body = _create_tenant_schema_body()
     missing = {f: src for f, src in _shape_functions().items() if f"PERFORM {f}(v_schema_name)" not in body}
     assert not missing, f"create_tenant_schema() never calls {missing}; new tenants lack that shape"
+
+
+def test_create_tenant_schema_creates_the_sql_proxy_login_on_every_path():
+    # ADR-0033 dec 1: provisioning creates the tenant's SQL proxy login, in its own transaction and
+    # whether or not the notebooks profile is on. Gating it on the proxy principal existing, or
+    # skipping it when the schema already exists, leaves it to the proxy's first use.
+    body = _create_tenant_schema_body()
+    assert "notebook_sql_proxy'" not in body, "the login must not be gated on the proxy principal"
+    early_return = body[:body.index("RETURN v_schema_name;")]
+    assert "PERFORM ensure_tenant_sql_login(p_company_id)" in early_return, (
+        "re-provisioning an existing tenant does not converge its SQL login")
+    assert body.count("PERFORM ensure_tenant_sql_login(p_company_id)") == 2, (
+        "a new tenant's schema is built without its SQL login")

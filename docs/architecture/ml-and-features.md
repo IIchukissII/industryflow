@@ -95,7 +95,9 @@ model's address (its run, or its admitted upload), so the anomaly detector and t
 reuse a warm model instead of cold-loading from MLflow on every call (bounded LRU,
 `MODEL_CACHE_SIZE`). A cold load runs off the event loop, and first holds the record's address to the
 caller's tenant: a run must belong to one of the tenant's experiments, an artifact location must be an
-upload the gateway admitted under the tenant's prefix.
+upload the gateway admitted under the tenant's prefix. The address's shape (and, for an upload, the
+whole admitted-upload rule) is re-checked on every call, warm hits included, so a tightened policy
+refuses a cached model at once.
 
 ## Model drift monitoring
 
@@ -115,8 +117,10 @@ model's training distribution?"* — **windowed and statistical, not per-event**
   **prediction drift** (the model's output distribution). The current scores for prediction drift
   are produced by scoring an evenly spaced sample of the window's rows the way `/predict` scores a
   reading — feature config, then the model's detector — so a reference's prediction column must
-  hold the same 0–1 detector scores. Where they cannot be produced, data drift is still returned
-  with a `prediction_drift_reason`. The primary scalar is the drifted-feature *share*.
+  hold the same 0–1 detector scores. A profile whose prediction column holds anything else (labels,
+  raw outputs, values off the 0–1 scale) is refused at registration; one already stored is not
+  scored against. Where current scores cannot be produced, or the stored column is not a baseline,
+  data drift is still returned with a `prediction_drift_reason`. The primary scalar is the drifted-feature *share*.
 - **Where it lives.** The baseline is the `reference_profile JSONB` column on `ml_models`
   (init script `14-model-drift-reference-profile.sql`), built at registration by the capture helper
   in `ml_service/api/drift/`. The alert-rule API validates that a `statistical` rule binds a model

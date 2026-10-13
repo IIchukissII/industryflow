@@ -51,8 +51,9 @@ tenant prefix. Every other location is refused — another scheme, another bucke
 prefix, and above all the staging area, whose bytes were never judged. A kernel-authored model is
 addressed by its run instead, and that run must belong to one of the caller's experiments; a model
 naming both a run and an artifact is refused. Both checks run at registration, again at deployment,
-and again on every cold load in serving, so a row registered before they existed cannot be served
-from anywhere it should not.
+and again on every load in serving — the admitted-upload rule on warm-cache hits too, the run's
+ownership on every cold load — so a row registered before they existed cannot be served from anywhere
+it should not, and a tightened policy applies to models already cached.
 
 Registration records the **detector** that implements the declared semantics for the artifact's
 flavor (a caller may name one of those, never another). Serving dispatches on it; a row with none —

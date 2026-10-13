@@ -21,8 +21,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
 import main
+from capability_auth import suspended_key
 from dependencies import get_db_with_tenant
 from messaging import refresh_tokens
+from routers import companies
 from users import current_active_user
 
 OWN = uuid.uuid4()
@@ -68,7 +70,7 @@ class FakeDB:
                                  is_active=self.active if active is None else active, created_at=NOW)])
         if sql.startswith("SELECT is_active FROM public.companies"):
             return _Result([_Row(is_active=self.active)])
-        if sql.startswith('UPDATE public."user"'):
+        if sql.startswith('UPDATE public."user"') or sql.startswith('SELECT id FROM public."user"'):
             return _Result([_Row(id=i) for i in self.user_ids])
         return _Result([])
 
@@ -76,11 +78,32 @@ class FakeDB:
         self.commits += 1
 
 
+class FakeStore:
+    def __init__(self):
+        self.kv = {}
+
+    async def set(self, key, value, ex=None):
+        self.kv[key] = value
+
+    async def delete(self, *keys):
+        for k in keys:
+            self.kv.pop(k, None)
+
+
 @pytest.fixture
-def as_user(monkeypatch):
+def store(monkeypatch):
+    fake = FakeStore()
+    monkeypatch.setattr(companies.redis_client, "redis", fake)
+    return fake
+
+
+@pytest.fixture
+def as_user(monkeypatch, store):
     revoked = []
 
     async def revoke_all(user_id):
+        # The suspension marker is in place before any session is ended.
+        assert any(k.startswith("nbcap-suspended:") for k in store.kv)
         revoked.append(user_id)
         return 1
 
@@ -171,6 +194,56 @@ def test_delete_deactivates_company_and_users_and_ends_sessions(as_user):
     assert not any("DELETE" in s or "DROP" in s for s, _ in db.sql)
 
 
+def test_delete_marks_the_company_suspended_for_every_capability_plane(as_user, store):
+    c, _, _ = as_user(is_superuser=True)
+    assert c.delete(f"/api/companies/{OTHER}").status_code == 200
+    assert suspended_key(str(OTHER)) in store.kv
+
+
+def test_deactivating_through_update_takes_the_delete_path(as_user, store):
+    # ADR-0004 dec 2 rev 2: deactivating a company ends its users' sessions, whatever the route.
+    c, db, revoked = as_user(is_superuser=True)
+    r = c.put(f"/api/companies/{OTHER}", json={"is_active": False})
+    assert r.status_code == 200 and r.json()["is_active"] is False
+    (sql, params), = _calls(db, "update_company")
+    assert params["is_active"] is False
+    assert revoked == [str(i) for i in db.user_ids]
+    assert suspended_key(str(OTHER)) in store.kv
+    assert db.commits == 2  # the suspension, then ending its SQL sessions
+
+
+def test_reactivating_lifts_the_suspension_and_ends_nothing(as_user, store):
+    store.kv[suspended_key(str(OTHER))] = "1"
+    c, _, revoked = as_user(is_superuser=True, db=FakeDB(active=False))
+    assert c.put(f"/api/companies/{OTHER}", json={"is_active": True}).status_code == 200
+    assert suspended_key(str(OTHER)) not in store.kv
+    assert revoked == []
+
+
+def test_renaming_ends_no_session(as_user, store):
+    c, _, revoked = as_user(is_superuser=True)
+    assert c.put(f"/api/companies/{OTHER}", json={"company_name": "New"}).status_code == 200
+    assert revoked == [] and store.kv == {}
+
+
+def test_superuser_cannot_deactivate_own_company_through_update(as_user):
+    c, db, revoked = as_user(is_superuser=True)
+    assert c.put(f"/api/companies/{OWN}", json={"is_active": False}).status_code == 400
+    assert db.sql == [] and revoked == []
+
+
+def test_the_transition_is_seen_at_once_by_this_replica(as_user, company_flags):
+    import asyncio
+
+    import company_status
+
+    assert asyncio.run(company_status.is_company_active(OTHER)) is True  # cached as active
+    company_flags.inactive.add(str(OTHER))
+    c, _, _ = as_user(is_superuser=True)
+    assert c.put(f"/api/companies/{OTHER}", json={"is_active": False}).status_code == 200
+    assert asyncio.run(company_status.is_company_active(OTHER)) is False
+
+
 def test_tenant_admin_cannot_delete(as_user):
     c, db, revoked = as_user()
     assert c.delete(f"/api/companies/{OWN}").status_code == 403
@@ -188,3 +261,33 @@ def test_no_route_writes_the_registry_directly():
     path = os.path.join(os.path.dirname(__file__), "..", "routers", "companies.py")
     src = open(path, encoding="utf-8").read()
     assert not re.search(r"(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+public\.companies", src, re.I)
+
+
+def test_open_sql_sessions_are_ended_after_the_suspension_commits(as_user):
+    # NOLOGIN takes effect at commit, so the tenant's SQL sessions are ended in a later transaction.
+    for method, body in (("put", {"is_active": False}), ("delete", None)):
+        c, db, _ = as_user(is_superuser=True)
+        r = c.request(method.upper(), f"/api/companies/{OTHER}", json=body)
+        assert r.status_code == 200
+        sqls = [sql for sql, _ in db.sql]
+        suspend = next(i for i, sql in enumerate(sqls) if "update_company" in sql)
+        (end, params), = [(i, p) for i, (sql, p) in enumerate(db.sql) if "end_suspended_tenant_sql_sessions" in sql]
+        assert end > suspend and params == {"company_id": OTHER}
+        assert db.commits == 2  # the suspension's commit, then the termination's own
+
+
+def test_reactivation_and_rename_end_no_sql_session(as_user):
+    c, db, _ = as_user(is_superuser=True, db=FakeDB(active=False))
+    assert c.put(f"/api/companies/{OTHER}", json={"is_active": True, "company_name": "N"}).status_code == 200
+    assert _calls(db, "end_suspended_tenant_sql_sessions") == []
+
+
+def test_lifecycle_actions_leave_a_structured_record(as_user, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="routers.companies")
+    c, _, _ = as_user(is_superuser=True)
+    assert c.put(f"/api/companies/{OTHER}", json={"is_active": False}).status_code == 200
+    records = [r.company_lifecycle for r in caplog.records if hasattr(r, "company_lifecycle")]
+    assert records and records[-1]["action"] == "deactivate"
+    assert records[-1]["company_id"] == str(OTHER) and records[-1]["actor"]

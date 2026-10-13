@@ -32,6 +32,9 @@ class FakeRedis:
     async def set(self, key, value, ex=None):
         self.kv[key] = value
 
+    async def get(self, key):
+        return self.kv.get(key)
+
     async def getdel(self, key):
         return self.kv.pop(key, None)
 
@@ -189,8 +192,9 @@ def test_stored_value_names_the_user_and_the_credential(redis):
     import asyncio
 
     t = asyncio.run(refresh_tokens.create_refresh_token("u9", "h9"))
-    assert json.loads(redis.kv[f"refresh:{t}"]) == {
-        "uid": "u9", "cred": refresh_tokens.credential_fingerprint("h9")}
+    stored = json.loads(redis.kv[f"refresh:{t}"])
+    assert stored.pop("sid")
+    assert stored == {"uid": "u9", "cred": refresh_tokens.credential_fingerprint("h9")}
     assert t in redis.sets["refresh-user:u9"]
     assert REFRESH_COOKIE == "if_refresh"
 
@@ -232,3 +236,52 @@ async def test_logout_with_a_pre_fingerprint_token_still_revokes_capabilities(re
     _give_capability(redis, user.id)
     assert client.post("/auth/logout", json={"refresh_token": "legacy"}).status_code == 204
     assert "refresh:legacy" not in redis.kv and "nbcap:h1" not in redis.kv
+
+
+@pytest.mark.asyncio
+async def test_refresh_of_a_suspended_companys_user_is_refused_and_ends_its_sessions(refresh_client, redis, company_flags):
+    import company_status
+
+    client, user = refresh_client
+    t = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password)
+    other = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password)
+    company_flags.inactive.add(str(user.company_id))
+    company_status.clear()
+    assert client.post("/auth/refresh", json={"refresh_token": t}).status_code == 401
+    assert f"refresh:{other}" not in redis.kv
+
+
+@pytest.mark.asyncio
+async def test_rotation_keeps_the_session_id(refresh_client, redis):
+    import jwt as pyjwt
+
+    client, user = refresh_client
+    t = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, "sid-a")
+    r = client.post("/auth/refresh", json={"refresh_token": t})
+    assert r.status_code == 200
+    assert json.loads(redis.kv[f"refresh:{r.json()['refresh_token']}"])["sid"] == "sid-a"
+    assert pyjwt.decode(r.json()["access_token"], options={"verify_signature": False})["sid"] == "sid-a"
+
+
+@pytest.mark.asyncio
+async def test_logout_records_that_its_session_ended(refresh_client, redis):
+    client, user = refresh_client
+    t = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, "sid-a")
+    await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, "sid-b")
+    assert client.post("/auth/logout", json={"refresh_token": t}).status_code == 204
+    assert await refresh_tokens.session_ended(str(user.id), "sid-a", None) is True
+    assert await refresh_tokens.session_ended(str(user.id), "sid-b", 0) is False
+
+
+@pytest.mark.asyncio
+async def test_ending_all_sessions_records_each_session_and_the_time(redis):
+    import time
+
+    uid = str(uuid.uuid4())
+    await refresh_tokens.create_refresh_token(uid, "h", "sid-a")
+    await refresh_tokens.end_all_sessions(uid)
+    assert await refresh_tokens.session_ended(uid, "sid-a", time.time() + 60) is True  # by its id
+    assert await refresh_tokens.session_ended(uid, "sid-z", time.time() - 60) is True  # by its time
+    assert await refresh_tokens.session_ended(uid, None, None) is True
+    assert await refresh_tokens.session_ended(uid, "sid-z", time.time() + 60) is False
+    assert await refresh_tokens.session_ended(str(uuid.uuid4()), None, None) is False

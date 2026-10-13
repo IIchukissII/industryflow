@@ -37,6 +37,10 @@ from typing import Awaitable, Callable, Optional
 
 AUDIENCE_SQL = "sql"
 _KEY_PREFIX = "nbcap:"
+# Present while the handle's company is suspended (ADR-0033 dec 3): its handles do not resolve.
+# Written and removed by the platform API with the company's active flag; shared contract
+# (services/api_gateway/capability_auth.py).
+_SUSPENDED_PREFIX = "nbcap-suspended:"
 
 
 @dataclass(frozen=True)
@@ -53,7 +57,8 @@ async def resolve_sql_binding(
 
     None means the proxy refuses the connection. An API-audience handle never resolves here
     (ADR-0015 dec 3); absent/expired/revoked/malformed all deny (dec 1-2) — a record that is not
-    an object, or whose tenant is missing or not a UUID, denies rather than raising.
+    an object, or whose tenant is missing or not a UUID, denies rather than raising — and so does
+    a handle whose tenant is suspended.
     """
     if not handle:
         return None
@@ -74,6 +79,8 @@ async def resolve_sql_binding(
         # Canonical, or deny: the tenant becomes a role name and a schema name below.
         company_id = str(uuid.UUID(str(record.get("company_id") or "")))
     except ValueError:
+        return None
+    if await aget(f"{_SUSPENDED_PREFIX}{company_id}") is not None:
         return None
     return SqlBinding(
         user=str(record.get("user", "")),

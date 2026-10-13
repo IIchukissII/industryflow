@@ -201,6 +201,29 @@ def test_ones_own_run_and_ones_own_upload_are_registered(client):
     assert r.status_code == 201, r.text
 
 
+def _profile(scores):
+    return {"schema_version": 2, "method": "evidently_sample", "columns": ["a"],
+            "prediction_column": "prediction_score", "n_training_rows": len(scores),
+            "n_samples": len(scores), "sample": {"a": [1.0] * len(scores), "prediction_score": scores}}
+
+
+def test_a_reference_whose_predictions_are_not_detector_scores_is_refused(client):
+    """ADR-0021 rev 1 dec 4: the prediction column is a baseline only on the detector's scale. A
+    column of labels is refused at registration, before anything is stored."""
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-mine",
+                                              reference_profile=_profile([1, -1, 1, 1])))
+    assert r.status_code == 422, r.text
+    assert "declared scale" in r.json()["detail"]["message"]
+    assert client.repo.created == []
+
+
+def test_a_reference_of_detector_scores_is_registered(client):
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-mine",
+                                              reference_profile=_profile([0.1, 0.0, 1.0, 0.4])))
+    assert r.status_code == 201, r.text
+    assert client.repo.created[0][1]["reference_profile"]["prediction_column"] == "prediction_score"
+
+
 def test_a_tracking_store_that_does_not_answer_is_transient_not_a_verdict(client, monkeypatch):
     def down(run_id, company_id):
         raise model_loader.TrackingStoreUnavailable("connection refused")
