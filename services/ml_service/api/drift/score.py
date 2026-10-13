@@ -5,13 +5,17 @@
 """Drift scoring via evidently (ADR-0021 decisions 1 + 3).
 
 Given the stored reference profile (an evidently-consumable sample; see
-:mod:`drift.reference_profile`) and a recent window of feature values, measure how far the
-recent distribution has moved from the training baseline using ``evidently``'s data-drift
-tests. Both signals are label-free, so v1 needs no ground truth:
+:mod:`drift.reference_profile`) and a recent window of readings, measure how far the recent
+distribution has moved from the training baseline using ``evidently``'s data-drift tests. Both
+signals are label-free, so v1 needs no ground truth:
 
-- **data drift** — the input-feature columns of the current window vs the reference sample;
-- **prediction drift** — the model's own output-score column (if the reference captured
-  one) vs its training-window distribution, scored through the identical path.
+- **data drift** — the input columns of the current window vs the reference sample. The window
+  arrives as individual readings; :func:`align_readings` turns it into rows (one per instant at
+  which every compared sensor reported), because a sample is a row and sensors reporting at
+  different rates do not otherwise line up;
+- **prediction drift** — the model's own 0-1 anomaly scores over the current window vs the scores
+  the reference captured for the training window. The drift endpoint produces the current scores
+  by scoring the window's rows through the model's own detector, exactly as ``/predict`` would.
 
 This module computes the *scores*; the alert service applies each rule's threshold and
 decides whether to fire (ADR-0021 decision 3). The primary scalar is ``drift_share`` — the
@@ -21,7 +25,7 @@ fraction of feature columns evidently flags as drifted — matching the ADR's
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
 from evidently import DataDefinition, Dataset, Report
@@ -39,6 +43,31 @@ MIN_ROWS = 30
 
 _DRIFTED_COUNT_TYPE = "DriftedColumnsCount"
 _VALUE_DRIFT_TYPE = "ValueDrift"
+
+
+def align_readings(
+    readings: Iterable[Mapping[str, Any]],
+    columns: Sequence[str],
+) -> Tuple[List[Any], Dict[str, List[float]]]:
+    """Turn individual readings into rows: one per instant at which EVERY named column reported.
+
+    ``readings`` are ``{time, sensor_name, value}`` mappings (what the repository reads). An instant
+    missing any of ``columns`` is dropped rather than filled — a fill value is a reading nobody took,
+    and the distributions under comparison would then be partly invented. Readings of sensors not in
+    ``columns`` are ignored. A repeated (instant, sensor) keeps its last value.
+
+    Returns ``(times, {column: values})``, oldest first, every list the same length.
+    """
+    wanted = set(columns)
+    by_time: Dict[Any, Dict[str, float]] = {}
+    for reading in readings:
+        name = reading["sensor_name"]
+        if name in wanted:
+            by_time.setdefault(reading["time"], {})[name] = reading["value"]
+
+    times = sorted(t for t, row in by_time.items() if len(row) == len(wanted))
+    aligned = {c: [float(by_time[t][c]) for t in times] for c in columns}
+    return times, aligned
 
 
 def _is_drifted(method: Optional[str], value: Any, threshold: Optional[float]) -> Optional[bool]:
@@ -103,6 +132,7 @@ def compute_drift(
     reference_profile: Mapping[str, Any],
     current_data: Mapping[str, Iterable[float]],
     *,
+    current_predictions: Optional[Iterable[float]] = None,
     drift_share_threshold: float = DEFAULT_DRIFT_SHARE_THRESHOLD,
 ) -> Dict[str, Any]:
     """Score data + prediction drift of a recent window against the reference profile.
@@ -110,10 +140,14 @@ def compute_drift(
     Args:
         reference_profile: the stored profile (schema v2). Callers must handle a *missing*
             profile ("drift unavailable") before calling this.
-        current_data: mapping column -> recent-window values. Feature columns are matched
-            against the reference by name; if the reference captured a prediction column
-            and ``current_data`` supplies it (the endpoint scores the window with the warm
-            model), prediction drift is reported too.
+        current_data: mapping column -> recent-window values, ROW-ALIGNED (every column the
+            same length; see :func:`align_readings`). Feature columns are matched against the
+            reference by name.
+        current_predictions: the model's 0-1 scores over the current window. Compared against
+            the reference's prediction column, when it captured one. They are their own sample
+            (the endpoint may score a subset of the window's rows), so they need not match the
+            feature columns' length. A ``prediction_column`` inside ``current_data`` is still
+            honoured when this is not given.
         drift_share_threshold: advisory threshold on the drifted-feature share for the
             convenience ``drift_detected`` flag. The alert service supplies the
             authoritative one (ADR-0021 dec 3).
@@ -126,7 +160,8 @@ def compute_drift(
         overlap and ``"insufficient_data"`` when either side is below ``MIN_ROWS``.
 
     Raises:
-        ValueError: if the profile schema version is not understood.
+        ValueError: if the profile schema version is not understood, or the current columns
+            are not row-aligned.
     """
     version = reference_profile.get("schema_version")
     if version != REFERENCE_PROFILE_VERSION:
@@ -135,8 +170,15 @@ def compute_drift(
             f"(expected {REFERENCE_PROFILE_VERSION})"
         )
 
+    current = {k: list(v) for k, v in current_data.items()}
+    lengths = {len(v) for v in current.values()}
+    if len(lengths) > 1:
+        raise ValueError(
+            f"current-window columns must be row-aligned, saw lengths {sorted(lengths)}"
+        )
+
     ref_df = pd.DataFrame(reference_profile.get("sample", {}))
-    cur_df = pd.DataFrame({k: list(v) for k, v in current_data.items()})
+    cur_df = pd.DataFrame(current)
 
     feature_cols = [c for c in reference_profile.get("columns", []) if c in cur_df.columns]
     unmatched = [c for c in reference_profile.get("columns", []) if c not in cur_df.columns]
@@ -169,8 +211,13 @@ def compute_drift(
     }
 
     prediction_drift = None
-    if pred_col and pred_col in cur_df.columns and pred_col in ref_df.columns:
-        _, _, pred_per_col = _run_report(ref_df, cur_df, [pred_col])
+    if current_predictions is not None:
+        pred_df = pd.DataFrame({pred_col: list(current_predictions)}) if pred_col else None
+    else:
+        pred_df = cur_df if pred_col and pred_col in cur_df.columns else None
+    if (pred_col and pred_df is not None and pred_col in ref_df.columns
+            and len(pred_df) >= MIN_ROWS):
+        _, _, pred_per_col = _run_report(ref_df, pred_df, [pred_col])
         pc = pred_per_col.get(pred_col, {})
         prediction_drift = {
             "column": pred_col,

@@ -38,6 +38,9 @@ data:
   # platform's topology. The public edge when one is set (so a browser reaches stage/commit at the
   # front door, ADR-0030 dec 10), else the interior gateway, which only an in-cluster client can reach.
   UPLOAD_GATEWAY_URL: {{ .Values.publicBaseUrl | default (printf "http://%s-notebook-tracking-gateway:%v" (include "industryflow.fullname" .) .Values.notebookHub.trackingGateway.port) | quote }}
+  # The bucket the gateway admits uploads into; ml_service registers and serves an uploaded model
+  # only from an admitted upload there (ADR-0030 dec 4). The gateway's own value, not a second one.
+  UPLOAD_ARTIFACT_BUCKET: {{ .Values.notebookHub.trackingGateway.artifactBucket | quote }}
   {{- end }}
   # Spark S3A checkpoint endpoint (ADR-0006). Used only when CHECKPOINT_LOCATION is an s3a:// URI
   # (the scale-out path); the default local mode ignores it.

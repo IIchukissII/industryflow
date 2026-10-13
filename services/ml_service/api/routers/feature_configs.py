@@ -50,12 +50,16 @@ async def get_company_id_dependency(
         for schema_row in schemas:
             schema_name = schema_row['schema_name']
 
-            await conn.execute(f"SET search_path TO {schema_name}, public")
-
-            company_id = await conn.fetchval(
-                'SELECT company_id FROM "user" WHERE id = $1',
-                user_id
-            )
+            # Transaction-local, so the path is discarded when this lookup ends instead of
+            # riding the pooled connection to its next borrower (ADR-0003 dec 6).
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT set_config('search_path', $1, true)", f"{schema_name}, public"
+                )
+                company_id = await conn.fetchval(
+                    'SELECT company_id FROM "user" WHERE id = $1',
+                    user_id
+                )
 
             if company_id:
                 return str(company_id)
@@ -113,6 +117,7 @@ class FeatureConfigListResponse(BaseModel):
 async def create_feature_config(
     config: FeatureConfigCreate,
     request: Request,
+    current_user: dict = Depends(auth.verify_jwt_token),
     company_id: str = Depends(get_company_id_dependency)
 ):
     """
@@ -122,8 +127,6 @@ async def create_feature_config(
     for a specific equipment type.
     """
     try:
-        # company_id from dependency  # User ID from JWT
-
         result = await request.app.state.ml_repository.create_feature_config(
             company_id=company_id,
             equipment_type=config.equipment_type,
@@ -131,7 +134,8 @@ async def create_feature_config(
             base_sensors=config.base_sensors,
             transformations=config.transformations,
             description=config.description,
-            created_by=company_id
+            # Who created it: the authenticated user (the token's subject), not their company.
+            created_by=str(current_user["user_id"])
         )
 
         logger.info(f"Created feature config: {result['id']} for {config.equipment_type}")

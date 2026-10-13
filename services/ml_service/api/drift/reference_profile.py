@@ -72,7 +72,10 @@ def build_reference_profile(
             passes ``df.to_dict("list")``; keeping the input a plain mapping avoids a
             pandas dependency in the capture path.
         prediction_scores: optional per-row model output scores over the training window;
-            stored as ``prediction_column`` so the endpoint can measure prediction drift.
+            stored as ``prediction_column`` so the endpoint can measure prediction drift. They
+            must be the model's 0-1 anomaly scores as its detector produces them (what
+            ``/api/inference/predict`` returns): the endpoint scores the current window that way,
+            and two different quantities would differ without anything having drifted.
         prediction_column: name for the prediction column (default ``prediction_score``).
         max_sample_rows: cap on stored rows (default 5000); larger windows are evenly
             down-sampled.

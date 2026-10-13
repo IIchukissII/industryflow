@@ -31,6 +31,7 @@ import logging
 
 from . import (
     ANOMALY_PROBABILITY,
+    DIRECT_SCORE,
     OUTLIER_SCORE,
     RECONSTRUCTION_ERROR,
     DetectionResult,
@@ -47,10 +48,20 @@ except ImportError:  # pragma: no cover - the service always has numpy
 
 
 def _estimator(model):
-    """Reach the real estimator; MLflow's pyfunc wrapper hides it behind `_model_impl`."""
-    impl = getattr(model, "_model_impl", model)
-    # mlflow's sklearn pyfunc wrapper nests it once more.
-    return getattr(impl, "sklearn_model", impl)
+    """Reach the real estimator behind MLflow's pyfunc wrapper.
+
+    Through MLflow's own accessor, which every flavor's wrapper implements for itself — not by
+    reaching into one flavor's private attribute. The private reach found the sklearn estimator and
+    stopped at the xgboost wrapper, whose `predict` is all it exposes: an XGBoost classifier was then
+    never asked for its probability. A bare estimator (no pyfunc around it) is its own estimator.
+    """
+    get_raw = getattr(model, "get_raw_model", None)
+    if callable(get_raw):
+        try:
+            return get_raw()
+        except NotImplementedError:
+            pass  # a pyfunc flavor with no underlying framework object: score the wrapper itself
+    return model
 
 
 def _clamp(x: float) -> float:
@@ -74,9 +85,11 @@ async def sklearn_detector(features, model, threshold, ctx) -> DetectionResult:
          LocalOutlierFactor). This is the branch #236 never reached, because the old code read
          `predict()`'s ±1 label instead — and could not tell IsolationForest's "+1 = normal" from
          XGBoost's "+1 = anomaly".
-      3. a float prediction -> the model already emits a score and means it.
 
-    A model that offers none of these is REFUSED, not guessed at.
+    A model that offers neither is REFUSED, not guessed at — and that includes one whose prediction is
+    a float. A float is a dtype, not a meaning (ADR-0028 dec 2): a regressor's output, a log-odds, a
+    reconstruction and a calibrated score are all floats. A model that emits a 0-1 anomaly score says
+    so by naming the `direct` detector, which implements exactly that declaration.
     """
     est = _estimator(model)
 
@@ -94,22 +107,43 @@ async def sklearn_detector(features, model, threshold, ctx) -> DetectionResult:
     if hasattr(est, "decision_function"):
         return _outlier_result(float(np.asarray(est.decision_function(features)).ravel()[0]), threshold)
 
-    prediction = np.asarray(model.predict(features)).ravel()[0]
-    if isinstance(prediction, (float, np.floating)):
-        return DetectionResult(
-            score=_clamp(prediction),
-            is_anomaly=_clamp(prediction) >= threshold,
-            detail={"semantics": "direct_score"},
-        )
-
-    # An integer label with no probability and no outlier score. This is exactly the case that
-    # produced #236, and the honest answer is that we do not know what it means: `1` is normal to an
-    # IsolationForest and anomalous to a classifier, and nothing in the artifact says which.
+    # Neither a probability nor an outlier score. Whatever `predict` returns — a ±1 label (the case that
+    # produced #236: `1` is normal to an IsolationForest and anomalous to a classifier) or a float —
+    # nothing in it says what it means, and the honest answer is that we do not know.
     raise UninterpretableModel(
-        f"this model returns the bare label {prediction!r} and exposes neither predict_proba nor "
-        f"decision_function — so what the label MEANS cannot be established "
-        f"(+1 is 'normal' to an IsolationForest and 'anomaly' to a classifier). Register a detector "
-        f"that declares the semantics of this model rather than having the platform guess (ADR-0028)."
+        "this model exposes neither predict_proba nor decision_function, so what its output MEANS "
+        "cannot be established — a label's sign and a float's range are not declarations (+1 is "
+        "'normal' to an IsolationForest and 'anomaly' to a classifier). Register it with the detector "
+        "that declares its semantics — `direct` if it already emits a 0-1 anomaly score — rather than "
+        "having the platform guess (ADR-0028)."
+    )
+
+
+@register_detector(
+    "direct",
+    semantics=DIRECT_SCORE,
+    handles_flavors=["mlflow.sklearn", "mlflow.xgboost"],
+)
+async def direct_detector(features, model, threshold, ctx) -> DetectionResult:
+    """A model that already emits a 0-1 anomaly score, and was registered as meaning it.
+
+    The declaration is the model record's, not an inference from the output: this detector is only
+    reached because the model named it. It still holds the model to what was declared — a value
+    outside 0-1 is not a 0-1 score, and clamping it would turn a broken declaration into a confident
+    number. That is refused, like any other output nothing here can interpret.
+    """
+    prediction = np.asarray(model.predict(features), dtype=float).ravel()
+    if prediction.size == 0 or not np.isfinite(prediction[0]) or not 0.0 <= prediction[0] <= 1.0:
+        raise UninterpretableModel(
+            f"this model is registered as emitting a 0-1 anomaly score, but returned "
+            f"{prediction[:1].tolist()} — not a score in that range. It is not the model its "
+            f"declaration describes."
+        )
+    score = float(prediction[0])
+    return DetectionResult(
+        score=score,
+        is_anomaly=score >= threshold,
+        detail={"semantics": DIRECT_SCORE},
     )
 
 

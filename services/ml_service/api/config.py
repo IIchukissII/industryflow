@@ -62,7 +62,12 @@ class Config:
     # Where an uploader takes the handle. Advertised with the handle so a client does not have to
     # know the platform's internal topology to use one.
     UPLOAD_GATEWAY_URL: str = os.getenv('UPLOAD_GATEWAY_URL', '')
-    
+    # The bucket the upload gateway admits artifacts into (its TRACKING_ARTIFACT_BUCKET). An uploaded
+    # model's artifact location is accepted only as an admitted upload in THIS bucket, under the
+    # caller's own tenant prefix (ADR-0030 dec 4). Absent = no artifact location can be shown to be
+    # one, so this deployment registers and serves no uploaded models.
+    UPLOAD_ARTIFACT_BUCKET: str = os.getenv('UPLOAD_ARTIFACT_BUCKET', '')
+
     # CORS
     CORS_ORIGINS: str = os.getenv('CORS_ORIGINS', 'http://localhost:3000')
     

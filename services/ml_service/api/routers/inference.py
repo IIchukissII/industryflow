@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from prometheus_client import Counter
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
+import asyncio
 import logging
 import mlflow
 import mlflow.pyfunc
@@ -21,11 +22,10 @@ import json
 
 import auth
 import model_cache
-import skops_trust
+import model_loader
 import uploaded_model
 from feature_engineering import FeatureEngineeringEngine
 from extensions import get_detector, DetectorContext, UninterpretableModel
-from model_uri import resolve_model_uri
 
 logger = logging.getLogger(__name__)
 
@@ -95,12 +95,16 @@ async def _company_id_from_user(request: Request, user_id: str) -> str:
         for schema_row in schemas:
             schema_name = schema_row['schema_name']
 
-            await conn.execute(f"SET search_path TO {schema_name}, public")
-
-            company_id = await conn.fetchval(
-                'SELECT company_id FROM "user" WHERE id = $1',
-                user_id
-            )
+            # Transaction-local, so the path is discarded when this lookup ends instead of
+            # riding the pooled connection to its next borrower (ADR-0003 dec 6).
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT set_config('search_path', $1, true)", f"{schema_name}, public"
+                )
+                company_id = await conn.fetchval(
+                    'SELECT company_id FROM "user" WHERE id = $1',
+                    user_id
+                )
 
             if company_id:
                 return str(company_id)
@@ -164,36 +168,77 @@ async def _resolve_company_id(request: Request, request_data: InferenceRequest) 
 # Helper Functions
 # ============================================================================
 
-def _load_model_uncached(mlflow_run_id: str, provenance: Optional[str]):
-    """Cold-load a model from MLflow (the slow path behind the warm cache).
+def record_provenance(model_data: Dict[str, Any]) -> str:
+    """Provenance as the registry recorded it (ADR-0030 dec 8); derived by the same rule for a row
+    that predates the column."""
+    return model_data.get('provenance') or uploaded_model.provenance_of(
+        mlflow_run_id=model_data.get('mlflow_run_id'), artifact_uri=model_data.get('artifact_uri'),
+    )
 
-    What its skops file may deserialise into is the serving side's grant for its provenance, never
-    the list the artifact carries (ADR-0027 dec 13).
 
-    The URI is RESOLVED, not assumed (#240). MLflow 3 stores a logged model under
-    `<experiment>/models/m-<id>/`, not under its run — so `runs:/<run_id>/model` addresses a path that
-    does not exist on a real deployment, and the artifact proxy 404s until the client gives up. It
-    only ever "worked" against a local artifact directory, which is what CI and every local test used.
+def load_model_for(company_id: str, model_data: Dict[str, Any]):
+    """Load a registered model, warm from the process-local cache when already loaded.
+
+    The anomaly detector and the drift evaluator both score with the same models repeatedly; the
+    cache avoids a cold fetch on every call (see model_cache). A cold load is the full path in
+    `model_loader`: the record's address is held to the caller's tenant, then the artifact is loaded
+    with the trust its provenance is granted (ADR-0027 dec 13) — a kernel model through its run, an
+    uploaded one from the location the upload gateway admitted it to (ADR-0030 dec 8).
+
+    Blocking (tracking-store and object-store IO on a miss): call it off the event loop.
     """
-    model_uri = resolve_model_uri(mlflow_run_id)
-    model = skops_trust.load_pyfunc(model_uri, provenance)
-    logger.info(f"Model loaded from MLflow: {model_uri} (provenance {provenance})")
-    return model
-
-
-def load_model_from_mlflow(mlflow_run_id: str, provenance: Optional[str]):
-    """Load a model by run_id, warm from the process-local cache when already loaded.
-
-    The anomaly detector and the drift evaluator both score with the same models
-    repeatedly; the cache avoids a cold MLflow fetch on every call (see model_cache).
-    """
+    address = dict(
+        company_id=company_id,
+        mlflow_run_id=model_data.get('mlflow_run_id'),
+        artifact_uri=model_data.get('artifact_uri'),
+        provenance=record_provenance(model_data),
+    )
     try:
-        return model_cache.get_or_load(mlflow_run_id, lambda key: _load_model_uncached(key, provenance))
+        return model_cache.get_or_load(
+            model_loader.cache_key(**address), lambda _key: model_loader.load(**address),
+        )
     except Exception as e:
-        logger.error(f"Failed to load model from MLflow: {e}")
+        logger.error(f"Failed to load model: {e}")
         raise
 
 
+async def load_model_or_refuse(company_id: str, model_data: Dict[str, Any]):
+    """`load_model_for`, off the event loop, with its refusals turned into the HTTP answers they are."""
+    try:
+        return await asyncio.to_thread(load_model_for, company_id, model_data)
+    except model_loader.ModelNotAdmissible as exc:
+        raise HTTPException(status_code=422, detail={
+            "message": "This model's artifact is not one your tenant may load, so it will not be scored.",
+            "reason": str(exc),
+        }) from exc
+    except model_loader.TrackingStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The tracking store did not answer, so the model's ownership cannot be established. Retry.",
+        ) from exc
+
+
+def detector_for(model_data: Dict[str, Any]):
+    """The detector the model record names (ADR-0010 dec 6), refusing rather than assuming one.
+
+    The detector IS the declaration of what the model's output means (ADR-0028 dec 1). A record with
+    none — an upload registered before the choice was kept — is refused: scoring it with a default
+    would be deciding its semantics on its behalf.
+    """
+    name = model_data.get('detector')
+    if not name:
+        raise HTTPException(status_code=422, detail={
+            "message": (
+                "This model records no detector, so nothing declares what its output means and it "
+                "will not be scored (ADR-0028). Register it again to record one."
+            ),
+        })
+    detector = get_detector(name)
+    if detector is None:
+        # Named, but not loaded in this deployment (an extension module was removed). A deployment
+        # fault rather than the caller's, and not one a retry fixes.
+        raise HTTPException(status_code=500, detail=f"Unknown anomaly detector: {name}")
+    return name, detector
 
 
 # ============================================================================
@@ -233,21 +278,12 @@ async def predict(
             detail=f"Model status is '{model_data.get('status')}'. Only 'production' or 'active' models can be used for inference."
         )
 
-    mlflow_run_id = model_data.get('mlflow_run_id')
-    if not mlflow_run_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Model has no MLflow run_id. Cannot load model."
-        )
+    # Before anything is loaded: which detector scores it. A model whose semantics nothing declares is
+    # refused without fetching an artifact it could never be scored with.
+    detector_name, detector = detector_for(model_data)
 
     try:
-        # Load model from MLflow
-        # Provenance as the registry recorded it (ADR-0030 dec 8); derived by the same rule for a row
-        # that predates the column.
-        provenance = model_data.get('provenance') or uploaded_model.provenance_of(
-            mlflow_run_id=mlflow_run_id, artifact_uri=model_data.get('artifact_uri'),
-        )
-        model = load_model_from_mlflow(mlflow_run_id, provenance)
+        model = await load_model_or_refuse(company_id, model_data)
 
         # Get feature engineering configuration
         feature_config_id = model_data.get('feature_config_id')
@@ -294,13 +330,8 @@ async def predict(
         if neutralized:
             STATEFUL_NEUTRALIZED.inc(len(neutralized))
 
-        # Score the features through the anomaly-detector registry (ADR-0010). The model
-        # record may name a detector (a domain may register its own); the default 'sklearn'
-        # built-in reproduces the platform's scikit-learn scoring.
-        detector_name = model_data.get('detector', 'sklearn')
-        detector = get_detector(detector_name)
-        if detector is None:
-            raise HTTPException(status_code=500, detail=f"Unknown anomaly detector: {detector_name}")
+        # Score the features through the detector the model record names (ADR-0010 dec 6), chosen at
+        # the registration gate as the one that implements its declared semantics (ADR-0028 dec 1).
 
         # An autoencoder's error is unbounded, so it is scored against the error the model itself saw
         # in training (ADR-0028). Where that scale lives is deliberately not fixed by the ADR; today it
@@ -351,6 +382,11 @@ async def predict(
             neutralized_features=neutralized or None,
         )
 
+    except HTTPException:
+        # A refusal raised above (400/404/422/503) is already the answer. Re-wrapping it as a 500
+        # would tell the caller the platform broke when it declined, and invite a retry that can
+        # never succeed.
+        raise
     except Exception as e:
         logger.error(f"Inference failed: {e}", exc_info=True)
         raise HTTPException(

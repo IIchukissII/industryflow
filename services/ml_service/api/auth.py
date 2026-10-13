@@ -102,12 +102,16 @@ async def get_company_id(
         for schema_row in schemas:
             schema_name = schema_row['schema_name']
             
-            await conn.execute(f"SET search_path TO {schema_name}, public")
-            
-            company_id = await conn.fetchval(
-                'SELECT company_id FROM "user" WHERE id = $1',
-                user_id
-            )
+            # Transaction-local, so the path is discarded when this lookup ends instead of
+            # riding the pooled connection to its next borrower (ADR-0003 dec 6).
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT set_config('search_path', $1, true)", f"{schema_name}, public"
+                )
+                company_id = await conn.fetchval(
+                    'SELECT company_id FROM "user" WHERE id = $1',
+                    user_id
+                )
             
             if company_id:
                 logger.debug(f"User {user_id} found in schema {schema_name}")

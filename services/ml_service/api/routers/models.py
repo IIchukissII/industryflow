@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
+import asyncio
 import logging
 import json
 
@@ -20,6 +21,7 @@ import config
 import extensions
 import load_probe
 import model_compat
+import model_loader
 import upload_capability
 import uploaded_model
 
@@ -40,9 +42,10 @@ class ModelMetadata(BaseModel):
     equipment_id: Optional[str] = None
     equipment_type: Optional[str] = None
     model_name: str
-    # The read path already SELECTs `description` and _format_model_row surfaces it; without a field
-    # here the response model drops it at the door — the same silent loss provenance suffered. It is
-    # load-bearing for an uploaded model, whose author writes a description the operator should read.
+    # Written at registration, SELECTed by both full-surface reads and surfaced by _format_model_row;
+    # without a field here the response model would drop it at the door — the same silent loss
+    # provenance suffered. It is load-bearing for an uploaded model, whose author writes a description
+    # the operator should read.
     description: Optional[str] = None
     model_version: str
     model_type: str
@@ -61,9 +64,12 @@ class ModelMetadata(BaseModel):
     training_samples: Optional[int] = None
     training_start_date: Optional[datetime] = None
     training_end_date: Optional[datetime] = None
-    training_duration_seconds: Optional[int] = None
     mlflow_run_id: Optional[str] = None
     mlflow_experiment_id: Optional[str] = None
+    # ADR-0010 dec 6 / ADR-0028 dec 1: the detector that scores this model — the declaration of what
+    # its output means. None only for an upload registered before the choice was recorded, which
+    # serving refuses until it is registered again.
+    detector: Optional[str] = None
     # ADR-0027 dec 7: whether this serving environment still satisfies what the model declares.
     # Surfaced on the model, never fired as an alert — a version mismatch is a mechanical fact about
     # two containers, not the statistical claim about the world that ADR-0022's lane carries.
@@ -94,9 +100,16 @@ class ModelCreateRequest(BaseModel):
     equipment_id: Optional[str] = None
     equipment_type: Optional[str] = None
     model_name: str
+    # What the model is for, in its author's words. Stored and shown on the model (ModelMetadata).
+    description: Optional[str] = None
     model_version: str
     model_type: str
     model_path: Optional[str] = None
+    # The detector that scores this model (ADR-0010 dec 6) — which is to say, what its output MEANS
+    # (ADR-0028 dec 1). A kernel-authored model names it, defaulting to the `sklearn` compatibility
+    # detector. An uploaded model need not: the gate picks the detector that implements its declared
+    # semantics for its flavor, and refuses a named one that does not.
+    detector: Optional[str] = None
     # An externally-authored model (ADR-0030): where its artifact was put, and what its author says
     # its output means. Both absent for a kernel-authored model — its run answers the first, and its
     # detector already declares the second (ADR-0028 dec 1).
@@ -119,7 +132,6 @@ class ModelCreateRequest(BaseModel):
     training_samples: Optional[int] = None
     training_start_date: Optional[datetime] = None
     training_end_date: Optional[datetime] = None
-    training_duration_seconds: Optional[int] = None
     mlflow_run_id: Optional[str] = None
     mlflow_experiment_id: Optional[str] = None
     # ADR-0021: compact training-window distribution snapshot the drift evaluator
@@ -168,12 +180,16 @@ async def get_company_id_dependency(
         for schema_row in schemas:
             schema_name = schema_row['schema_name']
             
-            await conn.execute(f"SET search_path TO {schema_name}, public")
-            
-            company_id = await conn.fetchval(
-                'SELECT company_id FROM "user" WHERE id = $1',
-                user_id
-            )
+            # Transaction-local, so the path is discarded when this lookup ends instead of
+            # riding the pooled connection to its next borrower (ADR-0003 dec 6).
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT set_config('search_path', $1, true)", f"{schema_name}, public"
+                )
+                company_id = await conn.fetchval(
+                    'SELECT company_id FROM "user" WHERE id = $1',
+                    user_id
+                )
             
             if company_id:
                 return str(company_id)
@@ -271,6 +287,66 @@ async def _evaluate_or_reject(
     return compatibility
 
 
+async def _admit_address_or_refuse(
+    company_id: str, mlflow_run_id: Optional[str], artifact_uri: Optional[str], *, on_refused: int,
+) -> None:
+    """Refuse a model whose run or artifact location this tenant may not use (ADR-0003, ADR-0030).
+
+    Both are caller-supplied, and everything after this point trusts them: the compatibility gate
+    reads the artifact, the load probe executes its loader, and serving loads it with a credential
+    that reaches every tenant's artifacts. So the address is held to the caller's tenant FIRST — a run
+    in one of its experiments, or an upload its gateway admitted under its prefix — before any of that
+    reads a byte. Asked again at deployment, for rows registered before this check existed.
+    """
+    try:
+        await asyncio.to_thread(
+            model_loader.check_admissible,
+            company_id=company_id, mlflow_run_id=mlflow_run_id, artifact_uri=artifact_uri,
+        )
+    except model_loader.ModelNotAdmissible as exc:
+        logger.warning(f"Refusing a model address for tenant {company_id}: {exc}")
+        raise HTTPException(status_code=on_refused, detail={
+            "message": "This model's artifact is not one your tenant may register or serve.",
+            "reason": str(exc),
+        }) from exc
+    except model_loader.TrackingStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The tracking store did not answer, so it cannot be established that this run is "
+                "your tenant's. This is transient — retry."
+            ),
+        ) from exc
+
+
+def _kernel_detector_or_refuse(named: Optional[str], flavor: Optional[str]) -> str:
+    """The detector a kernel-authored model is scored by, held to what the registry declares.
+
+    `sklearn` when none is named — the compatibility detector every model before ADR-0028 names
+    (ADR-0010 dec 6). A named detector must be loaded in this deployment, and if it declares the
+    flavors it can score, the artifact's flavor must be one of them (ADR-0028 dec 4): otherwise the
+    model would register and then be refused, or worse misread, at its first score.
+    """
+    name = named or "sklearn"
+    capability = next((c for c in extensions.detector_capabilities() if c["name"] == name), None)
+    if capability is None:
+        raise HTTPException(status_code=422, detail={
+            "message": f"No detector named '{name}' is loaded in this deployment.",
+            "detectors": extensions.registered_detectors(),
+        })
+    flavors = capability.get("handles_flavors") or []
+    if flavor and flavors and flavor not in flavors:
+        raise HTTPException(status_code=422, detail={
+            "message": (
+                f"The '{name}' detector does not score `{flavor}` models, so nothing would know what "
+                f"this model's output means (ADR-0028 dec 4). Name a detector that does."
+            ),
+            "flavor": flavor,
+            "detector_flavors": flavors,
+        })
+    return name
+
+
 # ============================================================================
 # API Endpoints
 # ============================================================================
@@ -366,6 +442,10 @@ async def create_model(
             ),
         )
 
+    await _admit_address_or_refuse(
+        company_id, payload.get("mlflow_run_id"), payload.get("artifact_uri"), on_refused=422,
+    )
+
     compatibility = await _evaluate_or_reject(
         payload.get("mlflow_run_id"),
         on_incompatible=422,
@@ -395,13 +475,33 @@ async def create_model(
                 "declared_semantics": payload.get("score_semantics"),
                 "flavor": compatibility.flavor if compatibility else None,
             })
+        detector = verdict.detector
+        if payload.get("detector"):
+            # A caller may pick among the detectors that implement the declaration, never outside
+            # them: a detector with other semantics would read this model's output as something else.
+            matches = extensions.detectors_for(payload["score_semantics"], compatibility.flavor)
+            if payload["detector"] not in matches:
+                raise HTTPException(status_code=422, detail={
+                    "message": (
+                        f"The '{payload['detector']}' detector does not implement "
+                        f"'{payload['score_semantics']}' for `{compatibility.flavor}` models."
+                    ),
+                    "detectors": matches,
+                })
+            detector = payload["detector"]
+        payload["detector"] = detector
         logger.info(
             f"Uploaded model '{model_data.model_name}' declares '{payload.get('score_semantics')}'; "
-            f"scored here by '{verdict.detector}'"
+            f"scored here by '{detector}'"
+        )
+    else:
+        payload["detector"] = _kernel_detector_or_refuse(
+            payload.get("detector"), compatibility.flavor if compatibility else None,
         )
 
-    payload.pop("score_semantics", None)  # judged, not stored: the detector remains the authority
-    # on what an output means (ADR-0028 dec 1), and a second copy could only drift from it.
+    # Judged, not stored: the detector recorded above IS the declaration, and remains the authority
+    # on what an output means (ADR-0028 dec 1). A second copy could only drift from it.
+    payload.pop("score_semantics", None)
 
     # Create model in database
     try:
@@ -548,6 +648,27 @@ async def deploy_model(
     # to break it. Only the states that put a model into a serving path run the load-and-score gate.
     if request_data.environment in ("production", "active"):
         model_label = str(model_data.get("model_name", model_id))
+
+        # The address first, as at registration: a row registered before that check existed carries
+        # whatever it was given, and this is the gate that puts it in front of the serving path.
+        await _admit_address_or_refuse(
+            company_id, model_data.get("mlflow_run_id"), model_data.get("artifact_uri"),
+            on_refused=409,
+        )
+
+        # And the detector it names must still be loaded here (an extension can be removed between
+        # registration and deployment). Without it the model would deploy and then fail every score.
+        detector = model_data.get("detector")
+        if not detector or extensions.get_detector(detector) is None:
+            raise HTTPException(status_code=409, detail={
+                "message": (
+                    "This model names no detector this deployment has loaded, so nothing here can "
+                    "say what its output means and it will not be deployed (ADR-0028)."
+                    + ("" if detector else " Register it again to record one.")
+                ),
+                "detector": detector,
+            })
+
         compatibility = await _evaluate_or_reject(
             model_data.get("mlflow_run_id"),
             on_incompatible=409,

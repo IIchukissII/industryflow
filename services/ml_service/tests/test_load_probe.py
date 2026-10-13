@@ -113,9 +113,10 @@ def test_that_switch_is_not_set_on_this_process():
     assert "MLFLOW_ALLOW_PICKLE_DESERIALIZATION" not in os.environ
 
 
-def test_the_worker_inherits_the_rest_of_the_environment(monkeypatch):
+def test_the_worker_reaches_the_same_object_store(monkeypatch):
     # It must reach the same object store the serving path does; a probe in a different environment
-    # would prove the wrong thing.
+    # would prove the wrong thing. (Only what reading the artifact needs is passed — see
+    # test_silent_omission_guards for the secrets it is not handed.)
     monkeypatch.setenv("MLFLOW_S3_ENDPOINT_URL", "http://minio:9000")
     assert load_probe._worker_env()["MLFLOW_S3_ENDPOINT_URL"] == "http://minio:9000"
 

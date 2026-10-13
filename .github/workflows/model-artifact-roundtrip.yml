@@ -45,6 +45,12 @@ jobs:
               - 'services/notebook_hub/Dockerfile.authoring'
               - 'services/ml_service/api/Dockerfile'
               - 'services/ml_service/api/requirements.txt'
+              # The serving half loads through ml_service's own code; a change there is a change
+              # to what the round trip proves (guarded by test_roundtrip_path_filter.py).
+              - 'services/ml_service/api/skops_trust.py'
+              - 'services/ml_service/api/uploaded_model.py'
+              - 'services/ml_service/api/model_uri.py'
+              - 'services/ml_service/api/extensions/**'
               - 'infrastructure/mlflow/**'
               - 'clients/python/**'
               - 'scripts/check_model_env_parity.py'

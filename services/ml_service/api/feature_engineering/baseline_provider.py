@@ -14,11 +14,15 @@ stop being a windowing substrate (ADR-0023 dec 2 / dec 7).
 A short in-process TTL cache absorbs the per-feature reads of a single ``/predict`` (a model
 may carry many statistical features): the aggregates only change when a window closes (order of
 a minute), so a few seconds of caching adds negligible staleness while collapsing N queries.
+The cache is keyed by tenant schema as well as equipment, and BOUNDED: its keys come from the
+request (the equipment named in the sensor payload), so an unbounded map would grow with every
+distinct value a caller chose to send.
 """
 import logging
 import os
 import time
 import uuid
+from collections import OrderedDict
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -43,6 +47,11 @@ GRANULARITY_SECONDS = {
 }
 
 
+# Entries the baseline cache may hold. A live entry is one (tenant, equipment, sensor, window), so
+# this covers a large fleet several times over; beyond it the least recently used entry goes.
+DEFAULT_CACHE_MAX_ENTRIES = 4096
+
+
 def _schema_for(company_id: str) -> str:
     """Tenant schema name for a company_id, validated as a UUID before interpolation (ADR-0003).
 
@@ -58,7 +67,8 @@ class AggregateBaselineProvider:
     """Reads a sensor's latest windowed mean from the tenant's Spark-materialized aggregates."""
 
     def __init__(self, pool, cache_ttl_seconds: Optional[float] = None,
-                 query_timeout_seconds: Optional[float] = None):
+                 query_timeout_seconds: Optional[float] = None,
+                 cache_max_entries: Optional[int] = None):
         """
         Args:
             pool: asyncpg connection pool (shared with the repository).
@@ -66,6 +76,8 @@ class AggregateBaselineProvider:
                 BASELINE_CACHE_TTL env var (default 5.0).
             query_timeout_seconds: Per-query timeout so a slow DB fails fast to the neutral
                 value on the inference hot path; defaults to BASELINE_QUERY_TIMEOUT (default 1.0).
+            cache_max_entries: Bound on cached baselines (least recently used evicted first);
+                defaults to the BASELINE_CACHE_MAX_ENTRIES env var (default 4096).
         """
         self.pool = pool
         self.cache_ttl_seconds = cache_ttl_seconds if cache_ttl_seconds is not None else float(
@@ -74,7 +86,11 @@ class AggregateBaselineProvider:
         self.query_timeout_seconds = query_timeout_seconds if query_timeout_seconds is not None else float(
             os.getenv("BASELINE_QUERY_TIMEOUT", "1.0")
         )
-        self._cache = {}  # (schema, equipment_id, sensor_name, granularity) -> (expires_at, value)
+        self.cache_max_entries = max(1, cache_max_entries if cache_max_entries is not None else int(
+            os.getenv("BASELINE_CACHE_MAX_ENTRIES", str(DEFAULT_CACHE_MAX_ENTRIES))
+        ))
+        # (schema, equipment_id, sensor_name, granularity) -> (expires_at, value), oldest use first.
+        self._cache: "OrderedDict[tuple, tuple]" = OrderedDict()
 
     async def compute_baseline(
         self,
@@ -101,16 +117,36 @@ class AggregateBaselineProvider:
         except (ValueError, AttributeError, TypeError):
             logger.warning("Invalid company_id for baseline lookup: %r", company_id)
             return None
+        try:
+            # Canonical, so one equipment is one key however the caller spelled it — and a value
+            # that is not an equipment id at all is answered without a query or a cache entry.
+            equipment = str(uuid.UUID(str(equipment_id)))
+        except (ValueError, AttributeError, TypeError):
+            logger.warning("Invalid equipment_id for baseline lookup: %r", equipment_id)
+            return None
 
-        key = (schema, str(equipment_id), sensor_name, granularity)
+        key = (schema, equipment, sensor_name, granularity)
         now = time.monotonic()
         cached = self._cache.get(key)
         if cached is not None and cached[0] > now:
+            self._cache.move_to_end(key)
             return cached[1]
 
-        value = await self._read(schema, table, equipment_id, sensor_name)
-        self._cache[key] = (now + self.cache_ttl_seconds, value)
+        value = await self._read(schema, table, equipment, sensor_name)
+        self._store(key, (now + self.cache_ttl_seconds, value), now)
         return value
+
+    def _store(self, key, entry, now: float) -> None:
+        """Insert one entry, keeping the cache within its bound: expired entries go first, then the
+        least recently used."""
+        self._cache[key] = entry
+        self._cache.move_to_end(key)
+        if len(self._cache) <= self.cache_max_entries:
+            return
+        for stale in [k for k, (expires_at, _) in self._cache.items() if expires_at <= now]:
+            del self._cache[stale]
+        while len(self._cache) > self.cache_max_entries:
+            self._cache.popitem(last=False)
 
     async def compute_rolling_mean(
         self,
@@ -141,10 +177,15 @@ class AggregateBaselineProvider:
         )
         try:
             async with self.pool.acquire() as conn:
-                # Tenant isolation via search_path (ADR-0003); schema is UUID-validated above.
-                await conn.execute(f"SET search_path TO {schema}, public")
-                row = await conn.fetchrow(sql, str(equipment_id), sensor_name,
-                                          timeout=self.query_timeout_seconds)
+                # Tenant isolation via search_path (ADR-0003); schema is UUID-validated above. Set
+                # transaction-locally, so it is discarded with the transaction rather than left on
+                # the pooled connection for its next borrower (ADR-0003 dec 6).
+                async with conn.transaction():
+                    await conn.execute(
+                        "SELECT set_config('search_path', $1, true)", f"{schema}, public"
+                    )
+                    row = await conn.fetchrow(sql, str(equipment_id), sensor_name,
+                                              timeout=self.query_timeout_seconds)
         except Exception as e:  # noqa: BLE001 — degrade to neutral, never fail inference
             logger.warning("Baseline query failed for %s/%s: %s", equipment_id, sensor_name, e)
             return None

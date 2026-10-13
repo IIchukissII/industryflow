@@ -756,6 +756,9 @@ services:
       # an in-cluster client (a CLI on the network) can reach — and the wizard reads that as "browser
       # upload is not configured here" and points at the CLI instead.
       UPLOAD_GATEWAY_URL: ${PUBLIC_BASE_URL:-http://notebook-tracking-gateway:5050}
+      # The bucket the gateway admits uploads into (its TRACKING_ARTIFACT_BUCKET). An uploaded model
+      # is registered and served only from an admitted upload in this bucket (ADR-0030 dec 4).
+      UPLOAD_ARTIFACT_BUCKET: mlflow
       MODEL_DIR: /app/models
       # Warm model cache size (ADR-0021): loaded MLflow models reused across inference + drift.
       MODEL_CACHE_SIZE: ${MODEL_CACHE_SIZE:-8}

@@ -22,6 +22,7 @@ from check_model_env_parity import (  # noqa: E402
     kernel_pin_sources,
     parse_pins,
     serving_requirements_path,
+    violations,
 )
 
 
@@ -148,6 +149,26 @@ class TestTheCheckReadsWhatTheImageInstalls:
             "the repo-wide resolve gate will keep it green forever while it teaches every reader "
             "something false. ADR-0027 dec 9 removed it."
         )
+
+
+class TestAMissingPinIsAFailure:
+    """A package the contract covers but one side no longer pins is not "out of scope" — the check
+    can no longer see it. Printing `--` and passing is a gate that passes by not looking."""
+
+    PINS = {"numpy": "2.5.3", "scikit-learn": "1.9.1", "pandas": "2.3.3", "skops": "0.16.0",
+            "xgboost": "3.4.1"}
+
+    def test_matching_pins_pass(self):
+        assert violations(dict(self.PINS), dict(self.PINS)) == {}
+
+    @pytest.mark.parametrize("side", ["kernel", "serving"])
+    @pytest.mark.parametrize("package", sorted(RULES))
+    def test_a_pin_missing_on_either_side_fails(self, side, package):
+        kernel, serving = dict(self.PINS), dict(self.PINS)
+        (kernel if side == "kernel" else serving).pop(package)
+        found = violations(kernel, serving)
+        assert package in found, f"{package} missing from {side} was waved through"
+        assert "not pinned" in found[package]
 
 
 def test_the_real_repository_satisfies_the_contract():

@@ -16,6 +16,7 @@ from .reference_profile import (
 from .score import (
     DEFAULT_DRIFT_SHARE_THRESHOLD,
     MIN_ROWS,
+    align_readings,
     compute_drift,
 )
 
@@ -24,5 +25,6 @@ __all__ = [
     "build_reference_profile",
     "DEFAULT_DRIFT_SHARE_THRESHOLD",
     "MIN_ROWS",
+    "align_readings",
     "compute_drift",
 ]

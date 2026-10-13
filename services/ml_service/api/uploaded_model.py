@@ -32,6 +32,8 @@ enumerate frameworks: the flavor question is asked of the registry, which is dis
 """
 from __future__ import annotations
 
+import re
+import uuid
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence
 
@@ -43,6 +45,15 @@ PROVENANCE_KERNEL = "kernel"      # authored in the platform's own environment, 
 PROVENANCE_UPLOADED = "uploaded"  # authored somewhere the platform never saw
 
 PROVENANCE = (PROVENANCE_KERNEL, PROVENANCE_UPLOADED)
+
+# Where the upload gateway puts an artifact it ADMITTED: inside the tenant's own prefix, under this
+# root, one directory per upload. Mirrors the gateway's `staging.ADMITTED_ROOT`; the two are held
+# together by a test that reads both, because they live in different images.
+ADMITTED_ROOT = "uploads/"
+
+# The gateway's upload id: opaque, URL-safe, high-entropy. Matching its exact shape is what makes
+# "under uploads/" mean one admitted upload rather than any key that happens to start there.
+_UPLOAD_ID = r"[A-Za-z0-9_-]{16,64}"
 
 
 @dataclass(frozen=True)
@@ -66,6 +77,41 @@ def provenance_of(*, mlflow_run_id: Optional[str], artifact_uri: Optional[str]) 
     uploaded one has an artifact and no run, because dec 8 forbids inventing one for it.
     """
     return PROVENANCE_KERNEL if mlflow_run_id else PROVENANCE_UPLOADED
+
+
+def admitted_artifact_refusal(artifact_uri: Optional[str], company_id: str, bucket: str) -> Optional[str]:
+    """Why ``artifact_uri`` is not an admitted upload of this tenant's — or ``None`` if it is one.
+
+    The URI is supplied by the caller, and everything downstream trusts it: the serving side loads
+    from it with its own object-store credential, and MLflow's loader executes what the artifact's
+    manifest names. So the only acceptable address is the one the upload gateway produced when it
+    ADMITTED the bytes (ADR-0030 dec 4) — exactly ``s3://<bucket>/tenant_<uuid>/uploads/<upload id>``
+    for the caller's own tenant. Anything else is refused, not normalised:
+
+      * another scheme (``file:``, ``http:``, ``runs:``, ``models:``...) reaches bytes the gateway
+        never judged, or a model the caller does not own;
+      * the staging area holds bytes that were never admitted — registering them would skip the
+        refusal that is the precondition for accepting an upload at all;
+      * another tenant's prefix is another tenant's model (ADR-0003).
+    """
+    if not artifact_uri:
+        return "an uploaded model must carry the artifact location the upload gateway returned"
+    if not bucket:
+        return ("this deployment does not name the bucket uploads are admitted into, so no artifact "
+                "location can be shown to be an admitted upload")
+    try:
+        token = "tenant_" + str(uuid.UUID(str(company_id))).replace("-", "_")
+    except (ValueError, AttributeError, TypeError):
+        return "the caller's tenant is not a valid company id"
+
+    expected = rf"s3://{re.escape(bucket)}/{token}/{re.escape(ADMITTED_ROOT)}{_UPLOAD_ID}/?"
+    if not re.fullmatch(expected, artifact_uri):
+        return (
+            "the artifact location is not an upload this tenant's gateway admitted. Register the "
+            f"`artifact_uri` the upload commit returned (s3://{bucket}/{token}/{ADMITTED_ROOT}<upload>); "
+            "nothing else is accepted, because nothing else was judged (ADR-0030 dec 4)."
+        )
+    return None
 
 
 def judge_semantics(

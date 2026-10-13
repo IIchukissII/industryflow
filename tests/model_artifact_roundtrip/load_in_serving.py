@@ -5,9 +5,17 @@
 """Half two of ADR-0027's empirical gate: LOAD, inside the real ml_service image.
 
 This runs in the actual serving image and loads what the authoring kernel trained, through the same
-call the inference path makes — `mlflow.pyfunc.load_model` on a `runs:/<id>/model` URI
-(`services/ml_service/api/routers/inference.py`). It then scores the probe input and demands the same
-answer the kernel got.
+calls the inference path makes (`services/ml_service/api/model_loader.py`): the run's model URI as
+`model_uri.resolve_model_uri` resolves it (MLflow 3 keeps a logged model outside its run, so not a
+`runs:/` URI), loaded by `skops_trust.load_pyfunc` with the provenance's trust grant. It then scores
+the probe input and demands the same answer the kernel got.
+
+Two more things only the real image can show. The detectors reach the estimator behind MLflow's
+wrapper (`builtins_detectors._estimator`): if they stop at the wrapper, a classifier is never asked for
+its probability, and every unit test — which hands detectors bare estimators — stays green. And a
+model loaded as an UPLOAD goes through the stricter path an uploaded artifact takes (manifest checked
+for author code, downloaded once): the xgboost booster must still load and score identically there,
+and the tree model must still be refused.
 
 Why "it loaded" is not the assertion. An unpickle across a numpy major does not reliably raise; it can
 succeed and score WRONG, which is the failure mode that actually matters — the drift lane (ADR-0021)
@@ -32,6 +40,7 @@ import xgboost
 # not our own. The loader decides skops trust by provenance (ADR-0027 dec 13).
 import skops_trust
 import uploaded_model
+from extensions.builtins_detectors import _estimator
 from model_uri import resolve_model_uri
 
 ARTIFACTS = os.environ.get("ROUNDTRIP_DIR", "/artifacts")
@@ -91,6 +100,12 @@ def main() -> int:
                 if "InconsistentVersion" in type(w.message).__name__:
                     print(f"  WARN {flavor}: {w.message}")
 
+        est = _estimator(model)
+        if type(est).__module__.split(".")[0] not in ("sklearn", "xgboost"):
+            print(f"  FAIL {flavor}: the detectors reach {type(est).__module__}.{type(est).__name__}, "
+                  f"not the estimator — they would score the wrapper, not the model")
+            failures.append(f"{flavor}-estimator")
+
         expected = np.asarray(entry["expected"])
         drift = np.abs(actual - expected).max()
         if drift > TOLERANCE:
@@ -120,6 +135,25 @@ def main() -> int:
                 failures.append("trust")
             else:
                 print("  ok   trust: the same tree model is refused with uploaded provenance")
+
+    # The upload path, on the flavor an upload may actually be (a native booster: no object
+    # deserialisation, nothing the author chose to construct beyond an xgboost model).
+    booster = manifest["models"].get("xgboost")
+    if booster:
+        try:
+            uploaded = skops_trust.load_pyfunc(resolve_model_uri(booster["run_id"]),
+                                               uploaded_model.PROVENANCE_UPLOADED)
+            delta = np.abs(np.asarray(uploaded.predict(probe)).ravel()
+                           - np.asarray(booster["expected"])).max()
+            if delta > TOLERANCE:
+                print(f"  FAIL upload: the booster loaded as an upload scores differently ({delta:.3e})")
+                failures.append("upload")
+            else:
+                print("  ok   upload: the booster loads and scores identically on the upload path")
+        except Exception as exc:  # noqa: BLE001 — any failure to load IS the finding
+            print(f"  FAIL upload: the booster could not be loaded as an upload: "
+                  f"{type(exc).__name__}: {exc}")
+            failures.append("upload")
 
     print()
     if failures:

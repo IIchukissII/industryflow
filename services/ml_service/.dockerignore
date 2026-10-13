@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The build context is services/ml_service and the image copies api/ wholesale (api/Dockerfile), so
+# anything left lying in api/ ships. What the serving image must never carry is excluded here:
+# tests and their requirements, the notebook helpers, and any local tracking store or cache.
+tests/
+notebooks/
+requirements-dev.txt
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/*.db
+**/*.sqlite
+**/mlruns/
+**/mlartifacts/

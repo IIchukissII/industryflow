@@ -10,6 +10,7 @@ import asyncpg
 import logging
 import json
 import uuid
+from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,10 @@ def _format_model_row(row: dict, company_id: str) -> Dict[str, Any]:
         # KeyError on a real box after every unit test had passed.
         'provenance': row.get('provenance'),
         'artifact_uri': row.get('artifact_uri'),
+        # ADR-0010 dec 6 / ADR-0028 dec 1: the detector this model is scored by — the declaration of
+        # what its output means. Inference dispatches on it, so a read that drops it would leave
+        # every model scored by whatever default the caller assumed.
+        'detector': row.get('detector'),
         'status': row['status'],
         'deployed_at': row.get('deployed_at'),
         'deprecated_at': row.get('deprecated_at'),
@@ -92,6 +97,25 @@ def normalize_company_id_to_schema(company_id: str) -> str:
     return f"tenant_{canonical.replace('-', '_')}"
 
 
+@asynccontextmanager
+async def tenant_connection(pool: asyncpg.Pool, company_id: str):
+    """A pooled connection whose tenant ``search_path`` cannot outlive this block (ADR-0003 dec 6).
+
+    The path is applied with transaction-local scope inside a transaction that spans the block, so
+    it is discarded when the transaction ends and a connection never returns to the pool carrying
+    this tenant's path. A session-scoped ``SET`` would leave it there for the next borrower, and
+    isolation would then rest on every later query remembering to set its own path first.
+    ``set_config(..., true)`` is ``SET LOCAL`` with the value bound as a parameter.
+    """
+    schema_name = normalize_company_id_to_schema(company_id)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT set_config('search_path', $1, true)", f"{schema_name}, public"
+            )
+            yield conn
+
+
 class MLRepository:
     """Repository for ML models in industryflow database"""
     
@@ -105,10 +129,8 @@ class MLRepository:
         limit: int = 50
     ) -> List[Dict[str, Any]]:
         """Get all models for a company from tenant schema"""
-        schema_name = normalize_company_id_to_schema(company_id)
         
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
             
             query = """
                 SELECT
@@ -118,7 +140,7 @@ class MLRepository:
                     accuracy, precision_score, recall, f1_score, auc_roc,
                     training_samples, training_start_date, training_end_date,
                     compatibility_status, compatibility_detail, compatibility_checked_at,
-                    provenance, artifact_uri,
+                    provenance, artifact_uri, detector,
                     status, deployed_at, deprecated_at, created_at, updated_at
                 FROM ml_models
             """
@@ -147,8 +169,7 @@ class MLRepository:
         """Create a new model entry"""
         schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
 
             # Build INSERT query dynamically based on provided fields
             # Note: company_id is NOT in table, it's implied by schema
@@ -160,6 +181,7 @@ class MLRepository:
                 'equipment_id': 'equipment_id',
                 'equipment_type': 'equipment_type',
                 'model_name': 'model_name',
+                'description': 'description',
                 'model_version': 'model_version',
                 'model_type': 'model_type',
                 'model_path': 'model_path',
@@ -179,7 +201,6 @@ class MLRepository:
                 'training_samples': 'training_samples',
                 'training_start_date': 'training_start_date',
                 'training_end_date': 'training_end_date',
-                'training_duration_seconds': 'training_duration_seconds',
                 'reference_profile': 'reference_profile',  # ADR-0021 drift baseline
                 # ADR-0027: the verdict on whether this serving environment can honour what the
                 # artifact declares. Set by the registration gate, refreshed at the deployment gate.
@@ -191,6 +212,9 @@ class MLRepository:
                 # (declining to invent a run means recording what the run would have told us).
                 'provenance': 'provenance',
                 'artifact_uri': 'artifact_uri',
+                # ADR-0010 dec 6 / ADR-0028 dec 1: which detector scores this model, chosen at the
+                # registration gate (for an upload, the one that implements its declared semantics).
+                'detector': 'detector',
             }
 
             # JSONB fields that need serialization (note: feature_names and sensor_ids are arrays, not JSONB)
@@ -249,10 +273,8 @@ class MLRepository:
         model_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get single model by ID"""
-        schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
 
             row = await conn.fetchrow(
                 """
@@ -264,7 +286,7 @@ class MLRepository:
                     training_samples, training_start_date, training_end_date,
                     reference_profile,
                     compatibility_status, compatibility_detail, compatibility_checked_at,
-                    provenance, artifact_uri,
+                    provenance, artifact_uri, detector,
                     status, deployed_at, deprecated_at, created_at, updated_at
                 FROM ml_models
                 WHERE model_id = $1
@@ -283,24 +305,22 @@ class MLRepository:
         sensor_ids: List[str],
         start,
         end,
-    ) -> Dict[str, List[float]]:
-        """Read a trailing window of raw sensor values, grouped by sensor name (ADR-0021).
+    ) -> List[Dict[str, Any]]:
+        """Read a trailing window of raw sensor readings, oldest first (ADR-0021).
 
-        Returns ``{sensor_name: [values...]}`` for the drift evaluator to compare against
-        the model's reference profile. Tenant-scoped via search_path (ADR-0003); the drift
-        endpoint reads only its own tenant's data.
+        Returns one ``{time, sensor_name, value}`` per reading. The time is kept because the drift
+        evaluator compares ROWS, and a row is the set of readings taken at one instant: grouping
+        values per sensor without their times loses the alignment, and sensors that report at
+        different rates then no longer line up. Tenant-scoped via search_path (ADR-0003); the
+        drift endpoint reads only its own tenant's data.
         """
         if not sensor_ids:
-            return {}
+            return []
 
-        schema_name = normalize_company_id_to_schema(company_id)
-
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
-
+        async with tenant_connection(self.pool, company_id) as conn:
             rows = await conn.fetch(
                 """
-                SELECT s.sensor_name AS sensor_name, m.value AS value
+                SELECT m.time AS time, s.sensor_name AS sensor_name, m.value AS value
                 FROM sensor_measurements m
                 JOIN sensors s ON s.sensor_id = m.sensor_id
                 WHERE m.sensor_id = ANY($1::uuid[])
@@ -311,10 +331,10 @@ class MLRepository:
                 sensor_ids, start, end,
             )
 
-        window: Dict[str, List[float]] = {}
-        for row in rows:
-            window.setdefault(row['sensor_name'], []).append(row['value'])
-        return window
+        return [
+            {'time': row['time'], 'sensor_name': row['sensor_name'], 'value': row['value']}
+            for row in rows
+        ]
     
     async def update_model_status(
         self,
@@ -323,10 +343,8 @@ class MLRepository:
         status: str
     ) -> bool:
         """Update model status"""
-        schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
 
             result = await conn.execute(
                 "UPDATE ml_models SET status = $1 WHERE model_id = $2",
@@ -348,10 +366,8 @@ class MLRepository:
         can be rebuilt underneath a registered model, so what was true at registration need not be true
         at deployment. `compatibility_checked_at` is what makes a stale verdict legible as stale.
         """
-        schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
 
             result = await conn.execute(
                 """
@@ -375,10 +391,8 @@ class MLRepository:
     ) -> bool:
         """Deprecate a model (soft delete) — to `deprecated`, the retire state the ml_models CHECK
         permits; `archived` is an MLflow stage name this table never adopted and the DB rejects it."""
-        schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
 
             result = await conn.execute(
                 "UPDATE ml_models SET status = 'deprecated' WHERE model_id = $1",
@@ -393,10 +407,8 @@ class MLRepository:
         model_type: str
     ) -> Optional[Dict[str, Any]]:
         """Get latest active model for a type"""
-        schema_name = normalize_company_id_to_schema(company_id)
         
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
             
             row = await conn.fetchrow(
                 """
@@ -423,10 +435,8 @@ class MLRepository:
         model_ids: List[str]
     ) -> List[Dict[str, Any]]:
         """Compare multiple models"""
-        schema_name = normalize_company_id_to_schema(company_id)
         
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
             
             rows = await conn.fetch(
                 """
@@ -461,10 +471,8 @@ class MLRepository:
         created_by: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create a new feature engineering configuration"""
-        schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
 
             row = await conn.fetchrow(
                 """
@@ -490,10 +498,8 @@ class MLRepository:
         config_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get feature config by ID"""
-        schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
 
             row = await conn.fetchrow(
                 """
@@ -518,10 +524,8 @@ class MLRepository:
         equipment_type: str
     ) -> List[Dict[str, Any]]:
         """Get all feature configs for an equipment type"""
-        schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
 
             rows = await conn.fetch(
                 """
@@ -547,10 +551,8 @@ class MLRepository:
         limit: int = 100
     ) -> List[Dict[str, Any]]:
         """Get all feature configs for a company"""
-        schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
 
             rows = await conn.fetch(
                 """
@@ -581,7 +583,6 @@ class MLRepository:
         transformations: Optional[List[Dict[str, Any]]] = None
     ) -> Optional[Dict[str, Any]]:
         """Update feature config"""
-        schema_name = normalize_company_id_to_schema(company_id)
 
         # Build dynamic update query
         updates = []
@@ -616,8 +617,7 @@ class MLRepository:
         if not updates:
             return await self.get_feature_config_by_id(company_id, config_id)
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
 
             query = f"""
                 UPDATE feature_engineering_configs
@@ -642,10 +642,8 @@ class MLRepository:
         config_id: str
     ) -> bool:
         """Delete feature config"""
-        schema_name = normalize_company_id_to_schema(company_id)
 
-        async with self.pool.acquire() as conn:
-            await conn.execute(f"SET search_path TO {schema_name}, public")
+        async with tenant_connection(self.pool, company_id) as conn:
 
             result = await conn.execute(
                 "DELETE FROM feature_engineering_configs WHERE id = $1",
