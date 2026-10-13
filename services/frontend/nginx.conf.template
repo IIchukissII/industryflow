@@ -76,7 +76,10 @@ server {
         return 200 "ok\n";
     }
 
-    proxy_set_header Host $host;
+    # The Host exactly as the client sent it, port included ($http_host, not $host): the gateway's
+    # WebSocket Origin check compares the Origin with the request host, and a browser on a
+    # non-default port (compose's :3443) sends both with the port.
+    proxy_set_header Host $http_host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto https;
@@ -116,9 +119,15 @@ server {
     location /openapi.json { proxy_pass http://$api_gateway; }
 
     # WebSocket (sensor stream) — wss:// terminates here, proxied to the gateway.
+    # Declaring proxy_set_header here drops every inherited one (nginx inheritance), so the
+    # forwarding headers are restated: without them the gateway saw Host = its own upstream name.
     location /ws/ {
         proxy_pass http://$api_gateway;
         proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_read_timeout 3600s;
@@ -161,7 +170,8 @@ server {
     # externally-trained model is the largest artifact the platform handles.
     location /mlflow/_upload-staging/ {
         proxy_pass $artifact_store;
-        proxy_set_header Host $host;
+        # As sent, port included: the pre-signed signature covers the host:port it was signed for.
+        proxy_set_header Host $http_host;
         client_max_body_size 0;
         proxy_request_buffering off;
         proxy_read_timeout 300s;

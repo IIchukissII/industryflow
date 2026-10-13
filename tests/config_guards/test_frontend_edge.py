@@ -98,3 +98,44 @@ def test_the_frontend_image_takes_no_dead_build_args():
     assert "REACT_APP_" not in dockerfile
     assert "REACT_APP_" not in (ROOT / "docker-compose.yml").read_text()
     assert "REACT_APP_" not in (ROOT / ".env.example").read_text()
+
+
+def _locations():
+    """(location line, [directives]) for each location block; plus the server-level directives."""
+    server, blocks, current, depth = [], [], None, 0
+    for line in TEMPLATE.splitlines():
+        code = line.split("#", 1)[0].strip()
+        if not code:
+            continue
+        if code.startswith("location ") and depth == 1:
+            current = (code, [])
+            blocks.append(current)
+            if code.endswith("}"):  # one-line block
+                current[1].append(code[code.index("{") + 1:-1].strip())
+                current = None
+                continue
+        elif current is not None and depth == 2 and code != "}":
+            current[1].append(code)
+        elif depth == 1 and current is None:
+            server.append(code)
+        depth += code.count("{") - code.count("}")
+        if depth == 1:
+            current = None
+    return server, blocks
+
+
+def test_api_and_websocket_routes_forward_the_host_with_its_port():
+    # The gateway's WebSocket Origin check compares Origin with the request host; behind compose's
+    # :3443 the browser sends both with the port, so the edge must forward $http_host. A location
+    # that sets any proxy_set_header inherits none from the server (it once sent its upstream name).
+    server, blocks = _locations()
+    checked = 0
+    for loc, directives in blocks:
+        if not any(re.search(r"proxy_pass http://\$(api_gateway|ml_service)", d) for d in directives):
+            continue
+        checked += 1
+        own = [d for d in directives if d.startswith("proxy_set_header")]
+        effective = own if own else [d for d in server if d.startswith("proxy_set_header")]
+        assert "proxy_set_header Host $http_host;" in effective, f"{loc} forwards {effective}"
+        assert any(d.startswith("proxy_set_header X-Forwarded-Proto") for d in effective), loc
+    assert checked >= 10, f"only {checked} gateway/ML locations found — the parser is not reading"

@@ -270,14 +270,27 @@ jobs:
           if docker run --rm --env-file incomplete.env "$IMAGE" nginx -t; then
             echo "::error::the edge started without an upstream"; exit 1
           fi
-          docker run -d --name edge --env-file compose.env -p 18080:8080 -p 18443:8443 "$IMAGE"
-          trap 'docker logs edge; docker rm -f edge' EXIT
+          # A stand-in gateway that echoes the Host it receives, to check what the edge forwards.
+          docker network create edgenet
+          docker run -d --name api-gateway --network edgenet python:3.14-slim python -c "
+          import http.server
+          class H(http.server.BaseHTTPRequestHandler):
+              def do_GET(self):
+                  self.send_response(200); self.end_headers(); self.wfile.write(('host=' + self.headers['Host']).encode())
+          http.server.HTTPServer(('', 8000), H).serve_forever()"
+          docker run -d --name edge --network edgenet --env-file compose.env -p 18080:8080 -p 18443:8443 "$IMAGE"
+          trap 'docker logs edge; docker rm -f edge api-gateway' EXIT
           for i in $(seq 1 30); do curl -fsS http://localhost:18080/healthz >/dev/null 2>&1 && break; sleep 1; done
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18080/)" = 301
           test "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' http://localhost:18080/)" = 200
           headers=$(curl -sk -D - -o /dev/null https://localhost:18443/)
           for h in Strict-Transport-Security Content-Security-Policy X-Content-Type-Options X-Frame-Options Referrer-Policy; do
             echo "$headers" | grep -qi "^$h:" || { echo "::error::missing $h"; echo "$headers"; exit 1; }
+          done
+          # The gateway's WebSocket Origin check compares Origin with the host, port included.
+          for path in /ws/sensors /api/alerts; do
+            got=$(curl -sk "https://localhost:18443$path")
+            test "$got" = "host=localhost:18443" || { echo "::error::$path forwarded '$got'"; exit 1; }
           done
           echo "edge ok"
 
