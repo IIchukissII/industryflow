@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
+      serving: ${{ steps.filter.outputs.serving }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -36,6 +37,20 @@ jobs:
               - 'infrastructure/minio/**'
               - 'docker-compose.yml'
               - 'docker-compose.ci-notebooks.yml'
+              - '.env.example'
+              - '.github/workflows/tracking-gateway-integration.yml'
+            serving:
+              - 'services/ml_service/**'
+              - 'services/api_gateway/**'
+              - 'services/notebook_tracking_gateway/**'
+              - 'libs/industryflow_contracts/**'
+              - 'infrastructure/timescaledb/**'
+              - 'infrastructure/mlflow/**'
+              - 'infrastructure/minio/**'
+              - 'scripts/create-tenant.sh'
+              - 'scripts/manage_users.py'
+              - 'scripts/user_admin_db.py'
+              - 'docker-compose.yml'
               - '.env.example'
               - '.github/workflows/tracking-gateway-integration.yml'
 
@@ -147,9 +162,75 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml --profile notebooks down -v
 
+  # The serving half of the upload path (ADR-0030 dec 4-7): what the gateway admits, registered and
+  # deployed by the real ml_service image, whose deployment gate loads and scores it in a subprocess.
+  # The client's whole path runs, with no shortcut through the stores: a user created by the operator
+  # CLI logs in at the API gateway, mints the upload capability at ml_service, uploads through the
+  # tracking gateway at the address ml_service advertises, then registers and deploys.
+  upload-serving:
+    needs: changes
+    if: needs.changes.outputs.serving == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Provide compose env
+        run: cp .env.example .env
+
+      - name: Start TimescaleDB + MinIO + Redis
+        run: docker compose up -d --wait timescaledb minio redis
+
+      - name: Provision buckets (incl. the mlflow artifact bucket)
+        run: docker compose up minio-init
+
+      - name: Build + start MLflow, the API gateway, ml_service and the tracking gateway
+        run: |
+          docker compose --profile notebooks up -d --build --wait --wait-timeout 600 \
+            mlflow api-gateway ml-service-api notebook-tracking-gateway
+
+      - name: Provision a tenant and an uploader, the way an operator does
+        id: uploader
+        run: |
+          company_id=$(cat /proc/sys/kernel/random/uuid)
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          scripts/create-tenant.sh "CI Upload Tenant" "$company_id"
+          printf '%s\n' "$password" | docker compose run --rm -T --no-deps \
+            -v "$PWD/scripts:/scripts:ro" -e PYTHONPATH=/app --entrypoint python \
+            api-gateway /scripts/manage_users.py create --email ci-uploader@example.com \
+            --company-id "$company_id" --role engineer --password-stdin
+          echo "company_id=$company_id" >> "$GITHUB_OUTPUT"
+          echo "password=$password" >> "$GITHUB_OUTPUT"
+
+      # IN-NETWORK: the pre-signed PUTs point at minio:9000. IF_REQUIRE_LIVE_STACK=1 makes a SKIP a
+      # FAILURE.
+      - name: Run the upload path's serving-half proof (ADR-0030 dec 4-7)
+        env:
+          IF_UPLOADER_PASSWORD: ${{ steps.uploader.outputs.password }}
+        run: |
+          docker run --rm --network industryflow-network -v "$PWD:/w" -w /w \
+            -e IF_REQUIRE_LIVE_STACK=1 \
+            -e ML_SERVICE_URL=http://ml-service-api:8002 \
+            -e API_GATEWAY_URL=http://api-gateway:8000 \
+            -e IF_UPLOADER_EMAIL=ci-uploader@example.com \
+            -e IF_UPLOADER_PASSWORD \
+            -e IF_UPLOADER_COMPANY_ID=${{ steps.uploader.outputs.company_id }} \
+            python:3.14-slim bash -c "
+              pip install -q -r services/ml_service/tests/requirements-integration.txt &&
+              pytest -p no:cacheprovider services/ml_service/tests/test_upload_serving_integration.py -m integration -v"
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: docker compose --profile notebooks logs timescaledb minio redis mlflow api-gateway ml-service-api notebook-tracking-gateway
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile notebooks down -v
+
   tracking-gateway-integration-gate:
     name: tracking-gateway-integration-gate
-    needs: [changes, tracking-gateway]
+    needs: [changes, tracking-gateway, upload-serving]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -158,11 +239,15 @@ jobs:
         run: |
           changes="${{ needs.changes.result }}"
           result="${{ needs.tracking-gateway.result }}"
-          echo "changes=$changes proof=$result (relevant=${{ needs.changes.outputs.relevant }})"
+          serving="${{ needs.upload-serving.result }}"
+          echo "changes=$changes proof=$result serving=$serving (relevant=${{ needs.changes.outputs.relevant }}, serving=${{ needs.changes.outputs.serving }})"
           if [ "$changes" != "success" ]; then
             echo "::error::change-detection job did not succeed ($changes)"; exit 1
           fi
           if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
             echo "::error::tracking-gateway integration proof did not pass"; exit 1
+          fi
+          if [ "$serving" = "failure" ] || [ "$serving" = "cancelled" ]; then
+            echo "::error::upload-serving integration proof did not pass"; exit 1
           fi
           exit 0

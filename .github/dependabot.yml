@@ -54,6 +54,7 @@ updates:
     directories:
       - "/services/ml_service"
       - "/services/ml_service/api"
+      - "/services/ml_service/tests"
       - "/clients/python/kernel"
       - "/services/notebook_hub"
       - "/services/notebook_sql_proxy"
