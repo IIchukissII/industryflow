@@ -291,7 +291,7 @@ infra:
   timescaledb:
     inCluster: true
     # Pinned by immutable digest (the tag is kept for readability only). Re-pin on upgrade.
-    image: timescale/timescaledb:latest-pg15@sha256:d621009854b8519a1bf63f81eebc979c1acc06a16843086f244edd44dcce6eea
+    image: timescale/timescaledb:latest-pg15@sha256:6343bdc87ca132c6b53acb26113a6bad1821d188fa39975a745f32ddd9757634
     port: 5432
     storage: 20Gi
     database: industryflow
@@ -305,13 +305,13 @@ infra:
 
   zookeeper:
     inCluster: true
-    image: confluentinc/cp-zookeeper:7.5.0@sha256:02f6c042bb9a7844382fc4cedc513a44585d8a5acae873fb9e510e3ca9dcabc6
+    image: confluentinc/cp-zookeeper:7.9.1@sha256:7610a50b13e7e9f6dc0dd00585ffdcb0bbed27392bef6b45791ef4087b2a746c
     port: 2181
     storage: 2Gi
 
   kafka:
     inCluster: true
-    image: confluentinc/cp-kafka:7.5.0@sha256:fbbb6fa11b258a88b83f54d4f0bddfcffbf2279f99d66a843486e3da7bdfbf41
+    image: confluentinc/cp-kafka:7.9.10@sha256:07c3d60362e67c296f7f34b690b1240e5ecdcde4a84f5e73cab320fb4041f58c
     port: 9092
     storage: 20Gi
     external: { bootstrap: "" }
@@ -321,7 +321,7 @@ infra:
 
   redis:
     inCluster: true
-    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     port: 6379
     storage: 2Gi
     external: { host: "", port: 6379 }
@@ -330,7 +330,7 @@ infra:
     inCluster: true
     # Maintained third-party MinIO build (the upstream images were withdrawn). Non-root (65532),
     # distroless. Pinned by immutable digest; the tag is kept for readability.
-    image: cgr.dev/chainguard/minio:latest@sha256:7df55d002b698e4494a131b848dd553361bbe58b7e19f62d9623c29af1ba9ccf
+    image: cgr.dev/chainguard/minio:latest@sha256:dc455cdd4db6e390b1b26514f15ff37681a777bf8dab41aac445a0259f751e56
     apiPort: 9000
     consolePort: 9001
     storage: 20Gi
@@ -355,7 +355,7 @@ objectStore:
   buckets:
     sparkCheckpoint: spark-checkpoints
   # mc image for the bootstrap Job. The -dev variant carries the shell the script needs.
-  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:207b9a2045f01cef90feda8127a55f769115e060d8350dcb3a29593fc81166ac
+  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:799f7e86017c3ee8d00f6372e1ee28dd73453f271d5b306a47af8e8a408a777a
 
 # ---------------------------------------------------------------------------
 # Logical database backups (tier-1 DR) — a CronJob dumps each database to S3/MinIO
@@ -633,7 +633,7 @@ ingress:
       rootWarnDays: 30
       # No successful check for this long raises the alert (two missed 6-hourly runs).
       alertAfterSeconds: 46800
-      image: alpine/openssl:3.5.8@sha256:3f25da71f70eba788067daac3f3df03bd1de7a7c52ed89fa93b94ad2c92d986b
+      image: alpine/openssl:3.5.9@sha256:e8a2319d15637db5296c0ff540bb028cfabc480b22fcdd4a020582393d32673f
 
 # ---------------------------------------------------------------------------
 # NetworkPolicy restricting ingestion-service ingress to the cluster TLS edge only
@@ -679,7 +679,7 @@ notebookHub:
   # SSO reverse proxy (ADR-0014): validates the platform session against api-gateway and
   # forwards the verified identity to the hub, overwriting any client-supplied identity.
   ssoProxy:
-    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    image: nginx:1.31-alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
     port: 8080
     # api-gateway endpoint that validates the session cookie and returns the verified identity
     # in X-IF-* response headers (implemented; ADR-0014 handoff contract).
