@@ -71,7 +71,13 @@ async def create_user_table():
     """
     Create the users table in the database.
     Call this once during initialization.
+
+    Every uvicorn worker runs this at startup. On a fresh database two of them would both find the
+    table missing and race to create it; the loser fails on the catalog's unique index and its worker
+    takes the whole process down. A transaction-scoped advisory lock serialises them: the second sees
+    the table the first created and creates nothing.
     """
     from models.user import Base
     async with engine.begin() as conn:
+        await conn.execute(text("SELECT pg_advisory_xact_lock(hashtext('api_gateway.create_user_table'))"))
         await conn.run_sync(Base.metadata.create_all)
