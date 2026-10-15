@@ -88,20 +88,21 @@ IndustryFlow uses a comprehensive monitoring stack built on industry-standard to
 - Retention: 30 days
 - Storage: `/prometheus-data` volume
 
-**Scraped Targets** (13 total):
+**Scraped Targets** (14 jobs):
 1. **prometheus** (self-monitoring)
 2. **cadvisor** - Container metrics
 3. **node-exporter** - System metrics
 4. **postgres** - Database metrics
 5. **redis** - Cache metrics
 6. **api-gateway** - API service metrics
-7. **alert-service** - Alert service metrics
-8. **ml-service** - ML service metrics
-9. **ingestion-service** - Ingestion service metrics
-10. **kafka** - Kafka cluster metrics
-11. **spark-driver** - Spark streaming driver metrics
-12. **spark-executors** - Spark aggregations/executor metrics
-13. **spark-master** - Spark master metrics
+7. **ml-service** - ML service metrics
+8. **ingestion-service** - Ingestion service metrics
+9. **kafka** - Kafka cluster metrics
+10. **spark-driver** - Spark streaming driver metrics
+11. **spark-executors** - Spark aggregations/executor metrics
+12. **spark-master** - Spark master metrics
+13. **loki** - Log store; its `up` is Loki's health signal (the image has no shell for a container healthcheck)
+14. **promtail** - Log collector
 
 **Access**: http://localhost:9090
 
@@ -147,7 +148,8 @@ IndustryFlow uses a comprehensive monitoring stack built on industry-standard to
 **Storage**: `/loki-data` volume
 
 **Log Sources**:
-- All Docker containers (via Promtail)
+- This deployment's containers (via Promtail): those on `industryflow-network` and the notebook-kernel
+  network, not every container on the host
 - System logs from `/var/log`
 
 ---
@@ -159,7 +161,9 @@ IndustryFlow uses a comprehensive monitoring stack built on industry-standard to
 **Configuration**: `/infrastructure/promtail/promtail-config.yml`
 
 **Key Features**:
-- Automatic Docker container discovery
+- Automatic Docker container discovery, filtered to this deployment's networks
+- Read positions kept on the `promtail-positions` volume, so a recreate resumes instead of re-sending
+  every container's history (which Loki rejects as too old)
 - Label extraction from container metadata
 - JSON log parsing
 - Real-time log streaming
