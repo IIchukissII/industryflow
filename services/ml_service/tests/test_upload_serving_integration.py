@@ -76,11 +76,11 @@ def _training_data():
     return X, y
 
 
-def _save(estimator, path):
+def _save(estimator, path, *, trusted_types=None):
     X, y = _training_data()
     estimator.fit(X, y)
     mlflow_sklearn.save_model(
-        estimator, str(path), serialization_format="skops",
+        estimator, str(path), serialization_format="skops", skops_trusted_types=trusted_types,
         signature=models.infer_signature(X, estimator.predict(X)),
     )
     return path
@@ -153,8 +153,10 @@ def test_an_admitted_upload_registers_loads_scores_and_deploys(session, linear_u
 # --- the deployment gate refuses on what only loading can show ----------------------------------
 
 def test_an_uploaded_tree_model_is_refused_at_the_load_probe(session, tmp_path):
+    # MLflow saves a tree model as skops only when its author vouches for the tree type. That is the
+    # author's assertion, and an uploaded artifact's assertions are what the platform does not take.
     uri = _upload(session, _save(ensemble.RandomForestClassifier(n_estimators=3, random_state=0),
-                                 tmp_path / "model"))
+                                 tmp_path / "model", trusted_types=["sklearn.tree._tree.Tree"]))
     r = _register(session, uri)
     assert r.status_code == 201, f"register -> {r.status_code} {r.text[:400]}"
 
