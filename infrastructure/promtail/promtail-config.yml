@@ -7,7 +7,7 @@ server:
   grpc_listen_port: 0
 
 positions:
-  filename: /tmp/positions.yaml
+  filename: /var/lib/promtail/positions.yaml
 
 clients:
   - url: http://loki:3100/loki/api/v1/push
@@ -18,6 +18,11 @@ scrape_configs:
     docker_sd_configs:
       - host: unix:///var/run/docker.sock
         refresh_interval: 5s
+        # This deployment's containers only: the platform's network and the notebook kernels'. The
+        # socket lists every container on the host, including other stacks sharing it.
+        filters:
+          - name: network
+            values: [industryflow-network, industryflow-notebook-kernels]
     relabel_configs:
       # Extract container name
       - source_labels: ['__meta_docker_container_name']

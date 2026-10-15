@@ -80,3 +80,12 @@ scrape_configs:
     metrics_path: '/metrics/master/prometheus'
     static_configs:
       - targets: ['spark-master:8080']
+
+  # Loki has no container healthcheck (distroless image), so `up` here is its health signal.
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki:3100']
+
+  - job_name: 'promtail'
+    static_configs:
+      - targets: ['promtail:9080']
