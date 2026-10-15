@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from _repo import load_yaml
+from _repo import ROOT, load_yaml
 
 DIGEST = re.compile(r"^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$")
 
@@ -68,6 +68,24 @@ def test_compose_and_chart_pin_the_same_image_identically():
                 drift.append(f"{name}: compose {ref} vs chart {sorted(helm_by_repo[_repo(ref)])}")
     assert shared >= 8, f"only {shared} images shared — the guard is not matching repositories"
     assert not drift, "compose and the chart pin different builds:\n" + "\n".join(drift)
+
+
+def test_workflows_run_the_compose_pin_of_every_image_compose_runs():
+    # Dependabot updates compose and nothing else, so a workflow that `docker run`s the same image by
+    # digest silently keeps testing the old build.
+    compose_by_repo: dict[str, set[str]] = {}
+    for ref in _compose_images().values():
+        compose_by_repo.setdefault(_repo(ref), set()).add(ref)
+    pinned = re.compile(r"[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}")
+    shared, drift = 0, []
+    for wf in sorted((ROOT / ".github" / "workflows").glob("*.y*ml")):
+        for ref in pinned.findall(wf.read_text()):
+            if _repo(ref) in compose_by_repo:
+                shared += 1
+                if ref not in compose_by_repo[_repo(ref)]:
+                    drift.append(f"{wf.name}: {ref} vs compose {sorted(compose_by_repo[_repo(ref)])}")
+    assert shared >= 2, f"only {shared} workflow pins matched compose — the guard is not reading them"
+    assert not drift, "workflows pin a different build than compose:\n" + "\n".join(drift)
 
 
 # spark-master's version against the job images is scripts/check_spark_version_parity.py's job.
