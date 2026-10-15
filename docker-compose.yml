@@ -1168,11 +1168,9 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    # No healthcheck: the Loki 3 image is distroless (no shell, no wget) and its binary has no health
+    # subcommand, so any in-container probe reports unhealthy forever. Prometheus scrapes it instead
+    # (job `loki`), and `up` is its health signal.
 
   # Promtail - Log collector
   promtail:
@@ -1181,6 +1179,9 @@ services:
     command: -config.file=/etc/promtail/promtail-config.yml
     volumes:
       - ./infrastructure/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml
+      # Read positions survive a recreate; without them every recreate re-ships each container's whole
+      # log history, which Loki rejects as too old.
+      - promtail-positions:/var/lib/promtail
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/log:/var/log
     networks:
@@ -1296,6 +1297,7 @@ volumes:
   prometheus-data:
     driver: local
   loki-data:
+  promtail-positions:
     driver: local
   frontend-certs:
     driver: local
