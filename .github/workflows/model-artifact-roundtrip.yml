@@ -120,7 +120,7 @@ jobs:
             if curl -fsS http://localhost:9000/minio/health/live >/dev/null 2>&1; then break; fi
             sleep 1
           done
-          docker run --rm --network roundtrip-net --entrypoint sh cgr.dev/chainguard/minio-client:latest-dev@sha256:3b5eb8505b378708e08491bd2b487cb39621cabd0cf99bd90927ae83b7378c9b -c \
+          docker run --rm --network roundtrip-net --entrypoint sh cgr.dev/chainguard/minio-client:latest-dev@sha256:cd7f5d19d115615d809f27343b1e5cfbdc84f38e1c9a29475535b74ec5bade50 -c \
             "mc alias set m http://roundtrip-minio:9000 minioadmin minioadmin && mc mb -p m/mlflow"
 
       - name: Build and start the MLflow tracking server (the same image the platform runs)
