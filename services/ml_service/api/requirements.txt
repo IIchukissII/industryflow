@@ -21,7 +21,7 @@ python-jose[cryptography]==3.5.0
 python-multipart==0.0.32
 
 # MLflow integration
-mlflow==3.17.0
+mlflow==3.17.1
 boto3==1.43.111
 
 # ML libraries for inference.
