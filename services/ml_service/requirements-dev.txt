@@ -37,7 +37,7 @@ fastapi==0.143.0
 httpx==0.28.1
 python-jose[cryptography]==3.5.0
 asyncpg==0.32.0
-mlflow==3.17.0
+mlflow==3.17.1
 prometheus-client==0.26.0
 # The serializer and the estimator library the skops trust tests load (ADR-0027 dec 13); same pins as serving.
 scikit-learn==1.9.1
