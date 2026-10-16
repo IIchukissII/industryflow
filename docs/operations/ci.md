@@ -25,7 +25,7 @@ status, which is what lets it be required without blocking unrelated PRs.
 | `compose-smoke-gate` | Compose smoke (the stack starts and stays up) |
 | `db-tenant-isolation-gate` | DB tenant isolation |
 | `cold-layer-integration-gate` | Cold layer integration |
-| `tracking-gateway-integration-gate` | Tracking gateway integration |
+| `tracking-gateway-integration-gate` | Tracking gateway integration (the gateway proofs, and the upload path's serving half: register and deploy in the real ml_service) |
 | `model-artifact-roundtrip-gate` | Model artifact round-trip |
 | `config-guards-gate` | Config guards (silent-omission lists: path filters, image pins, chart/compose wiring; object-store principals against a real MinIO) |
 
