@@ -9,7 +9,7 @@
 # inside mlflow's fastapi<1.
 fastapi==0.143.0
 uvicorn[standard]==0.54.0
-pydantic==2.14.0
+pydantic==2.14.1
 
 # Database
 asyncpg==0.32.0
@@ -22,7 +22,7 @@ python-multipart==0.0.32
 
 # MLflow integration
 mlflow==3.17.0
-boto3==1.43.111
+boto3==1.43.112
 
 # ML libraries for inference.
 #
