@@ -84,6 +84,10 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "pandas"
         update-types: ["version-update:semver-major"]
+      # pyspark tracks the job images' Spark (scripts/check_spark_version_parity.py), whose minors are
+      # ignored in the docker entries below; a pyspark minor alone fails that guard.
+      - dependency-name: "pyspark"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: "npm"
     directory: "/services/frontend"
