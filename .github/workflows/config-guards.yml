@@ -42,8 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      MINIO_IMAGE: cgr.dev/chainguard/minio:latest@sha256:dc455cdd4db6e390b1b26514f15ff37681a777bf8dab41aac445a0259f751e56
-      MC_IMAGE: cgr.dev/chainguard/minio-client:latest-dev@sha256:799f7e86017c3ee8d00f6372e1ee28dd73453f271d5b306a47af8e8a408a777a
+      MINIO_IMAGE: cgr.dev/chainguard/minio:latest@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
+      MC_IMAGE: cgr.dev/chainguard/minio-client:latest-dev@sha256:3b5eb8505b378708e08491bd2b487cb39621cabd0cf99bd90927ae83b7378c9b
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
