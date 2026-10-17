@@ -45,15 +45,17 @@ of the kernel. Artifacts are large, metadata calls small.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| A. A server, database and bucket per tenant now | ADR-0013 alternative A; later hardening |
-| B. Expose the server with its own authorization | ADR-0013 alternative B |
-| C. Shared credentials, tenants by naming convention | ADR-0013 alternative C |
-| D. Prefix-scoped object-store session credentials | Reusable over every object in the prefix; broader than decision 6 |
-| E. Reuse the SQL or API capability | Audiences are non-interchangeable |
-| F. A client library that scopes itself | Scoping in untrusted, bypassable code |
-| G. Proxy all artifact bytes through the gateway | Puts the gateway in the data path |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Expose the server with its own authorization | Not tenant-aware; ADR-0013 dec 1 alternatives |
+| 1 | Shared credentials, tenants by naming convention | Broad credentials in the kernel; ADR-0013 dec 1 alternatives |
+| 2 | Reuse the SQL or API capability | Audiences are non-interchangeable |
+| 5 | A server, database and bucket per tenant now | Fleet cost before need; ADR-0013 dec 5 alternatives, kept as later hardening |
+| 5 | A client library that scopes itself | Scoping in untrusted, bypassable code |
+| 5 | A human-readable tenant slug in the namespace | Neither unique nor stable across a rename, so no security boundary |
+| 6 | Prefix-scoped object-store session credentials | Reusable over every object in the prefix; broader than decision 6 |
+| 6 | Proxy all artifact bytes through the gateway, as default or fallback | Puts the gateway in the data path, and the deployed object store pre-signs |
+| 7 | Tenant browsing by a tenant schema search path on the tracking server's shared database | A no-op that returns every tenant's experiments and models |
 
 ## Consequences
 

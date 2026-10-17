@@ -35,13 +35,17 @@ without a fork, and must never contain secrets.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Compose only | No rolling updates, autoscaling or multi-node scheduling |
-| Raw manifests or Kustomize | No clean in-cluster-or-external toggle |
-| Datastores always in-cluster, or always external | Each fails one of managed or self-hosted |
-| Tracking server as a StatefulSet | Its state is in the database and object store |
-| One Secret for every workload | Every pod would read every credential |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Compose only | No rolling updates, autoscaling or multi-node scheduling |
+| 1 | Raw manifests or Kustomize | No clean in-cluster-or-external toggle |
+| 2 | A separate alerting HTTP service among the Deployments | Retired by ADR-0031 dec 2 |
+| 2 | Tracking server as a StatefulSet | Its state is in the database and object store |
+| 3 | Datastores always in-cluster | A managed deployment loses the durability of managed datastores |
+| 3 | Datastores always external | A self-hoster cannot run the whole stack on their own cluster |
+| 4 | Placeholder secrets shipped in the chart | A deployment that forgets to replace them runs on known credentials |
+| 4 | One Secret for every workload | Every pod would read every credential |
+| 6 | Compose as a development convenience only, never a deployment | Single-host self-hosting is a real, supported shape |
 
 ## Consequences
 

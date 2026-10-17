@@ -41,13 +41,14 @@ do not satisfy by default. Requiring TLS breaks any client not yet configured fo
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Encrypt-only | Impersonation stays open |
-| Client certificates instead of passwords | Per-service issuance and rotation burden |
-| Plaintext behind network scoping | Does not stop an on-network sniffer or impersonator |
-| On Kubernetes, issue at database start | Clients need the root before the database exists |
-| On a single host, refuse to start without the internal CA | No database until an operator acts; plaintext is no fallback |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Encrypt-only | Impersonation stays open |
+| 1 | Plaintext behind network scoping | Does not stop an on-network sniffer or impersonator |
+| 2 | Client certificates instead of passwords | Per-service issuance and rotation burden |
+| 2 | MD5 password hashing | A deprecated hash where SCRAM is available to every client |
+| 3 | The certificate always from the internal CA, so a single host without it does not start | No database until an operator acts, and plaintext is no fallback |
+| 7 | On Kubernetes, issue at database start | Clients need the root before the database exists |
 
 ## Consequences
 

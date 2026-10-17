@@ -37,15 +37,19 @@ repeat. Unbounded window state exhausts memory, and model features are computed 
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Re-emit open windows and deduplicate downstream | Partial rows for every reader; state still unbounded |
-| Store retention instead of a watermark | Bounds stored rows, not executor state |
-| Delete-then-insert a window | Not atomic under retries |
-| Replace-on-conflict for raw measurements | A later message rewrites a recorded fact |
-| Fail the batch on every write error | One poison reading halts every tenant |
-| Per-node checkpoint volume | Forbids a horizontal worker pool |
-| Window values copied per component and tested equal | A copy the test does not list drifts |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Store retention instead of a watermark | Bounds stored rows, not executor state |
+| 1 | Larger executors to survive unbounded state | Postpones the out-of-memory failure; unbounded state defeats any fixed ceiling |
+| 2 | Re-emit open windows and deduplicate downstream | Partial rows for every reader; state still unbounded |
+| 3 | Delete-then-insert a window | Not atomic under retries and can briefly expose a window as missing |
+| 3 | Replace-on-conflict for raw measurements | A later message with the same key rewrites a recorded fact |
+| 4 | Different error policies per job, the aggregation continuing past a write error | Silent data loss under at-least-once delivery |
+| 4 | Fail the batch on every write error and let an operator remove the bad message | One poison reading halts every tenant and returns after every restart |
+| 5 | A persistent volume per query, with the storage medium left to deployment | Node-local storage cannot serve a state store written on several nodes |
+| 5 | A per-node checkpoint volume with each stateful query pinned to one node | Forbids a horizontal worker pool and strands the checkpoint with a lost node |
+| 7 | Window width and allowed lateness set per deployment | A deployment change silently changes the meaning of every trained feature |
+| 7 | Window values copied per component and tested equal | A copy the test does not list drifts |
 
 ## Consequences
 

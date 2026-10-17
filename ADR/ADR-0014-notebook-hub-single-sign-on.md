@@ -43,14 +43,14 @@ edge already forwards a verified identity that its service trusts only from that
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| A. The hub verifies the session cookie itself | A second verification to keep correct, and the key distributed to the hub |
-| B. The platform as an OpenID Connect provider | Large effort for a problem forwarding solves; the revisit if an external IdP is adopted |
-| C. The hub's own login and user store | A second login and account store (ADR-0011 dec 8) |
-| D. A client-supplied identity trusted without restricting who sends it | Trivially forged |
-| E. Hub session lifetime tied only to platform session expiry | A role change or sign-out would take effect only when a timer ran out |
-| F. Trust the forwarded identity by network origin alone | Environments reach the same hub application, so any of them could forge a login |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | The platform as an OpenID Connect provider | A large effort for a problem forwarding already solves; the revisit if an external identity provider is adopted |
+| 1 | The hub's own login and user store | A second login and a second account store to keep in sync |
+| 2 | The hub verifies the session cookie itself | A second verification to keep correct, and the verification key distributed to the hub |
+| 3 | A client-supplied identity trusted without restricting who sends it | Trivially forged |
+| 3 | Trusting the forwarded identity by the hub's network boundary alone | Every environment reaches the same hub, so any of them could forge a login |
+| 7 | Hub session lifetime tied only to platform session expiry | A role change or sign-out would take effect only when a timer ran out |
 
 ## Consequences
 
@@ -67,7 +67,7 @@ edge already forwards a verified identity that its service trusts only from that
 
 | Open question | Settled by |
 |---|---|
-| Sign-on from an external identity provider (alternative B) | First deployment that requires one |
+| Sign-on from an external identity provider (dec 1 alternatives) | First deployment that requires one |
 
 ## References
 

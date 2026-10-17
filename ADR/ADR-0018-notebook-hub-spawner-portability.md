@@ -36,12 +36,13 @@ Docker host.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| A. Kubernetes spawner only | The single-host deployment would have no conforming notebooks |
-| B. Harden the shared Jupyter | No per-user identity or tenant scoping |
-| C. Docker spawner only | Drops the strongest egress containment |
-| D. Standing per-tenant notebook deployments | Contradicts the ephemeral, on-demand posture |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Kubernetes spawner only | The single-host deployment would have no conforming notebooks |
+| 1 | Docker spawner only | Drops the strongest egress containment |
+| 1 | Standing per-tenant notebook deployments | Contradicts the ephemeral, on-demand posture |
+| 4 | On a Docker host, a dedicated network with no route off the host | A pre-signed address that names the public edge would be unreachable from the kernel |
+| 5 | Harden the shared Jupyter | No per-user identity or tenant scoping |
 
 ## Consequences
 

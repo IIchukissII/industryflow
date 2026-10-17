@@ -36,12 +36,12 @@ which scripts it has had. Rolling back is rarely safe once data is written in th
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Operators apply new scripts by hand | Self-hosters cannot know which scripts their database has had |
-| A general-purpose migration framework | Not chosen yet: it brings a ledger and runner but not the per-tenant shape |
-| Generate the schema from application models | Several services own the schema, extension objects sit outside any model layer, tenant schemas are created at run time |
-| Down-migrations for every change | Lossy or untested once data is written through the change |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Generate the schema from application models | Several services own the schema, extension objects sit outside any model layer, tenant schemas are created at run time |
+| 4 | Operators apply new scripts by hand | Self-hosters cannot know which scripts their database has had |
+| 4 | A general-purpose migration framework | Not chosen yet: it brings a ledger and runner but not the per-tenant shape |
+| 5 | Down-migrations for every change | Lossy or untested once data is written through the change |
 
 ## Consequences
 

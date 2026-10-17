@@ -32,11 +32,13 @@ credentials, make compute long-lived or cross tenants.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Mount the whole home | The volume freezes image content per user |
-| A standing hub admin or service token | An ambient credential that crosses tenants |
-| Stay ephemeral; users export work | Unusable for authoring |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Mount the whole home | The volume freezes image content per user |
+| 1 | Stay ephemeral; users export work | Unusable for authoring |
+| 1 | A work volume for every user, analytics profile included | Durable storage for a profile that authors nothing, leaving volumes to reclaim |
+| 2 | A standing hub admin or service token | An ambient credential that crosses tenants |
+| 4 | The platform admin role mapped to a hub administrator | A tenant role would reach other tenants' environments |
 
 ## Consequences
 

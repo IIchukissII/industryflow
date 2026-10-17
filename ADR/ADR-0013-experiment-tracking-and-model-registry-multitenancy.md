@@ -37,12 +37,12 @@ containment at operational cost, not a boundary mediation lacks.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| A. A server, backend and bucket per tenant now | No boundary the gateway lacks; fleet cost. Kept as decision 5's path |
-| B. The tracking server exposed with its own authorization plugin | Per-user, not per-tenant; puts the store on the tenant edge |
-| C. Shared store credentials in notebooks, tenants separated by naming | Broad credentials in untrusted code, cross-tenant by default |
-| D. No tracking or registration from notebooks | Removes the core of the authoring profile |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | The tracking server exposed with its own authorization plugin | Its authorization is per user, not per tenant, and it puts the store on the tenant edge |
+| 1 | Shared store credentials in notebooks, tenants separated by naming | Broad credentials in untrusted code, cross-tenant by default |
+| 2 | No tracking or registration from notebooks | Removes the core of the authoring profile |
+| 5 | A server, backend and bucket per tenant now | No boundary the gateway lacks, at fleet cost; kept as the hardening path |
 
 ## Consequences
 

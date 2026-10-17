@@ -49,14 +49,19 @@ pinned stack.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Identical versions on both ends | Every serving patch becomes a notebook release; fails on an open framework set |
-| The round trip alone, no version rule | A test cannot refuse one artifact at a gate after a later rebuild |
-| Recreate each model's environment at load | Per model is the wrong unit; per flavor is decision 4 |
-| Every framework in the serving image | A multi-gigabyte layer for every self-hoster (ADR-0001) |
-| Reuse the retrain recommendation | Corrupts the statistical signal ADR-0022 makes trustworthy |
-| Trust tree structures by default, for every artifact, or by the artifact's own list | Keeps a memory-safety flaw, or lets the file judged decide its own trust |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 2 | Every framework in the serving image | A multi-gigabyte layer for every self-hoster (ADR-0001) and a second numeric stack to keep in parity |
+| 3 | Identical versions on both ends | Every serving patch becomes a notebook release; fails on an open framework set |
+| 3 | The round trip alone, no version rule | A test cannot refuse one artifact at a gate after a later rebuild |
+| 3 | A version-checked serializer in place of version constraints | It is already the format scikit-learn models cross in, and it does not make two numeric stacks agree |
+| 4 | Recreate each model's environment at load | Per model is the wrong unit; per flavor is decision 4 |
+| 8 | Reuse the retrain recommendation | Corrupts the statistical signal ADR-0022 makes trustworthy |
+| 13 | Stay on the serializer version that trusted tree structures by default | Keeps a known memory-safety flaw on the model load path, and a security patch does not wait (ADR-0026 dec 7) |
+| 13 | Trust tree structures for every artifact | Erases the provenance distinction and hands the closed flaw to an author with no foothold |
+| 13 | Validate tree structures before trusting them | A standing bet on a checker against a library's private internals, which move between releases |
+| 13 | Honour the trust list the artifact declares | Lets the file judged decide its own trust |
+| 13 | Load typed artifacts through the tracking framework's flavor | Its loader takes trust from the artifact and refuses every typed artifact while its deserialisation switch is off |
 
 ## Consequences
 
