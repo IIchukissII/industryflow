@@ -7,7 +7,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **ID:** ADR-0007
 - **Status:** Accepted
-- **Date:** 2026-10-11
+- **Date:** 2026-06-26 (rev 1: 2026-10-11)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001
 - **Companions:** ADR-0002 (ingestion authentication & device identity), ADR-0004 (API authentication, sessions & transport)
@@ -93,6 +93,11 @@ This ADR specifies the device CA. It does not re-decide that mTLS is used (ADR-0
 - ~~**Revocation mechanism.** CRL vs OCSP (vs OCSP stapling), its hosting, and freshness requirements.~~ *Resolved in rev 1 as decision 8.* OCSP or stapling remains open if a verifier ever cannot hold the list locally.
 - **Root-key custody.** Where the offline root key lives (HSM, air-gapped media) and the signing-ceremony procedure.
 - **SAN URI scheme.** The exact URI structure encoding tenant and device, coordinated with ADR-0003's tenant resolution.
+
+## Resolved since acceptance
+
+- **SAN URI scheme (2026-10-17).** The build settled the deferred scheme item as the structure decision 3 gives: a tenant identifier and a device identifier under the platform's own URI scheme. The CA issues it and the ingestion service parses it with one shape, the tenant is canonical before it is vouched into a certificate, and the device identifier is restricted to a character set that is safe in every place it lands. The concrete pattern is owned by the CA tooling and the ingestion service.
+- **Enrollment as built (2026-10-17).** Enrollment today is an operator-run flow: the operator authorizes a device's certificate request for one tenant and the CA signs it, which satisfies decisions 2 and 4. Whether an automated enrollment protocol replaces it for unattended fleets remains open.
 
 ## References
 
