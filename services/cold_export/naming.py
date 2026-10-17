@@ -21,7 +21,7 @@ from datetime import date
 from industryflow_contracts import tenancy
 
 # ``tenant_<uuid>`` (hyphenated): each tenant's Parquet lives under its own prefix — tenants are
-# never pooled into a shared path keyed by a column (ADR-0025 dec 5, alternative F).
+# never pooled into a shared path keyed by a column (ADR-0025 dec 5).
 company_id_to_prefix = tenancy.cold_object_prefix
 # ``tenant_<uuid with underscores>``: the schema every service routes the tenant to.
 company_id_to_schema = tenancy.schema_name

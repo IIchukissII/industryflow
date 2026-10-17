@@ -6,11 +6,11 @@
 Structural admission of an externally-authored artifact (ADR-0030 dec 4) — the **pure** rule, no I/O.
 
 The gateway is the exclusive write path to the artifact store, so it is where bytes can still be
-refused before they reach the tenant's namespace (ADR-0030 dec 2 rev 1). What it refuses on is
+refused before they reach the tenant's namespace (ADR-0030 dec 2). What it refuses on is
 **structure**: what the bytes *are*. It does not decide whether this deployment can serve them — an
 open framework set cannot be judged by a closed list (ADR-0027 dec 2), and the registry that knows is
 discovered, lives on the serving side, and is asked at the registration gate instead (ADR-0030
-dec 5/6 rev 1).
+dec 5/6).
 
 Note the precise claim: refused **before they reach the tenant's namespace**, not before they exist.
 An artifact is staged first and admitted second, because the two decisions in play pull opposite

@@ -63,7 +63,7 @@ async def verify_jwt_token(
 
     A valid signature is not enough: every request re-reads the account, and a deactivated or
     deleted user, or a user of a suspended company, is refused at once rather than when the
-    token expires (ADR-0004 dec 2 rev 2, ADR-0033 dec 3).
+    token expires (ADR-0004 dec 2, ADR-0033 dec 3).
 
     Returns:
         dict with user_id and other claims

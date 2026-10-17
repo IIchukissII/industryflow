@@ -201,7 +201,7 @@ def test_delete_marks_the_company_suspended_for_every_capability_plane(as_user, 
 
 
 def test_deactivating_through_update_takes_the_delete_path(as_user, store):
-    # ADR-0004 dec 2 rev 2: deactivating a company ends its users' sessions, whatever the route.
+    # ADR-0004 dec 2: deactivating a company ends its users' sessions, whatever the route.
     c, db, revoked = as_user(is_superuser=True)
     r = c.put(f"/api/companies/{OTHER}", json={"is_active": False})
     assert r.status_code == 200 and r.json()["is_active"] is False

@@ -19,7 +19,7 @@ capability as the bearer token (``MLFLOW_TRACKING_TOKEN``). The gateway:
 It also serves a second, narrower population: a **person uploading an externally-authored artifact**
 (ADR-0030). That plane exists here because this component holds the only credential that may write
 the artifact store — not because admission is decided here; what may be *served* is the serving
-side's judgement, at the gates it already operates (ADR-0030 dec 2 rev 1).
+side's judgement, at the gates it already operates (ADR-0030 dec 2).
 
 The two planes are distinguished only by their capability's **audience**, and that is load-bearing
 rather than tidy: an uploaded artifact is refused if loading it would deserialise author-supplied
@@ -207,7 +207,7 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
         if not keys:
             raise HTTPException(status_code=404, detail="nothing staged for this upload")
 
-        # The handle authorised one upload (ADR-0015 dec 4 rev 1: a demand-minted handle's lifetime is
+        # The handle authorised one upload (ADR-0015 dec 4: a demand-minted handle's lifetime is
         # one operation). Claimed atomically before judging, so two commits cannot both proceed on it
         # and it buys no further stage/commit cycle whatever the verdict.
         if not await store_consume(policy.store_key(request.state.upload_handle)):
@@ -475,7 +475,7 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
         # follow-the-redirect PUT (with its own Content-Type) is accepted.
         config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
     )
-    # ADR-0030 dec 10 (rev 2): a pre-signed PUT is followed by the CLIENT, and that client may be a
+    # ADR-0030 dec 10: a pre-signed PUT is followed by the CLIENT, and that client may be a
     # browser outside the trust network. The URL must therefore name the address the client can reach
     # — the public edge — not the interior one the gateway reaches the store on. This second client is
     # identical to the one above but for its endpoint; it signs upload-staging URLs only

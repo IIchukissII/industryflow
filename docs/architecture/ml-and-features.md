@@ -33,7 +33,7 @@ Paths under `services/ml_service/api/`.
 | Built-in detectors | `extensions/builtins_detectors.py` |
 | Model loading, skops trust | `model_loader.py`, `skops_trust.py`, `model_uri.py` |
 | Warm model cache (LRU, `MODEL_CACHE_SIZE`, default 8) | `model_cache.py` |
-| Drift (reference profile capture, scoring) | `drift/` |
+| Drift (reference profile format, scoring) | `drift/` |
 | Deployment load probe | `load_probe.py`, `load_probe_worker.py` |
 
 ## Endpoints
@@ -116,7 +116,7 @@ Kernel-trained tree-based sklearn models need the skops grant at log time:
 
 | Item | Detail |
 |---|---|
-| Baseline | `ml_models.reference_profile`, captured at registration by `drift/reference_profile.py` |
+| Baseline | `ml_models.reference_profile`, supplied in the registration request (format: `drift/reference_profile.py`); no notebook-side helper emits it ([ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md) dec 4) |
 | Current window | Trailing window of the tenant's data, aligned to instants where every compared sensor reported |
 | Engine | `evidently` |
 | Output | Data drift (drifted-feature share) and prediction drift; `prediction_drift_reason` when prediction drift cannot be computed |

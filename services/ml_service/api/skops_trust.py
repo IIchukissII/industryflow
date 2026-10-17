@@ -104,7 +104,7 @@ class UnsafeArtifact(ValueError):
 
 
 # The loaders an UPLOADED model may name: the platform's own loaders that read the model as data
-# (ADR-0030 dec 4 rev 4). Deny by default: any other loader is refused by name, without being
+# (ADR-0030 dec 4). Deny by default: any other loader is refused by name, without being
 # imported — an arbitrary module, MLflow's pyfunc `python_model` loader, or an MLflow flavor whose
 # format is a pickle (statsmodels and most others). Adding one here claims it never deserialises
 # author objects nor runs author code.
@@ -131,7 +131,7 @@ def refuse_author_code(flavors: dict) -> None:
 
     The upload gateway refuses such an artifact before it is admitted (ADR-0030 dec 4). This is the
     serving side's own check of the same property, run at registration, at deployment and before every
-    load (dec 4 rev 4): the bytes are loaded by a process that holds credentials for every tenant, and
+    load (dec 4): the bytes are loaded by a process that holds credentials for every tenant, and
     they may have been replaced since they were judged. It reads only the manifest and imports nothing
     the manifest names, so it is safe to run in the serving process itself.
 

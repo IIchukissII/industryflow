@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Offline re-derivation of the serving baseline, for training data (ADR-0023 rev 2 dec 9).
+Offline re-derivation of the serving baseline, for training data (ADR-0023 dec 9).
 
 At serve time a ``statistical`` feature reads the most recent **closed** window of the
 Spark-materialized aggregates (``sensor_aggregations_<granularity>``) and returns a statistic of

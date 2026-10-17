@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Whether a company is active, as authentication reads it (ADR-0004 dec 2 rev 2, ADR-0033 dec 3).
+Whether a company is active, as authentication reads it (ADR-0004 dec 2, ADR-0033 dec 3).
 
 A suspended (inactive) company's users are refused at authentication: every session-authenticated
 request, login, refresh, socket and capability-authenticated request checks the caller's company

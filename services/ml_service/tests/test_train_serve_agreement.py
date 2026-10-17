@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-The train/serve agreement proof for the ``statistical`` feature (ADR-0023 rev 2 dec 9, issue #173).
+The train/serve agreement proof for the ``statistical`` feature (ADR-0023 dec 9, issue #173).
 
 Training re-derives the windowed baseline offline (``notebooks/utils/offline_baseline``) because
 historical training data cannot read the tenant's aggregate table; inference reads that table

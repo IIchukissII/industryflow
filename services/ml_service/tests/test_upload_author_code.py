@@ -4,7 +4,7 @@
 
 """
 An uploaded model runs no code its author chose — at registration, at deployment and on every load
-(ADR-0030 dec 4 rev 4), and the serving process never imports a module an artifact names.
+(ADR-0030 dec 4), and the serving process never imports a module an artifact names.
 
 Each proof uses a real artifact directory whose manifest was edited the way an uploader could edit
 it, and a tripwire that records whether the author's choice ran:

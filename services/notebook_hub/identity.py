@@ -7,8 +7,8 @@ Notebook hub identity and spawn-profile logic (ADR-0014, ADR-0011 dec 5, ADR-001
 
 Pure, dependency-free decision logic so it can be unit-tested without a hub or a cluster:
 
-  * read the verified identity the trusted proxy forwards (ADR-0014 dec 2-4),
-  * choose the spawn profile from the role (ADR-0011 dec 5),
+  * read the verified identity the trusted proxy forwards (ADR-0014 dec 2-3),
+  * choose the spawn profile from the role, by the configured mapping (ADR-0011 dec 5, ADR-0014 dec 4),
   * derive the pod labels and environment that bind the environment to its tenant.
 
 It deliberately holds NO data credential: the environment carries identity only; what the
@@ -43,11 +43,36 @@ _PLACEHOLDER_PREFIXES = ("change_me", "changeme")
 
 # Spawn profiles (ADR-0011 dec 5).
 PROFILE_ANALYTICS = "analytics"  # operators: read-only, rendered dashboards
-PROFILE_AUTHORING = "authoring"  # data scientists: full authoring
+PROFILE_AUTHORING = "authoring"  # full authoring
 
-# Roles that receive the authoring profile; everyone else gets read-only analytics. The
-# concrete mapping is deployment-owned config (ADR-0014 deferred); this is the default.
-DEFAULT_AUTHORING_ROLES = frozenset({"admin", "engineer", "data_scientist"})
+# The platform's user roles: the API gateway's role set, which the SSO proxy forwards verbatim. A
+# guard (tests/config_guards/test_notebook_roles.py) keeps this copy equal to the gateway's.
+PLATFORM_ROLES = frozenset({"admin", "engineer", "observer"})
+
+# Roles that receive the authoring profile; every other role gets read-only analytics. The mapping
+# is deployment configuration (ADR-0014 dec 4): a comma-separated list of platform roles.
+AUTHORING_ROLES_ENV = "NOTEBOOK_AUTHORING_ROLES"
+DEFAULT_AUTHORING_ROLES = frozenset({"admin", "engineer"})
+
+
+def parse_authoring_roles(value: str | None) -> frozenset[str]:
+    """The configured authoring roles, or ValueError if the list is empty or names an unknown role.
+
+    Unset means the default. A name outside the platform's role set fails closed at config load: a
+    misspelt role would otherwise silently give its users the other profile.
+    """
+    if value is None:
+        return DEFAULT_AUTHORING_ROLES
+    roles = frozenset(part.strip() for part in value.split(",") if part.strip())
+    if not roles:
+        raise ValueError(f"{AUTHORING_ROLES_ENV} names no role")
+    unknown = sorted(roles - PLATFORM_ROLES)
+    if unknown:
+        raise ValueError(
+            f"{AUTHORING_ROLES_ENV} names roles the platform does not have: {unknown} "
+            f"(platform roles: {sorted(PLATFORM_ROLES)})"
+        )
+    return roles
 
 
 @dataclass(frozen=True)
@@ -150,8 +175,8 @@ def reconcile(headers: Mapping[str, str], hub_user: str, auth_state: Mapping[str
     return RECONCILE_SAME
 
 
-def select_profile(role: str, authoring_roles: frozenset[str] = DEFAULT_AUTHORING_ROLES) -> str:
-    """Map a role to a spawn profile (ADR-0011 dec 5). Unknown roles get least privilege."""
+def select_profile(role: str, authoring_roles: frozenset[str]) -> str:
+    """Map a role to a spawn profile (ADR-0011 dec 5). Any other role gets least privilege."""
     return PROFILE_AUTHORING if role in authoring_roles else PROFILE_ANALYTICS
 
 
@@ -174,7 +199,7 @@ def image_for_profile(profile: str, env: Mapping[str, str]) -> str:
     return image
 
 
-def pod_labels(identity: Identity) -> dict[str, str]:
+def pod_labels(identity: Identity, profile: str) -> dict[str, str]:
     """Labels for the single-user pod — used by NetworkPolicy targeting and attribution.
 
     A UUID (36 chars, ``[0-9a-f-]``) is a valid Kubernetes label value.
@@ -183,14 +208,14 @@ def pod_labels(identity: Identity) -> dict[str, str]:
         "app.kubernetes.io/name": "notebook-singleuser",
         "app.kubernetes.io/component": "notebook",
         "industryflow.io/company-id": identity.company_id,
-        "industryflow.io/profile": select_profile(identity.role),
+        "industryflow.io/profile": profile,
     }
 
 
-def pod_environment(identity: Identity) -> dict[str, str]:
+def pod_environment(identity: Identity, profile: str) -> dict[str, str]:
     """Identity-only environment for the kernel. NOT a data credential (ADR-0012 dec 5)."""
     return {
         "INDUSTRYFLOW_USER": identity.user,
         "INDUSTRYFLOW_COMPANY_ID": identity.company_id,
-        "INDUSTRYFLOW_PROFILE": select_profile(identity.role),
+        "INDUSTRYFLOW_PROFILE": profile,
     }

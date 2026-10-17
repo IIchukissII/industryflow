@@ -660,6 +660,9 @@ notebookHub:
   # Path prefix the hub is mounted under, embedded same-origin in the frontend (ADR-0014): the
   # notebooks Ingress serves this prefix on the frontend's host, and the /notebooks page iframes it.
   baseUrl: /jupyter/
+  # Platform roles (admin, engineer, observer) that get the authoring profile; every other role gets
+  # read-only analytics (ADR-0014 dec 4). Comma-separated; an unknown role stops the hub at start.
+  authoringRoles: "admin,engineer"
   # Legacy standalone host (unused under single-origin; kept for a dedicated-host deployment).
   host: notebooks.industryflow.local
   # Per-user images the hub spawns by role profile (ADR-0011 dec 5): authoring = JupyterLab + the

@@ -123,7 +123,7 @@ class CompanyClaimJWTStrategy(JWTStrategy):
         )
 
     async def read_token(self, token, user_manager):
-        """The token's user, unless that user's company is suspended (ADR-0004 dec 2 rev 2,
+        """The token's user, unless that user's company is suspended (ADR-0004 dec 2,
         ADR-0033 dec 3): every session-authenticated request is refused for it, through the
         cached company flag (company_status.py)."""
         user = await super().read_token(token, user_manager)

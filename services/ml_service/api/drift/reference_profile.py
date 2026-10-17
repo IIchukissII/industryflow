@@ -2,11 +2,12 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Reference-profile capture (ADR-0021 decision 4).
+"""The reference-profile format (ADR-0021 dec 4).
 
-At training/registration time we snapshot the distribution of each input feature over the
-training window. Drift is later measured as the divergence of a recent window from this
-baseline, computed by `evidently` in the ml-service drift endpoint (ADR-0021 decision 3).
+A profile snapshots the distribution of each input feature over the training window. It is supplied
+in the registration request; the platform builds none itself (``build_reference_profile`` is the
+format's reference implementation for a training flow to call). Drift is measured as the divergence
+of a recent window from this baseline, computed by `evidently` in the drift endpoint (ADR-0021 dec 3).
 
 `evidently` measures drift between a *reference dataset* and a *current dataset*, so the
 profile stores a **capped, deterministically down-sampled reference sample** of the
@@ -79,7 +80,7 @@ def prediction_column_refusal(profile: Mapping[str, Any]) -> Optional[str]:
     """Why ``profile``'s prediction column is not a prediction-drift baseline — ``None`` if it is one,
     or if the profile carries no prediction column (data drift needs none).
 
-    ADR-0021 rev 1 dec 4: the column holds what the current side holds — the declared detector's
+    ADR-0021 dec 4: the column holds what the current side holds — the declared detector's
     scores, on its declared scale. Two distributions are comparable only on the same scale, so a
     column of labels or raw outputs would raise prediction drift on a model that has not moved.
     """
@@ -115,7 +116,7 @@ def build_reference_profile(
             must be the model's 0-1 anomaly scores as its detector produces them (what
             ``/api/inference/predict`` returns): the endpoint scores the current window that way,
             and two different quantities would differ without anything having drifted. Values
-            off that scale, or not finite, are refused (ADR-0021 rev 1 dec 4).
+            off that scale, or not finite, are refused (ADR-0021 dec 4).
         prediction_column: name for the prediction column (default ``prediction_score``).
         max_sample_rows: cap on stored rows (default 5000); larger windows are evenly
             down-sampled.

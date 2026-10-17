@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Demand-minting of the upload capability (ADR-0030 dec 3, ADR-0015 dec 4 rev 1) — the **pure** rule,
+Demand-minting of the upload capability (ADR-0030 dec 3, ADR-0015 dec 4) — the **pure** rule,
 no I/O.
 
 An upload is a person holding a platform session, not a kernel holding a spawn-injected handle. So
 the handle it needs is **demand-minted**: minted at the moment it is asked for, consumed immediately,
-and never held. ADR-0015 dec 4 rev 1 permits that only under conditions this module exists to keep:
+and never held. ADR-0015 dec 4 permits that only under conditions this module exists to keep:
 
   * **the tenant comes from the verified principal, never from the caller.** This module takes a
     company_id and will not invent, default, or discover one — the caller must have established it
@@ -24,7 +24,7 @@ and never held. ADR-0015 dec 4 rev 1 permits that only under conditions this mod
     be able to verify a session, because the platform's signature is symmetric and a verifier would
     therefore be a forger, for every tenant, permanently.
 
-**Not read-only** (ADR-0015 dec 1 rev 1): this handle authorises writing one artifact. Its boundary
+**Not read-only** (ADR-0015 dec 1): this handle authorises writing one artifact. Its boundary
 is the tenant namespace its mediator enforces, not read-only-ness — and a writing handle still
 reaches exactly one tenant.
 
@@ -56,7 +56,7 @@ _HANDLE_BYTES = 32
 
 
 # Every upload handle is indexed under the user it was minted for (a set), so that ending the
-# user's sessions revokes it with the rest of their capabilities (ADR-0004 dec 2 rev 2). Shared
+# user's sessions revokes it with the rest of their capabilities (ADR-0004 dec 2). Shared
 # contract with the platform API, which revokes by it (services/api_gateway/capability_auth.py).
 _UPLOAD_INDEX_PREFIX = "nbcap-upload-user:"
 
@@ -100,7 +100,7 @@ def build_record(*, user: str, company_id: str) -> Tuple[str, Dict[str, Any]]:
         "user": user,
         "company_id": _validated_tenant(company_id),
         "audience": AUDIENCE_UPLOAD,
-        # ADR-0015 dec 1 rev 1: a bound fact, per handle. This plane writes; its boundary is the
+        # ADR-0015 dec 1: a bound fact, per handle. This plane writes; its boundary is the
         # tenant namespace the mediator enforces.
         "read_only": False,
     }

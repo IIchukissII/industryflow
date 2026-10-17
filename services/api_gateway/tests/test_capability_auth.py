@@ -174,7 +174,7 @@ async def test_logout_with_an_unknown_refresh_token_revokes_nothing(monkeypatch)
 @pytest.mark.asyncio
 async def test_revoking_a_user_also_revokes_their_upload_handles():
     # The model-upload minter indexes each handle it demand-mints under its user, so ending the
-    # user's sessions ends those too (ADR-0004 dec 2 rev 2).
+    # user's sessions ends those too (ADR-0004 dec 2).
     from capability_auth import revoke_user_capabilities
 
     redis = FakeRedis()

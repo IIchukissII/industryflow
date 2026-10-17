@@ -159,7 +159,7 @@ def test_an_unknown_tenant_is_skipped_and_the_others_are_written():
 
 
 def test_an_unknown_sensor_or_equipment_is_excluded_like_the_streaming_job_rejects_it():
-    # ADR-0006 rev 2 dec 4: the aggregation excludes the readings the streaming job dead-letters,
+    # ADR-0006 dec 4: the aggregation excludes the readings the streaming job dead-letters,
     # by the same definition. A known tenant's aggregate for a sensor or equipment it does not know
     # is such a reading; only the known key is written.
     ghost_sensor = "aaaaaaaa-0000-0000-0000-00000000dead"

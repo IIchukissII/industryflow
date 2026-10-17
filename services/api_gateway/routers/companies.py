@@ -17,7 +17,7 @@ who may call them is decided here (ADR-0004 dec 5):
 Every transition to inactive — an update that clears the flag, or a delete — then takes the same
 path (``_suspended``): the company is marked suspended in the capability store, so no notebook
 handle bound to it resolves or is minted anywhere, and every session of every one of its users is
-ended, with the notebook capabilities derived from them (ADR-0004 dec 2 rev 2, ADR-0033 dec 3).
+ended, with the notebook capabilities derived from them (ADR-0004 dec 2, ADR-0033 dec 3).
 From then on its users are refused at authentication (company_status.py). Reactivating removes the
 marker; it does not restore any session.
 """
