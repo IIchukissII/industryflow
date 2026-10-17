@@ -457,6 +457,14 @@ is a **trust** decision, not a parity one, and it is deferred below.
 - **The analytics kernel's versioning policy.** Its own operational record, when it warrants one
   (decision 12).
 
+## Resolved since acceptance
+
+- **The kernel hold is lifted.** Both kernel images have moved to the newer interpreter and the second
+  numpy major, so the hold the References cite no longer exists. Each library decision 3 binds is now
+  pinned to the same version on both ends of the path, which is within the contract and is not a pin of
+  one end to the other. The declarative check and the round trip both run on any change to either end,
+  and the round trip is a required check for merging.
+
 ## References
 
 - ADR-0011 — the deferral decision 11 resolves; ADR-0000 — the discipline that forbade settling this inside
