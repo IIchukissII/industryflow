@@ -79,6 +79,12 @@ The remaining question is whether to also separate tenants *physically* — a tr
 - **Migration of existing tracking data.** How current single-tenant experiments, runs, models, and artifacts are attributed to a tenant or retired is an operational task, not decided here.
 - **Retention and quota.** Per-tenant limits on runs, model versions, and artifact storage are configuration values owned by the deployment, not this ADR.
 
+## Resolved since acceptance
+
+- **Artifact-access mechanism.** Resolved by ADR-0019 dec 6: artifact bytes move directly between the kernel and the object store under pre-signed grants that the gateway issues per object, per operation and for minutes, after checking the tenant boundary. The gateway carries the bytes itself only where the store cannot issue such grants. No reusable object-store credential reaches the kernel.
+- **The notebook tracking gate.** With the gateway of decision 2 built (ADR-0019), authoring environments log runs and register models through it under their own tracking capability, so the gate of ADR-0011 dec 9 is lifted on the terms of decisions 1 to 3.
+- **Tenant-scoped experiment and model UI (in part).** The platform's own API serves session-authenticated, tenant-scoped reads of experiments, runs and registered models, re-checking the tenant boundary on every item it returns, and the product UI browses registered models through it. A product view of experiments and runs is not yet built.
+
 ## References
 
 - ADR-0011 — embedded notebooks; this ADR resolves its deferred experiment-tracking multi-tenancy decision and lifts the gate in its decision 9.
