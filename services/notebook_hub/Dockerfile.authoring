@@ -46,9 +46,10 @@ COPY kernel/requirements.txt /tmp/kernel-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/kernel-requirements.txt && rm /tmp/kernel-requirements.txt
 
 # The tenant-scoped client + the [sql] extra (psycopg) so the kernel can reach the SQL proxy with
-# its capability (ADR-0015). Built from the context (clients/python).
+# its capability (ADR-0015), and the [cold] extra (pyarrow) for cold-layer Parquet reads (ADR-0025).
+# Built from the context (clients/python).
 COPY . /tmp/industryflow-client
-RUN pip install --no-cache-dir "/tmp/industryflow-client[sql]" && rm -rf /tmp/industryflow-client
+RUN pip install --no-cache-dir "/tmp/industryflow-client[sql,cold]" && rm -rf /tmp/industryflow-client
 
 # Ship a read-only worked example into the workspace (ADR-0011): read your data -> features ->
 # train -> register a model. Owned by root + mode 0444 so it is an immutable reference — a data

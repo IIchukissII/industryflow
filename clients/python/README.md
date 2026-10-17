@@ -64,6 +64,8 @@ hourly = db.query("SELECT time, value FROM sensor_aggregations_1hour WHERE senso
 
 ## Cold layer
 
+Requires the `cold` extra (`industryflow[cold]`, installed in the authoring image).
+
 ```python
 from industryflow import IndustryFlowCold, cold_read_all
 

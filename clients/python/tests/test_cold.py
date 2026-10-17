@@ -174,3 +174,21 @@ def test_read_all_refuses_a_manifest_naming_a_missing_part(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="not in the store"):
         cold.read_all()
+
+
+def test_read_parquet_decodes_real_parquet_bytes():
+    # The real engine, not a stub: the authoring kernel must be able to decode what cold_export writes.
+    import io
+
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    buf = io.BytesIO()
+    pq.write_table(pa.table({"sensor_id": ["s1", "s2"], "value": [1.5, 2.5]}), buf)
+    payload = buf.getvalue()
+
+    cold = IndustryFlowCold("http://broker:5060", "cap", session=_FakeSession())
+    cold.open = lambda path: payload
+    df = cold.read_parquet("year=2026/month=07/day=06/measurements.parquet")
+    pd.testing.assert_frame_equal(df, pd.DataFrame({"sensor_id": ["s1", "s2"], "value": [1.5, 2.5]}))
