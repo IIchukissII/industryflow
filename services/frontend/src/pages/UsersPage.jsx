@@ -5,13 +5,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import Icon from '../components/Icon';
 import api from '../services/api';
+import { usersReading } from '../utils/reading-admin';
 
-function UsersPage() {
+const detailOf = (error) => error.response?.data?.detail || error.message;
+const ROLE_LABEL = { observer: 'Observer', engineer: 'Engineer', admin: 'Admin' };
+const ROLE_SCOPE = {
+  observer: 'Reads the company\'s data and changes nothing.',
+  engineer: 'Manages equipment, sensors, alert rules and models; acknowledges and labels alerts.',
+  admin: 'An engineer who also administers the company.',
+};
+
+function UsersPage({ nav }) {
   const [users, setUsers] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+  const [formError, setFormError] = useState(null);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -25,9 +36,10 @@ function UsersPage() {
     try {
       const response = await api.get('/api/users');
       setUsers(response.data);
-      setLoading(false);
+      setLoadError(null);
     } catch (error) {
-      console.error('Error fetching users:', error);
+      setLoadError(detailOf(error));
+    } finally {
       setLoading(false);
     }
   }, []);
@@ -36,8 +48,8 @@ function UsersPage() {
     try {
       const response = await api.get('/api/companies');
       setCompanies(response.data);
-    } catch (error) {
-      console.error('Error fetching companies:', error);
+    } catch {
+      // Without the list, users show their company identifier instead of its name.
     }
   }, []);
 
@@ -57,6 +69,7 @@ function UsersPage() {
       is_active: true,
       is_superuser: false
     });
+    setFormError(null);
     setShowModal(true);
   };
 
@@ -70,6 +83,7 @@ function UsersPage() {
       is_active: user.is_active,
       is_superuser: user.is_superuser
     });
+    setFormError(null);
     setShowModal(true);
   };
 
@@ -77,40 +91,33 @@ function UsersPage() {
     e.preventDefault();
     try {
       const submitData = { ...formData };
-      
+
       // Don't send password if editing and password field is empty
       if (editingUser && !submitData.password) {
         delete submitData.password;
       }
 
       if (editingUser) {
-        // Update existing user
-        await api.patch(
-          `/api/users/${editingUser.id}`,
-          submitData
-        );
+        await api.patch(`/api/users/${editingUser.id}`, submitData);
       } else {
-        // Create new user
         await api.post('/api/users', submitData);
       }
       setShowModal(false);
       fetchUsers();
     } catch (error) {
-      console.error('Error saving user:', error);
-      alert('Error saving user: ' + (error.response?.data?.detail || error.message));
+      setFormError(`The user was not saved: ${detailOf(error)}`);
     }
   };
 
-  const handleDelete = async (userId) => {
-    if (!window.confirm('Are you sure you want to delete this user? This cannot be undone.')) {
+  const handleDelete = async (user) => {
+    if (!window.confirm(`Delete ${user.email}? This cannot be undone.`)) {
       return;
     }
     try {
-      await api.delete(`/api/users/${userId}`);
+      await api.delete(`/api/users/${user.id}`);
       fetchUsers();
     } catch (error) {
-      console.error('Error deleting user:', error);
-      alert('Error deleting user: ' + (error.response?.data?.detail || error.message));
+      alert(`${user.email} was not deleted: ${detailOf(error)}`);
     }
   };
 
@@ -120,100 +127,107 @@ function UsersPage() {
   };
 
   if (loading) {
-    return <div className="loading">Loading users...</div>;
+    return <div className="adm-state"><span className="sdot pending" /> Loading users</div>;
   }
 
   return (
-    <div className="admin-page">
-      <div className="page-header">
-        <h1>Users Management</h1>
-        <button className="btn-primary" onClick={handleCreate}>
-          + Add User
-        </button>
+    <div className="adm-page">
+      <div className="adm-head">
+        <p className="reading">
+          {loadError ? `The user list could not load: ${loadError}.` : usersReading({ users, companies })}
+        </p>
+        <button type="button" className="btn btn-primary adm-primary" onClick={handleCreate}>Add user</button>
       </div>
 
-      <div className="table-container">
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>Email</th>
-              <th>Company</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Superuser</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map(user => (
-              <tr key={user.id}>
-                <td><strong>{user.email}</strong></td>
-                <td>{getCompanyName(user.company_id)}</td>
-                <td>
-                  <span className={`role-badge role-${user.role}`}>
-                    {user.role}
-                  </span>
-                </td>
-                <td>
-                  <span className={`status-badge ${user.is_active ? 'active' : 'inactive'}`}>
-                    {user.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td>
-                  {user.is_superuser
-                    ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--warn)' }}><Icon name="star" size={13} /> Yes</span>
-                    : 'No'}
-                </td>
-                <td>
-                  <button className="btn-edit" onClick={() => handleEdit(user)}>
-                    Edit
-                  </button>
-                  <button className="btn-delete" onClick={() => handleDelete(user.id)}>
-                    Delete
-                  </button>
-                </td>
+      {nav}
+
+      {users.length > 0 && (
+        <div className="adm-table-wrap">
+          <table className="data-table adm-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Company</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th><span className="adm-sr">Actions</span></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {users.map(user => (
+                <tr key={user.id}>
+                  <td className="adm-name">
+                    {user.email}
+                    {user.is_superuser && (
+                      <span className="adm-super"><Icon name="star" size={12} /> Superuser</span>
+                    )}
+                  </td>
+                  <td>{getCompanyName(user.company_id)}</td>
+                  <td>{ROLE_LABEL[user.role] || user.role}</td>
+                  <td>
+                    <span className="adm-status">
+                      <span className={`sdot${user.is_active ? ' ok' : ''}`} />
+                      {user.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="adm-actions">
+                    <button type="button" className="btn" onClick={() => handleEdit(user)}>Edit</button>
+                    <button type="button" className="btn btn-danger" onClick={() => handleDelete(user)}>Delete user</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {/* Modal for Create/Edit */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2>{editingUser ? 'Edit User' : 'Create New User'}</h2>
+        <div className="adm-overlay" onClick={() => setShowModal(false)}>
+          <div
+            className="adm-dialog" role="dialog" aria-modal="true" aria-labelledby="adm-user-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="adm-dialog-head">
+              <h2 id="adm-user-title">{editingUser ? 'Edit user' : 'Add a user'}</h2>
+              <button type="button" className="adm-close" aria-label="Close" onClick={() => setShowModal(false)}>×</button>
+            </div>
             <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label>Email *</label>
+              <div className="adm-field">
+                <label htmlFor="adm-user-email">Email</label>
                 <input
+                  id="adm-user-email"
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   required
-                  placeholder="user@example.com"
+                  autoFocus
+                  placeholder="name@example.com"
                 />
               </div>
 
-              <div className="form-group">
-                <label>Password {editingUser ? '(leave blank to keep current)' : '*'}</label>
+              <div className="adm-field">
+                <label htmlFor="adm-user-password">
+                  Password{editingUser && <span className="adm-hint"> Leave blank to keep the current one</span>}
+                </label>
                 <input
+                  id="adm-user-password"
                   type="password"
                   value={formData.password}
-                  onChange={(e) => setFormData({...formData, password: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   required={!editingUser}
-                  placeholder="Enter password"
+                  autoComplete="new-password"
                 />
               </div>
 
-              <div className="form-group">
-                <label>Company *</label>
+              <div className="adm-field">
+                <label htmlFor="adm-user-company">Company</label>
                 <select
+                  id="adm-user-company"
                   value={formData.company_id}
-                  onChange={(e) => setFormData({...formData, company_id: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, company_id: e.target.value })}
                   required
                 >
-                  <option value="">Select Company</option>
+                  <option value="">Choose a company</option>
                   {companies.map(company => (
                     <option key={company.company_id} value={company.company_id}>
                       {company.company_name}
@@ -222,48 +236,45 @@ function UsersPage() {
                 </select>
               </div>
 
-              <div className="form-group">
-                <label>Role *</label>
+              <div className="adm-field">
+                <label htmlFor="adm-user-role">Role</label>
                 <select
+                  id="adm-user-role"
                   value={formData.role}
-                  onChange={(e) => setFormData({...formData, role: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                  aria-describedby="adm-user-role-scope"
                   required
                 >
-                  <option value="observer">Observer</option>
-                  <option value="engineer">Engineer</option>
-                  <option value="admin">Admin</option>
+                  {Object.entries(ROLE_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
                 </select>
+                <p className="adm-scope" id="adm-user-role-scope">{ROLE_SCOPE[formData.role]}</p>
               </div>
 
-              <div className="form-group">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={formData.is_active}
-                    onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
-                  />
-                  {' '}Active
-                </label>
-              </div>
+              <label className="adm-check">
+                <input
+                  type="checkbox"
+                  checked={formData.is_active}
+                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                />
+                Active
+              </label>
 
-              <div className="form-group">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={formData.is_superuser}
-                    onChange={(e) => setFormData({...formData, is_superuser: e.target.checked})}
-                  />
-                  {' '}Superuser
-                </label>
-              </div>
+              <label className="adm-check">
+                <input
+                  type="checkbox"
+                  checked={formData.is_superuser}
+                  onChange={(e) => setFormData({ ...formData, is_superuser: e.target.checked })}
+                />
+                Superuser, across every company
+              </label>
 
-              <div className="modal-actions">
-                <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary">
-                  {editingUser ? 'Update' : 'Create'}
-                </button>
+              {formError && <p className="adm-error" role="alert">{formError}</p>}
+
+              <div className="adm-dialog-actions">
+                <button type="button" className="btn" onClick={() => setShowModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary">{editingUser ? 'Save changes' : 'Add user'}</button>
               </div>
             </form>
           </div>

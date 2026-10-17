@@ -6,6 +6,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../components/Icon';
 import authFetch from '../services/http';
 import { fmtMetric, pickPrimary } from '../utils/metrics';
+import { canWrite } from '../utils/roles';
+import { modelsReading } from '../utils/reading-models';
 import ModelUploadWizard from './ModelUploadWizard';
 import './MLModels.css';
 
@@ -31,6 +33,21 @@ const ORIGIN_LABEL = { notebook: 'Notebook', platform: 'Platform', uploaded: 'Up
 function originOf(registry, provenance) {
   if (registry === 'notebook') return 'notebook';
   return provenance === 'uploaded' ? 'uploaded' : 'platform';
+}
+
+// A stage or status as the reader says it: "production" -> "Production"; MLflow's "None" -> "No stage".
+function stageLabel(s) {
+  if (!s || s === 'None') return 'No stage';
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// A metric key as a label: acronyms in capitals, anything else in sentence case.
+const METRIC_ACRONYMS = { rmse: 'RMSE', mae: 'MAE', mape: 'MAPE', mse: 'MSE', r2: 'R²', f1: 'F1', auc: 'AUC', auc_roc: 'AUC ROC', roc_auc: 'ROC AUC', f1_score: 'F1' };
+function metricLabel(key) {
+  const k = String(key).toLowerCase().replace(/ /g, '_');
+  if (METRIC_ACRONYMS[k]) return METRIC_ACRONYMS[k];
+  const words = k.replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function fmtDate(ms) {
@@ -113,21 +130,21 @@ function normalizePlatform(m) {
 const COMPAT = {
   incompatible: {
     pill: 'badge-crit',
-    label: 'incompatible',
-    title: 'This serving environment cannot honour what the model declares — it will not deploy (ADR-0027).',
+    label: 'Incompatible',
+    title: 'This serving environment cannot honour what the model declares, so it will not deploy.',
     headline: 'This environment cannot serve this model',
     note: 'The serving environment does not satisfy what the model declares, so it will not be deployed. Loading it anyway risks scoring silently wrong, which is worse than refusing it.',
   },
   patch_drift: {
     pill: 'badge-warn',
-    label: 'version drift',
-    title: 'Servable, but the training and serving versions are not identical — scikit-learn warns on load (ADR-0027).',
+    label: 'Version drift',
+    title: 'Servable, but the training and serving versions are not identical. scikit-learn warns when it loads it.',
     headline: 'Trained against different versions',
     note: 'The model is servable: the versions differ, but not in a way that breaks the contract. scikit-learn warns when it loads a model built by another version, and that warning is shown rather than swallowed.',
   },
   compatible: {
     pill: 'badge-live',
-    label: 'parity',
+    label: 'Parity',
     title: 'The serving environment satisfies everything this model declares (ADR-0027).',
     headline: 'The serving environment satisfies this model',
     note: null,
@@ -166,16 +183,16 @@ function ParityLedger({ status, detail }) {
       {detail?.flavor && (
         <p className="mdl-compat-flavor mono">
           {detail.flavor}
-          {detail.flavor_supported === false && <span className="mdl-compat-missing"> · not installed here</span>}
+          {detail.flavor_supported === false && <span className="mdl-compat-missing">, not installed here</span>}
         </p>
       )}
 
       {libraries.length > 0 && (
         <div className="mdl-ledger" role="table" aria-label="Trained-against versus serving versions">
           <div className="mdl-ledger-row mdl-ledger-head" role="row">
-            <span role="columnheader">library</span>
-            <span role="columnheader">trained against</span>
-            <span role="columnheader">serving with</span>
+            <span role="columnheader">Library</span>
+            <span role="columnheader">Trained against</span>
+            <span role="columnheader">Serving with</span>
           </div>
           {libraries.map((lib) => {
             const fault = faults[lib];
@@ -216,6 +233,8 @@ function MLModels() {
   const [filter, setFilter] = useState('all'); // all | notebook | platform | uploaded
   const [retrainModels, setRetrainModels] = useState(() => new Set()); // model_ids with a live retrain rec (ADR-0022)
   const [uploading, setUploading] = useState(false); // the ADR-0030 upload wizard is open
+  // Uploading, deploying and editing a description need engineer or admin (observer is read-only).
+  const [writable] = useState(() => canWrite());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -287,160 +306,143 @@ function MLModels() {
     notebook: models.filter((m) => m.origin === 'notebook').length,
     platform: models.filter((m) => m.origin === 'platform').length,
     uploaded: models.filter((m) => m.origin === 'uploaded').length,
-    deployed: models.filter((m) => statusTone(m.status).dot === 'ok').length,
   }), [models]);
+
+  const reading = useMemo(() => modelsReading({
+    models: models.map((m) => ({
+      name: m.name,
+      origin: m.origin,
+      live: statusTone(m.status).dot === 'ok',
+      retrain: !!(m.id && retrainModels.has(m.id)),
+      incompatible: m.compatibility === 'incompatible',
+    })),
+  }), [models, retrainModels]);
 
   const shown = filter === 'all' ? models : models.filter((m) => m.origin === filter);
 
+  if (loading && !models.length) {
+    return <div className="mdl-state"><span className="sdot pending" /> Loading the model registry</div>;
+  }
+  if (error) {
+    return (
+      <div className="mdl-state mdl-state-bad">
+        <p>{error} Check that the model service is running, then try again.</p>
+        <button type="button" className="btn" onClick={load}>Try again</button>
+      </div>
+    );
+  }
+
   return (
-    <>
-      <div className="page-head">
-        <div>
-          <div className="eyebrow">Model registry</div>
-          <h1>Models</h1>
-          <div className="sub">Every model serving your tenant — authored in notebooks, built in, or brought in from outside.</div>
-        </div>
+    <div className="mdl">
+      <div className="mdl-head">
+        <p className="reading">{reading}</p>
         <div className="mdl-head-actions">
-          <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
-            <Icon name="refresh" size={14} /> {loading ? 'Loading…' : 'Refresh'}
+          <button type="button" className="btn mdl-refresh" onClick={load} disabled={loading}>
+            <Icon name="refresh" size={14} /> {loading ? 'Refreshing' : 'Refresh'}
           </button>
           {/* ADR-0030: bring in a model trained off-platform, through the one mediated door. */}
-          <button className="btn btn-primary btn-sm" onClick={() => setUploading(true)}>
-            <Icon name="upload" size={14} /> Upload model
-          </button>
+          {writable && (
+            <button type="button" className="btn btn-primary mdl-upload" onClick={() => setUploading(true)}>
+              <Icon name="upload" size={15} /> Upload model
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="kpi-row mdl-kpis">
-        <div className="kpi">
-          <div className="kpi-label">Total models</div>
-          <div className="kpi-value">{counts.all}</div>
-          <div className="kpi-foot">in the registry</div>
-        </div>
-        <div className="kpi" style={{ '--accent': 'var(--signal)' }}>
-          <div className="kpi-label">Notebook</div>
-          <div className="kpi-value">{counts.notebook}</div>
-          <div className="kpi-foot">authored in notebooks</div>
-        </div>
-        {/* ADR-0030 dec 8 wants the count of externally-authored models SEEN, not buried — an
-            operator should be able to answer "how many models am I trusting from outside?" at a
-            glance. It takes the headline slot the low-value Platform tile held; the platform count
-            still lives on the filter tab below. */}
-        <div className="kpi" style={{ '--accent': 'var(--gold)' }}>
-          <div className="kpi-label">Uploaded</div>
-          <div className="kpi-value">{counts.uploaded}</div>
-          <div className="kpi-foot">authored off-platform</div>
-        </div>
-        <div className="kpi" style={{ '--accent': 'var(--live)' }}>
-          <div className="kpi-label">In production</div>
-          <div className="kpi-value">{counts.deployed}</div>
-          <div className="kpi-foot">serving live</div>
-        </div>
-      </div>
+      {models.length > 0 && (
+        <section className="mdl-registry" aria-labelledby="mdl-registry-h">
+          <div className="mdl-registry-head">
+            <h2 id="mdl-registry-h">Registry</h2>
+            <div className="seg" role="group" aria-label="Show models by origin">
+              {['all', 'notebook', 'platform', 'uploaded'].map((f) => (
+                <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>
+                  {f === 'all' ? 'All' : ORIGIN_LABEL[f]} <span className="mono mdl-seg-n">{counts[f]}</span>
+                </button>
+              ))}
+            </div>
+          </div>
 
-      <section className="panel mdl-panel" style={{ padding: 0 }}>
-        <div className="panel-head">
-          <h2>Registry</h2>
-          <div className="mdl-filters" role="tablist" aria-label="Filter by origin">
-            {['all', 'notebook', 'platform', 'uploaded'].map((f) => (
-              <button
-                key={f}
-                role="tab"
-                aria-selected={filter === f}
-                className={`mdl-filter${filter === f ? ' active' : ''}`}
-                onClick={() => setFilter(f)}
-              >
-                {f === 'all' ? 'All' : ORIGIN_LABEL[f]} <span className="mdl-filter-n">{counts[f]}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="mdl-empty"><span className="sdot pending" /> Loading registry…</div>
-        ) : error ? (
-          <div className="mdl-empty"><Icon name="alert" size={22} color="var(--crit)" /><p>{error}</p></div>
-        ) : !shown.length ? (
-          <div className="mdl-empty">
-            <Icon name="cpu" size={26} color="var(--faint)" />
-            <p>No models here yet.</p>
-            <span className="mdl-empty-hint">Register one from a notebook, train a platform detector, or upload one you built elsewhere.</span>
-          </div>
-        ) : (
-          <div className="mdl-table-wrap">
-            <table className="data-table mdl-table">
-              <thead>
-                <tr>
-                  <th>Model</th><th>Origin</th><th>Version</th><th>Stage</th>
-                  <th className="mdl-num">Key metric</th><th>Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((m) => {
-                  const tone = statusTone(m.status);
-                  const active = selected && selected.key === m.key;
-                  return (
-                    <tr
-                      key={m.key}
-                      className={`mdl-row${active ? ' active' : ''}`}
-                      onClick={() => openRow(m)}
-                      tabIndex={0}
-                      onKeyDown={(e) => { if (e.key === 'Enter') openRow(m); }}
-                    >
-                      <td className="mdl-name">
-                        {m.name}
-                        {m.id && retrainModels.has(m.id) && (
-                          <span className="badge badge-warn mdl-retrain" title="The alert worker recommends retraining this model (sustained drift + precision decay)">
-                            <Icon name="refresh" size={11} /> retrain
+          {!shown.length ? (
+            <p className="mdl-none">
+              No {ORIGIN_LABEL[filter].toLowerCase()} models.{' '}
+              <button type="button" className="mdl-link" onClick={() => setFilter('all')}>Show all models</button>
+            </p>
+          ) : (
+            <div className="mdl-table-wrap">
+              <table className="data-table mdl-table">
+                <thead>
+                  <tr>
+                    <th>Model</th><th>Origin</th><th>Version</th><th>Stage</th>
+                    <th className="mdl-num">Key metric</th><th>Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((m) => {
+                    const tone = statusTone(m.status);
+                    const active = selected && selected.key === m.key;
+                    return (
+                      <tr
+                        key={m.key}
+                        className={`mdl-row${active ? ' active' : ''}`}
+                        onClick={() => openRow(m)}
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRow(m); } }}
+                      >
+                        <td className="mdl-name">
+                          <span className="mdl-name-text">{m.name}</span>
+                          {m.id && retrainModels.has(m.id) && (
+                            <span className="badge badge-warn mdl-flag" title="The alert worker recommends retraining this model: sustained drift and falling precision">
+                              <Icon name="refresh" size={11} /> Retrain
+                            </span>
+                          )}
+                          {/* Only a FINDING earns a row badge. A model in parity is the expected case
+                              and stays quiet; its verdict is in the drawer for anyone who looks. */}
+                          {(m.compatibility === 'incompatible' || m.compatibility === 'patch_drift') && (
+                            <span
+                              className={`badge ${COMPAT[m.compatibility].pill} mdl-flag`}
+                              title={COMPAT[m.compatibility].title}
+                            >
+                              <Icon name="alert" size={11} /> {COMPAT[m.compatibility].label}
+                            </span>
+                          )}
+                        </td>
+                        {/* Uploaded is the one origin that earns an icon: an externally-authored
+                            model is the exceptional case an operator must not skim past. */}
+                        <td className="mdl-origin">
+                          <span className={`badge mdl-src mdl-src-${m.origin}`}>
+                            {m.origin === 'uploaded' && <Icon name="upload" size={11} />}
+                            {ORIGIN_LABEL[m.origin]}
                           </span>
-                        )}
-                        {/* Only a FINDING earns a row badge. A model in parity is the expected case
-                            and stays quiet — its verdict is in the drawer for anyone who looks. */}
-                        {(m.compatibility === 'incompatible' || m.compatibility === 'patch_drift') && (
-                          <span
-                            className={`badge ${COMPAT[m.compatibility].pill} mdl-retrain`}
-                            title={COMPAT[m.compatibility].title}
-                          >
-                            <Icon name="alert" size={11} /> {COMPAT[m.compatibility].label}
+                        </td>
+                        <td className="mono mdl-dim mdl-version">{m.version}</td>
+                        <td className="mdl-stage-cell">
+                          <span className="mdl-stage">
+                            {tone.dot && <span className={`sdot ${tone.dot}`} />}
+                            {stageLabel(m.status)}
                           </span>
-                        )}
-                      </td>
-                      {/* Uploaded is the one origin that earns an icon: an externally-authored
-                          model is the exceptional case an operator must not skim past, the same way
-                          only a finding earns a row badge above. */}
-                      <td>
-                        <span className={`badge mdl-src-${m.origin}`}>
-                          {m.origin === 'uploaded' && <Icon name="upload" size={11} />}
-                          {ORIGIN_LABEL[m.origin]}
-                        </span>
-                      </td>
-                      <td className="mono mdl-dim">{m.version}</td>
-                      <td>
-                        <span className="mdl-stage">
-                          {tone.dot && <span className={`sdot ${tone.dot}`} />}
-                          {m.status}
-                        </span>
-                      </td>
-                      <td className="mdl-num">
-                        {m.primary
-                          ? <span className="mono"><i className="mdl-mlabel">{m.primary.label}</i> {fmtMetric(m.primary.value)}</span>
-                          : <span className="mdl-dim">—</span>}
-                      </td>
-                      <td className="mono mdl-dim">{fmtDate(m.updated)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+                        </td>
+                        <td className="mdl-num">
+                          {m.primary
+                            ? <><span className="mdl-mlabel">{metricLabel(m.primary.label)}</span> <span className="mono">{fmtMetric(m.primary.value)}</span></>
+                            : <span className="mdl-dim">—</span>}
+                        </td>
+                        <td className="mono mdl-dim mdl-updated">{fmtDate(m.updated)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {selected && (
         <ModelDrawer
           key={selected.key}
           row={selected}
           detail={detail}
+          writable={writable}
           retrainRecommended={!!(selected.id && retrainModels.has(selected.id))}
           onClose={() => setSelected(null)}
           onSaved={(desc) => {
@@ -457,7 +459,7 @@ function MLModels() {
       {uploading && (
         <ModelUploadWizard onClose={() => setUploading(false)} onRegistered={handleRegistered} />
       )}
-    </>
+    </div>
   );
 }
 
@@ -466,14 +468,26 @@ function MLModels() {
 // `archived` were MLflow stage names the DB rejects, so choosing them 500'd; they are gone.
 const PLATFORM_STATUSES = ['production', 'active', 'deprecated'];
 
+// A refused deploy says why (a string detail, or {message}); fall back to the status code.
+async function deployRefusal(res) {
+  try {
+    const body = await res.json();
+    const d = body?.detail;
+    if (typeof d === 'string') return d;
+    if (d && typeof d.message === 'string') return d.message;
+  } catch { /* no JSON body */ }
+  return `The status was not changed: the model service answered ${res.status}.`;
+}
+
 // Rendered with `key={row.key}` (see the render site), so opening a different model remounts the
 // drawer — draft/editing/saveErr initialise fresh from the new row, no reset effect required.
-function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStatusChanged }) {
+function ModelDrawer({ row, detail, writable, retrainRecommended, onClose, onSaved, onStatusChanged }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(row.description || '');
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState(null);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [statusErr, setStatusErr] = useState(null);
 
   // Esc closes the drawer.
   useEffect(() => {
@@ -495,7 +509,7 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
       onSaved(draft);
       setEditing(false);
     } catch {
-      setSaveErr('Could not save. Try again.');
+      setSaveErr('The description was not saved. Try again.');
     } finally {
       setSaving(false);
     }
@@ -505,14 +519,19 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
   // alerting pipeline serves them (production/active = live).
   const changeStatus = async (status) => {
     setStatusBusy(true);
+    setStatusErr(null);
     try {
       const res = await authFetch(`/api/models/${row.id}/deploy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model_id: row.id, environment: status }),
       });
+      // A refused deploy (the load-and-score gate, ADR-0030 dec 7) carries its reason: show it.
       if (res.ok) onStatusChanged(status);
-    } catch { /* leave the select on its prior value */ } finally {
+      else setStatusErr(await deployRefusal(res));
+    } catch {
+      setStatusErr('The model service could not be reached. The status is unchanged; try again.');
+    } finally {
       setStatusBusy(false);
     }
   };
@@ -528,14 +547,16 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
           <div>
             <div className="eyebrow">{ORIGIN_LABEL[row.origin]} model</div>
             <h2 className="mdl-drawer-title">{row.name}</h2>
-            <div className="mdl-drawer-meta mono">
-              {row.version}
-              <span className="mdl-sep">·</span>
-              <span className="mdl-stage">{tone.dot && <span className={`sdot ${tone.dot}`} />}{row.status}</span>
-              {row.type && <><span className="mdl-sep">·</span>{row.type}</>}
-            </div>
+            <dl className="mdl-facts">
+              <div><dt>Version</dt><dd className="mono">{row.version}</dd></div>
+              <div>
+                <dt>Stage</dt>
+                <dd className="mdl-stage">{tone.dot && <span className={`sdot ${tone.dot}`} />}{stageLabel(row.status)}</dd>
+              </div>
+              {row.type && <div><dt>Type</dt><dd className="mono">{row.type}</dd></div>}
+            </dl>
           </div>
-          <button className="icon-btn mdl-close" onClick={onClose} title="Close" aria-label="Close">×</button>
+          <button type="button" className="mdl-close" onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <div className="mdl-drawer-body">
@@ -543,12 +564,12 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
               (notebook or platform) is the ordinary case and stays quiet, its origin already told by
               the header. It frames everything below it: the parity ledger's empirical check is a
               narrower proof for an upload (dec 7), and the drift lane may not cover it (dec 8), so
-              the reader needs the frame before the sections. Gold, not a status colour — an external
+              the reader needs the frame before the sections. Neutral, not a status colour: an external
               origin is a fact to attend to, not a fault to fix. */}
           {row.origin === 'uploaded' && (
             <section className="mdl-prov">
               <div className="mdl-prov-head">
-                <Icon name="upload" size={15} color="var(--gold)" />
+                <Icon name="upload" size={15} />
                 <span className="eyebrow mdl-prov-eyebrow">Provenance</span>
               </div>
               <p className="mdl-prov-title">Authored outside the platform</p>
@@ -559,7 +580,7 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
                 it could deploy.
               </p>
               <p className="mdl-prov-note">
-                That is a narrower proof than a notebook or platform model carries — the platform can
+                That is a narrower proof than a notebook or platform model carries: the platform can
                 confirm this model runs <em>here</em>, not that here matches where it was trained.
               </p>
             </section>
@@ -590,28 +611,29 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
           <section className="mdl-block">
             <div className="mdl-block-head">
               <span className="eyebrow">Description</span>
-              {row.editable && !editing && (
-                <button className="mdl-link" onClick={() => setEditing(true)}>Edit</button>
+              {row.editable && writable && !editing && (
+                <button type="button" className="mdl-link" onClick={() => setEditing(true)}>Edit</button>
               )}
             </div>
             {editing ? (
               <div className="mdl-edit">
                 <textarea
                   className="mdl-textarea"
+                  aria-label="Description"
                   value={draft}
                   rows={4}
-                  placeholder="What this model predicts, how it was trained, when to retrain…"
+                  placeholder="What this model predicts, how it was trained, when to retrain"
                   onChange={(e) => setDraft(e.target.value)}
                 />
                 {saveErr && <div className="mdl-err">{saveErr}</div>}
                 <div className="mdl-edit-actions">
-                  <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(false); setDraft(row.description || ''); }} disabled={saving}>Cancel</button>
-                  <button className="btn btn-primary btn-sm" onClick={saveDescription} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+                  <button type="button" className="btn" onClick={() => { setEditing(false); setDraft(row.description || ''); }} disabled={saving}>Cancel</button>
+                  <button type="button" className="btn btn-primary" onClick={saveDescription} disabled={saving}>{saving ? 'Saving' : 'Save description'}</button>
                 </div>
               </div>
             ) : (
               <p className={`mdl-desc${row.description ? '' : ' faint'}`}>
-                {row.description || (row.editable ? 'No description yet — add one to explain what this model does.' : 'No description.')}
+                {row.description || (row.editable && writable ? 'No description yet. Add one to say what this model does.' : 'No description.')}
               </p>
             )}
           </section>
@@ -620,14 +642,14 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
           <section className="mdl-block">
             <span className="eyebrow">Metrics</span>
             {metricEntries.length ? (
-              <div className="mdl-metrics">
+              <dl className="mdl-metrics">
                 {metricEntries.map(([k, v]) => (
                   <div className="mdl-metric" key={k}>
-                    <span className="mdl-metric-label">{k.replace(/_/g, ' ')}</span>
-                    <span className="mdl-metric-value mono">{fmtMetric(v)}</span>
+                    <dt>{metricLabel(k)}</dt>
+                    <dd className="mono">{fmtMetric(v)}</dd>
                   </div>
                 ))}
-              </div>
+              </dl>
             ) : <p className="mdl-desc faint">No metrics logged for this model.</p>}
           </section>
 
@@ -650,20 +672,20 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
             <section className="mdl-block">
               <span className="eyebrow">Versions</span>
               {versions === null ? (
-                <p className="mdl-desc faint">Loading history…</p>
+                <p className="mdl-desc faint">Loading the version history</p>
               ) : !versions.length ? (
                 <p className="mdl-desc faint">No versions.</p>
               ) : (
                 <table className="data-table mdl-versions">
-                  <thead><tr><th>Ver</th><th>Stage</th><th>Status</th><th>Created</th></tr></thead>
+                  <thead><tr><th>Version</th><th>Stage</th><th>Status</th><th>Created</th></tr></thead>
                   <tbody>
                     {versions.map((v) => {
                       const t = statusTone(v.current_stage);
                       return (
                         <tr key={v.version}>
                           <td className="mono">v{v.version}</td>
-                          <td><span className="mdl-stage">{t.dot && <span className={`sdot ${t.dot}`} />}{v.current_stage || 'None'}</span></td>
-                          <td className="mono mdl-dim">{v.status || '—'}</td>
+                          <td><span className="mdl-stage">{t.dot && <span className={`sdot ${t.dot}`} />}{stageLabel(v.current_stage)}</span></td>
+                          <td className="mdl-dim">{v.status ? stageLabel(v.status.toLowerCase()) : '—'}</td>
                           <td className="mono mdl-dim">{fmtDate(v.creation_timestamp)}</td>
                         </tr>
                       );
@@ -679,18 +701,23 @@ function ModelDrawer({ row, detail, retrainRecommended, onClose, onSaved, onStat
           {row.registry === 'platform' && (
             <section className="mdl-block">
               <span className="eyebrow">Deployment</span>
-              {row.equipment && <p className="mdl-desc" style={{ marginBottom: 12 }}>Equipment type: {row.equipment}</p>}
-              <label className="mdl-status-ctl">
-                <span className="mdl-status-label">Status</span>
-                <select
-                  className="mdl-select"
-                  value={PLATFORM_STATUSES.includes((row.status || '').toLowerCase()) ? row.status.toLowerCase() : 'active'}
-                  disabled={statusBusy || !row.id}
-                  onChange={(e) => changeStatus(e.target.value)}
-                >
-                  {PLATFORM_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </label>
+              {row.equipment && <p className="mdl-desc mdl-equip">Equipment type <span className="mono">{row.equipment}</span></p>}
+              {writable ? (
+                <label className="mdl-status-ctl">
+                  <span className="mdl-status-label">Status</span>
+                  <select
+                    className="mdl-select"
+                    value={PLATFORM_STATUSES.includes((row.status || '').toLowerCase()) ? row.status.toLowerCase() : 'active'}
+                    disabled={statusBusy || !row.id}
+                    onChange={(e) => changeStatus(e.target.value)}
+                  >
+                    {PLATFORM_STATUSES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
+                  </select>
+                </label>
+              ) : (
+                <p className="mdl-desc">Your role (observer) cannot change its status.</p>
+              )}
+              {statusErr && <p className="mdl-err" role="alert">{statusErr}</p>}
             </section>
           )}
         </div>
@@ -753,7 +780,7 @@ function DriftPanel({ row }) {
       setResult(await res.json());
       setState('done');
     } catch {
-      setErr('Could not evaluate drift. Try again.');
+      setErr('The drift check did not finish. Try again.');
       setState('error');
     }
   }, [row.id]);
@@ -773,7 +800,7 @@ function DriftPanel({ row }) {
       <div className="mdl-block-head">
         <span className="eyebrow">Data drift</span>
         {state === 'done' && (
-          <button className="mdl-link" onClick={evaluate}>Re-evaluate</button>
+          <button type="button" className="mdl-link" onClick={evaluate}>Check again</button>
         )}
       </div>
 
@@ -782,21 +809,21 @@ function DriftPanel({ row }) {
           <p className="mdl-desc faint">
             Compare recent readings against this model’s training baseline to check for data drift.
           </p>
-          <button className="btn btn-secondary btn-sm" onClick={evaluate} disabled={!row.id}>
-            <Icon name="activity" size={14} /> Evaluate drift
+          <button type="button" className="btn" onClick={evaluate} disabled={!row.id}>
+            <Icon name="activity" size={14} /> Check for drift
           </button>
         </div>
       )}
 
       {state === 'loading' && (
-        <div className="mdl-drift-loading"><span className="sdot pending" /> Evaluating recent window…</div>
+        <div className="mdl-drift-loading"><span className="sdot pending" /> Checking recent readings</div>
       )}
 
       {state === 'error' && (
         <div className="mdl-drift-idle">
           <p className="mdl-err" style={{ margin: 0 }}>{err}</p>
-          <button className="btn btn-secondary btn-sm" onClick={evaluate}>
-            <Icon name="refresh" size={14} /> Retry
+          <button type="button" className="btn" onClick={evaluate}>
+            <Icon name="refresh" size={14} /> Try again
           </button>
         </div>
       )}
