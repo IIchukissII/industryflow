@@ -6,34 +6,41 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # CI and required checks
 
-`main` means every required check passed, and one of them starts the system
+The GitHub Actions workflows, their gate jobs, and the required checks on `main`
 ([ADR-0026](../../ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md)).
 
-Every workflow runs on every pull request and ends in one **gate** job. A `changes` job decides
-whether the workflow's paths changed. If they did not, the work is skipped and the gate passes.
-If they did, the gate fails when any gated job failed or was cancelled. So a gate always reports a
-status, which is what lets it be required without blocking unrelated PRs.
+## Gate convention
+
+| Rule | Detail |
+|------|--------|
+| Triggers | Every workflow runs on `pull_request` and on `push` to `main` |
+| One gate per workflow | Each workflow ends in a `<name>-gate` job with `if: always()`, so it always reports a status |
+| Path-filtered workflows | A `changes` job (`dorny/paths-filter`) decides whether the workflow's paths changed. Unchanged: the work is skipped and the gate passes. Changed: the gate fails when any gated job failed or was cancelled, or when `changes` itself did not succeed |
+| Unfiltered workflows | `compose-smoke.yml` and `config-guards.yml` have no `changes` job; their jobs run on every PR and the gate passes only when all of them succeeded |
 
 ## Required checks on `main`
 
-| Gate | Workflow |
-|------|----------|
-| `unit-tests-gate` | Unit tests |
-| `lint-gate` | Lint (ruff, exact pins, deps-resolve, eslint, frontend tests) |
-| `images-gate` | Images (build, smoke, Trivy) |
-| `helm-gate` | Helm |
-| `compose-smoke-gate` | Compose smoke (the stack starts and stays up) |
-| `db-tenant-isolation-gate` | DB tenant isolation |
-| `cold-layer-integration-gate` | Cold layer integration |
-| `tracking-gateway-integration-gate` | Tracking gateway integration (the gateway proofs, and the upload path's serving half: register and deploy in the real ml_service) |
-| `model-artifact-roundtrip-gate` | Model artifact round-trip |
-| `config-guards-gate` | Config guards (silent-omission lists: path filters, image pins, chart/compose wiring; object-store principals against a real MinIO) |
+| Gate | Workflow file | Gated jobs |
+|------|---------------|------------|
+| `unit-tests-gate` | `unit-tests.yml` | pytest |
+| `lint-gate` | `lint.yml` | ruff, exact pins + deps-resolve, eslint, frontend tests (vitest) |
+| `images-gate` | `images.yml` | Spark/JupyterHub version parity, image build + smoke + Trivy, pip-audit / npm audit |
+| `helm-gate` | `helm.yml` | `helm lint` / `helm template`, fail-closed placeholder-secret guard |
+| `compose-smoke-gate` | `compose-smoke.yml` | The stack starts and stays up (unfiltered) |
+| `db-tenant-isolation-gate` | `db-tenant-isolation.yml` | Reader-role cross-tenant isolation |
+| `cold-layer-integration-gate` | `cold-layer-integration.yml` | Cold layer integration |
+| `tracking-gateway-integration-gate` | `tracking-gateway-integration.yml` | Tracking gateway proofs; upload path's serving half (register and deploy in the real ml_service) |
+| `model-artifact-roundtrip-gate` | `model-artifact-roundtrip.yml` | Parity, model artifact round-trip |
+| `config-guards-gate` | `config-guards.yml` | Silent-omission list guards (`tests/config_guards`); object-store principals against a real MinIO (unfiltered) |
 
-**This list is enforced only in the repository's branch-protection settings, so it can drift
-silently.** A new workflow must end in a gate, and that gate must be added here and to branch
-protection in the same change:
+## Changing the list
+
+The list is enforced only in the repository's branch-protection settings. A new workflow ends in a
+gate, and that gate is added to this table and to branch protection in the same change:
 
 ```bash
+gh api repos/<owner>/<repo>/branches/main/protection --jq '.required_status_checks.contexts'
+
 gh api -X PATCH repos/<owner>/<repo>/branches/main/protection/required_status_checks \
   -f strict=false $(printf -- '-f contexts[]=%s ' unit-tests-gate lint-gate images-gate helm-gate \
   compose-smoke-gate db-tenant-isolation-gate cold-layer-integration-gate \

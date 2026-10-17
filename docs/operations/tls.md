@@ -3,127 +3,111 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# TLS & the internal CA
+# TLS and the internal CA
 
-All external traffic is served over HTTPS, terminated at the frontend nginx (the TLS
-edge — see **[ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md)**). Out of the
-box the edge generates a **self-signed** certificate so the stack works immediately, at
-the cost of a browser "not trusted" warning.
+Server certificates for the HTTPS edge and for TimescaleDB, issued by the internal CA. The edge is
+the TLS terminator ([ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md));
+database TLS is [ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md). Device client
+certificates are a separate PKI: [device-mtls.md](device-mtls.md).
 
-For a trusted setup on a LAN, run a small **internal Certificate Authority**: a root CA you
-install on your devices once, which signs the server certificate. After that
-`https://industryflow.local` is trusted with no warnings.
+## Edge TLS modes
 
-## TLS options at a glance
+| Mode | Client trust | Setup |
+|------|--------------|-------|
+| Self-signed (default) | Browser warning per site | None; the frontend entrypoint self-signs into the `frontend-certs` volume. Extra SANs: `CERT_EXTRA_SAN` (e.g. `IP:<host-ip>`) |
+| Internal CA | Trusted after installing `ca.crt` once per client | `scripts/gen-internal-ca.sh`, then `TLS_CERT_DIR` |
+| Public CA | Trusted everywhere | Place the issued `tls.crt` / `tls.key` in a directory and point `TLS_CERT_DIR` at it |
 
-| Mode | Trust | How |
-| --- | --- | --- |
-| Self-signed (default) | One-time per-site warning | Nothing — generated automatically into the `frontend-certs` volume |
-| Internal CA (this guide) | Trusted after installing the CA once | `scripts/gen-internal-ca.sh` + `TLS_CERT_DIR` |
-| Public CA (e.g. ACME/Let's Encrypt) | Trusted everywhere | Out of scope here; mount the issued `tls.crt`/`tls.key` via `TLS_CERT_DIR` |
+The entrypoint self-signs only when no certificate is present at `/etc/nginx/certs`.
 
-## Set up the internal CA
+## Issue certificates with the internal CA
 
-Run on the host that serves the frontend (needs `openssl`):
+Run on the Compose host (needs `openssl`):
 
 ```sh
-# The host's primary IP is auto-added to the SAN, so usually just:
 scripts/gen-internal-ca.sh
-
-# To pin the SAN explicitly (extra names/IPs, or to override auto-detection), set CERT_SAN —
-# include every name/IP clients use to reach the edge (replace <host-ip> with the server's IP):
-CERT_SAN="DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1,IP:<host-ip>" \
-  scripts/gen-internal-ca.sh
+echo "TLS_CERT_DIR=$(pwd)/deploy/certs" >> .env      # absolute path
+docker compose up -d --build frontend ingestion-edge
 ```
 
-This writes two git-ignored directories:
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `CA_OUT_DIR` | `deploy/ca` | CA key and certificate; never mounted into a container |
+| `CERT_OUT_DIR` | `deploy/certs` | Served directory; the `TLS_CERT_DIR` target |
+| `PRIMARY_HOST` | `industryflow.local` | Edge certificate CommonName |
+| `CERT_SAN` | `DNS:industryflow.local,DNS:industryflow,DNS:localhost,IP:127.0.0.1` plus the host's primary IPv4 | Edge certificate SAN; setting it replaces the default, including the auto-detected IP |
+| `DB_CERT_SAN` | `DNS:timescaledb,DNS:localhost,DNS:industryflow.local,IP:127.0.0.1` | Database certificate SAN |
+| `CA_DAYS` | `3650` | Root CA validity |
+| `CERT_DAYS` | `825` | Edge and database certificate validity |
+| `NGINX_GID` | `101` | Group `tls.key` is assigned to, so the unprivileged nginx can read it |
 
-- `deploy/ca/` — `ca.key` (the CA signing key) and `ca.crt`. **Never mounted** into any
-  container, so the network-facing edge can't reach the signing key.
-- `deploy/certs/` — `tls.crt` / `tls.key` (served by nginx) plus a copy of `ca.crt` for
-  distribution. This is the only directory mounted into the frontend.
+| Output | Files | Mounted into |
+|--------|-------|--------------|
+| `deploy/ca/` | `ca.key` (mode `0600`), `ca.crt` | Nothing |
+| `deploy/certs/` | `tls.crt`, `tls.key` (mode `0640`, group `NGINX_GID`) | `frontend`, `ingestion-edge` (server certificate) |
+| `deploy/certs/` | `db.crt`, `db.key` (mode `0600`) | `db-cert-init` (staged for TimescaleDB) |
+| `deploy/certs/` | `ca.crt` | Every database client (`DB_SSLROOTCERT`); distribute to browsers |
 
-The root CA is generated once and **reused** on later runs, so you only install `ca.crt`
-on clients a single time; re-running the script just reissues the leaf certificate.
+Both directories are git-ignored. The root CA is reused on later runs; only the leaf certificates are
+reissued. If the script cannot `chgrp` the key, run `sudo chgrp 101 deploy/certs/tls.key`.
 
-Point the frontend at it and restart:
+## Install the CA root on clients
 
-```sh
-echo "TLS_CERT_DIR=$(pwd)/deploy/certs" >> .env   # absolute path
-docker compose up -d --build frontend
-```
+Copy `deploy/certs/ca.crt` to each device.
 
-The entrypoint only self-signs when no certificate is present, so the mounted CA-signed
-cert is used as-is.
+| Client | Command or steps |
+|--------|------------------|
+| Linux | `sudo cp ca.crt /usr/local/share/ca-certificates/industryflow-ca.crt && sudo update-ca-certificates` |
+| macOS | Keychain Access → *System* → add `ca.crt` → *Always Trust* |
+| Windows | `certutil -addstore -f Root ca.crt` (elevated) |
+| Firefox (own store) | Settings → Privacy & Security → *View Certificates* → *Authorities* → *Import* → trust for websites |
 
-## Install the CA root on clients (once)
+## Name resolution
 
-Copy `deploy/certs/ca.crt` to each device and trust it:
+| Address | Requirement |
+|---------|-------------|
+| `https://industryflow.local` | mDNS on the host (e.g. `avahi-daemon` with hostname `industryflow`); macOS and Windows 10+ resolve `.local` natively, Linux needs `nss-mdns` |
+| `https://<host-ip>` | The IP is in the certificate SAN (auto-detected or in `CERT_SAN`) |
+| Hosts file | `<host-ip> industryflow.local` |
 
-- **Linux:** `sudo cp ca.crt /usr/local/share/ca-certificates/industryflow-ca.crt && sudo update-ca-certificates`
-- **macOS:** Keychain Access → *System* → drag in `ca.crt` → set it to *Always Trust*.
-- **Windows:** `certutil -addstore -f Root ca.crt` (elevated), or *Manage computer certificates* → *Trusted Root Certification Authorities*.
-- **Firefox** (uses its own store): Settings → Privacy & Security → *Certificates* → *View Certificates* → *Authorities* → *Import* → trust for websites.
+## Rotation
 
-Then browse to **https://industryflow.local** — no warning.
+| Task | Steps | Client action |
+|------|-------|---------------|
+| Reissue the edge certificate (new SAN, expiry) | Re-run the script; `docker compose up -d --force-recreate frontend ingestion-edge` | None |
+| Reissue the database certificate (Compose) | Re-run the script; `docker compose up -d --force-recreate db-cert-init`; `docker compose restart timescaledb` | None |
+| Reissue the database certificate (Helm) | Renew or replace the `tls.db.secretName` Secret; restart the TimescaleDB pod | None |
+| Rotate the CA | Delete `deploy/ca/`, re-run the script, recreate the edges and the database as above | Install the new `ca.crt` on every client; restart every database client |
 
-## Reaching it by name
+## Database TLS
 
-`industryflow.local` is published over mDNS by `avahi-daemon` on the server (pinned to the
-LAN interface) when the host's name is `industryflow`. macOS and Windows 10+ resolve `.local`
-names natively; Linux clients need `avahi`/`nss-mdns`. If a device can't resolve it, use the
-host's IP (which is in the cert SAN) — `https://<host-ip>` — or add a `hosts` entry
-(`<host-ip> industryflow.local`).
+### Compose
 
-## Renewing / rotating
+| Element | Behaviour |
+|---------|-----------|
+| `db-cert-init` (one-shot, runs on every `up`) | Copies `db.crt` / `db.key` / `ca.crt` from `TLS_CERT_DIR` into the `db-certs` volume, owned by uid 70, key `0600`. Without `TLS_CERT_DIR` it keeps an earlier staged certificate, else self-signs one. It publishes the staged CA to the `db-ca` volume |
+| Client CA mount | `${TLS_CERT_DIR:-db-ca}` at `/etc/ssl/industryflow` (read-only) |
+| Client settings | `DB_SSLMODE` (default `verify-full`), `DB_SSLROOTCERT=/etc/ssl/industryflow/ca.crt` |
+| `pg_hba.conf` | `infrastructure/timescaledb/config/pg_hba.conf`, shared with the chart: `hostssl` + `scram-sha-256` on private ranges only; `local … trust` (Unix socket, init scripts) is the only non-TLS path. `metrics_user` (postgres-exporter) has its own `hostssl` rule |
 
-- **Reissue the server cert** (e.g. add a SAN, or before it expires): re-run the script and
-  restart the frontend. The CA is unchanged, so clients need no action.
-- **Rotate the CA** (compromise, or a fresh trust anchor): delete `deploy/ca/`, re-run the
-  script, and reinstall the new `ca.crt` on every client.
+### Helm
 
-## Database TLS (ADR-0017)
+| Value | Behaviour |
+|-------|-----------|
+| `tls.db.secretName` (default `industryflow-db-tls`) | Secret with `tls.crt` / `tls.key` / `ca.crt`. The TimescaleDB pod mounts all three (an initContainer stages the key `0600` for the postgres uid); every database client mounts only `ca.crt` |
+| `tls.db.mountPath` (default `/etc/ssl/industryflow`) | Mount path; `DB_SSLMODE` / `DB_SSLROOTCERT` come from the shared ConfigMap |
+| `tls.db.certManager.enabled` (default `false`) | The chart provisions the Secret through cert-manager (`templates/db-tls-certificate.yaml`: SelfSigned issuer → internal CA → server certificate). Requires the cert-manager CRDs |
 
-The decision — full server verification, SCRAM, the internal CA as the database's root, a staged
-rollout — is [ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md). This section is
-how it is realised.
+Without the Secret and without cert-manager, the database and its clients stay pending; `NOTES.txt`
+reports it.
 
-### Compose (single host)
+### Staged enablement on an existing deployment
 
-- `scripts/gen-internal-ca.sh` also issues the database server certificate, `db.crt` / `db.key`,
-  from the same internal CA as the edge. Its SAN covers the names clients use
-  (`DB_CERT_SAN`, default `timescaledb`, `localhost`, `industryflow.local`, `127.0.0.1`).
-- The `db-cert-init` one-shot copies the certificate and key into a postgres-owned volume with
-  mode `0600` before TimescaleDB starts — Postgres refuses a key with looser permissions.
-- Clients read `DB_SSLMODE` (default `verify-full`) and `DB_SSLROOTCERT` (the mounted `ca.crt`).
-- `pg_hba.conf` (one canonical file, shared with the chart) requires `hostssl` with
-  `scram-sha-256`; the in-container Unix socket (`local … trust`, used by the init scripts) is the
-  only plaintext path.
+Each stage is validated before the next
+([ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md)).
 
-### Kubernetes (Helm)
-
-- The chart consumes a Secret holding `tls.crt` / `tls.key` / `ca.crt`, named by
-  `tls.db.secretName`. The TimescaleDB pod mounts all three (an initContainer stages the key with
-  `0600` and the postgres uid); every database client mounts only `ca.crt`.
-- `DB_SSLMODE` / `DB_SSLROOTCERT` come from the shared ConfigMap.
-- With `tls.db.certManager.enabled` the chart provisions the Secret itself through cert-manager
-  (`templates/db-tls-certificate.yaml`: a SelfSigned issuer → internal CA → server certificate).
-  Otherwise the operator supplies the Secret from their own PKI. Without it the database and its
-  clients stay pending, and `NOTES.txt` says so.
-- The monitoring role (`metrics_user`, used by postgres-exporter) has its own `hostssl` rule.
-
-### Staged rollout (how TLS was turned on without an outage)
-
-1. **Server capable.** `ssl=on` with the certificate; `pg_hba` stays `host`, so TLS is offered
-   but not required.
-2. **Clients verify.** Every client sets `sslmode=verify-full` and `sslrootcert`; still accepted
-   under `host`, now over TLS.
-3. **Enforce.** `pg_hba` `host` → `hostssl` and `md5` → `scram-sha-256`; plaintext is rejected.
-
-Validate each stage before the next. The compose path is enforced and validated on a live
-deployment; the Helm path is render-validated (`helm lint` / `helm template`).
-
-### Rotating the database certificate
-
-Re-run `scripts/gen-internal-ca.sh` (the CA is reused, so clients need no change) and restart
-TimescaleDB. On Kubernetes, renew or replace the Secret and restart the database pod.
+| Stage | Server | Clients |
+|-------|--------|---------|
+| 1. Server capable | `ssl=on` with the certificate; `pg_hba` stays `host` | Unchanged |
+| 2. Clients verify | Unchanged | `sslmode=verify-full` + `sslrootcert` |
+| 3. Enforce | `host` → `hostssl`, `md5` → `scram-sha-256`; re-hash existing roles with `ALTER ROLE <role> PASSWORD '<same value>'` | Unchanged |
