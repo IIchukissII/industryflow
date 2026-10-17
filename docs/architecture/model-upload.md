@@ -3,180 +3,108 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# Uploading an externally-authored model — how the path works
+# Model upload
 
-[ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md) decides *that* the platform
-admits models it never watched being made, and *why* each refusal exists. This is its operational
-companion: the shape of the flow, what each component is authoritative for, and what an operator
-needs to know when something is refused. **The ADR is the why; nothing here overrides it.**
+The path that admits an externally-authored model: components, locations, settings and refusals.
+The decisions, and the reason for each refusal, are
+[ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md)'s.
 
-The requirement it serves: the cold layer ([ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md))
-makes years of history durable so it can be used, and training over that horizon is beyond what an
-embedded notebook is meant to carry. The history goes out; the finished model comes back.
+| Decision | ADR |
+|---|---|
+| Admission, structural refusal, registration and deployment gates, browser reachability | [ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md) |
+| Bytes go direct to the store; the gateway is the only writer | [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md) dec 6 |
+| Supported flavor set, skops trust by provenance | [ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) |
+| Declared score semantics, detector per model | [ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) |
+| Single origin | [ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) |
 
-## The flow
+## Flow
 
 ```
-  session ──► ml_service            mint an upload capability      (ADR-0030 dec 3)
-                 │                  short-lived, one tenant, audience=upload
-                 ▼
-  client  ──► tracking gateway      stage: one pre-signed PUT per file
-                 │                  keys are the gateway's, not the caller's
-                 ▼
-  client  ──► object store          bytes go DIRECT (ADR-0019 dec 6)
-                 │                  into _upload-staging/<tenant>/<upload>/ — outside every
-                 │                  tenant prefix, so nothing can address them yet
-                 ▼
-  client  ──► tracking gateway      commit: read each file's HEAD, judge on structure
-                 │                  admitted → server-side copy into tenant_<uuid>/uploads/<id>/
-                 │                  refused  → deleted, and the reason is returned
-                 ▼
-  client  ──► ml_service            register: the admitted location, declared semantics +
-                 │                  compatibility                                 (dec 4/5/6)
-                 │                  refused at 422 if this deployment cannot honour it
-                 ▼
-  client  ──► ml_service            deploy: load and score it here               (dec 7)
-                 │                  refused at 409 if it has not been shown to work
-                 ▼
-  alert worker ► ml_service         score: loaded from the admitted location, by the detector
-                                    its declaration matched at registration
+session ─▶ ml-service-api              POST /api/models/upload-capability   (audience upload)
+client  ─▶ notebook-tracking-gateway   stage: one pre-signed PUT URL per file
+client  ─▶ object store                PUT into _upload-staging/<tenant>/<upload id>/
+client  ─▶ notebook-tracking-gateway   commit: judge each file's head; admit → copy to tenant_<uuid>/uploads/<upload id>/, refuse → delete
+client  ─▶ ml-service-api              POST /api/models (admitted artifact_uri, declared semantics, feature config)
+client  ─▶ ml-service-api              POST /api/models/{model_id}/deploy (load-and-score probe)
+alert worker ─▶ ml-service-api         POST /api/inference/predict (loaded from the admitted location)
 ```
 
-## Where the artifact may be, and how it is served
+## Components
 
-The `artifact_uri` registration takes is the one the commit returned, and **only** that:
-`s3://<bucket>/tenant_<uuid>/uploads/<upload id>`, in the bucket the gateway admits into
-(`UPLOAD_ARTIFACT_BUCKET`, the gateway's `TRACKING_ARTIFACT_BUCKET`) and under the caller's own
-tenant prefix. Every other location is refused — another scheme, another bucket, another tenant's
-prefix, and above all the staging area, whose bytes were never judged. A kernel-authored model is
-addressed by its run instead, and that run must belong to one of the caller's experiments; a model
-naming both a run and an artifact is refused. Both checks run at registration, again at deployment,
-and again on every load in serving — the admitted-upload rule on warm-cache hits too, the run's
-ownership on every cold load — so a row registered before they existed cannot be served from anywhere
-it should not, and a tightened policy applies to models already cached.
-
-Registration records the **detector** that implements the declared semantics for the artifact's
-flavor (a caller may name one of those, never another). Serving dispatches on it; a row with none —
-an upload registered before the detector was recorded — is refused until it is registered again.
-
-Scoring loads an uploaded model the way the deployment gate's probe does: the same loader, with the
-uploaded provenance's trust (no skops grant), the artifact downloaded once and its manifest checked
-for anything that would run author-chosen code — code on the import path, a loader module of its own,
-object deserialisation, or an xgboost class that is not one of xgboost's models. The probe itself runs
-with only what reading the artifact needs: interpreter settings and the object-store credential, none
-of the service's secrets.
-
-## Who decides what, and why it is not all in one place
-
-| Question | Answered by | Why there |
+| Question | Answered by | Code |
 |---|---|---|
-| May these bytes be written at all? | tracking gateway | It holds the **only** credential that may write the artifact store. Nothing else can refuse before the bytes exist. |
-| What *are* these bytes? | tracking gateway | Structural, and needs no ML libraries: does loading this require deserialising author-supplied objects? |
-| Can this deployment *serve* it? | ml_service | It **is** the serving environment, and the detector registry is discovered — a copy elsewhere would be wrong the day an operator installed an adapter. |
-| Does its output *mean* anything here? | ml_service (registration) | The semantics vocabulary and the live registry live there. |
-| Does it actually work here? | ml_service (deployment) | Only the real serving image can answer, and the verdict expires — so it is asked at the gate that already knows that. |
+| May these bytes be written? | notebook-tracking-gateway (only writer to the artifact store) | `services/notebook_tracking_gateway/gateway.py`, `staging.py` |
+| Does loading them deserialise author-supplied objects? | notebook-tracking-gateway, at commit | `services/notebook_tracking_gateway/admission.py` |
+| Can this deployment serve the flavor with these semantics? | ml-service-api, at registration | `services/ml_service/api/routers/models.py`, `model_compat.py`, `uploaded_model.py` |
+| Does it load and score here? | ml-service-api, at deployment | `services/ml_service/api/load_probe.py`, `load_probe_worker.py` |
+| Upload capability | ml-service-api | `services/ml_service/api/upload_capability.py` |
+| Browser wizard | Models page, **Upload model** | `services/frontend/src/pages/ModelUploadWizard.jsx` |
 
-The gateway is the door for the **bytes**, not for the request. Admission policy stays with the side
-that can judge it. See ADR-0030 dec 2 rev 1 if this looks like it could be simplified — it is the
-shape a kernel-authored model already takes.
+## Locations
 
-## What an uploader must provide
+| Item | Value |
+|---|---|
+| Staging prefix | `_upload-staging/` (`UPLOAD_STAGING_PREFIX`; gateway, `minio-init`, Helm `job-minio-init.yaml`) |
+| Admitted location | `s3://<bucket>/tenant_<uuid>/uploads/<upload id>` |
+| Bucket | `UPLOAD_ARTIFACT_BUCKET` (ml-service-api) = `TRACKING_ARTIFACT_BUCKET` (gateway), compose `mlflow` |
+| Edge routes | `/api/2.0/industryflow-upload/` → gateway; `/mlflow/_upload-staging/` → object store, pre-signed only (`services/frontend/nginx.conf.template`) |
 
-- **A model whose load path does not deserialise author-supplied objects.** In practice: save it in
-  the format your framework offers that is not pickle. MLflow warns about this itself.
-- **A declared input signature.** Without one the platform cannot construct an input to score, so it
-  cannot establish that the artifact works here — and a check that cannot run is not a pass.
-- **Declared output semantics**, from the vocabulary the registry advertises. There is no default:
-  what a model's numbers *mean* is not recoverable from the numbers.
-- **Complete declared requirements.** MLflow infers these, and its inference is not complete; nothing
-  watched this artifact being trained, so what it carries is what someone wrote.
+Registration accepts only the admitted location under the caller's tenant; a model naming both a run
+and an artifact is refused. The check runs at registration, deployment and every load (warm-cache
+hits included).
 
-## Reading a refusal
+The deployment probe loads with uploaded-provenance trust (no skops grant), checks the manifest for
+code on the import path, a custom loader module, object deserialisation or a non-model xgboost class,
+and runs with only interpreter settings and the object-store credential.
 
-| Where | Code | It means |
+## Settings
+
+| Name | Service | Default | Meaning |
+|---|---|---|---|
+| `PUBLIC_BASE_URL` | ml-service-api, gateway | empty | Public edge origin. Set: pre-signed PUTs are signed for the edge (`TRACKING_S3_PRESIGN_ENDPOINT_URL`) and advertised as the upload endpoint (`UPLOAD_GATEWAY_URL`). Empty: interior endpoint only; the wizard reports browser upload as not configured |
+| `UPLOAD_ARTIFACT_BUCKET` | ml-service-api | `mlflow` (compose) | Unset: no uploaded model can be registered or served |
+| `UPLOAD_STAGING_EXPIRE_DAYS` | minio-init | 1 | Lifecycle expiry for staged, never-committed uploads; Helm `notebookHub.trackingGateway.uploadStaging.expireDays` |
+| `TRACKING_PRESIGN_TTL_SECONDS` | gateway | 300 | Pre-signed URL lifetime |
+
+## Uploader requirements
+
+| Requirement | Refused without it at |
+|---|---|
+| A load path that does not deserialise author-supplied objects (not pickle) | commit (422) |
+| A declared input signature | deploy (409, stage `signature`) |
+| Declared output semantics from the vocabulary in `GET /api/ml/capabilities` | register (422) |
+| Complete declared requirements | register (422) or deploy (409) |
+| A feature config (wizard field) | Stored, but not scorable; register a new version with one |
+
+## Refusals
+
+| Where | Code | Meaning |
 |---|---|---|
-| commit | 422 | The artifact carries executable object-serialisation, declared or actual. Re-save it in a non-executing format. |
-| commit | 404 | Nothing is staged under this upload for your tenant. An upload id from elsewhere buys nothing. |
-| register | 422 | Either this environment cannot honour what the artifact declares, or nothing here can score that flavor with those semantics. The response says which. |
-| deploy | 409 | It was registrable, but it did not load and score here. `stage` in the response says how far it got: `manifest`, `signature`, `load`, `score`, `timeout`, or `crash`. |
-| any | 401 | The capability was absent, expired, revoked, or belongs to another plane. A kernel's tracking handle is not an uploader's. |
+| commit | 400 | Unknown upload id |
+| commit | 401 | Upload capability absent, expired or already used |
+| commit | 404 | Nothing staged under this upload for the caller's tenant |
+| commit | 422 | Executable object serialisation, declared or actual; or a manifest over the size limit |
+| commit | 409 | A staged file changed while it was judged |
+| register | 422 | The environment cannot honour the declared requirements, or no detector scores that flavor with those semantics |
+| deploy | 409 | Did not load and score; `stage` is `manifest`, `signature`, `trust`, `load`, `score`, `timeout`, `crash` or `invoke` |
+| upload-capability | 501 | No capability store configured |
+| any | 401 | Capability absent, expired, revoked or for another plane |
 
-A refusal is the answer, not a failure of the platform to try harder: serving a model whose output
-this deployment cannot interpret produces a confident wrong number, and the drift and alert lanes
-believe those numbers.
+## Operating notes
 
-## Operating it
+| Item | Detail |
+|---|---|
+| Capability store | Required for minting; without it no external model is accepted (`501`) |
+| Staging expiry | Set by `minio-init` (compose) and `job-minio-init.yaml` (Helm); with bucket lifecycle managed elsewhere, the expiry must be provided there |
+| Staging-prefix agreement | Gateway, compose and chart values checked against each other by `services/notebook_tracking_gateway/tests/test_staging_infra_parity.py` |
+| Migrations 19, 20 | Apply by hand on a live database ([ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md)); 20 backfills `sklearn` for kernel-trained rows only, so an upload registered before it must be registered again |
 
-- **The capability store must be reachable.** Without it `ml_service` mints nothing and says so
-  (`501`) — a deployment with no store accepts no externally-authored models. This is the shared
-  capability store, not the Redis feature store that was removed from `ml_service`.
-- **Staging expires.** Admitted and refused uploads are cleaned at commit; the lifecycle rule exists
-  for uploads that are staged and never committed, which nothing in the request path returns for.
-  Compose sets it in `minio-init`; the chart sets it in a post-install hook. If you manage bucket
-  lifecycle out-of-band, the expiry becomes **yours to provide** — without one, unadmitted bytes
-  accumulate with nothing to collect them.
-- **The staging prefix is known in three places** (the gateway, compose, the chart). They are checked
-  against each other in the gateway's test suite, because drift there is silent: uploads keep
-  working and the expiry quietly applies to a prefix nothing writes to.
-- **Migrations do not re-run on an existing volume.** The provenance columns arrive with migration 19
-  and the detector with migration 20; on a live database apply them by hand, the way every
-  init-script change has to be. Migration 20 backfills `sklearn` for notebook-trained rows and leaves
-  uploaded rows without a detector, so an upload registered earlier must be registered again before
-  it can be scored.
-- **`UPLOAD_ARTIFACT_BUCKET` must name the gateway's bucket.** Unset, no artifact location can be
-  shown to be an admitted upload, and this deployment registers and serves no uploaded models.
+## Not supported
 
-## Reaching it from the browser (ADR-0030 dec 10)
-
-Decision 3 named a browser client; decision 10 (rev 2) made it reachable. The Models page carries an
-**Upload model** wizard that drives the whole flow — mint, stage, transfer, commit, register — and
-surfaces each gate's verdict where it happens. It stops at registration: deploying (the load-and-score
-gate, dec 7) is a separate control on the model's drawer, because the two gates have two remedies.
-
-Registration also carries the model's **description** (required by the wizard: it is what the operator
-reads about a model nobody watched being made) and the **feature config** that computes its inputs,
-picked from the tenant's own. A model registered without a feature config is stored but cannot be
-scored, and nothing attaches one to a registered model afterwards; the wizard says so, and the remedy
-is to create a feature config and register a new version that uses it.
-
-What makes it reachable is one setting and one routing rule, and it holds the decision's invariants:
-
-- **`PUBLIC_BASE_URL`** is the platform's public edge origin. Set it and two things follow: the gateway
-  signs pre-signed PUT URLs against *that* origin (so a browser can follow them), and `ml_service`
-  advertises it as the upload endpoint. Leave it empty and pre-signing falls back to the interior
-  object-store endpoint — which only an in-cluster client can reach — and the wizard, seeing a
-  pre-signed URL that is not same-origin, says browser upload is not configured here and points at the
-  CLI flow above instead.
-- **The edge serves both halves under the one origin.** The front door routes the gateway's
-  `stage`/`commit` and the store's staging prefix beneath the same HTTPS origin the app is served from,
-  so the browser's PUT is *first-party* — there is no cross-origin request and therefore no CORS to
-  configure, which is tighter than an allowlist and truer to single-origin (ADR-0004). The store route
-  is pre-signed-only (the bucket is not public) and scoped to the pre-admission staging prefix, so
-  nothing already admitted into a tenant namespace is reachable through it.
-
-The pre-signed URL is still the whole authorisation: the browser holds a signed permission for one
-object, never a key, and the gateway remains the only writer to the store (ADR-0019 dec 6). The upload
-handle lives in memory for the one upload and is never written to browser storage.
-
-## Deliberately not built
-
-- **Torch and any flavor outside the supported set.** Refused at the gate with a reason; the
-  out-of-process serving boundary is [ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md)
-  dec 7's record to write. An upload path makes an unsupported flavor *more likely to arrive*, not
-  more servable.
-- **Uploaded tree-based sklearn models** (random forests, gradient boosting, isolation forests, ...).
-  Their skops files deserialise into tree structures the platform trusts only for models trained in
-  its own kernels, so the deployment gate's load probe refuses them with stage `trust`
-  ([ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) dec 13). Admitting them needs
-  its own record.
-- **A drift baseline for uploaded models.** Without one they are visibly un-monitorable rather than
-  silently so; where that baseline lives is deferred across ADR-0021/0028/0030 and should be closed
-  by one record, not three.
-- **Attestation.** The platform accepts the uploader's assertions and checks what it can observe. A
-  verifiable claim about *who built this and from what* is the supply-chain question proper, and is
-  separate from admission.
-- **Resumable or very large transfers.** Decision 10 (rev 2) settled the *single-request* transport —
-  one PUT per file against a pre-signed URL, reachable from the browser at the edge. What a transfer
-  becomes once one request will not carry it — resumable, multipart, chunked — stays deferred, and must
-  keep decision 10's invariants (bytes direct to staging, one writer, the edge as the only address a
-  client is handed).
+| Item | Status |
+|---|---|
+| Torch and other flavors outside the supported set | Refused with a reason ([ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) dec 7) |
+| Uploaded tree-based sklearn models | Refused at deploy, stage `trust` ([ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) dec 13) |
+| Drift baseline for uploaded models | Not built ([ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md)) |
+| Attestation of origin | Not built |
+| Resumable or multipart transfer | Not built ([ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md) dec 10) |

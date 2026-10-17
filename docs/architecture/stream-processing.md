@@ -5,148 +5,103 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Stream processing
 
-The path from a sensor reading to stored, queryable time-series: ingestion → Kafka → Spark
-Structured Streaming → TimescaleDB. The Spark job code under `services/spark_jobs/` is
-authoritative; this is the shape and its delivery guarantees.
+The path from a device reading to stored time-series, the live-value read path, and Spark upgrades.
+The job code in `services/spark_jobs/` is authoritative.
 
-## Pipeline
+| Decision | ADR |
+|---|---|
+| At-least-once consumption, manual commits, dead-letter | [ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md) |
+| Watermark + append windows, idempotent upserts, durable checkpoint | [ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) |
+| Aggregation windows as a feature contract | [ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) dec 7, [ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md) |
+| Tenant routing by verified `company_id` | [ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md) |
+| Checkpoint across a Spark major upgrade | [ADR-0029](../../ADR/ADR-0029-spark-major-upgrade-checkpoint-cutover.md) |
 
-```
-device ──mTLS──▶ ingestion ──▶ Kafka (sensor-data-raw) ──▶ Spark streaming ──▶ TimescaleDB
-                                                              │
-                                                              └─▶ Spark aggregations ──▶ TimescaleDB
-```
-
-1. **Ingestion** validates the reading, stamps it with the verified `company_id`, and produces
-   to the raw-sensor Kafka topic. It never writes to the database directly.
-2. **Spark streaming** consumes the topic and upserts raw readings into each tenant's
-   `sensor_measurements`.
-3. **Spark aggregations** windows the stream into 1-minute / 5-minute / 1-hour rollups and
-   upserts them into the aggregation hypertables.
-
-## Read side (live values)
-
-The write path above ends at TimescaleDB; the live sensor view reads back out of it:
+## Write path
 
 ```
-sensor_measurements ─▶ api-gateway cache_updater (2s poll) ─▶ Redis (sensor:latest:*, TTL 60s) ─▶ WS /ws/sensors ─▶ UI
+device ──mTLS──▶ ingestion-edge ─▶ ingestion-service ─▶ Kafka sensor-data-raw ─┬▶ spark-streaming    ─▶ tenant_<uuid>.sensor_measurements
+                                                                                └▶ spark-aggregations ─▶ tenant_<uuid>.sensor_aggregations_{1min,5min,1hour}
 ```
 
-The `cache_updater` polls each tenant's `sensor_measurements` for the latest value per sensor in
-the last hour and mirrors it into Redis; the frontend streams those over the sensor WebSocket. So
-the **live UI view depends on the Spark streaming job** (pipeline step 2) writing fresh
-measurements — if that job is stopped, `sensor_measurements` goes stale, the cache empties, and
-the UI shows no data even though ingestion and Kafka are fine. The gateway logs a throttled
-warning in that state (`0 fresh sensor_measurements … is spark-streaming running?`). Note this is
-a distinct path from the aggregation rollups, which feed model **feature baselines**, not the live
-view (**[ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md)**).
+| Component | Role | Code |
+|---|---|---|
+| `ingestion-service` | Validates the reading, stamps the verified `company_id`, produces to Kafka; rejects a timestamp more than 300 s ahead (HTTP 422); no database access | `services/ingestion_service/` |
+| `spark-streaming` | Upserts raw readings; reads from `earliest` | `services/spark_jobs/kafka_to_timescaledb.py` |
+| `spark-aggregations` | Windows readings into 1 min / 5 min / 1 h rollups; reads from `latest` | `services/spark_jobs/kafka_aggregations.py`, `aggregation_windows.py` |
+| Reading guard | One definition of an unwritable reading, shared by both jobs | `services/spark_jobs/reading_guard.py` |
+| Window contract | Window widths and allowed lateness | `libs/industryflow_contracts/industryflow_contracts/windows.py` |
+| `spark-master`, `spark-worker` | Standalone cluster (compose) | `services/spark_jobs/Dockerfile.worker` |
 
-## Delivery semantics (at-least-once, idempotent)
+## Kafka topics
 
-The system is **at-least-once with idempotent writes**, so a retry or replay cannot create
-duplicates or corrupt state:
+| Topic | Producer | Consumers | Setting |
+|---|---|---|---|
+| `sensor-data-raw` | ingestion-service | spark-streaming, spark-aggregations, alert-service-detector | `KAFKA_TOPIC_SENSOR_DATA` (ingestion, alert worker); fixed in the Spark jobs |
+| `sensor-data-raw.measurements.dlq` | spark-streaming | operators | `KAFKA_TOPIC_MEASUREMENTS_DLQ` |
+| `<sensor topic>.dlq` | alert-service-detector | operators | `KAFKA_TOPIC_DLQ` ([alerting.md](alerting.md)) |
 
-- **Kafka consumption** is at-least-once: manual offset commits *after* a batch is fully
-  handled, a bounded per-message retry, and a **dead-letter topic** for messages that cannot be
-  processed — offsets only advance once the batch is durably handled
-  (**[ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md)**).
-- **Spark writes** are idempotent upserts: each window is emitted once via a **watermark +
-  append** output mode (no unbounded state, no re-emitting old windows), and rows are written
-  with `ON CONFLICT … DO UPDATE/NOTHING` against the tables' `UNIQUE` constraints (which include
-  the hypertable partition column). Writes go through `foreachPartition` with a per-executor
-  connection, and an error re-raises so Spark retries safely
-  (**[ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md)**).
-- **Unwritable readings are dead-lettered, not retried forever and not dropped silently**
-  (ADR-0005 dec 3). A reading that is malformed, lacks a required field, carries an id that is not a
-  UUID, is stamped more than 5 minutes ahead of the clock, or names a tenant schema, sensor or
-  equipment that does not exist can never be written; failing the batch for it would replay the
-  batch forever and halt ingestion for every tenant. `spark-streaming` publishes each such reading
-  to **`sensor-data-raw.measurements.dlq`** (`KAFKA_TOPIC_MEASUREMENTS_DLQ`) — the original message,
-  the reason, and its topic/partition/offset — before the batch's writes, then writes the rest.
-  `spark-aggregations` excludes the same readings with the same definition
-  (`services/spark_jobs/reading_guard.py`): the stateless rules *before* its watermark, so a
-  far-future timestamp cannot drag the watermark ahead and close live windows, and the unknown
-  tenant/sensor/equipment rule at write time, on the aggregate's key (which is the readings' key).
-  It does not publish them a second time: both jobs consume `sensor-data-raw`. A failure
-  of the database or Kafka itself still fails the batch. Ingestion rejects the far-future timestamp
-  at the edge already (HTTP 422).
-- **Aggregation windows are a feature contract** (ADR-0006 rev 2 dec 7). The window widths and
-  allowed lateness are defined once, in `libs/industryflow_contracts` (`industryflow_contracts.windows`),
-  not in environment overrides: with append-mode emission the newest aggregate row at time *t* is
-  window `floor((t − lateness) / width) − 1`, and the offline training re-derivation reproduces
-  exactly that window
-  (**[ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md)** rev 2 dec 9). The
-  Spark job (`aggregation_windows.py` adapts it to Spark's duration strings), the serving provider
-  and the offline module all read that one table; `tests/config_guards` fails on any service that
-  restates it. The job images ship the package to their executors as
-  `industryflow_contracts.zip` in `--py-files`.
-- **Checkpoints** are durable, so a restart resumes the stream rather than reprocessing from the
-  beginning. The **stateful** aggregation queries (windowed) keep a *state store* in the
-  checkpoint that the executor writes and the driver reads, so the checkpoint must live on **one
-  store visible to every node**.
+The Helm rule `IndustryFlowDeadLetteredReadings` fires when any `*.dlq` topic grows.
 
-  In compose the checkpoint is on **MinIO via S3A** (`CHECKPOINT_LOCATION=s3a://spark-checkpoints`),
-  shared over the network by the driver (the `spark-*` job containers) and every executor (the
-  `spark-worker` pool) — so the standalone cluster **scales to N workers** (`SPARK_WORKER_REPLICAS`
-  / `docker compose up -d --scale spark-worker=N`) with no shared local volume. The job's
-  SparkSession turns S3A on whenever `CHECKPOINT_LOCATION` is an `s3a://` URI (a local path opts
-  out for single-node dev); the S3A jars (`hadoop-aws` + the AWS SDK v2 `bundle`, pinned to the
-  image's Hadoop 3.4.2) are baked into all three Spark images, and a `minio-init` one-shot creates
-  the bucket. (Raw streaming is stateless, so it is unaffected either way.)
+## Unwritable readings
 
-  Under **Helm** Spark runs in local mode (driver = executor, one pod), so its RWO PVC at
-  `/opt/spark/checkpoints` suffices by default. To scale Spark out on k8s, point
-  `config.CHECKPOINT_LOCATION` at `s3a://…`, give the spark workloads the MinIO credentials, and
-  disable their `persistence` — see the chart README.
+A reading that is malformed, lacks a required field, carries a non-UUID id, is stamped more than
+300 s (`MAX_FUTURE_SKEW_SECONDS`) ahead, or names a tenant schema, sensor or equipment that does not
+exist:
 
-## Tenant routing
+| Job | Handling |
+|---|---|
+| spark-streaming | Published to `sensor-data-raw.measurements.dlq` with the reason and its topic/partition/offset, before the batch's writes; the rest of the batch is written |
+| spark-aggregations | Stateless rules applied before the watermark; the unknown tenant/sensor/equipment rule applied at write time on the aggregate key; not published again |
 
-Each Kafka message carries the verified `company_id`. The Spark sink resolves it to the tenant
-schema (UUID-validated, `tenant_<uuid>`) before writing — the same tenant-resolution discipline
-as the rest of the platform (**[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**).
+A failure of the database or Kafka fails the batch.
 
-## Upgrading Spark across a major (checkpoint)
+## Checkpoints
 
-Spark does not *guarantee* a structured-streaming checkpoint written by one major version is readable
-by the next — but it does not forbid it either, and the sinks are idempotent (ADR-0006), so the
-checkpoint is not load-bearing. The policy
-(**[ADR-0029](../../ADR/ADR-0029-spark-major-upgrade-checkpoint-cutover.md)**): **resume** the
-checkpoint when the new version can read it, **reset** it when it can't, and establish which by running
-the boundary — never assume. This is the procedure.
+| Deployment | `CHECKPOINT_LOCATION` | Storage |
+|---|---|---|
+| Compose | `s3a://spark-checkpoints` (`SPARK_CHECKPOINT_LOCATION`) | MinIO via S3A, shared by driver and every `spark-worker` (`SPARK_WORKER_REPLICAS`, default 1) |
+| Helm | `/opt/spark/checkpoints` | RWO PVC per job; Spark in `local[*]` mode |
+| Helm, scaled out | `s3a://<objectStore.buckets.sparkCheckpoint>` | Set in `config.CHECKPOINT_LOCATION` with the checkpoint principal; see `deploy/helm/industryflow/values.yaml` |
 
-For **3.5 → 4.1 the checkpoint resumes** (box-verified 2026-07-15): offsets and windowed state both.
-So that upgrade is a rolling restart against the existing checkpoint — no drop, no loss.
+A local path disables S3A. The S3A jars (`hadoop-aws`, AWS SDK v2 `bundle`) are baked into all three
+Spark images; the Kafka connector is `spark-sql-kafka-0-10_2.13`.
 
-### Resume path (3.5 → 4.1, and any boundary the box run shows resuming)
+## Live-value read path
 
-1. Build the new images.
-2. Stop the jobs (also frees RAM for the build — the box swaps hard):
-   `docker compose stop spark-streaming spark-aggregations`
-3. Bring up the new cluster against the **unchanged** checkpoint:
-   `docker compose up -d --build spark-master spark-worker spark-streaming spark-aggregations`
-4. Verify (below). The streaming query resumes committed offsets — it goes idle once caught up rather
-   than reprocessing from `earliest` — and the aggregation queries resume their state store.
+```
+sensor_measurements ─▶ api-gateway cache_updater (2 s poll, last hour) ─▶ Redis sensor:latest:<sensor_id> (TTL 60 s) ─▶ WS /ws/sensors ─▶ UI
+```
 
-### Reset path (fallback — a boundary the box run shows NOT resuming)
+| Symptom | Cause | Fix |
+|---|---|---|
+| UI shows no live data; ingestion and Kafka healthy; gateway log `0 fresh sensor_measurements in the last hour … is spark-streaming (raw-measurements writer) running?` | spark-streaming stopped | Start `spark-streaming` |
 
-Only when the new version refuses the old checkpoint or reinitialises it. The idempotent sinks make
-this safe, at a bounded, asymmetric cost (ADR-0029): the measurements stream re-reads from `earliest`
-and re-upserts idempotently (**lossless within Kafka retention** — confirm retention covers what you
-expect; anything older stays in `sensor_measurements` and the cold layer, ADR-0025); the aggregations
-lose only the windows **open at the reset instant** (bounded, self-healing).
+Code: `services/api_gateway/messaging/cache_updater.py`, `services/api_gateway/routers/websocket.py`.
 
-- Run the resume path, but **between steps 2 and 3 delete the checkpoint prefix**: on the object store
-  remove `spark-checkpoints` (e.g. `mc rm -r --force <alias>/spark-checkpoints`); for a local path
-  delete the contents of `/opt/spark/checkpoints`.
-- To make the aggregation loss zero, optionally pause the producers first and let the widest window's
-  watermark pass, so no window is open at the reset instant.
+## Spark major upgrade
 
-### Verify
+Whether the checkpoint resumes or must be reset is decided per boundary by running it
+([ADR-0029](../../ADR/ADR-0029-spark-major-upgrade-checkpoint-cutover.md)). 3.5 → 4.1 resumes.
 
-- Both queries consume: the driver logs show micro-batches and the `spark-submit` processes are up.
-- **Measurements land:** the row count in `tenant_<uuid>.sensor_measurements` climbs.
-- **Aggregations upsert:** fresh rows appear in `tenant_<uuid>.sensor_aggregations_{1min,5min,1hour}`.
+| Step | Resume | Reset |
+|---|---|---|
+| 1 | Build the new images | Same |
+| 2 | `docker compose stop spark-streaming spark-aggregations` | Same |
+| 3 | — | Delete the checkpoint: `mc rm -r --force <alias>/spark-checkpoints`, or the contents of `/opt/spark/checkpoints` |
+| 4 | `docker compose up -d --build spark-master spark-worker spark-streaming spark-aggregations` | Same |
 
-If a query fails at submit with `NoClassDefFoundError` / `ClassNotFoundException`, the runtime
-connector (`spark-sql-kafka-0-10_2.13`) or the baked S3A jars are mismatched to the Spark/Hadoop
-version — not a checkpoint problem.
+Reset cost: measurements re-read from `earliest` within Kafka retention; aggregations lose the windows
+open at the reset instant. Pausing producers until the widest window's watermark passes avoids that
+loss.
+
+Verify:
+
+| Check | Expected |
+|---|---|
+| Driver logs | Micro-batches; `spark-submit` processes up |
+| `tenant_<uuid>.sensor_measurements` | Row count rising |
+| `tenant_<uuid>.sensor_aggregations_{1min,5min,1hour}` | Fresh rows |
+
+| Symptom | Cause |
+|---|---|
+| `NoClassDefFoundError` / `ClassNotFoundException` at submit | Kafka connector or S3A jars mismatched to the Spark/Hadoop version |
