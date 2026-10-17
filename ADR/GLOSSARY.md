@@ -74,8 +74,9 @@ authenticates the platform *to* browsers. A distinct PKI concern from the device
 
 **Internal edge+DB CA (self-hosted)** — the **internal** CA used in the **self-hosted / Compose**
 deployment, where a public ACME cert is not obtainable for an internal hostname (e.g.
-`industryflow.local`). It is the server-certificate root for both the frontend TLS edge and
-TimescaleDB. A separate root from the Device CA. For the decision (why one internal root serves
+`industryflow.local`). It is the server-certificate root for the frontend TLS edge and, when it
+exists, for TimescaleDB; a single host started without it self-signs the database certificate
+instead (ADR-0017 rev 2). A separate root from the Device CA. For the decision (why one internal root serves
 both edge and database) see ADR-0017; issuance is described in `docs/operations/tls.md`. *(ADR-0004 dec 8 keys the edge
 certificate to the deployment shape; ADR-0017 reuses this internal root for the database)*
 
@@ -83,7 +84,7 @@ certificate to the deployment shape; ADR-0017 reuses this internal root for the 
 server certificate. Used only on the device-ingestion edge. *(ADR-0002)*
 
 **`verify-full`** — the PostgreSQL TLS mode where the client both encrypts the connection and
-verifies the DB server certificate (against the internal edge+DB CA) with hostname checking —
+verifies the DB server certificate (against the deployment's database trust anchor) with hostname checking —
 as opposed to encrypt-only (`require`). *(ADR-0017)*
 
 ---
