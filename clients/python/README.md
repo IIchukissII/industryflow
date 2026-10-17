@@ -5,61 +5,74 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # industryflow (Python notebook client)
 
-The blessed, tenant-scoped way to load a tenant's data into a notebook as pandas DataFrames
-(ADR-0011 dec 4). It calls the platform's existing read API over HTTP with a per-session
-capability minted by the notebook spawner (ADR-0012/0015), sent in the `X-IF-Capability` header.
-The data API resolves the capability to the caller's tenant and serves the request read-only. It
-never holds a database or object-store credential.
+Tenant-scoped access to a tenant's data from a notebook kernel, returned as pandas DataFrames
+([ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) dec 4). The
+kernel holds only per-session capability handles minted by the hub
+([ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md),
+[ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md)), never a database or
+object-store credential. Tenant scoping is enforced server-side
+([ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)), not by this client.
 
-> **Status:** the client and the data-API capability resolution are in place. The spawner that
-> mints and injects the handle runs on a cluster (not yet validated end-to-end).
+## Exports
+
+| Name | Purpose | Backend | Hub-injected env | Profiles |
+|------|---------|---------|------------------|----------|
+| `IndustryFlowClient` | Measurements, aggregations, training data | API gateway read API, capability in `X-IF-Capability` | `INDUSTRYFLOW_API_URL`, `INDUSTRYFLOW_API_CAPABILITY` | authoring, analytics |
+| `IndustryFlowSQL`, `sql_query` | Read-only tenant SQL | SQL access proxy, capability as the Postgres password | `INDUSTRYFLOW_SQL_PROXY_URL`, `INDUSTRYFLOW_SQL_CAPABILITY` | authoring |
+| `IndustryFlowCold`, `cold_read_all` | Cold-layer Parquet history | cold-store broker, pre-signed object-store reads ([ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md)) | `INDUSTRYFLOW_COLD_BROKER_URL`, `INDUSTRYFLOW_COLD_CAPABILITY` | authoring |
+| `SKOPS_TRUSTED_TYPES` | Types to pass to `mlflow.sklearn.log_model` for tree-based models ([ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md)) | — | — | authoring |
+
+The SQL, cold and tracking variables are injected only when the hub itself has the matching URL
+configured ([`jupyterhub_config.py`](../../services/notebook_hub/jupyterhub_config.py)). Outside a
+hub-spawned kernel, `from_env()` raises.
+
+## Read API
 
 ```python
-from datetime import datetime, timedelta
+import os
+from datetime import datetime, timedelta, timezone
 from industryflow import IndustryFlowClient
 
-client = IndustryFlowClient("https://api.industryflow.local", token=NOTEBOOK_TOKEN)
+client = IndustryFlowClient(os.environ["INDUSTRYFLOW_API_URL"],
+                            token=os.environ["INDUSTRYFLOW_API_CAPABILITY"])
 
-# Raw measurements over a window (ascending, ready for plotting)
-df = client.measurements(
-    sensor_id="…",
-    start=datetime.utcnow() - timedelta(hours=6),
-    end=datetime.utcnow(),
-    order="asc",
-)
-
-# Hourly aggregates
-hourly = client.aggregations("1hour", equipment_id="…", order="asc")
-
-# A per-equipment training dataset (bulk historical pull)
-training = client.training_data("…", lookback_days=30)
+now = datetime.now(timezone.utc)
+df = client.measurements(sensor_id="<sensor-id>", start=now - timedelta(hours=6), end=now)
+hourly = client.aggregations("1hour", equipment_id="<equipment-id>")
+training = client.training_data("<equipment-id>", lookback_days=30)
 ```
 
-All calls return only the caller's tenant data — tenant scoping is enforced server-side
-(ADR-0003), never by this client.
+| Method | Endpoint | Defaults |
+|--------|----------|----------|
+| `measurements(...)` | `GET /api/measurements` | `order="asc"`, `limit=1000` |
+| `aggregations(window, ...)` | `GET /api/aggregations/{window}`; `window` is `1min`, `5min` or `1hour` | `order="asc"`, `limit=1000` |
+| `training_data(equipment_id, ...)` | `GET /api/training-data/equipment/{id}` | `lookback_days=30`, `min_quality=0.8`, `limit=10000` |
 
-## Tenant SQL (authoring notebooks)
+## Tenant SQL
 
-An authoring notebook can also run SQL against its tenant through the **SQL access proxy**
-(ADR-0015). The kernel connects with a normal Postgres driver, presenting its per-session SQL
-capability handle as the password — never a database credential, and never the database directly.
-The proxy resolves the handle, assumes the tenant's **read-only** role, and relays. Install the
-extra (`industryflow[sql]`, already in the authoring image):
+Requires the `sql` extra (`industryflow[sql]`, installed in the authoring image). The proxy assumes
+the tenant's read-only role ([ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md)).
 
 ```python
 from industryflow import IndustryFlowSQL, sql_query
 
-# Reads INDUSTRYFLOW_SQL_PROXY_URL + INDUSTRYFLOW_SQL_CAPABILITY (injected by the hub at spawn).
 df = sql_query("SELECT * FROM equipment LIMIT 10")
 
-# Or hold a handle for several queries:
 db = IndustryFlowSQL.from_env()
-hourly = db.query("SELECT time, value FROM sensor_aggregations_1hour WHERE sensor_id = %s", ["…"])
+hourly = db.query("SELECT time, value FROM sensor_aggregations_1hour WHERE sensor_id = %s", ["<sensor-id>"])
 ```
 
-Reads are read-only and single-tenant — enforced by the proxy's `SET ROLE` and the per-tenant
-role's grants (ADR-0011), not by this client. SQL is available only in an authoring kernel spawned
-by the hub (the env vars above are injected there); elsewhere `from_env()` raises a clear error.
+## Cold layer
+
+```python
+from industryflow import IndustryFlowCold, cold_read_all
+
+history = cold_read_all()                      # every verified Parquet part of the tenant
+
+cold = IndustryFlowCold.from_env()
+files = cold.list_files("year=2026")
+month = cold.read_all("year=2026/month=07")    # narrow the path to prune partitions
+```
 
 ## Develop
 
