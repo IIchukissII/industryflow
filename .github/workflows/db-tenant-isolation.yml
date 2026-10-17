@@ -6,7 +6,10 @@
 #   * the per-tenant read-only role boundary (ADR-0011 dec 3, ADR-0012 dec 4) — the GRANT-enforced
 #     reader-role proof, run directly against TimescaleDB with the real init scripts; and
 #   * the end-to-end cross-tenant-denied proof through the running SQL proxy (ADR-0015 dec 5) —
-#     a capability handle for tenant A cannot read tenant B when relayed by the proxy.
+#     a capability handle for tenant A cannot read tenant B when relayed by the proxy;
+#   * that the GRANT boundary survives a disaster recovery: a real backup -> restore with the backup
+#     image keeps every owner, privilege and default privilege, and refuses a dump naming a role the
+#     cluster lacks (infrastructure/timescaledb/tests/test_backup_restore_privileges.py).
 #
 # The scope that ENFORCES isolation (the gateway's search_path routing and the proxy relay) is
 # path-gated in the `changes` job below, not just the DB init scripts — so a change that breaks the
@@ -38,6 +41,8 @@ jobs:
           filters: |
             relevant:
               - 'infrastructure/timescaledb/**'
+              - 'infrastructure/backup/**'
+              - 'infrastructure/minio/**'
               - 'services/notebook_sql_proxy/**'
               - 'services/api_gateway/dependencies.py'
               - 'services/alert_service/worker/repository.py'
@@ -85,6 +90,9 @@ jobs:
           done
           echo "proxy did not come up healthy on :6432"; docker compose logs notebook-sql-proxy; exit 1
 
+      - name: Build the db-backup image (the restore proof runs the real backup and restore scripts)
+        run: docker compose --profile backup build db-backup
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
@@ -126,7 +134,7 @@ jobs:
 
       - name: Dump service logs on failure
         if: failure()
-        run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml logs timescaledb redis notebook-sql-proxy
+        run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml logs timescaledb redis notebook-sql-proxy minio minio-init
 
       - name: Tear down
         if: always()
