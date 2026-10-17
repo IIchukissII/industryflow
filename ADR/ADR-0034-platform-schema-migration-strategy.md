@@ -32,9 +32,11 @@ that provisions a tenant. Every later one is, in effect, a migration, and they s
 
 That is a good shape. Under schema-per-tenant (ADR-0003) a change is not applied once but once per
 tenant, and the three parts are exactly what makes old tenants, new tenants and fresh installs agree.
-But nothing records it, so nothing enforces it, and each part is a place to forget: a script whose
-backfill is missing leaves existing tenants behind; one that is not wired into provisioning leaves new
-tenants behind. Both fail silently, and only for some tenants.
+But nothing records it, and each part is a place to forget: a script whose backfill is missing leaves
+existing tenants behind; one that is not wired into provisioning leaves new tenants behind. Both fail
+silently, and only for some tenants. One part is now guarded: a static check in the build fails when a
+per-tenant shape function is not called from tenant provisioning. The backfill over existing tenants is
+not checked, and neither is a per-tenant change written in any other form.
 
 The other half is undecided outright. The image runs the sequence only against an empty volume, so on a
 **live** database nothing applies a new script: an operator runs it by hand, and nothing records which
@@ -83,7 +85,8 @@ release gate's upgrade path (ADR-0026 dec 4) does not cover the database, which 
 
 6. **The upgrade path is tested.** The release gate starts the database from state written by the
    previous release and applies the pending sequence, so a migration that cannot run against real prior
-   state fails the merge (ADR-0026 dec 4, which deferred the database to this record).
+   state fails the merge (ADR-0026 dec 4; that record left open which stateful components earn an upgrade path, and this
+   decision settles it for the database).
 
 ## Alternatives considered
 
