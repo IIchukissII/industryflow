@@ -34,18 +34,14 @@ A feature configuration entry uses the transform like a built-in:
 
 ## Loading
 
-The ML service imports each module named in `EXTENSION_MODULES` (comma-separated) at startup; the
-module must be on the service's import path. The core never imports `tep_reference` by name.
-
-```sh
-EXTENSION_MODULES=tep_reference
-```
+`EXTENSION_MODULES=tep_reference`, with the module on `ml-service-api`'s import path
+([loading an extension](../../docs/operations/extensions.md#loading-an-extension)).
 
 ## Producer settings
 
 `producer/stream_tep_data.py` reads:
 
-| Env var | Default | Meaning |
+| Name | Default | Meaning |
 |---|---|---|
 | `INGESTION_URL` | `https://localhost:8443/ingest` | Ingestion edge endpoint |
 | `DEVICE_CERT` | none (required) | Device certificate chain from `scripts/device-ca.sh issue` |
@@ -59,7 +55,7 @@ EXTENSION_MODULES=tep_reference
 
 ## Related
 
-| Doc | Topic |
+| Page | Topic |
 |---|---|
-| [extensions.md](../../docs/operations/extensions.md) | Operating extensions |
-| [device-mtls.md](../../docs/operations/device-mtls.md) | Issuing device certificates |
+| [extensions](../../docs/operations/extensions.md) | Extension contract |
+| [device mTLS](../../docs/operations/device-mtls.md#ca-commands) | Issuing device certificates |

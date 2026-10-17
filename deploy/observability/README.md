@@ -1,19 +1,15 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # Cluster monitoring stack
 
-The Kubernetes monitoring backend and the integration objects the IndustryFlow Helm chart emits for
-it. The compose stack, metric names, dashboards and runbooks are in
-[docs/operations/monitoring.md](../../docs/operations/monitoring.md). The decision is
-[ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md).
-
-This stack is the operator-facing platform plane. Tenant sensor and streaming alerts stay on the
-tenant-isolated path and never pass through it (ADR-0016 decision 5,
-[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)).
+The Kubernetes monitoring backend and the integration objects the Helm chart emits for it
+([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md)). Compose stack, metric
+names, dashboards and runbooks: [monitoring](../../docs/operations/monitoring.md). Tenant sensor and
+streaming alerts never pass through this stack
+([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 5).
 
 ## Install the backend (self-hosted)
 
@@ -85,5 +81,4 @@ kube-state-metrics and cAdvisor come from the backend, not the chart.
 | `IndustryFlowDeviceCrlStale` | `time() - kube_cronjob_status_last_successful_time{cronjob="<fullname>-device-crl-check"} > ingress.mtls.crlCheck.alertAfterSeconds`; rendered only when `ingress.enabled`, `ingress.mtls.enabled` and `ingress.mtls.crlCheck.enabled` | none | critical |
 
 Dead letters: [ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md). Device CRL:
-[ADR-0007](../../ADR/ADR-0007-public-key-infrastructure.md),
-[device-mtls.md](../../docs/operations/device-mtls.md).
+[device mTLS](../../docs/operations/device-mtls.md#kubernetes).

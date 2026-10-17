@@ -1,6 +1,5 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
@@ -13,13 +12,13 @@ single instances of the stateful backends. Packaging and the deferred stateful-o
 ## Stateless tier (Helm)
 
 | Mechanism | Values | Behaviour |
-|-----------|--------|-----------|
+|---|---|---|
 | PodDisruptionBudget | `resilience.podDisruptionBudgets.enabled` (`true`), `maxUnavailable` (`1`) | Rendered for each app with more than one replica or HPA on |
 | Pod anti-affinity | `resilience.antiAffinity.enabled` (`true`), `type` (`soft` / `hard`), `topologyKey` (`kubernetes.io/hostname`) | Same apps; `soft` = preferred, `hard` = required (one replica per node) |
 | HorizontalPodAutoscaler | `apps.<name>.hpa.enabled` (`false`), `minReplicas`, `maxReplicas`, `targetCPUUtilizationPercentage` | `autoscaling/v2`, CPU; the Deployment then omits `replicas`. Requires metrics-server. Defined for `api-gateway`, `ml-service-api`, `frontend` |
 
 | App | Default `replicas` |
-|-----|--------------------|
+|---|---|
 | `api-gateway`, `ingestion-service`, `frontend` | `2` |
 | `ml-service-api`, `alert-service-detector`, `spark-streaming`, `spark-aggregations` | `1` |
 
@@ -42,10 +41,10 @@ Consumer parallelism is bounded by the topic's partition count.
 Each runs as one instance in both Compose and the chart.
 
 | Backend | Instance | HA option |
-|---------|----------|-----------|
-| TimescaleDB | Single primary | Postgres operator with streaming replication, or managed Postgres. Backups: [backup-and-recovery.md](backup-and-recovery.md) |
+|---|---|---|
+| TimescaleDB | Single primary | Postgres operator with streaming replication, or managed Postgres. Backups: [backup and recovery](backup-and-recovery.md) |
 | Kafka + ZooKeeper | Single broker, single ZooKeeper | Kafka operator or managed Kafka; replication factor ≥ 3, `min.insync.replicas` ≥ 2 |
 | Redis | Single | Sentinel / Cluster, an operator, or managed |
 | MinIO | Single | Distributed MinIO with erasure coding, or managed S3 |
-| Spark (Compose) | Master + worker pool (`SPARK_WORKER_REPLICAS`, default `1`, or `--scale spark-worker=N`) | Checkpoint on MinIO via S3A (`SPARK_CHECKPOINT_LOCATION`, [ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md)), shared by driver and executors |
-| Spark (Helm) | One driver per job, local mode | Checkpoint on a ReadWriteOnce PVC (`apps.<job>.persistence`), single writer |
+| Spark (Compose) | Master + worker pool (`SPARK_WORKER_REPLICAS` or `--scale spark-worker=N`) | Shared S3A checkpoint ([checkpoints](../architecture/stream-processing.md#checkpoints)) |
+| Spark (Helm) | One driver per job, local mode | Checkpoint on the object store ([checkpoints](../architecture/stream-processing.md#checkpoints)) |

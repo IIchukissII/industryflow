@@ -6,16 +6,15 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Data and storage
 
 Where tenant data lives: PostgreSQL + TimescaleDB with one schema per tenant, and the cold layer in
-the object store. The SQL in `infrastructure/timescaledb/init-scripts/` is authoritative for the
-schema.
+the object store. Scripts, roles and grants: [init scripts](../../infrastructure/timescaledb/init-scripts/README.md).
 
 | Decision | ADR |
 |---|---|
 | Schema-per-tenant; tenant resolved from a verified identity, applied with `SET LOCAL search_path` in a transaction | [ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md) |
 | Idempotent writes against `UNIQUE` keys | [ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) |
 | Cold layer, export → verify → drop, raw retention owned by the exporter | [ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md) |
-| Tenant provisioning | [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) (proposed) |
-| Applying init-script changes to a live database | [ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md) (proposed) |
+| Tenant provisioning | [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) |
+| Applying init-script changes to a live database | [ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
 
 ## Tenant identity sources
 
@@ -24,10 +23,9 @@ schema.
 | API request | `company_id` JWT claim |
 | Device reading | Client-certificate SAN, stamped by ingestion ([ADR-0002](../../ADR/ADR-0002-ingestion-authentication-and-device-identity.md)) |
 | Spark, alert worker | The Kafka message (stamped by ingestion) |
-| Notebook kernel | The capability handle ([notebooks.md](notebooks.md)) |
+| Notebook kernel | The capability handle ([notebooks](notebooks.md)) |
 
-Provisioning: `scripts/create-tenant.sh "<Company Name>" [<company-id>]` inserts the
-`public.companies` row and calls `create_tenant_schema()`.
+Provisioning: [user management](../operations/user-management.md#tenants).
 
 ## Tenant names
 
@@ -55,53 +53,31 @@ executors with `--py-files`.
 
 `public` schema:
 
-| Table | Content | Created by |
-|---|---|---|
-| `companies` | `company_id` → `schema_name` registry | `01-init-schema.sql` |
-| `user` | Platform users (fastapi-users) | `services/api_gateway/models/user.py` |
-| `platform_config` | Platform switches (`stateful_features_enabled`, [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) | `17-stateful-feature-kill-switch.sql` |
-| `cold_export_drops` | Committed cold-export drops | `16-cold-layer-raw-retention.sql` |
+| Table | Content |
+|---|---|
+| `companies` | `company_id` → `schema_name` registry |
+| `user` | Platform users (fastapi-users, `services/api_gateway/models/user.py`) |
+| `platform_config` | Platform switches (`stateful_features_enabled`, [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) |
+| `cold_export_drops` | Committed cold-export drops |
 
-Per tenant schema (`create_tenant_schema()` in `04-complete-tenant-creation.sql`):
+Per tenant schema, created by `create_tenant_schema()`:
 
-| Table | Kind | Key / retention | Defined in |
-|---|---|---|---|
-| `equipment`, `sensors` | Plain | `UNIQUE (equipment_id, sensor_name)` on `sensors` | `04-complete-tenant-creation.sql` |
-| `sensor_measurements` | Hypertable on `time` | `UNIQUE (time, sensor_id)`; no retention policy (cold export drops it) | `04-complete-tenant-creation.sql`, `16-cold-layer-raw-retention.sql` |
-| `sensor_aggregations_1min` / `_5min` / `_1hour` | Hypertable on `time` | `UNIQUE (time, sensor_id, equipment_id)`; retention 90 d / 180 d / 1 y | `04-complete-tenant-creation.sql` |
-| `alert_rules` | Plain | | `02-tenant-alert-tables.sql` |
-| `alerts` | Hypertable on `triggered_at` | Retention 90 d | `02-tenant-alert-tables.sql` |
-| `alert_labels` | Plain | No retention | `15-alert-labels.sql` |
-| `ml_models` | Plain | | `03-tenant-ml-tables.sql`; columns added by `14`, `18`–`20` |
-| `model_predictions` | Hypertable on `timestamp` | Retention 180 d | `03-tenant-ml-tables.sql` |
-| `feature_engineering_configs` | Plain | | `06-feature-engineering-tables.sql` |
+| Table | Hypertable on, chunk | Key | Compression (segment by, after) | Retention |
+|---|---|---|---|---|
+| `equipment` | | | | |
+| `sensors` | | `UNIQUE (equipment_id, sensor_name)` | | |
+| `sensor_measurements` | `time`, 1 d | `UNIQUE (time, sensor_id)` | `equipment_id`, 7 d | None; the cold export drops it |
+| `sensor_aggregations_1min` | `time`, 7 d | `UNIQUE (time, sensor_id, equipment_id)` | `equipment_id`, 14 d | 90 d |
+| `sensor_aggregations_5min` | `time`, 30 d | same | `equipment_id`, 30 d | 180 d |
+| `sensor_aggregations_1hour` | `time`, 90 d | same | `equipment_id`, 60 d | 1 y |
+| `alert_rules` | | | | |
+| `alerts` | `triggered_at`, 7 d | | | 90 d |
+| `alert_labels` | | | | |
+| `ml_models` | | `UNIQUE (model_name, model_version)` | | |
+| `model_predictions` | `timestamp`, 7 d | | `model_id`, 30 d | 180 d |
+| `feature_engineering_configs` | | | | |
 
-Compression (`segmentby equipment_id`, `orderby time DESC`) after: raw 7 d; aggregations
-14 d / 30 d / 60 d. Extension-owned domain tables: [operations/extensions.md](../operations/extensions.md).
-
-Init scripts run only on an empty data volume. On a live database a new or changed script is applied
-by hand.
-
-## Roles
-
-Created in `00-create-roles.sh` (and `12-metrics-role.sql`, `13-notebook-sql-proxy-role.sh`).
-Per-tenant grants are made by `create_tenant_schema()`.
-
-| Role | Used by | Tenant-schema access | Connection limit |
-|---|---|---|---|
-| `api_gateway_user` | api-gateway | SELECT, INSERT, UPDATE, DELETE | 50 |
-| `spark_streaming_user` | spark-streaming, spark-aggregations | SELECT, INSERT, UPDATE | 50 |
-| `alert_service_user` | alert-service-detector | SELECT, INSERT, UPDATE, DELETE | 50 |
-| `ml_service_user` | ml-service-api | SELECT, INSERT, UPDATE, DELETE | 10 |
-| `cold_export_user` | cold-export | SELECT on `sensor_measurements`; EXECUTE on `cold_export_day_fingerprint`, `cold_export_drop_day` | 5 |
-| `mlflow_user` | mlflow (own `mlflow` database) | none | 20 |
-| `metrics_user` | postgres-exporter (`pg_monitor`) | none | 5 |
-| `tenant_reader_<uuid>` | Assumed by the SQL proxy via `SET ROLE` (`NOLOGIN`) | SELECT on current and future tables of its own schema | |
-| `tenant_sqlproxy_<uuid>` | SQL proxy login per tenant (`NOINHERIT`) | Member of its own reader role only | |
-| `notebook_sql_proxy` | SQL proxy enrolment | none | 5 |
-
-Ingestion has no database role ([ADR-0002](../../ADR/ADR-0002-ingestion-authentication-and-device-identity.md)).
-`tests/config_guards/test_db_connection_budget.py` checks that `max_connections` covers the sum of these limits.
+Extension-owned domain tables: [extensions](../operations/extensions.md).
 
 ## Cold layer
 
@@ -115,7 +91,7 @@ Raw `sensor_measurements` older than the export horizon, as Parquet in the objec
 | Bucket | `COLD_STORE_BUCKET` / `coldExport.store.bucket`, default `industryflow-cold` |
 | Database side | `16-cold-layer-raw-retention.sql`: `cold_export_day_fingerprint`, `cold_export_drop_day` (`SECURITY DEFINER`), `public.cold_export_drops` |
 | Object-store principals | Write-scoped exporter principal; read-only broker principal; created by `minio-init` / Helm `job-minio-init.yaml` |
-| Read path | `services/notebook_cold_broker/`, client `industryflow.IndustryFlowCold` ([notebooks.md](notebooks.md)) |
+| Read path | `services/notebook_cold_broker/`, client `industryflow.IndustryFlowCold` ([notebooks](notebooks.md)) |
 | Backup | `db-backup` mirrors the cold bucket (`COLD_SOURCE_*`, Helm `backup.cold.enabled`) |
 
 Exporter behaviour per tenant and day:
@@ -128,4 +104,4 @@ Exporter behaviour per tenant and day:
 | Drop | `cold_export_drop_day` re-checks the day's fingerprint (count + digest) under a lock and drops nothing if it changed; the drop is recorded in `public.cold_export_drops` |
 | Schema | Derived from `company_id`; a registry `schema_name` that disagrees is refused |
 
-Deferred cold-layer items and their triggers: [cold-layer-evolution.md](cold-layer-evolution.md).
+Deferred cold-layer items and their triggers: [cold layer evolution](cold-layer-evolution.md).

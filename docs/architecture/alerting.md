@@ -5,8 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Alerting
 
-The alert API, the detection worker, rule types, deduplication and operator labels. Code in
-`services/alert_service/` and `services/api_gateway/routers/alert_*.py` is authoritative.
+The alert API, the detection worker, rule types, deduplication and operator labels.
 
 | Decision | ADR |
 |---|---|
@@ -20,25 +19,43 @@ The alert API, the detection worker, rule types, deduplication and operator labe
 
 ## Components
 
-| Component | Role | Code |
-|---|---|---|
-| api-gateway | Rule CRUD, alert history, acknowledge, labels, precision; tenant from the JWT | `services/api_gateway/routers/alert_rules.py`, `alerts_history.py` |
-| alert-service-detector | Kafka consumer on `sensor-data-raw`; evaluates rules, writes `alerts`; no HTTP API | `services/alert_service/worker/` |
-| ml-service-api | Scores ML rules and computes drift for the worker | [ml-and-features.md](ml-and-features.md) |
-| Alert History page | Acknowledge, label (Real / False / Unsure), "Precision (labelled)" KPI | `services/frontend/src/pages/AlertHistory.jsx` |
+| Name | Role | Port | Config |
+|---|---|---|---|
+| `api-gateway` | Rule CRUD, alert history, acknowledge, labels, precision | 8000 | `services/api_gateway/routers/alert_rules.py`, `alerts_history.py` |
+| `alert-service-detector` | Kafka consumer on `KAFKA_TOPIC_SENSOR_DATA`; evaluates rules, writes `alerts` | none | `services/alert_service/config.py`, `worker/` |
+| `ml-service-api` | Scores `ml` rules, computes drift ([ML and features](ml-and-features.md)) | 8002 | `services/ml_service/` |
+| Alert History page | Acknowledge, label (Real / False / Unsure), "Precision (labelled)" KPI | | `services/frontend/src/pages/AlertHistory.jsx` |
 
-## Endpoints (api-gateway)
+## Endpoints
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET, POST | `/api/alert-rules` | List, create |
-| GET, PUT, DELETE | `/api/alert-rules/{rule_id}` | Read, replace, delete |
-| PATCH | `/api/alert-rules/{rule_id}/detection-mode` | Change detection type |
-| GET | `/api/alerts` | History |
-| GET | `/api/alerts/unacknowledged`, `/api/alerts/critical` | Filtered history |
-| PATCH | `/api/alerts/{alert_id}/acknowledge` | Acknowledge |
-| PATCH | `/api/alerts/{alert_id}/label` | `true_positive` / `false_positive` / `unsure` |
-| GET | `/api/alerts/label-metrics` | Precision = TP/(TP+FP) and false-positive rate per bucket and overall; optional model or rule scope |
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/alert-rules`, `/api/alert-rules/{rule_id}` | session | List, read |
+| POST | `/api/alert-rules` | `engineer`, `admin` | Create |
+| PUT, DELETE | `/api/alert-rules/{rule_id}` | `engineer`, `admin` | Replace, delete |
+| PATCH | `/api/alert-rules/{rule_id}/detection-mode` | `engineer`, `admin` | Change detection type |
+| GET | `/api/alerts`, `/api/alerts/unacknowledged`, `/api/alerts/critical` | session | History, filtered history |
+| PATCH | `/api/alerts/{alert_id}/acknowledge` | `engineer`, `admin` | Acknowledge |
+| PATCH | `/api/alerts/{alert_id}/label` | `engineer`, `admin` | `true_positive` / `false_positive` / `unsure` |
+| GET | `/api/alerts/label-metrics` | session | Precision = TP/(TP+FP) and false-positive rate per bucket and overall; optional model or rule scope |
+
+## Rule fields
+
+| Field | Values |
+|---|---|
+| `detection_type` | `threshold` (default), `ml`, `statistical`; `ml` and `statistical` require `model_id` |
+| `condition` | `greater_than`, `less_than`, `equals`, `not_equals`, `between`, `outside_range` |
+| `threshold`, `threshold_min`, `threshold_max` | Threshold bounds; a `statistical` threshold is a share in 0–1 |
+| `anomaly_threshold` | `ml` score threshold, 0–1, default 0.85 |
+| `severity` | `low`, `medium` (default), `high`, `critical` |
+| `company_id` | Ignored; the tenant is the caller's |
+
+```bash
+curl -X POST https://<host>/api/alert-rules -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "High temperature", "sensor_pattern": "temp_*", "detection_type": "threshold",
+       "condition": "greater_than", "threshold": 80.0, "severity": "critical"}'
+```
 
 ## Rule types (`alert_rules.detection_type`)
 
@@ -49,9 +66,9 @@ The alert API, the detection worker, rule types, deduplication and operator labe
 | `statistical` | Every `DRIFT_EVAL_INTERVAL` over `DRIFT_WINDOW_MINUTES` | Worker calls `POST /api/drift/evaluate` for the rule's `model_id`; alert when the drifted-feature share crosses the rule threshold; no-op per reading |
 | Retrain recommendation | Scheduled, beside drift | `statistical` alert with `condition='retrain_recommended'` when a model shows sustained drift and precision below `RETRAIN_PRECISION_FLOOR`; cooldown per model |
 
-Worker → ml-service calls carry `INTERNAL_SERVICE_TOKEN` (header `X-Internal-Service-Token`); unset, ml-service refuses them.
-`unsure` labels are excluded from precision. Labels sit in `alert_labels`, not on the `alerts`
-hypertable ([data-and-storage.md](data-and-storage.md)).
+Worker → `ml-service-api` calls carry the internal service token
+([authentication](../operations/authentication.md#configuration)). `unsure` labels are excluded from precision. Labels sit in `alert_labels`, not on the `alerts`
+hypertable ([data and storage](data-and-storage.md)).
 
 ## Failure handling
 
@@ -84,7 +101,7 @@ Code: `services/alert_service/worker/repository.py`.
 | Store | Redis, `REDIS_URL` (required) |
 | Key | `features:{company_id}:{equipment_id}:{sensor_name}` |
 | Staleness | A sensor older than `FEATURE_MAX_AGE_SECONDS` by event time is missing; an incomplete snapshot is not scored |
-| Degraded score | When ml-service reports `degraded`, the alert message names the neutralised features |
+| Degraded score | When `ml-service-api` reports `degraded`, the alert message names the neutralised features |
 
 Code: `services/alert_service/worker/feature_store.py`.
 
@@ -100,7 +117,7 @@ Code: `services/alert_service/worker/feature_store.py`.
 | `ALERT_DEDUP_CACHE_MAX` | 10000 | Dedup cache size |
 | `FEATURE_MAX_AGE_SECONDS` | 300 | Snapshot staleness |
 | `RULE_RELOAD_INTERVAL` | 60 | Rule reload, seconds |
-| `ML_SERVICE_URL` | `http://ml-service-api:8002` | ml-service |
+| `ML_SERVICE_URL` | `http://ml-service-api:8002` | `ml-service-api` base URL |
 | `DRIFT_EVAL_INTERVAL` / `DRIFT_WINDOW_MINUTES` / `DRIFT_SHARE_THRESHOLD` | 3600 / 1440 / 0.5 | Drift evaluation |
 | `RETRAIN_RECO_ENABLED` | true | Retrain recommendation on/off |
 | `RETRAIN_PRECISION_FLOOR` / `RETRAIN_MIN_LABELS` / `RETRAIN_MIN_DRIFT_ALERTS` | 0.6 / 10 / 2 | Recommendation conditions |

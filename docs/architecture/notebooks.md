@@ -5,20 +5,18 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Embedded notebooks
 
-The notebook hub, its per-user environments, and the mediators a kernel reaches through capability
-handles. Code in `services/notebook_hub/`, `services/notebook_sql_proxy/`,
-`services/notebook_tracking_gateway/`, `services/notebook_cold_broker/` and `clients/python/` is
-authoritative.
+The notebook hub, its per-user environments, and the planes a kernel reaches through capability
+handles.
 
 | Decision | ADR |
 |---|---|
 | Notebooks as untrusted, per-user, tenant-bound environments; role profiles | [ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) |
 | No durable credential in the kernel; per-tenant read-only role | [ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md) |
 | Tenant-namespaced tracking and registry | [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) |
-| SSO from the platform session; single origin | [ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on.md) |
+| Notebook SSO from the platform session; single origin | [ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on.md) |
 | Capability minting, audiences, SQL proxy | [ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md) |
 | Database TLS (`verify-full`) | [ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md) |
-| KubeSpawner / DockerSpawner, compose non-parity | [ADR-0018](../../ADR/ADR-0018-notebook-hub-spawner-portability.md) |
+| KubeSpawner / DockerSpawner, Compose non-parity | [ADR-0018](../../ADR/ADR-0018-notebook-hub-spawner-portability.md) |
 | Tracking gateway, default-deny routes, direct artifact bytes | [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md) |
 | Per-user persistence, idle reclamation | [ADR-0020](../../ADR/ADR-0020-notebook-per-user-persistence.md) |
 | Cold-layer read path | [ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md) dec 5 |
@@ -32,98 +30,84 @@ browser ─▶ frontend edge /jupyter/ ─▶ notebook-sso ──auth_request─
                                     notebook-hub ──spawns──▶ per-user environment (profile by role)
                                           │ mints capability handles
                                           ▼
-kernel ─▶ api-gateway data API     (X-IF-Capability, audience api)
-       ─▶ notebook-sql-proxy       (audience sql)      ─▶ TimescaleDB as tenant_sqlproxy_<uuid>, SET ROLE tenant_reader_<uuid>
+kernel ─▶ api-gateway data API      (X-IF-Capability, audience api)
+       ─▶ notebook-sql-proxy        (audience sql)      ─▶ TimescaleDB as tenant_sqlproxy_<uuid>, SET ROLE tenant_reader_<uuid>
        ─▶ notebook-tracking-gateway (audience tracking) ─▶ MLflow, tenant-namespaced; artifacts by pre-signed URL
-       ─▶ notebook-cold-broker     (audience cold)     ─▶ pre-signed GETs under tenant_<uuid>/
+       ─▶ notebook-cold-broker      (audience cold)     ─▶ pre-signed GETs under tenant_<uuid>/
 ```
 
-The frontend `/notebooks` page iframes `/jupyter/` (`services/frontend/src/pages/Notebooks.jsx`). The
+The frontend `/notebooks` page iframes `/jupyter/` (`services/frontend/src/pages/Notebooks.jsx`); the
 hub sends `Content-Security-Policy: frame-ancestors 'self'`.
 
 ## Components
 
-| Component | Role | Port | Code / config |
+| Name | Role | Port | Config |
 |---|---|---|---|
-| notebook-sso | nginx `auth_request` to `/auth/verify`, forwards `X-IF-*`; adds `X-IF-SSO-Proxy-Secret` on hub routes only | 8080 (internal) | `services/notebook_hub/sso-nginx.conf` |
-| notebook-hub | JupyterHub, spawner by `NOTEBOOK_SPAWNER` (`docker` / `kube`), base URL `NOTEBOOK_BASE_URL` (`/jupyter/`); login only with the SSO proxy secret | 8000 (chp, platform network only), 8081 (hub API) | `services/notebook_hub/jupyterhub_config.py`, `identity.py`, `capabilities.py` |
-| notebook-authoring image | JupyterLab, DS stack, `industryflow[sql,cold]` client | | `services/notebook_hub/Dockerfile.authoring` |
-| notebook-analytics image | Voila, data-API client; hub lands on `/voila` | | `services/notebook_hub/Dockerfile.analytics` |
-| notebook-sql-proxy | Postgres-wire proxy | 6432 | `services/notebook_sql_proxy/` |
-| notebook-tracking-gateway | MLflow proxy with per-route tenant rules; upload stage/commit | 5050 | `services/notebook_tracking_gateway/` |
-| notebook-cold-broker | Pre-signed GETs for the tenant's cold prefix | 5060 | `services/notebook_cold_broker/` |
-| Python client | `IndustryFlowClient`, `IndustryFlowSQL` / `sql_query`, `IndustryFlowCold`, `SKOPS_TRUSTED_TYPES` | | `clients/python/industryflow/` |
+| `notebook-sso` | nginx `auth_request` to `/auth/verify`; forwards `X-IF-*`; adds `X-IF-SSO-Proxy-Secret` on hub routes only | 8080 | `services/notebook_hub/sso-nginx.conf` |
+| `notebook-hub` | JupyterHub; spawns and culls per-user environments, mints capability handles; login only with the SSO proxy secret | 8000 (chp, platform network only), 8081 (hub API) | [notebook hub](../../services/notebook_hub/README.md) |
+| `notebook-authoring` image | JupyterLab, data-science stack, `industryflow[sql,cold]` client | | `services/notebook_hub/Dockerfile.authoring` |
+| `notebook-analytics` image | Voila, data-API client | | `services/notebook_hub/Dockerfile.analytics` |
+| `notebook-sql-proxy` | SQL proxy (Postgres wire) | 6432 | [SQL proxy](../../services/notebook_sql_proxy/README.md) |
+| `notebook-tracking-gateway` | Tracking gateway (MLflow, per-route tenant rules); upload stage and commit | 5050 | [tracking gateway](../../services/notebook_tracking_gateway/README.md) |
+| `notebook-cold-broker` | Cold-store broker: pre-signed GETs for the tenant's cold prefix | 5060 | `services/notebook_cold_broker/` |
+| Python client | `IndustryFlowClient`, `IndustryFlowSQL`, `IndustryFlowCold`, `SKOPS_TRUSTED_TYPES` | | [Python client](../../clients/python/README.md) |
 
 ## Profiles
 
-| Profile | Roles (default) | Handles | Persistence |
-|---|---|---|---|
-| `authoring` | `admin`, `engineer`, `data_scientist` | api, sql, tracking, cold | Per-user volume at `/home/jovyan/work` (`NOTEBOOK_VOLUME_TEMPLATE`, default `industryflow-nb-{username}`; PVC of `NOTEBOOK_STORAGE_CAPACITY`, default 2Gi, on Kubernetes) |
-| `analytics` | every other role | api | none |
+| Profile | Roles (default) | Image | Landing | Capability handles | Persistence |
+|---|---|---|---|---|---|
+| `authoring` | `admin`, `engineer`, `data_scientist` | `NOTEBOOK_IMAGE_AUTHORING` | JupyterLab | api, sql; tracking when `INDUSTRYFLOW_TRACKING_URL` is set; cold when `INDUSTRYFLOW_COLD_BROKER_URL` is set | Per-user volume `NOTEBOOK_VOLUME_TEMPLATE` at `<home>/work`; a PVC on Kubernetes |
+| `analytics` | Every other role | `NOTEBOOK_IMAGE_ANALYTICS` | `/voila` | api | None |
 
-Unknown roles get `analytics`.
+Either image falls back to `NOTEBOOK_IMAGE`. Hub settings:
+[notebook hub](../../services/notebook_hub/README.md#settings).
 
 ## Capability handles
 
-| Audience | Verified by | Read-only |
+| Audience | Redeemed by | Read-only |
 |---|---|---|
 | `api` | `services/api_gateway/capability_auth.py` | yes |
 | `sql` | `services/notebook_sql_proxy/binding.py` | yes |
 | `tracking` | `services/notebook_tracking_gateway/` | no |
 | `cold` | `services/notebook_cold_broker/` | yes |
 
-| Lifecycle | Detail |
+| Event | Effect |
 |---|---|
-| Mint | At spawn, one per audience, TTL `NOTEBOOK_CAPABILITY_TTL_SECONDS` (default 900) |
-| Refresh | On each spawner poll while the server is healthy |
-| Revoke | Server stop, respawn, or platform logout |
-| SQL session re-check | Every `SQL_PROXY_REVALIDATE_SECONDS` (default 15); session ended once revoked |
+| Spawn | Handles of an earlier run of the server are revoked; one handle per audience is minted with lifetime `NOTEBOOK_CAPABILITY_TTL_SECONDS` and recorded in `nbcap-user:<user>` |
+| Spawner poll, server healthy | Lifetime extended |
+| Server stops (user, culler, hub logout) | `post_stop_hook` revokes its handles |
+| Platform logout | The frontend logs out of the hub first (`shutdown_on_logout` stops the server); `/auth/logout` revokes all the user's handles; a server whose handles are all revoked stops at its next poll |
+| Login (`/hub/login`) | Refused (401) unless `X-IF-SSO-Proxy-Secret` matches `NOTEBOOK_SSO_PROXY_SECRET` |
+| Hub request after `NOTEBOOK_AUTH_REFRESH_SECONDS`, and before a spawn | Hub login compared with the forwarded identity (identity headers without the proxy secret count as none): a different user ends the login; the same user with another tenant or role ends it and stops their servers |
+| Open SQL session | Re-checked every `SQL_PROXY_REVALIDATE_SECONDS`; closed once the handle is revoked |
 
 ## Kernel environment
 
-| Variable | Profile | Meaning |
+| Name | Profile | Meaning |
 |---|---|---|
 | `INDUSTRYFLOW_USER`, `INDUSTRYFLOW_COMPANY_ID`, `INDUSTRYFLOW_PROFILE` | both | Identity |
 | `INDUSTRYFLOW_API_URL`, `INDUSTRYFLOW_API_CAPABILITY` | both | Data API |
 | `INDUSTRYFLOW_SQL_PROXY_URL`, `INDUSTRYFLOW_SQL_CAPABILITY` | authoring | SQL proxy; the handle is the password |
 | `INDUSTRYFLOW_TRACKING_URL`, `INDUSTRYFLOW_TRACKING_CAPABILITY` | authoring | Tracking gateway |
-| `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_TOKEN` | authoring | MLflow client pointed at the gateway, handle as bearer token |
-| `INDUSTRYFLOW_COLD_BROKER_URL`, `INDUSTRYFLOW_COLD_CAPABILITY` | authoring | Cold broker |
+| `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_TOKEN` | authoring | MLflow client pointed at the tracking gateway, handle as bearer token |
+| `INDUSTRYFLOW_COLD_BROKER_URL`, `INDUSTRYFLOW_COLD_CAPABILITY` | authoring | Cold-store broker |
 
-## Data API (api-gateway)
+A URL variable is set only when the hub has it configured; the tracking and cold handles are minted
+only then. Outside a hub-spawned kernel, `IndustryFlowSQL.from_env()` and `IndustryFlowCold.from_env()`
+raise.
 
-Each route accepts the platform session or an `X-IF-Capability` handle; a capability request runs
-read-only.
+## Planes
 
-| Method | Path |
-|---|---|
-| GET | `/api/measurements`, `/api/measurements/latest`, `/api/measurements/{sensor_id}` |
-| GET | `/api/aggregations/{window}` (`start`, `end`, `order`, `limit` ≤ 1000), `/api/aggregations/{window}/latest`, `/api/aggregations/combined/{sensor_id}` |
-| GET | `/api/training-data/equipment/{equipment_id}`, `/api/training-data/equipment/{equipment_id}/stream` |
+| Plane | Mediator | Detail |
+|---|---|---|
+| Data API | `api-gateway` | Read endpoints accept an `api` handle and run read-only ([endpoints](../api/README.md#api-gateway-endpoints)) |
+| SQL | SQL proxy | [principals and mechanism](../../services/notebook_sql_proxy/README.md#database-principals) |
+| Tracking | Tracking gateway | [endpoints and rules](../../services/notebook_tracking_gateway/README.md#endpoints) |
+| Cold history | Cold-store broker | [cold layer](data-and-storage.md#cold-layer) |
+| Model upload | `ml-service-api`, tracking gateway | [model upload](model-upload.md) |
 
-## SQL proxy
-
-| Item | Detail |
-|---|---|
-| Upstream login | `tenant_sqlproxy_<uuid>`, `NOINHERIT`, member of its own reader role only; password an HMAC of the tenant under a proxy-held key |
-| Session | `SET ROLE tenant_reader_<uuid>`, `search_path` to the tenant schema; byte-transparent relay |
-| Refused by Postgres | `SET ROLE` to another tenant, `RESET ROLE`, `set_config('role', …)`, `SET SESSION AUTHORIZATION` |
-| Enrolment | `notebook_sql_proxy` role installs the login's SCRAM verifier on first use |
-| Cancel | CancelRequest forwarded through a proxy-issued key |
-| TLS | `verify-full` to the database |
-
-## Tracking gateway
-
-| Item | Detail |
-|---|---|
-| Names | Experiments and registered models prefixed `tenant_<uuid>.`, stripped on read |
-| Artifacts | Under `tenant_<uuid>/`; the gateway sets each experiment's artifact location to that prefix |
-| Routes | Only routes in `services/notebook_tracking_gateway/routes.py` are forwarded, each with its ownership rule; any other route → 403 |
-| Request fields | Read from the query string (GET) or JSON body (other methods); the same field in the other place → 400 |
-| Artifact bytes | Redirect to a pre-signed URL for the interior store; only upload staging is signed for the edge |
-
-Experiments recorded at `mlflow-artifacts:/<id>` (created before the gateway set the location) are
-rewritten by:
+Experiments recorded at `mlflow-artifacts:/<id>` (created before the tracking gateway set the
+location) are rewritten by:
 
 ```bash
 docker compose exec -T mlflow python - < scripts/migrate_tenant_artifact_locations.py           # dry run
@@ -138,24 +122,22 @@ safe to re-run.
 | | Compose (DockerSpawner) | Kubernetes (KubeSpawner) |
 |---|---|---|
 | Environment | Per-user container | Per-user pod |
-| Egress | Network `industryflow-notebook-kernels`, shared with notebook-hub, api-gateway, notebook-sql-proxy, notebook-tracking-gateway, notebook-cold-broker, minio | Single-user egress NetworkPolicy (`networkpolicy.yaml`) |
+| Egress | Network `industryflow-notebook-kernels`, shared with `notebook-hub`, `api-gateway`, `notebook-sql-proxy`, `notebook-tracking-gateway`, `notebook-cold-broker`, `minio` | Single-user egress NetworkPolicy (`networkpolicy.yaml`) |
 | Docker access | Hub in supplementary group `DOCKER_GID` | RBAC for pods and PVCs (`notebook-hub.yaml`) |
-| Enable | `docker compose --profile notebooks build` then `docker compose --profile notebooks up -d` | `notebookHub.enabled: true`, `notebookHub.baseUrl: /jupyter/` |
-| URL | `https://<host>:<FRONTEND_HTTPS_PORT>/jupyter/` (default port 3443) | Frontend host, `/jupyter/` |
+| Enable | [getting started, step 6](../getting-started.md#6-notebooks-optional-profile) | `notebookHub.enabled: true`, `notebookHub.baseUrl: /jupyter/` |
 | Validation | Compose smoke checks the kernel network on every PR | Renders and lints in CI; not run on a cluster |
 
-Idle culling: `jupyterhub-idle-culler`, timeout `NOTEBOOK_IDLE_TIMEOUT_SECONDS` (3600), interval
-`NOTEBOOK_CULL_EVERY_SECONDS` (300), token scopes `list:users`, `read:users:activity`,
+Idle culling: `jupyterhub-idle-culler` with token scopes `list:users`, `read:users:activity`,
 `read:servers`, `delete:servers`.
 
-## Tests
+## Isolation tests
 
 | Test | Proves | Workflow |
 |---|---|---|
 | `infrastructure/timescaledb/tests/test_tenant_reader_isolation.py` | Reader role cannot read another tenant | `db-tenant-isolation.yml` |
 | `infrastructure/timescaledb/tests/test_notebook_sql_login_isolation.py` | Proxy login cannot escape its reader role | `db-tenant-isolation.yml` |
-| `services/notebook_sql_proxy/tests/test_sql_proxy_integration.py` | End-to-end through the running proxy | `db-tenant-isolation.yml` |
-| `services/notebook_tracking_gateway/tests/test_*_integration.py` | Gateway routing and upload against live MLflow and object store | `tracking-gateway-integration.yml` |
+
+Proxy and gateway tests: their READMEs.
 
 ## Not built
 
@@ -163,4 +145,4 @@ Idle culling: `jupyterhub-idle-culler`, timeout `NOTEBOOK_IDLE_TIMEOUT_SECONDS` 
 |---|
 | Curated Voila dashboard content; locking the analytics server API to render-only |
 | `/analytics` and `/experiments` frontend pages |
-| A Kubernetes cluster run of the hub |
+| A Kubernetes cluster run of the notebook hub |
