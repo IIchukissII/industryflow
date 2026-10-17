@@ -35,6 +35,10 @@ settings = get_settings()
 # Secret key for token generation (should be in your .env)
 SECRET = settings.JWT_SECRET_KEY
 
+# Access tokens are signed with HMAC-SHA256 under SECRET. A constant, not a setting: a verifier
+# whose accepted algorithm is configurable invites algorithm confusion.
+JWT_ALGORITHM = "HS256"
+
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     """
@@ -137,6 +141,7 @@ def get_jwt_strategy() -> JWTStrategy:
     return CompanyClaimJWTStrategy(
         secret=SECRET,
         lifetime_seconds=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        algorithm=JWT_ALGORITHM,
     )
 
 # Authentication backend combining transport + strategy

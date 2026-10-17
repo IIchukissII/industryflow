@@ -114,7 +114,6 @@ curl -k https://<host>/api/measurements/latest -H "Authorization: Bearer $TOKEN"
 | `JWT_SECRET_KEY` | none (required) | Access-token signing key |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Access-token lifetime |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Refresh-token lifetime |
-| `JWT_ALGORITHM` | `HS256` | Read by `ml_service` to verify tokens; the gateway always signs HS256 |
 | `COOKIE_SECURE` | `true` | `Secure` flag on the cookies |
 | `COOKIE_SAMESITE` | `lax` | `SameSite` on the cookies |
 | `CORS_ORIGINS` | none (required) | Allowed origins, comma-separated; also the websocket `Origin` allowlist |

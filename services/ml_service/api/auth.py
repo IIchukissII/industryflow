@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 # httpOnly access-cookie name — must match the gateway's CookieTransport (ADR-0004 dec 3).
 ACCESS_COOKIE = "if_access"
 
+# The gateway signs access tokens with HMAC-SHA256. Pinned, not configurable: a verifier whose
+# accepted algorithm is a setting invites algorithm confusion.
+JWT_ALGORITHM = "HS256"
+
 
 # The account behind a token, re-read on every request: whether the user exists and is active,
 # and whether their company (if any) is. One round trip; the company flag rides on the user read.
@@ -82,7 +86,7 @@ async def verify_jwt_token(
         payload = jwt.decode(
             token,
             config.config.JWT_SECRET_KEY,
-            algorithms=[config.config.JWT_ALGORITHM],
+            algorithms=[JWT_ALGORITHM],
             options={"verify_aud": False}
         )
 
