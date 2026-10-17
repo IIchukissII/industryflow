@@ -80,8 +80,12 @@ This ADR establishes the discipline the project currently lacks and makes it the
 
 - **ADR-0001 framing.** The project's scope, licensing posture, intended audience, and relationship to the sibling project are a framing decision to be recorded in ADR-0001, not here. (ADR-0001 has since been accepted and relicensed the project to AGPL-3.0-or-later; this ADR does not restate the licence to avoid the very duplication it forbids.)
 - **ADR template.** A skeleton enforcing the section structure shared across ADRs is implied but not yet written.
-- **Cross-reference and duplication tooling.** A linter that flags a value duplicated across README / compose / `.env.example`, or a checker that validates references resolve, is desirable but unspecified.
+- **Cross-reference and duplication tooling.** A linter that flags a value duplicated across README / compose / `.env.example`, or a checker that validates references resolve, is desirable but unspecified. *Resolved in part since acceptance:* see below.
 - **The authoritative-home registry.** A concise map of which artifact owns which class of fact (ports/topics → `.env.example`, schema → SQL init scripts, rationale → ADR) could be maintained, but its location and format are open.
+
+## Resolved since acceptance
+
+- **Duplication tooling (2026-10-17).** The build settled the duplication half of this item in a narrower form than the general linter it imagined. Where a fact must exist in more than one artifact, because the artifacts cannot share it (a version that one artifact declares and another restates, a setting that both deployment descriptions carry, a configuration variable and the deployment that reads it), a check that runs on every proposed change reads every copy and fails when they disagree. Where a fact need not be copied at all, as with the names derived from a tenant identity, the copies were replaced by one shared definition, and a check refuses any code that restates it (ADR-0003). Each check covers a named class of fact; none detects an arbitrary value duplicated across documents. A checker that cross-references resolve does not exist, so that half of the item, the ADR template and the authoritative-home registry remain open. This changes no decision above.
 
 ## References
 
