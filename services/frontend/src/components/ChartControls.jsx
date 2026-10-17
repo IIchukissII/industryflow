@@ -4,82 +4,62 @@
 
 import './ChartControls.css';
 
+const TIMEFRAMES = [
+  { value: 'raw', label: 'Raw' },
+  { value: '1min', label: '1 minute' },
+  { value: '5min', label: '5 minutes' },
+  { value: '1hour', label: '1 hour' },
+];
+
+const CHART_TYPES = [
+  { value: 'line', label: 'Line' },
+  { value: 'area', label: 'Area' },
+  { value: 'candlestick', label: 'Range' },
+];
+
+const TIME_RANGES = [
+  { value: '100', label: '100' },
+  { value: '200', label: '200' },
+  { value: '500', label: '500' },
+];
+
+function Seg({ label, options, value, onChange, disabledWhen }) {
+  return (
+    <div className="seg" role="group" aria-label={label}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={value === o.value}
+          disabled={disabledWhen ? disabledWhen(o.value) : false}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const ChartControls = ({
   selectedTimeframe,
   onTimeframeChange,
   selectedChartType,
   onChartTypeChange,
   selectedTimeRange,
-  onTimeRangeChange
-}) => {
-  const timeframes = [
-    { value: 'raw', label: 'Raw Data' },
-    { value: '1min', label: '1 Minute' },
-    { value: '5min', label: '5 Minutes' },
-    { value: '1hour', label: '1 Hour' }
-  ];
-
-  const chartTypes = [
-    { value: 'line', label: 'Line' },
-    { value: 'area', label: 'Area' },
-    { value: 'candlestick', label: 'Candlestick' }
-  ];
-
-  const timeRanges = [
-    { value: '100', label: 'Last 100' },
-    { value: '200', label: 'Last 200' },
-    { value: '500', label: 'Last 500' }
-  ];
-
-  return (
-    <div className="chart-controls">
-      <div className="control-group">
-        <label>Timeframe:</label>
-        <div className="button-group">
-          {timeframes.map(tf => (
-            <button
-              key={tf.value}
-              className={selectedTimeframe === tf.value ? 'active' : ''}
-              onClick={() => onTimeframeChange(tf.value)}
-            >
-              {tf.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="control-group">
-        <label>Chart Type:</label>
-        <div className="button-group">
-          {chartTypes.map(ct => (
-            <button
-              key={ct.value}
-              className={selectedChartType === ct.value ? 'active' : ''}
-              onClick={() => onChartTypeChange(ct.value)}
-              disabled={selectedTimeframe === 'raw' && ct.value === 'candlestick'}
-            >
-              {ct.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="control-group">
-        <label>Data Points:</label>
-        <div className="button-group">
-          {timeRanges.map(tr => (
-            <button
-              key={tr.value}
-              className={selectedTimeRange === tr.value ? 'active' : ''}
-              onClick={() => onTimeRangeChange(tr.value)}
-            >
-              {tr.label}
-            </button>
-          ))}
-        </div>
-      </div>
+  onTimeRangeChange,
+}) => (
+  <div className="chart-controls">
+    <Seg label="Resolution" options={TIMEFRAMES} value={selectedTimeframe} onChange={onTimeframeChange} />
+    <Seg
+      label="Chart style" options={CHART_TYPES} value={selectedChartType} onChange={onChartTypeChange}
+      disabledWhen={(v) => v === 'candlestick' && selectedTimeframe === 'raw'}
+    />
+    <div className="chart-controls-points">
+      <Seg label="Points shown" options={TIME_RANGES} value={selectedTimeRange} onChange={onTimeRangeChange} />
+      <span aria-hidden="true">points</span>
     </div>
-  );
-};
+  </div>
+);
 
 export default ChartControls;

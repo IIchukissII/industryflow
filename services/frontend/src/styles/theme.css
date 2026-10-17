@@ -9,7 +9,7 @@
  * (Fraunces) for the human voice, IBM Plex Mono for the machine. Status borrows the alchemical
  * stages: citrinitas (amber) → rubedo (cinnabar). All accents contrast-checked on the ground.
  */
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
 :root {
   /* surfaces — strata of the ground, darkest at the base (nigredo) */
@@ -22,8 +22,10 @@
 
   /* text — the core, a warm luminous white (albedo), not LED-cold */
   --text: #f2efe9;
+  --text-soft: #e9e5dc; /* the reading line: warm, a step below the core */
   --muted: #9aa0ac;
   --faint: #6a7382;
+  --ink: #090c16;     /* text set on the warm-white primary action */
 
   /* the gold of the Self — the one accent */
   --gold: #cfa94e;
@@ -94,14 +96,25 @@ a { color: inherit; }
   letter-spacing: -0.01em;
 }
 
-/* eyebrow / section label — the gold thread that marks a beginning */
+/* section label — sentence case, quiet; the page's sentence and title carry the voice */
 .eyebrow {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: 13px;
   font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--gold);
+  color: var(--muted);
+}
+
+/* the reading line: one sentence under each page title that states the situation in words */
+.reading {
+  margin: 0;
+  max-width: 34ch;
+  font-family: var(--font-display);
+  font-weight: 340;
+  font-optical-sizing: auto;
+  font-size: clamp(21px, 2.2vw, 30px);
+  line-height: 1.28;
+  letter-spacing: -0.005em;
+  color: var(--text-soft);
 }
 
 :focus-visible {

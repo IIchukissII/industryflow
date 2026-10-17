@@ -120,9 +120,9 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, onO
           <circle className="conv-strata" r="180" strokeWidth="1" opacity="0.26" strokeDasharray="3 10" />
           <circle className="conv-strata" r="120" strokeWidth="1.2" opacity="0.18" />
 
-          {/* equipment arc labels — coloured by the group's worst health so a troubled machine
-              is legible without hovering */}
-          {groupArcs.map((g) => {
+          {/* equipment arc labels, coloured by the group's worst health so a troubled machine is
+              legible without hovering; with one machine the core already names it */}
+          {groupArcs.length > 1 && groupArcs.map((g) => {
             const rad = (g.mid * Math.PI) / 180;
             const cos = Math.cos(rad);
             const anchor = cos > 0.25 ? 'start' : cos < -0.25 ? 'end' : 'middle';
@@ -133,7 +133,7 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, onO
                 x={cos * R_LABEL} y={Math.sin(rad) * R_LABEL}
                 textAnchor={anchor} dominantBaseline="middle"
               >
-                {g.name.length > 20 ? `${g.name.slice(0, 19)}…` : g.name}
+                {g.name.length > 28 ? `${g.name.slice(0, 27)}…` : g.name}
               </text>
             );
           })}
@@ -173,7 +173,7 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, onO
           })}
 
           <circle className="conv-coreglow" r="96" fill="url(#convCore)" />
-          <circle className="conv-coredot" r="6" />
+          {!focus && <circle className="conv-coredot" r="6" />}
         </g>
       </svg>
 
@@ -189,20 +189,21 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, onO
             )}
             {onOpenAlerts && focusId === selectedSensor && (
               <button type="button" className="conv-core-action" onClick={() => onOpenAlerts(focusId)}>
-                View alerts →
+                Show alerts
               </button>
             )}
           </>
-        ) : (
+        ) : count > 0 ? (
           <>
             <div className="conv-core-val">{count}</div>
             <div className="conv-core-name">{count === 1 ? 'channel' : 'channels'} converging</div>
-            <div className="conv-core-eq">{wsConnected ? 'live' : 'awaiting stream'}</div>
+            <div className="conv-core-eq">{wsConnected ? 'Live' : 'Waiting for the stream'}</div>
           </>
+        ) : (
+          <div className="conv-core-eq">No channels yet</div>
         )}
       </div>
 
-      {count === 0 && <div className="conv-empty">Waiting for sensor data…</div>}
     </div>
   );
 }
