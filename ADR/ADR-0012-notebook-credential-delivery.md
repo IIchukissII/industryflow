@@ -93,6 +93,12 @@ There is a model already in the codebase for how to do this. The API gateway hol
 - **Audit of credential use.** What record is kept of which capability accessed which tenant's data, and where, is desirable and unspecified here; it relates to the notebook-execution audit trail already deferred in ADR-0011.
 - **A future query-over-HTTP data service.** Whether to also offer the result-streaming service of alternative D as an additional convenience is a separate decision, not foreclosed by this one.
 
+## Resolved since acceptance
+
+- **Capability format and issuance internals.** Settled by ADR-0015 dec 1: a capability is an opaque handle whose authority is a short-lived entry in the shared store, not a signed token, so the lookup that authorises a handle is the same lookup that revocation defeats.
+- **Lifetimes and revocation transport.** The mechanism is settled by ADR-0015 rev 3 dec 2. Revocation deletes the handle's entry, and every honouring point resolves the entry on use and denies when it is missing or incomplete; an open SQL session is re-checked at a bounded interval and closed once its handle no longer resolves. A spawn-minted entry is refreshed only while its environment runs, and is revoked when the environment stops or respawns and when the user signs out. The lifetimes and intervals remain configuration.
+- **Honouring points.** The negative consequences name two points that must honour revocation. Each plane added since (ADR-0019, ADR-0025, ADR-0030) brought its own mediator, so there is now one honouring point per plane, each resolving handles against the same store and failing closed in the same way.
+
 ## References
 
 - ADR-0011 — embedded notebooks; this ADR resolves its deferred "short-lived single-tenant credential delivery" decision.
