@@ -189,45 +189,11 @@
   border-top: 1px solid #2a2e39;
 }
 
-.btn-primary,
-.btn-secondary {
-  padding: 10px 20px;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  border: none;
-  white-space: nowrap;
-}
 
-.btn-primary {
-  background: var(--signal);
-  color: white;
-}
 
-.btn-primary:hover:not(:disabled) {
-  background: #1e4fd6;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(41, 98, 255, 0.3);
-}
 
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
-.btn-secondary {
-  background: transparent;
-  color: #787b86;
-  border: 1px solid #2a2e39;
-}
 
-.btn-secondary:hover {
-  background: #131722;
-  border-color: #787b86;
-  color: #d1d4dc;
-}
 
 .error-message {
   padding: 12px;

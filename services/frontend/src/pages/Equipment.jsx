@@ -4,9 +4,46 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import EquipmentConfigModal from '../components/EquipmentConfigModal';
-import { getEquipment, getEquipmentById, deleteEquipment } from '../services/equipmentApi';
+import { getEquipment, getEquipmentById, getEquipmentSensors, deleteEquipment } from '../services/equipmentApi';
 import './Equipment.css';
 import { canWrite } from '../utils/roles';
+import { equipmentReading } from '../utils/reading';
+
+// "grow-cabinet" -> "Grow cabinet"
+const humanize = (t) => (t ? (t.charAt(0).toUpperCase() + t.slice(1)).replace(/[-_]+/g, ' ') : '');
+
+// The machine's own small mandala: one node per configured sensor around a gold core.
+function SensorRing({ count }) {
+  const n = Math.max(count, 0);
+  const nodes = Array.from({ length: n }, (_, i) => {
+    const a = ((-90 + (i * 360) / n) * Math.PI) / 180;
+    return { x: 60 + 46 * Math.cos(a), y: 60 + 46 * Math.sin(a) };
+  });
+  return (
+    <svg className="eq-ring" viewBox="0 0 120 120" role="img" aria-label={`${n} sensors`}>
+      <defs>
+        <radialGradient id="eqGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#e6c67c" stopOpacity="0.5" />
+          <stop offset="100%" stopColor="#cfa94e" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <circle cx="60" cy="60" r="34" fill="url(#eqGlow)" />
+      <circle cx="60" cy="60" r="46" fill="none" stroke="#2a3248" strokeWidth="0.8" />
+      {nodes.map((p, i) => <line key={`l${i}`} x1="60" y1="60" x2={p.x} y2={p.y} stroke="#232a3d" strokeWidth="0.6" />)}
+      {nodes.map((p, i) => <circle key={`n${i}`} cx={p.x} cy={p.y} r="3" fill="#0d1222" stroke="#5c6478" strokeWidth="1.2" />)}
+      <circle cx="60" cy="60" r="2.6" fill="#fff6dc" />
+    </svg>
+  );
+}
+
+function Fact({ label, children, mono }) {
+  return (
+    <div className="eq-fact">
+      <dt>{label}</dt>
+      <dd className={mono ? 'mono' : undefined}>{children}</dd>
+    </div>
+  );
+}
 
 function Equipment() {
   // Creating, editing and deleting equipment needs engineer or admin (observer is read-only).
@@ -39,10 +76,13 @@ function Equipment() {
   const viewEquipmentDetails = async (equipmentId) => {
     try {
       const data = await getEquipmentById(equipmentId);
-      setSelectedEquipment(data);
+      // Sensor names and units for the list; the configured ids stand in if that call fails.
+      let sensors = null;
+      try { sensors = await getEquipmentSensors(equipmentId); } catch { sensors = null; }
+      setSelectedEquipment({ ...data, sensorRows: Array.isArray(sensors) ? sensors : null });
       setShowModal(true);
     } catch (err) {
-      alert('Error loading equipment details: ' + err.message);
+      alert('The machine details could not load: ' + err.message);
     }
   };
 
@@ -56,196 +96,127 @@ function Equipment() {
     setShowConfigModal(true);
   };
 
-  const handleDelete = async (equipmentId) => {
-    if (!window.confirm('Are you sure you want to delete this equipment?')) {
+  const handleDelete = async (equip) => {
+    if (!window.confirm(`Delete ${equip.name}? Its configuration is removed; stored readings stay.`)) {
       return;
     }
-
     try {
-      await deleteEquipment(equipmentId);
+      await deleteEquipment(equip.equipment_id);
       await fetchEquipment();
-      alert('Equipment deleted successfully');
     } catch (err) {
-      alert('Error deleting equipment: ' + (err.response?.data?.detail || err.message));
+      alert('The machine could not be deleted: ' + (err.response?.data?.detail || err.message));
     }
   };
 
-  const handleConfigSuccess = () => {
-    fetchEquipment();
-  };
-
-  if (loading) return <div className="equipment-loading">Loading equipment...</div>;
-  if (error) return <div className="equipment-error">Error: {error}</div>;
+  if (loading) return <div className="eq-state"><span className="sdot pending" /> Loading equipment</div>;
+  if (error) return <div className="eq-state eq-state-bad">The equipment list could not load: {error}</div>;
 
   return (
-    <div className="App">
+    <div className="eq">
+      <div className="eq-head">
+        <p className="reading">{equipmentReading({ equipment })}</p>
+        {writable && (
+          <button type="button" className="btn btn-primary eq-add" onClick={handleCreateNew}>Add equipment</button>
+        )}
+      </div>
 
-      <div className="equipment-container">
-        <div className="equipment-header">
-          <div>
-            <h1>Equipment Management</h1>
-            <p className="equipment-subtitle">Manage industrial equipment and sensor configurations</p>
-          </div>
-          {writable && (
-            <button className="btn-create" onClick={handleCreateNew}>
-              + Create New Equipment
-            </button>
-          )}
-        </div>
-
-        <div className="equipment-grid">
-          {equipment.map((equip) => (
-            <div key={equip.equipment_id} className="equipment-card">
-              <div className="equipment-card-header">
-                <h3>{equip.name}</h3>
-                <span className="equipment-badge">{equip.equipment_type}</span>
+      <div className="eq-list">
+        {equipment.map((equip) => (
+          <article key={equip.equipment_id} className="eq-plate" aria-labelledby={`eq-${equip.equipment_id}`}>
+            <SensorRing count={Number(equip.sensor_count) || 0} />
+            <div className="eq-body">
+              <div>
+                <h2 id={`eq-${equip.equipment_id}`}>{equip.name}</h2>
+                <div className="eq-type">{humanize(equip.equipment_type)}</div>
+                {equip.description && <p className="eq-desc">{equip.description}</p>}
               </div>
-              
-              <div className="equipment-card-body">
-                <div className="equipment-stat">
-                  <span className="stat-label">Sensors:</span>
-                  <span className="stat-value">{equip.sensor_count}</span>
-                </div>
-                
-                <div className="equipment-stat">
-                  <span className="stat-label">Location:</span>
-                  <span className="stat-value">{equip.location || 'N/A'}</span>
-                </div>
-                
-                <div className="equipment-stat">
-                  <span className="stat-label">Site:</span>
-                  <span className="stat-value">{equip.site_id || 'N/A'}</span>
-                </div>
-
-                <div className="equipment-stat">
-                  <span className="stat-label">Batch Timeout:</span>
-                  <span className="stat-value">{equip.batch_timeout_seconds}s</span>
-                </div>
-
-                {equip.description && (
-                  <p className="equipment-description">{equip.description}</p>
-                )}
-              </div>
-
-              <div className="equipment-card-footer">
-                <button 
-                  className="btn-view-details"
-                  onClick={() => viewEquipmentDetails(equip.equipment_id)}
-                >
-                  View Details
+              <dl className="eq-facts">
+                <Fact label="Sensors" mono>{equip.sensor_count}</Fact>
+                <Fact label="Site">{equip.site_id || 'Not set'}</Fact>
+                <Fact label="Location">{equip.location || 'Not set'}</Fact>
+                <Fact label="Batch window" mono>{equip.batch_timeout_seconds} s</Fact>
+              </dl>
+              <div className="eq-actions">
+                <a className="btn btn-primary" href="/">Show on Core</a>
+                <button type="button" className="btn" onClick={() => viewEquipmentDetails(equip.equipment_id)}>
+                  Details
                 </button>
                 {writable && (
                   <>
-                    <button
-                      className="btn-edit"
-                      onClick={() => handleEdit(equip)}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      className="btn-delete"
-                      onClick={() => handleDelete(equip.equipment_id)}
-                    >
-                      Delete
+                    <button type="button" className="btn" onClick={() => handleEdit(equip)}>Edit</button>
+                    <button type="button" className="btn btn-danger eq-delete" onClick={() => handleDelete(equip)}>
+                      Delete machine
                     </button>
                   </>
                 )}
               </div>
             </div>
-          ))}
-        </div>
+          </article>
+        ))}
+      </div>
 
-        {equipment.length === 0 && (
-          <div className="equipment-empty">
-            <p>No equipment configured</p>
-            {writable && (
-              <button className="btn-primary" onClick={handleCreateNew}>
-                Create Your First Equipment
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Details Modal */}
-        {showModal && selectedEquipment && (
-          <div className="modal-overlay" onClick={() => setShowModal(false)}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h2>{selectedEquipment.name}</h2>
-                <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
-              </div>
-              
-              <div className="modal-body">
-                <div className="detail-section">
-                  <h3>Equipment Information</h3>
-                  <div className="detail-grid">
-                    <div className="detail-item">
-                      <span className="detail-label">Equipment ID:</span>
-                      <span className="detail-value">{selectedEquipment.equipment_id}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="detail-label">Type:</span>
-                      <span className="detail-value">{selectedEquipment.equipment_type}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="detail-label">Location:</span>
-                      <span className="detail-value">{selectedEquipment.location || 'N/A'}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="detail-label">Site ID:</span>
-                      <span className="detail-value">{selectedEquipment.site_id || 'N/A'}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="detail-section">
-                  <h3>Batch Configuration</h3>
-                  <div className="detail-grid">
-                    <div className="detail-item">
-                      <span className="detail-label">Sensor Count:</span>
-                      <span className="detail-value">{selectedEquipment.sensor_count}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="detail-label">Batch Timeout:</span>
-                      <span className="detail-value">{selectedEquipment.batch_timeout_seconds}s</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="detail-label">Require Complete:</span>
-                      <span className="detail-value">{selectedEquipment.require_complete_batch ? 'Yes' : 'No'}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="detail-label">Min Sensors (Partial):</span>
-                      <span className="detail-value">{selectedEquipment.min_sensors_for_partial || 'N/A'}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="detail-section">
-                  <h3>Expected Sensors ({selectedEquipment.expected_sensors?.length || 0})</h3>
-                  <div className="sensor-list">
-                    {selectedEquipment.expected_sensors?.map((sensor, idx) => (
-                      <span key={idx} className="sensor-chip">{sensor}</span>
+      {showModal && selectedEquipment && (
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div
+            className="modal-content" role="dialog" aria-modal="true" aria-label={selectedEquipment.name}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2>{selectedEquipment.name}</h2>
+              <button type="button" className="modal-close" aria-label="Close" onClick={() => setShowModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <section className="detail-section">
+                <h3>Machine</h3>
+                <dl className="detail-grid">
+                  <Fact label="Identifier" mono>{selectedEquipment.equipment_id}</Fact>
+                  <Fact label="Type">{humanize(selectedEquipment.equipment_type)}</Fact>
+                  <Fact label="Site">{selectedEquipment.site_id || 'Not set'}</Fact>
+                  <Fact label="Location">{selectedEquipment.location || 'Not set'}</Fact>
+                </dl>
+              </section>
+              <section className="detail-section">
+                <h3>Batching</h3>
+                <dl className="detail-grid">
+                  <Fact label="Sensors" mono>{selectedEquipment.sensor_count}</Fact>
+                  <Fact label="Batch window" mono>{selectedEquipment.batch_timeout_seconds} s</Fact>
+                  <Fact label="Complete batch required">{selectedEquipment.require_complete_batch ? 'Yes' : 'No'}</Fact>
+                  <Fact label="Minimum sensors for a partial batch" mono={!!selectedEquipment.min_sensors_for_partial}>
+                    {selectedEquipment.min_sensors_for_partial || 'Not set'}
+                  </Fact>
+                </dl>
+              </section>
+              <section className="detail-section">
+                <h3>Sensors ({selectedEquipment.sensorRows?.length ?? selectedEquipment.expected_sensors?.length ?? 0})</h3>
+                <div className="sensor-list">
+                  {selectedEquipment.sensorRows
+                    ? selectedEquipment.sensorRows.map((s) => (
+                      <span key={s.sensor_id} className="sensor-chip">
+                        {s.sensor_name}{s.unit ? <span className="sensor-chip-unit"> {s.unit}</span> : null}
+                      </span>
+                    ))
+                    : selectedEquipment.expected_sensors?.map((id) => (
+                      <span key={id} className="sensor-chip mono">{id}</span>
                     ))}
-                  </div>
                 </div>
-              </div>
+              </section>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Config Modal — keyed by target so opening a different equipment (or switching
-            between create and edit) remounts it with fresh, correctly-initialised form state. */}
-        <EquipmentConfigModal
-          key={editingEquipment?.equipment_id ?? 'new'}
-          isOpen={showConfigModal}
-          onClose={() => {
-            setShowConfigModal(false);
-            setEditingEquipment(null);
-          }}
-          onSuccess={handleConfigSuccess}
-          editEquipment={editingEquipment}
-        />
-      </div>
+      {/* Config modal, keyed by target so opening a different machine (or switching between
+          create and edit) remounts it with fresh, correctly initialised form state. */}
+      <EquipmentConfigModal
+        key={editingEquipment?.equipment_id ?? 'new'}
+        isOpen={showConfigModal}
+        onClose={() => {
+          setShowConfigModal(false);
+          setEditingEquipment(null);
+        }}
+        onSuccess={fetchEquipment}
+        editEquipment={editingEquipment}
+      />
     </div>
   );
 }

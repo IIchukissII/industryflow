@@ -55,3 +55,37 @@ export function coreReading({ sensors = {}, statusBySensor = {}, wsConnected = t
   if (!wsConnected) parts.push('The live stream is reconnecting; these are the last readings.');
   return parts.join(' ');
 }
+
+const SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+
+const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+// Alerts: what is open, the most severe of it, and how quiet the last day was otherwise.
+export function alertsReading({ alerts = [], now = Date.now() }) {
+  const open = alerts.filter((a) => !a.acknowledged);
+  const dayAgo = now - 24 * 3600 * 1000;
+  const lastDay = alerts.filter((a) => new Date(a.triggered_at).getTime() >= dayAgo).length;
+
+  if (!alerts.length) return 'No alerts have fired. Alert rules decide what raises one.';
+  if (!open.length) {
+    return lastDay
+      ? `No alerts are open. ${cap(countWord(lastDay))} fired in the last 24 hours, all acknowledged.`
+      : 'No alerts are open, and none fired in the last 24 hours.';
+  }
+  const worst = [...open].sort((a, b) =>
+    (SEVERITY_RANK[a.severity] ?? 5) - (SEVERITY_RANK[b.severity] ?? 5)
+    || new Date(a.triggered_at) - new Date(b.triggered_at))[0];
+  const what = worst.message || worst.rule_name || 'an alert';
+  const since = worst.triggered_at ? `, since ${clock(worst.triggered_at)}` : '';
+  if (open.length === 1) return `One alert is open: ${what}${since}.`;
+  return `${cap(countWord(open.length))} alerts are open. The most severe is ${worst.severity || 'unrated'}: ${what}${since}.`;
+}
+
+// Equipment: how many machines report, and through how many sensors.
+export function equipmentReading({ equipment = [] }) {
+  if (!equipment.length) return 'No machines yet. Add one to start receiving its readings.';
+  const sensors = equipment.reduce((n, e) => n + (Number(e.sensor_count) || 0), 0);
+  const machines = equipment.length === 1 ? 'One machine is' : `${cap(countWord(equipment.length))} machines are`;
+  const tail = equipment.length === 1 ? '' : ' between them';
+  return `${machines} configured, with ${countWord(sensors)} ${sensors === 1 ? 'sensor' : 'sensors'}${tail}.`;
+}

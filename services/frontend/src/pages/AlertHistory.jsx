@@ -8,14 +8,14 @@ import Icon from '../components/Icon';
 import './AlertHistory.css';
 import authFetch from '../services/http';
 import { canWrite, READ_ONLY_HINT } from '../utils/roles';
+import { alertsReading } from '../utils/reading';
 
-// Severity → status token. Maps the five levels onto the platform's status palette so the page
-// reads as one system with the rest of the app (no ad-hoc hex).
+// Severity → status token: the alchemical stages for the two that need action, quiet greys below.
 const SEVERITY = {
   critical: 'var(--crit)',
   high: 'var(--warn)',
-  medium: 'var(--signal)',
-  low: 'var(--live)',
+  medium: '#b9bfcc',
+  low: 'var(--muted)',
   info: 'var(--faint)',
 };
 const sevColor = (s) => SEVERITY[s] || SEVERITY.info;
@@ -164,7 +164,14 @@ function AlertHistory() {
     }
   };
 
-  const formatDate = (ts) => new Date(ts).toLocaleString();
+  // Today: the time alone. Earlier: a short date and the time.
+  const formatDate = (ts) => {
+    const d = new Date(ts);
+    const today = new Date().toDateString() === d.toDateString();
+    return today
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
 
   const filteredAlerts = alerts.filter(alert => {
     const severityMatch = filterSeverity === 'all' || alert.severity === filterSeverity;
@@ -196,186 +203,139 @@ function AlertHistory() {
     return { hours, counts: hours.map(h => counts[h]) };
   };
 
-  const getSeverityDistribution = () => {
-    const distribution = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-    filteredAlerts.forEach(alert => {
-      if (distribution[alert.severity] !== undefined) distribution[alert.severity]++;
-    });
-    return distribution;
-  };
-
   const hourlyData = getHourlyAlertCounts();
-  const severityDist = getSeverityDistribution();
   const maxCount = Math.max(...hourlyData.counts, 1);
+  const open = filteredAlerts.filter((a) => !a.acknowledged);
+  const earlier = filteredAlerts.filter((a) => a.acknowledged);
+  const lastDayTotal = hourlyData.counts.reduce((n, c) => n + c, 0);
+  const precision = metrics?.overall?.precision;
+  const labelled = metrics?.overall?.labeled_total || 0;
 
-  if (loading) return <div className="alh-state"><span className="sdot pending" /> Loading alerts…</div>;
+  if (loading) return <div className="alh-state"><span className="sdot pending" /> Loading alerts</div>;
   if (error) return <div className="alh-state"><Icon name="alert" size={20} color="var(--crit)" /> {error}</div>;
 
+  const row = (alert) => (
+    <li key={alert.alert_id} className={`alh-alert${alert.acknowledged ? ' is-ack' : ' is-open'}`} style={{ '--sev': sevColor(alert.severity) }}>
+      <span className="alh-mark" aria-hidden="true" />
+      <div className="alh-alert-body">
+        <div className="alh-alert-msg">{alert.message}</div>
+        <div className="alh-alert-meta">
+          {[alert.equipment_name, alert.sensor_name, alert.rule_name, alert.severity].filter(Boolean).join(', ')}
+          {alert.triggered_at && <>{' '}<span className="mono">{formatDate(alert.triggered_at)}</span></>}
+          {alert.detection_type === 'ml' && alert.anomaly_score != null && (
+            <>, anomaly score <span className="mono">{alert.anomaly_score.toFixed(3)}</span></>
+          )}
+        </div>
+      </div>
+      <div className="alh-alert-right">
+        {!alert.acknowledged && writable && (
+          <button type="button" className="btn btn-primary" onClick={() => acknowledgeAlert(alert.alert_id)}>Acknowledge</button>
+        )}
+        {alert.acknowledged && (
+          <span className="alh-ack-done">
+            Acknowledged{alert.acknowledged_at ? <> <span className="mono">{formatDate(alert.acknowledged_at)}</span></> : ''}
+          </span>
+        )}
+        <LabelControl alert={alert} onLabel={labelAlert} readOnly={!writable} />
+      </div>
+    </li>
+  );
+
   return (
-    <div className="alh-wrap">
-      <div className="page-head">
-        <div>
-          <div className="eyebrow">Operations</div>
-          <h1>Alert history</h1>
-          <div className="sub">Fired alerts across your tenant — label them real/false to measure model precision.</div>
-        </div>
-        <button onClick={fetchAlerts} className="btn btn-secondary btn-sm">
-          <Icon name="refresh" size={14} /> Refresh
-        </button>
-      </div>
-
-      <div className="kpi-row alh-kpis">
-        <div className="kpi">
-          <div className="kpi-label">Total alerts</div>
-          <div className="kpi-value">{filteredAlerts.length}</div>
-        </div>
-        <div className="kpi" style={{ '--accent': 'var(--crit)' }}>
-          <div className="kpi-label">Critical</div>
-          <div className="kpi-value" style={{ color: 'var(--crit)' }}>{severityDist.critical}</div>
-        </div>
-        <div className="kpi" style={{ '--accent': 'var(--warn)' }}>
-          <div className="kpi-label">High priority</div>
-          <div className="kpi-value" style={{ color: 'var(--warn)' }}>{severityDist.high}</div>
-        </div>
-        <div className="kpi" style={{ '--accent': 'var(--signal)' }}>
-          <div className="kpi-label">Unacknowledged</div>
-          <div className="kpi-value">{filteredAlerts.filter(a => !a.acknowledged).length}</div>
-        </div>
-        <div className="kpi" style={{ '--accent': 'var(--live)' }} title="Precision from operator labels over the last 30 days. Recall is not measurable from fired-alert labels (ADR-0022).">
-          <div className="kpi-label">Precision (labelled)</div>
-          <div className="kpi-value">
-            {metrics?.overall?.precision != null ? `${Math.round(metrics.overall.precision * 100)}%` : '—'}
-          </div>
-          <PrecisionSparkline series={metrics?.series} />
-          <div className="kpi-foot">
-            {metrics?.overall?.labeled_total ? `${metrics.overall.labeled_total} labelled · 30d` : 'label alerts below to measure'}
-          </div>
+    <div className="alh">
+      <div className="alh-head">
+        <p className="reading">{alertsReading({ alerts })}</p>
+        <div className="alh-actions">
+          <a href="/alert-rules">Manage alert rules</a>
+          <button type="button" onClick={fetchAlerts} className="btn btn-sm">
+            <Icon name="refresh" size={14} /> Refresh
+          </button>
         </div>
       </div>
 
-      <section className="panel alh-filters-panel">
-        <div className="alh-filters">
-          <label className="alh-field">
-            <span className="alh-field-label">Alert rule</span>
-            <select className="alh-select" value={selectedRule} onChange={(e) => setSelectedRule(e.target.value)}>
-              <option value="all">All rules</option>
-              {alertRules.map(rule => <option key={rule.rule_id} value={rule.rule_id}>{rule.name}</option>)}
-            </select>
-          </label>
-          <label className="alh-field">
-            <span className="alh-field-label">Severity</span>
-            <select className="alh-select" value={filterSeverity} onChange={(e) => setFilterSeverity(e.target.value)}>
-              <option value="all">All severities</option>
-              <option value="critical">Critical</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-          </label>
-          <label className="alh-field">
-            <span className="alh-field-label">Detection type</span>
-            <select className="alh-select" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
-              <option value="all">All types</option>
-              <option value="ml">ML detection</option>
-              <option value="threshold">Threshold</option>
-              <option value="statistical">Statistical (drift)</option>
-            </select>
-          </label>
-          {sensorFilter && (
-            <div className="alh-field">
-              <span className="alh-field-label">Sensor</span>
-              <button
-                type="button"
-                className="alh-sensor-chip"
-                title="Clear sensor filter"
-                onClick={() => {
-                  const next = new URLSearchParams(searchParams);
-                  next.delete('sensor');
-                  setSearchParams(next, { replace: true });
-                }}
-              >
-                {sensorFilterName} <span aria-hidden="true">✕</span>
-              </button>
-            </div>
-          )}
+      <section className="alh-day" aria-labelledby="alh-day-h">
+        <div className="alh-day-head">
+          <h2 id="alh-day-h">Last 24 hours</h2>
+          <div className="alh-summary">
+            <p>
+              {lastDayTotal} fired, {open.length} open.{' '}
+              {precision != null
+                ? <>Labels put precision at <span className="mono">{Math.round(precision * 100)}%</span> over 30 days ({labelled} labelled).</>
+                : 'Label alerts as real or false to measure precision.'}
+            </p>
+            <PrecisionSparkline series={metrics?.series} />
+          </div>
+        </div>
+        <div className="alh-timeline" role="img" aria-label={`Alerts per hour over the last 24 hours: ${lastDayTotal} in total`}>
+          {hourlyData.hours.map((hour, index) => {
+            const count = hourlyData.counts[index];
+            const barHeight = count > 0 ? Math.max((count / maxCount) * 56, 6) : 2;
+            return (
+              <div key={hour} className="alh-bar-col" title={`${hour}: ${count} alert${count === 1 ? '' : 's'}`}>
+                <div className={`alh-bar${count > 0 ? '' : ' empty'}`} style={{ height: `${barHeight}px` }} />
+                <div className="alh-bar-label">{index % 6 === 0 ? hour : ''}</div>
+              </div>
+            );
+          })}
         </div>
       </section>
 
-      <div className="alh-charts">
-        <section className="panel alh-chart">
-          <div className="panel-head"><h2>Alert timeline · last 24h</h2></div>
-          <div className="alh-timeline" role="img" aria-label="Alerts per hour over the last 24 hours">
-            {hourlyData.hours.map((hour, index) => {
-              const count = hourlyData.counts[index];
-              const barHeight = count > 0 ? Math.max((count / maxCount) * 160, 6) : 2;
-              return (
-                <div key={hour} className="alh-bar-col">
-                  <div className="alh-bar-count">{count > 0 ? count : ''}</div>
-                  <div
-                    className={`alh-bar${count > 0 ? '' : ' empty'}`}
-                    style={{ height: `${barHeight}px` }}
-                    title={`${hour}: ${count} alert${count === 1 ? '' : 's'}`}
-                  />
-                  <div className="alh-bar-label">{index % 3 === 0 ? hour.slice(0, 2) + 'h' : ''}</div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="panel alh-chart">
-          <div className="panel-head"><h2>By severity</h2></div>
-          <div className="alh-sevdist">
-            {Object.entries(severityDist).map(([severity, count]) => (
-              <div className="alh-sev-row" key={severity} style={{ '--sev': sevColor(severity) }}>
-                <div className="alh-sev-head">
-                  <span className="alh-sev-name">{severity}</span>
-                  <span className="alh-sev-count mono">{count}</span>
-                </div>
-                <div className="alh-sev-track">
-                  <div className="alh-sev-fill" style={{ width: `${(count / (filteredAlerts.length || 1)) * 100}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+      <div className="alh-filters" role="group" aria-label="Filter alerts">
+        <label className="alh-field">
+          <span>Rule</span>
+          <select value={selectedRule} onChange={(e) => setSelectedRule(e.target.value)}>
+            <option value="all">Every rule</option>
+            {alertRules.map(rule => <option key={rule.rule_id} value={rule.rule_id}>{rule.name}</option>)}
+          </select>
+        </label>
+        <label className="alh-field">
+          <span>Severity</span>
+          <select value={filterSeverity} onChange={(e) => setFilterSeverity(e.target.value)}>
+            <option value="all">Every severity</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+        <label className="alh-field">
+          <span>Detection</span>
+          <select value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+            <option value="all">Every kind</option>
+            <option value="ml">Model</option>
+            <option value="threshold">Threshold</option>
+            <option value="statistical">Drift</option>
+          </select>
+        </label>
+        {sensorFilter && (
+          <button
+            type="button"
+            className="alh-sensor-chip"
+            aria-label={`Clear the sensor filter ${sensorFilterName}`}
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete('sensor');
+              setSearchParams(next, { replace: true });
+            }}
+          >
+            Sensor {sensorFilterName} <span aria-hidden="true">✕</span>
+          </button>
+        )}
       </div>
 
-      <section className="panel alh-list-panel">
-        <div className="panel-head"><h2>Recent alerts <span className="alh-count">{filteredAlerts.length}</span></h2></div>
-        <div className="alh-list">
-          {filteredAlerts.length === 0 ? (
-            <div className="alh-empty"><Icon name="bell" size={22} color="var(--faint)" /><p>No alerts match your filters.</p></div>
-          ) : (
-            filteredAlerts.slice(0, 30).map(alert => (
-              <div key={alert.alert_id} className={`alh-alert${alert.acknowledged ? ' is-ack' : ''}`} style={{ '--sev': sevColor(alert.severity) }}>
-                <div className="alh-alert-body">
-                  <div className="alh-alert-msg">{alert.message}</div>
-                  <div className="alh-alert-meta">
-                    {alert.equipment_name && <span><Icon name="box" size={12} /> {alert.equipment_name}</span>}
-                    {alert.sensor_name && <span><Icon name="sensor" size={12} /> {alert.sensor_name}</span>}
-                    <span><Icon name="clock" size={12} /> {formatDate(alert.triggered_at)}</span>
-                    {alert.detection_type === 'ml' && alert.anomaly_score != null && (
-                      <span className="alh-score"><Icon name="cpu" size={12} /> {alert.anomaly_score.toFixed(3)}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="alh-alert-right">
-                  <span className="badge alh-sev-badge">{alert.severity}</span>
-                  <LabelControl alert={alert} onLabel={labelAlert} readOnly={!writable} />
-                  {alert.acknowledged ? (
-                    <span className="alh-ack-done" title={alert.acknowledged_at ? `Acknowledged ${formatDate(alert.acknowledged_at)}` : 'Acknowledged'}>
-                      <Icon name="check" size={12} /> Ack
-                    </span>
-                  ) : writable && (
-                    <button className="alh-ack-btn" onClick={() => acknowledgeAlert(alert.alert_id)}>Acknowledge</button>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+      <section aria-labelledby="alh-open-h">
+        <h2 id="alh-open-h" className="alh-h">Open <span className="alh-count mono">{open.length}</span></h2>
+        {open.length === 0
+          ? <p className="alh-empty">Nothing is open{filteredAlerts.length !== alerts.length ? ' for these filters' : ''}.</p>
+          : <ul className="alh-list">{open.map(row)}</ul>}
       </section>
+
+      {earlier.length > 0 && (
+        <section aria-labelledby="alh-earlier-h">
+          <h2 id="alh-earlier-h" className="alh-h">Earlier</h2>
+          <ul className="alh-list">{earlier.slice(0, 30).map(row)}</ul>
+        </section>
+      )}
     </div>
   );
 }
