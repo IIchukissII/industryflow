@@ -79,10 +79,15 @@ The decision is made now, rather than later, because licensing, audience, the op
 ## Deferred decisions
 
 - **Contributor licensing (CLA / copyright assignment).** Dual-licensing (decision 3) requires the rights to grant commercial exceptions; the contributor-agreement mechanism is necessary but unspecified here.
-- **License rollout mechanics.** Which paths are AGPL (code) versus CC-BY-SA-4.0 (docs), and the actual edit of `LICENSE` and the SPDX headers, are an implementation task following acceptance.
+- ~~**License rollout mechanics.** Which paths are AGPL (code) versus CC-BY-SA-4.0 (docs), and the actual edit of `LICENSE` and the SPDX headers, are an implementation task following acceptance.~~ *Resolved since acceptance:* see below.
 - **Commercial packaging and pricing.** The shape of the managed offering and the terms of the commercial license are business decisions, not fixed here.
-- **Extension/plugin interface.** How domains plug into the generic core (decision 7) is a technical ADR of its own.
+- ~~**Extension/plugin interface.** How domains plug into the generic core (decision 7) is a technical ADR of its own.~~ *Resolved since acceptance:* see below.
 - **Trademark and branding policy.** Whether and how the IndustryFlow name is protected, separate from the code license, is open.
+
+## Resolved since acceptance
+
+- **License rollout (2026-10-17).** The relicensing of decision 2 has been carried out. The repository's licence is the AGPL, and the texts of both licences are kept in the repository. Every file declares its own licence in a machine-readable header, with code under the AGPL and the decision records and documentation under CC-BY-SA-4.0; files whose format cannot carry a header are licensed by a repository manifest instead. No file carries the prior MIT grant. This changes no decision above.
+- **Extension/plugin interface (2026-10-17).** How domains plug into the generic core is decided in ADR-0008, which keeps the core domain-generic and makes extensions separately packaged and versioned against the platform, and in ADR-0010, which decides the in-process mechanism and its contracts. This changes no decision above.
 
 ## References
 
