@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # IndustryFlow
 
-**Real-time industrial IoT platform for sensor-data processing, anomaly detection, and predictive maintenance.**
+**Open-core, general-purpose industrial-IoT data platform: device ingestion, stream processing, per-tenant isolation, anomaly detection, alerting and embedded notebooks.**
 
 [![Unit tests](https://github.com/IIchukissII/industryflow/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/IIchukissII/industryflow/actions/workflows/unit-tests.yml)
 [![DB tenant isolation](https://github.com/IIchukissII/industryflow/actions/workflows/db-tenant-isolation.yml/badge.svg)](https://github.com/IIchukissII/industryflow/actions/workflows/db-tenant-isolation.yml)
@@ -15,90 +15,69 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 ![Python 3.14](https://img.shields.io/badge/python-3.14-blue.svg)
 ![React 19](https://img.shields.io/badge/react-19-61dafb.svg)
 
-<table>
-<tr>
-<td width="300">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="img/industryflow-logo-mono-dark.svg" />
-    <img src="img/industryflow-logo-mono-light.svg" alt="IndustryFlow" width="280" />
-  </picture>
-</td>
-<td>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/industryflow-logo-mono-dark.svg" />
+  <img src="img/industryflow-logo-mono-light.svg" alt="IndustryFlow" width="280" />
+</picture>
 
-IndustryFlow ingests high-velocity sensor streams, processes them through Kafka and Spark into
-TimescaleDB, detects anomalies with ML models, and surfaces real-time alerts — with a full
-Prometheus / Grafana / Loki observability stack. It is multi-tenant by design (schema-per-tenant
-isolation) and is the platform a sibling cultivation project is built on.
+## Capabilities
 
-Where an application is the **tree**, IndustryFlow is the **ground it grows from** — the gateway
-core at the centre, where every sensor stream converges.
-
-</td>
-</tr>
-</table>
-
-## Features
-
-- **Real-time stream processing** — Kafka + Apache Spark (at-least-once, idempotent writes)
-- **Multi-tenant** — schema-per-tenant isolation; tenants are provisioned at runtime, never hardcoded
-- **ML-powered anomaly detection** — pluggable detectors over engineered features
-- **Time-series storage** — TimescaleDB hypertables with compression
-- **Configurable alerting** — threshold, ML-based, and statistical model-drift rules (ADR-0021)
-- **Secure by design** — HTTPS everywhere, httpOnly-cookie + CSRF browser auth, and
-  **device ingestion over mutual TLS** with an internal device CA
-- **Extensible** — domains add feature transforms and anomaly detectors as plugins without forking the core
-- **Deployable** — `docker compose` for local dev, a **Helm chart** for Kubernetes (self-hosted or managed datastores)
-- **Full observability** — Prometheus, Grafana, Loki
+| Capability | Implementation | Decision |
+|------------|----------------|----------|
+| Device ingestion | Mutual TLS edge, tenant taken from the device certificate | [ADR-0002](ADR/ADR-0002-ingestion-authentication-and-device-identity.md), [ADR-0007](ADR/ADR-0007-public-key-infrastructure.md) |
+| Stream processing | Kafka → Spark → TimescaleDB, at-least-once with idempotent writes | [ADR-0005](ADR/ADR-0005-kafka-delivery-semantics.md), [ADR-0006](ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) |
+| Multi-tenancy | Schema-per-tenant; tenants provisioned at runtime | [ADR-0003](ADR/ADR-0003-tenant-to-schema-resolution.md), [ADR-0033](ADR/ADR-0033-tenant-lifecycle.md) |
+| Anomaly detection | Feature transforms and detectors over MLflow-registered models | [ADR-0023](ADR/ADR-0023-stream-materialized-feature-engineering.md), [ADR-0028](ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) |
+| Alerting | Threshold, ML and statistical (model-drift) rules; operator labels | [ADR-0021](ADR/ADR-0021-model-drift-monitoring.md), [ADR-0022](ADR/ADR-0022-concept-drift-operator-feedback.md), [ADR-0031](ADR/ADR-0031-alerting-http-surface-single-owner.md) |
+| Authentication | HTTPS edge, httpOnly-cookie + CSRF browser sessions, bearer tokens for API clients | [ADR-0004](ADR/ADR-0004-api-authentication-sessions-and-transport.md) |
+| Embedded notebooks | Per-user JupyterHub with capability handles, SQL access proxy, tracking gateway | [ADR-0011](ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md), [ADR-0015](ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md) |
+| Cold layer | Parquet history in object storage | [ADR-0025](ADR/ADR-0025-cold-layer-historical-data-open-columnar.md) |
+| Extensions | Domain feature transforms and detectors as plugins | [ADR-0008](ADR/ADR-0008-extension-and-plugin-interface.md), [ADR-0010](ADR/ADR-0010-extension-plugin-mechanism.md) |
+| Deployment | `docker compose` (local), Helm chart (Kubernetes) | [ADR-0009](ADR/ADR-0009-kubernetes-deployment-and-packaging.md) |
+| Observability | Prometheus, Grafana, Loki | [ADR-0016](ADR/ADR-0016-observability-and-monitoring-integration.md) |
 
 ## Quick start
 
 ```bash
 git clone https://github.com/IIchukissII/industryflow
 cd industryflow
-cp .env.example .env          # configure secrets and ports
+cp .env.example .env               # replace every changeme_* value
+scripts/device-ca.sh init          # device CA; the ingestion edge needs it to start
 docker compose up -d
 curl http://localhost:8000/health
-
-# Provision your first tenant + admin (nothing is hardcoded), then sign in
-scripts/create-tenant.sh "Your Company"   # prints a company_id
-#   set ADMIN_USER_1_* in .env, then seed the admin as in docs/getting-started.md (step 3)
+scripts/create-tenant.sh "Your Company"   # prints the company_id
 ```
 
-The frontend is served over HTTPS by its built-in TLS edge. The full setup — TLS, the
-first tenant/admin, API examples, and troubleshooting — is in
-**[docs/getting-started.md](docs/getting-started.md)**.
+Seeding the first admin, endpoints and API examples: [docs/getting-started.md](docs/getting-started.md).
 
 ## Documentation
 
-Full index: **[docs/](docs/README.md)**.
-
-- **[Getting Started & Operations](docs/getting-started.md)** — setup, configuration, API, testing, troubleshooting
-- **[Operations](docs/operations/)** — [authentication](docs/operations/authentication.md) · [user management](docs/operations/user-management.md) · [TLS & internal CA](docs/operations/tls.md) · [device mTLS](docs/operations/device-mtls.md) · [monitoring](docs/operations/monitoring.md) · [backup & recovery](docs/operations/backup-and-recovery.md) · [high availability](docs/operations/high-availability.md) · [production readiness](docs/operations/production-readiness.md) · [CI & required checks](docs/operations/ci.md)
-- **[Architecture](docs/architecture/README.md)** — database, Spark streaming, ML, alerting, feature engineering
-- **[API Reference](docs/api/README.md)** — per-service API documentation
-- **[Deployment](deploy/helm/industryflow/)** — the Helm chart for Kubernetes (ADR-0009)
-- **[Extensions](docs/operations/extensions.md)** — the plugin contracts for domain feature transforms & detectors (ADR-0008/0010)
-- **[Architecture Decision Records](ADR/)** — the platform's design decisions (ADR-0000 … ADR-0022)
-
-Interactive API docs are served at `http://localhost:8000/docs` when the stack is running.
+| Area | Link |
+|------|------|
+| Index of all docs | [docs/README.md](docs/README.md) |
+| Getting started | [docs/getting-started.md](docs/getting-started.md) |
+| Architecture | [docs/architecture/README.md](docs/architecture/README.md) |
+| API | [docs/api/README.md](docs/api/README.md); Swagger UI at `http://localhost:8000/docs` |
+| Helm chart | [deploy/helm/industryflow/](deploy/helm/industryflow/README.md) |
+| Decisions | [ADR/](ADR/) and [ADR/GLOSSARY.md](ADR/GLOSSARY.md) |
 
 ## Technology
 
-Python 3.14 · FastAPI · Apache Spark 4.1 · Apache Kafka · MLflow · PostgreSQL 15 + TimescaleDB ·
-Redis · MinIO · React 19 (Vite) · Prometheus / Grafana / Loki.
-
-Every Python image runs 3.14. The **MLflow** server was the last to move: it was held at 3.11 because
-its server imported a stdlib name 3.14 removed ([#222](https://github.com/IIchukissII/industryflow/issues/222)).
-Its dependency closure *resolved* perfectly on 3.14 and only starting the server found it, which is
-why `main` requires a check that boots the stack rather than one that merely builds it
-([ADR-0026](ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md)).
+| Layer | Components |
+|-------|------------|
+| Services | Python 3.14, FastAPI |
+| Streaming | Apache Kafka, Apache Spark 4.1 |
+| Storage | PostgreSQL 15 + TimescaleDB, Redis, MinIO |
+| ML | MLflow |
+| Frontend | React 19, Vite, nginx |
+| Observability | Prometheus, Grafana, Loki |
 
 ## Contributing
 
 1. Branch from `main`.
-2. Make changes following the existing code style (Python: `ruff`, configured in `ruff.toml` and gated in CI).
-3. Record architectural decisions as ADRs (see [ADR/ADR-0000](ADR/ADR-0000-decision-records-and-source-of-truth.md)).
-4. Add tests and update the relevant docs.
+2. Python style: `ruff`, configured in `ruff.toml`, gated in CI ([docs/operations/ci.md](docs/operations/ci.md)).
+3. Architectural decisions are recorded as ADRs ([ADR-0000](ADR/ADR-0000-decision-records-and-source-of-truth.md)).
+4. Add tests and update the affected docs.
 5. Open a pull request.
 
 ## License
