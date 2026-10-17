@@ -24,21 +24,7 @@
   margin: 0;
 }
 
-.btn-primary {
-  background: var(--signal);
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  transition: background 0.2s;
-}
 
-.btn-primary:hover {
-  background: #1e4fd9;
-}
 
 .tabs {
   display: flex;
@@ -203,19 +189,4 @@
   margin-top: 30px;
 }
 
-.btn-secondary {
-  background: transparent;
-  border: 1px solid #2a2e39;
-  color: #787b86;
-  padding: 10px 20px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.2s;
-}
 
-.btn-secondary:hover {
-  border-color: var(--signal);
-  color: var(--signal);
-}
