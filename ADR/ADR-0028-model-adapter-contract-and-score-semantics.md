@@ -3,16 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0028 — A model declares what its output means; the platform never guesses (rev 1)
+# ADR-0028 — A model declares what its output means; the platform never guesses (rev 2)
 
 - **ID:** ADR-0028
 - **Status:** Accepted
-- **Date:** 2026-07-14 (rev 1: 2026-10-13)
+- **Date:** 2026-07-14 (rev 1: 2026-10-13; rev 2: 2026-10-17)
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (whose deferred **model-adapter contract** — *"a third contract … its signature is not fixed here"* — this closes)
 - **Companions:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the gate that refuses what this environment cannot honour; this ADR says what "can honour" means for *scoring*), [ADR-0008](ADR-0008-extension-and-plugin-interface.md) (which names *model adapters* as a plugin category, and whose in-process default this inherits)
 - **Related:** [ADR-0021](ADR-0021-model-drift-monitoring.md) (the lane that trusts these scores enough to alert on them), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (the operator who labels those alerts), [ADR-0001](ADR-0001-industryflow-framing.md) (why a self-hoster who never trains a torch model must not carry a CUDA layer)
-- **Supersedes:** ADR-0028 rev 0 (2026-07-14 — made the detector a fact of the model record without saying when it is fixed, listed `direct_score` with no detector implementing it, and left the compatibility detector able to read a continuous output as a score; rev 1 decides all three, decisions 1 and 3)
+- **Supersedes:** ADR-0028 rev 0 (2026-07-14 — made the detector a fact of the model record without saying when it is fixed, listed `direct_score` with no detector implementing it, and left the compatibility detector able to read a continuous output as a score; rev 1 decides all three, decisions 1 and 3); rev 1 (2026-10-13 — named the model's raw sample score beside its boundary-relative score as one outlier semantics; rev 2 restricts `outlier_score` to a score centred on the decision boundary, decision 1)
 
 ## Context and problem
 
@@ -60,6 +60,15 @@ it were a score — which is inferring semantics from a dtype, the act decision 
 when the detector is decided and what serving does with it (decision 1), adds the direct-score
 detector, and closes the compatibility detector's last guess (decision 3).
 
+**Revision 2 (2026-10-17).** Decision 1 defined `outlier_score` by two of IsolationForest's outputs as
+if they carried one meaning. They do not. The decision-boundary score is centred on the boundary: its
+sign is the verdict and its magnitude the distance from it. The raw sample score is the same ranking
+shifted by an offset the model learned, so a perfectly normal reading sits well below zero and its sign
+says nothing. A detector that read the second as the first would put every reading on the anomalous
+side, which is #236 again in a subtler form, and the built-in outlier detector already refuses it. The
+definition invited exactly the inference decision 2 forbids. Rev 2 restates the semantics as the score
+centred on the boundary (decision 1).
+
 ## Decision drivers
 
 - **A wrong score is worse than no score.** ADR-0021 raises alerts on these numbers and ADR-0022 asks
@@ -87,6 +96,14 @@ detector, and closes the compatibility detector's last guess (decision 3).
    - **`direct_score`** — the model already emits a 0–1 anomaly score and means it.
 
    The list is open: a new semantics is a new registration, not a core edit (ADR-0010 dec 1).
+
+   > **rev 2 (2026-10-17): `outlier_score` is a continuous score centred on the model's own decision
+   > boundary.** Its sign carries the inlier/outlier verdict, with negative on the outlier side, and
+   > its magnitude carries the distance from the boundary; the label is a thresholding of it at zero.
+   > A raw sample score that is offset from the boundary by a quantity the model learned is **not**
+   > this semantics: its sign means nothing, and a detector that took it for one would score normal
+   > readings as anomalous. A model that exposes only such a score does not offer `outlier_score`, and
+   > a detector implementing `outlier_score` refuses it rather than re-centring it by a guess.
 
    > **rev 1 (2026-10-13): the detector is persisted per model at registration, and serving
    > dispatches on it.** Which detector scores a model is decided **once, at registration**, from what
@@ -218,6 +235,10 @@ it is exactly the model whose output the platform has no basis to interpret.
   is re-registered with a declared semantics, and changing a model's detector means registering it
   again rather than editing a heuristic.
 
+- **rev 2:** a model that offers only an offset sample score, and no boundary-centred one, is refused
+  by the outlier detectors; it needs a detector that declares how to centre that score before it can be
+  scored.
+
 ## Deferred decisions
 
 - **The out-of-process serving boundary** (decision 7): the sidecar protocol, routing an artifact to one
@@ -230,6 +251,19 @@ it is exactly the model whose output the platform has no basis to interpret.
 - **Whether a drift signal should carry its semantics.** ADR-0021 compares prediction distributions; two
   models with different score semantics are not comparable, and the drift lane does not currently know
   that.
+
+## Resolved since acceptance
+
+- **Whether a drift signal carries its semantics** (deferred above) is resolved by ADR-0021 rev 1: both
+  sides of a prediction-drift comparison hold the model's declared detector's scores, on that
+  detector's scale, so a model is only ever compared with a baseline of the same semantics.
+
+## Added after acceptance
+
+- **Where the reconstruction-error scale comes from** (deferred above) remains open as a schema
+  question. The build carries the scale as a training-time figure supplied with the model at
+  registration, and the reconstruction-error detector refuses a model registered without one, as
+  the Negative consequence requires.
 
 ## References
 
