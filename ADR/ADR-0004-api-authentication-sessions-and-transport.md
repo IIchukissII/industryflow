@@ -120,11 +120,16 @@ These are not seven unrelated bugs; they are the consequence of never deciding h
 
 ## Deferred decisions
 
-- **CSRF mechanism.** The specific anti-CSRF approach (double-submit cookie, synchroniser token, `SameSite` strictness level) is left to implementation.
-- **Refresh-token store and lifetimes.** The store backing revocation, the access/refresh lifetimes, and rotation/reuse-detection details are unspecified here.
+- ~~**CSRF mechanism.** The specific anti-CSRF approach (double-submit cookie, synchroniser token, `SameSite` strictness level) is left to implementation.~~ *Resolved since acceptance:* see below.
+- ~~**Refresh-token store and lifetimes.** The store backing revocation, the access/refresh lifetimes, and rotation/reuse-detection details are unspecified here.~~ *Resolved since acceptance:* see below.
 - ~~**Server-certificate issuance.**~~ *Resolved in rev 1, decision 8:* public ACME for the managed edge, an internal CA for self-hosting. Renewal automation remains an infrastructure concern (ACME auto-renewal; internal-CA leaf reissue per ADR-0017).
 - **Internal service-to-service authentication.** Whether internal calls use mTLS, signed tokens, or network trust is the deferred ADR-0002 question, not resolved here.
 - **Password-reset delivery.** Replacing the logged reset/verification tokens with an email delivery path is an implementation concern.
+
+## Resolved since acceptance
+
+- **CSRF mechanism (2026-10-17).** Implementation chose a double-submit token. Beside the httpOnly session cookie the backend sets a second cookie that page script can read, and every state-changing request authenticated by the session cookie must echo its value in a request header; a request that does not is refused. A request that presents a bearer credential instead is exempt, because a browser does not attach one automatically, and so is the authentication surface itself, which authenticates by password or refresh credential rather than by the session cookie. The cookies' `SameSite` level is deployment configuration. Each API service that authenticates requests by the session cookie applies the same check. This changes no decision above.
+- **Refresh-token store and lifetimes (2026-10-17).** The refresh credential is an opaque random value held in the platform's in-memory data store with a time-to-live, and indexed under its user so that all of a user's sessions can be ended at once (decision 2, rev 2). Refreshing claims the credential atomically and issues a successor, so a credential that has already been used is refused; it also carries a fingerprint of the user's password, so a password set outside the API ends the session at its next refresh. The access and refresh lifetimes are configuration. Ending a session is recorded for longer than any access token issued before it, and that record is what the periodic re-check of a live socket reads (decision 9), so a socket closes within one re-check interval of its session ending. This changes no decision above.
 
 ## References
 
