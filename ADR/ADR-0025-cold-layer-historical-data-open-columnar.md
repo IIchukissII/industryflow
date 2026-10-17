@@ -3,150 +3,78 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0025 — Cold layer for historical telemetry (raw measurements in an open columnar format) (rev 2)
+# ADR-0025 — Cold layer for historical telemetry in an open columnar format
 
-- **ID:** ADR-0025
 - **Status:** Accepted
-- **Date:** 2026-07-08 (rev 1: 2026-10-13; rev 2: 2026-10-13)
-- **Project:** IndustryFlow
-- **Parent:** ADR-0001 (framing)
-- **Companions:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (verified-identity, one-canonical-mapping tenant isolation, carried into the object store), [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (idempotency and the stream-holds-state boundary this reuses), [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (CronJob orchestration, the MinIO/external-S3 `inCluster` toggle), [ADR-0012](ADR-0012-notebook-credential-delivery.md) / [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (the no-durable-secret-in-the-kernel, brokered per-tenant read model the cold-read path extends to a plane of its own), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (training reads history; the cold layer is where "years, all columns" comes from)
-- **Related:** [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (the cold layer's own backup), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (per-tenant read-only role and egress allowlist that bound a leaked capability), [ADR-0021](ADR-0021-model-drift-monitoring.md) (monthly drift monitoring reads history)
-- **Supersedes:** ADR-0025 rev 0 (2026-07-08 — recorded the cold layer as direction, built only when decision 12's trigger fired; rev 1 records that it was built ahead of the trigger, restates decision 12, and closes the deferred items the build settled); rev 1 (2026-10-13 — treated a day as archived once, in one file, and settled verification as a row reconciliation plus a manifest; rev 2 lets a day be archived in immutable parts, verifies a drop against a fingerprint and records it, and requires the cold layer's own backup, decisions 3, 4 and 13)
+- **Date:** 2026-07-08; changed 2026-10-17
+- **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md) (framing)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant mapping), [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (scheduled jobs, object store), [ADR-0012](ADR-0012-notebook-credential-delivery.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (brokered reads, no secret in the kernel), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (the cold layer's backup)
 
-## Context and problem
+## Context
 
-The platform has a hot store but no cold store, and the hot store is quietly being used as both.
-
-- **Raw telemetry lives in the OLTP store, for two years.** The Spark streaming job upserts every reading *(since ADR-0006 rev 2, writes it first-write-wins)* into `tenant_<uuid>.sensor_measurements` (`services/spark_jobs/kafka_to_timescaledb.py:119`), a TimescaleDB hypertable chunked one day at a time (`infrastructure/timescaledb/init-scripts/04-complete-tenant-creation.sql:183-184`). Chunks compress columnar after 7 days (`compress_segmentby = equipment_id`, `compress_orderby = time DESC`, line 187-194) and the retention policy drops them after **two years** (line 195). The rolled-up `sensor_aggregations_1min/_5min/_1hour` tables carry their own tiered retention — 90 days / 180 days / 1 year by plan (lines 220-229). So raw high-frequency data is *persisted*, compressed, and kept for two years inside a row-store built for transactional point access.
-
-- **That two-year raw hypertable is already a cold archive wearing a hot store's clothes.** TimescaleDB's columnar compression shrinks the *bytes on disk*, but it changes nothing about the *transport*: a `SELECT` decompresses transparently and delivers rows one at a time over the Postgres wire protocol, over one connection. A data scientist pulling a year of history to train pulls billions of rows that way — OLTP transport for an OLAP scan. Column compression inside the chunk does not help the reader; the chunk is still handed out row-wise. An open columnar format in object storage is read the other way: many workers in parallel, only the needed columns, with predicate pushdown across partitions. The difference is an order of magnitude, not a percentage.
-
-- **"Training is a rare one-off" stops being true the moment real ML starts.** Today IndustryFlow's reference model is trained on the external TEP dataset, not on tenant long-horizon telemetry, and the sibling project's Phase-2 ML layer is not yet built — so nothing reads years of history yet, and the cost has stayed invisible. But around training lives everything that is *not* rare: hyperparameter search, temporal cross-validation, feature-window iteration ("5 min or 15 min?"), backtests, and the monthly drift monitoring [ADR-0021](ADR-0021-model-drift-monitoring.md) already commits to. Every one of those rereads the history. If each read costs hours because it streams row-wise out of Postgres, the experimentation stops. The cost of a history read sets the tempo of all ML work — so it is an architectural concern, not a convenience.
-
-There is no *bug* here today: the hot store works, and nothing yet reads years of it. As with [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md), this ADR does not order a rewrite. It records the **direction** — a third storage layer for long-horizon raw history in an open columnar format — so the decision is not re-derived from scratch when the first serious history read lands, and it states the sharp trigger that moves it from proposed to built.
-
-**A distinction this ADR is built on.** Two tempting shortcuts collapse the layer and must be named as wrong:
-
-- *"Timescale already compresses columnar — just push the compressed chunk to S3."* A chunk is an internal Postgres object, readable only by Postgres of the same major version with the same extension state. Dropped in the object store it is an opaque blob: no Spark, DuckDB, or pandas can read it. That is a **backup** (restore the database to read it), not a **cold layer** (read the data *without* the database). The right move is not to move the chunk but to export its *content* into an open format, before retention drops it.
-- *"One store can answer everything — why keep three?"* The three layers do not exist because there are three technologies; they exist because there are three classes of question, and collapsing any two makes one of them answered badly (see decision drivers and the alternatives).
-
-**Revision 1 (2026-10-13).** Decision 12 recorded this as direction, to be built when the first serious history read arrived or the hot store's raw accumulation became a burden, and said that until then there would be no code changes, no export, and no change to raw retention. The build was undertaken ahead of either trigger: both planes exist — the export (export → verify → drop) and the brokered read path — and the hot store's raw retention is now owned by the exporter rather than by a fixed timer. The record went on saying the opposite in its own decision while its status line announced the build. Rev 1 restates decision 12 to what is true, closes the deferred items the build settled (how the export is verified; how the broker vends access), and moves the implementation map out of this record into `docs/architecture/data-and-storage.md`. No decision about the layer's shape changes.
-
-**Revision 2 (2026-10-13).** Review of the built exporter found three places where the safety argument of decision 3 was weaker than the decision. *A day was treated as archived once.* Raw readings are not windowed, so a reading can arrive for a day after that day was exported; the export either missed it — the hot store then dropped it with the day — or re-exported the day over the file already archived, replacing the only copy of history with a new one written under different conditions. *The drop's check was a row reconciliation at export time.* Between export and drop, rows could arrive, change or leave, and a count taken earlier does not see a change that keeps the count. *Past the hot horizon the cold layer is the only copy, and nothing copied it.* Decision 3 makes the drop safe only relative to the export; if the object store is lost, a verified export protects nothing. Rev 2 restates decisions 3 and 4 and adds decision 13. It also corrects the References, which pointed through to an implementation map that named a provisioning job that is being folded into the object store's single bootstrap.
-
-## Decision drivers
-
-- **A history read's cost sets the ML tempo.** The layer that serves training and analysis must be read the way analytics reads — parallel, columnar, column-pruned, partition-pruned — not row-wise over the OLTP wire.
-- **The line is drawn by consumer, not by tool.** Three questions — *is it happening now?*, *what happened in the last hours?*, *what happened over years?* — have three different access profiles. Duplication would mean two layers answering the *same* question; here the questions differ, so three layers is role separation, not copied state. This is the same "decouple by default, bind by contract" discipline as [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md), and the same "draw the line by responsibility" as [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md)'s stream-holds-state boundary.
-- **Tenant isolation is not optional, does not stop at the database edge, and follows the policy already on record.** Every storage decision in the platform is schema-per-tenant ([ADR-0003](ADR-0003-tenant-to-schema-resolution.md)); [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) went out of its way to make feature isolation *structural*. The cold layer must obey the two rules that policy already fixes: on the *write* side, a tenant boundary derived from a verified identity and a single canonical mapping ([ADR-0003](ADR-0003-tenant-to-schema-resolution.md) dec 1, 4, 5); on the *read* side, the notebook credential rule that no durable, transferable secret enters the untrusted kernel and that a trusted broker binds each access to one tenant, read-only ([ADR-0012](ADR-0012-notebook-credential-delivery.md) dec 2, 4; [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) dec 5). This is not a new rule for object storage — [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) dec 7 already states the capability store holds handles and bindings, *"never database or object-store secrets."* A cold layer that pools tenants into one path, or that hands a notebook a durable object-store key, would break policy already written down.
-- **No drop without a verified export.** Once retention shortens (decision 2), the only thing standing between "aged-out chunk" and "lost data" is the export having run and been verified *first*. That ordering is safety-critical and must live where it cannot be reordered.
-- **Do not store what is derivable.** Aggregates are a pure function of raw. Holding them in the cold layer as well would be exactly the duplicated state [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) decision 2 refused when it declined to build a table for a value the aggregates already carried.
-- **Record the direction lazily; build on a trigger.** Nothing here needs code today; the value now is a written decision so the design is not lost, and the code lands when a real history read demands it.
+Raw telemetry lands in a hypertable in the transactional database, whose compression shrinks storage but
+still streams rows over one connection. Training, search, backtests and drift monitoring reread long
+history, so a history read's cost sets the pace of ML work. A compressed database chunk is readable only
+by the database that wrote it.
 
 ## Decision
 
-1. **Introduce a cold layer: raw measurements in Parquet in the object store, unbounded retention.** The content of `sensor_measurements` chunks is exported to Parquet files in the object store before retention drops them. This is the third layer — *stream* answers "is an anomaly happening now?" ([ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) state store), *hot* (TimescaleDB) answers "what happened in the last hours/days?", *cold* (Parquet) answers "give me years, all columns — I am training." The cold layer's role is training and analysis history; it is not a query path for live monitoring.
+1. **Raw measurements are kept in Parquet in the object store, unbounded, for training and analysis.**
+2. **Hot-store raw retention is the live-monitoring horizon; raw rows leave only through decision 3.**
+3. **Export → verify → drop, ordered inside the exporter.** The drop locks writers off the day and
+   proceeds only if a fingerprint of its rows (count and order-independent digest) equals the one taken
+   at export. Each drop is recorded in its own transaction, so a crash resumes correctly.
+4. **The export is idempotent, and archived parts are immutable.** Each run exports everything past the
+   horizon not yet archived; late rows become a further part, and a part whose drop is recorded is never
+   rewritten.
+5. **Tenant isolation extends into the object store under the existing policy.** On write, tenants come
+   from the registry and map through the one tenant mapping to their own prefix (ADR-0003). On read, the
+   kernel holds no durable credential: a trusted broker resolves an audience-bound handle to one tenant
+   and vends short-lived, read-only presigned reads within its prefix (ADR-0012, ADR-0015).
+6. **Partition by event time; sort within each file by equipment.**
+7. **The cold layer holds raw readings only; aggregates are recomputed on read.**
+8. **Parquet now; a table format on a named trigger.** The trigger is a change to the archived reading's
+   shape that readers cannot absorb by tolerating parts with and without a field, or a second writer; a
+   new sensor or tenant only adds rows.
+9. **Orchestration is a scheduled cluster job until a real dependency graph exists.**
+10. **The object store is the one the platform already runs; the cold layer adds buckets and principals.**
+11. **The exporter is a separate job whose principal can write but not delete in the cold bucket.** The
+    stream's principal gains no access; the default engine is a single-node columnar writer.
+12. **The layer is built; table format, distributed export and aggregate history wait for triggers.**
+13. **The cold layer is mirrored append-only by a principal that can only read it (ADR-0032 dec 4).**
 
-2. **The hot-layer raw retention shortens to the live-monitoring horizon, gated on the cold layer existing.** Once the cold layer owns long history, keeping raw `sensor_measurements` in TimescaleDB for two years is the anti-pattern this ADR exists to remove: an OLTP store hoarding cold data. Raw retention shortens to the horizon live monitoring and post-alert forensics actually need (order of days-to-weeks, not years). Per [ADR-0000](ADR-0000-decision-records-and-source-of-truth.md), the concrete interval is owned by the init scripts, not fixed here; what this ADR fixes is *that it shortens* and *that it must not shorten before a verified cold export path exists*. Aggregation-table retention (the tiered 90d/180d/1yr) is unchanged — those serve the hot-layer question and are small.
+## Alternatives
 
-3. **The retention step becomes export → verify → drop, and the ordering is an invariant in the export script — never in the orchestrator.** The sequence is: select chunks older than N days, read their content and write Parquet partitions, **verify the write**, and only then drop the chunk. An orchestrator restarts a failed task; it does not resurrect dropped data. The only real protection is the order inside the script. **No chunk is dropped without a verified export.**
-
-   > **rev 2 (2026-10-13): a drop is checked against a fingerprint, and recorded.** "Verify" means the content being dropped is the content that was archived. When a day is exported, a **fingerprint** of its rows — their count and an order-independent digest of their content — is taken from the same snapshot that is written. The drop takes a lock that holds writers off the day, takes the fingerprint again, and drops **only if it is unchanged**; if any row arrived, changed or left since the export, nothing is dropped and the next run exports the difference. Each drop is **recorded** in the database in the drop's own transaction — which tenant, which day, which part, how many rows — so whether a part's drop happened is a fact the exporter reads rather than infers, and a crash on either side of the drop resumes correctly.
-
-4. **The export is idempotent and self-healing: "export everything older than N days not yet exported," not "export yesterday."** Formulated this way, a follow-up run automatically picks up a chunk a previous run failed on, which makes the orchestrator almost incidental. This reuses [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) decision 3/4's discipline — idempotent on the natural key, a failure fails the run — applied to a batch export rather than a stream sink.
-
-   > **rev 2 (2026-10-13): a day may be archived in several parts, and an archived part is never overwritten.** A day is not archived once. Rows that reach the hot store for a day after that day was exported — a late reading is still a reading — are exported as a **further part** of the same day, with its own fingerprint and its own recorded drop; a row the archive already holds is not exported twice. Once a part's drop is recorded, that part is **immutable**: no later run writes to it, and new rows only ever become a new part. A part whose drop was never recorded has not yet replaced anything and may be re-exported in place. Readers read every archived part of a day. The naming of parts is the exporter's.
-
-5. **Tenant isolation is carried into the object store end-to-end, following the policy already on record — not a new one.** Both sides obey the isolation rules the platform already fixed:
-
-   - **Write side (the export), per [ADR-0003](ADR-0003-tenant-to-schema-resolution.md).** The tenant boundary is derived from a verified identity — the `public.companies` registry, iterated by the trusted CronJob, not a value from any request — with `company_id` validated as a UUID (dec 4) and mapped through *one canonical* `company_id → tenant prefix` function (the object-store analogue of dec 5's single `company_id → schema` function, and its only definition). Each tenant's data is written under its own prefix (`tenant_<uuid>/…`); tenants are never pooled into a shared path keyed by a column.
-
-   - **Read side (notebooks/training), per [ADR-0012](ADR-0012-notebook-credential-delivery.md)/[ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md).** The untrusted kernel receives **no durable object-store credential** — the direct analogue of "no raw database password in the kernel" ([ADR-0012](ADR-0012-notebook-credential-delivery.md) dec 2), and the case [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) dec 7 already reserved ("never … object-store secrets"). Instead the spawner mints an **audience-bound capability handle of its own** — of the same opaque, single-tenant, read-only, centrally-revocable form as the API and SQL handles ([ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) dec 1, 3), and a **trusted cold-store broker** — holding the privileged object-store principal, the way the SQL proxy holds the privileged database principal ([ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) dec 5-6) — resolves the handle to its tenant and vends *short-lived, read-only, prefix-scoped* access to only that tenant's prefix (presigned URLs or scoped temporary credentials). Parallel direct-from-object-store reads (decision 1's whole point) are preserved; the privileged principal never enters the kernel or the capability store. A data scientist on tenant A can no more read tenant B's Parquet than tenant B's schema.
-
-6. **Partition by event time; sort within the file by `equipment_id`; do not partition by equipment or sensor.** Reads are "a year, all devices, a few columns," so partition by time (year/month/day) with file sizes in the hundreds-of-MB range (not thousands of small files), and let column selection prune the rest. Sorting rows within a file by `equipment_id` — the same key the hot store already segments compression by — makes Parquet min/max statistics skip blocks. Partitioning by `equipment_id`/`sensor_id` would create tens of thousands of directories (the small-file pathology) and is rejected.
-
-7. **The cold layer holds raw only; aggregates are not copied into it.** Aggregates are a pure function of raw and are recomputed by the analytical engine on read. Copying them into the cold layer would be the duplicated derivable state [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) decision 2 rejected. Long-horizon *aggregate* history, if ever needed for its own sake, is a separate question and a separate decision — not folded in here.
-
-8. **Format is Parquet now; a table format (Iceberg/Delta/Hudi) is a later superset added on a named trigger.** Parquet decides how the bytes lie; a table format decides what counts as a *table* over those same files — atomic commits, schema evolution without rewrite, snapshots/time-travel, and a manifest of which files are "current." Bare Parquet is a folder of files and lacks all of these. Start with Parquet plus clean partitioning; add a table format the first time the schema must evolve without rewriting history (a new sensor = a new column) **or** parallel writers appear — not before, or it is overengineering, and its commit-per-file metadata invites a small-file/compaction burden that trades database administration for table administration.
-
-9. **Orchestration is a Kubernetes CronJob — not Airflow, not (yet) Prefect.** Kubernetes already runs the platform ([ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md)) and provides scheduling, retries, run history, and resource limits natively; the export is one linear task (export → verify → drop) with no dependency graph, so an orchestrator would be ceremony. Airflow is too heavy for a single daily task. A workflow orchestrator (e.g. Prefect) earns its place only when a real dependency graph appears — the sibling project's Phase-2 ML pipeline (feature prep → training → validation → registration) — which is a separate project's concern and a separate decision, deferred here.
-
-10. **The object store is the existing one: MinIO in-cluster, external S3 when managed.** The cold layer reuses the object store and the S3A access path already in the stack for Spark checkpoints ([ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) decision 5) under [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md)'s `inCluster` toggle. No new infrastructure dependency is introduced — the cold layer is new *buckets/prefixes* on the object store already operated, not a new store; concrete endpoint/bucket names are owned by configuration ([ADR-0000](ADR-0000-decision-records-and-source-of-truth.md)).
-
-    *Note (2026-10-11):* "MinIO" names the server and its S3 surface, not a publisher's distribution of it. The upstream public images were withdrawn, so the in-cluster store now runs a maintained, signed third-party build of the same server. The decision is unchanged: same store, same API surface, no new dependency. Replacing the server itself would be a new decision.
-
-11. **The exporter is its own job with its own write-scoped principal; it is not the streaming Spark job and need not be Spark.** Three distinct MinIO roles are kept separate: the streaming Spark's **checkpoint** credentials stay checkpoint-only (they gain no cold-layer access), the exporter holds a **write-scoped** principal to the cold buckets/prefixes, and the read path holds no durable principal at all (decision 5, read side). The exporter's *engine* is a volume-driven choice, not an architectural one: at this deployment's scale the default is a **single-node columnar writer** (e.g. DuckDB / PyArrow reading Postgres and writing partitioned Parquet), matching decision 9's one-linear-task shape; a **distributed Spark batch write** is an option only if one tenant's per-run volume outgrows a single node. Either way the archival write is decoupled from the latency-critical stream (Alternative H), so the streaming Spark's relationship to MinIO is unchanged by this ADR.
-
-12. **Trigger and scope *(rev 1)*.** The direction was recorded with a trigger — the first serious history read, or the hot store's raw accumulation becoming a burden — and **the layer was built ahead of it**: the export runs, the read path is served, and the hot store's raw retention is owned by the exporter's export → verify → drop rather than by a fixed timer. What remains trigger-gated is what this record defers to later triggers of its own: a table format (decision 8), a distributed export engine (decision 11), and long-horizon aggregate history (decision 7).
-
-    > *Rev 0 read:* "The export code lands when the first serious history read arrives … Until a trigger fires there are no code changes: raw retention keeps its current value and no export runs. This ADR is the sharp precondition, not a build order."
-
-13. **The cold layer is backed up as an object store *(rev 2)*.** Because decision 3 makes the cold layer the only copy of history past the hot horizon, its objects are mirrored to a backup target by the platform's backup job, append-only, under a principal that can only read the cold bucket — never by the exporter, and never with a credential that could delete what it mirrors. The class of protection, its failure domain and its rehearsal are ADR-0032's (decision 4 there); this decision fixes only that a drop's safety includes the copy existing.
-
-## Alternatives considered
-
-**A. Keep raw in TimescaleDB with long retention and let data scientists query it directly (status quo).** *Rejected:* this is the current state, and it is OLTP row-transport for OLAP scans — the two-year raw hypertable is already the cold archive this ADR removes. Column compression inside the chunk does not change that the reader is served row-wise over the Postgres wire.
-
-**B. Push compressed Timescale chunks to the object store as-is.** *Rejected:* a chunk is a Postgres-internal object, readable only by the same Postgres major version and extension state. In the object store it is an opaque blob no analytical engine can read — a backup, not a cold layer. The content must be *exported* to an open format, not relocated as a blob.
-
-**C. Adopt Iceberg/Delta from day one.** *Rejected (deferred to decision 8's trigger):* the table-format guarantees (atomic commits, schema evolution, time-travel) solve problems the project does not yet have, while its commit-per-file metadata creates a small-file/compaction operational burden immediately. Parquet plus partitioning first; the table format is added when schema evolution without rewrite or parallel writers actually appear.
-
-**D. Materialize aggregates into the cold layer alongside raw.** *Rejected:* aggregates are derivable from raw and are recomputed on read. Storing them too is the duplicated state [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) decision 2 refused; it also invites the two copies to drift.
-
-**E. Partition the cold layer by `equipment_id` (or `sensor_id`).** *Rejected:* tens of thousands of devices become tens of thousands of directories full of tiny files — the small-file pathology that makes object-store reads slow and listing expensive. Time partitions plus within-file sort on `equipment_id` give the pruning without the directory explosion (decision 6).
-
-**F. A single shared path keyed by a tenant column, tenants distinguished only at query time.** *Rejected:* it breaks the schema-per-tenant isolation the platform is built on ([ADR-0003](ADR-0003-tenant-to-schema-resolution.md)) and the per-tenant read model — the same rejection as [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) alternative D, one layer down. Features and measurements follow per-tenant routing; so does cold history (decision 5, write side).
-
-**I. Mint a durable, single-tenant object-store credential (a MinIO/S3 access key) into the notebook kernel.** *Rejected*, and already rejected in shape by [ADR-0012](ADR-0012-notebook-credential-delivery.md) alternative A/B: it places a durable, transferable secret inside user-controlled code, which [ADR-0012](ADR-0012-notebook-credential-delivery.md) dec 2 forbids and [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) dec 7 names explicitly for object-store secrets. The brokered capability of decision 5 (read side) reaches the same single-tenant, read-only scope with no durable secret in the kernel and with central, immediate revocation — the object-store twin of the SQL proxy, not a new trust model.
-
-**G. Airflow (or another heavyweight scheduler) for the export.** *Rejected:* built for dozens of DAGs and a team, it is disproportionate to one linear daily task and heavier than the deployment should carry. A k8s CronJob provides the scheduling, retries, and history the task needs (decision 9).
-
-**H. Fold the export into the Spark streaming/aggregation job.** *Rejected:* archival is a batch concern on a daily cadence with a drop-after-verify failure model; the stream is latency-critical with a watermark/checkpoint failure model ([ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md)). Coupling them makes a slow or failed export a streaming-pipeline problem. The export is a separate CronJob (decision 9).
-
-**J. Re-export a whole day when late rows arrive for it *(rev 2)*.** *Rejected:* it overwrites the only copy of history with a new file, written under whatever conditions hold on that run, to add a handful of rows. Appending a part leaves every verified byte where it was.
-
-**K. Verify the drop by the row count reconciled at export *(rev 2)*.** *Rejected:* a count taken earlier cannot see a change that leaves the count unchanged, and cannot see anything that happens between export and drop. A fingerprint re-taken under a lock at the moment of the drop checks what is actually being dropped.
+| Alternative | Why rejected |
+|---|---|
+| Raw kept long in the hot store | Row-wise transport for analytical scans |
+| Compressed chunks copied to the object store | A backup, not readable without the database |
+| A table format from the start | Compaction work for problems not yet present |
+| Partition by equipment or sensor | Small-file directory explosion |
+| One shared path keyed by tenant column | Breaks schema-per-tenant isolation |
+| A durable object-store key in the kernel | A transferable secret in untrusted code |
+| Export inside the streaming job | Couples batch failures to the stream |
+| Re-export a day when late rows arrive | Overwrites the only copy of history |
+| Verify a drop by a count taken at export | Misses changes after export or that keep the count |
 
 ## Consequences
 
-### Positive
+**Positive**
+- History reads are parallel, columnar and pruned; tenant isolation holds; no new store or orchestrator.
 
-- A history read becomes an analytical read — parallel, columnar, column- and partition-pruned — instead of a row-wise drain over the Postgres wire, which is what lets ML experimentation (hyperparameter search, temporal CV, feature-window iteration, backtests, drift scans) proceed at a workable tempo.
-- The hot store returns to being hot: raw retention shortens from two years to the live-monitoring horizon, so TimescaleDB stops slowly becoming a bad archive and stays fast for the questions it is for.
-- Tenant isolation extends unbroken into the object store under the *existing* policy, not a new one: verified-identity, one-canonical-mapping writes ([ADR-0003](ADR-0003-tenant-to-schema-resolution.md)) and a brokered, no-durable-secret, single-tenant read path ([ADR-0012](ADR-0012-notebook-credential-delivery.md)/[ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md)) — the cold plane is one more instance of trusted mediation, a pattern the platform already runs.
-- No new infrastructure dependency and no new orchestrator: the export is a k8s CronJob over the object store the stack already runs ([ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md)/[ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md)).
-- The record is grounded and honest: the ADR names the two-year raw hypertable as the current anti-pattern rather than describing a system that does not exist.
+**Negative**
+- The cold layer is the only copy of old raw history; a further broker must honour revocation.
+- A day may span several parts, readers must tolerate added fields, and the backup grows without bound.
 
-### Negative
+## Deferred
 
-- The retention change is irreversible past the horizon: once raw ages out of the hot store, the cold layer is the *only* copy of long history, which is exactly why the export → verify → drop ordering (decision 3) is safety-critical and non-negotiable.
-- Decoupling into an open format trades database administration for **table administration**: even bare Parquet needs file-size discipline, and if decision 8's trigger later brings Iceberg, it brings compaction, snapshot expiry, and orphan-file cleanup. The operational burden changes shape; it does not vanish.
-- Open columnar storage is good for batch-write/heavy-read/time-scan and poor for high-frequency point inserts and "last N values now" — which is precisely why the cold layer must not be mistaken for a live-query path (decision 1); those questions stay with the hot and stream layers.
-- A further capability plane and a new trusted component are needed: a cold-store audience-bound handle minted by the spawner, and a cold-store broker holding the privileged object-store principal (decision 5, read side) — a real if bounded extension of [ADR-0012](ADR-0012-notebook-credential-delivery.md)/[ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md), and one more place the revocation path must be honoured.
-- **rev 2:** a day may now span several parts, so readers must read every part of a day, and the cold bucket's backup grows without bound alongside it.
-- *(rev 0, superseded by rev 1)* Until decision 12's trigger fired, the two-year raw accumulation was to continue; building ahead of the trigger ended it.
-
-## Deferred decisions
-
-- **Concrete retention values.** The shortened raw-retention interval and the export's "older than N days" threshold are configuration owned by the init scripts / job config ([ADR-0000](ADR-0000-decision-records-and-source-of-truth.md)), not fixed here.
-- ~~**Verification method for decision 3.**~~ *Settled by the build (rev 1), and decided in rev 2 (decision 3):* the drop is checked against a fingerprint of the day's content — count and order-independent digest — re-taken under a lock at drop time, and every drop is recorded. The detail is the exporter's, documented in `docs/architecture/data-and-storage.md`.
-- **Table format adoption (Iceberg/Delta/Hudi).** Which one, and the exact schema-evolution / parallel-writer trigger that pulls it in, is left to decision 8's trigger.
-- ~~**Cold-store broker internals (decision 5, read side).**~~ *Settled by the build (rev 1):* the broker is a distinct component, not an extension of the SQL proxy, and vends short-lived, read-only, per-object pre-signed reads confined to the tenant's prefix; the handle has an audience of its own.
-- **Export engine and the single-node → Spark threshold (decision 11).** The default is a single-node columnar writer; the concrete per-run volume at which the export escalates to a distributed Spark batch write is a build-time measurement, not fixed here.
-- **Long-horizon aggregate history.** If aggregate (not raw) history is ever needed beyond the tiered hot-layer retention, that is a separate decision (decision 7); not opened here.
-- **Prefect / ML-pipeline orchestration.** The orchestrator for the sibling project's Phase-2 ML dependency graph is that project's decision, triggered when the graph is real (decision 9).
+| Open question | Settled by |
+|---|---|
+| Which table format | Decision 8's trigger |
+| Volume at which the export becomes distributed | Measurement of the largest tenant's run |
+| Long-horizon aggregate history | A need beyond hot retention |
 
 ## References
 
-- ADR-0001 — framing; the generic-platform scope under which long-horizon history is a platform capability.
-- ADR-0003 — tenant-to-schema resolution; the verified-identity, UUID-validated, one-canonical-mapping isolation decision 5's write side carries into the object store.
-- ADR-0011 — embedded notebooks; the per-tenant read-only role and egress allowlist that bound a leaked cold-store capability.
-- ADR-0006 — Spark windowing & idempotent writes; the stream-holds-state boundary decision 1 relies on and the idempotency discipline decision 4 reuses; the MinIO/S3A object-store access decision 10 shares.
-- ADR-0009 — Kubernetes deployment; the CronJob orchestration (decision 9) and the MinIO/external-S3 `inCluster` toggle (decision 10).
-- ADR-0012 / ADR-0015 — notebook credential delivery and capability minting / SQL proxy; the no-durable-secret-in-the-kernel rule (ADR-0012 dec 2), the brokered single-tenant read-only binding (ADR-0015 dec 5-6), and the "never … object-store secrets" reservation (ADR-0015 dec 7) that decision 5's read side extends to a plane of its own.
-- ADR-0021 — model drift monitoring; a monthly history reader that motivates a cheap history-read path.
-- ADR-0023 — stream-materialized feature engineering; the "decouple by default, bind by contract" and "do not store derivable state" disciplines decisions 1 and 7 follow.
-- Code read (2026-07-08): `services/spark_jobs/kafka_to_timescaledb.py` (raw upsert into `sensor_measurements`); `infrastructure/timescaledb/init-scripts/04-complete-tenant-creation.sql` (hypertable, 1-day chunks, compress-after-7-days on `equipment_id`, raw retention 2 years, tiered aggregate retention); `docs/architecture/data-and-storage.md` (storage shape).
-- Implementation: where each decision is realised is mapped in `docs/architecture/data-and-storage.md`; the triggers still open are tracked in `docs/architecture/cold-layer-evolution.md`. The cold bucket and its scoped principals are created by the object store's one bootstrap, which alone holds the store's root credential (ADR-0030 dec 2 rev 4); no separate cold-layer provisioning job is part of the design.
-- ADR-0032 — backup and disaster recovery; decision 4 there governs the cold layer's backup that decision 13 requires.
+- [data-and-storage.md](../docs/architecture/data-and-storage.md), [cold-layer-evolution.md](../docs/architecture/cold-layer-evolution.md)
+- `services/cold_export/`, `services/notebook_cold_broker/`, `infrastructure/backup/db-backup.sh`
