@@ -3,12 +3,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Feature Store - Storage for Recent Sensor Readings
+Latest-value snapshot store for the alert worker's ML rules.
 
-Stores time-series sensor data to enable:
-- Windowed aggregations (rolling mean, std, etc.)
-- Historical feature engineering
-- Lag features and deltas
+Holds each sensor's recent readings per tenant and equipment; the ML rules read the latest value
+of each sensor as one snapshot (ADR-0023 dec 7). No windowed or derived features are computed here.
 
 Backend: Redis (production) or In-Memory (development/testing)
 """
