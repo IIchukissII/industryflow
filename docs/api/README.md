@@ -20,6 +20,7 @@ serves the full reference at `/docs` and `/openapi.json`; ports: [components](..
 | GET | `/api/training-data/equipment/{equipment_id}`, `…/stream` | session or `api` capability handle | Training frames |
 | GET | `/api/equipment`, `/api/equipment/{id}`, `/api/equipment/{id}/sensors` | session | Equipment and sensors |
 | POST, PUT, DELETE | `/api/equipment[/{id}]`, `/api/equipment/{id}/sensors[/{sensor_id}]`, `…/sensors/bulk` | `engineer`, `admin` | Manage equipment and sensors |
+| PATCH | `/api/equipment/{id}/sensors/{sensor_id}` | `engineer`, `admin` | Set or clear `display_name` (trimmed, ≤ 100, empty → null); `sensor_name` is not editable |
 | GET | `/api/cache/sensors` | session | Latest-value cache |
 | WS | `/ws/sensors`, `/ws/sensors/{equipment_id}` | `if_access` cookie | Live values ([websockets](../operations/authentication.md#websockets)) |
 | GET | `/health` | none | Liveness |

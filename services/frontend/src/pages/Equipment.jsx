@@ -8,6 +8,7 @@ import { getEquipment, getEquipmentById, getEquipmentSensors, deleteEquipment } 
 import './Equipment.css';
 import { canWrite } from '../utils/roles';
 import { equipmentReading } from '../utils/reading';
+import { sensorLabel } from '../utils/sensors';
 
 // "grow-cabinet" -> "Grow cabinet"
 const humanize = (t) => (t ? (t.charAt(0).toUpperCase() + t.slice(1)).replace(/[-_]+/g, ' ') : '');
@@ -191,8 +192,8 @@ function Equipment() {
                 <div className="sensor-list">
                   {selectedEquipment.sensorRows
                     ? selectedEquipment.sensorRows.map((s) => (
-                      <span key={s.sensor_id} className="sensor-chip">
-                        {s.sensor_name}{s.unit ? <span className="sensor-chip-unit"> {s.unit}</span> : null}
+                      <span key={s.sensor_id} className="sensor-chip" title={s.display_name ? s.sensor_name : undefined}>
+                        {sensorLabel(s)}{s.unit ? <span className="sensor-chip-unit"> {s.unit}</span> : null}
                       </span>
                     ))
                     : selectedEquipment.expected_sensors?.map((id) => (

@@ -27,6 +27,7 @@ WRITES = [
     ("put", f"/api/equipment/{EQ}", {"name": "p2"}),
     ("delete", f"/api/equipment/{EQ}", None),
     ("post", f"/api/equipment/{EQ}/sensors", {"sensor_name": "s", "sensor_type": "t", "position": 1}),
+    ("patch", f"/api/equipment/{EQ}/sensors/{SENSOR}", {"display_name": "s"}),
     ("delete", f"/api/equipment/{EQ}/sensors/{SENSOR}", None),
     ("post", f"/api/equipment/{EQ}/sensors/bulk", {"sensors": []}),
     ("post", "/api/alert-rules", {"name": "n", "severity": "low"}),

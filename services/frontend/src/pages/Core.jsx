@@ -11,6 +11,7 @@ import AppShell from '../components/AppShell';
 import ConvergenceCore from '../components/ConvergenceCore';
 import authFetch from '../services/http';
 import { coreReading } from '../utils/reading';
+import { sensorLabel } from '../utils/sensors';
 
 // lightweight-charts (the heaviest dependency) ships only in the chart's chunk.
 const SensorChart = lazy(() => import('../components/SensorChart'));
@@ -34,7 +35,7 @@ function ChannelList({ sensors, statusBySensor, selected, onSelect }) {
   });
   const order = (a, b) =>
     (STATUS_RANK[statusBySensor[a.id]] ?? 2) - (STATUS_RANK[statusBySensor[b.id]] ?? 2)
-    || (a.sensor_name || a.id).localeCompare(b.sensor_name || b.id);
+    || sensorLabel(a, a.id).localeCompare(sensorLabel(b, b.id));
 
   return (
     <div className="channels">
@@ -54,7 +55,7 @@ function ChannelList({ sensors, statusBySensor, selected, onSelect }) {
                   >
                     <span className="channel-dot" aria-hidden="true" />
                     <span className="channel-name">
-                      {c.sensor_name || c.id}
+                      {sensorLabel(c, c.id)}
                       {st === 'crit' && <span className="sr-only"> (critical alert)</span>}
                       {st === 'warn' && <span className="sr-only"> (needs a look)</span>}
                     </span>
@@ -160,7 +161,7 @@ export default function Core({ user }) {
                 <Suspense fallback={<div className="core-wait"><span className="sdot pending" /> Loading the chart</div>}>
                   <SensorChart
                     sensorId={selectedSensor}
-                    name={sensors[selectedSensor]?.sensor_name}
+                    name={sensorLabel(sensors[selectedSensor]) || undefined}
                     unit={sensors[selectedSensor]?.unit}
                   />
                 </Suspense>

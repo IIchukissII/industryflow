@@ -102,8 +102,11 @@ class AlertResponse(BaseModel):
     sensor_id: Optional[str]
     equipment_id: Optional[str]
     sensor_name: Optional[str]
+    sensor_display_name: Optional[str] = None  # the sensor's human label, joined at read time
     equipment_name: Optional[str]
+    rule_name: Optional[str] = None             # NULL when the rule was deleted
     company_id: str
+    detection_type: Optional[str] = None
     severity: str
     message: str
     actual_value: Optional[float]
@@ -121,12 +124,14 @@ class AlertResponse(BaseModel):
     labeled_by: Optional[str] = None
 
 
-# Shared SELECT for the three alert-list endpoints: the alert row + joined sensor/equipment
-# names + the operator label. Callers append a WHERE and params (see _fetch_alerts).
+# Shared SELECT for the three alert-list endpoints: the alert row + joined sensor/equipment/rule
+# names + the operator label. Callers append a WHERE and params (see _fetch_alerts). Every column
+# here must also be a field of AlertResponse, or the response model drops it.
 _ALERT_SELECT = """
     SELECT
         a.alert_id::text, a.rule_id::text, a.sensor_id::text, a.equipment_id::text,
-        s.sensor_name, e.name AS equipment_name,
+        s.sensor_name, s.display_name AS sensor_display_name, e.name AS equipment_name,
+        r.name AS rule_name, a.detection_type,
         a.severity, a.message, a.actual_value, a.threshold_value, a.anomaly_score,
         a.model_id::text, a.condition,
         a.triggered_at, a.acknowledged, a.acknowledged_at, a.acknowledged_by,
@@ -134,6 +139,7 @@ _ALERT_SELECT = """
     FROM alerts a
     LEFT JOIN sensors s ON a.sensor_id = s.sensor_id
     LEFT JOIN equipment e ON a.equipment_id = e.equipment_id
+    LEFT JOIN alert_rules r ON a.rule_id = r.rule_id
     LEFT JOIN alert_labels al ON a.alert_id = al.alert_id
 """
 

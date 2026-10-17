@@ -45,6 +45,12 @@ export const addSensorsBulk = async (equipmentId, sensorsData) => {
   return response.data;
 };
 
+// Only the display name is editable; the sensor key never changes.
+export const updateSensor = async (equipmentId, sensorId, changes) => {
+  const response = await api.patch(`/api/equipment/${equipmentId}/sensors/${sensorId}`, changes);
+  return response.data;
+};
+
 export const removeSensorFromEquipment = async (equipmentId, sensorId) => {
   await api.delete(`/api/equipment/${equipmentId}/sensors/${sensorId}`);
 };

@@ -6,6 +6,8 @@
 // It says only what the data supports: how many sensors report, on which machines, and which
 // of them sit in an open alert.
 
+import { sensorLabel } from './sensors';
+
 const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
   'ten', 'eleven', 'twelve'];
 
@@ -24,7 +26,7 @@ export function listNames(names, max = 3) {
   return `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`;
 }
 
-const sensorName = (sensors, id) => sensors[id]?.sensor_name || id;
+const sensorName = (sensors, id) => sensorLabel(sensors[id], id);
 
 export function coreReading({ sensors = {}, statusBySensor = {}, wsConnected = true }) {
   const ids = Object.keys(sensors);

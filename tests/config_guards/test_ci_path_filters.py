@@ -171,3 +171,21 @@ def test_workflows_that_run_the_backup_image_watch_its_build_context():
         globs = workflow_filter(wf.name)
         missed += [f"{wf.name}: {p}" for p in context if not covered(p, globs)]
     assert not missed, "workflows that run the db-backup image but miss its files:\n" + "\n".join(missed)
+
+
+# --- db-tenant-isolation.yml ----------------------------------------------------------------------
+
+
+def test_db_tenant_isolation_filter_covers_the_sources_its_live_tests_read():
+    # The live DB proofs run SQL read out of service modules (e.g. the gateway's name joins); a
+    # change to such a module must re-run them. Every repo path a live test names is watched.
+    globs = workflow_filter("db-tenant-isolation.yml")
+    named = set()
+    for test in sorted((ROOT / "infrastructure" / "timescaledb" / "tests").glob("test_*.py")):
+        for node in ast.walk(ast.parse(test.read_text())):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                    and node.value.startswith("services/") and (ROOT / node.value).is_file():
+                named.add(node.value)
+    assert named, "no live DB test reads a service module any more — revisit this guard"
+    missed = sorted(p for p in named if not covered(p, globs))
+    assert not missed, f"db-tenant-isolation never re-runs when these change: {missed}"
