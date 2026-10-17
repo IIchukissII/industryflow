@@ -1,6 +1,5 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
@@ -115,7 +114,7 @@ A domain's sensor set lives in its extension ([ADR-0008](../../../../ADR/ADR-000
 
 ## Related
 
-| Doc | Topic |
+| Page | Topic |
 |---|---|
-| [ml-and-features.md](../../../../docs/architecture/ml-and-features.md) | Feature engineering, transformation types |
-| [extensions.md](../../../../docs/operations/extensions.md) | Domain extensions |
+| [ML and features](../../../../docs/architecture/ml-and-features.md) | Feature engineering, transformation types |
+| [extensions](../../../../docs/operations/extensions.md) | Domain extensions |

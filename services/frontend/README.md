@@ -3,9 +3,9 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# frontend
+# Frontend
 
-The IndustryFlow web app: a React single-page app built with Vite, served by the nginx edge same-origin with the API ([ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md), [ADR-0009](../../ADR/ADR-0009-kubernetes-deployment-and-packaging.md)).
+The web app: a React single-page app built with Vite, served by the nginx edge same-origin with the API ([ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md), [ADR-0009](../../ADR/ADR-0009-kubernetes-deployment-and-packaging.md)).
 
 ## Commands
 
@@ -22,7 +22,7 @@ The IndustryFlow web app: a React single-page app built with Vite, served by the
 The dev server proxies `/api`, `/auth`, `/users` and `/ws` to `http://localhost:8000`
 (`server.proxy` in `vite.config.js`).
 
-| Build-time env var | Default | Meaning |
+| Name (build time) | Default | Meaning |
 |---|---|---|
 | `VITE_API_URL` | empty (same-origin) | API base URL |
 | `VITE_WS_URL` | derived from the page origin | WebSocket base URL |
@@ -72,11 +72,4 @@ them per request, and the resolver applies no search domains.
 
 ### Routes
 
-| Path | Upstream |
-|---|---|
-| `/api/models`, `/api/registered-models`, `/api/experiments`, `/api/feature-configs`, `/api/ml/`, `/api/drift` | ml-service |
-| `/api/`, `/auth/`, `/users/`, `/health`, `/docs`, `/openapi.json`, `/ws/` | api-gateway |
-| `/jupyter/` | notebook SSO proxy ([ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on.md)) |
-| `/api/2.0/industryflow-upload/` | tracking gateway ([ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md)) |
-| `/mlflow/_upload-staging/` | object store, pre-signed requests only |
-| `/` | the SPA |
+[API reference, edge routes](../../docs/api/README.md#edge-routes).

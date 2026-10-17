@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# notebook_sql_proxy
+# SQL proxy
 
 The SQL proxy for authoring notebooks ([ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md) dec 5-6): a kernel connects with its SQL-audience capability handle as the password, and the proxy relays its session as that tenant's own login after `SET ROLE tenant_reader_<uuid>`. The kernel holds no database password ([ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md) dec 2).
 
@@ -47,7 +47,7 @@ The roles and functions are created by
 
 ## Settings
 
-| Env var | Default | Meaning |
+| Name | Default | Meaning |
 |---|---|---|
 | `SQL_PROXY_HOST` | `0.0.0.0` | Listen address |
 | `SQL_PROXY_PORT` | `6432` | Listen port |
@@ -79,7 +79,7 @@ It skips when the database, Redis, the principals or the proxy port is unreachab
 
 ## Existing databases
 
-Init scripts run on an empty data volume only. On an existing database:
+On an existing database ([init scripts](../../infrastructure/timescaledb/init-scripts/README.md#execution)):
 
 | Step | Command |
 |---|---|

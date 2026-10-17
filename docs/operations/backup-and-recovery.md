@@ -1,30 +1,28 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # Backup and disaster recovery
 
 What the backup job copies, where to, and how to restore it. Store classification, the failure-domain
-rule and restore rehearsal are decided in
-[ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) (Proposed).
+rule and restore rehearsal: [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md).
 
 ## Coverage
 
 | Store | Backed up | Mechanism |
-|-------|-----------|-----------|
+|---|---|---|
 | Platform database (`industryflow`) | Yes | `pg_dump -Fc -Z6`, scheduled |
 | Tracking database (`mlflow`) | Yes | `pg_dump -Fc -Z6`, scheduled |
 | Cluster globals (roles) | Yes | `pg_dumpall --globals-only --no-role-passwords` |
 | Cold layer ([ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md)) | Yes | Object mirror, same run |
 | Model artifacts (object store) | No | — |
 | Notebook volumes ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-persistence.md)) | No | — |
-| Continuous WAL archiving / point-in-time recovery | No | Deferred in ADR-0032 |
+| Continuous WAL archiving / point-in-time recovery | No | Deferred in [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) |
 
 The recovery point of the databases is the schedule interval. The default target is the deployment's
 own MinIO: that is undo, not disaster recovery, until the target is a separate failure domain
-(ADR-0032 dec 3; [off-site target](#off-site-target)).
+([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 3; [off-site target](#off-site-target)).
 
 ## Backup job
 
@@ -32,7 +30,7 @@ Image `infrastructure/backup/` (`postgres:15-alpine` + `aws-cli`, uid 10001), en
 `db-backup.sh`.
 
 | Object | Key |
-|--------|-----|
+|---|---|
 | Database dump | `s3://<bucket>/<prefix>/<db>/<stamp>.dump` |
 | Globals | `s3://<bucket>/<prefix>/globals/<stamp>.sql` |
 | Cold mirror | `s3://<bucket>/<cold-prefix>/<source key>` |
@@ -40,8 +38,8 @@ Image `infrastructure/backup/` (`postgres:15-alpine` + `aws-cli`, uid 10001), en
 `<stamp>` is UTC `YYYYMMDDTHHMMSSZ`; lexical order is chronological. Dumps and globals are pruned to
 the newest `RETAIN_PER_DB` per prefix. The bucket is created if absent.
 
-| Script variable | Default | Meaning |
-|-----------------|---------|---------|
+| Name | Default | Meaning |
+|---|---|---|
 | `PGHOST` / `PGPORT` / `PGUSER` / `PGPASSWORD` | required (`PGPORT` `5432`) | Database connection (TLS via `PGSSLMODE` / `PGSSLROOTCERT`) |
 | `S3_BUCKET` | required | Backup bucket |
 | `S3_ENDPOINT_URL` | unset (AWS S3) | S3 endpoint |
@@ -57,7 +55,7 @@ the newest `RETAIN_PER_DB` per prefix. The bucket is created if absent.
 ### Cold mirror
 
 | Property | Behaviour |
-|----------|-----------|
+|---|---|
 | Incremental | An object is copied when the mirror lacks it or holds a different size; every `_manifest.json` is re-copied each run |
 | Append-only | Nothing is deleted from the mirror and it is not pruned |
 | Verified | Each copied object's size is read back; a mismatch fails the run |
@@ -76,8 +74,8 @@ MinIO root key.
 
 CronJob `<release>-db-backup` (`templates/cronjob-db-backup.yaml`).
 
-| Value | Default | Meaning |
-|-------|---------|---------|
+| Name | Default | Meaning |
+|---|---|---|
 | `backup.enabled` | `true` | CronJob rendered |
 | `backup.schedule` | `0 2 * * *` | Cron schedule (UTC) |
 | `backup.retainPerDatabase` | `14` | `RETAIN_PER_DB` |
@@ -96,10 +94,11 @@ kubectl -n <namespace> logs -f job/db-backup-manual-1
 
 ### Docker Compose
 
-`db-backup` is in the `backup` profile and does not start with `up`.
+`db-backup` is in the `backup` profile and does not start with `up`. Each `.env` variable sets the
+job variable named in *Meaning*.
 
-| `.env` | Default | Maps to |
-|--------|---------|---------|
+| Name (`.env`) | Default | Meaning |
+|---|---|---|
 | `DB_USER` / `DB_PASSWORD` | — | `PGUSER` / `PGPASSWORD` |
 | `BACKUP_STORE_ACCESS_KEY` / `BACKUP_STORE_SECRET_KEY` | — | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` |
 | `MINIO_ENDPOINT` | `http://minio:9000` | `S3_ENDPOINT_URL` and `COLD_SOURCE_ENDPOINT_URL` |
@@ -113,7 +112,7 @@ kubectl -n <namespace> logs -f job/db-backup-manual-1
 | `BACKUP_COLD_PREFIX` | `cold` | `COLD_BACKUP_PREFIX` |
 
 | Task | Command |
-|------|---------|
+|---|---|
 | One backup run | `docker compose run --rm db-backup` |
 | Without the cold mirror | `docker compose run --rm -e COLD_SOURCE_BUCKET= db-backup` |
 | Daily from host cron | `0 2 * * *  cd <install-dir> && docker compose run --rm db-backup` |
@@ -121,7 +120,7 @@ kubectl -n <namespace> logs -f job/db-backup-manual-1
 ### Off-site target
 
 | Deployment | Setting |
-|------------|---------|
+|---|---|
 | Helm | `backup.s3.endpoint`, `backup.s3.bucket`, and that bucket's keys as `BACKUP_STORE_ACCESS_KEY` / `BACKUP_STORE_SECRET_KEY` |
 | Compose | `BACKUP_S3_BUCKET` and `BACKUP_STORE_*` in `.env`; the endpoint per run: `docker compose run --rm -e S3_ENDPOINT_URL=https://<s3-endpoint> db-backup` (the service otherwise uses `MINIO_ENDPOINT`) |
 
@@ -169,7 +168,7 @@ Compare row counts and recent timestamps per tenant with the source, then drop t
 ### Full recovery
 
 | Step | Action |
-|------|--------|
+|---|---|
 | 1 | Start an empty TimescaleDB; the init scripts create the roles (passwords from the environment) and base schema |
 | 2 | Apply `<prefix>/globals/<stamp>.sql` with `psql`: it recreates the runtime roles (`tenant_reader_*`, `tenant_sqlproxy_*`); `role … already exists` errors for the init-script roles are expected. Roles carry no passwords (`--no-role-passwords`) |
 | 3 | `docker compose run --rm --entrypoint db-restore.sh db-backup industryflow latest` |
@@ -188,6 +187,8 @@ Manifests return with their parts, so readers see the same verified days.
 
 ## Related
 
-- [high-availability.md](high-availability.md): replication and HA of the stateful backends
-- [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md): deleting a tenant from backups
-- [ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md): a schema rollback is a restore
+| Page | Topic |
+|---|---|
+| [high availability](high-availability.md) | Replication and HA of the stateful backends |
+| [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) | Deleting a tenant from backups |
+| [ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md) | A schema rollback is a restore |

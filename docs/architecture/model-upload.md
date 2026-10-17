@@ -6,8 +6,6 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Model upload
 
 The path that admits an externally-authored model: components, locations, settings and refusals.
-The decisions, and the reason for each refusal, are
-[ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md)'s.
 
 | Decision | ADR |
 |---|---|
@@ -31,14 +29,11 @@ alert worker ─▶ ml-service-api         POST /api/inference/predict (loaded f
 
 ## Components
 
-| Question | Answered by | Code |
-|---|---|---|
-| May these bytes be written? | notebook-tracking-gateway (only writer to the artifact store) | `services/notebook_tracking_gateway/gateway.py`, `staging.py` |
-| Does loading them deserialise author-supplied objects? | notebook-tracking-gateway, at commit | `services/notebook_tracking_gateway/admission.py` |
-| Can this deployment serve the flavor with these semantics? | ml-service-api, at registration | `services/ml_service/api/routers/models.py`, `model_compat.py`, `uploaded_model.py` |
-| Does it load and score here? | ml-service-api, at deployment | `services/ml_service/api/load_probe.py`, `load_probe_worker.py` |
-| Upload capability | ml-service-api | `services/ml_service/api/upload_capability.py` |
-| Browser wizard | Models page, **Upload model** | `services/frontend/src/pages/ModelUploadWizard.jsx` |
+| Name | Role | Port | Config |
+|---|---|---|---|
+| `notebook-tracking-gateway` | Stage and commit; the only writer to the artifact store; judges at commit whether loading deserialises author-supplied objects | 5050 | `services/notebook_tracking_gateway/gateway.py`, `staging.py`, `admission.py` |
+| `ml-service-api` | Mints the upload capability handle; at registration, checks the flavor and semantics are servable; at deployment, runs the load-and-score probe | 8002 | `services/ml_service/api/upload_capability.py`, `routers/models.py`, `model_compat.py`, `uploaded_model.py`, `load_probe.py`, `load_probe_worker.py` |
+| Upload wizard | Models page, **Upload model** | | `services/frontend/src/pages/ModelUploadWizard.jsx` |
 
 ## Locations
 
@@ -46,8 +41,8 @@ alert worker ─▶ ml-service-api         POST /api/inference/predict (loaded f
 |---|---|
 | Staging prefix | `_upload-staging/` (`UPLOAD_STAGING_PREFIX`; gateway, `minio-init`, Helm `job-minio-init.yaml`) |
 | Admitted location | `s3://<bucket>/tenant_<uuid>/uploads/<upload id>` |
-| Bucket | `UPLOAD_ARTIFACT_BUCKET` (ml-service-api) = `TRACKING_ARTIFACT_BUCKET` (gateway), compose `mlflow` |
-| Edge routes | `/api/2.0/industryflow-upload/` → gateway; `/mlflow/_upload-staging/` → object store, pre-signed only (`services/frontend/nginx.conf.template`) |
+| Bucket | `UPLOAD_ARTIFACT_BUCKET` (`ml-service-api`) = `TRACKING_ARTIFACT_BUCKET` (tracking gateway) |
+| Edge routes | [API reference](../api/README.md#edge-routes) |
 
 Registration accepts only the admitted location under the caller's tenant; a model naming both a run
 and an artifact is refused. The check runs at registration, deployment and every load (warm-cache
@@ -76,12 +71,13 @@ interpreter settings and the object-store credential.
 
 ## Settings
 
-| Name | Service | Default | Meaning |
-|---|---|---|---|
-| `PUBLIC_BASE_URL` | ml-service-api, gateway | empty | Public edge origin. Set: pre-signed PUTs are signed for the edge (`TRACKING_S3_PRESIGN_ENDPOINT_URL`) and advertised as the upload endpoint (`UPLOAD_GATEWAY_URL`). Empty: interior endpoint only; the wizard reports browser upload as not configured |
-| `UPLOAD_ARTIFACT_BUCKET` | ml-service-api | `mlflow` (compose) | Unset: no uploaded model can be registered or served |
-| `UPLOAD_STAGING_EXPIRE_DAYS` | minio-init | 1 | Lifecycle expiry for staged, never-committed uploads; Helm `notebookHub.trackingGateway.uploadStaging.expireDays` |
-| `TRACKING_PRESIGN_TTL_SECONDS` | gateway | 300 | Pre-signed URL lifetime |
+| Name | Default | Meaning |
+|---|---|---|
+| `PUBLIC_BASE_URL` (Compose; `ml-service-api`, tracking gateway) | empty | Public edge origin. Set: pre-signed PUTs are signed for the edge (`TRACKING_S3_PRESIGN_ENDPOINT_URL`) and advertised as the upload endpoint (`UPLOAD_GATEWAY_URL`). Empty: interior endpoint only; the wizard reports browser upload as not configured |
+| `UPLOAD_ARTIFACT_BUCKET` (`ml-service-api`) | `mlflow` (Compose) | Unset: no uploaded model can be registered or served |
+| `UPLOAD_STAGING_EXPIRE_DAYS` (`minio-init`); Helm `notebookHub.trackingGateway.uploadStaging.expireDays` | 1 | Lifecycle expiry for staged, never-committed uploads. With bucket lifecycle managed elsewhere, the expiry must be set there |
+
+Pre-signed URL lifetime: [tracking gateway settings](../../services/notebook_tracking_gateway/README.md#settings).
 
 ## Uploader requirements
 
@@ -107,17 +103,15 @@ interpreter settings and the object-store credential.
 | register | 503 | Manifest unreadable (transient) |
 | deploy | 409 | Loading would run author code |
 | deploy | 409 | Did not load and score; `stage` is `manifest`, `signature`, `trust`, `load`, `score`, `timeout`, `crash` or `invoke` |
-| upload-capability | 501 | No capability store configured |
+| upload-capability | 501 | No capability store configured; no external model is accepted |
 | any | 401 | Capability absent, expired, revoked or for another plane |
 
 ## Operating notes
 
 | Item | Detail |
 |---|---|
-| Capability store | Required for minting; without it no external model is accepted (`501`) |
-| Staging expiry | Set by `minio-init` (compose) and `job-minio-init.yaml` (Helm); with bucket lifecycle managed elsewhere, the expiry must be provided there |
-| Staging-prefix agreement | Gateway, compose and chart values checked against each other by `services/notebook_tracking_gateway/tests/test_staging_infra_parity.py` |
-| Migrations 19, 20 | Apply by hand on a live database ([ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md)); 20 backfills `sklearn` for kernel-trained rows only, so an upload registered before it must be registered again |
+| Staging-prefix agreement | Gateway, Compose and chart values checked against each other by `services/notebook_tracking_gateway/tests/test_staging_infra_parity.py` |
+| Script 20 on a live database | Backfills `detector = sklearn` for kernel-trained rows only; an upload registered before it must be registered again |
 
 ## Not supported
 

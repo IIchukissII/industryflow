@@ -5,11 +5,14 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Device ingestion over mTLS
 
-How devices authenticate to ingestion with client certificates from the device CA, and how the CA,
-enrollment, revocation and CRL refresh are operated. Decisions:
-[ADR-0002](../../ADR/ADR-0002-ingestion-authentication-and-device-identity.md) (mTLS, device
-identity), [ADR-0007](../../ADR/ADR-0007-public-key-infrastructure.md) (device CA). The
-browser-facing server certificate is a separate PKI: [tls.md](tls.md).
+Device authentication to ingestion with client certificates from the Device CA, and operation of the
+CA, enrollment, revocation and CRL refresh. The browser-facing server certificate is a separate PKI
+([TLS](tls.md)).
+
+| Decision | ADR |
+|---|---|
+| mTLS, device identity | [ADR-0002](../../ADR/ADR-0002-ingestion-authentication-and-device-identity.md) |
+| Device CA, CRL | [ADR-0007](../../ADR/ADR-0007-public-key-infrastructure.md) |
 
 ## Request path
 
@@ -19,7 +22,7 @@ device ──mTLS (client cert)──▶ ingestion edge ──verified cert─�
 ```
 
 | Step | Behaviour |
-|------|-----------|
+|---|---|
 | Handshake | The edge verifies the client certificate against the device-CA chain and CRL (`ssl_verify_client on`, depth 2). Absent, untrusted or revoked: rejected (HTTP 400) |
 | Forward | The edge sets the identity headers itself, overwriting any the client sent |
 | Reachability | `ingestion-service` has no host port and sits only on networks shared with the edge and Kafka |
@@ -30,8 +33,8 @@ device ──mTLS (client cert)──▶ ingestion edge ──verified cert─�
 request carrying the other one's headers.
 
 | Deployment | Edge | `DEVICE_IDENTITY_HEADERS` | Headers |
-|------------|------|---------------------------|---------|
-| Compose | `ingestion-edge` (nginx, host port `INGESTION_MTLS_PORT`, default `8443`) | `x-client` | `X-Client-Verify`, `X-Client-Cert` |
+|---|---|---|---|
+| Compose | `ingestion-edge` (nginx, host port `INGESTION_MTLS_PORT`) | `x-client` | `X-Client-Verify`, `X-Client-Cert` |
 | Kubernetes | ingress-nginx, second Ingress (`ingress.mtls.enabled`) | `ssl-client` | `ssl-client-verify`, `ssl-client-cert` |
 
 ## CA commands
@@ -39,7 +42,7 @@ request carrying the other one's headers.
 All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 
 | Task | Command |
-|------|---------|
+|---|---|
 | Create root, issuing intermediate and CRLs | `scripts/device-ca.sh init` |
 | Sign a device CSR | `scripts/device-ca.sh issue <company-uuid> <device-id> device.csr` |
 | Issue a test key and certificate (local/test producers only) | `scripts/device-ca.sh issue <company-uuid> <device-id>` |
@@ -50,7 +53,7 @@ All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 | Print the verify-chain path | `scripts/device-ca.sh chain` |
 
 | File | Content |
-|------|---------|
+|---|---|
 | `root/root.key` | Root key; keep offline |
 | `intermediate/` | Issuing intermediate (day-to-day signer) |
 | `ca-chain.crt` | Intermediate + root; the edge's verify chain |
@@ -58,8 +61,8 @@ All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 | `devices/<company-uuid>/<device-id>/<serial>.{crt,key,chain.crt}` | One set per issued certificate; `.key` only for test issuance |
 | `devices/<company-uuid>/<device-id>/current.{crt,key,chain.crt}` | The newest serial |
 
-| Setting | Default | Meaning |
-|---------|---------|---------|
+| Name | Default | Meaning |
+|---|---|---|
 | `DEVICE_DAYS` | `90` | Device certificate validity |
 | `INT_DAYS` / `ROOT_DAYS` | `1825` / `3650` | Intermediate / root validity |
 | `CRL_DAYS` / `CRL_WARN_DAYS` | `7` / `3` | Intermediate CRL validity / warning window |
@@ -68,20 +71,13 @@ All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 ## Enrollment
 
 | Rule | Detail |
-|------|--------|
+|---|---|
 | Tenant binding | Fixed at issuance by the operator; the device cannot choose its tenant |
 | Real devices | Key generated on the device or secure element; only the CSR reaches the CA |
 | Renewal | Issuing again adds a new serial and moves `current.*`; nothing is overwritten |
 | Same `device_id`, two tenants | Two separate devices |
 
-Reference producer against the edge:
-
-```sh
-INGESTION_URL=https://<host>:8443/ingest \
-DEVICE_CERT=deploy/device-ca/devices/<company-uuid>/<device-id>/current.chain.crt \
-DEVICE_KEY=deploy/device-ca/devices/<company-uuid>/<device-id>/current.key \
-  python3 extensions/tep-reference/producer/stream_tep_data.py
-```
+Reference producer against the edge: [getting started, step 5](../getting-started.md#5-stream-test-data).
 
 ## Revocation
 
@@ -89,18 +85,17 @@ DEVICE_KEY=deploy/device-ca/devices/<company-uuid>/<device-id>/current.key \
 the SAN identity; another tenant's device with the same `device_id` is untouched.
 
 | Deployment | Takes effect |
-|------------|--------------|
+|---|---|
 | Compose | The edge polls the CRL file (`CRL_RELOAD_INTERVAL_SECONDS`, default `60`) and reloads nginx on change |
 | Kubernetes | After the new CRL is published to the device-CA Secret (below) |
 
 ## CRL refresh
 
 An expired CRL makes the edge refuse every device. Device certificates carry no CRL distribution
-point; the edge holds the CRL locally ([ADR-0007](../../ADR/ADR-0007-public-key-infrastructure.md)
-dec 8).
+point; the edge holds the CRL locally ([ADR-0007](../../ADR/ADR-0007-public-key-infrastructure.md) dec 8).
 
 | CRL | Lists | Re-signed by | Where |
-|-----|-------|--------------|-------|
+|---|---|---|---|
 | Intermediate | Revoked devices | `device-ca.sh crl` | Compose: `device-crl-refresh` service. Kubernetes: the CA host, at least every few days |
 | Root | Revoked intermediates | `device-ca.sh root-crl` | Yearly root ceremony: bring the root key in, run it, take the key offline |
 
@@ -124,8 +119,8 @@ kubectl -n <namespace> create secret generic industryflow-device-ca \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-| Value | Default | Meaning |
-|-------|---------|---------|
+| Name | Default | Meaning |
+|---|---|---|
 | `ingress.mtls.caSecret` | `industryflow-device-ca` | Secret with `ca.crt` and `ca.crl`; without `ca.crl` revocation is not checked and the CRL check fails |
 | `ingress.mtls.crlCheck.schedule` | `17 */6 * * *` | `device-crl-check` CronJob checking the Secret's CRL |
 | `ingress.mtls.crlCheck.warnDays` / `rootWarnDays` | `3` / `30` | Warning windows |
@@ -134,7 +129,7 @@ kubectl -n <namespace> create secret generic industryflow-device-ca \
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
-|---------|-------|-----|
+|---|---|---|
 | Every device refused | A CRL expired | `device-ca.sh crl` (and `root-crl` if the root CRL expired); on Kubernetes republish the Secret |
 | `device-ca.sh check` warns on the root CRL far ahead of the yearly ceremony | Root CRL signed with a shorter validity than `ROOT_CRL_DAYS` | `scripts/device-ca.sh root-crl`, then `docker compose up -d device-crl-refresh ingestion-edge` |
 | `device-crl-refresh` exits: device CA not initialized | No `deploy/device-ca/intermediate` | `scripts/device-ca.sh init` |

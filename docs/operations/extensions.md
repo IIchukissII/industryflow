@@ -5,23 +5,25 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Extensions and plugins
 
-The extension surfaces of the ML service: configuration, the feature-transform and anomaly-detector
-plugin contracts, and how an extension module is loaded. Decisions:
-[ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md),
-[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md).
+The extension surfaces of `ml-service-api`: configuration, the feature-transform and detector plugin
+contracts, and loading an extension module
+([ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md),
+[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)).
 
 | Surface | Content | Change needed |
-|---------|---------|---------------|
+|---|---|---|
 | Configuration | Feature definitions (`feature_engineering_configs`), sensor mappings, alert rules, per tenant | Data only |
-| Code plugins | Feature transforms and anomaly detectors registered through `extensions` (`services/ml_service/api/extensions/`) | An extension module named in `EXTENSION_MODULES` |
+| Code plugins | Feature transforms and detectors registered through `extensions` (`services/ml_service/api/extensions/`) | An extension module named in `EXTENSION_MODULES` |
 
 The core ships only generic built-ins and never imports a named extension.
 
-| Registry | Decorator | Built-ins |
-|----------|-----------|-----------|
-| Feature transforms | `register_transform(name, *, stateful=False, neutral=0.0)` | `identity`, `polynomial`, `interaction`, `deviation`, `statistical`, `rolling_stat` |
-| Anomaly detectors | `register_detector(name, *, semantics=DIRECT_SCORE, handles_flavors=None)` | `sklearn`, `direct`, `outlier`, `autoencoder` |
+| Registry | Decorator |
+|---|---|
+| Feature transforms | `register_transform(name, *, stateful=False, neutral=0.0)` |
+| Detectors | `register_detector(name, *, semantics=DIRECT_SCORE, handles_flavors=None)` |
 
+Built-ins: [transforms](../architecture/ml-and-features.md#feature-configuration),
+[detectors](../architecture/ml-and-features.md#detectors).
 Registering a different function under an existing name raises `ValueError`.
 
 ## Feature transforms
@@ -44,13 +46,13 @@ async def pressure_baseline(transformation, sensor_data, ctx):
 ```
 
 | Tag | Meaning |
-|-----|---------|
+|---|---|
 | `stateful=True` | The transform reads an external store. Required for any such transform ([ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) |
 | `neutral` | Value the engine puts in the slot while the stateful-feature kill-switch is off; the transform is then not called. The vector keeps its length and order |
 
-Operating the kill-switch: [monitoring.md](monitoring.md).
+Operating the kill-switch: [monitoring](monitoring.md#runbook-stateful-feature-kill-switch).
 
-## Anomaly detectors
+## Detectors
 
 A detector is `async (features, model, threshold, ctx) -> DetectionResult`; `model` is `None` for a
 model-free detector.
@@ -69,11 +71,11 @@ async def rule_detector(features, model, threshold, ctx):
 ```
 
 | Element | Rule |
-|---------|------|
+|---|---|
 | `semantics` | What the model's output means: `ANOMALY_PROBABILITY`, `OUTLIER_SCORE`, `RECONSTRUCTION_ERROR`, `DIRECT_SCORE` ([ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md)) |
 | `handles_flavors` | MLflow flavors the detector can score; empty claims none |
 | `UninterpretableModel` | Raise it when the meaning of a model's output cannot be established |
-| Dispatch | ML inference uses the model record's `detector`; a record without one is refused (422) |
+| Dispatch | Inference uses the model record's `detector`; a record without one is refused (422) |
 | `GET /api/ml/capabilities` | Every registered detector with its semantics and flavors, read from the registry, including those from `EXTENSION_MODULES` |
 
 ## Loading an extension
@@ -83,16 +85,15 @@ EXTENSION_MODULES=my_domain.transforms,my_domain.detectors
 ```
 
 | Rule | Detail |
-|------|--------|
-| Loading | The ML service imports each comma-separated module at startup, which runs its `@register_*` decorators |
+|---|---|
+| Loading | `ml-service-api` imports each comma-separated module at startup, which runs its `@register_*` decorators |
 | Import path | The module must be importable by the service (a separate package depending on IndustryFlow) |
 | Version check | The module calls `check_api_version("<target>")` at import. It passes when the major matches `EXTENSION_API_VERSION` and the platform minor is at least the target's; otherwise `ValueError` |
-| `EXTENSION_API_VERSION` | Defined in `services/ml_service/api/extensions/__init__.py`; stability rules in ADR-0010 dec 3 |
+| `EXTENSION_API_VERSION` | Defined in `services/ml_service/api/extensions/__init__.py`; stability rules in [ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md) dec 3 |
 | Domain data | Extension-owned tables in the tenant schema; no columns on core tables |
 | Dependency direction | Extensions depend on IndustryFlow; the platform never vendors or imports them |
 
 ## Example
 
-`extensions/tep-reference/` (module `tep_reference`, Tennessee-Eastman reference dataset) registers a
-transform (`tep_reactor_pressure_margin`) and a detector (`tep_rule`). It is loaded only when
-`EXTENSION_MODULES` names it. See [its README](../../extensions/tep-reference/README.md).
+[`extensions/tep-reference/`](../../extensions/tep-reference/README.md) (module `tep_reference`) is
+loaded only when `EXTENSION_MODULES` names it.

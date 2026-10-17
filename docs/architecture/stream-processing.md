@@ -6,7 +6,6 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Stream processing
 
 The path from a device reading to stored time-series, the live-value read path, and Spark upgrades.
-The job code in `services/spark_jobs/` is authoritative.
 
 | Decision | ADR |
 |---|---|
@@ -23,29 +22,30 @@ device ──mTLS──▶ ingestion-edge ─▶ ingestion-service ─▶ Kafka 
                                                                                 └▶ spark-aggregations ─▶ tenant_<uuid>.sensor_aggregations_{1min,5min,1hour}
 ```
 
-| Component | Role | Code |
-|---|---|---|
-| `ingestion-service` | Validates the reading, stamps the verified `company_id`, produces to Kafka; rejects a timestamp more than 300 s ahead (HTTP 422); no database access | `services/ingestion_service/` |
-| `spark-streaming` | Upserts raw readings; reads from `earliest` | `services/spark_jobs/kafka_to_timescaledb.py` |
-| `spark-aggregations` | Windows readings into 1 min / 5 min / 1 h rollups; reads from `latest` | `services/spark_jobs/kafka_aggregations.py`, `aggregation_windows.py` |
-| Reading guard | One definition of an unwritable reading, shared by both jobs | `services/spark_jobs/reading_guard.py` |
-| Window contract | Window widths and allowed lateness | `libs/industryflow_contracts/industryflow_contracts/windows.py` |
-| `spark-master`, `spark-worker` | Standalone cluster (compose) | `services/spark_jobs/Dockerfile.worker` |
+| Name | Role | Port | Config |
+|---|---|---|---|
+| `ingestion-service` | Validates the reading, stamps the verified `company_id`, produces to Kafka; rejects a timestamp more than 300 s ahead (HTTP 422); no database access | 8003 | `services/ingestion_service/` |
+| `spark-streaming` | Upserts raw readings; reads from `earliest` | 4040 (metrics) | `services/spark_jobs/kafka_to_timescaledb.py` |
+| `spark-aggregations` | Windows readings into 1 min / 5 min / 1 h aggregates; reads from `latest` | 4040 (metrics) | `services/spark_jobs/kafka_aggregations.py`, `aggregation_windows.py` |
+| Reading guard | One definition of an unwritable reading, shared by both jobs | | `services/spark_jobs/reading_guard.py` |
+| Window contract | Window widths and allowed lateness | | `libs/industryflow_contracts/industryflow_contracts/windows.py` |
+| `spark-master`, `spark-worker` | Standalone cluster (Compose) | 7077, 8080 | `services/spark_jobs/Dockerfile.worker` |
 
 ## Kafka topics
 
 | Topic | Producer | Consumers | Setting |
 |---|---|---|---|
-| `sensor-data-raw` | ingestion-service | spark-streaming, spark-aggregations, alert-service-detector | `KAFKA_TOPIC_SENSOR_DATA` (ingestion, alert worker); fixed in the Spark jobs |
-| `sensor-data-raw.measurements.dlq` | spark-streaming | operators | `KAFKA_TOPIC_MEASUREMENTS_DLQ` |
-| `<sensor topic>.dlq` | alert-service-detector | operators | `KAFKA_TOPIC_DLQ` ([alerting.md](alerting.md)) |
+| `sensor-data-raw` | `ingestion-service` | `spark-streaming`, `spark-aggregations`, `alert-service-detector` | `KAFKA_TOPIC_SENSOR_DATA` |
+| `sensor-data-raw.measurements.dlq` | `spark-streaming` | Operators | `KAFKA_TOPIC_MEASUREMENTS_DLQ` |
+| `<KAFKA_TOPIC_SENSOR_DATA>.dlq` | `alert-service-detector` | Operators | `KAFKA_TOPIC_DLQ` ([alerting](alerting.md)) |
 
-The Helm rule `IndustryFlowDeadLetteredReadings` fires when any `*.dlq` topic grows.
+A growing `*.dlq` topic fires the Helm rule `IndustryFlowDeadLetteredReadings`
+([platform alert rules](../../deploy/observability/README.md#platform-alert-rules)).
 
 ## Unwritable readings
 
 A reading that is malformed, lacks a required field, carries a non-UUID id, is stamped more than
-300 s (`MAX_FUTURE_SKEW_SECONDS`) ahead, or names a tenant schema, sensor or equipment that does not
+300 s ahead (`MAX_FUTURE_SKEW_SECONDS`), or names a tenant schema, sensor or equipment that does not
 exist:
 
 | Job | Handling |
@@ -59,9 +59,9 @@ A failure of the database or Kafka fails the batch.
 
 | Deployment | `CHECKPOINT_LOCATION` | Storage |
 |---|---|---|
-| Compose | `s3a://spark-checkpoints` (`SPARK_CHECKPOINT_LOCATION`) | MinIO via S3A, shared by driver and every `spark-worker` (`SPARK_WORKER_REPLICAS`, default 1) |
-| Helm | `/opt/spark/checkpoints` | RWO PVC per job; Spark in `local[*]` mode |
-| Helm, scaled out | `s3a://<objectStore.buckets.sparkCheckpoint>` | Set in `config.CHECKPOINT_LOCATION` with the checkpoint principal; see `deploy/helm/industryflow/values.yaml` |
+| Compose | `s3a://spark-checkpoints` (`SPARK_CHECKPOINT_LOCATION`) | MinIO via S3A, shared by the driver and every `spark-worker` |
+| Helm | `/opt/spark/checkpoints` | ReadWriteOnce PVC per job; Spark in `local[*]` mode |
+| Helm, on the object store | `s3a://…` | [Helm chart](../../deploy/helm/industryflow/README.md#spark-checkpoint-on-the-object-store) |
 
 A local path disables S3A. The S3A jars (`hadoop-aws`, AWS SDK v2 `bundle`) are baked into all three
 Spark images; the Kafka connector is `spark-sql-kafka-0-10_2.13`.
@@ -74,7 +74,7 @@ sensor_measurements ─▶ api-gateway cache_updater (2 s poll, last hour) ─�
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| UI shows no live data; ingestion and Kafka healthy; gateway log `0 fresh sensor_measurements in the last hour … is spark-streaming (raw-measurements writer) running?` | spark-streaming stopped | Start `spark-streaming` |
+| UI shows no live data; ingestion and Kafka healthy; gateway log `0 fresh sensor_measurements in the last hour … is spark-streaming (raw-measurements writer) running?` | `spark-streaming` stopped | Start `spark-streaming` |
 
 Code: `services/api_gateway/messaging/cache_updater.py`, `services/api_gateway/routers/websocket.py`.
 
@@ -94,14 +94,12 @@ Reset cost: measurements re-read from `earliest` within Kafka retention; aggrega
 open at the reset instant. Pausing producers until the widest window's watermark passes avoids that
 loss.
 
-Verify:
-
-| Check | Expected |
+| Check after the upgrade | Expected |
 |---|---|
 | Driver logs | Micro-batches; `spark-submit` processes up |
 | `tenant_<uuid>.sensor_measurements` | Row count rising |
 | `tenant_<uuid>.sensor_aggregations_{1min,5min,1hour}` | Fresh rows |
 
-| Symptom | Cause |
-|---|---|
-| `NoClassDefFoundError` / `ClassNotFoundException` at submit | Kafka connector or S3A jars mismatched to the Spark/Hadoop version |
+| Symptom | Cause | Fix |
+|---|---|---|
+| `NoClassDefFoundError` / `ClassNotFoundException` at submit | Kafka connector or S3A jars mismatched to the Spark/Hadoop version | Align the jar versions in the Spark images with the Spark/Hadoop version |

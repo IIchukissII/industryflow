@@ -1,6 +1,5 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
@@ -12,7 +11,7 @@ The GitHub Actions workflows, their gate jobs, and the required checks on `main`
 ## Gate convention
 
 | Rule | Detail |
-|------|--------|
+|---|---|
 | Triggers | Every workflow runs on `pull_request` and on `push` to `main` |
 | One gate per workflow | Each workflow ends in a `<name>-gate` job with `if: always()`, so it always reports a status |
 | Path-filtered workflows | A `changes` job (`dorny/paths-filter`) decides whether the workflow's paths changed. Unchanged: the work is skipped and the gate passes. Changed: the gate fails when any gated job failed or was cancelled, or when `changes` itself did not succeed |
@@ -21,7 +20,7 @@ The GitHub Actions workflows, their gate jobs, and the required checks on `main`
 ## Required checks on `main`
 
 | Gate | Workflow file | Gated jobs |
-|------|---------------|------------|
+|---|---|---|
 | `unit-tests-gate` | `unit-tests.yml` | pytest |
 | `lint-gate` | `lint.yml` | ruff, exact pins + deps-resolve, eslint, frontend tests (vitest) |
 | `images-gate` | `images.yml` | Spark/JupyterHub version parity, image build + smoke + Trivy, pip-audit / npm audit |

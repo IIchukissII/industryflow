@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# IndustryFlow Helm chart
+# Helm chart
 
 Kubernetes packaging for IndustryFlow ([ADR-0009](../../../ADR/ADR-0009-kubernetes-deployment-and-packaging.md)): templates, values, image pinning and pre-production steps.
 
@@ -49,7 +49,7 @@ Kubernetes packaging for IndustryFlow ([ADR-0009](../../../ADR/ADR-0009-kubernet
 
 ## In-cluster vs external datastores
 
-Each stateful dependency under `infra` has an `inCluster` toggle (ADR-0009 decision 3).
+Each stateful dependency under `infra` has an `inCluster` toggle ([ADR-0009](../../../ADR/ADR-0009-kubernetes-deployment-and-packaging.md) dec 3).
 
 | `inCluster` | Result |
 |---|---|
@@ -83,7 +83,7 @@ Each stateful dependency under `infra` has an `inCluster` toggle (ADR-0009 decis
 `scripts/pin-image-digests.sh [TAG]` derives the image list from `values.yaml` and resolves each
 digest from GHCR over the registry API (`GITHUB_TOKEN` or `gh auth token` for private packages).
 
-| Env var | Default | Meaning |
+| Name | Default | Meaning |
 |---|---|---|
 | `REGISTRY` | `image.registry` | Registry/namespace prefix |
 | `GITHUB_TOKEN` | `gh auth token` | Token for private packages |
@@ -96,11 +96,11 @@ digest from GHCR over the registry API (`GITHUB_TOKEN` or `gh auth token` for pr
 | DB roles | `secrets.data.*_DB_PASSWORD`, `config.*_DB_USER` | Each service connects as its own role; the init scripts create the roles from these passwords |
 | Images | `values-digests.yaml` | Install with the generated overlay; never `latest` |
 | Ingress TLS | `ingress.tls.secretName` | Public certificate Secret ([ADR-0004](../../../ADR/ADR-0004-api-authentication-sessions-and-transport.md)) |
-| DB TLS | `tls.db.*` | Secret `tls.db.secretName` with `tls.crt`/`tls.key`/`ca.crt`, or `tls.db.certManager.enabled=true`; without it the DB and its clients stay pending ([ADR-0017](../../../ADR/ADR-0017-database-tls-and-authentication.md)) |
+| DB TLS | `tls.db.*` | Secret or cert-manager ([database TLS](../../../docs/operations/tls.md#helm)) |
 | DB init | `infra.timescaledb.inCluster` | In-cluster: scripts run on a fresh data volume. External: run [the init scripts](../../../infrastructure/timescaledb/init-scripts/README.md) yourself before first use |
 | Spark checkpoints | `apps.spark-*.persistence` | Default is a ReadWriteOnce PVC; needs a default StorageClass or `storageClass` |
 | Object-store principals | `secrets.data.*_ACCESS_KEY` / `*_SECRET_KEY` | One pair per consumer, access keys distinct from the root's. External store: create equivalent principals; the policy table in `infrastructure/minio/minio-init.sh` is the reference |
-| Device mTLS | `ingress.mtls.*` | Device-CA Secret `caSecret` with `ca.crt` and `ca.crl` ([device mTLS](../../../docs/operations/device-mtls.md)) |
+| Device mTLS | `ingress.mtls.*` | Device CA Secret with `ca.crt` and `ca.crl` ([device mTLS](../../../docs/operations/device-mtls.md#kubernetes)) |
 
 ### Object-store principals
 
@@ -129,15 +129,15 @@ Moving the Structured-Streaming checkpoint off the PVC ([ADR-0006](../../../ADR/
 
 ## Deferred
 
-Open per ADR-0009 *Deferred decisions*: stateful operators, autoscaling policy, secrets backend,
-Spark on Kubernetes. The notebook stack (`notebookHub`) renders but is not cluster-validated.
+Open per [ADR-0009](../../../ADR/ADR-0009-kubernetes-deployment-and-packaging.md) *Deferred decisions*: stateful operators, autoscaling policy, secrets backend,
+Spark on Kubernetes. The notebook stack (`notebookHub`) renders but is not run on a cluster.
 
 ## Related
 
-| Doc | Topic |
+| Page | Topic |
 |---|---|
-| [backup-and-recovery.md](../../../docs/operations/backup-and-recovery.md) | `backup.*`, restore |
-| [monitoring.md](../../../docs/operations/monitoring.md) | `observability.*`, `deploy/observability` |
-| [high-availability.md](../../../docs/operations/high-availability.md) | `resilience.*`, HPA |
-| [notebooks.md](../../../docs/architecture/notebooks.md) | `notebookHub.*` |
-| [ADR-0025](../../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md) | `coldExport.*` |
+| [backup and recovery](../../../docs/operations/backup-and-recovery.md#kubernetes-helm) | `backup.*`, restore |
+| [cluster monitoring](../../observability/README.md) | `observability.*` |
+| [high availability](../../../docs/operations/high-availability.md) | `resilience.*`, HPA |
+| [notebooks](../../../docs/architecture/notebooks.md#deployment-profiles) | `notebookHub.*` |
+| [cold layer](../../../docs/architecture/data-and-storage.md#cold-layer) | `coldExport.*` |
