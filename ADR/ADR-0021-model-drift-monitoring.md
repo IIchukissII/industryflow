@@ -94,6 +94,23 @@ So this is mostly *wiring foundations that already exist*, not new infrastructur
   profile is stored with the model as a compact, down-sampled sample that the drift library consumes
   directly — not raw training rows and not a bare histogram — so decision 3's compute engine is
   unchanged.
+- **Reference-profile storage location** (deferred above) is the model's record in the platform
+  registry, for every model the platform serves, a notebook-trained one included. No profile is
+  kept as a tracking artifact, so a model held only in the notebook registry has no baseline and no
+  drift. The registering caller supplies the profile, and one whose prediction column does not hold
+  the declared detector's scores is refused at registration (decision 4 as revised). How the
+  notebook flow emits a profile is still open: the component that builds one exists only inside the
+  ML service, nothing on the notebook side calls it, and a notebook-trained model therefore
+  registers without a baseline unless its author constructs one.
+- **Performance/concept drift via operator feedback** (deferred above) is decided by ADR-0022:
+  operator labels on fired alerts, precision over time, and a retrain recommendation. Recall and
+  automated retraining remain deferred there.
+- **Models-page drift indicator** (deferred above) is delivered in two forms: an on-demand
+  evaluation of a platform-registry model against its baseline, computed by the same ml-service
+  endpoint the alert lane calls, and ADR-0022's retrain recommendation marked beside the model.
+  Neither displays the outcome of the scheduled drift rules themselves.
+- **Compute backend** (deferred above): the ml-service endpoint computes inline; no window is
+  offloaded to the stream-processing engine.
 
 ## References
 - Reserved `statistical` detection type: `infrastructure/timescaledb/init-scripts/02-tenant-alert-tables.sql`.

@@ -112,7 +112,7 @@ Kernel-trained tree-based sklearn models need the skops grant at log time:
 
 | Item | Detail |
 |---|---|
-| Baseline | `ml_models.reference_profile`, captured at registration by `drift/reference_profile.py` |
+| Baseline | `ml_models.reference_profile`, supplied in the registration request (format: `drift/reference_profile.py`); no notebook-side helper emits it |
 | Current window | Trailing window of the tenant's data, aligned to instants where every compared sensor reported |
 | Engine | `evidently` |
 | Output | Data drift (drifted-feature share) and prediction drift; `prediction_drift_reason` when prediction drift cannot be computed |
