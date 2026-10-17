@@ -38,7 +38,6 @@ other two.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -180,12 +179,18 @@ class Compatibility:
         }
 
 
-def _flavor_importable(flavor: str) -> bool:
-    try:
-        importlib.import_module(flavor)
-        return True
-    except Exception:  # noqa: BLE001 — any failure to import IS the finding
-        return False
+def _supported_flavor(flavor: str) -> bool:
+    """Whether `flavor` is in the supported flavor set (ADR-0027 dec 2) — decided BY NAME.
+
+    The set is the loaders this gate knows (FLAVOR_LIBRARY) and the flavors the loaded detectors claim
+    to score (ADR-0028 dec 4). The name comes from the artifact's manifest, so it is never imported to
+    find out: importing a module runs it, and this check runs in the serving process before anything
+    has decided the artifact may be loaded.
+    """
+    import extensions  # noqa: PLC0415 — the registry is discovered at call time, never copied
+
+    claimed = {f for d in extensions.detector_capabilities() for f in d.get("handles_flavors", [])}
+    return flavor in FLAVOR_LIBRARY or flavor in claimed
 
 
 def _installed(package: str) -> Optional[str]:
@@ -239,19 +244,20 @@ def evaluate(model_uri: str) -> Compatibility:
     flavor_supported = True
 
     # 1. The flavor. `loader_module` names the code that will reconstruct this model (mlflow.sklearn,
-    #    mlflow.xgboost, mlflow.pytorch, ...). If we cannot even import it, this image does not carry that
-    #    flavor and no version arithmetic below is worth doing. THIS IS THE TORCH CASE, and it fails here
-    #    with a sentence an operator can act on rather than an ImportError three frames into a prediction.
+    #    mlflow.xgboost, mlflow.pytorch, ...). If it is not in the supported flavor set, or its framework
+    #    is not installed, no version arithmetic below is worth doing. THIS IS THE TORCH CASE, and it
+    #    fails here with a sentence an operator can act on rather than an ImportError three frames into
+    #    a prediction.
     flavor_library = FLAVOR_LIBRARY.get(flavor or "")
     if flavor:
-        # THE TORCH CASE. Anchored on the flavor's framework actually being installed, not on whether
-        # `import mlflow.pytorch` succeeds — mlflow imports its frameworks lazily, so that import can
-        # succeed in an image with no torch at all and would quietly wave the model through.
+        # THE TORCH CASE. Anchored on the flavor's framework actually being installed — read from the
+        # installed distributions, never by importing the module the artifact names.
         missing_framework = flavor_library is not None and _installed(flavor_library) is None
-        if missing_framework or not _flavor_importable(flavor):
+        if missing_framework or not _supported_flavor(flavor):
             reasons.append(
                 f"this environment cannot serve `{flavor}` models"
-                + (f" — `{flavor_library}` is not installed here." if missing_framework else " — the flavor is not installed.")
+                + (f" — `{flavor_library}` is not installed here." if missing_framework
+                   else " — it is not in this deployment's supported flavor set.")
                 + " Serving a new model framework needs a model adapter (ADR-0027 dec 4); it is not "
                   "something a version bump can fix."
             )

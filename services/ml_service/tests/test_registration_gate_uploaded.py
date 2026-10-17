@@ -25,6 +25,7 @@ import extensions  # noqa: E402
 import extensions.builtins_detectors  # noqa: F401,E402  (registers the built-ins)
 import model_compat  # noqa: E402
 import model_loader  # noqa: E402
+import skops_trust  # noqa: E402
 import uploaded_model  # noqa: E402
 from routers.models import router, get_company_id_dependency  # noqa: E402
 
@@ -64,6 +65,11 @@ def client(monkeypatch):
 
     monkeypatch.setattr(model_compat, "evaluate_uri", fake_evaluate_uri)
     monkeypatch.setattr(model_compat, "evaluate_run", fake_evaluate_run)
+    # The manifest read by the author-code check (its own suite: test_upload_author_code).
+    monkeypatch.setattr(skops_trust, "read_flavors", lambda uri: {
+        "python_function": {"loader_module": "mlflow.sklearn"},
+        "sklearn": {"serialization_format": "skops"},
+    })
     # The address checks have their own suite (test_model_admission); here the run is the caller's
     # and the bucket is the one the artifact names.
     monkeypatch.setattr(config.config, "UPLOAD_ARTIFACT_BUCKET", "mlflow")
