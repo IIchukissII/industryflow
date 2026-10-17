@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # TLS and the internal CA
 
-Server certificates for the HTTPS edge and for TimescaleDB, issued by the internal CA. The edge is
+Server certificates for the HTTPS edge and for TimescaleDB: issued by the internal CA, or self-signed when none is configured. The edge is
 the TLS terminator ([ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md));
 database TLS is [ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md). Device client
 certificates are a separate PKI: [device-mtls.md](device-mtls.md).

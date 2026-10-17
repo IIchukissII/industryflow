@@ -3,15 +3,15 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0017: Database TLS and authentication (rev 1)
+# ADR-0017: Database TLS and authentication (rev 2)
 
 - **ID:** ADR-0017
 - **Status:** Accepted
-- **Date:** 2026-06-27 (rev 1: 2026-06-27, recorded 2026-10-13)
+- **Date:** 2026-06-27 (rev 1: 2026-06-27, recorded 2026-10-13; rev 2: 2026-10-17)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0001 (framing)
 - **Companions:** ADR-0004 (API edge TLS — in the self-hosted deployment its edge cert shares the internal CA this DB cert uses), ADR-0007 (device PKI — referenced for the signing pattern; its device CA is a *separate* root, not this one), ADR-0003 (per-tenant schemas), production-readiness item 4
-- **Supersedes:** ADR-0017 rev 0 (2026-06-27 — decided the database certificate for the single-host deployment only; rev 1 adds decision 7, how the Kubernetes deployment sources and distributes it)
+- **Supersedes:** ADR-0017 rev 0 (2026-06-27 — decided the database certificate for the single-host deployment only; rev 1 adds decision 7, how the Kubernetes deployment sources and distributes it); ADR-0017 rev 1 (2026-06-27, recorded 2026-10-13 — held that the single-host database certificate is issued by the internal CA; rev 2 restates decision 3 for a single host started without that CA)
 
 ## Context and problem
 
@@ -25,6 +25,8 @@ network segment, and an active MITM / a rogue process impersonating the DB. `md5
 hashing is also deprecated in favour of SCRAM.
 
 **Revision 1 (2026-06-27; recorded 2026-10-13).** Rev 0 decided the database certificate for the single-host deployment, where the certificate can be issued beside the database at start. The Kubernetes deployment cannot do that: its clients are separate workloads that must all trust the same root, so the certificate and its root must exist before any of them start. Decision 7 answering that was added to this record after acceptance by an in-place edit; this revision records it as the decision it is.
+
+**Revision 2 (2026-10-17).** Decision 3 says the database certificate is issued by the self-hosted internal CA. The single-host deployment has never required that CA to exist. Started without it, the one-shot staging step that runs before the database issues a self-signed certificate, keeps it across restarts, and hands it to every client as their trust anchor, so a fresh installation comes up with TLS enforced instead of refusing to start. Full verification still holds, but the certificate is then its own root and shares nothing with the edge. Rev 2 restates decision 3 to record this.
 
 ## Decision drivers
 
@@ -56,6 +58,8 @@ hashing is also deprecated in favour of SCRAM.
 3. **The database server certificate is issued by the self-hosted internal CA,** with subject
    names covering every hostname clients use to reach the database, so full verification passes.
    The CA's root is distributed to clients as their trust anchor for the database.
+
+   > **rev 2 (2026-10-17): where the internal CA is in use it issues the certificate; a single host started without it issues a self-signed certificate instead.** That certificate covers the hostnames clients use, is kept across restarts so that the server and its clients never hold different roots, and is distributed to every client as its trust anchor, so decisions 1 and 2 hold unchanged. It is a bootstrap, not a second PKI: a certificate issued by the internal CA, once supplied, takes precedence over it. Until then the database shares no root with the edge, so the single internal root named in the decision drivers holds only where the internal CA is in use.
 
 4. **Key ownership and permissions are fixed inside the deployment, not on the host.** A one-shot
    step that runs before the database copies the certificate and key into database-owned storage
@@ -96,6 +100,11 @@ hashing is also deprecated in favour of SCRAM.
   Rejected: clients are separate workloads that need the root before the database exists to hand
   it to them; a root minted inside the database pod has no way to reach them that is not a second,
   ad hoc distribution channel. A cluster secret is the orchestrator's own distribution channel.
+- **On a single host, refuse to start the database until the internal CA has issued its
+  certificate *(rev 2)*.** Rejected: an installation would have no working database until an
+  operator ran the CA step, and plaintext is no fallback because the access rules forbid it. A
+  self-signed certificate distributed as the trust anchor keeps full verification from the first
+  start.
 
 ## Consequences
 
@@ -113,6 +122,9 @@ hashing is also deprecated in favour of SCRAM.
 - A failed certificate, permission or rotation breaks database connectivity, so changes are staged
   and validated.
 - Kubernetes adds an init step for key permissions.
+- A single host started without the internal CA serves a database certificate that only the
+  deployment's own clients trust, under a root separate from the edge's; a client outside the
+  deployment must be handed that certificate explicitly *(rev 2)*.
 - The chart requires a database-certificate secret (controller-provisioned or operator-supplied);
   an install without one leaves the database and its clients pending — the chart says so at
   install time.
