@@ -39,8 +39,8 @@ function Login({ onLogin }) {
     } catch (err) {
       const status = err.response?.status;
       setError(status === 400 || status === 401
-        ? 'Invalid email or password.'
-        : 'Sign-in failed. Please try again.');
+        ? 'That email and password do not match an account. Check both and try again.'
+        : 'The server did not answer. Try again in a moment.');
     } finally {
       setLoading(false);
     }
@@ -52,27 +52,26 @@ function Login({ onLogin }) {
         <Starfield className="login-stars" />
         <div className="login-hero-stack">
           <Mandala size={300} className="login-hero-mandala" />
-          <h1 className="login-wordmark">Industry<span className="wm-accent">Flow</span></h1>
+          <p className="login-wordmark">Industry<span className="wm-accent">Flow</span></p>
           <p className="login-tagline">The still centre in the turning world.</p>
           <p className="login-lede">
-            Every sensor stream converges inward — flux resolved into meaning at a
-            luminous core.
+            Every sensor stream converges inward, flux resolved into meaning at a luminous core.
           </p>
         </div>
       </aside>
 
       <main className="login-panel">
         <div className="login-card">
-          <div className="eyebrow">Industrial IoT · Control plane</div>
-          <h1>Sign in</h1>
-          <p className="login-sub">Access your IndustryFlow workspace.</p>
+          <h1 className="login-title">Sign in</h1>
+          <p className="login-sub">Use the email and password your administrator gave you.</p>
 
           <form onSubmit={handleSubmit} className="login-form">
-            <div className="form-group">
+            <div className="login-field">
               <label htmlFor="email">Email</label>
               <input
                 id="email"
                 type="email"
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@company.com"
@@ -81,26 +80,26 @@ function Login({ onLogin }) {
               />
             </div>
 
-            <div className="form-group">
+            <div className="login-field">
               <label htmlFor="password">Password</label>
               <input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
                 required
               />
             </div>
 
-            {error && <div className="login-error">{error}</div>}
+            {error && <p className="login-error" role="alert">{error}</p>}
 
-            <button type="submit" className="btn-primary login-submit" disabled={loading}>
-              {loading ? 'Signing in…' : 'Sign in'}
+            <button type="submit" className="btn btn-primary login-submit" disabled={loading}>
+              {loading ? 'Signing in' : 'Sign in'}
             </button>
           </form>
 
-          <div className="login-foot">Need access? Contact your administrator.</div>
+          <p className="login-foot">No account yet? Your administrator adds you.</p>
         </div>
       </main>
     </div>

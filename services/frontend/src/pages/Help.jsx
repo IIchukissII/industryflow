@@ -4,64 +4,61 @@
 
 import { useEffect, useRef, useState } from 'react';
 import './Help.css';
+import { helpReading } from '../utils/reading-help';
 
 // The guide is content-first: section data here, rendered as a long-form manual with a sticky
-// index. Copy is written from the operator's side of the screen — plain verbs, what you control,
-// not how the platform is built.
+// index. Copy is written from the operator's side of the screen: plain verbs, what you control,
+// not how the platform is built. Names match the sidebar.
 const SECTIONS = [
   {
     id: 'getting-started',
-    label: 'Getting started',
     title: 'Getting started',
-    lead: 'IndustryFlow is your control room — live equipment telemetry on one side, the tools to analyze and act on it on the other. Everything you see belongs to your organization alone.',
+    lead: 'IndustryFlow shows your equipment’s live readings and gives you the tools to act on them. Everything you see belongs to your organization alone.',
     blocks: [
-      { term: 'Signing in', def: 'Use the email and password your administrator set up. Your session stays signed in on this device until you sign out from the account menu at the bottom of the sidebar.' },
-      { term: 'Finding your way', def: 'The sidebar groups everything by what you are doing: Monitor for live data and alerts, Analyze for notebooks, Configure for alert rules and models, and System for this guide and your settings.' },
-      { term: 'Your organization and role', def: 'You only ever see your own organization’s data. Operators monitor and respond; data scientists also get notebooks for building models. Your role is shown beneath your email.' },
+      { term: 'Signing in', def: 'Use the email and password your administrator set up. You stay signed in on this device until you sign out with the button beside your email at the bottom of the sidebar.' },
+      { term: 'Finding your way', def: 'The sidebar has three groups. The core holds the Core and Alerts: what is happening now. The ground holds Equipment and Notebooks: the machines and the work on their data. The watch holds Alert rules and Models: what decides when to raise an alert.' },
+      { term: 'Your role', def: 'Observers see everything but change nothing. Engineers also change equipment, alert rules and models, and handle alerts. Admins also manage the users of their organization. Your role is shown beneath your email.' },
     ],
-    tip: 'Update your profile and preferences any time under System → Settings.',
+    tip: 'Change your password under Settings.',
   },
   {
     id: 'monitoring',
-    label: 'Monitoring & alerts',
-    title: 'Monitoring & alerts',
-    lead: 'The platform streams sensor readings as they arrive and watches them for trouble.',
+    title: 'Monitoring and alerts',
+    lead: 'Readings stream in as devices send them, and alert rules watch them for trouble.',
     blocks: [
-      { term: 'The Core', def: 'The home screen — the centre where every stream converges. Every reporting sensor is a node on a ring, grouped by equipment, tinted by its active alerts; each new reading pulses toward the centre. Point at or select a node to read its live value and plot that channel’s recent history alongside. The stream indicator turns green when data is flowing.' },
-      { term: 'Equipment and sensors', def: 'Configure → Equipment lists your monitored units and their sensors. Open a unit to see and adjust its channels.' },
-      { term: 'Alert rules', def: 'Configure → Alert Rules is where you set the conditions that raise an alert — a simple threshold, such as temperature above a limit, or a model-based check that flags anomalies.' },
-      { term: 'Alert history', def: 'Monitor → Alerts is the record of everything that fired, newest first, so you can see what happened and when.' },
+      { term: 'The Core', def: 'The home screen, where every stream converges. Each reporting sensor is a node on a ring, grouped by machine and tinted by its open alerts; each new reading pulses toward the centre. Select a node to read its value and plot its recent history.' },
+      { term: 'Equipment', def: 'Lists your machines and their sensors. Open a machine to see its channels; engineers and admins add, edit and delete machines here.' },
+      { term: 'Alert rules', def: 'Set the conditions that raise an alert: a threshold, such as temperature above a limit, or a model that flags anomalies.' },
+      { term: 'Alerts', def: 'Everything that fired, open alerts first. Acknowledge an alert once it is handled, and mark whether it was real so the rules can be judged by how often they are right.' },
     ],
-    tip: 'A model-based alert needs a model set to “production” or “active”. See Notebooks & models to publish one.',
+    tip: 'A model-based rule needs a model in production. Notebooks and models explains how to publish one.',
   },
   {
     id: 'notebooks',
-    label: 'Notebooks & models',
-    title: 'Notebooks & models',
-    lead: 'Notebooks are your workbench for exploring data and building models, embedded right in the console.',
+    title: 'Notebooks and models',
+    lead: 'Notebooks are your workbench for exploring data and building models, inside the console.',
     blocks: [
-      { term: 'Two kinds of notebook', def: 'Analyze → Notebooks opens your workspace. An analytics view runs a finished notebook as an interactive dashboard; an authoring view — for data scientists — is a full JupyterLab for writing code.' },
-      { term: 'Reading your data', def: 'Inside a notebook, the built-in industryflow client reads your organization’s data with no credentials to manage. You can also run SQL directly; unqualified queries resolve to your organization automatically, and the connection is read-only.' },
-      { term: 'Tracking experiments', def: 'As you train, log runs, parameters, and metrics with the standard MLflow client. It is already pointed at the platform and scoped to your organization, so you only ever see your own experiments.' },
-      { term: 'Registering models', def: 'Register a trained model to publish it to your registry. It appears on the Models page under the plain name you gave it — the platform handles keeping every organization’s models separate.' },
-      { term: 'The Models page', def: 'Configure → Models is your registry. Click any model to see its description, metrics, and version history. Notebook models let you edit the description; platform detectors can be promoted to production from there.' },
+      { term: 'Two kinds of notebook', def: 'Notebooks opens your workspace. Depending on your role, it opens either as finished notebooks run as interactive dashboards, or as a full JupyterLab for writing code. Your deployment decides which roles get which.' },
+      { term: 'Reading your data', def: 'Inside a notebook, the built-in industryflow client reads your organization’s data with no credentials to manage. You can also run SQL; the connection is read-only and limited to your organization.' },
+      { term: 'Tracking experiments', def: 'Log runs, parameters and metrics with the standard MLflow client. It is already set up for your organization, so you only see your own experiments.' },
+      { term: 'Registering models', def: 'Register a trained model to publish it. It appears on the Models page under the name you gave it.' },
+      { term: 'The Models page', def: 'Your registry. Select a model to see its description, metrics and version history. Engineers and admins can also upload a model trained elsewhere and promote a model to production.' },
     ],
   },
   {
     id: 'data',
-    label: 'Data & API access',
-    title: 'Data & API access',
-    lead: 'Your data is yours to read, query, and export — always scoped to your organization.',
+    title: 'Data and API access',
+    lead: 'Your data is yours to read, query and export, always limited to your organization.',
     blocks: [
-      { term: 'The data API', def: 'Equipment, sensors, and readings are available over the platform’s API for your own integrations, authenticated by your signed-in session.' },
-      { term: 'SQL from notebooks', def: 'The notebook SQL connection is read-only and limited to your organization’s data, so you can explore freely without risk of changing anything.' },
-      { term: 'Access without passwords', def: 'Behind the scenes, notebooks use short-lived, revocable access grants instead of long-lived passwords. A notebook can read your data without ever holding a credential you would have to rotate.' },
-      { term: 'Exporting', def: 'Pull query results into a notebook and export them — CSV, Parquet, or any format you would use for a DataFrame.' },
+      { term: 'The data API', def: 'Equipment, sensors and readings are available over the platform’s API for your own integrations, using your signed-in session.' },
+      { term: 'SQL from notebooks', def: 'The notebook SQL connection is read-only and limited to your organization’s data, so you can explore without changing anything.' },
+      { term: 'Access without passwords', def: 'Notebooks use short-lived, revocable access grants instead of passwords, so a notebook never holds a credential you would have to rotate.' },
+      { term: 'Exporting', def: 'Load query results into a notebook and save them as CSV, Parquet or any format a DataFrame writes.' },
     ],
   },
 ];
 
-function Help() {
+function Help({ user }) {
   const [active, setActive] = useState(SECTIONS[0].id);
   const refs = useRef({});
 
@@ -82,17 +79,11 @@ function Help() {
 
   return (
     <div className="guide">
-      <div className="page-head">
-        <div>
-          <div className="eyebrow">Help</div>
-          <h1>User guide</h1>
-          <div className="sub">How to operate IndustryFlow — from live monitoring to notebooks and models.</div>
-        </div>
-      </div>
+      <p className="reading guide-reading">{helpReading({ user })}</p>
 
       <div className="guide-layout">
         <nav className="guide-index" aria-label="Guide sections">
-          <div className="guide-index-label eyebrow">Contents</div>
+          <p className="guide-index-label">Contents</p>
           {SECTIONS.map((s) => (
             <a
               key={s.id}
@@ -100,7 +91,7 @@ function Help() {
               className={`guide-index-item${active === s.id ? ' active' : ''}`}
               aria-current={active === s.id ? 'true' : undefined}
             >
-              {s.label}
+              {s.title}
             </a>
           ))}
         </nav>
@@ -111,10 +102,10 @@ function Help() {
               key={s.id}
               id={s.id}
               className="guide-section"
+              aria-labelledby={`${s.id}-h`}
               ref={(el) => { refs.current[s.id] = el; }}
             >
-              <div className="eyebrow guide-section-label">{s.label}</div>
-              <h2 className="guide-section-title">{s.title}</h2>
+              <h2 id={`${s.id}-h`} className="guide-section-title">{s.title}</h2>
               <p className="guide-lead">{s.lead}</p>
 
               <dl className="guide-blocks">
@@ -126,18 +117,13 @@ function Help() {
                 ))}
               </dl>
 
-              {s.tip && (
-                <div className="guide-tip">
-                  <span className="guide-tip-mark eyebrow">Tip</span>
-                  <p>{s.tip}</p>
-                </div>
-              )}
+              {s.tip && <p className="guide-tip">{s.tip}</p>}
             </section>
           ))}
 
-          <div className="guide-foot">
-            Still stuck? Reach your administrator, or check the platform docs for deeper technical detail.
-          </div>
+          <p className="guide-foot">
+            Still stuck? Ask your administrator, or read the platform docs for the technical detail.
+          </p>
         </div>
       </div>
     </div>

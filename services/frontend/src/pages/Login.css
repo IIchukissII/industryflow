@@ -2,6 +2,9 @@
  * SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Sign in: the mandala resolving out of a starfield beside the form. On a phone the brand
+ * stays, smaller, above the form.
  */
 
 .login {
@@ -11,7 +14,7 @@
   background: var(--bg);
 }
 
-/* ---- hero: one big living mandala resolving out of a starfield of raw data --- */
+/* ---- hero: one living mandala resolving out of a starfield of raw data ---- */
 .login-hero {
   position: relative;
   overflow: hidden;
@@ -26,41 +29,60 @@
 }
 .login-hero-stack {
   position: relative; z-index: 1;
-  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
   max-width: 48ch;
 }
 .login-hero-mandala { width: min(320px, 40vh); height: auto; }
 .login-wordmark {
-  font-family: var(--font-display); font-weight: 600;
-  font-size: clamp(34px, 4.4vw, 46px); letter-spacing: -0.015em; margin: 18px 0 0;
+  font-family: var(--font-display); font-weight: 560;
+  font-size: clamp(34px, 4.4vw, 46px); line-height: 1.1; letter-spacing: -0.015em;
+  color: var(--text); margin: 18px 0 0;
 }
 .login-tagline {
   font-family: var(--font-display); font-style: italic; font-weight: 400;
-  font-size: clamp(19px, 2.4vw, 24px); line-height: 1.25;
-  color: var(--text); margin: 10px 0 0; text-wrap: balance;
+  font-size: clamp(17px, 2.4vw, 24px); line-height: 1.25;
+  color: var(--text-soft); margin: 10px 0 0; text-wrap: balance;
 }
 .login-lede { color: var(--muted); font-size: 15px; line-height: 1.6; margin: 14px 0 0; max-width: 42ch; }
 
 /* ---- sign-in panel -------------------------------------------------------- */
 .login-panel { display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
 .login-card { width: 100%; max-width: 360px; }
-.login-card h1 { font-size: 26px; }
-.login-sub { color: var(--muted); font-size: 14px; margin: 6px 0 26px; }
+.login-title { font-size: 28px; font-weight: 500; }
+.login-sub { color: var(--muted); font-size: 14px; margin: 8px 0 28px; }
 
 .login-form { display: grid; gap: 16px; }
-.form-group { display: grid; gap: 7px; }
-.form-group label { font-size: 12.5px; color: var(--muted); }
-.login-form input { padding: 11px 13px; font-size: 14px; }
+.login-field { display: grid; gap: 6px; }
+.login-field label { font-size: 14px; color: #c9cdd6; }
+.login-form input { min-height: 48px; padding: 12px 14px; font-size: 15px; border-radius: 12px; }
 
 .login-error {
-  background: rgba(244, 73, 109, 0.1); border: 1px solid rgba(244, 73, 109, 0.35);
-  color: #ff8da6; font-size: 13px; padding: 10px 12px; border-radius: var(--r-sm);
+  margin: 0; font-size: 14px; color: #ef7a64;
+  padding: 10px 12px; border-radius: var(--r-sm);
+  background: rgba(224, 71, 47, 0.08); border: 1px solid rgba(224, 71, 47, 0.35);
 }
 
-.login-submit { width: 100%; padding: 12px; font-size: 14px; margin-top: 4px; }
-.login-foot { margin-top: 22px; color: var(--faint); font-size: 12.5px; text-align: center; }
+.login-submit { width: 100%; min-height: 50px; font-size: 15px; font-weight: 600; border-radius: 12px; margin-top: 6px; }
+.login-foot { margin: 28px 0 0; color: var(--muted); font-size: 13px; text-align: center; }
 
+/* ---- phone: brand above the form, one column ------------------------------ */
 @media (max-width: 860px) {
-  .login { grid-template-columns: 1fr; }
-  .login-hero { display: none; }
+  .login { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .login-hero {
+    padding: 48px 24px 0; border-right: 0;
+    background: radial-gradient(380px 380px at 50% 30%, #141c34 0%, transparent 72%);
+  }
+  .login-stars { display: none; }
+  .login-hero-mandala { width: 200px; }
+  .login-wordmark { font-size: 34px; margin-top: 10px; }
+  .login-tagline { font-size: 17px; margin-top: 6px; color: #b9bfcc; }
+  .login-lede { display: none; }
+  .login-panel { align-items: stretch; padding: 36px 24px 32px; }
+  .login-card { max-width: 420px; display: flex; flex-direction: column; }
+  /* the wordmark heads the page on a phone; the form's heading stays for screen readers */
+  .login-title, .login-sub {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+  .login-foot { margin-top: auto; padding-top: 32px; }
 }
