@@ -165,7 +165,7 @@ jobs:
           - { name: notebook-cold-broker,   context: services/notebook_cold_broker, file: services/notebook_cold_broker/Dockerfile,
               smoke: "python -c \"import broker; print('cold-broker imports ok')\"" }
           - { name: notebook-authoring,     context: clients/python,            file: services/notebook_hub/Dockerfile.authoring,
-              smoke: "python -c \"import numpy, pandas, sklearn, mlflow, industryflow; print('authoring kernel ok', numpy.__version__)\"" }
+              smoke: "python -c \"import numpy, pandas, pyarrow.parquet, sklearn, mlflow, industryflow; print('authoring kernel ok', numpy.__version__)\"" }
           - { name: notebook-analytics,     context: clients/python,            file: services/notebook_hub/Dockerfile.analytics,
               smoke: "python -c \"import numpy, pandas, industryflow; print('analytics kernel ok', numpy.__version__)\"" }
           - { name: db-backup,              context: infrastructure/backup,     file: infrastructure/backup/Dockerfile,

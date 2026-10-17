@@ -20,6 +20,8 @@ dependencies = [
 # Tenant SQL through the proxy (ADR-0015). Optional so the base client stays lean; the authoring
 # notebook image installs it (industryflow[sql]).
 sql = ["psycopg[binary]>=3.1"]
+# Cold-layer Parquet reads (ADR-0025 dec 5, read side); the authoring notebook image installs it.
+cold = ["pyarrow>=25"]
 dev = ["pytest==9.1.1"]
 
 [tool.setuptools]
