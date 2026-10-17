@@ -84,6 +84,11 @@ This ADR decides how a domain extends IndustryFlow: what the extension surfaces 
 - **Extension-owned schema management.** How extension tables register and migrate within per-tenant schemas alongside the platform's own migrations.
 - **Dashboards and profiles packaging.** How domain dashboards (Grafana) and operating profiles ship as part of an extension.
 
+## Resolved since acceptance
+
+- **Plugin interface and versioning (2026-10-17).** Two deferred items are decided in ADR-0010, which refines this record: the concrete plugin interface (an in-process registry that a service fills by importing the modules its configuration names) and the extension-API versioning scheme (ADR-0010 decision 3, with its pre-stable rule for major 0). The in-process default of alternative D is ADR-0010 decision 4; when a plugin must instead run out of process stays open, as does every other item above.
+- **Domain configuration out of the core (2026-10-17).** The domain-specific feature definition and sensor mapping named in the context no longer ship in platform code. They live in a reference extension that the platform loads only when configuration names it (ADR-0010 decision 5).
+
 ## References
 
 - ADR-0001 — IndustryFlow framing; decision 7 (domain specifics live in extensions) that this ADR gives a shape.
