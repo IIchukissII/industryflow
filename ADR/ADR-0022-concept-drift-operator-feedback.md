@@ -85,6 +85,17 @@ So the undecided shape is: what an operator labels, where the label lives (given
   dec 5. The revision now numbered rev 1 is the one recorded above (2026-10-13). The slices, their storage and their validation are in
   `docs/architecture/alerting.md`. The one surface not built is a retrain flag shown beside the model
   on the models view; the recommendation is surfaced in alert history.
+- **Correction to the note above (2026-10-17).** The retrain flag beside the model is built, and
+  was built before that note was written: the models view marks each model that has an
+  unacknowledged retrain recommendation and explains the recommendation in the model's detail, in
+  addition to the entry in alert history. Acknowledging the recommendation clears the mark.
+- **Recommendation thresholds and cadence** (deferred above). The evaluator runs on the drift
+  schedule, directly after each drift pass, once per model, and holds a per-model cooldown. It
+  reads decision 4's "precision decay" as the model's label-derived precision over a trailing window
+  falling below a configured floor, given a minimum number of decided labels, together with a
+  minimum number of drift alerts over a lookback period. It compares no earlier window, so a model
+  whose precision was below the floor from the start qualifies as well. The values are
+  configuration, documented with the alerting architecture.
 
 ## References
 - ADR-0021 (model drift monitoring) — parent; this realizes its deferred operator-feedback decision.
