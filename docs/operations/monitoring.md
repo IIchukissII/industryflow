@@ -4,892 +4,175 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# IndustryFlow Monitoring & Observability
+# Monitoring
 
-Complete guide to the monitoring, metrics, and logging infrastructure for IndustryFlow.
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Components](#components)
-- [Access & Credentials](#access--credentials)
-- [Dashboards](#dashboards)
-- [Metrics](#metrics)
-- [Logs](#logs)
-- [Alerts](#alerts)
-- [Troubleshooting](#troubleshooting)
-
----
-
-## Overview
-
-IndustryFlow uses a comprehensive monitoring stack built on industry-standard tools:
-
-- **Prometheus** - Time-series metrics collection and storage
-- **Grafana** - Visualization and dashboarding
-- **Loki** - Log aggregation and querying
-- **Promtail** - Log collection agent
-- **Multiple Exporters** - Specialized metrics collectors
-
-### Key Features
-
-- Real-time metrics from all services
-- Centralized log aggregation from 23+ containers
-- Custom dashboards for system and application monitoring
-- 7-day log retention
-- 30-day metrics retention
-- Automated service discovery
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Grafana (Port 3001)                     │
-│                  Visualization & Dashboards                  │
-└────────────────┬─────────────────────┬──────────────────────┘
-                 │                     │
-        ┌────────▼────────┐   ┌───────▼────────┐
-        │   Prometheus    │   │      Loki      │
-        │   (Port 9090)   │   │   (Port 3100)  │
-        │  Metrics Store  │   │   Log Store    │
-        └────────┬────────┘   └───────┬────────┘
-                 │                     │
-    ┌────────────┼─────────────┐      │
-    │            │             │      │
-┌───▼────┐ ┌────▼────┐ ┌──────▼──┐ ┌─▼────────┐
-│cAdvisor│ │  Node   │ │Exporters│ │ Promtail │
-│        │ │Exporter │ │(DB,etc) │ │          │
-└───┬────┘ └────┬────┘ └──────┬──┘ └─┬────────┘
-    │           │             │      │
-    └───────────┴─────────────┴──────┴──────────┐
-                                                 │
-              ┌──────────────────────────────────▼────┐
-              │         Docker Containers              │
-              │  (API, Services, Databases, Kafka...)  │
-              └────────────────────────────────────────┘
-```
-
----
+The compose stack's metrics, logs and dashboards, and the stateful-feature kill-switch runbook. The
+Kubernetes path (ServiceMonitors, PrometheusRules, dashboard ConfigMaps, cluster backend) is in
+[deploy/observability/README.md](../../deploy/observability/README.md). The decision is
+[ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md).
 
 ## Components
 
-### Prometheus
-
-**Purpose**: Metrics collection, storage, and querying engine
-
-**Configuration**: `/infrastructure/prometheus/prometheus.yml`
-
-**Key Settings**:
-- Scrape interval: 15 seconds
-- Evaluation interval: 15 seconds
-- Retention: 30 days
-- Storage: `/prometheus-data` volume
-
-**Scraped Targets** (14 jobs):
-1. **prometheus** (self-monitoring)
-2. **cadvisor** - Container metrics
-3. **node-exporter** - System metrics
-4. **postgres** - Database metrics
-5. **redis** - Cache metrics
-6. **api-gateway** - API service metrics
-7. **ml-service** - ML service metrics
-8. **ingestion-service** - Ingestion service metrics
-9. **kafka** - Kafka cluster metrics
-10. **spark-driver** - Spark streaming driver metrics
-11. **spark-executors** - Spark aggregations/executor metrics
-12. **spark-master** - Spark master metrics
-13. **loki** - Log store; its `up` is Loki's health signal (the image has no shell for a container healthcheck)
-14. **promtail** - Log collector
-
-**Access**: http://localhost:9090
-
----
-
-### Grafana
-
-**Purpose**: Metrics visualization and dashboard management
-
-**Configuration**:
-- Datasources: `/infrastructure/grafana/provisioning/datasources.yml`
-- Dashboards: `/infrastructure/grafana/provisioning/dashboards.yml`
-
-**Port**: 3001 (configurable via `GRAFANA_PORT` in `.env`)
-
-**Default Credentials**:
-- Username: `admin`
-- Password: Check `.env` file (`GRAFANA_ADMIN_PASSWORD`)
-
-**Configured Datasources**:
-1. **Prometheus** (default) - Metrics
-2. **Loki** - Logs
-3. **TimescaleDB** - Time-series data
-
-**Volume**: `/grafana-data` for persistent storage
-
----
-
-### Loki
-
-**Purpose**: Log aggregation and querying system
-
-**Configuration**: `/infrastructure/loki/loki-config.yml`
-
-**Port**: 3100
-
-**Key Settings**:
-- Retention period: 7 days (168 hours)
-- Ingestion rate: 16 MB/s
-- Max streams per user: 10,000
-- Compaction interval: 10 minutes
-
-**Storage**: `/loki-data` volume
-
-**Log Sources**:
-- This deployment's containers (via Promtail): those on `industryflow-network` and the notebook-kernel
-  network, not every container on the host
-- System logs from `/var/log`
-
----
-
-### Promtail
-
-**Purpose**: Log collection and forwarding to Loki
-
-**Configuration**: `/infrastructure/promtail/promtail-config.yml`
-
-**Key Features**:
-- Automatic Docker container discovery, filtered to this deployment's networks
-- Read positions kept on the `promtail-positions` volume, so a recreate resumes instead of re-sending
-  every container's history (which Loki rejects as too old)
-- Label extraction from container metadata
-- JSON log parsing
-- Real-time log streaming
-
-**Labels Applied**:
-- `job` - "docker" for containers, "varlogs" for system
-- `container` - Container name
-- `service` - Compose service name
-- `project` - Compose project name
-- `environment` - "production"
-- `cluster` - "industryflow"
-
----
-
-### Exporters
-
-#### cAdvisor (Container Advisor)
-
-**Port**: 8080 (internal)
-
-**Metrics**:
-- Container CPU usage
-- Container memory usage
-- Network I/O per container
-- Filesystem usage
-
-**Configuration**:
-- Housekeeping interval: 30 seconds
-- Docker-only mode enabled
-- Disk metrics disabled (performance)
-
-#### Node Exporter
-
-**Port**: 9100
-
-**Metrics**:
-- System CPU usage
-- System memory usage
-- Disk I/O and usage
-- Network statistics
-- Load averages
-
-#### PostgreSQL Exporter
-
-**Port**: 9187
-
-**Metrics**:
-- Database sizes
-- Connection counts
-- Query performance
-- Transaction rates
-- Table statistics
-
-**Configuration**:
-- Connects to: `timescaledb:5432` over TLS, verifying the server (`verify-full`, ADR-0017)
-- Database: `industryflow`
-- Credentials: the read-only monitoring role `metrics_user` (`pg_monitor`), password
-  `METRICS_DB_PASSWORD` from `.env` — never the superuser (ADR-0016 dec 3). A database initialised
-  before the exporter used this role has it without a password; set it once as
-  `init-scripts/12-metrics-role.sql` describes.
-
-#### Redis Exporter
-
-**Port**: 9121
-
-**Metrics**:
-- Memory usage
-- Connected clients
-- Hit/miss rates
-- Key statistics
-- Command statistics
-
-#### Kafka Exporter
-
-**Port**: 9308
-
-**Metrics**:
-- Broker status
-- Topic metrics
-- Partition counts
-- Consumer lag
-- Message rates
-
----
-
-## Access & Credentials
-
-### Grafana Access
-
-**URL**: http://localhost:3001
-
-**Login**:
-```
-Username: admin
-Password: <from .env GRAFANA_ADMIN_PASSWORD>
-```
-
-**Default password location**: `.env` file at project root
-
-### Prometheus Access
-
-**URL**: http://localhost:9090
-
-**No authentication required** (internal use)
-
-### Loki Access
-
-**URL**: http://localhost:3100
-
-**API Endpoints**:
-- Metrics: `http://localhost:3100/metrics`
-- Ready check: `http://localhost:3100/ready`
-- Query API: `http://localhost:3100/loki/api/v1/query`
-
----
-
-## Dashboards
-
-### 1. Complete System Infrastructure
-
-**UID**: `complete-system`
-
-**URL**: http://localhost:3001/d/complete-system/complete-system-infrastructure
-
-**Panels**:
-- **Service Health Status** - UP/DOWN for all monitored services
-- **System Resources** - CPU, Memory, Disk usage gauges
-- **Container CPU Usage** - Time series of container CPU
-- **Container Memory Usage** - Time series of container memory
-- **Network I/O** - Container network traffic
-- **Database Metrics**:
-  - Active connections
-  - Database sizes
-  - Query performance
-- **Redis Metrics**:
-  - Memory usage
-  - Cache hit rates
-  - Connected clients
-- **Kafka Metrics**:
-  - Topic offsets
-  - Consumer lag
-  - Broker status
-
-**Refresh Rate**: 10 seconds (configurable)
-
----
-
-### 2. Container Logs Dashboard
-
-**UID**: `container_logs`
-
-**URL**: http://localhost:3001/d/container_logs/container-logs-dashboard
-
-**Panels**:
-- **Log Rate by Service** - Bar chart showing log volume
-- **Active Containers** - Count of containers logging
-- **Current Log Rate** - Real-time logs/second
-- **Top 10 Services** - Services with highest log volume
-- **Container Logs Viewer** - Full log explorer with:
-  - Multi-container selection
-  - Service filter
-  - Text search
-  - Label display
-  - Time range selection
-
-**Features**:
-- Multi-select container filter
-- Regex search support
-- Real-time log streaming
-- Label visibility for each log line
-- Auto-refresh every 10 seconds
-
-**Usage Examples**:
-
-Filter specific containers:
-1. Click "Container" dropdown
-2. Uncheck "All"
-3. Select desired containers (e.g., kafka, api-gateway)
-
-Search for errors:
-1. Enter "error" in Search box
-2. Or use regex: `ERROR|FATAL|CRITICAL`
-
-Filter by service:
-1. Use "Service" dropdown
-2. Select service (e.g., "api-gateway")
-
----
-
-## Kubernetes integration (Helm, ADR-0016)
-
-The decision is [ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md); the
-names it is realised with:
-
-- **ServiceMonitors** — the chart renders one for every entry under `apps` with `metrics: true`.
-- **PrometheusRules** — platform rules on `up`, `pg_up`, `redis_up` and
-  `kafka_consumergroup_lag`.
-- **Grafana dashboards** — ConfigMaps labelled for the Grafana sidecar, single-sourced from the
-  compose dashboards.
-- These are toggled under `observability:` in `values.yaml`. `serviceMonitors` and
-  `prometheusRules` **default off**, because they need the Prometheus Operator CRDs; their
-  `labels` let you match your operator's selectors. `dashboards` are plain ConfigMaps and default
-  on.
-- **Exporters** — postgres/redis/kafka exporters ship with the chart. The postgres-exporter
-  connects as `metrics_user` (granted `pg_monitor`), which has its own `hostssl` rule.
-- **Backend** — `kube-prometheus-stack` (Prometheus Operator, Grafana, Alertmanager) and Loki run
-  separately; see `deploy/observability/README.md`.
-
----
-
-## Runbook: the stateful-feature kill-switch
-
-**What it is.** Some feature transforms (`statistical`, `rolling_stat`) are *stateful*: to compute a
-feature they read a windowed baseline out of the Spark-materialized aggregate tables. Every
-inference issues one such read per stateful feature, so a model carrying nine of them queries the
-database nine times per prediction. When the database is degraded, that load is part of the problem.
-
-The kill-switch (ADR-0024) neutralizes that whole class **live, without a redeploy**: the engine
-fills each stateful feature's slot with its neutral value and does **not call the transform**, so
-those queries stop entirely. The feature vector keeps its length and order, so every bound model
-keeps serving — on partially degraded input.
-
-**When to flip it.** The database is alive but overloaded, and inference is a meaningful part of the
-load. This is not a fix for a *totally unreachable* database: there, the switch's own read fails
-too, it holds `enabled`, and the transforms fall back to the same neutral value on their own. The
-switch buys relief for an overloaded store, not resurrection of a dead one.
-
-**Turn it off** (neutralize stateful features):
-
-```sql
-UPDATE public.platform_config
-   SET value = 'false'::jsonb, updated_at = NOW(), updated_by = '<operator>'
- WHERE key = 'stateful_features_enabled';
-```
-
-**Turn it back on** when the substrate recovers — `value = 'true'::jsonb`.
-
-The flag is read on the serving path with a short TTL cache, so a flip takes effect within seconds;
-no restart, no redeploy. The service only ever **reads** it (it holds `SELECT` and nothing more), so
-it cannot trip itself — the switch moves because a human moved it.
-
-**Confirm it took effect.** Degraded serving is never silent: `/api/inference/predict` responses
-carry `degraded: true` and list the `neutralized_features`, the service logs the neutralization, and
-the counter rises:
-
-```promql
-# Feature slots being served neutral instead of computed — should be 0 in normal operation
-rate(ml_stateful_features_neutralized_total[5m])
-```
-
-**Alert on it being left off.** The switch's cost is silent quality loss: scores keep coming, and
-they look ordinary unless you check. A non-zero rate for longer than an incident should last is
-worth paging on — it means models are scoring on neutralized input and somebody forgot to flip it
-back.
+All host ports bind to `127.0.0.1`. Config paths are relative to the repository root.
+
+| Service | Role | Host port | Config |
+|---|---|---|---|
+| `prometheus` | Metrics store, 15 s scrape and evaluation interval | `${PROMETHEUS_PORT:-9090}` | `infrastructure/prometheus/prometheus.yml` |
+| `grafana` | Dashboards | `${GRAFANA_PORT:-3000}` (`.env.example`: `3001`) | `infrastructure/grafana/provisioning/` |
+| `loki` | Log store | `3100` | `infrastructure/loki/loki-config.yml` |
+| `promtail` | Ships container and `/var/log` logs to Loki | none (`9080` internal) | `infrastructure/promtail/promtail-config.yml` |
+| `cadvisor` | Container CPU, memory, network | `8080` | flags in `docker-compose.yml` |
+| `node-exporter` | Host CPU, memory, disk, network | `9100` | flags in `docker-compose.yml` |
+| `postgres-exporter` | TimescaleDB metrics | `9187` | env in `docker-compose.yml` |
+| `redis-exporter` | Redis metrics | `9121` | env in `docker-compose.yml` |
+| `kafka-exporter` | Kafka topic offsets, consumer lag | `9308` | flags in `docker-compose.yml` |
+
+| Volume | Holds |
+|---|---|
+| `prometheus-data` | TSDB, retention `30d` (`--storage.tsdb.retention.time` in `docker-compose.yml`) |
+| `grafana-data` | Grafana state |
+| `loki-data` | Chunks, index, compactor |
+| `promtail-positions` | Read positions; a recreated `promtail` resumes instead of re-sending history Loki rejects as too old |
+
+## Prometheus scrape jobs
+
+| Job | Target | Path |
+|---|---|---|
+| `prometheus` | `localhost:9090` | `/metrics` |
+| `cadvisor` | `cadvisor:8080` | `/metrics` |
+| `node-exporter` | `node-exporter:9100` | `/metrics` |
+| `postgres` | `postgres-exporter:9187` | `/metrics` |
+| `redis` | `redis-exporter:9121` | `/metrics` |
+| `api-gateway` | `api-gateway:8000` | `/metrics` |
+| `ml-service` | `ml-service-api:8002` | `/metrics` |
+| `ingestion-service` | `ingestion-edge:9003` (internal metrics-only listener; `/metrics` is denied on the device port) | `/metrics` |
+| `kafka` | `kafka-exporter:9308` | `/metrics` |
+| `spark-driver` | `spark-streaming:4040`, `spark-aggregations:4040` | `/metrics/prometheus` |
+| `spark-executors` | `spark-streaming:4040`, `spark-aggregations:4040` | `/metrics/executors/prometheus` |
+| `spark-master` | `spark-master:8080` | `/metrics/master/prometheus` |
+| `loki` | `loki:3100` | `/metrics`; `up{job="loki"}` is Loki's health signal (distroless image, no container healthcheck) |
+| `promtail` | `promtail:9080` | `/metrics` |
+
+## Grafana
+
+| Item | Value |
+|---|---|
+| URL | `http://localhost:<GRAFANA_PORT>` |
+| Login | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env` |
+| Datasources | `Prometheus` (default), `Loki` — `datasources.yml` |
+| Dashboard provider | folder `IndustryFlow`, files under `/etc/grafana/provisioning/dashboards` — `dashboards.yml` |
+
+There is no database datasource: the database holds tenant data
+([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) decision 5). Database
+health reaches Grafana as `postgres-exporter` metrics.
+
+### Dashboards
+
+| UID | Title | File | Rows / panels |
+|---|---|---|---|
+| `complete-system` | Complete System Infrastructure | `complete_system_dashboard.json` | Service health (`up` for prometheus, postgres, redis, kafka, api-gateway, ml-service; alert detector via cAdvisor `container_last_seen`); system CPU / memory / disk; container CPU and memory; container and host network I/O; DB connections and activity; Redis hit rate and activity; Kafka topic offsets and consumer lag; Spark container CPU / memory / network. Refresh `10s` |
+| `container_logs` | Container Logs Dashboard | `logs_dashboard.json` | Log rate by service, active containers, current log rate, top 10 services by volume, log viewer. Variables `service`, `container`, `search` (regex). Refresh `10s` |
 
 ## Metrics
 
-### Available Metrics Categories
+| Source | Metrics |
+|---|---|
+| `api-gateway`, `ml-service-api`, `ingestion-service` (`prometheus-fastapi-instrumentator` defaults) | `http_requests_total{handler,method,status}` (`status` grouped: `2xx`, `5xx`, …), `http_request_duration_seconds{handler,method}`, `http_request_duration_highr_seconds`, `http_request_size_bytes`, `http_response_size_bytes` |
+| `ml-service-api` | `ml_stateful_features_neutralized_total` — see [kill-switch](#runbook-stateful-feature-kill-switch) |
+| Spark | Native `PrometheusServlet` driver, executor and master metrics |
+| `cadvisor` | `container_cpu_usage_seconds_total`, `container_memory_usage_bytes`, `container_network_{receive,transmit}_bytes_total`, `container_last_seen` (disk and diskIO metrics disabled) |
+| `node-exporter` | `node_cpu_seconds_total`, `node_memory_*`, `node_filesystem_*`, `node_network_*` |
+| `postgres-exporter` | `pg_up`, `pg_stat_database_*`, `pg_database_size_bytes` |
+| `redis-exporter` | `redis_up`, `redis_connected_clients`, `redis_commands_total` |
+| `kafka-exporter` | `kafka_brokers`, `kafka_topic_partition_current_offset`, `kafka_consumergroup_lag` |
 
-#### Application Metrics
+`postgres-exporter` connects to `timescaledb` as `metrics_user` (`pg_monitor`) with
+`METRICS_DB_PASSWORD`, `sslmode=${DB_SSLMODE:-verify-full}`
+([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) decision 3,
+[ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md)). A database initialised before the
+role had a password: set it as `infrastructure/timescaledb/init-scripts/12-metrics-role.sql` describes.
 
-From FastAPI services (API Gateway, Alert Service, ML Service):
-
-```promql
-# Request rate
-rate(http_requests_total[5m])
-
-# Request latency
-histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
-
-# Error rate
-rate(http_requests_total{status=~"5.."}[5m])
-```
-
-#### Container Metrics
-
-From cAdvisor:
-
-```promql
-# Container CPU usage
-rate(container_cpu_usage_seconds_total{name!=""}[5m])
-
-# Container memory usage
-container_memory_usage_bytes{name!=""}
-
-# Container network I/O
-rate(container_network_receive_bytes_total[5m])
-```
-
-#### System Metrics
-
-From Node Exporter:
-
-```promql
-# CPU usage
-100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
-
-# Memory usage
-100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))
-
-# Disk usage
-100 - ((node_filesystem_avail_bytes / node_filesystem_size_bytes) * 100)
-```
-
-#### Database Metrics
-
-From PostgreSQL Exporter:
-
-```promql
-# Active connections
-pg_stat_database_numbackends{datname="industryflow"}
-
-# Database size
-pg_database_size_bytes{datname="industryflow"}
-
-# Transaction rate
-rate(pg_stat_database_xact_commit{datname="industryflow"}[5m])
-```
-
-#### Kafka Metrics
-
-From Kafka Exporter:
-
-```promql
-# Consumer lag
-kafka_consumergroup_lag
-
-# Topic messages per second
-rate(kafka_topic_partition_current_offset[5m])
-
-# Broker count
-count(kafka_brokers)
-```
-
----
+| Question | PromQL |
+|---|---|
+| Request rate | `sum by (handler) (rate(http_requests_total[5m]))` |
+| 5xx rate | `sum by (job) (rate(http_requests_total{status="5xx"}[5m]))` |
+| p95 latency | `histogram_quantile(0.95, sum by (le, handler) (rate(http_request_duration_seconds_bucket[5m])))` |
+| Container CPU | `sum by (name) (rate(container_cpu_usage_seconds_total{name=~".+"}[5m]))` |
+| Host memory used % | `100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)` |
+| DB connections | `pg_stat_database_numbackends{datname="industryflow"}` |
+| Consumer lag | `sum by (consumergroup, topic) (kafka_consumergroup_lag)` |
+| Dead-lettered readings | `sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".+\\.dlq"}[15m]))` |
 
 ## Logs
 
-### Query Syntax (LogQL)
+| Setting | Value (`loki-config.yml`) |
+|---|---|
+| Retention | `168h`, compactor every `10m` |
+| Ingestion rate / burst | `16` / `32` MB |
+| Per-stream rate / burst | `8MB` / `16MB` |
+| Max streams per user | `10000` local, `50000` global |
+| Auth | disabled (`auth_enabled: false`) |
 
-**Basic Queries**:
+| Promtail job | Source | Labels |
+|---|---|---|
+| `docker` | Docker socket, containers on `industryflow-network` and `industryflow-notebook-kernels` only | `job="docker"`, `container`, `container_id`, `service`, `project`, `level` (from JSON logs), `environment="production"`, `cluster="industryflow"` |
+| `system` | `/var/log/*log` | `job="varlogs"` |
 
-```logql
-# All Docker container logs
-{job="docker"}
+| Query | LogQL |
+|---|---|
+| One service | `{service="api-gateway"}` |
+| One container | `{container="industryflow-kafka"}` |
+| Errors | `{job="docker"} \|~ "ERROR\|FATAL"` |
+| JSON level | `{job="docker", level="error"}` |
+| Lines per service | `sum by (service) (count_over_time({job="docker"}[5m]))` |
+| Noisiest containers | `topk(10, sum by (container) (count_over_time({job="docker"}[1h])))` |
 
-# Specific container
-{container="industryflow-kafka"}
-
-# Specific service
-{service="api-gateway"}
-
-# Multiple containers
-{container=~"industryflow-(kafka|api-gateway)"}
-```
-
-**Filtering**:
-
-```logql
-# Contains text
-{job="docker"} |= "error"
-
-# Regex match
-{job="docker"} |~ "ERROR|WARN|FATAL"
-
-# Does not contain
-{job="docker"} != "debug"
-
-# JSON field extraction
-{job="docker"} | json | level="error"
-```
-
-**Aggregations**:
-
-```logql
-# Count logs per service
-sum by(service) (count_over_time({job="docker"}[5m]))
-
-# Log rate per container
-sum by(container) (rate({job="docker"}[1m]))
-
-# Top 10 noisiest containers
-topk(10, sum by(container) (count_over_time({job="docker"}[1h])))
-```
-
-### Accessing Logs
-
-**Via Grafana**:
-1. Navigate to Container Logs Dashboard
-2. Use filters to narrow down logs
-3. Click log lines to expand details
-
-**Via Loki API**:
-
-```bash
-# Query last hour of logs
-curl -G -s "http://localhost:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={job="docker"}' \
-  --data-urlencode 'start=1h'
-
-# Get available labels
-curl -s "http://localhost:3100/loki/api/v1/labels"
-
-# Get label values
-curl -s "http://localhost:3100/loki/api/v1/label/container/values"
-```
-
-**Via LogCLI** (if installed):
-
-```bash
-# Tail logs
-logcli query --tail '{container="industryflow-kafka"}'
-
-# Query with time range
-logcli query '{job="docker"} |= "error"' --since=1h
-```
-
----
+| Loki API | Path |
+|---|---|
+| Ready | `GET http://localhost:3100/ready` |
+| Labels | `GET http://localhost:3100/loki/api/v1/labels` |
+| Label values | `GET http://localhost:3100/loki/api/v1/label/<label>/values` |
+| Range query | `GET http://localhost:3100/loki/api/v1/query_range?query=<logql>` |
 
 ## Alerts
 
-### Current Alert Configuration
+| Plane | Where |
+|---|---|
+| Platform rules, compose | None: `prometheus.yml` has no `rule_files` and no Alertmanager target |
+| Platform rules, Kubernetes | Helm `PrometheusRule` — [deploy/observability/README.md](../../deploy/observability/README.md#platform-alert-rules) |
+| Tenant sensor and streaming alerts | alert-service, tenant-isolated, never this stack ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) decision 5) |
 
-The monitoring stack is configured for alerting but does not have active alert rules configured by default.
+## Runbook: stateful-feature kill-switch
 
-### Setting Up Alerts
+The switch ([ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) makes the feature engine
+fill every stateful transform's slot (`statistical`, `rolling_stat`) with its neutral value without
+calling the transform, so inference stops reading the aggregate tables. Vector length and order are
+unchanged. Use it when the database is alive but overloaded; in a total outage it reads as enabled
+and the transforms fall back to the same neutral value.
 
-**1. Create Alert Rules in Prometheus**:
+| Task | Command / signal |
+|---|---|
+| Turn off (neutralize) | `UPDATE public.platform_config SET value = 'false'::jsonb, updated_at = NOW(), updated_by = '<operator>' WHERE key = 'stateful_features_enabled';` |
+| Turn back on | same statement with `'true'::jsonb` |
+| Takes effect | within `STATEFUL_SWITCH_CACHE_TTL` seconds (default `5`); no restart |
+| Confirm, response | `POST /api/inference/predict` returns `degraded: true` and `neutralized_features` |
+| Confirm, metric | `rate(ml_stateful_features_neutralized_total[5m])` > 0; `0` in normal operation |
 
-Edit `/infrastructure/prometheus/prometheus.yml`:
-
-```yaml
-rule_files:
-  - "alerts.yml"
-```
-
-Create `/infrastructure/prometheus/alerts.yml`:
-
-```yaml
-groups:
-  - name: industryflow
-    interval: 30s
-    rules:
-      - alert: HighCPUUsage
-        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High CPU usage detected"
-          description: "CPU usage is above 80% for 5 minutes"
-
-      - alert: ServiceDown
-        expr: up == 0
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Service {{ $labels.job }} is down"
-```
-
-**2. Configure Alert Manager** (optional):
-
-Add to `docker-compose.yml` and update Prometheus config to point to it.
-
-**3. Create Grafana Alerts**:
-
-Grafana supports creating alerts directly from dashboard panels.
-
----
+`ml_service_user` holds `SELECT` only on `public.platform_config`; the service never writes the flag.
+No shipped rule alerts on the counter.
 
 ## Troubleshooting
 
-### Prometheus Issues
-
-**Prometheus not scraping targets**:
-
-```bash
-# Check Prometheus targets
-curl http://localhost:9090/api/v1/targets | jq
-
-# Check Prometheus logs
-docker logs industryflow-prometheus
-
-# Verify config syntax
-docker exec industryflow-prometheus promtool check config /etc/prometheus/prometheus.yml
-```
-
-**High memory usage**:
-
-- Reduce retention time in `prometheus.yml`
-- Reduce scrape frequency
-- Limit cardinality of metrics
-
-### Grafana Issues
-
-**Dashboards not loading**:
-
-```bash
-# Check Grafana logs
-docker logs industryflow-grafana
-
-# Verify dashboard files permissions
-ls -la infrastructure/grafana/provisioning/*.json
-
-# Fix permissions if needed
-chmod 644 infrastructure/grafana/provisioning/*.json
-docker compose restart grafana
-```
-
-**Datasource connection errors**:
-
-- Verify service names in datasource URLs
-- Check network connectivity: `docker exec industryflow-grafana ping prometheus`
-- There is deliberately no database datasource: the database holds tenant data, which the shared
-  monitoring plane must not query (ADR-0016 dec 5). Database health comes from the
-  postgres-exporter's metrics, through Prometheus.
-
-### Loki Issues
-
-**No logs appearing**:
-
-```bash
-# Check Loki status
-curl http://localhost:3100/ready
-
-# Check available labels
-curl http://localhost:3100/loki/api/v1/labels
-
-# Check Promtail logs
-docker logs industryflow-promtail
-
-# Verify Promtail is sending logs
-curl http://localhost:3100/loki/api/v1/label/container/values
-```
-
-**Parse errors in queries**:
-
-- Ensure LogQL syntax is correct
-- Use `{job="docker"}` not `{job=docker}`
-- Time ranges need units: `[5m]` not `[5]`
-
-### Promtail Issues
-
-**Not collecting container logs**:
-
-```bash
-# Check Promtail logs
-docker logs industryflow-promtail
-
-# Verify Docker socket access
-docker exec industryflow-promtail ls -la /var/run/docker.sock
-
-# Check Promtail config
-docker exec industryflow-promtail cat /etc/promtail/promtail-config.yml
-```
-
-**High memory usage**:
-
-- Reduce batch size in Promtail config
-- Increase batch timeout
-- Limit number of streams
-
-### Exporter Issues
-
-**PostgreSQL Exporter not connecting**:
-
-```bash
-# Check exporter logs
-docker logs industryflow-postgres-exporter
-
-# Test the monitoring role's login (its password is METRICS_DB_PASSWORD in .env)
-docker exec -it industryflow-timescaledb psql "host=localhost dbname=industryflow user=metrics_user sslmode=require" -c "SELECT 1"
-
-```
-
-**Redis Exporter not working**:
-
-```bash
-# Check Redis connectivity
-docker exec industryflow-redis redis-cli ping
-
-# Check exporter status
-curl http://localhost:9121/metrics | grep redis_up
-```
-
-### General Debugging
-
-**Check all monitoring services status**:
-
-```bash
-docker ps --filter "name=prometheus\|grafana\|loki\|promtail" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-```
-
-**Restart monitoring stack**:
-
-```bash
-docker compose restart prometheus grafana loki promtail
-```
-
-**View resource usage**:
-
-```bash
-docker stats --filter "name=prometheus\|grafana\|loki\|promtail"
-```
-
----
-
-## Performance Tuning
-
-### Prometheus
-
-**Reduce cardinality**:
-- Use recording rules for expensive queries
-- Drop unnecessary labels with `metric_relabel_configs`
-
-**Optimize storage**:
-```yaml
-# In prometheus.yml
-storage:
-  tsdb:
-    retention.time: 15d  # Reduce from 30d if needed
-    retention.size: 10GB # Add size limit
-```
-
-### Loki
-
-**Reduce ingestion**:
-```yaml
-# In loki-config.yml
-limits_config:
-  ingestion_rate_mb: 8  # Reduce from 16
-  per_stream_rate_limit: 4MB  # Reduce from 8MB
-```
-
-**Improve compaction**:
-```yaml
-compactor:
-  compaction_interval: 5m  # Reduce from 10m
-  retention_delete_worker_count: 200  # Increase from 150
-```
-
-### Grafana
-
-**Optimize dashboard queries**:
-- Use time-based aggregations
-- Limit data points with `$__interval`
-- Use query caching where possible
-
----
-
-## Backup & Recovery
-
-### Backing Up Metrics
-
-**Prometheus**:
-```bash
-# Backup Prometheus data
-docker run -v prometheus-data:/data -v $(pwd)/backup:/backup \
-  busybox tar czf /backup/prometheus-backup.tar.gz /data
-```
-
-**Loki**:
-```bash
-# Backup Loki data
-docker run -v loki-data:/data -v $(pwd)/backup:/backup \
-  busybox tar czf /backup/loki-backup.tar.gz /data
-```
-
-### Backing Up Configuration
-
-```bash
-# Backup all monitoring configs
-tar czf monitoring-config-backup.tar.gz \
-  infrastructure/prometheus/ \
-  infrastructure/loki/ \
-  infrastructure/promtail/ \
-  infrastructure/grafana/provisioning/
-```
-
-### Restoring
-
-```bash
-# Restore Prometheus data
-docker run -v prometheus-data:/data -v $(pwd)/backup:/backup \
-  busybox tar xzf /backup/prometheus-backup.tar.gz -C /
-
-# Restart services
-docker compose restart prometheus grafana
-```
-
----
-
-## Best Practices
-
-1. **Regular Health Checks**
-   - Monitor Prometheus targets daily
-   - Check Grafana dashboards weekly
-   - Review log volume and retention
-
-2. **Security**
-   - Keep Grafana password secure (stored in .env)
-   - Don't expose Prometheus/Loki ports externally
-   - Use authentication for production deployments
-
-3. **Performance**
-   - Monitor monitoring stack resource usage
-   - Tune retention based on disk space
-   - Use recording rules for expensive queries
-
-4. **Maintenance**
-   - Backup configurations regularly
-   - Update dashboard versions
-   - Review and clean up unused metrics
-
-5. **Documentation**
-   - Document custom dashboards
-   - Keep alert rule descriptions clear
-   - Maintain runbooks for common issues
-
----
-
-## Additional Resources
-
-- [Prometheus Documentation](https://prometheus.io/docs/)
-- [Grafana Documentation](https://grafana.com/docs/)
-- [Loki Documentation](https://grafana.com/docs/loki/)
-- [LogQL Query Language](https://grafana.com/docs/loki/latest/logql/)
-- [PromQL Query Language](https://prometheus.io/docs/prometheus/latest/querying/basics/)
+| Symptom | Check | Fix |
+|---|---|---|
+| Target down in Prometheus | `curl -s localhost:9090/api/v1/targets \| jq '.data.activeTargets[] \| {job: .labels.job, health, lastError}'` | Fix the target named in `lastError` |
+| Edit to `prometheus.yml` not applied | `docker exec industryflow-prometheus promtool check config /etc/prometheus/prometheus.yml` | `docker compose restart prometheus` (the single-file bind mount keeps the old inode when an editor replaces the file) |
+| Dashboards missing | `docker logs industryflow-grafana` | Files are bind-mounted one by one in `docker-compose.yml`; a new JSON file needs its own mount, then `docker compose up -d grafana` |
+| No logs in Loki | `curl -s localhost:3100/ready`; `docker logs industryflow-promtail` | Container must be on `industryflow-network` or `industryflow-notebook-kernels` |
+| `pg_up` is `0` | `curl -s localhost:9187/metrics \| grep '^pg_up'`; `docker logs industryflow-postgres-exporter` | Set the `metrics_user` password (`12-metrics-role.sql`); check the CA mount for `verify-full` |
+| `redis_up` is `0` | `docker exec industryflow-redis redis-cli ping` | Start `redis`, then the exporter |
+| LogQL parse error | Quote label values, give ranges a unit | `{job="docker"}`, `[5m]` |
+
+## Links
+
+- [Prometheus](https://prometheus.io/docs/) · [PromQL](https://prometheus.io/docs/prometheus/latest/querying/basics/) · [Grafana](https://grafana.com/docs/) · [Loki](https://grafana.com/docs/loki/) · [LogQL](https://grafana.com/docs/loki/latest/query/)
