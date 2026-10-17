@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# notebook_tracking_gateway
+# Tracking gateway
 
 The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md)): it resolves the kernel's tracking capability handle (`MLFLOW_TRACKING_TOKEN`) to one tenant and confines every MLflow call to that tenant's namespace. MLflow's backend and object-store credentials live only here ([ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) dec 1).
 
@@ -37,7 +37,7 @@ The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/AD
 
 ## Settings
 
-| Env var | Default | Meaning |
+| Name | Default | Meaning |
 |---|---|---|
 | `TRACKING_HOST` | `0.0.0.0` | Listen address |
 | `TRACKING_PORT` | `5050` | Listen port |
@@ -58,10 +58,6 @@ The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/AD
 | `tests/test_*.py` except `test_tracking_gateway_integration.py`, against a fake MLflow and store | `unit-tests.yml` |
 | `tests/test_*_integration.py` (`-m integration`), against live MLflow + MinIO + Redis | `tracking-gateway-integration.yml` |
 
-| Task | Command |
-|---|---|
-| Install test deps | `pip install ../../libs/industryflow_contracts -r requirements-dev.txt` |
-| Unit tests | `pytest tests/` |
-
+Unit-test command: [getting started](../../docs/getting-started.md#tests).
 With `TRACKING_S3_PRESIGN_ENDPOINT_URL` (`PUBLIC_BASE_URL` in Compose) set, upload-staging URLs are
 signed for the public edge: an integration run outside CI needs the edge's CA in `REQUESTS_CA_BUNDLE`.

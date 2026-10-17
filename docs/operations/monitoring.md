@@ -1,21 +1,19 @@
 <!--
 SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
-
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # Monitoring
 
-The compose stack's metrics, logs and dashboards, and the stateful-feature kill-switch runbook. The
-Kubernetes path (ServiceMonitors, PrometheusRules, dashboard ConfigMaps, cluster backend) is in
-[deploy/observability/README.md](../../deploy/observability/README.md). The decision is
-[ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md).
+The Compose stack's metrics, logs and dashboards, and the stateful-feature kill-switch runbook
+([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md)). Kubernetes:
+[cluster monitoring](../../deploy/observability/README.md).
 
 ## Components
 
-All host ports bind to `127.0.0.1`. Config paths are relative to the repository root.
+Host ports bind to `127.0.0.1`.
 
-| Service | Role | Host port | Config |
+| Name | Role | Port | Config |
 |---|---|---|---|
 | `prometheus` | Metrics store, 15 s scrape and evaluation interval | `${PROMETHEUS_PORT:-9090}` | `infrastructure/prometheus/prometheus.yml` |
 | `grafana` | Dashboards | `${GRAFANA_PORT:-3000}` (`.env.example`: `3001`) | `infrastructure/grafana/provisioning/` |
@@ -63,7 +61,7 @@ All host ports bind to `127.0.0.1`. Config paths are relative to the repository 
 | Dashboard provider | folder `IndustryFlow`, files under `/etc/grafana/provisioning/dashboards` — `dashboards.yml` |
 
 There is no database datasource: the database holds tenant data
-([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) decision 5). Database
+([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 5). Database
 health reaches Grafana as `postgres-exporter` metrics.
 
 ### Dashboards
@@ -88,9 +86,8 @@ health reaches Grafana as `postgres-exporter` metrics.
 
 `postgres-exporter` connects to `timescaledb` as `metrics_user` (`pg_monitor`) with
 `METRICS_DB_PASSWORD`, `sslmode=${DB_SSLMODE:-verify-full}`
-([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) decision 3,
-[ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md)). A database initialised before the
-role had a password: set it as `infrastructure/timescaledb/init-scripts/12-metrics-role.sql` describes.
+([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 3,
+[ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md)).
 
 | Question | PromQL |
 |---|---|
@@ -138,9 +135,9 @@ role had a password: set it as `infrastructure/timescaledb/init-scripts/12-metri
 
 | Plane | Where |
 |---|---|
-| Platform rules, compose | None: `prometheus.yml` has no `rule_files` and no Alertmanager target |
-| Platform rules, Kubernetes | Helm `PrometheusRule` — [deploy/observability/README.md](../../deploy/observability/README.md#platform-alert-rules) |
-| Tenant sensor and streaming alerts | alert-service, tenant-isolated, never this stack ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) decision 5) |
+| Platform rules, Compose | None: `prometheus.yml` has no `rule_files` and no Alertmanager target |
+| Platform rules, Kubernetes | Helm `PrometheusRule` ([platform alert rules](../../deploy/observability/README.md#platform-alert-rules)) |
+| Tenant sensor and streaming alerts | `alert-service-detector`, tenant-isolated, never this stack ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 5) |
 
 ## Runbook: stateful-feature kill-switch
 
@@ -163,15 +160,15 @@ No shipped rule alerts on the counter.
 
 ## Troubleshooting
 
-| Symptom | Check | Fix |
+| Symptom | Cause | Fix |
 |---|---|---|
-| Target down in Prometheus | `curl -s localhost:9090/api/v1/targets \| jq '.data.activeTargets[] \| {job: .labels.job, health, lastError}'` | Fix the target named in `lastError` |
-| Edit to `prometheus.yml` not applied | `docker exec industryflow-prometheus promtool check config /etc/prometheus/prometheus.yml` | `docker compose restart prometheus` (the single-file bind mount keeps the old inode when an editor replaces the file) |
-| Dashboards missing | `docker logs industryflow-grafana` | Files are bind-mounted one by one in `docker-compose.yml`; a new JSON file needs its own mount, then `docker compose up -d grafana` |
-| No logs in Loki | `curl -s localhost:3100/ready`; `docker logs industryflow-promtail` | Container must be on `industryflow-network` or `industryflow-notebook-kernels` |
-| `pg_up` is `0` | `curl -s localhost:9187/metrics \| grep '^pg_up'`; `docker logs industryflow-postgres-exporter` | Set the `metrics_user` password (`12-metrics-role.sql`); check the CA mount for `verify-full` |
-| `redis_up` is `0` | `docker exec industryflow-redis redis-cli ping` | Start `redis`, then the exporter |
-| LogQL parse error | Quote label values, give ranges a unit | `{job="docker"}`, `[5m]` |
+| Target down in Prometheus | Target unreachable or failing; `curl -s localhost:9090/api/v1/targets \| jq '.data.activeTargets[] \| {job: .labels.job, health, lastError}'` | Fix the target named in `lastError` |
+| Edit to `prometheus.yml` not applied | The single-file bind mount keeps the old inode when an editor replaces the file | `docker exec industryflow-prometheus promtool check config /etc/prometheus/prometheus.yml`; `docker compose restart prometheus` |
+| Dashboards missing | Dashboard files are bind-mounted one by one in `docker-compose.yml`; a new JSON file has no mount | Add its mount, then `docker compose up -d grafana` |
+| No logs in Loki | Container not on `industryflow-network` or `industryflow-notebook-kernels`, or promtail down (`docker logs industryflow-promtail`) | Attach the container to one of the networks; `curl -s localhost:3100/ready` |
+| `pg_up` is `0` | `metrics_user` has no password, or the CA mount for `verify-full` is missing (`docker logs industryflow-postgres-exporter`) | Set the password as `12-metrics-role.sql` describes; check the CA mount |
+| `redis_up` is `0` | Redis down (`docker exec industryflow-redis redis-cli ping`) | Start `redis`, then the exporter |
+| LogQL parse error | Unquoted label value or range without a unit | `{job="docker"}`, `[5m]` |
 
 ## Links
 
