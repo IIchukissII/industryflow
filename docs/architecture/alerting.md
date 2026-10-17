@@ -24,7 +24,7 @@ The alert API, the detection worker, rule types, deduplication and operator labe
 | `api-gateway` | Rule CRUD, alert history, acknowledge, labels, precision | 8000 | `services/api_gateway/routers/alert_rules.py`, `alerts_history.py` |
 | `alert-service-detector` | Kafka consumer on `KAFKA_TOPIC_SENSOR_DATA`; evaluates rules, writes `alerts` | none | `services/alert_service/config.py`, `worker/` |
 | `ml-service-api` | Scores `ml` rules, computes drift ([ML and features](ml-and-features.md)) | 8002 | `services/ml_service/` |
-| Alert History page | Acknowledge, label (Real / False / Unsure), "Precision (labelled)" KPI | | `services/frontend/src/pages/AlertHistory.jsx` |
+| Alerts page | Acknowledge, label (Real / False / Unsure); label precision over 30 days in the 24-hour summary | | `services/frontend/src/pages/AlertHistory.jsx` |
 
 ## Endpoints
 
