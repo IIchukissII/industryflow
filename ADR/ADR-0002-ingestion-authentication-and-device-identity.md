@@ -3,120 +3,70 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0002: Ingestion authentication and device identity — mTLS for gateways, JWT for the API (rev 1)
+# ADR-0002 — Ingestion authentication and device identity: mTLS for devices, JWT for the API
 
-- **ID:** ADR-0002
 - **Status:** Accepted
-- **Date:** 2026-06-26 (rev 1: 2026-10-13)
-- **Project:** IndustryFlow
-- **Parent:** ADR-0001 (framing)
-- **Companions:** ADR-0003 (tenant→schema resolution), ADR-0004 (API authentication, sessions & transport)
-- **Related (sibling):** ADR-0004 rev 1 (gateway host hardening), ADR-0007 (PKI and secure-element identity)
-- **Supersedes:** ADR-0002 rev 0 (2026-06-26 — decision 3 trusted "the identity headers" from the edge without saying which; rev 1 makes each deployment honour exactly one header convention and refuse the other, so no client-supplied header can stand in for the identity the edge vouches for)
+- **Date:** 2026-06-26; changed 2026-10-17
+- **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (consumes the verified tenant),
+  [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the API trust domain),
+  [ADR-0007](ADR-0007-public-key-infrastructure.md) (the device PKI)
 
-## Context and problem
+## Context
 
-IndustryFlow's ingestion endpoint authenticates every caller with a **JWT bearer token** and then resolves the caller's tenant by scanning the database: it lists all `tenant_%` schemas and, for each, issues `SET search_path` plus `SELECT company_id FROM "user"` until one matches (`services/ingestion_service/dependencies.py:53-73`). The reference data producer ships a **hardcoded, now-expired JWT** committed to source (`services/mock_service/stream_tep_data.py:19`), so today the streamer authenticates with a credential anyone can read and that no longer works.
-
-This model was designed for a human or a service calling an HTTP API, and it is the wrong fit for the producers IndustryFlow actually has to serve. The platform's first real deployment is the sibling project, whose sensor data originates on **unattended field gateways** — Raspberry-Pi-class devices that hold a hardware-bound identity in an ATECC secure element and authenticate by PKI, not by logging in (sibling ADR-0004 rev 1, ADR-0007). A bearer JWT does not match that producer on three counts:
-
-- **There is no human to log in.** A field gateway cannot complete an interactive login flow to mint a token, and a long-lived token minted out-of-band becomes a static secret on the device.
-- **A bearer token is replayable.** Whoever holds the JWT *is* the device, for the token's whole lifetime (currently seven days). The credential is not bound to the device's key; a copy works from anywhere. The committed mock token is the degenerate case of this.
-- **The tenant is derived from an untrusted source and used unsafely.** `company_id` reaches the ingestion path from the token/body and is interpolated into `SET search_path TO {schema}` without UUID validation (review finding **X1**, the `search_path` injection), and resolving it costs an O(number-of-tenants) schema scan on the hot ingestion path (review finding **X2**).
-
-So ingestion authentication is really **two different trust domains wearing one mechanism**. Machine producers in the field need a credential bound to hardware that cannot be replayed and that carries a *verified* tenant identity; human and service callers of the HTTP API (the frontend, operators, service-to-service calls) are well served by the existing JWT. Forcing both through one JWT path is what produces the committed-secret footgun, the replay exposure, and the unsafe tenant derivation. This ADR records how ingestion authenticates, and where the tenant identity for ingested data comes from. It does **not** redesign the API's JWT auth (ADR-0004) nor the general tenant→schema resolution used by query paths (ADR-0003); it decides the ingestion/device boundary and hands those neighbours a verified identity to build on.
-
-**Revision 1 (2026-10-13).** Decision 3 made the forwarded identity trustworthy by two conditions: the service is reachable only through the edge, and it accepts the identity only from the edge. Review found a third condition the record never stated. The platform terminates device mTLS at two different edges — one per deployment shape — and each writes the verified identity under its own header convention. The ingestion service accepted either. An edge overwrites the headers *it* writes, and has no reason to touch a convention it does not use, so a client could send the other convention's headers and have them pass through the edge untouched, to a service that would honour them as verified. The network boundary held and the proxy did its job; the gap was that "the identity headers" named two sets, and only one of them was ever vouched for. Rev 1 makes the convention a single, per-deployment fact (decision 3).
-
-## Decision drivers
-
-- **Device credentials must be bound to the device and non-replayable.** A field gateway's identity should live in its secure element and be unusable if copied off the device — the property a bearer token cannot have and mTLS client authentication does.
-- **Tenant identity must come from a verified source, never from untrusted input.** The schema a write lands in is a security boundary; deriving it from a request body or an unvalidated claim and splicing it into SQL is the X1 defect. A cryptographically verified certificate field is a trustworthy source.
-- **Tenant resolution on the ingestion hot path must be O(1), not O(tenants).** The per-request schema scan (X2) does not belong on the highest-throughput endpoint in the system.
-- **Existing API clients must keep working.** The frontend and operators authenticate with JWT today; the device decision must not break the human/service API.
-- **Cryptographic termination should stay out of application code.** Certificate verification, rotation, and revocation are better handled by infrastructure built for it than re-implemented inside the FastAPI app.
-- **Align with the sibling project's gateway, do not reinvent it.** The sibling already decided hardware identity and PKI for its gateways (ADR-0004 rev 1, ADR-0007). IndustryFlow's ingestion should be the server side of that same trust model, not a parallel one.
-- **No standing secrets in source or images.** The committed mock JWT must have no successor; test producers must authenticate the same way real ones do, with test credentials that are not long-lived bearer secrets.
+Sensor data comes from unattended gateways holding a hardware-bound key in a secure element. A bearer
+token suits them badly: nobody logs in, whoever holds it can replay it, and a tenant taken from it or
+from the request body is caller-asserted. The tenant a write lands in is a security boundary, on the
+highest-throughput path.
 
 ## Decision
 
-### Two trust domains
+1. **Device ingestion authenticates with mutual TLS; the HTTP API keeps JWT.** The two trust domains
+   keep two mechanisms.
+2. **mTLS terminates at the edge proxy, not in the application.** The edge verifies the client
+   certificate and forwards the verified identity in request headers.
+3. **The ingestion service trusts identity headers only from its edge, under exactly one convention.**
+   The service is reachable only from the edge and reaches only the broker; each deployment names its
+   edge's header convention with no default, and refuses a request carrying another convention's
+   headers, because an edge overwrites only the headers it writes.
+4. **IndustryFlow operates its own certificate authority for device certificates.** Hierarchy,
+   issuance, lifetime and revocation are ADR-0007.
+5. **Tenant and device identity are read from the verified certificate.** Never from the request body
+   or a token claim.
+6. **The ingested tenant is validated as a UUID before it routes a write.**
+7. **Reference and test producers authenticate with test certificates.** No standing secret is
+   committed to source or baked into an image.
+8. **Ingestion accepts only mTLS and holds no database role.** It authenticates the device and
+   produces to the broker.
 
-1. **Device/gateway ingestion authenticates with mutual TLS (mTLS); the HTTP API keeps JWT.** Producers writing sensor data — field gateways and any machine producer — present a **client certificate** and are authenticated by it. Human and service callers of the API (frontend, operators, service-to-service) continue to authenticate with JWT bearer tokens as decided in ADR-0004. These are two distinct trust domains with two distinct mechanisms, deliberately not merged.
+## Alternatives
 
-### Where mTLS terminates
-
-2. **mTLS is terminated at the reverse proxy / ingress, not in the application.** A proxy (e.g. nginx/Traefik/Envoy — the specific product is an implementation choice, not fixed here) performs the TLS handshake, verifies the client certificate against IndustryFlow's CA, and forwards the request to the ingestion service over the trusted internal network with the **verified** certificate identity passed in trusted request headers (subject/SAN fields). The ingestion service does not perform TLS client-cert verification itself.
-
-3. **The ingestion service trusts the identity headers only from the terminating proxy.** Because a verified-identity header is forgeable if it can reach the service from anywhere, the ingestion service must be reachable only via the proxy (network isolation), and must not accept the identity headers from any other source. The trust that the header reflects a *verified* certificate is the proxy's responsibility and the network's; this coupling is explicit and is called out in the negative consequences.
-
-   > **rev 1 (2026-10-13): each deployment honours exactly one identity header convention, and refuses the other.** The identity the edge vouches for is carried under the header convention *that edge* writes, and it is the only one the service behind it honours. The convention is a per-deployment fact, set in deployment configuration with no default: a service that does not know which edge it sits behind does not start, rather than guessing or accepting both. A request that carries the *other* convention's identity headers is **refused**, not ignored — their presence means a client tried to supply an identity, and that is never benign. The edge, for its part, overwrites the headers of its own convention and, where it can, blanks those of the other; the refusal is what makes that a convenience rather than the control.
-   >
-   > The reason is the one this decision already gives, applied to a case it did not name. An edge strips and replaces what it writes; it cannot be relied on to strip a convention it does not use. A service that honoured two conventions behind an edge that vouches for one would accept, under the second, an identity no edge ever verified. With one convention per deployment, every identity the service honours is one its edge wrote, and a client can never supply the identity the edge vouches for.
-
-### Identity and the certificate authority
-
-4. **IndustryFlow operates its own certificate authority and issues device certificates.** This CA is the server-side counterpart to the sibling's gateway PKI (sibling ADR-0007); IndustryFlow issues the client certificates that gateways present. The CA hierarchy, issuance/provisioning workflow, and revocation mechanism are PKI concerns deferred to a dedicated PKI ADR (see *Deferred decisions*) — this ADR fixes only *that* IndustryFlow runs its own CA and that ingestion trusts certificates chaining to it.
-
-5. **Tenant and device identity are carried in the certificate.** A device certificate encodes its `company_id` (tenant) and a `device_id` in the subject/SAN. The exact field encoding is a PKI-ADR detail, but the decision here is that the **tenant is read from the verified certificate, not from the request body or a JWT claim**.
-
-## Consequences for tenant resolution on ingestion
-
-6. **Ingested data's tenant comes from the verified certificate field and is validated before use.** The `company_id` used to route a write to its tenant schema is taken from the authenticated certificate identity, validated as a well-formed UUID, and only then used to build the schema name. This **supersedes the ingestion path's body/JWT-derived `company_id`** and removes the X1 injection vector and the X2 per-request schema scan *for ingestion*. The general tenant→schema resolution mechanism shared by query paths is decided in ADR-0003; this ADR guarantees ADR-0003 a trustworthy, pre-validated tenant identity on the ingestion side.
-
-### Test and reference producers
-
-7. **Reference and test producers authenticate the same way, with test certificates.** The mock/reference streamer and integration tests present client certificates issued by a test CA, not bearer tokens. No long-lived JWT or other standing secret is committed to source or baked into an image; the committed mock JWT (`stream_tep_data.py:19`) is removed with no bearer-token successor.
-
-### Transition
-
-8. **The JWT ingestion path is retired for devices but removed only after producers are migrated.** Until the reference producer and any real gateways present certificates, the JWT ingestion path may remain accepted as a temporary, explicitly-labelled transition mechanism; it is removed once producers are on mTLS. This transition window is the only period in which both mechanisms accept ingestion, and it is a migration aid, not the end state.
-
-   > **Transition closed (2026-06-27).** The reference producer now presents a client certificate (decision 7), so the JWT ingestion path and its database lookup have been removed: `get_ingestion_identity` accepts only a verified client certificate. As a consequence ingestion no longer holds a database role at all — it is stateless, authenticates by mTLS, and produces only to Kafka. The `ingestion_service_user` role, its `pg_hba` entry, and its per-tenant grants are removed, and a Kubernetes egress NetworkPolicy restricts the ingestion pod to Kafka + DNS (defense in depth against the shared-Secret credentials). The API's JWT trust domain (ADR-0004) is unaffected.
-
-## Alternatives considered
-
-**A. Keep JWT for ingestion (status quo).** *Rejected:* it is a replayable bearer credential ill-suited to unattended field devices, it is the source of the committed-secret footgun, and it derives the tenant from untrusted input spliced into SQL (X1/X2). None of these are fixable while the credential remains an unbound bearer token.
-
-**B. mTLS for all ingestion, no JWT anywhere on the path.** *Rejected for now:* cleaner in principle, but it forces every ingestion client — including any current HTTP/JWT producer and test tooling — onto PKI on day one with no transition, and conflates the device decision with the API's auth model (ADR-0004). The dual model reaches the same end state for devices without breaking API clients; decision 8 keeps the transition bounded.
-
-**C. Per-device API keys (long-lived bearer tokens issued per gateway).** *Rejected:* an API key is still a bearer secret — replayable if copied, not bound to the device's hardware key, and requiring its own issuance/rotation/revocation machinery that duplicates what a CA already provides. It would not let IndustryFlow reuse the sibling's secure-element identity (sibling ADR-0007); it reinvents a weaker version of it.
-
-**D. Terminate mTLS inside the ingestion service (uvicorn client-cert verification).** *Rejected:* it couples certificate verification, trust-store management, and rotation into application code and into every replica, makes horizontal scaling and cert rotation harder, and puts crypto where it is easy to get wrong. Terminating at a purpose-built proxy keeps the app handling an already-verified identity (decision 2). The price — the proxy-trust coupling — is accepted and bounded by decision 3.
-
-**E. Pass the tenant in a request header/body without certificate binding.** *Rejected:* this is the X1 defect with extra steps — an unverified, caller-supplied tenant identity used to route a write. The whole point of decisions 5–6 is that the tenant comes from a *verified* certificate, not from anything the caller can assert freely.
-
-**F. Honour every header convention a supported edge might write, in every deployment *(rev 1)*.** *Rejected:* it lets one service image run behind either edge without configuration, which is its whole appeal, and it is exactly the gap rev 1 closes — the convention an edge does not write is one it does not overwrite, so honouring it honours whatever a client sent. One required setting per deployment is a small price for every honoured identity having been written by the edge.
+| Alternative | Why rejected |
+|---|---|
+| JWT or per-device API keys | Replayable bearer secrets, not bound to the hardware key |
+| mTLS verified inside the service | Trust-store handling and rotation in every replica |
+| Tenant in a header or body without certificate binding | A caller-asserted tenant routes the write |
+| Honour every edge's header convention | A convention the edge does not write passes a client-supplied identity through |
 
 ## Consequences
 
-### Positive
+**Positive**
+- Device credentials are hardware-bound and not replayable; the tenant needs no lookup.
+- Test producers exercise the real authentication path.
 
-- Device credentials become hardware-bound and non-replayable: a certificate's private key lives in the gateway's secure element, so a copied credential is useless. This is the property the committed mock JWT most visibly lacked.
-- The ingestion tenant is read from a cryptographically verified certificate field and validated before use, closing the X1 `search_path` injection and removing the X2 per-request schema scan on the highest-throughput endpoint.
-- IndustryFlow becomes the coherent server side of the sibling's gateway trust model (sibling ADR-0004/0007) rather than a second, parallel scheme.
-- No standing bearer secret remains in source or images; test producers exercise the same authentication path as real ones, so the test setup validates the production mechanism.
-- The API's existing JWT auth is untouched, so the frontend and operators keep working through the change.
+**Negative**
+- The platform operates a CA: issuance, provisioning, rotation, revocation.
+- Isolating the service behind its edge is a standing invariant; a wrong header convention refuses
+  every device.
+- Local development needs a dev CA, certificates and the edge proxy.
 
-### Negative
+## Deferred
 
-- IndustryFlow must run and operate a certificate authority — issuance, provisioning onto devices, rotation, and revocation — which is real operational burden that did not exist under JWT. The bulk of it is deferred to the PKI ADR, but the burden is incurred by this decision.
-- The ingestion service now trusts an identity header from the terminating proxy; if the service is reachable off the proxy path, that header is spoofable. The deployment must enforce that the ingestion service is reachable only via the proxy (decision 3) — a network-isolation requirement that becomes a standing operational invariant.
-- **rev 1:** the header convention is a required per-deployment setting, so a deployment configured for the wrong edge refuses every device until it is corrected. That failure is loud and immediate by design, and preferable to the silent alternative.
-- Local development and testing get more complex: a dev CA, dev certificates, and the terminating proxy must be present to exercise the real ingestion path.
-- During the transition window (decision 8) two ingestion auth mechanisms were accepted at once, a temporary increase in surface area. This window is now **closed** (see decision 8): ingestion accepts only mTLS and holds no database role.
-
-## Deferred decisions
-
-- **PKI architecture.** CA hierarchy (root/intermediate), the exact certificate fields and encoding for `company_id`/`device_id`, device provisioning and enrolment workflow, certificate lifetime, and revocation mechanism (CRL/OCSP) are a dedicated PKI ADR — mirroring the sibling's split between gateway behaviour (sibling ADR-0004) and PKI/identity (sibling ADR-0007). This ADR fixes only that IndustryFlow runs its own CA and reads tenant/device identity from the certificate.
-- ~~**Reverse-proxy product and configuration.**~~ *Resolved in part by rev 1, decision 3:* how many identity header conventions a deployment honours is no longer open — exactly one, the one its edge writes, with the other refused. The choice of proxy product and the concrete header names carrying the verified identity remain implementation concerns owned by the deployment artifacts, not this ADR.
-- **General tenant→schema resolution.** How the validated `company_id` maps to a schema and is applied safely on *all* paths (not just ingestion) is ADR-0003; this ADR supplies it a verified identity for the ingestion case.
-- **Service-to-service auth.** Whether internal service-to-service calls (gateway→alert, etc.) use mTLS, JWT, or network trust is out of scope here and belongs with ADR-0004.
+| Open question | Settled by |
+|---|---|
+| Internal service-to-service authentication | An ADR alongside ADR-0004, when an internal call carries tenant authority beyond the interim mechanism |
 
 ## References
 
-- IndustryFlow review (2026-06-26), findings X1 (`search_path` injection) and X2 (per-request tenant-schema scan), and the committed mock JWT — internal report.
-- Sibling ADR-0004 rev 1 — gateway host hardening and stateless-edge operation (the device whose data IndustryFlow ingests).
-- Sibling ADR-0007 — PKI and secure-element identity (the device-side counterpart to IndustryFlow's CA).
-- ADR-0003 — tenant→schema resolution, consumer of the verified identity decided here.
-- ADR-0004 — API authentication, sessions & transport, the JWT trust domain this ADR leaves in place.
+- `services/ingestion_edge/`, `services/ingestion_service/`: the edge and identity parsing.
+- `docker-compose.yml`, `deploy/helm/`: the isolation of decision 3.
