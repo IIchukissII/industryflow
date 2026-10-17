@@ -14,7 +14,10 @@ The live enforcement of each policy is tested against a real MinIO in tests/obje
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import subprocess
 
 from _repo import ROOT, find, helm_template, load_yaml
 
@@ -118,6 +121,51 @@ def test_chart_mlflow_server_uses_the_database_and_the_object_store():
     joined = " ".join(args)
     assert "--backend-store-uri postgresql://" in joined, args
     assert "--artifacts-destination s3://" in joined and "--default-artifact-root mlflow-artifacts:/" in joined, args
+
+
+# The policy each principal is created with, rendered by the script's own policy functions (so what
+# is asserted is what `mc admin policy create` receives, not a reading of the call's argument names).
+_BUCKETS = {"SPARK_CHECKPOINT_BUCKET": "cp", "ARTIFACT_BUCKET": "art", "BACKUP_BUCKET": "bak", "COLD_STORE_BUCKET": "cold"}
+_WRITE_VERBS = {"s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"}
+
+
+def _granted() -> dict[str, dict[str, set[str]]]:
+    """principal -> bucket -> the actions its policy allows on that bucket's objects."""
+    start = SCRIPT.index("rw_policy() {")
+    functions = SCRIPT[start:SCRIPT.index("\n# principal <name>", start)]
+    calls = re.findall(r"^principal (\S+) \w+ \w+ \S+ (\w+_policy .*)$", SCRIPT, re.M)
+    assert len(calls) == len(_principals()), "a principal line the guard cannot render"
+    out = {}
+    for name, call in calls:
+        r = subprocess.run(["sh", "-euc", functions + "\n" + call], capture_output=True, text=True,
+                           env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), **_BUCKETS}, check=True)
+        grants: dict[str, set[str]] = {}
+        for st in json.loads(r.stdout)["Statement"]:
+            assert st["Effect"] == "Allow", st
+            for res in st["Resource"]:
+                bucket, _, key = res.removeprefix("arn:aws:s3:::").partition("/")
+                if key:
+                    grants.setdefault(bucket, set()).update(st["Action"])
+        out[name] = grants
+    return out
+
+
+def test_the_tracking_gateway_is_the_only_principal_that_writes_the_artifact_store():
+    # ADR-0030 dec 2 / ADR-0019: one privileged writer to the store every tenant's models live in.
+    # The MLflow server only serves reads; its artifact proxy is unauthenticated, so a write verb on
+    # its principal is a write path open to anything that can reach the server.
+    writers = {n for n, g in _granted().items() if g.get("art", set()) & _WRITE_VERBS}
+    assert writers == {"tracking-gateway"}, f"principals that can write or delete artifacts: {sorted(writers)}"
+
+
+def test_each_principal_holds_only_the_verbs_it_uses():
+    granted = _granted()
+    writes = {n for n, g in granted.items() if any(v & _WRITE_VERBS for v in g.values())}
+    deletes = {n for n, g in granted.items() if any("s3:DeleteObject" in v for v in g.values())}
+    assert writes == {"spark-checkpoint", "tracking-gateway", "db-backup", "cold-export-rw"}, sorted(writes)
+    # The cold exporter never removes history it archived (ADR-0025 dec 11).
+    assert deletes == {"spark-checkpoint", "tracking-gateway", "db-backup"}, sorted(deletes)
+    assert granted["mlflow-artifacts"] == {"art": {"s3:GetObject"}}, granted["mlflow-artifacts"]
 
 
 def test_the_backup_cold_mirror_reads_with_the_cold_read_principal():

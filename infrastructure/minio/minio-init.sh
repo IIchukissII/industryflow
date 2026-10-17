@@ -13,7 +13,7 @@
 #
 #   principal          bucket(s)              verbs                       consumer
 #   spark-checkpoint   checkpoint             read/write/delete           Spark jobs' S3A checkpoint (ADR-0025 dec 11)
-#   mlflow-artifacts   artifact               read/write/delete           the MLflow server (artifact proxy)
+#   mlflow-artifacts   artifact               read only                   the MLflow server (artifact proxy; serves reads)
 #   tracking-gateway   artifact               read/write/delete           the tracking gateway (ADR-0019, ADR-0030 dec 2)
 #   model-read         artifact, tenant_*/uploads/*  read only            ml_service loading admitted uploads (ADR-0030)
 #   db-backup          backup                 read/write/delete           the backup job (dump, prune, restore)
@@ -117,7 +117,10 @@ principal() {
 }
 
 principal spark-checkpoint SPARK_CHECKPOINT_ACCESS_KEY SPARK_CHECKPOINT_SECRET_KEY "${SPARK_CHECKPOINT_BUCKET:-}" rw_policy "${SPARK_CHECKPOINT_BUCKET:-}"
-principal mlflow-artifacts MLFLOW_STORE_ACCESS_KEY MLFLOW_STORE_SECRET_KEY "${ARTIFACT_BUCKET:-}" rw_policy "${ARTIFACT_BUCKET:-}"
+# The MLflow server only serves artifact READS (serving resolves models:/ through it). Every write
+# goes through the tracking gateway (ADR-0030 dec 2), and the server's proxy endpoints are
+# unauthenticated — so its principal holds no write or delete verb to hand them.
+principal mlflow-artifacts MLFLOW_STORE_ACCESS_KEY MLFLOW_STORE_SECRET_KEY "${ARTIFACT_BUCKET:-}" read_policy "${ARTIFACT_BUCKET:-}"
 principal tracking-gateway TRACKING_STORE_ACCESS_KEY TRACKING_STORE_SECRET_KEY "${ARTIFACT_BUCKET:-}" rw_policy "${ARTIFACT_BUCKET:-}"
 principal model-read MODEL_READ_ACCESS_KEY MODEL_READ_SECRET_KEY "${ARTIFACT_BUCKET:-}" read_policy "${ARTIFACT_BUCKET:-}" "tenant_*/uploads/*"
 principal db-backup BACKUP_STORE_ACCESS_KEY BACKUP_STORE_SECRET_KEY "${BACKUP_BUCKET:-}" rw_policy "${BACKUP_BUCKET:-}"

@@ -317,7 +317,7 @@ services:
       PGSSLMODE: ${DB_SSLMODE:-verify-full}
       PGSSLROOTCERT: /etc/ssl/industryflow/ca.crt
       MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
-      # The artifact-bucket principal minio-init creates (read/write on that bucket only).
+      # The artifact-bucket principal minio-init creates (read-only on that bucket).
       AWS_ACCESS_KEY_ID: ${MLFLOW_STORE_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${MLFLOW_STORE_SECRET_KEY}
     # List form (not a folded scalar): the `&` in a URI query string truncates a `command: >`
