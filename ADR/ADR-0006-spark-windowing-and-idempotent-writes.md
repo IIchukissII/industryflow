@@ -110,6 +110,10 @@ These are facets of one missing decision: how windowed aggregation bounds its st
 - ~~**Checkpoint storage medium.**~~ *Resolved in rev 1, decision 5:* storage visible to every node that runs the query — the object store for a multi-node pool, a durable local volume for a single process. The concrete location remains configuration.
 - **Streaming vs cluster execution.** Whether these jobs continue to run `local[*]` or submit to the provisioned Spark cluster is a separate deployment decision (noted in the review) and is not decided here.
 
+## Resolved since acceptance
+
+- **Execution per deployment shape (2026-10-17).** The build settled the execution item above for each deployment shape, within decision 5. The single-host deployment submits both jobs to a standalone worker pool, with each checkpoint on the object store, so the pool can grow beyond one worker. The Kubernetes chart runs each job with driver and executor in one process, with its checkpoint on a durable single-writer volume; a scaled-out installation points the checkpoint at the object store instead. Whether the jobs on Kubernetes move to native cluster submission stays open, as ADR-0009's deferred decision.
+
 ## References
 
 - IndustryFlow review (2026-06-26): aggregation job missing watermark (unbounded state/OOM), `update`-mode append producing duplicate rows, swallowed write failures, ephemeral `/tmp` checkpoints — internal report.
