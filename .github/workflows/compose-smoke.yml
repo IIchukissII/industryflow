@@ -48,6 +48,9 @@ jobs:
           # The hub encrypts the tenant/role it hands the spawn hook (auth_state); the placeholder is
           # not a key, and the hub exits rather than start without a real one.
           sed -i "s|^JUPYTERHUB_CRYPT_KEY=.*|JUPYTERHUB_CRYPT_KEY=$(openssl rand -hex 32)|" .env
+          # The SSO proxy's credential to the hub (ADR-0014 dec 3); the hub refuses the placeholder.
+          sed -i "s|^NOTEBOOK_SSO_PROXY_SECRET=.*|NOTEBOOK_SSO_PROXY_SECRET=$(openssl rand -hex 32)|" .env
+          grep -q '^NOTEBOOK_SSO_PROXY_SECRET=CHANGE_ME' .env && { echo "::error::proxy secret not generated"; exit 1; } || true
           # DockerSpawner reaches the Docker socket through the host's docker group rather than as root
           # (ADR-0011); the gid differs per machine, so take this runner's.
           sed -i "s|^DOCKER_GID=.*|DOCKER_GID=$(getent group docker | cut -d: -f3)|" .env
@@ -194,7 +197,17 @@ jobs:
             && echo "OK    the hub migrated the seeded previous-major schema on start" \
             || { echo "::error::the hub never migrated the seed — the upgrade path was not exercised"; exit 1; }
           docker compose --profile notebooks exec -T notebook-hub \
-            python -c "import urllib.request; print('hub health:', urllib.request.urlopen('http://localhost:8000' + __import__('os').environ.get('NOTEBOOK_BASE_URL', '/').rstrip('/') + '/hub/health', timeout=10).status)"
+            python -c "import urllib.request; print('hub health:', urllib.request.urlopen('http://localhost:8081' + __import__('os').environ.get('NOTEBOOK_BASE_URL', '/').rstrip('/') + '/hub/health', timeout=10).status)"
+          # chp (the browser-facing proxy) answers on the platform-network alias, where notebook-sso
+          # reaches it; the kernel network does not (asserted in the kernel-network step).
+          docker compose --profile notebooks exec -T notebook-sso \
+            wget -q -O /dev/null http://notebook-hub-public:8000/jupyter/hub/health \
+            && echo "OK    chp serves the hub on the platform network" \
+            || { echo "::error::notebook-sso cannot reach chp at notebook-hub-public:8000"; exit 1; }
+          # The SSO config is a template; a variable left unrendered would send a literal to the hub.
+          docker compose --profile notebooks exec -T notebook-sso sh -c \
+            'nginx -t && ! grep -n "\${NOTEBOOK_" /etc/nginx/nginx.conf' \
+            || { echo "::error::notebook-sso config did not render"; exit 1; }
 
       # Probed from inside the network (the services are not host-published), and with the container's
       # own python so no tooling has to be installed.
@@ -275,7 +288,7 @@ jobs:
                   ("notebook-tracking-gateway", 5050), ("notebook-cold-broker", 5060), ("minio", 9000)]
           MUST_NOT = [("redis", 6379), ("mlflow", 5000), ("kafka", 29092), ("zookeeper", 2181),
                       ("timescaledb", 5432), ("spark-master", 7077), ("ml-service-api", 8002),
-                      ("prometheus", 9090), ("loki", 3100),
+                      ("prometheus", 9090), ("loki", 3100), ("notebook-hub", 8000),
                       (gw, 5000), (gw, 9000), (gw, 9090), (gw, 3100), (gw, 8000), (gw, 6379)]
           def reach(host, port):
               try:
@@ -290,6 +303,47 @@ jobs:
           PY
           docker run --rm --network "$net" --user 1000:1000 -v "$PWD/reach.py:/reach.py:ro" \
             python:3.12-slim python /reach.py "$gw"
+
+      # ADR-0014 dec 3. A kernel reaches the hub API, and the login route is served by the same
+      # application, so from the kernel network a forged identity must get no hub session: without
+      # the SSO proxy's secret, or with a wrong one, the login is refused. The same request carrying
+      # the real secret is accepted, which proves the refusals come from this check and not from
+      # some other failure. Run as the kernel uid, on the network the hub spawns kernels onto.
+      - name: A forged hub login from the kernel network is refused
+        run: |
+          net=$(docker compose --profile notebooks exec -T notebook-hub printenv NOTEBOOK_NETWORK)
+          base=$(docker compose --profile notebooks exec -T notebook-hub printenv NOTEBOOK_BASE_URL)
+          cat > forge.py <<'PY'
+          import os, sys, urllib.error, urllib.request
+          URL = "http://notebook-hub:8081" + sys.argv[1] + "hub/login"
+          IDENTITY = {"X-IF-User": "forged-admin", "X-IF-Role": "admin",
+                      "X-IF-Company-Id": "00000000-0000-4000-8000-000000000001"}
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *a, **k):
+                  return None
+          def login(extra):
+              req = urllib.request.Request(URL, headers={**IDENTITY, **extra})
+              try:
+                  r = urllib.request.build_opener(NoRedirect).open(req, timeout=10)
+              except urllib.error.HTTPError as e:
+                  r = e
+              return r.status, " ".join(r.headers.get_all("Set-Cookie") or [])
+          bad = []
+          for name, extra in [("no secret", {}), ("wrong secret", {"X-IF-SSO-Proxy-Secret": "0" * 64})]:
+              status, cookies = login(extra)
+              print(f"{name}: {status}")
+              if status != 401 or "jupyterhub-hub-login" in cookies:
+                  bad.append(f"{name}: got {status}, a hub session was {'set' if cookies else 'not set'}")
+          status, cookies = login({"X-IF-SSO-Proxy-Secret": os.environ["SECRET"]})
+          print(f"proxy secret: {status}")
+          if status != 302 or "jupyterhub-hub-login" not in cookies:
+              bad.append(f"the real secret was not accepted ({status}): the probe measures nothing")
+          print("\n".join(bad) or "forged logins refused, proxy login accepted")
+          sys.exit(1 if bad else 0)
+          PY
+          SECRET=$(grep -oP '^NOTEBOOK_SSO_PROXY_SECRET=\K.*' .env)
+          docker run --rm --network "$net" --user 1000:1000 -e SECRET="$SECRET" \
+            -v "$PWD/forge.py:/forge.py:ro" python:3.12-slim python /forge.py "$base"
 
       - name: Dump everything on failure
         if: failure()

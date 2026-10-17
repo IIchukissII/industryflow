@@ -136,3 +136,43 @@ def test_reconcile_without_a_forwarded_identity_is_not_a_mismatch():
 ])
 def test_reconcile_unparseable_identity_is_invalid(headers):
     assert ident.reconcile(headers, "u-1", _STATE) == ident.RECONCILE_INVALID
+
+
+# --- the SSO proxy's secret (ADR-0014 dec 3) ------------------------------------------------------
+
+_SECRET = "f" * 64
+
+
+def test_from_proxy_accepts_the_shared_secret_under_any_header_casing():
+    assert ident.from_proxy({ident.HEADER_PROXY_SECRET: _SECRET}, _SECRET)
+    assert ident.from_proxy({ident.HEADER_PROXY_SECRET.lower(): _SECRET}, _SECRET)
+
+
+@pytest.mark.parametrize("headers", [
+    {},
+    {ident.HEADER_PROXY_SECRET: ""},
+    {ident.HEADER_PROXY_SECRET: _SECRET[:-1]},
+    {ident.HEADER_PROXY_SECRET: _SECRET + "f"},
+    {ident.HEADER_PROXY_SECRET: _SECRET.upper()},
+    {ident.HEADER_PROXY_SECRET: "é" * 64},
+    {"X-IF-SSO-Proxy": _SECRET},
+])
+def test_from_proxy_refuses_anything_else(headers):
+    assert not ident.from_proxy(headers, _SECRET)
+
+
+@pytest.mark.parametrize("secret", ["", None])
+def test_from_proxy_with_no_expected_secret_matches_nothing(secret):
+    assert not ident.from_proxy({ident.HEADER_PROXY_SECRET: ""}, secret)
+    assert not ident.from_proxy({ident.HEADER_PROXY_SECRET: "x"}, secret)
+
+
+def test_validate_proxy_secret_accepts_a_generated_secret():
+    assert ident.validate_proxy_secret(" " + _SECRET + "\n") == _SECRET
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", "CHANGE_ME_openssl_rand_hex_32",
+                                   "changeme" + "a" * 40, "a" * 31, "a" * 31 + "$", "a b" * 20])
+def test_validate_proxy_secret_refuses_unset_placeholder_or_unfit(value):
+    with pytest.raises(ValueError, match=ident.PROXY_SECRET_ENV):
+        ident.validate_proxy_secret(value)

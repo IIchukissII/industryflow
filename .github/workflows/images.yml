@@ -152,7 +152,7 @@ jobs:
           - { name: mlflow,                 context: infrastructure/mlflow,     file: infrastructure/mlflow/Dockerfile,
               smoke: "python -c \"import mlflow.server.fastapi_app; print('mlflow SERVER imports ok', __import__('mlflow').__version__)\"" }
           - { name: notebook-hub,           context: services/notebook_hub,     file: services/notebook_hub/Dockerfile,
-              smoke: "cd /opt/hub && env NOTEBOOK_SPAWNER=docker NOTEBOOK_NETWORK=x NOTEBOOK_IMAGE=x PLATFORM_VERIFY_URL=http://x REDIS_HOST=x REDIS_PORT=6379 python -c \"import os; from traitlets.config import Config; c = Config(); f = os.path.abspath('jupyterhub_config.py'); exec(compile(open(f).read(), f, 'exec'), {'c': c, 'get_config': lambda: c, '__file__': f, '__name__': '__main__'}); print('hub config loads', c.JupyterHub.spawner_class)\" && jupyterhub --version" }
+              smoke: "cd /opt/hub && env NOTEBOOK_SPAWNER=docker NOTEBOOK_SSO_PROXY_SECRET=0123456789abcdef0123456789abcdef NOTEBOOK_NETWORK=x NOTEBOOK_IMAGE=x PLATFORM_VERIFY_URL=http://x REDIS_HOST=x REDIS_PORT=6379 python -c \"import os; from traitlets.config import Config; c = Config(); f = os.path.abspath('jupyterhub_config.py'); exec(compile(open(f).read(), f, 'exec'), {'c': c, 'get_config': lambda: c, '__file__': f, '__name__': '__main__'}); print('hub config loads', c.JupyterHub.spawner_class)\" && jupyterhub --version" }
           - { name: notebook-sql-proxy,     context: services/notebook_sql_proxy, file: services/notebook_sql_proxy/Dockerfile,
               smoke: "python -c \"import server; print('sql-proxy imports ok')\"" }
           # Imports what the container SERVES, not merely what it depends on. `import fastapi, redis`

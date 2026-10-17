@@ -31,9 +31,12 @@ def _compose_service(name: str) -> str:
 
 
 def _list_under(block: str, key: str) -> list[str]:
-    m = re.search(rf"^    {key}:\n((?:      - .*\n|      #.*\n)+)", block, re.M)
+    """The entries under ``key``, in either compose form: a list (``- name``) or a mapping
+    (``name:`` with per-entry settings such as network aliases)."""
+    m = re.search(rf"^    {key}:\n((?:      .*\n)+)", block, re.M)
     assert m, f"{key} not found"
-    return re.findall(r"^      - (\S+)", m.group(1), re.M)
+    entries = re.findall(r"^      (?:- (\S+)|([A-Za-z0-9_.-]+):)", m.group(1), re.M)
+    return [listed or mapped for listed, mapped in entries]
 
 
 def test_compose_edge_and_service_use_x_client():

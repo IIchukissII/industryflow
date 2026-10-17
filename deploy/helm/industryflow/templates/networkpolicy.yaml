@@ -101,9 +101,9 @@ spec:
 {{- if and .Values.networkPolicy.enabled .Values.notebookHub.enabled }}
 ---
 # Notebook single-user pods run untrusted, user-authored code (ADR-0011). Their egress is
-# restricted to the tenant-scoped data API, the SQL proxy, and DNS only — no lateral reach to
-# other services or tenants (ADR-0011 dec 7). The experiment-tracking gateway is added here when
-# that phase lands. The pods carry these labels from the spawner (identity.py).
+# restricted to the hub API, the tenant-scoped data API and the mediators (SQL proxy, tracking
+# gateway, cold broker, object store), plus DNS — no lateral reach to other services or tenants
+# (ADR-0011 dec 7). The pods carry these labels from the spawner (identity.py).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -123,6 +123,16 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    # The hub API: a single-user server registers, authenticates its user (OAuth) and reports
+    # activity there. A forwarded identity is not honoured on this path without the SSO proxy's
+    # secret (ADR-0014 dec 3), which the pod does not hold.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: notebook-hub
+      ports:
+        - protocol: TCP
+          port: {{ .Values.notebookHub.hub.port }}
     # The tenant-scoped data API only (ADR-0011 dec 4); per-tenant data scoping is enforced
     # server-side, not by reachability.
     - to:
@@ -173,6 +183,68 @@ spec:
         - protocol: TCP
           port: {{ .Values.infra.minio.apiPort }}
     {{- end }}
+---
+# Who may reach the hub (ADR-0014 dec 3): chp (routing browser traffic) and the single-user pods
+# (the hub API they need). The SSO proxy's secret is the control on the login route; this narrows
+# reachability to those two callers.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "industryflow.fullname" . }}-notebook-hub-ingress
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-hub
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: notebook-proxy
+              app.kubernetes.io/instance: {{ .Release.Name }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: notebook-singleuser
+      ports:
+        - protocol: TCP
+          port: {{ .Values.notebookHub.hub.port }}
+---
+# Who may reach chp: its public port only from the SSO proxy (the one browser entry, ADR-0014
+# dec 3), its API port only from the hub, which configures its routes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "industryflow.fullname" . }}-notebook-proxy-ingress
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: notebook-proxy
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: notebook-sso
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: 8000
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: notebook-hub
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: 8001
 ---
 {{- if .Values.notebookHub.enabled }}
 # The tracking gateway reaches only MLflow (proxy the REST API), Redis (capability lookup) and the

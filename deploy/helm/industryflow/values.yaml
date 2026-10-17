@@ -595,6 +595,10 @@ secrets:
     # Encrypts auth_state (the verified tenant/role the hub carries to spawn); required by
     # enable_auth_state. Generate: openssl rand -hex 32.
     JUPYTERHUB_CRYPT_KEY: "CHANGE_ME"
+    # Shared by the notebook SSO proxy and the hub: the hub accepts a forwarded identity only on a
+    # request carrying it (ADR-0014 dec 3), and does not start without it. At least 32 alphanumeric
+    # characters; generate: openssl rand -hex 32. notebookHub only.
+    NOTEBOOK_SSO_PROXY_SECRET: "CHANGE_ME"
     # Password for the notebook_sql_proxy enrolment DB role (ADR-0015; a member of nothing, it may
     # only install a tenant login's verifier). Consumed by 13-notebook-sql-proxy-role.sh at DB init
     # and by the SQL proxy. notebookHub only.
