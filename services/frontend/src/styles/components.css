@@ -147,6 +147,6 @@ label { color: var(--muted); font-size: 12px; }
   border-radius: 999px; padding: 6px 12px; min-height: 32px; cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
-.seg button:hover:not([disabled]) { color: var(--text); }
+.seg button:hover:not([disabled]):not([aria-pressed='true']) { color: var(--text); }
 .seg button[aria-pressed='true'] { background: var(--text); color: var(--ink); font-weight: 500; }
 .seg button[disabled] { opacity: 0.4; cursor: not-allowed; }
