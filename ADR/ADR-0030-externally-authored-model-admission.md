@@ -480,6 +480,19 @@ vouch for, and what must an uploaded artifact do instead?**
   surfaces without settling. ADR-0019 dec 5 reads as though the answer is one; the realisation has
   been two since the trusted read-path existed.
 
+## Resolved since acceptance
+
+- **How the edge separates the two routes (decision 10).** By sub-path. The upload plane and the
+  pre-admission staging area are served under the application's own origin, so the client's write is
+  a same-origin request and the object store carries no cross-origin policy at all. The negative
+  consequence that the store gains a cross-origin policy therefore did not arise; the external route
+  did, and it is scoped to the staging area and reachable presigned-only, as decision 10 requires.
+- **The training baseline for uploaded models (deferred above).** An uploaded model may carry a
+  declared baseline at registration, in the same form ADR-0021 settled for kernel-authored models and
+  held to the same rule for its prediction column (ADR-0021 rev 1 dec 4). A model registered without
+  one reports drift as unavailable, with the reason, which is decision 8's visibly un-monitorable
+  state.
+
 ## References
 
 - ADR-0027 — the declare/satisfy-or-refuse contract this record extends; dec 3 (supported flavor set,
