@@ -5,54 +5,63 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # notebook_tracking_gateway
 
-The trusted experiment-tracking gateway for authoring notebooks (ADR-0019). A kernel's MLflow
-client points `MLFLOW_TRACKING_URI` at this gateway and sends its **tracking capability** as the
-bearer token (`MLFLOW_TRACKING_TOKEN`). The gateway authenticates the capability, resolves it to
-one tenant, and **forces every MLflow operation into that tenant's namespace** — so a notebook can
-log runs and register models within its own tenant and nothing else. MLflow's broad backend and
-object-store credentials live only here, never in the kernel (ADR-0013 dec 1, ADR-0019).
+The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md)): it resolves the kernel's tracking capability handle (`MLFLOW_TRACKING_TOKEN`) to one tenant and confines every MLflow call to that tenant's namespace. MLflow's backend and object-store credentials live only here ([ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) dec 1).
 
-## Contents
+## Endpoints
 
-- **`policy.py`** (pure, tested) — resolve a handle of exactly one audience (tracking or upload) to
-  its tenant; the `tenant_<uuid>.` name prefix for experiments + registered models (qualify in /
-  strip out / ownership predicate); the artifact object-store prefix and plain-key rule; the map of
-  which MLflow REST fields are tenant-namespaced names.
-- **`routes.py`** (pure, tested) — **default deny**: the MLflow routes the gateway forwards and the
-  tenant rule each is held to. A route not listed, or not spelled canonically, is refused (403).
-- **`scoping.py`** (pure, tested) — apply the name map: qualify request names, strip response names,
-  and **drop any entry that is not the caller's tenant's** so a list call can never leak another
-  tenant's experiment or model.
-- **`gateway.py`** — the FastAPI app: bearer auth → route match → ownership lookups → request
-  scoping → proxy to MLflow → response scoping. A request's fields are read from the one place
-  MLflow reads them (query string for GET, JSON body otherwise); fields in the other place are
-  refused (400), so what is checked is what MLflow acts on. Artifacts are answered with
-  **tenant-scoped, per-object, short-TTL pre-signed URLs** (ADR-0019 dec 6) so bytes move directly
-  kernel↔object-store. Written against injectable `Upstream`/`ArtifactStore`, so the orchestration
-  is testable with a fake MLflow.
-- **`admission.py`, `staging.py`** — the upload plane (ADR-0030): an externally-authored artifact is
-  staged, judged on structure, then admitted into the tenant's prefix or discarded. The commit
-  spends the upload handle (one upload per handle), refuses a manifest over 256 KiB rather than
-  judging it truncated, and promotes each member with an ETag-conditional copy, so bytes re-PUT
-  after the verdict are never admitted (409). Admitted uploads (`<tenant>/uploads/…`) are written
-  only by this plane: the kernel's artifact plane refuses PUT/DELETE there (403).
-- **`tests/`** — unit tests run in the `unit-tests` CI workflow; `test_*_integration.py` run against
-  a live MLflow + MinIO + Redis in the `tracking-gateway-integration` workflow.
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/health` | none | Liveness |
+| GET, POST, PUT, PATCH, DELETE | `/api/2.0/mlflow/<endpoint>` | tracking handle | Allow-listed MLflow REST routes, tenant-scoped; any other route or non-canonical spelling: 403 |
+| GET, PUT, DELETE | `/api/2.0/mlflow-artifacts/artifacts/<path>` | tracking handle | Key forced under the tenant prefix. GET/PUT: 307 to a per-object, short-TTL pre-signed URL (ADR-0019 dec 6); DELETE: done by the gateway. PUT/DELETE under `<tenant>/uploads/`: 403 |
+| GET | `/api/2.0/mlflow-artifacts/artifacts` | tracking handle | Artifact listing, tenant-scoped |
+| POST | `/api/2.0/industryflow-upload/stage` | upload handle | Stage an externally-authored artifact under `_upload-staging/` ([ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md)) |
+| POST | `/api/2.0/industryflow-upload/commit` | upload handle | Judge and admit into `<tenant>/uploads/`, or discard |
 
-## Status & boundary
+| Rule | Behaviour |
+|---|---|
+| Field source | Fields are read from where MLflow reads them (query string for GET, JSON body otherwise); fields in the other place: 400 |
+| Names | Experiments and registered models carry a `tenant_<uuid>.` prefix: qualified on request, stripped on response; entries of other tenants are dropped from lists |
+| Commit | Spends the upload handle (one upload per handle); a manifest over 256 KiB is refused; members are promoted with an ETag-conditional copy, so bytes re-PUT after the verdict are refused (409) |
 
-**Verified in CI:** everything above against a fake upstream + store (unit), and the live path
-against a real MLflow server and object store (integration): tenant namespacing, cross-tenant
-refusal, artifact round trips through pre-signed URLs, the upload plane, and a gateway-logged model
-loading on the serving side.
+## Files
 
-**Running the integration tests outside CI** where `PUBLIC_BASE_URL` is set: upload-staging URLs
-are signed for the public edge, so the test container must trust the edge's CA
-(`REQUESTS_CA_BUNDLE`).
+| File | Content |
+|---|---|
+| `policy.py` | Resolve a handle of exactly one audience (tracking or upload); tenant name prefix; artifact prefix and plain-key rule; map of tenant-namespaced MLflow fields |
+| `routes.py` | Default-deny route table: forwarded MLflow routes and the tenant rule each is held to |
+| `scoping.py` | Qualify request names, strip response names, drop other tenants' entries |
+| `gateway.py` | FastAPI app: auth → route match → ownership lookup → request scoping → MLflow → response scoping; injectable `Upstream` / `ArtifactStore` |
+| `staging.py` | Staging keys under `STAGING_ROOT = "_upload-staging/"` |
+| `admission.py` | Structural judgement of a staged upload |
 
-## Develop
+## Settings
 
-```bash
-pip install ../../libs/industryflow_contracts -r requirements-dev.txt
-pytest tests/
-```
+| Env var | Default | Meaning |
+|---|---|---|
+| `TRACKING_HOST` | `0.0.0.0` | Listen address |
+| `TRACKING_PORT` | `5050` | Listen port |
+| `TRACKING_MLFLOW_URL` | required | MLflow server |
+| `TRACKING_REDIS_URL` | required | Capability store |
+| `TRACKING_ARTIFACT_BUCKET` | required | MLflow artifact bucket |
+| `TRACKING_PRESIGN_TTL_SECONDS` | `300` | Pre-signed URL lifetime |
+| `TRACKING_S3_ENDPOINT_URL` | unset | Object store, interior endpoint |
+| `TRACKING_S3_PRESIGN_ENDPOINT_URL` | unset (= interior endpoint) | Public edge origin that upload-staging URLs are signed for |
+| `TRACKING_S3_ACCESS_KEY` | required | Object-store principal (`TRACKING_STORE_*`) |
+| `TRACKING_S3_SECRET_KEY` | required | Its secret |
+| `TRACKING_S3_REGION` | `us-east-1` | Signing region |
+
+## Tests
+
+| Tests | Runs in |
+|---|---|
+| `tests/test_*.py` except `test_tracking_gateway_integration.py`, against a fake MLflow and store | `unit-tests.yml` |
+| `tests/test_*_integration.py` (`-m integration`), against live MLflow + MinIO + Redis | `tracking-gateway-integration.yml` |
+
+| Task | Command |
+|---|---|
+| Install test deps | `pip install ../../libs/industryflow_contracts -r requirements-dev.txt` |
+| Unit tests | `pytest tests/` |
+
+With `TRACKING_S3_PRESIGN_ENDPOINT_URL` (`PUBLIC_BASE_URL` in Compose) set, upload-staging URLs are
+signed for the public edge: an integration run outside CI needs the edge's CA in `REQUESTS_CA_BUNDLE`.

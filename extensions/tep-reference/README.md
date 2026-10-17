@@ -3,42 +3,63 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# tep-reference — example IndustryFlow extension
+# tep-reference extension
 
-A minimal **reference extension** demonstrating the plugin contract from
-**[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)** (which makes
-**[ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md)** concrete). It exists to
-show — and test — that a domain extends IndustryFlow *without editing the core*. The real
-reference extension is the sibling project, in its own repository.
+Example extension that registers Tennessee-Eastman Process (TEP) plugins through the extension contract of [ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md) and [ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md), without editing the core.
 
-It contains:
+## Contents
 
-- `tep_reference.py` — Tennessee-Eastman domain plugins (a feature transform
-  `tep_reactor_pressure_margin` and a detector `tep_rule`) registered through the platform
-  contracts.
-- `tep_reactor_config.json` — the TEP feature definition that previously lived inside
-  `ml_service`; a domain artifact now owned by the extension (ADR-0008 dec 5/7).
-- `producer/` — the reference **data producer**: streams the Tennessee-Eastman dataset to
-  the ingestion edge over device mTLS (`stream_tep_data.py`), plus the dataset and the
-  helpers that built it (`convert_tep_data.py`, `create_sensors.py`, `data/`). This is
-  reference/test tooling for the example dataset, not part of the platform core.
+| Path | Content |
+|---|---|
+| `tep_reference.py` | Module `tep_reference`; targets extension API `0.1.0` |
+| `tep_reactor_config.json` | TEP feature configuration (`equipment_type: tep_reactor`) |
+| `producer/stream_tep_data.py` | Streams `data/tep_streaming_data.csv` to the ingestion edge over device mTLS |
+| `producer/convert_tep_data.py` | Builds the streaming CSV from the TEP `.RData` training files |
+| `producer/create_sensors.py` | Builds the sensor payload and mapping in `producer/data/` |
+| `producer/data/` | `tep_streaming_data.csv`, `sensors_mapping.json`, `bulk_sensors_payload.json` |
 
-## How the platform loads it
+## Registered plugins
 
-The core ships only generic transforms. To make a domain transform available, name the module
-in `EXTENSION_MODULES` (comma-separated) and put it on the service's import path:
+| Kind | Name | Behaviour |
+|---|---|---|
+| Feature transform | `tep_reactor_pressure_margin` | `params.limit_kpa` (default `2950.0`) minus the reading of `sensor` (default `xmeas_7`) |
+| Detector | `tep_rule` | Score = largest absolute feature value / 100, clamped to `[0, 1]`; anomaly when score ≥ threshold |
 
-```sh
-EXTENSION_MODULES=tep_reference
-```
-
-At startup the ML service imports each named module, which runs its `@register_transform`
-decorators. A configuration entry then uses the new type like any built-in:
+A feature configuration entry uses the transform like a built-in:
 
 ```json
 { "name": "reactor_pressure_margin", "type": "tep_reactor_pressure_margin",
   "sensor": "xmeas_7", "params": { "limit_kpa": 2950.0 } }
 ```
 
-The platform never imports this module by name itself — it loads only what it is configured to
-load, so the dependency points one way (extension → platform).
+## Loading
+
+The ML service imports each module named in `EXTENSION_MODULES` (comma-separated) at startup; the
+module must be on the service's import path. The core never imports `tep_reference` by name.
+
+```sh
+EXTENSION_MODULES=tep_reference
+```
+
+## Producer settings
+
+`producer/stream_tep_data.py` reads:
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `INGESTION_URL` | `https://localhost:8443/ingest` | Ingestion edge endpoint |
+| `DEVICE_CERT` | none (required) | Device certificate chain from `scripts/device-ca.sh issue` |
+| `DEVICE_KEY` | none (required) | Device private key |
+| `INGEST_CA` | empty | CA bundle for the edge's server certificate; empty skips verification |
+| `EQUIPMENT_ID` | `550e8400-e29b-41d4-a716-446655440100` | Equipment the readings belong to |
+| `SITE_ID` | `factory-tep` | Site id in each reading |
+
+`producer/convert_tep_data.py` reads `TEP_FAULT_FREE_FILE` (default
+`data/TEP_FaultFree_Training.RData`) and `TEP_FAULTY_FILE` (default `data/TEP_Faulty_Training.RData`).
+
+## Related
+
+| Doc | Topic |
+|---|---|
+| [extensions.md](../../docs/operations/extensions.md) | Operating extensions |
+| [device-mtls.md](../../docs/operations/device-mtls.md) | Issuing device certificates |
