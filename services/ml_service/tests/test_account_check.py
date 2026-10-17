@@ -69,7 +69,7 @@ def _client(pool):
 
 def _token(sub=USER):
     return jwt.encode({"sub": str(sub), "exp": int(time.time()) + 600},
-                      config.config.JWT_SECRET_KEY, algorithm=config.config.JWT_ALGORITHM)
+                      config.config.JWT_SECRET_KEY, algorithm=auth.JWT_ALGORITHM)
 
 
 def _get(pool, token=None):
@@ -105,6 +105,15 @@ def test_a_user_with_no_company_is_not_refused_for_it():
 def test_a_token_whose_subject_is_not_a_user_id_is_refused():
     pool = FakePool(_row())
     assert _get(pool, _token(sub="service")).status_code == 401
+    assert pool.queries == []
+
+
+@pytest.mark.parametrize("algorithm", ["HS384", "HS512"])
+def test_a_token_signed_with_another_algorithm_is_refused(algorithm):
+    token = jwt.encode({"sub": str(USER), "exp": int(time.time()) + 600},
+                       config.config.JWT_SECRET_KEY, algorithm=algorithm)
+    pool = FakePool(_row())
+    assert _get(pool, token).status_code == 401
     assert pool.queries == []
 
 
