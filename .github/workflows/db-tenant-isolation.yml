@@ -45,6 +45,9 @@ jobs:
               - 'infrastructure/minio/**'
               - 'services/notebook_sql_proxy/**'
               - 'services/api_gateway/dependencies.py'
+              # SQL the live DB tests read from the gateway's source and run in a tenant schema.
+              - 'services/api_gateway/routers/alert_rules.py'
+              - 'services/api_gateway/routers/alerts_history.py'
               - 'services/alert_service/worker/repository.py'
               - 'libs/industryflow_contracts/**'
               - 'docker-compose.yml'

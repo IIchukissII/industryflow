@@ -9,6 +9,7 @@ import './AlertHistory.css';
 import authFetch from '../services/http';
 import { canWrite, READ_ONLY_HINT } from '../utils/roles';
 import { alertsReading } from '../utils/reading';
+import { sensorLabel } from '../utils/sensors';
 
 // Severity → status token: the alchemical stages for the two that need action, quiet greys below.
 const SEVERITY = {
@@ -182,7 +183,7 @@ function AlertHistory() {
   });
   // Name for the sensor chip when arriving from a Convergence node (falls back to the id).
   const sensorFilterName = sensorFilter
-    ? (alerts.find(a => a.sensor_id === sensorFilter)?.sensor_name || `${sensorFilter.slice(0, 8)}…`)
+    ? sensorLabel(alerts.find(a => a.sensor_id === sensorFilter), `${sensorFilter.slice(0, 8)}…`)
     : null;
 
   // Timeline: alerts per hour over the last 24h.
@@ -220,7 +221,7 @@ function AlertHistory() {
       <div className="alh-alert-body">
         <div className="alh-alert-msg">{alert.message}</div>
         <div className="alh-alert-meta">
-          {[alert.equipment_name, alert.sensor_name, alert.rule_name, alert.severity].filter(Boolean).join(', ')}
+          {[alert.equipment_name, sensorLabel(alert, ''), alert.rule_name, alert.severity].filter(Boolean).join(', ')}
           {alert.triggered_at && <>{' '}<span className="mono">{formatDate(alert.triggered_at)}</span></>}
           {alert.detection_type === 'ml' && alert.anomaly_score != null && (
             <>, anomaly score <span className="mono">{alert.anomaly_score.toFixed(3)}</span></>

@@ -4,6 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './ConvergenceCore.css';
+import { sensorLabel } from '../utils/sensors';
 
 // The Core, alive with real data: every reporting sensor is a node on the ring, grouped by
 // equipment; each new reading sends a gold pulse converging inward to the luminous centre.
@@ -166,7 +167,7 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, onO
                   onMouseLeave={() => setHovered((h) => (h === n.id ? null : h))}
                   onClick={() => onSelect(n.id)}
                 >
-                  <title>{`${n.s.sensor_name || n.id}${st && st !== 'good' ? ` — ${STATUS_LABEL[st]}` : ''}`}</title>
+                  <title>{`${sensorLabel(n.s, n.id)}${st && st !== 'good' ? ` — ${STATUS_LABEL[st]}` : ''}`}</title>
                 </circle>
               </g>
             );
@@ -182,7 +183,7 @@ export default function ConvergenceCore({ sensors, selectedSensor, onSelect, onO
         {focus ? (
           <>
             <div className="conv-core-val">{fmt(focus.value)}<span className="conv-core-unit">{focus.unit || ''}</span></div>
-            <div className="conv-core-name">{focus.sensor_name || focusId}</div>
+            <div className="conv-core-name">{sensorLabel(focus, focusId)}</div>
             <div className="conv-core-eq">{focus.equipment_name || ''}</div>
             {focusStatus && focusStatus !== 'good' && (
               <div className={`conv-core-pill st-${focusStatus}`}>{STATUS_LABEL[focusStatus]}</div>

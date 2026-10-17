@@ -30,11 +30,11 @@ The alert API, the detection worker, rule types, deduplication and operator labe
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/api/alert-rules`, `/api/alert-rules/{rule_id}` | session | List, read |
+| GET | `/api/alert-rules`, `/api/alert-rules/{rule_id}` | session | List (with `sensor_name`, `sensor_display_name`, `equipment_name`, `model_name`, `model_version`; NULL for a deleted target), read |
 | POST | `/api/alert-rules` | `engineer`, `admin` | Create |
 | PUT, DELETE | `/api/alert-rules/{rule_id}` | `engineer`, `admin` | Replace, delete |
 | PATCH | `/api/alert-rules/{rule_id}/detection-mode` | `engineer`, `admin` | Change detection type |
-| GET | `/api/alerts`, `/api/alerts/unacknowledged`, `/api/alerts/critical` | session | History, filtered history |
+| GET | `/api/alerts`, `/api/alerts/unacknowledged`, `/api/alerts/critical` | session | History, filtered history; each alert with `sensor_name`, `sensor_display_name`, `equipment_name`, `rule_name`, `detection_type` |
 | PATCH | `/api/alerts/{alert_id}/acknowledge` | `engineer`, `admin` | Acknowledge |
 | PATCH | `/api/alerts/{alert_id}/label` | `engineer`, `admin` | `true_positive` / `false_positive` / `unsure` |
 | GET | `/api/alerts/label-metrics` | session | Precision = TP/(TP+FP) and false-positive rate per bucket and overall; optional model or rule scope |

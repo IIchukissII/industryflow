@@ -5,7 +5,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import Icon from './Icon';
 import './EquipmentConfigModal.css';
-import { createEquipment, updateEquipment, getEquipmentSensors, removeSensorFromEquipment } from '../services/equipmentApi';
+import { createEquipment, updateEquipment, getEquipmentSensors, removeSensorFromEquipment, addSensorToEquipment, updateSensor } from '../services/equipmentApi';
+import { sensorLabel } from '../utils/sensors';
 import api from '../services/api';
 
 function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null }) {
@@ -48,6 +49,8 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
   // Current sensor being configured
   const [currentSensor, setCurrentSensor] = useState({
     sensor_id: '',
+    sensor_name: '',
+    display_name: '',
     sensor_type: 'temperature',
     unit: 'celsius',
     description: '',
@@ -63,7 +66,10 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
 
   const loadExistingSensors = useCallback(async (equipmentId) => {
     try {
-      const data = await getEquipmentSensors(equipmentId);
+      // A stored sensor keeps the label it was saved with, so only a changed one is written back.
+      const data = (await getEquipmentSensors(equipmentId)).map((s) => ({
+        ...s, display_name: s.display_name || '', saved_display_name: s.display_name || '',
+      }));
       setSensors(data);
       setCurrentSensor(prev => ({ ...prev, position: data.length }));
       if (data.length > 0) {
@@ -132,6 +138,8 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
       // Initialize sensors array based on sensor_count
       const initialSensors = Array.from({ length: sensorCount }, (_, i) => ({
         sensor_id: '',
+        sensor_name: '',
+        display_name: '',
         sensor_type: 'temperature',
         unit: 'celsius',
         description: '',
@@ -156,15 +164,28 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
     e.preventDefault();
     setError(null);
 
-    // Validate sensor_id is not empty
+    // Validate sensor_id and the key are not empty
     if (!currentSensor.sensor_id.trim()) {
       setError('Sensor ID is required');
       return;
     }
+    if (!currentSensor.sensor_name.trim()) {
+      setError('Sensor key is required');
+      return;
+    }
+    if (currentSensor.display_name.trim().length > 100) {
+      setError('Display name is at most 100 characters');
+      return;
+    }
 
-    // Check for duplicate sensor_id
-    if (sensors.some(s => s.sensor_id === currentSensor.sensor_id)) {
+    // Check for a duplicate sensor_id or key among the other sensors
+    const others = sensors.filter((s, i) => i !== currentSensor.position);
+    if (others.some(s => s.sensor_id === currentSensor.sensor_id)) {
       setError('Sensor ID already exists');
+      return;
+    }
+    if (others.some(s => s.sensor_name && s.sensor_name === currentSensor.sensor_name)) {
+      setError('Sensor key already exists on this machine');
       return;
     }
 
@@ -182,6 +203,8 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
     if (nextPosition < formData.sensor_count) {
       setCurrentSensor({
         sensor_id: '',
+        sensor_name: '',
+        display_name: '',
         sensor_type: 'temperature',
         unit: 'celsius',
         description: '',
@@ -200,8 +223,10 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
     const sensor = sensors[position];
     setCurrentSensor({
       ...sensor,
-      normal_min: sensor.normal_min !== null ? sensor.normal_min : '',
-      normal_max: sensor.normal_max !== null ? sensor.normal_max : ''
+      sensor_name: sensor.sensor_name || '',
+      display_name: sensor.display_name || '',
+      normal_min: sensor.normal_min != null ? sensor.normal_min : '',
+      normal_max: sensor.normal_max != null ? sensor.normal_max : ''
     });
     setStep(2);
   };
@@ -218,6 +243,8 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
       const updatedSensors = [...sensors];
       updatedSensors[position] = {
         sensor_id: '',
+        sensor_name: '',
+        display_name: '',
         sensor_type: 'temperature',
         unit: 'celsius',
         description: '',
@@ -242,10 +269,25 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
         throw new Error(`Please configure all ${formData.sensor_count} sensors`);
       }
 
-      // Submit bulk sensors
-      await api.post(`/api/equipment/${createdEquipmentId}/sensors/bulk`, {
-        sensors: sensors
-      });
+      // An empty label is sent as unset; the key is shown in its place.
+      const body = (s) => ({ ...s, display_name: s.display_name.trim() || null });
+      const stored = sensors.filter((s) => s.created_at);
+      if (!stored.length) {
+        // A new machine: all its sensors in one transaction.
+        await api.post(`/api/equipment/${createdEquipmentId}/sensors/bulk`, {
+          sensors: sensors.map(body)
+        });
+      } else {
+        // Editing: stored sensors keep their key and change only their label; new ones are added.
+        for (const s of stored) {
+          if (s.display_name.trim() !== s.saved_display_name) {
+            await updateSensor(createdEquipmentId, s.sensor_id, { display_name: s.display_name.trim() || null });
+          }
+        }
+        for (const s of sensors.filter((x) => !x.created_at)) {
+          await addSensorToEquipment(createdEquipmentId, body(s));
+        }
+      }
 
       onSuccess();
       handleClose();
@@ -273,6 +315,8 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
     });
     setCurrentSensor({
       sensor_id: '',
+      sensor_name: '',
+      display_name: '',
       sensor_type: 'temperature',
       unit: 'celsius',
       description: '',
@@ -293,7 +337,6 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
 
   const configuredCount = sensors.filter(s => s.sensor_id && s.sensor_id.trim() !== "").length;
   const isAllConfigured = configuredCount === parseInt(formData.sensor_count);
-  console.log("Validation:", { configuredCount, sensorCount: formData.sensor_count, isAllConfigured, sensorsWithIds: sensors.filter(s => s.sensor_id).length });
 
   return (
     <div className="modal-overlay" onClick={handleClose}>
@@ -492,9 +535,38 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
                       name="sensor_id"
                       value={currentSensor.sensor_id}
                       onChange={handleSensorInputChange}
-                      placeholder="e.g., temp_sensor_01"
+                      placeholder="The UUID the device reports"
                       required
+                      disabled={!!currentSensor.created_at}
                     />
+                  </div>
+                  <div className="form-group">
+                    <label>Sensor key *</label>
+                    <input
+                      type="text"
+                      name="sensor_name"
+                      value={currentSensor.sensor_name}
+                      onChange={handleSensorInputChange}
+                      placeholder="e.g., temp_root_1"
+                      required
+                      disabled={!!currentSensor.created_at}
+                    />
+                    <small>Models, features and rule patterns refer to it; it cannot change</small>
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Display name</label>
+                    <input
+                      type="text"
+                      name="display_name"
+                      value={currentSensor.display_name}
+                      onChange={handleSensorInputChange}
+                      placeholder="e.g., Root zone temperature"
+                      maxLength={100}
+                    />
+                    <small>What people read; empty shows the key</small>
                   </div>
                   <div className="form-group">
                     <label>Position</label>
@@ -641,7 +713,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
                     <thead>
                       <tr>
                         <th>Pos</th>
-                        <th>Sensor ID</th>
+                        <th>Sensor</th>
                         <th>Type</th>
                         <th>Unit</th>
                         <th>Critical</th>
@@ -652,7 +724,16 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
                       {sensors.map((sensor, idx) => (
                         <tr key={idx} className={!sensor.sensor_id ? 'incomplete-row' : ''}>
                           <td>{sensor.position}</td>
-                          <td>{sensor.sensor_id || <em className="text-muted">Not configured</em>}</td>
+                          <td>
+                            {sensor.sensor_id
+                              ? <>
+                                {sensorLabel(sensor)}
+                                {sensor.display_name && sensor.sensor_name && (
+                                  <small className="text-muted mono"> {sensor.sensor_name}</small>
+                                )}
+                              </>
+                              : <em className="text-muted">Not configured</em>}
+                          </td>
                           <td>{sensor.sensor_type}</td>
                           <td>{sensor.unit || '-'}</td>
                           <td>{sensor.is_critical ? <Icon name="check" size={14} color="var(--live)" /> : '–'}</td>
@@ -691,7 +772,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
                   disabled={!isAllConfigured || loading}
                   className="btn-primary"
                 >
-                  {loading ? 'Submitting...' : 'Create Equipment with Sensors'}
+                  {loading ? 'Submitting...' : isEditMode ? 'Save Sensors' : 'Create Equipment with Sensors'}
                 </button>
               </div>
             </div>

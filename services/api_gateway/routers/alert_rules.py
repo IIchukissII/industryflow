@@ -58,6 +58,21 @@ async def _apply(db: AsyncSession, rule_id: UUID, changes: Dict[str, Any]):
     return row
 
 
+# The rule row plus the names of its targets, joined inside the tenant schema at read time. The ids
+# stay in the payload; a name is NULL when its target was deleted (no foreign keys hold them).
+RULE_LIST_SELECT = """
+    SELECT
+        r.*,
+        s.sensor_name, s.display_name AS sensor_display_name,
+        e.name AS equipment_name,
+        m.model_name, m.model_version
+    FROM alert_rules r
+    LEFT JOIN sensors s ON r.sensor_id = s.sensor_id
+    LEFT JOIN equipment e ON r.equipment_id = e.equipment_id
+    LEFT JOIN ml_models m ON r.model_id = m.model_id
+"""
+
+
 @router.get("")
 async def list_alert_rules(
         detection_type: Optional[str] = None,
@@ -65,18 +80,18 @@ async def list_alert_rules(
         db: AsyncSession = Depends(get_db_with_tenant),
         current_user: User = Depends(get_current_user_with_company)
 ):
-    """List all alert rules for user's company (schema-routed)"""
-    query = "SELECT * FROM alert_rules WHERE 1=1"
+    """List all alert rules for user's company (schema-routed), with the names of what they watch."""
+    query = RULE_LIST_SELECT + " WHERE 1=1"
     params = {}
-    
+
     if detection_type:
-        query += " AND detection_type = :detection_type"
+        query += " AND r.detection_type = :detection_type"
         params["detection_type"] = detection_type
-    
+
     if enabled_only:
-        query += " AND enabled = true"
-    
-    query += " ORDER BY created_at DESC"
+        query += " AND r.enabled = true"
+
+    query += " ORDER BY r.created_at DESC"
     
     result = await db.execute(text(query), params)
     rows = result.fetchall()

@@ -67,6 +67,8 @@ BEGIN
     PERFORM add_compatibility_columns_to_ml_models(v_schema_name);
     PERFORM add_provenance_columns_to_ml_models(v_schema_name);
     PERFORM add_detector_column_to_ml_models(v_schema_name);
+    -- The sensor's optional human label (defined in 22-*, resolved at call time).
+    PERFORM add_display_name_column_to_sensors(v_schema_name);
 
     -- Grant table permissions
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO api_gateway_user', v_schema_name);

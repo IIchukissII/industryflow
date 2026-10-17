@@ -9,7 +9,7 @@ NOTE: In v5.0, sensors have direct equipment_id - no junction table
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 import logging
 from dependencies import get_db_with_tenant, get_current_user_with_company, get_writer_with_company
@@ -41,14 +41,48 @@ class EquipmentUpdate(BaseModel):
     require_complete_batch: Optional[bool] = None
     min_sensors_for_partial: Optional[int] = None
 
+DISPLAY_NAME_MAX = 100  # sensors.display_name is VARCHAR(100) (init script 22)
+
+
+def clean_display_name(value: Optional[str]) -> Optional[str]:
+    """A sensor's human label: trimmed, and empty means unset (the key is shown instead)."""
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    if len(value) > DISPLAY_NAME_MAX:
+        raise ValueError(f"display_name is at most {DISPLAY_NAME_MAX} characters")
+    return value
+
+
 class SensorCreate(BaseModel):
     sensor_id: str
+    # The machine key: feature configs, model features and rule patterns reference it.
     sensor_name: str
+    # The label a person reads; optional, and never a substitute for the key.
+    display_name: Optional[str] = None
     sensor_type: str
     unit: Optional[str] = None
     description: Optional[str] = None
     position: int = 0
     is_active: bool = True
+
+    @field_validator("display_name")
+    @classmethod
+    def _label(cls, v):
+        return clean_display_name(v)
+
+
+class SensorUpdate(BaseModel):
+    """The editable part of a sensor. The key (sensor_name) is not: renaming it would orphan every
+    feature config, model and rule pattern that names it. Sending display_name null clears it."""
+    display_name: Optional[str] = None
+
+    @field_validator("display_name")
+    @classmethod
+    def _label(cls, v):
+        return clean_display_name(v)
 
 class BulkSensorCreate(BaseModel):
     sensors: List[SensorCreate]
@@ -216,15 +250,16 @@ async def add_sensor(
     try:
         result = await db.execute(text("""
             INSERT INTO sensors (
-                sensor_id, equipment_id, sensor_name, sensor_type, unit, description, position, is_active
+                sensor_id, equipment_id, sensor_name, display_name, sensor_type, unit, description, position, is_active
             ) VALUES (
-                :sensor_id, :equipment_id, :sensor_name, :sensor_type, :unit, :description, :position, :is_active
+                :sensor_id, :equipment_id, :sensor_name, :display_name, :sensor_type, :unit, :description, :position, :is_active
             )
             RETURNING *
         """), {
             "sensor_id": sensor.sensor_id,
             "equipment_id": equipment_id,
             "sensor_name": sensor.sensor_name,
+            "display_name": sensor.display_name,
             "sensor_type": sensor.sensor_type,
             "unit": sensor.unit,
             "description": sensor.description,
@@ -237,6 +272,29 @@ async def add_sensor(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.patch("/{equipment_id}/sensors/{sensor_id}")
+async def update_sensor(
+    equipment_id: str,
+    sensor_id: str,
+    sensor: SensorUpdate,
+    db: AsyncSession = Depends(get_db_with_tenant),
+    current_user: User = Depends(get_writer_with_company)
+):
+    """Change a sensor's display name; its key stays as it is."""
+    if "display_name" not in sensor.model_fields_set:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    result = await db.execute(text("""
+        UPDATE sensors
+        SET display_name = :display_name, updated_at = NOW()
+        WHERE equipment_id = :equipment_id AND sensor_id = :sensor_id
+        RETURNING *
+    """), {"display_name": sensor.display_name, "equipment_id": equipment_id, "sensor_id": sensor_id})
+    row = result.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Sensor not found")
+    await db.commit()
+    return dict(row._mapping)
 
 @router.delete("/{equipment_id}/sensors/{sensor_id}", status_code=204)
 async def remove_sensor(
@@ -304,15 +362,16 @@ async def add_sensors_bulk(
         for sensor in bulk_data.sensors:
             result = await db.execute(text("""
                 INSERT INTO sensors (
-                    sensor_id, equipment_id, sensor_name, sensor_type, unit, description, position, is_active
+                    sensor_id, equipment_id, sensor_name, display_name, sensor_type, unit, description, position, is_active
                 ) VALUES (
-                    :sensor_id, :equipment_id, :sensor_name, :sensor_type, :unit, :description, :position, :is_active
+                    :sensor_id, :equipment_id, :sensor_name, :display_name, :sensor_type, :unit, :description, :position, :is_active
                 )
                 RETURNING *
             """), {
                 "sensor_id": sensor.sensor_id,
                 "equipment_id": equipment_id,
                 "sensor_name": sensor.sensor_name,
+                "display_name": sensor.display_name,
                 "sensor_type": sensor.sensor_type,
                 "unit": sensor.unit,
                 "description": sensor.description,
