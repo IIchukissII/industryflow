@@ -3,16 +3,16 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0018: Notebook hub spawner portability (compose and Kubernetes) (rev 1)
+# ADR-0018: Notebook hub spawner portability (compose and Kubernetes) (rev 2)
 
 - **ID:** ADR-0018
 - **Status:** Accepted
-- **Date:** 2026-06-28 (rev 1: 2026-10-13)
+- **Date:** 2026-06-28 (rev 1: 2026-10-13; rev 2: 2026-10-17)
 - **Project:** IndustryFlow
 - **Parent:** ADR-0011 (embedded notebooks — the shape this refines)
 - **Companions:** ADR-0009 (Kubernetes deployment and packaging), ADR-0014 (notebook hub SSO), ADR-0015 (capability minting + SQL proxy)
 - **Related:** ADR-0001 (self-hosted vs managed deployment), ADR-0002 (network-boundary posture)
-- **Supersedes:** ADR-0018 rev 0 (2026-06-28 — decision 2 restated ADR-0011 rev 0's "short-lived single-tenant read-only principal"; rev 1 restates it as ADR-0011 rev 1 and ADR-0015 rev 2 decide it)
+- **Supersedes:** ADR-0018 rev 0 (2026-06-28 — decision 2 restated ADR-0011 rev 0's "short-lived single-tenant read-only principal"; rev 1 restates it as ADR-0011 rev 1 and ADR-0015 rev 2 decide it); ADR-0018 rev 1 (2026-10-13 — placed the Docker-host environment on a dedicated internal network; rev 2 restates decision 4 for a dedicated network that keeps a route off the host)
 
 ## Context and problem
 
@@ -42,6 +42,8 @@ environment is placed — and if so, how to record that so a compose deployment 
 realization rather than a divergence.
 
 **Revision 1 (2026-10-13).** Decision 2 enumerated ADR-0011's invariants by restating them, and so carried ADR-0011 rev 0's wording for direct SQL — a *short-lived* single-tenant principal — after that wording had been reversed: the principal is standing and per tenant, and the short-lived, revocable element is the capability the kernel presents (ADR-0011 rev 1). ADR-0015 rev 2 has since moved the SQL path's tenant boundary onto the identity the proxy logs in as. Rev 1 restates decision 2 to match both. Nothing about spawner portability changes: the restated invariants are as spawner-independent as the old ones.
+
+**Revision 2 (2026-10-17).** Decision 4 placed the Docker-host environment on a *dedicated internal network*. The network the compose profile built is dedicated but not internal: its membership is restricted to the hub, the trusted mediators and the object store, while it keeps a route off the host, because an address a mediator hands a kernel may name the platform's public edge rather than an interior host (ADR-0030). Rev 2 restates decision 4 to say what the network bounds and what it does not. The deferred implementation of both profiles has since been built; that outcome is recorded under Deferred decisions.
 
 ## Decision drivers
 
@@ -101,6 +103,8 @@ realization rather than a divergence.
    decisions 2–3, with network egress bounded at the host/network level rather than per
    environment. The compose profile targets single-host, test, and small deployments; deployments
    that require allowlist-grade egress containment use the Kubernetes profile.
+
+   > **rev 2 (2026-10-17): on a Docker host the environment runs on a dedicated network whose membership is restricted, not on a network without a route off the host.** The network carries only the hub, the trusted mediators a kernel is meant to use, and the object store those mediators answer with pre-signed addresses. The capability store, the tracking server, the database and the stream processors, among others, are not on it, so a kernel cannot address them. The network keeps its route off the host, so outbound egress to destinations outside the platform is bounded by the host alone. The rest of decision 4 stands: the compose profile's primary boundary is the isolation of decisions 2–3, and allowlist-grade egress containment remains a Kubernetes property.
 
 5. **The standalone root Jupyter is retired by the hub, not hardened into permanence.** The shared,
    root, authentication-disabled, shared-credential Jupyter container (ADR-0011 alternative A) is
@@ -162,9 +166,16 @@ quota-bounded posture and add operational burden, now compounded across hosts.
   (the embedded-notebooks issue); the compose path — a hub service with DockerSpawner, the
   notebook images, and the SQL-proxy wire backend — is its sibling. This ADR records the design they
   conform to, not the build.
+  *Resolved since acceptance.* Both profiles are built from one hub configuration that selects the
+  spawner. The compose profile runs on the single-host deployment, and its kernel network is checked
+  by the compose smoke gate (ADR-0026). The Kubernetes profile is rendered and linted in CI but has
+  not been run on a cluster.
 - **Compose egress hardening.** Whether and how far the compose profile tightens egress (a
   dedicated internal network, host firewall rules, an outbound proxy) beyond "no ambient
   credentials + resource caps" (decision 4) is an operational policy left to implementation.
+  *(rev 2)* The dedicated network with restricted membership is built (decision 4 as revised); a
+  network without a route off the host, host firewall rules and an outbound proxy are not, and
+  remain open.
 - **Notebook image contents and package policy** remain as deferred in ADR-0011 — shared across
   both spawners.
 

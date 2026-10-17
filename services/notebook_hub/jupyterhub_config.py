@@ -17,7 +17,7 @@ unit-tested ``identity.py`` + ``capabilities.py``:
     credential — only opaque, per-session, single-tenant capability handles minted here (ADR-0015).
   * Contained per-user environment (ADR-0011 dec 7): non-root, no privilege escalation, dropped
     capabilities, resource limits. Egress is a NetworkPolicy on k8s; on Compose it is a dedicated
-    internal network (the documented non-parity, ADR-0018 dec 4).
+    kernel network with restricted membership (the documented non-parity, ADR-0018 dec 4 rev 2).
 """
 import asyncio
 import os
