@@ -18,7 +18,7 @@ import logging
 import os
 
 from reading_guard import (  # shipped via --py-files
-    DEFAULT_DLQ_TOPIC, SOURCE_COLUMNS, UNKNOWN_TENANT, canonical_uuid, classify_references,
+    DEFAULT_DLQ_TOPIC, DEFAULT_SOURCE_TOPIC, SOURCE_COLUMNS, UNKNOWN_TENANT, canonical_uuid, classify_references,
     company_id_to_schema,
     parse_readings, publish_dead_letters, read_tenant_references, rejection_reason,
 )
@@ -265,7 +265,7 @@ def main():
         .readStream \
         .format("kafka") \
         .option("kafka.bootstrap.servers", kafka_bootstrap) \
-        .option("subscribe", "sensor-data-raw") \
+        .option("subscribe", os.getenv("KAFKA_TOPIC_SENSOR_DATA", DEFAULT_SOURCE_TOPIC)) \
         .option("startingOffsets", "earliest") \
         .option("maxOffsetsPerTrigger", "10000") \
         .option("kafka.max.partition.fetch.bytes", "1048576") \

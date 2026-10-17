@@ -40,6 +40,9 @@ from industryflow_contracts import tenancy
 # equal); this is the stream's own guard for anything that reaches Kafka another way.
 MAX_FUTURE_SKEW_SECONDS = 300
 
+# The topic the jobs read; KAFKA_TOPIC_SENSOR_DATA overrides it, as for the producer and the alert worker.
+DEFAULT_SOURCE_TOPIC = "sensor-data-raw"
+
 # Where unwritable readings go (ADR-0005 dec 3). Distinct from the alert worker's dead-letter topic:
 # different consumer, different failure.
 DEFAULT_DLQ_TOPIC = "sensor-data-raw.measurements.dlq"
