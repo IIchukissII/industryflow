@@ -88,6 +88,11 @@ There is one thing this ADR is *not*. Authenticating the user to the hub ("who a
 - **CSRF and same-origin embedding specifics.** How the hub entry interacts with the platform's CSRF protection (ADR-0004) and the iframe embedding (ADR-0011) is an implementation concern.
 - **Per-session capability minting.** What the spawner mints once identity is established is decided in ADR-0012, not here.
 
+## Resolved since acceptance
+
+- **The verification handoff contract.** The trusted proxy validates each hub request with a subrequest to the platform's existing session-verification endpoint, which answers with the verified user, tenant and role. The proxy forwards those as request headers to the hub, overwriting any the client sent. The forwarded identity is not signed, so its integrity rests wholly on the network boundary of decision 3; the signed hub-audience assertion this item named as an option was not adopted.
+- **Same-origin embedding.** The hub is mounted under a path of the platform's own origin, and the existing edge routes that path to the trusted proxy; the product's notebook page frames the hub from that origin. The hub and every spawned environment permit framing by the same origin only. The platform session therefore reaches the proxy as a first-party credential, and the user meets no second origin. The interaction with the platform's request-forgery protection was not separately decided: that protection guards the platform API, and hub requests are guarded by the hub's own.
+
 ## References
 
 - ADR-0011 — embedded notebooks; dec 8 (no second login, no new public auth surface) and dec 5 (role-driven profiles) this ADR implements for authentication.
