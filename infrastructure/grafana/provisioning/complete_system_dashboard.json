@@ -1249,7 +1249,7 @@
       },
       "targets": [
         {
-          "expr": "redis_keyspace_hitrate{db=\"db0\"}",
+          "expr": "rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))",
           "refId": "A"
         }
       ],

@@ -415,7 +415,7 @@ coldExport:
     limits: { cpu: "1", memory: 2Gi }
 
 # ---------------------------------------------------------------------------
-# Observability integration (ADR-0009). The chart does NOT run Prometheus/Grafana/Loki —
+# Observability integration (ADR-0016). The chart does NOT run Prometheus/Grafana/Loki —
 # those are the cluster's monitoring stack (kube-prometheus-stack + Loki; see
 # deploy/observability/). The app only EMITS the objects that stack discovers:
 #   - ServiceMonitors  — generated for every app with `metrics: true` (data-driven)
