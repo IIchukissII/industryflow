@@ -16,8 +16,8 @@ fact). It is a separate *process* rather than a function call for three reasons,
   * **it can be given its own environment.** ADR-0030 dec 4 refuses object-serialisation on the
     upload path and deliberately leaves the notebook path alone; MLflow's loader falls back to
     deserialising objects unless told otherwise, and that switch is process-wide. Set here, it binds
-    the upload path only — set in the service, it would silently change the rule for kernels too,
-    which no decision made.
+    the upload path only — set for the life of the service, it would silently change the rule for
+    kernels too, which no decision made (the service scopes it to each uploaded load instead).
   * **it can fail without taking the service with it.** A load that segfaults, hangs, or exhausts
     memory is a refusal, not an outage.
 

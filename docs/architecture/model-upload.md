@@ -53,9 +53,26 @@ Registration accepts only the admitted location under the caller's tenant; a mod
 and an artifact is refused. The check runs at registration, deployment and every load (warm-cache
 hits included).
 
-The deployment probe loads with uploaded-provenance trust (no skops grant), checks the manifest for
-code on the import path, a custom loader module, object deserialisation or a non-model xgboost class,
-and runs with only interpreter settings and the object-store credential.
+The author-code check (`skops_trust.refuse_author_code`) runs at registration (422), deployment (409)
+and every load. It reads the manifest only and imports nothing it names:
+
+| Refused | Detail |
+|---|---|
+| `code` in any flavor | Directory on the import path |
+| Loader other than `mlflow.sklearn` or `mlflow.xgboost` | Deny by default (`UPLOADED_LOADERS`), checked by name |
+| `mlflow.sklearn` not in skops format | Object deserialisation |
+| xgboost `model_class` outside xgboost's model classes | Class the artifact names |
+| A `data` path outside the model directory | Checked at load |
+
+An uploaded load runs with MLflow's pickle switch (`MLFLOW_ALLOW_PICKLE_DESERIALIZATION`) off: in the
+probe process for its whole life, in the serving process for the duration of the load, exclusive of
+kernel-model loads, which read the switch as configured.
+
+The compatibility gate decides a flavor by name: in the gate's flavor map or claimed by a loaded
+detector, never by importing the module the manifest names.
+
+The deployment probe loads with uploaded-provenance trust (no skops grant) and runs with only
+interpreter settings and the object-store credential.
 
 ## Settings
 
@@ -71,6 +88,7 @@ and runs with only interpreter settings and the object-store credential.
 | Requirement | Refused without it at |
 |---|---|
 | A load path that does not deserialise author-supplied objects (not pickle) | commit (422) |
+| A loader the platform supplies (`mlflow.sklearn` skops, `mlflow.xgboost`), no shipped code | register (422) or deploy (409) |
 | A declared input signature | deploy (409, stage `signature`) |
 | Declared output semantics from the vocabulary in `GET /api/ml/capabilities` | register (422) |
 | Complete declared requirements | register (422) or deploy (409) |
@@ -85,7 +103,9 @@ and runs with only interpreter settings and the object-store credential.
 | commit | 404 | Nothing staged under this upload for the caller's tenant |
 | commit | 422 | Executable object serialisation, declared or actual; or a manifest over the size limit |
 | commit | 409 | A staged file changed while it was judged |
-| register | 422 | The environment cannot honour the declared requirements, or no detector scores that flavor with those semantics |
+| register | 422 | Loading would run author code; the environment cannot honour the declared requirements; or no detector scores that flavor with those semantics |
+| register | 503 | Manifest unreadable (transient) |
+| deploy | 409 | Loading would run author code |
 | deploy | 409 | Did not load and score; `stage` is `manifest`, `signature`, `trust`, `load`, `score`, `timeout`, `crash` or `invoke` |
 | upload-capability | 501 | No capability store configured |
 | any | 401 | Capability absent, expired, revoked or for another plane |
