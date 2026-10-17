@@ -3,15 +3,16 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Help / user guide — a long-form operator manual in the console identity. Reuses the platform
- * tokens; the structure is a sticky contents index beside a single readable column. The one
- * expressive device is the hairline-ruled definition list, which reads like a labelled schematic.
+ * Help: the sentence, then a long-form guide with a sticky contents index beside one readable
+ * column. Each topic is a hairline-ruled row of a definition list.
  */
+
+.guide { display: flex; flex-direction: column; gap: 40px; max-width: 1040px; }
 
 .guide-layout {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
-  gap: 40px;
+  gap: 48px;
   align-items: start;
 }
 
@@ -23,42 +24,32 @@
   flex-direction: column;
   gap: 2px;
 }
-.guide-index-label { margin-bottom: 10px; }
+.guide-index-label {
+  margin: 0 0 8px; font-family: var(--font-sans); font-size: 13px; font-weight: 500; color: var(--muted);
+}
 .guide-index-item {
-  display: block;
-  padding: 7px 12px;
-  font-size: 13px;
-  color: var(--muted);
-  text-decoration: none;
+  display: flex; align-items: center;
+  min-height: 36px; padding: 6px 12px;
+  font-size: 14px; color: #b9bfcc; text-decoration: none;
   border-left: 2px solid var(--line-soft);
   transition: color 0.15s, border-color 0.15s;
 }
 .guide-index-item:hover { color: var(--text); }
-.guide-index-item.active {
-  color: var(--text);
-  border-left-color: var(--signal);
-}
+.guide-index-item.active { color: var(--text); border-left-color: var(--gold); }
 
 /* ---- content column ------------------------------------------------------- */
-.guide-main { max-width: 720px; }
+.guide-main { max-width: 720px; min-width: 0; }
 
 .guide-section {
-  padding: 8px 0 32px;
-  /* clear the sticky topbar when jumped to via the index */
+  padding: 0 0 36px;
+  /* clear the sticky top bar when jumped to from the index */
   scroll-margin-top: calc(var(--topbar-h) + 16px);
 }
-.guide-section + .guide-section { border-top: 1px solid var(--line-soft); padding-top: 30px; }
+.guide-section + .guide-section { border-top: 1px solid var(--line-soft); padding-top: 32px; }
 
-.guide-section-label { display: block; margin-bottom: 8px; }
-.guide-section-title { font-size: 20px; }
-.guide-lead {
-  color: var(--text);
-  font-size: 15px;
-  line-height: 1.65;
-  margin: 12px 0 4px;
-}
+.guide-section-title { font-size: 21px; font-weight: 500; }
+.guide-lead { color: var(--text-soft); font-size: 15px; line-height: 1.65; margin: 10px 0 0; }
 
-/* definition list — each topic is a labelled row in a schematic */
 .guide-blocks { margin: 18px 0 0; }
 .guide-block {
   display: grid;
@@ -67,52 +58,30 @@
   padding: 16px 0;
   border-top: 1px solid var(--line-soft);
 }
-.guide-block dt {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text);
-}
-.guide-block dd {
-  margin: 0;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.65;
-}
+.guide-block dt { font-size: 14px; font-weight: 500; color: var(--text); }
+.guide-block dd { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
 
-/* tip callout */
 .guide-tip {
-  display: flex;
-  gap: 14px;
-  align-items: baseline;
-  margin-top: 20px;
-  padding: 14px 16px;
-  background: var(--signal-soft);
-  border: 1px solid rgba(74, 144, 217, 0.28);
-  border-radius: var(--r);
+  margin: 12px 0 0; padding: 14px 16px;
+  background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--r);
+  color: var(--text-soft); font-size: 14px; line-height: 1.6;
 }
-.guide-tip-mark { color: var(--signal); flex-shrink: 0; }
-.guide-tip p { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.6; }
 
 .guide-foot {
-  margin-top: 8px;
-  padding-top: 22px;
+  margin: 0; padding-top: 22px;
   border-top: 1px solid var(--line-soft);
-  color: var(--faint);
-  font-size: 13px;
+  color: var(--muted); font-size: 14px;
 }
 
 @media (max-width: 760px) {
-  .guide-layout { grid-template-columns: 1fr; gap: 8px; }
-  .guide-index {
-    position: static;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-bottom: 8px;
+  .guide { gap: 28px; }
+  .guide-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .guide-index { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px 6px; }
+  .guide-index-label { width: 100%; margin-bottom: 2px; }
+  .guide-index-item {
+    min-height: 44px; padding: 8px 12px;
+    border-left: 0; border-bottom: 2px solid var(--line-soft);
   }
-  .guide-index-label { width: 100%; margin-bottom: 4px; }
-  .guide-index-item { border-left: 0; border-bottom: 2px solid var(--line-soft); padding: 6px 10px; }
-  .guide-index-item.active { border-left: 0; border-bottom-color: var(--signal); }
-  .guide-block { grid-template-columns: 1fr; gap: 4px; }
+  .guide-index-item.active { border-left: 0; border-bottom-color: var(--gold); }
+  .guide-block { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 }
