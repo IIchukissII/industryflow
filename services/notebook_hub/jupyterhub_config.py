@@ -11,7 +11,8 @@ on a Docker host / Compose). Everything ABOVE the spawner is identical and lives
 unit-tested ``identity.py`` + ``capabilities.py``:
 
   * SSO from the platform session via the trusted proxy (ADR-0014): the hub trusts the verified
-    identity headers the proxy forwards and runs no login of its own.
+    identity headers the proxy forwards, only on requests carrying the proxy's shared secret, and
+    runs no login of its own.
   * Role-driven, enforced spawn profiles (ADR-0011 dec 5): profile derived from the verified role.
   * Identity-only environment (ADR-0012 dec 5): the kernel gets its tenant/identity, never a data
     credential — only opaque, per-session, single-tenant capability handles minted here (ADR-0015).
@@ -40,6 +41,9 @@ CAPABILITY_TTL_SECONDS = int(os.environ.get("NOTEBOOK_CAPABILITY_TTL_SECONDS", "
 # How long a hub login is trusted before it is re-checked against the identity the SSO proxy
 # forwards (ADR-0014): a different user, tenant or role behind the same hub cookie ends the login.
 AUTH_REFRESH_SECONDS = int(os.environ.get("NOTEBOOK_AUTH_REFRESH_SECONDS", "60"))
+# The secret the SSO proxy presents on hub traffic (ADR-0014 dec 3). Required: without it the hub
+# cannot tell the proxy from a kernel, so it does not start (ValueError at config load).
+SSO_PROXY_SECRET = ident.validate_proxy_secret(os.environ.get(ident.PROXY_SECRET_ENV, ""))
 
 # Per-user durable work storage (ADR-0020): a data scientist's notebooks persist at work/ across
 # the ephemeral container; the rest of the home (incl the read-only examples/ baked into the image)
@@ -102,12 +106,15 @@ from tornado import web  # noqa: E402
 class _ProxyHeaderLoginHandler(BaseHandler):
     """Establish a hub session from the proxy-forwarded verified identity.
 
-    The hub is reachable only through the trusted SSO proxy, which validates the platform session
-    and overwrites any client-supplied identity headers (ADR-0014 dec 2-3); this handler does not
-    re-verify the session token.
+    The SSO proxy validates the platform session and overwrites any client-supplied identity
+    headers (ADR-0014 dec 2-3); this handler does not re-verify the session token. It does verify
+    that the request came from the proxy: kernels reach this application too (the hub API), so the
+    identity headers alone prove nothing, and a request without the proxy's secret is refused.
     """
 
     async def get(self):
+        if not ident.from_proxy(self.request.headers, SSO_PROXY_SECRET):
+            raise web.HTTPError(401, "a hub login is established only through the SSO proxy")
         try:
             who = ident.parse_identity(self.request.headers)
         except ValueError:
@@ -141,9 +148,11 @@ class ProxyHeaderAuthenticator(Authenticator):
     async def refresh_user(self, user, handler=None):
         if handler is None:
             return True  # no request to judge (an internal refresh): nothing has changed
-        verdict = ident.reconcile(
-            handler.request.headers, user.name, await user.get_auth_state() or {}
-        )
+        # Identity headers on a request that did not come through the proxy (a kernel's API call)
+        # are not evidence of anything: judged as carrying none.
+        headers = handler.request.headers
+        forwarded = headers if ident.from_proxy(headers, SSO_PROXY_SECRET) else {}
+        verdict = ident.reconcile(forwarded, user.name, await user.get_auth_state() or {})
         if verdict == ident.RECONCILE_STALE_FACTS:
             await _stop_active_servers(handler, user)
         return verdict in (ident.RECONCILE_SAME, ident.RECONCILE_NOT_FORWARDED)
@@ -398,15 +407,30 @@ if SPAWNER == "docker":
         "security_opt": ["no-new-privileges:true"],
     }
     # How the single-user container reaches the hub API, and the hub's public (chp) bind. On
-    # Compose the hub is addressed by its service name; chp is hub-managed (internal).
+    # Compose the hub is addressed by its service name; chp is hub-managed (internal). The public
+    # bind names an address only the platform network resolves (compose sets HUB_PUBLIC_URL), so
+    # the kernel network reaches the hub API and not the browser-facing proxy.
+    # Set as ip + port, not bind_url: JupyterHub rebuilds bind_url from ip/port/base_url whenever
+    # base_url is configured, and a bind_url host would be silently replaced by "all interfaces".
+    from urllib.parse import urlparse  # noqa: E402
+
+    _public = urlparse(os.environ.get("HUB_PUBLIC_URL", "http://0.0.0.0:8000"))
     c.JupyterHub.hub_ip = "0.0.0.0"
     c.JupyterHub.hub_connect_ip = os.environ.get("HUB_CONNECT_IP", "notebook-hub")
-    c.JupyterHub.bind_url = os.environ.get("HUB_PUBLIC_URL", "http://0.0.0.0:8000")
+    c.JupyterHub.ip = _public.hostname or ""
+    c.JupyterHub.port = _public.port or 8000
 else:
     from kubespawner import KubeSpawner  # noqa: E402
 
     c.JupyterHub.spawner_class = with_capability_lifecycle(KubeSpawner)
     c.KubeSpawner.pre_spawn_hook = bind_identity_and_profile
+    # The hub API is reached from other pods (chp, single-user servers) at the hub Service, and chp
+    # runs as its own Deployment, configured over its API rather than started by the hub.
+    c.JupyterHub.hub_ip = "0.0.0.0"
+    c.JupyterHub.hub_connect_ip = os.environ.get("HUB_CONNECT_IP", "")
+    if os.environ.get("CONFIGPROXY_API_URL"):
+        c.ConfigurableHTTPProxy.should_start = False
+        c.ConfigurableHTTPProxy.api_url = os.environ["CONFIGPROXY_API_URL"]
     # Containment (ADR-0009 / ADR-0011 dec 7). Network egress is constrained by NetworkPolicy.
     c.KubeSpawner.uid = 1000
     c.KubeSpawner.fs_gid = 1000

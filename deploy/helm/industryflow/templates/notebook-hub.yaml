@@ -135,8 +135,19 @@ spec:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-hub") }}
                   key: JUPYTERHUB_CRYPT_KEY
+            # The secret the SSO proxy presents on hub traffic (ADR-0014 dec 3); the hub honours a
+            # forwarded identity only with it, and does not start without it.
+            - name: NOTEBOOK_SSO_PROXY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-hub") }}
+                  key: NOTEBOOK_SSO_PROXY_SECRET
+            # chp is the sibling Deployment: the hub configures it over its API and starts none.
             - name: CONFIGPROXY_API_URL
               value: "http://{{ $proxySvc }}:8001"
+            # Where chp and the single-user pods reach the hub API: its Service.
+            - name: HUB_CONNECT_IP
+              value: {{ $hubSvc | quote }}
             # Where authoring kernels reach the SQL access proxy (ADR-0015); forwarded to authoring
             # spawns only. The kernel presents its SQL capability handle as the password.
             - name: INDUSTRYFLOW_SQL_PROXY_URL
@@ -226,13 +237,31 @@ metadata:
     {{- include "industryflow.labels" . | nindent 4 }}
     app.kubernetes.io/name: notebook-sso
 data:
-  default.conf: |
+  # A template: the nginx image renders it into conf.d at start (envsubst, filtered to
+  # NOTEBOOK_SSO_PROXY_SECRET), so the secret comes from the Secret, never from this ConfigMap.
+  default.conf.template: |
     # SSO reverse proxy (ADR-0014). Validates the platform session against api-gateway and
     # forwards the verified identity to the hub proxy, overwriting any client-supplied identity
     # (ADR-0002 anti-spoofing). Included inside http{}, so the map directive is valid here.
     map $http_upgrade $connection_upgrade {
         default upgrade;
         ""      close;
+    }
+    # The proxy's credential to the hub (ADR-0014 dec 3): the hub honours a forwarded identity only
+    # on a request carrying it, because single-user pods reach the hub API too. Sent on hub routes
+    # only, never on /user/ traffic (single-user servers run user code). Matched on the raw path,
+    # and withheld from any path another hop might route differently.
+    map $request_uri $if_hub_route {
+        default 0;
+        "~^{{ .Values.notebookHub.baseUrl }}hub/" 1;
+    }
+    map $request_uri $if_ambiguous_path {
+        default 0;
+        "~^[^?]*(\.\.|%2[eEfF]|%5[cC]|//|\\\\)" 1;
+    }
+    map "$if_hub_route$if_ambiguous_path" $if_sso_proxy_secret {
+        default "";
+        "10"    "${NOTEBOOK_SSO_PROXY_SECRET}";
     }
     server {
         listen {{ .Values.notebookHub.ssoProxy.port }};
@@ -259,6 +288,8 @@ data:
             proxy_set_header X-IF-User       $if_user;
             proxy_set_header X-IF-Company-Id $if_company;
             proxy_set_header X-IF-Role       $if_role;
+            # Always set, so a client-supplied value never passes; empty (not sent) off hub routes.
+            proxy_set_header X-IF-SSO-Proxy-Secret $if_sso_proxy_secret;
 
             proxy_pass http://{{ $proxySvc }}:{{ .Values.notebookHub.proxy.port }};
             proxy_http_version 1.1;
@@ -310,9 +341,17 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.notebookHub.ssoProxy.port }}
+          env:
+            - name: NGINX_ENVSUBST_FILTER
+              value: "^NOTEBOOK_SSO_PROXY_SECRET$"
+            - name: NOTEBOOK_SSO_PROXY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-sso") }}
+                  key: NOTEBOOK_SSO_PROXY_SECRET
           volumeMounts:
             - name: conf
-              mountPath: /etc/nginx/conf.d
+              mountPath: /etc/nginx/templates
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 100m, memory: 64Mi }

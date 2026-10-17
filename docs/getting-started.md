@@ -35,7 +35,7 @@ cp .env.example .env
 | `CERT_EXTRA_SAN`, `TLS_CERT_DIR` | Edge certificate ([TLS](operations/tls.md)) |
 | `DEVICE_CA_DIR`, `DEVICE_CA_UID`, `DEVICE_CA_GID` | Device CA location and owner ([device mTLS](operations/device-mtls.md)) |
 | `ADMIN_USER_<n>_*` | First users (step 4) |
-| `DOCKER_GID`, `JUPYTERHUB_CRYPT_KEY`, `NOTEBOOK_SQL_PROXY_*` | Notebooks profile only |
+| `DOCKER_GID`, `JUPYTERHUB_CRYPT_KEY`, `NOTEBOOK_SSO_PROXY_SECRET`, `NOTEBOOK_SQL_PROXY_*` | Notebooks profile only |
 
 ## 2. Initialise the device CA
 
@@ -123,8 +123,8 @@ The self-signed default certificate covers `industryflow.local`, `industryflow`,
 
 Per-user JupyterHub notebooks ([ADR-0011](../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md),
 [ADR-0018](../ADR/ADR-0018-notebook-hub-spawner-portability.md)). The hub spawns per-user containers
-through the Docker socket, so set `DOCKER_GID` (`getent group docker | cut -d: -f3`) and
-`JUPYTERHUB_CRYPT_KEY` in `.env`.
+through the Docker socket, so set `DOCKER_GID` (`getent group docker | cut -d: -f3`),
+`JUPYTERHUB_CRYPT_KEY` and `NOTEBOOK_SSO_PROXY_SECRET` (`openssl rand -hex 32` each) in `.env`.
 
 ```bash
 docker compose --profile notebooks build

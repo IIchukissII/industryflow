@@ -17,16 +17,29 @@ wires JupyterHub/KubeSpawner around this module.
 """
 from __future__ import annotations
 
+import hmac
+import re
 import uuid
 from dataclasses import dataclass
 from typing import Mapping
 
 # Headers the trusted proxy forwards after validating the platform session (ADR-0014 dec 2).
-# The proxy MUST overwrite any client-supplied values (ADR-0002 dec 3); the hub trusts these
-# only because it is reachable solely through that proxy.
+# The proxy MUST overwrite any client-supplied values (ADR-0002 dec 3).
 HEADER_USER = "X-IF-User"
 HEADER_COMPANY_ID = "X-IF-Company-Id"
 HEADER_ROLE = "X-IF-Role"
+
+# The SSO proxy's credential (ADR-0014 dec 3). Reachability is not proof of origin: every spawned
+# kernel must reach the hub API, and the login route is served by the same application, so a
+# kernel can send the identity headers too. The forwarded identity is honoured only on a request
+# that also carries the secret shared between the hub and the proxy, which the proxy sets on hub
+# traffic (overwriting any client value) and which no kernel holds.
+HEADER_PROXY_SECRET = "X-IF-SSO-Proxy-Secret"
+PROXY_SECRET_ENV = "NOTEBOOK_SSO_PROXY_SECRET"
+# Alphanumeric only: the proxy embeds the value in its nginx configuration, where a quote, a `$` or
+# whitespace would change its meaning. `openssl rand -hex 32` gives 64 such characters.
+_PROXY_SECRET_SHAPE = re.compile(r"[A-Za-z0-9]{32,}")
+_PLACEHOLDER_PREFIXES = ("change_me", "changeme")
 
 # Spawn profiles (ADR-0011 dec 5).
 PROFILE_ANALYTICS = "analytics"  # operators: read-only, rendered dashboards
@@ -76,6 +89,36 @@ def parse_identity(headers: Mapping[str, str]) -> Identity:
     return Identity(user=user, company_id=company_id, role=role)
 
 
+def validate_proxy_secret(value: str) -> str:
+    """The hub's copy of the SSO proxy secret, or ValueError if it is unset or unfit.
+
+    The hub refuses to start without one (fail closed): a hub that cannot tell the proxy from a
+    kernel must not accept a forwarded identity at all.
+    """
+    value = (value or "").strip()
+    if not value:
+        raise ValueError(f"{PROXY_SECRET_ENV} is not set")
+    if value.lower().startswith(_PLACEHOLDER_PREFIXES):
+        raise ValueError(f"{PROXY_SECRET_ENV} is still a placeholder")
+    if not _PROXY_SECRET_SHAPE.fullmatch(value):
+        raise ValueError(f"{PROXY_SECRET_ENV} must be at least 32 alphanumeric characters")
+    return value
+
+
+def from_proxy(headers: Mapping[str, str], secret: str) -> bool:
+    """True only when the request carries the SSO proxy's secret (constant-time comparison).
+
+    An empty expected secret matches nothing, so a misconfigured hub refuses every forwarded
+    identity rather than accepting every one.
+    """
+    if not secret:
+        return False
+    presented = _header(headers, HEADER_PROXY_SECRET)
+    if not presented:
+        return False
+    return hmac.compare_digest(presented.encode("utf-8"), secret.encode("utf-8"))
+
+
 # Outcomes of re-checking an established hub login against the identity forwarded now.
 RECONCILE_SAME = "same"                    # the login still describes who is behind it
 RECONCILE_NOT_FORWARDED = "not-forwarded"  # no forwarded identity: not browser traffic via the proxy
@@ -90,7 +133,9 @@ def reconcile(headers: Mapping[str, str], hub_user: str, auth_state: Mapping[str
     Browser traffic always reaches the hub through the SSO proxy, which always forwards the
     verified identity (ADR-0014 dec 2-3). A request carrying none of it is not browser traffic —
     it is a token-authenticated call from inside the deployment (a single-user server reporting
-    activity) — and there is nothing to compare, which is not the same as a mismatch.
+    activity) — and there is nothing to compare, which is not the same as a mismatch. The caller
+    passes only headers that came from the proxy (``from_proxy``); any other request's identity
+    headers are not evidence and must not reach this function.
     """
     if not any(_header(headers, h).strip() for h in (HEADER_USER, HEADER_COMPANY_ID, HEADER_ROLE)):
         return RECONCILE_NOT_FORWARDED

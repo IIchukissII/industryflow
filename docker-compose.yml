@@ -852,6 +852,12 @@ services:
       # Required for enable_auth_state — the hub encrypts the verified tenant/role it carries from
       # the SSO handoff to the spawn hook (ADR-0014). Generate: openssl rand -hex 32.
       JUPYTERHUB_CRYPT_KEY: ${JUPYTERHUB_CRYPT_KEY}
+      # The secret notebook-sso presents on hub traffic (ADR-0014 dec 3); the hub honours a
+      # forwarded identity only with it, and does not start without it. Never given to a kernel.
+      NOTEBOOK_SSO_PROXY_SECRET: ${NOTEBOOK_SSO_PROXY_SECRET:-}
+      # chp (the browser-facing proxy) binds to the platform-network alias below only, so the
+      # kernel network reaches the hub API (8081) and not chp (8000).
+      HUB_PUBLIC_URL: http://notebook-hub-public:8000
       # The blessed tenant-scoped data path the kernel's client calls (ADR-0011 dec 4).
       INDUSTRYFLOW_API_URL: ${INDUSTRYFLOW_API_URL:-http://api-gateway:8000}
       # Where authoring kernels reach the SQL access proxy (ADR-0015); the kernel authenticates
@@ -875,8 +881,10 @@ services:
       - redis
       - api-gateway
     networks:
-      - industryflow-network
-      - notebook-kernels
+      industryflow-network:
+        # Resolves only on the platform network: chp's bind address (HUB_PUBLIC_URL).
+        aliases: [notebook-hub-public]
+      notebook-kernels: {}
     restart: unless-stopped
 
   # SQL access proxy (ADR-0015): authoring kernels connect with a normal Postgres driver, using
@@ -1002,8 +1010,16 @@ services:
     profiles: ["notebooks"]
     image: nginx:1.31-alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
     container_name: industryflow-notebook-sso
+    environment:
+      # sso-nginx.conf is a template the image renders at start into /etc/nginx/nginx.conf; the
+      # filter limits substitution to these two.
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+      NGINX_ENVSUBST_FILTER: ^NOTEBOOK_
+      NOTEBOOK_BASE_URL: ${NOTEBOOK_BASE_URL:-/jupyter/}
+      # Presented to the hub on hub routes (ADR-0014 dec 3); the same value the hub holds.
+      NOTEBOOK_SSO_PROXY_SECRET: ${NOTEBOOK_SSO_PROXY_SECRET:-}
     volumes:
-      - ./services/notebook_hub/sso-nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./services/notebook_hub/sso-nginx.conf:/etc/nginx/templates/nginx.conf.template:ro
     depends_on:
       - notebook-hub
       - api-gateway
