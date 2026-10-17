@@ -149,7 +149,7 @@ def _mint_route(store):
     app = FastAPI()
     app.include_router(models.router)
     app.state.capability_store = store
-    app.dependency_overrides[auth.verify_jwt_token] = lambda: {"payload": {"sub": "user-1"}}
+    app.dependency_overrides[auth.verify_jwt_token] = lambda: {"payload": {"sub": "user-1"}, "role": "engineer"}
     app.dependency_overrides[models.get_company_id_dependency] = lambda: CID
     return TestClient(app).post("/api/models/upload-capability")
 

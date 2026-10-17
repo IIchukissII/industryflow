@@ -74,7 +74,7 @@ class FeatureConfigListResponse(BaseModel):
 # Endpoints
 # ============================================================================
 
-@router.post("", response_model=FeatureConfigResponse, status_code=201)
+@router.post("", response_model=FeatureConfigResponse, status_code=201, dependencies=[Depends(auth.require_writer)])
 async def create_feature_config(
     config: FeatureConfigCreate,
     request: Request,
@@ -180,7 +180,7 @@ async def get_feature_config(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/{config_id}", response_model=FeatureConfigResponse)
+@router.put("/{config_id}", response_model=FeatureConfigResponse, dependencies=[Depends(auth.require_writer)])
 async def update_feature_config(
     config_id: str,
     update: FeatureConfigUpdate,
@@ -219,7 +219,7 @@ async def update_feature_config(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/{config_id}", status_code=204)
+@router.delete("/{config_id}", status_code=204, dependencies=[Depends(auth.require_writer)])
 async def delete_feature_config(
     config_id: str,
     request: Request,

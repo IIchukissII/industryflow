@@ -282,7 +282,7 @@ def test_a_feature_config_records_the_user_who_created_it():
     app = FastAPI()
     app.include_router(feature_configs.router)
     app.state.ml_repository = Repo()
-    app.dependency_overrides[auth.verify_jwt_token] = lambda: {"user_id": "user-42", "payload": {}}
+    app.dependency_overrides[auth.verify_jwt_token] = lambda: {"user_id": "user-42", "payload": {}, "role": "engineer"}
     app.dependency_overrides[feature_configs.get_company_id_dependency] = lambda: cid
     r = TestClient(app).post("/api/feature-configs", json={
         "equipment_type": "p", "name": "n", "base_sensors": [], "transformations": []})
