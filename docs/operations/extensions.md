@@ -3,122 +3,96 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# Extensions & plugins
+# Extensions and plugins
 
-IndustryFlow is a **domain-generic** platform: the core carries no domain specifics, and a
-domain (cultivation, manufacturing, energy, …) extends it through stable contracts rather
-than by editing core code (**[ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md)**,
-made concrete in **[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)**).
+The extension surfaces of the ML service: configuration, the feature-transform and anomaly-detector
+plugin contracts, and how an extension module is loaded. Decisions:
+[ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md),
+[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md).
 
-There are two extension surfaces:
+| Surface | Content | Change needed |
+|---------|---------|---------------|
+| Configuration | Feature definitions (`feature_engineering_configs`), sensor mappings, alert rules, per tenant | Data only |
+| Code plugins | Feature transforms and anomaly detectors registered through `extensions` (`services/ml_service/api/extensions/`) | An extension module named in `EXTENSION_MODULES` |
 
-- **Configuration** — the primary surface. Feature definitions, sensor mappings, and alert
-  rules are data the platform loads per tenant (e.g. each ML model points at a
-  `feature_engineering_configs` row); no code change is needed to add them.
-- **Code plugins** — for behaviour configuration can't express. The platform exposes
-  **versioned plugin contracts**; a domain registers implementations in its own module and
-  the platform loads them. The core never imports a named extension.
+The core ships only generic built-ins and never imports a named extension.
 
-## The plugin contracts
+| Registry | Decorator | Built-ins |
+|----------|-----------|-----------|
+| Feature transforms | `register_transform(name, *, stateful=False, neutral=0.0)` | `identity`, `polynomial`, `interaction`, `deviation`, `statistical`, `rolling_stat` |
+| Anomaly detectors | `register_detector(name, *, semantics=DIRECT_SCORE, handles_flavors=None)` | `sklearn`, `direct`, `outlier`, `autoencoder` |
 
-Both contracts use the same registry pattern. A plugin is registered with a decorator and
-resolved by name at runtime; the core ships only generic, domain-free built-ins.
+Registering a different function under an existing name raises `ValueError`.
 
-### Feature transforms
+## Feature transforms
 
-A transform turns raw sensor readings into one engineered feature:
+A transform is `async (transformation, sensor_data, ctx) -> float`. The feature engine dispatches each
+configured transform `type` through the registry. `ctx` is a `TransformContext` (`baseline_provider`,
+`equipment_id`, `company_id`).
 
 ```python
 from extensions import register_transform
 
 @register_transform("pressure_margin")
 async def pressure_margin(transformation, sensor_data, ctx):
-    params = transformation.get("params", {})
-    limit = params.get("limit", 0.0)
+    limit = transformation.get("params", {}).get("limit", 0.0)
     return limit - sensor_data.get(transformation["sensor"], 0.0)
-```
 
-The feature engine dispatches each configured transform `type` through the registry. Built-in
-generic transforms: `identity`, `polynomial`, `interaction`, `deviation`, `statistical`,
-`rolling_stat`.
-
-**Declare a transform `stateful` if it reads an external store** (ADR-0024) — as opposed to being a
-pure function of the reading it is handed:
-
-```python
 @register_transform("pressure_baseline", stateful=True, neutral=0.0)
 async def pressure_baseline(transformation, sensor_data, ctx):
     return await ctx.baseline_provider.compute_rolling_mean(...)
 ```
 
-The tag is what lets the **stateful-feature kill-switch** neutralize your transform as a class when
-its substrate is degraded: with the switch off, the engine fills the slot with `neutral` and does
-**not call the transform at all**, so the degraded store stops being queried. The feature vector
-keeps its length and order, so bound models keep serving. A transform that reads an external store
-but does not declare `stateful=True` will keep hammering that store during an incident the operator
-believes they have contained — so declare it. Both keywords are optional (`stateful=False`,
-`neutral=0.0`), so transforms written before this existed keep working unchanged.
+| Tag | Meaning |
+|-----|---------|
+| `stateful=True` | The transform reads an external store. Required for any such transform ([ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) |
+| `neutral` | Value the engine puts in the slot while the stateful-feature kill-switch is off; the transform is then not called. The vector keeps its length and order |
 
-See [monitoring.md](monitoring.md) for flipping the switch and seeing that it took effect.
+Operating the kill-switch: [monitoring.md](monitoring.md).
 
-### Anomaly detectors
+## Anomaly detectors
 
-A detector turns engineered features (and optionally a model) into an anomaly verdict:
+A detector is `async (features, model, threshold, ctx) -> DetectionResult`; `model` is `None` for a
+model-free detector.
 
 ```python
 from extensions import register_detector, DetectionResult, RECONSTRUCTION_ERROR
 
 @register_detector(
     "rule",
-    semantics=RECONSTRUCTION_ERROR,          # what your score MEANS (ADR-0028)
-    handles_flavors=["mlflow.sklearn"],      # which artifacts you can score
+    semantics=RECONSTRUCTION_ERROR,
+    handles_flavors=["mlflow.sklearn"],
 )
 async def rule_detector(features, model, threshold, ctx):
-    score = ...  # 0.0–1.0
+    score = ...  # 0.0-1.0
     return DetectionResult(score=score, is_anomaly=score >= threshold)
 ```
 
-The ML inference path dispatches a model record's `detector` (default `sklearn`) through the
-registry — so a domain can supply a custom or model-free detector without touching the core
-scorer.
-
-**Declare your semantics; do not let the platform guess them**
-([ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md)). The meaning of a
-model's output is not recoverable from the output: `predict() == 1` means *normal* to an
-IsolationForest and *anomaly* to an XGBoost classifier. The platform used to sniff it, and scored
-every IsolationForest reading as an anomaly for months (#236). If your detector cannot establish what
-a model's output means, raise `UninterpretableModel` — a refusal is legible, a wrong score is not.
-
-`GET /api/ml/capabilities` lists every registered detector, its semantics, and the flavors it claims —
-including the ones your `EXTENSION_MODULES` added. It is discovered from the registry, so it cannot
-drift from what is actually loaded.
+| Element | Rule |
+|---------|------|
+| `semantics` | What the model's output means: `ANOMALY_PROBABILITY`, `OUTLIER_SCORE`, `RECONSTRUCTION_ERROR`, `DIRECT_SCORE` ([ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md)) |
+| `handles_flavors` | MLflow flavors the detector can score; empty claims none |
+| `UninterpretableModel` | Raise it when the meaning of a model's output cannot be established |
+| Dispatch | ML inference uses the model record's `detector`; a record without one is refused (422) |
+| `GET /api/ml/capabilities` | Every registered detector with its semantics and flavors, read from the registry, including those from `EXTENSION_MODULES` |
 
 ## Loading an extension
-
-Name the importable module(s) in `EXTENSION_MODULES` (comma-separated); the ML service
-imports them at startup, which runs their `@register_*` decorators:
 
 ```bash
 EXTENSION_MODULES=my_domain.transforms,my_domain.detectors
 ```
 
-The module must be on the service's import path (its own package depending on IndustryFlow).
-Each extension declares the platform **extension-API version** it targets; the loader checks
-compatibility (major must match) and refuses a mismatch.
-
-## Versioning, boundaries, packaging
-
-- The platform publishes `EXTENSION_API_VERSION` (semver; the current value is in
-  `services/ml_service/api/extensions/__init__.py`). The contract is still **0.x, pre-stable**: a
-  minor bump may remove or change an element, and the ADR or revision that makes such a change
-  names what broke. From 1.0 a breaking change is a major bump. See ADR-0010 dec 3 (rev 2).
-- Domain data lives in **extension-owned tables** inside the per-tenant schema, not as columns
-  on core tables — the core's generic entities (equipment, sensor, measurement) stay unchanged.
-- Extensions are **separate packages** that depend on IndustryFlow; the platform never vendors
-  or imports them. The dependency points one way.
+| Rule | Detail |
+|------|--------|
+| Loading | The ML service imports each comma-separated module at startup, which runs its `@register_*` decorators |
+| Import path | The module must be importable by the service (a separate package depending on IndustryFlow) |
+| Version check | The module calls `check_api_version("<target>")` at import. It passes when the major matches `EXTENSION_API_VERSION` and the platform minor is at least the target's; otherwise `ValueError` |
+| `EXTENSION_API_VERSION` | Defined in `services/ml_service/api/extensions/__init__.py`; stability rules in ADR-0010 dec 3 |
+| Domain data | Extension-owned tables in the tenant schema; no columns on core tables |
+| Dependency direction | Extensions depend on IndustryFlow; the platform never vendors or imports them |
 
 ## Example
 
-`extensions/tep-reference/` is a small **example** extension (the Tennessee-Eastman reference
-dataset) showing a domain transform and detector registered through these contracts. It is
-illustrative only — the platform does not load it unless `EXTENSION_MODULES` names it.
+`extensions/tep-reference/` (module `tep_reference`, Tennessee-Eastman reference dataset) registers a
+transform (`tep_reactor_pressure_margin`) and a detector (`tep_rule`). It is loaded only when
+`EXTENSION_MODULES` names it. See [its README](../../extensions/tep-reference/README.md).
