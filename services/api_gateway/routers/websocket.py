@@ -60,7 +60,7 @@ async def _load_names(company_id: str, sensor_ids: list) -> dict:
         # when it ends; it never lingers on the pooled connection (ADR-0003 dec 6).
         async with session.begin():
             schema_name = normalize_company_id_to_schema(company_id)
-            await session.execute(text(f"SET LOCAL search_path TO {schema_name}, public"))
+            await session.execute(text(f'SET LOCAL search_path TO "{schema_name}", public'))
             result = await session.execute(
                 text("""
                     SELECT

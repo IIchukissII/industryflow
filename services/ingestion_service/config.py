@@ -24,7 +24,7 @@ class Settings:
 
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-    KAFKA_TOPIC_SENSOR_DATA: str = os.getenv("KAFKA_TOPIC_SENSOR_DATA", "sensor-data-raw")
+    KAFKA_TOPIC_SENSOR_DATA: str = os.getenv("KAFKA_TOPIC_SENSOR_DATA")
 
     # Which edge header convention carries the verified certificate in this deployment
     # (one of DEVICE_IDENTITY_HEADER_CONVENTIONS). Required: guessing it, or accepting
@@ -32,6 +32,8 @@ class Settings:
     DEVICE_IDENTITY_HEADERS: str = os.getenv("DEVICE_IDENTITY_HEADERS", "")
 
     def __init__(self):
+        if not self.KAFKA_TOPIC_SENSOR_DATA:
+            raise RuntimeError("KAFKA_TOPIC_SENSOR_DATA must be set")
         if self.DEVICE_IDENTITY_HEADERS not in DEVICE_IDENTITY_HEADER_CONVENTIONS:
             raise RuntimeError(
                 "DEVICE_IDENTITY_HEADERS must be one of "

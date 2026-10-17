@@ -61,7 +61,7 @@ async def test_get_db_with_tenant_sets_search_path(fake_session):
 
     schema = f"tenant_{str(cid).replace('-', '_')}"
     assert any(
-        f"SET LOCAL search_path TO {schema}, public" in sql for sql in fake_session.executed
+        f'SET LOCAL search_path TO "{schema}", public' in sql for sql in fake_session.executed
     ), fake_session.executed
 
 

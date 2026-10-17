@@ -100,7 +100,7 @@ async def get_db_with_tenant(
                 if current_user and current_user.company_id:
                     schema_name = normalize_company_id_to_schema(current_user.company_id)
                     await session.execute(
-                        text(f"SET LOCAL search_path TO {schema_name}, public")
+                        text(f'SET LOCAL search_path TO "{schema_name}", public')
                     )
                     logger.debug(f"Schema search path set to: {schema_name}")
                 else:
@@ -178,7 +178,7 @@ async def get_tenant_db(
         try:
             async with session.begin():
                 schema_name = normalize_company_id_to_schema(ctx.company_id)
-                await session.execute(text(f"SET LOCAL search_path TO {schema_name}, public"))
+                await session.execute(text(f'SET LOCAL search_path TO "{schema_name}", public'))
                 if ctx.read_only:
                     await session.execute(text("SET LOCAL transaction read only"))
                 yield session
