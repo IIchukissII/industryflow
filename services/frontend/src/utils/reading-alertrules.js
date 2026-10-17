@@ -2,9 +2,11 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Alert rules: how many rules are active, of which kinds, and how many are switched off.
+// Alert rules: how many rules are active, of which kinds, and how many are switched off; and each
+// rule as one sentence that names what it watches.
 
 import { countWord, listNames } from './reading';
+import { sensorLabel } from './sensors';
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -46,3 +48,66 @@ export function alertRulesReading({ rules = [] }) {
   if (!off) return first;
   return `${first} ${off === 1 ? 'One more is' : `${cap(countWord(off))} more are`} switched off.`;
 }
+
+// --- One rule, as a sentence ---------------------------------------------------------------------
+// A sentence is a list of segments: plain text, or a value set in mono (`mono`), optionally with
+// the full value as a tooltip (`title`). ruleSentence() joins them as plain text.
+
+const seg = (t) => ({ t });
+const mono = (t, title) => ({ t: String(t), mono: true, ...(title ? { title } : {}) });
+const shortId = (id) => { const s = String(id); return s.length > 12 ? s.slice(0, 8) : s; };
+
+// A target the join found nothing for was deleted: say so, and keep its short id to tell them apart.
+const deleted = (what, id) => [seg(`a deleted ${what} (`), mono(shortId(id), String(id)), seg(')')];
+
+// What the rule watches, by name.
+export function ruleTargetParts(rule) {
+  if (rule.sensor_id) {
+    const name = sensorLabel(rule, '');
+    return name ? [seg(`sensor ${name}`)] : deleted('sensor', rule.sensor_id);
+  }
+  if (rule.equipment_id) {
+    return rule.equipment_name ? [seg(`machine ${rule.equipment_name}`)] : deleted('machine', rule.equipment_id);
+  }
+  if (rule.sensor_pattern) return [seg('sensors matching '), mono(rule.sensor_pattern)];
+  return [seg('every sensor')];
+}
+
+// The model a model or drift rule scores with, by name.
+export function ruleModelParts(rule) {
+  if (!rule.model_id) return [seg('no model')];
+  if (!rule.model_name) return deleted('model', rule.model_id);
+  return [seg(`model ${rule.model_name}${rule.model_version != null ? ` v${rule.model_version}` : ''}`)];
+}
+
+function conditionParts(rule) {
+  switch (rule.condition) {
+    case 'greater_than': return [seg('above '), mono(rule.threshold)];
+    case 'less_than': return [seg('below '), mono(rule.threshold)];
+    case 'equals': return [seg('equal to '), mono(rule.threshold)];
+    case 'between': return [seg('between '), mono(rule.threshold_min), seg(' and '), mono(rule.threshold_max)];
+    case 'outside_range': return [seg('outside '), mono(rule.threshold_min), seg(' to '), mono(rule.threshold_max)];
+    default: return [seg('with no condition set')];
+  }
+}
+
+const capFirst = ([first, ...rest]) => [{ ...first, t: cap(first.t) }, ...rest];
+
+// What the rule watches and when it fires.
+export function ruleSentenceParts(rule) {
+  const target = ruleTargetParts(rule);
+  const sev = seg(`, at ${rule.severity} severity.`);
+  const model = ruleModelParts(rule);
+  if (rule.detection_type === 'ml') {
+    return [seg('Model rule. '), ...capFirst(model), seg(' scores readings from '), ...target,
+      seg('; the rule fires past an anomaly threshold of '), mono(rule.anomaly_threshold ?? 0.85), sev];
+  }
+  if (rule.detection_type === 'statistical') {
+    return [seg('Drift rule. Fires when '), ...model, seg(' passes a drifted-feature share of '),
+      rule.threshold != null ? mono(rule.threshold) : seg('the service default'), seg(', for '), ...target, sev];
+  }
+  return [seg(`${cap(kindWord(rule.detection_type))} rule. Fires on a reading `), ...conditionParts(rule),
+    seg(' from '), ...target, sev];
+}
+
+export const ruleSentence = (rule) => ruleSentenceParts(rule).map((p) => p.t).join('');

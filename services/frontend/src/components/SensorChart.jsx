@@ -8,6 +8,7 @@ import { getMeasurements, getCombinedAggregations } from '../services/api';
 import websocketService from '../services/websocket';
 import ChartControls from './ChartControls';
 import { dedupeAscending } from '../utils/series';
+import { sensorLabel } from '../utils/sensors';
 import './SensorChart.css';
 
 // The chart is drawn on the page ground itself, not in a box of its own. A single series needs
@@ -191,10 +192,11 @@ const SensorChart = ({ sensorId, name, unit }) => {
       if (!entry) return;
 
       // name/unit come enriched on the stream; keep the header fresh + mark live
+      const label = sensorLabel(entry) || null;
       setMeta((m) =>
-        m.name === (entry.sensor_name || null) && m.unit === (entry.unit || '')
+        m.name === label && m.unit === (entry.unit || '')
           ? m
-          : { name: entry.sensor_name || m.name, unit: entry.unit || m.unit });
+          : { name: label || m.name, unit: entry.unit || m.unit });
       setLive(true);
 
       if (entry.value == null || !supportsLiveTick(selectedTimeframe, chartType)) return;

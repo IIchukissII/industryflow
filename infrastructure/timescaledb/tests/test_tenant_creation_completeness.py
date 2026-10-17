@@ -2,13 +2,15 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Every per-tenant shape migration is also applied to tenants created after it.
+"""Every per-tenant shape migration reaches every tenant: those that exist and those created later.
 
-A migration that changes the tenant schema does two things: it backfills the schemas that exist
-when it runs, and it must be called from create_tenant_schema() so a tenant created later gets the
-same shape. The second half is a list in 04-complete-tenant-creation.sql, and forgetting to extend
-it fails silently: init and every existing tenant look right, and only a tenant provisioned later
-lacks the columns — its first model registration fails. Migrations 18 and 19 shipped exactly so.
+A migration that changes the tenant schema does two things (ADR-0034 dec 3): it backfills the
+schemas that exist when it runs, and it must be called from create_tenant_schema() so a tenant
+created later gets the same shape. The second half is a list in 04-complete-tenant-creation.sql,
+and forgetting to extend it fails silently: init and every existing tenant look right, and only a
+tenant provisioned later lacks the columns — its first model registration fails. Migrations 18 and
+19 shipped exactly so. Forgetting the first half is as silent the other way round: fresh installs
+are right, and every live database lacks the shape until someone notices.
 
 Static: reads the init scripts, needs no database.
 """
@@ -29,6 +31,10 @@ def _shape_functions():
     return found
 
 
+def _script_number(script):
+    return int(script.split("-", 1)[0])
+
+
 def _create_tenant_schema_body():
     sql = open(_CREATION).read()
     start = sql.index("CREATE OR REPLACE FUNCTION create_tenant_schema(")
@@ -36,13 +42,29 @@ def _create_tenant_schema_body():
 
 
 def test_the_shape_functions_are_found():
-    assert {"add_alert_tables_to_schema", "add_alert_labels_to_schema"} <= set(_shape_functions())
+    assert {"add_alert_tables_to_schema", "add_alert_labels_to_schema",
+            "add_display_name_column_to_sensors"} <= set(_shape_functions())
 
 
 def test_create_tenant_schema_applies_every_shape_migration():
     body = _create_tenant_schema_body()
     missing = {f: src for f, src in _shape_functions().items() if f"PERFORM {f}(v_schema_name)" not in body}
     assert not missing, f"create_tenant_schema() never calls {missing}; new tenants lack that shape"
+
+
+def test_every_later_shape_migration_backfills_existing_tenants():
+    # Scripts before 04 run before create_tenant_schema() exists, so no tenant can predate them;
+    # every later one must apply its own function to the tenant schemas already there.
+    creation = _script_number(os.path.basename(_CREATION))
+    missing = {}
+    for f, src in _shape_functions().items():
+        if _script_number(src) <= creation:
+            continue
+        sql = open(os.path.join(_SCRIPTS, src)).read()
+        backfill = sql[sql.rfind("DO $$"):] if "DO $$" in sql else ""
+        if f"PERFORM {f}(schema_name)" not in backfill:
+            missing[f] = src
+    assert not missing, f"never applied to existing tenant schemas: {missing}"
 
 
 def test_create_tenant_schema_creates_the_sql_proxy_login_on_every_path():

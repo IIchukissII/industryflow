@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import Dict, Any
 from messaging.redis_client import redis_client
+from routers.websocket import sensor_names
 from dependencies import get_current_user_with_company, get_db_with_tenant
 from models.user import User
 
@@ -49,6 +50,7 @@ async def get_cached_sensors(
                 SELECT
                     s.sensor_id::text,
                     s.sensor_name,
+                    s.display_name,
                     s.equipment_id::text,
                     e.name as equipment_name
                 FROM sensors s
@@ -62,19 +64,12 @@ async def get_cached_sensors(
             rows = result.fetchall()
 
             # Create lookup dict for names
-            names_lookup = {
-                row[0]: {
-                    "sensor_name": row[1],
-                    "equipment_name": row[3]
-                }
-                for row in rows
-            }
+            names_lookup = {row.sensor_id: sensor_names(row) for row in rows}
 
             # Enrich sensor data with names
             for sensor_id, data in filtered_sensors.items():
                 if sensor_id in names_lookup:
-                    data['sensor_name'] = names_lookup[sensor_id]['sensor_name']
-                    data['equipment_name'] = names_lookup[sensor_id]['equipment_name']
+                    data.update(names_lookup[sensor_id])
 
         print(f"✅ CACHE: Returning {len(filtered_sensors)} sensors with names")
 

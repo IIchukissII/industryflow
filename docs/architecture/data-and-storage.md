@@ -77,6 +77,18 @@ Per tenant schema, created by `create_tenant_schema()`:
 | `model_predictions` | `timestamp`, 7 d | | `model_id`, 30 d | 180 d |
 | `feature_engineering_configs` | | | | |
 
+`sensors` naming columns:
+
+| Column | Type | Meaning |
+|---|---|---|
+| `sensor_name` | `VARCHAR(100) NOT NULL` | Machine key; referenced by feature configs, model feature names and alert-rule `sensor_pattern`; not editable through the API |
+| `display_name` | `VARCHAR(100)`, nullable | Human label (`22-sensor-display-name.sql`); NULL shows `sensor_name` |
+
+Payloads that name a sensor carry both: `GET /api/equipment/{id}/sensors`, `GET /api/cache/sensors`,
+WS `sensor_update` (`sensor_name`, `display_name`); `GET /api/alerts` and `GET /api/alert-rules`
+(`sensor_name`, `sensor_display_name`, joined at read time). The frontend shows
+`sensorLabel()` (`services/frontend/src/utils/sensors.js`).
+
 Extension-owned domain tables: [extensions](../operations/extensions.md).
 
 ## Cold layer

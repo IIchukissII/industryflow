@@ -33,6 +33,21 @@ describe('coreReading', () => {
     expect(r).toMatch(/Two sensors need a look: ec and vpd\.$/);
   });
 
+  it('names sensors by their display name, and by the key where there is none', () => {
+    const sensors = {
+      a: { ...s('bus_voltage'), display_name: 'Bus voltage' },
+      b: { ...s('co2'), display_name: null },
+      c: s('ppfd'),
+    };
+    const r = coreReading({ sensors, statusBySensor: { a: 'warn', b: 'warn' } });
+    expect(r).toMatch(/Two sensors need a look: Bus voltage and co2\.$/);
+  });
+
+  it('falls back to the sensor id when a sensor has no name at all', () => {
+    const r = coreReading({ sensors: { '5f0e8a1c': { equipment_name: 'Pump', value: 1 } }, statusBySensor: { '5f0e8a1c': 'crit' } });
+    expect(r).toMatch(/One sensor is in a critical alert: 5f0e8a1c\.$/);
+  });
+
   it('says when the stream is reconnecting', () => {
     const r = coreReading({ sensors: { a: s('ec') }, wsConnected: false });
     expect(r).toMatch(/reconnecting; these are the last readings\.$/);

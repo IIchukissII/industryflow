@@ -6,7 +6,8 @@ import { useState, useEffect, useCallback, useId } from 'react';
 import './AlertRules.css';
 import authFetch from '../services/http';
 import { canWrite } from '../utils/roles';
-import { alertRulesReading, kindWord, RULE_KINDS } from '../utils/reading-alertrules';
+import { alertRulesReading, kindWord, RULE_KINDS, ruleSentenceParts } from '../utils/reading-alertrules';
+import { sensorLabel } from '../utils/sensors';
 
 const RANGE = ['between', 'outside_range'];
 
@@ -22,56 +23,11 @@ const SEVERITIES = ['low', 'medium', 'high', 'critical'];
 
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
-// A stored id, shortened for reading; the full id stays in the tooltip.
-function Id({ value }) {
-  const s = String(value);
-  return <span className="mono" title={s}>{s.length > 12 ? `${s.slice(0, 8)}…` : s}</span>;
-}
-
-const Num = ({ v }) => <span className="mono">{v}</span>;
-
-// What the rule watches, in words.
-function RuleTarget({ rule }) {
-  if (rule.sensor_id) return <>sensor <Id value={rule.sensor_id} /></>;
-  if (rule.equipment_id) return <>machine <Id value={rule.equipment_id} /></>;
-  if (rule.sensor_pattern) return <>sensors matching <span className="mono">{rule.sensor_pattern}</span></>;
-  return <>every sensor</>;
-}
-
-// The value a threshold rule compares a reading against, in words.
-function ThresholdCondition({ rule }) {
-  switch (rule.condition) {
-    case 'greater_than': return <>above <Num v={rule.threshold} /></>;
-    case 'less_than': return <>below <Num v={rule.threshold} /></>;
-    case 'equals': return <>equal to <Num v={rule.threshold} /></>;
-    case 'between': return <>between <Num v={rule.threshold_min} /> and <Num v={rule.threshold_max} /></>;
-    case 'outside_range': return <>outside <Num v={rule.threshold_min} /> to <Num v={rule.threshold_max} /></>;
-    default: return <>with no condition set</>;
-  }
-}
-
-// What the rule watches and when it fires, as one sentence.
+// What the rule watches and when it fires, as one sentence: names, with values in mono.
 function RuleSentence({ rule }) {
-  const target = <RuleTarget rule={rule} />;
-  const sev = <>, at {rule.severity} severity.</>;
-  const model = <Id value={rule.model_id ?? 'not set'} />;
-  if (rule.detection_type === 'ml') {
-    return (
-      <>
-        Model rule. Model {model} scores readings from {target}; the rule fires past an anomaly
-        threshold of <Num v={rule.anomaly_threshold ?? 0.85} />{sev}
-      </>
-    );
-  }
-  if (rule.detection_type === 'statistical') {
-    return (
-      <>
-        Drift rule. Fires when model {model} passes a drifted-feature share of{' '}
-        {rule.threshold != null ? <Num v={rule.threshold} /> : 'the service default'}, for {target}{sev}
-      </>
-    );
-  }
-  return <>{cap(kindWord(rule.detection_type))} rule. Fires on a reading <ThresholdCondition rule={rule} /> from {target}{sev}</>;
+  return ruleSentenceParts(rule).map((p, i) => (p.mono
+    ? <span key={i} className="mono" title={p.title}>{p.t}</span>
+    : <span key={i}>{p.t}</span>));
 }
 
 function AlertRules() {
@@ -297,7 +253,8 @@ function EditRuleModal({ rule, onClose, onSave }) {
         const sensorsData = await sensorsResponse.json();
         const sensorsList = Object.entries(sensorsData.sensors || {}).map(([id, data]) => ({
           sensor_id: id,
-          sensor_name: data.sensor_name || id,
+          sensor_name: data.sensor_name,
+          display_name: data.display_name,
           equipment_name: data.equipment_name
         }));
         setSensors(sensorsList);
@@ -496,11 +453,12 @@ function EditRuleModal({ rule, onClose, onSave }) {
                   >
                     <option value="">Choose a sensor</option>
                     {missing(sensors, 'sensor_id', formData.sensor_id) && (
-                      <option value={formData.sensor_id}>{formData.sensor_id} (not reporting now)</option>
+                      <option value={formData.sensor_id}>{sensorLabel(rule, formData.sensor_id)} (not reporting now)</option>
                     )}
                     {sensors.map(sensor => (
                       <option key={sensor.sensor_id} value={sensor.sensor_id}>
-                        {sensor.sensor_name} ({sensor.sensor_id})
+                        {sensorLabel(sensor)}
+                        {sensor.display_name && sensor.sensor_name ? ` (${sensor.sensor_name})` : ''}
                         {sensor.equipment_name && `, ${sensor.equipment_name}`}
                       </option>
                     ))}
@@ -526,7 +484,7 @@ function EditRuleModal({ rule, onClose, onSave }) {
                   >
                     <option value="">Choose a machine</option>
                     {missing(equipment, 'equipment_id', formData.equipment_id) && (
-                      <option value={formData.equipment_id}>{formData.equipment_id}</option>
+                      <option value={formData.equipment_id}>{rule?.equipment_name || formData.equipment_id}</option>
                     )}
                     {equipment.map(eq => (
                       <option key={eq.equipment_id} value={eq.equipment_id}>
@@ -569,7 +527,7 @@ function EditRuleModal({ rule, onClose, onSave }) {
                   >
                     <option value="">Choose a model</option>
                     {missing(models, 'model_id', formData.model_id) && (
-                      <option value={formData.model_id}>{formData.model_id}</option>
+                      <option value={formData.model_id}>{rule?.model_name || formData.model_id}</option>
                     )}
                     {models.map(model => (
                       <option key={model.model_id} value={model.model_id}>

@@ -44,8 +44,9 @@ On an existing database a new or changed script is applied by hand ([manual oper
 | `19-model-provenance.sql` | `ml_models.provenance`, `artifact_uri` | [ADR-0030](../../../ADR/ADR-0030-externally-authored-model-admission.md) |
 | `20-model-detector.sql` | `ml_models.detector` | [ADR-0028](../../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) |
 | `21-company-provisioning.sql` | `provision_company()`, `update_company()`, `end_suspended_tenant_sql_sessions()`, `company_provisioning_guard()` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
+| `22-sensor-display-name.sql` | `add_display_name_column_to_sensors()`: `sensors.display_name`; backfill over existing tenants | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
 
-`create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15 and 18–20.
+`create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20 and 22.
 Scripts 06 and later are idempotent; the per-tenant ones also apply themselves to every existing
 tenant schema.
 
@@ -96,4 +97,5 @@ Provisioning and deactivating tenants through the API or script:
 |---|---|---|
 | `permission denied for table …` in a tenant created before a grant script | Grant backfill not applied | Re-apply the script that adds the grant (08, 10, 15, 16) |
 | `column "…" does not exist` on `ml_models` | Column migration not applied to that schema | Re-apply 06, 14, 18, 19 or 20, or `SELECT add_<…>_to_ml_models('tenant_<uuid>');` |
+| `column s.display_name does not exist` | 22 not applied to that schema | Re-apply 22, or `SELECT add_display_name_column_to_sensors('tenant_<uuid>');` |
 | Changed init script has no effect | Init scripts run on an empty data volume only | Apply the script by hand |

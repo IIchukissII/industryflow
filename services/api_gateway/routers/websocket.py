@@ -53,6 +53,15 @@ _cache_max_tenants = 256
 _names_cache: "OrderedDict[str, tuple[float, dict]]" = OrderedDict()
 
 
+# The names a latest-value entry carries, read from the sensor row. The cache in Redis holds values
+# only; names join at read time, so a renamed sensor shows its new label on the next refresh.
+SENSOR_NAME_FIELDS = ("sensor_name", "display_name", "equipment_name")
+
+
+def sensor_names(row) -> dict:
+    return {field: getattr(row, field) for field in SENSOR_NAME_FIELDS}
+
+
 async def _load_names(company_id: str, sensor_ids: list) -> dict:
     """Names of the given sensors and their equipment, read from the tenant's own schema."""
     async with AsyncSessionLocal() as session:
@@ -66,6 +75,7 @@ async def _load_names(company_id: str, sensor_ids: list) -> dict:
                     SELECT
                         s.sensor_id::text,
                         s.sensor_name,
+                        s.display_name,
                         s.equipment_id::text,
                         e.name as equipment_name
                     FROM sensors s
@@ -74,15 +84,12 @@ async def _load_names(company_id: str, sensor_ids: list) -> dict:
                 """),
                 {"sensor_ids": sensor_ids},
             )
-            return {
-                row[0]: {"sensor_name": row[1], "equipment_name": row[3]}
-                for row in result.fetchall()
-            }
+            return {row.sensor_id: sensor_names(row) for row in result.fetchall()}
 
 
 async def enrich_sensors_with_names(sensors: dict, company_id: str) -> dict:
     """
-    Enrich sensor data with sensor_name and equipment_name from database.
+    Enrich sensor data with sensor_name, display_name and equipment_name from database.
     Uses a per-tenant cache to minimize database queries: one tenant's names are never
     served to, or overwritten by, another tenant.
     """
@@ -107,8 +114,7 @@ async def enrich_sensors_with_names(sensors: dict, company_id: str) -> dict:
     names = cached[1] if cached else {}
     for sensor_id, data in sensors.items():
         if sensor_id in names:
-            data['sensor_name'] = names[sensor_id]['sensor_name']
-            data['equipment_name'] = names[sensor_id]['equipment_name']
+            data.update(names[sensor_id])
 
     return sensors
 
