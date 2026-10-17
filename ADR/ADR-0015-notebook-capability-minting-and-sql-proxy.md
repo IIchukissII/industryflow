@@ -123,6 +123,12 @@ The second half is the SQL path. The per-tenant read-only role already exists (A
 - **Capability-use audit.** What record is kept of which handle accessed which tenant, and where, relates to the notebook audit trail deferred in ADR-0011 and is not decided here.
 - ~~**Refresh-on-revocation propagation.**~~ *Resolved in rev 3, decision 2:* a platform sign-out reaches the handles by the hub's chained logout and by the platform revoking the user's capabilities when the session ends; open SQL sessions observe it at their next re-check.
 
+## Resolved since acceptance
+
+- **How the proxy holds and rotates the per-tenant credentials (rev 2).** The proxy stores none. Each tenant's credential is derived when needed from one secret that only the proxy holds, and the database keeps only a verifier for it. Tenant provisioning creates the tenant's confined login without a credential; the proxy installs the verifier on first use, through a separate enrolment identity that is a member of no role, can perform only that one act, and never carries a kernel's session. Rotating the one secret therefore rotates every tenant's credential at once, each login being re-enrolled at its next refused authentication. The rev 2 consequence that credential rotation is per tenant reads accordingly: each tenant still has its own credential, but rotation is a single act.
+- **The binding after login.** A session opened as the tenant's login then assumes the tenant's read-only role, because the login does not inherit it. That step is not the boundary of decision 5 rev 2: a kernel that undoes it is left on the same confined login.
+- **Pooling.** No pooler sits behind the proxy; each kernel connection is one upstream session.
+
 ## References
 
 - ADR-0012 — per-session credential delivery; this ADR resolves its deferred capability-format, SQL-proxy-binding, and lifetime/revocation decisions.
