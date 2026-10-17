@@ -5,126 +5,139 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # IndustryFlow Helm chart
 
-First-pass Kubernetes packaging for IndustryFlow, per **[ADR-0009](../../../ADR/ADR-0009-kubernetes-deployment-and-packaging.md)**.
+Kubernetes packaging for IndustryFlow ([ADR-0009](../../../ADR/ADR-0009-kubernetes-deployment-and-packaging.md)): templates, values, image pinning and pre-production steps.
 
-**Scope (this pass):** the application services (api-gateway, ml-service API,
-alert-service detector, ingestion-service, Spark streaming/aggregations) plus the core data
-services (TimescaleDB, Kafka, Zookeeper, Redis, MinIO, MLflow). The monitoring stack, stateful
-operators, autoscaling, and the mTLS device edge are deliberately later passes.
+## Templates
 
-## Layout
+| Template | Renders | Gate |
+|---|---|---|
+| `apps.yaml` | Deployment (+ Service, PDB, HPA) per entry in `apps` | `apps.<name>.enabled` |
+| `configmap.yaml` | Shared non-secret config from `config` | always |
+| `secret.yaml` | One scoped Secret per workload, `<release>-<workload>-secrets` | `secrets.create`, no `existingSecret` |
+| `infra-timescaledb.yaml` | TimescaleDB StatefulSet + Service | `infra.timescaledb.inCluster` |
+| `configmap-db-init.yaml` | `files/db-init` scripts, mounted at `/docker-entrypoint-initdb.d` | `infra.timescaledb.inCluster` |
+| `configmap-pg-hba.yaml` | Hardened `pg_hba.conf` + `postgresql.conf` (`files/db-config`) | `infra.timescaledb.inCluster` |
+| `db-tls-certificate.yaml` | cert-manager issuers, internal CA, DB server cert | `tls.db.certManager.enabled` |
+| `infra-kafka.yaml` | ZooKeeper + Kafka StatefulSets | `infra.zookeeper` / `infra.kafka.inCluster` |
+| `infra-redis.yaml` | Redis StatefulSet | `infra.redis.inCluster` |
+| `infra-minio.yaml` | MinIO StatefulSet | `infra.minio.inCluster` |
+| `infra-mlflow.yaml` | MLflow Deployment | `infra.mlflow.inCluster` |
+| `job-minio-init.yaml` | post-install/upgrade Job running `files/minio-init.sh` | `infra.minio.inCluster` |
+| `cronjob-db-backup.yaml` | Logical DB backup CronJob | `backup.enabled` |
+| `cronjob-cold-export.yaml` | Cold-layer export CronJob | `coldExport.enabled` |
+| `cronjob-device-crl-check.yaml` | Device CRL age check CronJob | `ingress.enabled`, `ingress.mtls.enabled`, `ingress.mtls.crlCheck.enabled` |
+| `ingress.yaml` | HTTPS Ingress; device mTLS Ingress | `ingress.enabled`; mTLS also `ingress.mtls.enabled` |
+| `networkpolicy.yaml` | NetworkPolicies | `networkPolicy.enabled` |
+| `notebook-hub.yaml` | Hub, configurable-http-proxy, SSO proxy, RBAC, notebooks Ingress | `notebookHub.enabled` |
+| `notebook-sql-proxy.yaml` | Notebook SQL proxy | `notebookHub.enabled` |
+| `notebook-tracking-gateway.yaml` | Experiment-tracking gateway | `notebookHub.enabled` |
+| `notebook-cold-broker.yaml` | Cold-store broker | `notebookHub.enabled` and `coldExport.enabled` |
+| `observability-servicemonitors.yaml` | ServiceMonitors for apps with `metrics: true` | `observability.serviceMonitors.enabled` |
+| `observability-prometheusrules.yaml` | PrometheusRules | `observability.prometheusRules.enabled` |
+| `observability-dashboards.yaml` | Grafana dashboard ConfigMaps (`files/grafana`) | `observability.dashboards.enabled` |
+| `observability-exporters.yaml` | postgres / redis / kafka exporters | `observability.exporters.<name>.enabled` |
 
-```
-deploy/helm/industryflow/
-├── Chart.yaml
-├── values.yaml                 # all knobs: images, replicas, resources, infra toggles, ingress, secrets
-└── templates/
-    ├── _helpers.tpl            # names, labels, infra host resolution (in-cluster vs external)
-    ├── configmap.yaml          # non-secret config; resolves connection endpoints
-    ├── secret.yaml             # PLACEHOLDER secret (do not ship real values)
-    ├── apps.yaml               # Deployment (+ Service) per stateless app, ranged from values.apps
-    ├── infra-timescaledb.yaml  # StatefulSet, gated by infra.timescaledb.inCluster
-    ├── infra-kafka.yaml        # Zookeeper + Kafka StatefulSets
-    ├── infra-redis.yaml
-    ├── infra-minio.yaml
-    ├── infra-mlflow.yaml       # Deployment (stateless front to DB + MinIO)
-    ├── job-minio-init.yaml     # buckets + scoped object-store principals (infrastructure/minio)
-    ├── ingress.yaml            # the TLS edge (ADR-0002 / ADR-0004)
-    └── NOTES.txt
-```
+`files/` holds symlinks to the compose sources; Helm follows them when it loads the chart.
 
-## Self-hosted vs managed (ADR-0009 decision 3)
+| Symlink | Target |
+|---|---|
+| `files/db-init` | `infrastructure/timescaledb/init-scripts` |
+| `files/db-config` | `infrastructure/timescaledb/config` |
+| `files/minio-init.sh` | `infrastructure/minio/minio-init.sh` |
+| `files/device-ca.sh` | `scripts/device-ca.sh` |
+| `files/grafana` | `infrastructure/grafana/provisioning` |
 
-Each stateful dependency has an `inCluster` toggle in `values.yaml`:
+## In-cluster vs external datastores
 
-- `inCluster: true` (default) renders the StatefulSet/Deployment + Service — the **self-hosted** model.
-- `inCluster: false` renders nothing and the app config points at `infra.<dep>.external.*` — the
-  **managed** model (external cloud Postgres/Kafka/object-store). The chart errors if an external
-  endpoint is required but not supplied.
+Each stateful dependency under `infra` has an `inCluster` toggle (ADR-0009 decision 3).
 
-## Usage
+| `inCluster` | Result |
+|---|---|
+| `true` (default) | The chart renders the workload + Service |
+| `false` | Nothing is rendered; config points at `infra.<dep>.external.*`, and rendering fails if that value is empty |
 
-```bash
-# Render locally (no cluster needed)
-helm template if deploy/helm/industryflow
+| Dependency | External key |
+|---|---|
+| `timescaledb` | `external.host`, `external.port` |
+| `kafka` | `external.bootstrap` |
+| `redis` | `external.host`, `external.port` |
+| `minio` | `external.endpoint` |
+| `mlflow` | `external.trackingUri` |
 
-# Lint
-helm lint deploy/helm/industryflow
+## Commands
 
-# Install (after providing real secrets + TLS cert)
-# Pin first-party images by digest: generate the overlay first, then apply it with -f.
-scripts/pin-image-digests.sh <tag> > deploy/helm/industryflow/values-digests.yaml
-helm install industryflow deploy/helm/industryflow \
-  --namespace industryflow --create-namespace \
-  -f deploy/helm/industryflow/values-digests.yaml \
-  --set-file ...   # or use a secrets backend
-```
+| Task | Command |
+|---|---|
+| Render locally | `helm template if deploy/helm/industryflow --set secrets.failOnPlaceholders=false` |
+| Lint | `helm lint deploy/helm/industryflow --set secrets.failOnPlaceholders=false` |
+| Generate the digest overlay | `scripts/pin-image-digests.sh <tag> > deploy/helm/industryflow/values-digests.yaml` |
+| Install | `helm install industryflow deploy/helm/industryflow --namespace industryflow --create-namespace -f deploy/helm/industryflow/values-digests.yaml -f <secrets-values>` |
 
-### Image digest pinning
+## Image digest pinning
 
-Production deployments run images by **immutable digest**, not mutable tags:
+| Image kind | Pinning |
+|---|---|
+| Third-party (TimescaleDB, Kafka, ZooKeeper, Redis, MinIO, mc, exporters, notebook proxies, init images) | `name:tag@sha256:…` inline in `values.yaml` |
+| First-party `industryflow-*` | Per-image `digest:` in every mapping with `image` + `digest`; empty uses `image.tag`, a set digest wins over the tag |
 
-- **Third-party** images (TimescaleDB, Kafka/ZooKeeper, Redis, MinIO, the notebook
-  proxy/nginx) are pinned as `name:tag@sha256:…` directly in `values.yaml`. Re-pin on upgrade.
-- **First-party** `industryflow-*` images carry a per-image `digest:` (`apps.<name>.digest`,
-  `infra.mlflow.digest`, `notebookHub.hub.digest`). Empty by default → the chart uses the
-  mutable `image.tag` (dev convenience); when set, the digest wins over the tag. Because these
-  digests rotate every build, generate the overlay rather than hand-editing:
+`scripts/pin-image-digests.sh [TAG]` derives the image list from `values.yaml` and resolves each
+digest from GHCR over the registry API (`GITHUB_TOKEN` or `gh auth token` for private packages).
 
-  ```bash
-  scripts/pin-image-digests.sh latest > deploy/helm/industryflow/values-digests.yaml
-  ```
+| Env var | Default | Meaning |
+|---|---|---|
+| `REGISTRY` | `image.registry` | Registry/namespace prefix |
+| `GITHUB_TOKEN` | `gh auth token` | Token for private packages |
 
-  The script resolves digests from GHCR via the registry API (`gh auth token` or `GITHUB_TOKEN`
-  for private packages); no docker/skopeo needed.
+## Before production
 
-## Before production (also printed in NOTES.txt)
+| Item | Keys | Requirement |
+|---|---|---|
+| Secrets | `secrets.data`, `secrets.create`, `secrets.existingSecret` | Replace every `CHANGE_ME` from a secrets backend, or `secrets.create=false` + `existingSecret` (every workload then references that one Secret). Rendering fails on a placeholder while `secrets.failOnPlaceholders=true` |
+| DB roles | `secrets.data.*_DB_PASSWORD`, `config.*_DB_USER` | Each service connects as its own role; the init scripts create the roles from these passwords |
+| Images | `values-digests.yaml` | Install with the generated overlay; never `latest` |
+| Ingress TLS | `ingress.tls.secretName` | Public certificate Secret ([ADR-0004](../../../ADR/ADR-0004-api-authentication-sessions-and-transport.md)) |
+| DB TLS | `tls.db.*` | Secret `tls.db.secretName` with `tls.crt`/`tls.key`/`ca.crt`, or `tls.db.certManager.enabled=true`; without it the DB and its clients stay pending ([ADR-0017](../../../ADR/ADR-0017-database-tls-and-authentication.md)) |
+| DB init | `infra.timescaledb.inCluster` | In-cluster: scripts run on a fresh data volume. External: run [the init scripts](../../../infrastructure/timescaledb/init-scripts/README.md) yourself before first use |
+| Spark checkpoints | `apps.spark-*.persistence` | Default is a ReadWriteOnce PVC; needs a default StorageClass or `storageClass` |
+| Object-store principals | `secrets.data.*_ACCESS_KEY` / `*_SECRET_KEY` | One pair per consumer, access keys distinct from the root's. External store: create equivalent principals; the policy table in `infrastructure/minio/minio-init.sh` is the reference |
+| Device mTLS | `ingress.mtls.*` | Device-CA Secret `caSecret` with `ca.crt` and `ca.crl` ([device mTLS](../../../docs/operations/device-mtls.md)) |
 
-1. **Secrets** — replace the placeholder `secrets.data` with a real backend (SealedSecrets/Vault/CSI)
-   or `secrets.create=false` + `secrets.existingSecret`. Never commit real values. The chart
-   **fails closed** if any value is still `CHANGE_ME` (`secrets.failOnPlaceholders`, default true;
-   CI/dev renders set it false). Each value is the single source: the chart renders a **scoped
-   Secret per workload** (only the keys that workload needs, e.g. `<release>-api-gateway-secrets`),
-   so no pod receives the whole bundle, and each service connects as its own least-privilege DB
-   role (`*_DB_USER` in config + `*_DB_PASSWORD` in its scoped Secret). With `existingSecret`, all
-   workloads reference that one Secret — scope it at your backend.
-2. **Images** — pin by digest (see *Image digest pinning* above): third-party in `values.yaml`,
-   first-party via `scripts/pin-image-digests.sh > values-digests.yaml` + `-f`. Never ship `latest`.
-3. **TLS** — provide two certs:
-   - **Ingress** — the `ingress.tls.secretName` certificate (ADR-0004 public cert).
-   - **Database (ADR-0017)** — the hardened `pg_hba` is `hostssl` + `scram-sha-256`, so an
-     in-cluster TimescaleDB **requires** a server cert and every client connects `verify-full`.
-     Either let the chart self-provision it with cert-manager — `--set tls.db.certManager.enabled=true`
-     (a SelfSigned issuer → internal CA → server cert, mirroring `scripts/gen-internal-ca.sh`) —
-     or supply a Secret (`tls.crt`/`tls.key`/`ca.crt`) from your own PKI as `tls.db.secretName`
-     (default `industryflow-db-tls`). The DB pod mounts all three (an initContainer stages the key
-     with `0600`/postgres-uid); clients mount only `ca.crt` and read `DB_SSLMODE`/`DB_SSLROOTCERT`
-     from the shared ConfigMap. Without it the DB + clients stay pending. Knobs live under `tls.db`.
-4. **DB init** — handled automatically when `infra.timescaledb.inCluster=true`: the canonical
-   `infrastructure/timescaledb/init-scripts` are mounted at `/docker-entrypoint-initdb.d` via a
-   ConfigMap and run on a fresh data volume. Set the five per-service role passwords in
-   `secrets.data` (`*_DB_PASSWORD`) alongside `DB_PASSWORD`. For an **external** database
-   (`inCluster=false`) run those scripts yourself before first use.
-5. **Spark checkpoints** — by default `spark-streaming`/`spark-aggregations` run in local mode
-   and claim a ReadWriteOnce PVC (`apps.<name>.persistence`); ensure a default StorageClass exists
-   or set `storageClass`. **To scale Spark out** (separate executors / a real cluster), move the
-   Structured-Streaming checkpoint to a shared store (ADR-0006): set
-   `config.CHECKPOINT_LOCATION=s3a://spark-checkpoints`, add `SPARK_CHECKPOINT_ACCESS_KEY`/
-   `SPARK_CHECKPOINT_SECRET_KEY` to both spark workloads' `secretKeys` with
-   `secretEnv: { MINIO_ACCESS_KEY: SPARK_CHECKPOINT_ACCESS_KEY, MINIO_SECRET_KEY: SPARK_CHECKPOINT_SECRET_KEY }`
-   (the checkpoint-only principal, ADR-0025 dec 11), and set their `persistence.enabled=false`. The
-   images already carry the S3A jars; the in-cluster store's bucket and principal come from the
-   minio-init Job (below), an external store's from you.
-6. **Object store principals** — no workload holds the MinIO root key except the server and the
-   `minio-init` Job, which runs `infrastructure/minio/minio-init.sh` (the script compose runs) after
-   every install/upgrade to create the buckets, the upload-staging expiry and one scoped principal
-   per consumer: `MLFLOW_STORE_*` (the MLflow server), `TRACKING_STORE_*` (the tracking gateway),
-   `MODEL_READ_*` (ml-service, read-only on admitted uploads), `BACKUP_STORE_*`, `SPARK_CHECKPOINT_*`,
-   `COLD_STORE_*` and `COLD_READ_*`. Set each pair in `secrets.data`; access keys must differ from
-   the root's. For an external store (`infra.minio.inCluster=false`) create equivalent principals
-   yourself — the script's policy table is the reference.
+### Object-store principals
 
-## Known follow-ups (ADR-0009 deferred)
+Only the MinIO server and the `minio-init` Job hold `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`.
 
-Monitoring stack chart · stateful operators (Postgres/Kafka) · HPA policies · secrets backend ·
-Spark-on-k8s.
+| Principal keys | Consumer |
+|---|---|
+| `MLFLOW_STORE_*` | MLflow server |
+| `TRACKING_STORE_*` | Notebook tracking gateway |
+| `MODEL_READ_*` | ml-service-api, read-only on admitted uploads ([ADR-0030](../../../ADR/ADR-0030-externally-authored-model-admission.md)) |
+| `BACKUP_STORE_*` | db-backup CronJob |
+| `SPARK_CHECKPOINT_*` | Spark jobs with an S3A checkpoint |
+| `COLD_STORE_*` | cold-export CronJob (write) |
+| `COLD_READ_*` | Notebook cold-store broker (read) |
+
+### Spark checkpoint on the object store
+
+Moving the Structured-Streaming checkpoint off the PVC ([ADR-0006](../../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md)), for both `spark-streaming` and `spark-aggregations`:
+
+| Key | Value |
+|---|---|
+| `config.CHECKPOINT_LOCATION` | `s3a://spark-checkpoints` |
+| `apps.<name>.secretKeys` | add `SPARK_CHECKPOINT_ACCESS_KEY`, `SPARK_CHECKPOINT_SECRET_KEY` |
+| `apps.<name>.secretEnv` | `{ MINIO_ACCESS_KEY: SPARK_CHECKPOINT_ACCESS_KEY, MINIO_SECRET_KEY: SPARK_CHECKPOINT_SECRET_KEY }` |
+| `apps.<name>.persistence.enabled` | `false` |
+
+## Deferred
+
+Open per ADR-0009 *Deferred decisions*: stateful operators, autoscaling policy, secrets backend,
+Spark on Kubernetes. The notebook stack (`notebookHub`) renders but is not cluster-validated.
+
+## Related
+
+| Doc | Topic |
+|---|---|
+| [backup-and-recovery.md](../../../docs/operations/backup-and-recovery.md) | `backup.*`, restore |
+| [monitoring.md](../../../docs/operations/monitoring.md) | `observability.*`, `deploy/observability` |
+| [high-availability.md](../../../docs/operations/high-availability.md) | `resilience.*`, HPA |
+| [notebooks.md](../../../docs/architecture/notebooks.md) | `notebookHub.*` |
+| [ADR-0025](../../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md) | `coldExport.*` |
