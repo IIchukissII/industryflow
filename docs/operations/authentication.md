@@ -120,3 +120,4 @@ curl -k https://<host>/api/measurements/latest -H "Authorization: Bearer $TOKEN"
 | `WS_SESSION_RECHECK_SECONDS` | `60` | Open-socket session re-check |
 | `COMPANY_STATUS_CACHE_SECONDS` | `30` | Company active-flag cache |
 | `INTERNAL_SERVICE_TOKEN` | none | Shared secret for `X-Internal-Service-Token` (alert worker → ML inference); unset disables the internal path |
+| `NOTEBOOK_SSO_PROXY_SECRET` | none (required, notebooks) | Shared secret for `X-IF-SSO-Proxy-Secret` (notebook SSO proxy → hub); the hub honours the `X-IF-*` identity only with it and does not start without it |

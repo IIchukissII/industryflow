@@ -11,10 +11,10 @@ The notebook hub: spawns per-user notebook environments ([ADR-0011](../../ADR/AD
 
 | File | Content |
 |---|---|
-| `identity.py` | Parses the verified identity headers (`X-IF-User`, `X-IF-Company-Id`, `X-IF-Role`), selects the profile from the role, derives pod labels and the identity-only environment, reconciles a hub login with the forwarded identity |
+| `identity.py` | Parses the verified identity headers (`X-IF-User`, `X-IF-Company-Id`, `X-IF-Role`), checks the SSO proxy secret (`X-IF-SSO-Proxy-Secret`, constant-time), selects the profile from the role, derives pod labels and the identity-only environment, reconciles a hub login with the forwarded identity |
 | `capabilities.py` | Capability handle mint / resolve / revoke and the per-server index `nbcap-user:<user>` ([ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md)) |
 | `jupyterhub_config.py` | Header-trusting authenticator with `refresh_user`, `pre_spawn_hook`, `post_stop_hook`, polling spawner subclass, idle culler, containment, spawner selection ([ADR-0018](../../ADR/ADR-0018-notebook-hub-spawner-portability.md)) |
-| `sso-nginx.conf` | SSO reverse proxy: validates the platform session against api-gateway and overwrites the identity headers before the hub |
+| `sso-nginx.conf` | SSO reverse proxy (nginx template): validates the platform session against api-gateway, overwrites the identity headers, sets `X-IF-SSO-Proxy-Secret` on hub routes only |
 | `Dockerfile` | Hub image (JupyterHub + configurable-http-proxy), uid 10001, ports 8000/8081 |
 | `Dockerfile.authoring` | Authoring single-user image: JupyterLab, the `industryflow` client with `[sql]`; build context `clients/python` |
 | `Dockerfile.analytics` | Analytics single-user image: Voila, client without `[sql]`; build context `clients/python` |
@@ -38,14 +38,16 @@ Either image falls back to `NOTEBOOK_IMAGE`.
 | `REDIS_URL` | required | Capability store |
 | `NOTEBOOK_CAPABILITY_TTL_SECONDS` | `900` | Handle lifetime, extended on every spawner poll |
 | `NOTEBOOK_AUTH_REFRESH_SECONDS` | `60` | Hub login re-check interval |
+| `NOTEBOOK_SSO_PROXY_SECRET` | required | Shared with the SSO proxy; ≥ 32 alphanumeric characters; the hub does not start without it |
 | `NOTEBOOK_IDLE_TIMEOUT_SECONDS` | `3600` | Idle culler timeout |
 | `NOTEBOOK_CULL_EVERY_SECONDS` | `300` | Idle culler interval |
 | `NOTEBOOK_HOME` | `/home/jovyan` | Single-user home |
 | `NOTEBOOK_VOLUME_TEMPLATE` | `industryflow-nb-{username}` | Per-user volume / PVC name |
 | `NOTEBOOK_STORAGE_CAPACITY` | `2Gi` | PVC size (kube) |
 | `NOTEBOOK_NETWORK` | required (docker) | Docker network shared with hub and proxy |
-| `HUB_CONNECT_IP` | `notebook-hub` | Hub address for single-user containers (docker) |
-| `HUB_PUBLIC_URL` | `http://0.0.0.0:8000` | Hub public bind (docker) |
+| `HUB_CONNECT_IP` | `notebook-hub` (docker), unset (kube) | Hub API address for chp and single-user servers |
+| `HUB_PUBLIC_URL` | `http://0.0.0.0:8000` | chp public bind (docker); compose sets `http://notebook-hub-public:8000`, an alias only the platform network resolves |
+| `CONFIGPROXY_API_URL` | unset | kube: API of the sibling chp; when set the hub starts no chp |
 | `INDUSTRYFLOW_API_URL` | unset | Passed to kernels |
 | `INDUSTRYFLOW_SQL_PROXY_URL` | unset | Passed to authoring kernels |
 | `INDUSTRYFLOW_TRACKING_URL` | unset | Passed to authoring kernels as `MLFLOW_TRACKING_URI`; enables the tracking handle |
@@ -62,7 +64,8 @@ Kernel environment: `INDUSTRYFLOW_API_CAPABILITY`, `INDUSTRYFLOW_SQL_CAPABILITY`
 | Spawner poll, server healthy | Handle lifetime extended by `NOTEBOOK_CAPABILITY_TTL_SECONDS` |
 | Server stops (user, culler, hub logout) | `post_stop_hook` revokes its handles |
 | Platform logout | Frontend logs out of the hub first (`shutdown_on_logout` stops the server); `/auth/logout` revokes all the user's handles; a server whose handles are all revoked stops at its next poll |
-| Hub request after `NOTEBOOK_AUTH_REFRESH_SECONDS`, and before a spawn | Hub login compared with the forwarded identity: a different user ends the login; the same user with another tenant or role ends it and stops their servers |
+| Login (`/hub/login`) | Refused (401) unless `X-IF-SSO-Proxy-Secret` matches `NOTEBOOK_SSO_PROXY_SECRET` |
+| Hub request after `NOTEBOOK_AUTH_REFRESH_SECONDS`, and before a spawn | Hub login compared with the forwarded identity (identity headers without the proxy secret count as none): a different user ends the login; the same user with another tenant or role ends it and stops their servers |
 
 ## Status
 

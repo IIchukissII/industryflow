@@ -45,8 +45,8 @@ hub sends `Content-Security-Policy: frame-ancestors 'self'`.
 
 | Component | Role | Port | Code / config |
 |---|---|---|---|
-| notebook-sso | nginx `auth_request` to `/auth/verify`, forwards `X-IF-*` | 8080 (internal) | `services/notebook_hub/sso-nginx.conf` |
-| notebook-hub | JupyterHub, spawner by `NOTEBOOK_SPAWNER` (`docker` / `kube`), base URL `NOTEBOOK_BASE_URL` (`/jupyter/`) | 8000 | `services/notebook_hub/jupyterhub_config.py`, `identity.py`, `capabilities.py` |
+| notebook-sso | nginx `auth_request` to `/auth/verify`, forwards `X-IF-*`; adds `X-IF-SSO-Proxy-Secret` on hub routes only | 8080 (internal) | `services/notebook_hub/sso-nginx.conf` |
+| notebook-hub | JupyterHub, spawner by `NOTEBOOK_SPAWNER` (`docker` / `kube`), base URL `NOTEBOOK_BASE_URL` (`/jupyter/`); login only with the SSO proxy secret | 8000 (chp, platform network only), 8081 (hub API) | `services/notebook_hub/jupyterhub_config.py`, `identity.py`, `capabilities.py` |
 | notebook-authoring image | JupyterLab, DS stack, `industryflow[sql,cold]` client | | `services/notebook_hub/Dockerfile.authoring` |
 | notebook-analytics image | Voila, data-API client; hub lands on `/voila` | | `services/notebook_hub/Dockerfile.analytics` |
 | notebook-sql-proxy | Postgres-wire proxy | 6432 | `services/notebook_sql_proxy/` |
