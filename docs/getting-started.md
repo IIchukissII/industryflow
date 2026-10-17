@@ -148,7 +148,9 @@ CI workflows and required checks: [CI](operations/ci.md).
 |---|---|---|
 | `SPARK_STREAMING_CORES_MAX` / `SPARK_AGG_CORES_MAX` | 1 / 3 | Cores per Spark job |
 | `SPARK_SHUFFLE_PARTITIONS` | 8 | Spark shuffle partitions |
-| `SPARK_DRIVER_MEMORY` / `SPARK_EXECUTOR_MEMORY` | `2g` / `2g` | Spark memory |
+| `SPARK_DRIVER_MEMORY` / `SPARK_EXECUTOR_MEMORY` | `768m` / `768m` | Spark heap per job |
+| `SPARK_WORKER_MEMORY` | `2g` | Memory the worker gives both executors together |
+| `SPARK_*_MEM_LIMIT` | master `384m`, worker `2560m`, each job `1280m` | Container memory ceilings; raise with the heaps |
 | `SPARK_WORKER_REPLICAS` | 1 | Spark workers |
 
 Compression and retention: [data and storage](architecture/data-and-storage.md#tables). Capacity and
