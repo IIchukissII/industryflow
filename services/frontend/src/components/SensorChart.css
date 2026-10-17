@@ -3,12 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-.sensor-chart {
-  background: #131722;
-  border: 1px solid #232733;
-  border-radius: 8px;
-  padding: 14px 16px 16px;
-}
+.sensor-chart { padding: 0; }
 
 /* header: identity on the left, live value readout on the right */
 .sensor-chart__head {
@@ -27,10 +22,11 @@
 }
 
 .sensor-chart__name {
-  color: #d1d4dc;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  margin: 0;
+  font-family: var(--font-display);
+  color: var(--text);
+  font-size: 21px;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -66,13 +62,14 @@
   font-variant-numeric: tabular-nums;
 }
 .sensor-chart__value {
-  color: #4c9aff;
+  font-family: var(--font-mono);
+  color: var(--text-soft);
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1;
 }
-.sensor-chart__unit { color: #a7abb6; font-size: 12px; }
-.sensor-chart__ts   { color: #6b7280; font-size: 11px; margin-left: 4px; }
+.sensor-chart__unit { color: var(--muted); font-size: 13px; }
+.sensor-chart__ts   { font-family: var(--font-mono); color: var(--muted); font-size: 12px; margin-left: 6px; }
 
 /* canvas + state overlay */
 .sensor-chart__canvas-wrap { position: relative; }
@@ -84,18 +81,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #787b86;
-  font-size: 13px;
-  background: rgba(19, 23, 34, 0.55);
+  color: var(--muted);
+  font-size: 14px;
+  background: rgba(9, 12, 22, 0.55);
   pointer-events: none;
 }
-.sensor-chart__err { color: #ffa726; }
+.sensor-chart__err { color: var(--warn); }
 
 .sensor-chart__spinner {
   width: 22px;
   height: 22px;
   border: 2px solid #2a2e39;
-  border-top-color: #4c9aff;
+  border-top-color: var(--gold);
   border-radius: 50%;
   animation: sensor-chart-spin 0.8s linear infinite;
 }
@@ -104,11 +101,4 @@
   .sensor-chart__spinner { animation-duration: 2s; }
 }
 
-.sensor-chart__placeholder {
-  padding: 40px;
-  text-align: center;
-  color: #787b86;
-  background: #131722;
-  border: 1px solid #232733;
-  border-radius: 8px;
-}
+.sensor-chart__placeholder { padding: 40px 0; color: var(--muted); }
