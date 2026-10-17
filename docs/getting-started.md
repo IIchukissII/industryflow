@@ -138,7 +138,7 @@ Swagger UI: `http://localhost:8000/docs`. Login and token examples:
 | A service's unit tests | `pip install ./libs/industryflow_contracts -r services/<service>/requirements-dev.txt && pytest services/<service>/tests` |
 | Python client | `pip install -e 'clients/python[dev]' && pytest clients/python/tests` |
 | Config guards | `pip install pytest pyyaml ./libs/industryflow_contracts && pytest tests/config_guards` |
-| Load test (running stack, device cert) | `cd tests/performance && python3 performance_test.py` |
+| Load test with the TEP reference data (running stack, TEP equipment provisioned, device cert) | `cd tests/performance && python3 performance_test.py` |
 
 CI workflows and required checks: [CI](operations/ci.md).
 
