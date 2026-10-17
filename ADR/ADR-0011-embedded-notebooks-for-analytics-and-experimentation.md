@@ -48,14 +48,15 @@ service role could re-scope itself to another tenant.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| A. A shared Jupyter server exposed through the product | No per-user identity, no tenant scope, shared credential |
-| B. In-browser execution only | No server compute, full library stack or large data; kept as a possible read-only implementation |
-| C. The ML-service role in the kernel, scoped by search path | Isolation by discipline in user code (decision 3) |
-| D. A bespoke notebook UI over raw kernel protocols | Reinvents a mature front end; same isolation work |
-| E. A notebook deployment per tenant | Per-tenant operations, no platform sign-on, standing fleets |
-| F. A database principal created and dropped per session | Race-prone role lifecycle; its credential would sit in the kernel |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | In-browser execution only | No server compute, full library stack or large data; kept as a possible read-only implementation |
+| 1 | A bespoke notebook UI over raw kernel protocols | Reinvents a mature front end and still needs the same isolation work |
+| 1 | A notebook deployment per tenant | Per-tenant operations, no platform sign-on, and standing fleets against on-demand containment |
+| 2 | A shared notebook server exposed through the product | No per-user identity, no tenant scope, and a shared credential |
+| 3 | The ML-service role in the kernel, scoped by search path | Isolation by discipline does not hold for user-authored code |
+| 6 | A database principal created and dropped per session | Race-prone role lifecycle, and its credential would sit in the kernel |
+| 9 | Notebook experiment tracking withheld until tracking-store tenancy is decided | A gateway that confines tracking to the caller's tenant now serves it without that wait |
 
 ## Consequences
 

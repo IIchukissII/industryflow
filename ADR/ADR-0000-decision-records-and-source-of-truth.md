@@ -31,9 +31,10 @@ cannot tell which copy is right.
 4. **Code never silently overrides an ADR.** A divergence is resolved by changing the ADR deliberately
    or by changing the code.
 5. **An ADR states the decision in force.** A decision that becomes untrue is edited in place to the
-   current truth, with the change date in the header and the change described in its pull request.
-   History lives in version control, not in the record. A reversed or replaced decision is a new ADR,
-   and the old one is marked superseded.
+   current truth, with the change date in the header and the change described in its pull request; the
+   replaced choice is recorded among the alternatives with why it is rejected now. History lives in
+   version control, not in the record. A reversed or replaced decision is a new ADR, and the old one is
+   marked superseded.
 6. **The governance root is not mirrored into the ADRs it governs.** No ADR names this one as its
    parent; the relationship is inherited.
 7. **Status follows a lifecycle, and the maintainer accepts.** `Proposed` while under discussion,
@@ -45,17 +46,21 @@ cannot tell which copy is right.
    cite it.
 9. **Every ADR has the same compact shape.** A header (status, date, optional parent, related records
    with the relation), then Context, Decision (numbered), Alternatives (table), Consequences (positive,
-   negative), Deferred (table), References. One decision per record, in about a hundred lines; a record
+   negative), Deferred (table), References. Alternatives hold every rejected alternative, one row each,
+   with the decision number it lost to. One decision per record, in about a hundred lines; a record
    that needs more holds several decisions.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Rationale in the README and docs only | Prose that mirrors values without owning them is a duplication source, not a decision record |
-| Several copies with one marked primary | Markers rot; a reader cannot tell a stale copy from a current one |
-| Decisions in code comments and commit messages | A cross-cutting decision has no single home; commits are not a body of current decisions |
-| Revision blocks and dated addenda inside each ADR | The record grows into its own history, and the decision in force is hard to find |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| — | Inheriting another project's decision records by reference | The platform's own decisions would depend on another repository for their source of truth |
+| 1 | Rationale in the README and docs only | Prose that mirrors values without owning them is a duplication source, not a decision record |
+| 1 | Decisions in code comments and commit messages | A cross-cutting decision has no single home; commits are not a body of current decisions |
+| 3 | Several copies with one marked primary | Markers rot; a reader cannot tell a stale copy from a current one |
+| 5 | A numbered revision block with a supersedes line for every change to a decision | The record grows into its own history, and the decision in force is hard to find |
+| 5 | Labelled status addenda on an accepted record | Outcomes accumulate beside the decision instead of being stated where they belong |
+| 5 | A full revision for every edit after acceptance, status notes included | Ceremony heavy enough to discourage keeping the record current |
 
 ## Consequences
 

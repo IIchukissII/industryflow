@@ -39,14 +39,15 @@ request to the caller's tenant (ADR-0003).
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| A. A short-lived database password in the kernel (credential broker) | A database password in user code; needs a secrets engine or race-prone role lifecycle |
-| B. A long-lived credential shared by a tenant's environments | Standing shared secret, no attribution, revocation only by rotation |
-| C. The user's platform session in the kernel | Hands over the whole authenticated surface; revoking it ends the web session |
-| D. Only an HTTP query service, no direct SQL | Not direct SQL for data-science tools; compatible as an addition |
-| E. Every plane read-only and spawn-minted | Tracking and upload are required writes, one held by a person |
-| F. One shared proxy principal narrowed after login | The kernel can repeat or undo the narrowing on its own session |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Every plane minted only by the spawner | A plane held by a person has no spawn to mint at |
+| 2 | A short-lived database password in the kernel from a credential broker | A database password in user code, needing a secrets engine or race-prone role lifecycle |
+| 2 | A long-lived credential shared by a tenant's environments | A standing shared secret with no attribution and revocation only by rotation |
+| 3 | The user's platform session in the kernel | Hands over the whole authenticated surface, and revoking it ends the web session |
+| 4 | Only an HTTP query service, no direct SQL | Not direct SQL for data-science tools; compatible as an addition |
+| 4 | One shared proxy principal narrowed after login | The kernel can repeat or undo the narrowing on its own session |
+| 5 | Read-only intent fixed on every capability | Experiment tracking and model upload are required writes |
 
 ## Consequences
 
@@ -63,7 +64,7 @@ request to the caller's tenant (ADR-0003).
 | Open question | Settled by |
 |---|---|
 | Audit record of which capability accessed which tenant's data | Maintainer, with ADR-0011's execution audit |
-| A query-over-HTTP data service in addition (alternative D) | First workload that needs it |
+| A query-over-HTTP data service in addition (dec 4 alternatives) | First workload that needs it |
 
 ## References
 

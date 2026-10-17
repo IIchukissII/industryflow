@@ -42,13 +42,13 @@ configuration names.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Packaging entry points | Not rejected; unneeded ceremony now, layers on later unchanged |
-| Hardcoded dispatcher with per-domain flags | Domain branches in the core (ADR-0008 dec 7) |
-| Out-of-process transforms | A network hop per feature per reading |
-| Scoring hardcoded to one library | A new or model-free detector would edit the core |
-| Treat 0.x as stable | Declares the contract finished while it is still being shaped |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 2 | Hardcoded dispatcher with per-domain flags | Domain branches in the core (ADR-0008 dec 7) |
+| 3 | One compatibility rule for every major: a breaking change is always a major bump | At 0.x it declares the contract stable while its first users still shape it |
+| 3 | Keeping that rule and spending 1.0 on the next break | Version 1.0 would mark an accident, not a decision that the contract is done |
+| 4 | Out-of-process transforms | A network hop per feature per reading |
+| 6 | Scoring hardcoded to one library | A new or model-free detector would edit the core |
 
 ## Consequences
 

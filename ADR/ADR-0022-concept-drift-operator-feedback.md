@@ -36,14 +36,14 @@ platform has no training service; a notebook trains and registers new versions.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Label columns on the alerts table | Retention deletes the label with the alert |
-| Reuse the per-prediction ground-truth column | Different grain and lifecycle |
-| Compute recall from labels | Labels carry no missed events |
-| An automated retrain executor now | No training service; its own ADR |
-| A standalone labelling service | A small write on the existing alert surface |
-| Any authenticated tenant user may label | A label is a durable write that moves precision |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Any authenticated tenant user may label | A label is a durable write that moves precision and can raise a recommendation; a read-only role would not hold |
+| 2 | Label columns on the alerts table | Retention deletes the label together with its alert |
+| 2 | Reuse the per-prediction ground-truth column | A different grain and lifecycle from a verdict on a fired alert |
+| 3 | Compute recall from labels | Fired-alert labels carry no missed events |
+| 4 | An automated retrain executor now | No training service exists to invoke; it needs its own ADR |
+| 5 | A standalone labelling service | Labelling is a small write on the existing alert surface |
 
 ## Consequences
 

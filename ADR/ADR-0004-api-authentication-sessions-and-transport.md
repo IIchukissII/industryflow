@@ -50,15 +50,19 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Stateless JWT, long- or short-lived, without refresh | Not revocable; short lifetimes force re-login |
-| Tokens in browser local storage with a CSP | Still readable by injected script |
-| TLS terminated in each service | Certificate handling in every replica |
-| Public ACME in every deployment | No public CA issues for an internal hostname |
-| Separate internal CAs for edge and database | Two roots to install and rotate |
-| End sessions only on logout | A refreshing session survives the password change made after a leak |
-| Token-in-URL fallback for sockets | A credential channel readable by script and logged |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | TLS terminated in each service | Certificate and renewal handling scattered across every service and replica |
+| 2 | A long-lived stateless JWT with no revocation | A leaked token stays valid for its whole lifetime and cannot be cancelled |
+| 2 | A short-lived stateless JWT without refresh or revocation | Still not revocable before expiry, and short lifetimes force repeated full logins |
+| 2 | Ending sessions only on logout and compromise | A refreshing session survives the password change made after a leak, and its capabilities keep working |
+| 3 | Tokens in browser local storage, with a CSP | Injected script can still read the token; a CSP lowers the odds but not the readability |
+| 6 | Wildcard origins combined with credentials | Browsers reject it, and it invites cross-site use of the credential |
+| 8 | A public ACME certificate in every deployment | No public CA issues for an internal hostname, so self-hosting would need a public name |
+| 8 | A separate internal CA for the edge and for the database | Two roots to install and rotate where one suffices |
+| 9 | A credential carried in the socket URL, as a fallback to the cookie | A second credential channel, readable by script and written to logs |
+| 9 | A socket handshake accepted from any origin | The automatically sent cookie would let a foreign page open the socket |
+| 9 | A socket that lives as long as its connection | It outlives the session and account behind it |
 
 ## Consequences
 

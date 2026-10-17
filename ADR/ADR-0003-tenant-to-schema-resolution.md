@@ -36,11 +36,17 @@ vector; pooled connections outlive requests; a rule implemented per service drif
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Scan tenant schemas per request, with or without a cache | O(tenants), injectable identifier, path left on the pooled connection |
-| Tenant from the request body or a header | A caller can steer a query into another tenant's schema |
-| Row-level security, or a database per tenant | A different isolation model, not resolution within the settled one |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| — | Row-level security over shared tables | A different isolation model, not resolution within the settled one |
+| — | A database per tenant | Stronger isolation at a per-tenant cost in connections, migrations and pooling; reopens the model |
+| 1 | Scanning tenant schemas per request until the principal matches | A per-request cost that grows with tenants, holding a pooled connection throughout |
+| 2 | Caching the principal-to-tenant mapping while still scanning | Hides the cost some of the time and keeps the scan as the resolution primitive |
+| 3 | A tenant taken from the request body or a header | A caller can steer a query into another tenant's schema |
+| 4 | A schema name built by string substitution without validation | A caller-influenced string reaches an SQL statement |
+| 6 | A session-wide search path re-set before each query | The pooled connection keeps the last tenant's path, one forgotten call from cross-tenant exposure |
+| 7 | Resolution implemented separately in each service | Copies drift and carry the same defects |
+| 7 | One vetted helper copied into each deployable, held by review | Review, not the build, would guarantee the single implementation |
 
 ## Consequences
 

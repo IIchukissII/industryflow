@@ -41,14 +41,16 @@ operators label. The framework set is open, while the serving image is one pinne
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Keep inferring, fix the outlier branch | The next model family collides; autoencoders stay unscoreable |
-| One detector per model class, by type check | One class can carry two semantics |
-| Torch in the serving image | A multi-gigabyte layer for every self-hoster (ADR-0001) |
-| Ship a sidecar now | The autoencoder does not need it |
-| Re-select the detector at load | Admitted and scored semantics can differ |
-| Read a float prediction as a score | Decision 2's inference; `direct_score` exists |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Re-select the detector at load, from the artifact | Admitted and scored semantics can differ |
+| 1 | The compatibility detector for any model that names none | Scores a model under semantics it never declared |
+| 1 | The raw sample score as the outlier score | Not centred on the model's own decision boundary, so its sign carries no verdict |
+| 2 | Keep inferring, fix the outlier branch | The next model family collides; autoencoders stay unscoreable |
+| 2 | One detector per model class, by type check | One class can carry two semantics |
+| 3 | Read a float prediction as a score | Decision 2's inference; `direct_score` exists |
+| 6 | Ship a sidecar now | The autoencoder does not need it |
+| 7 | Torch in the serving image | A multi-gigabyte layer for every self-hoster (ADR-0001) and a lockstep parity burden |
 
 ## Consequences
 

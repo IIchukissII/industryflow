@@ -35,11 +35,13 @@ not leave the tenant-isolated path.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| The full stack as plain workloads inside the chart | No HA or discovery, tied to the app release, dead weight in managed deployments |
-| Monitoring charts as chart dependencies | Couples releases and needs a network fetch to lint (ADR-0009) |
-| A shared alert topic kept for a future consumer | Every tenant's alerts on one topic with no reader |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 3 | A superuser exporter on the Compose path, least privilege only on Kubernetes | A compromised exporter would be a compromised database whichever orchestrator runs it |
+| 4 | The full stack as plain workloads inside the chart | No HA or discovery, tied to the app release, dead weight in managed deployments |
+| 4 | Monitoring charts as chart dependencies | Couples releases and needs a network fetch to lint (ADR-0009) |
+| 5 | Tenant alerts passing through a topic shared by all tenants on the way to the tenant's store | A second, shared copy of tenant data outside the tenant-isolated path |
+| 5 | A shared alert topic kept for a future consumer | Every tenant's alerts on one topic with no reader |
 
 ## Consequences
 

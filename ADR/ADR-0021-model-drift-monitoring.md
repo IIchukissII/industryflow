@@ -36,14 +36,18 @@ the ML service already holds a drift library and the tenant data path.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Detect in the real-time stream worker | Wrong timescale |
-| A standalone drift service | Detection already has a home |
-| Compute inside the alert service | Duplicates the ML service's library and data path |
-| Compute in the stream aggregation | Splits detection ownership; couples cadence to the stream job |
-| Labelled performance drift first | Needs a label loop; ADR-0022 |
-| Compare raw model outputs | Raw output means different things per family (ADR-0028) |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Labelled performance drift first | Needs an operator label loop and a label store; ADR-0022 |
+| 1 | Compare raw model outputs on both sides | Raw output means different things per model family (ADR-0028); only the detector's score is what the alert acts on |
+| 3 | A standalone drift service | Detection already has a home; a new service adds an operational surface for no isolation gain |
+| 3 | Compute drift inside the alert service | Duplicates the ML service's drift library and tenant data path |
+| 3 | Compute drift in the stream aggregation layer | Splits detection ownership and couples drift cadence to the stream job |
+| 4 | The platform capturing the reference profile itself at training time | The platform has no training flow of its own; whoever trains the model supplies its baseline |
+| 4 | Deriving a baseline from stored history when no profile exists | Stored history may be compacted and is not what the model learned from |
+| 4 | Raw training rows as the profile | Unbounded in size for a baseline that a sample represents |
+| 4 | A bare histogram as the profile | The drift library cannot compare against it directly |
+| 5 | Detect drift in the real-time stream worker | Drift is windowed and statistical; per-event evaluation is the wrong timescale |
 
 ## Consequences
 

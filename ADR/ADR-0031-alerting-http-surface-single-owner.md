@@ -31,10 +31,10 @@ then has to be made twice, and the copy no caller exercises is the one that drif
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| The alerting service owns its HTTP surface; the gateway proxies to it | Moves tenant resolution and session verification into a second service, and adds a hop for no capability the gateway lacks |
-| Keep both surfaces and reconcile them | Two owners of one resource is the condition that produces drift; reconciling once does not stop it recurring |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | The alerting service owns its HTTP surface; the gateway proxies to it | Moves tenant resolution and session verification into a second service, and adds a hop for no capability the gateway lacks |
+| 2 | Keep both surfaces and reconcile them | Two owners of one resource is the condition that produces drift; reconciling once does not stop it recurring |
 
 ## Consequences
 

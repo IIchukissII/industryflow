@@ -32,13 +32,14 @@ data, code or entities; each needs a place outside the core, and the platform mu
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Fork per domain | Every platform fix re-applied per fork |
-| Domain features behind flags in the core | The core accretes every domain |
-| Configuration only | Custom logic would have nowhere but the core |
-| Every plugin a service | A network hop per feature; in-process is the default (ADR-0010 dec 4) |
-| Domain columns on core tables | Couples the core schema to domains |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| — | Fork per domain | Every platform fix re-applied per fork |
+| 1 | Domain features behind flags in the core | The core accretes every domain |
+| 3 | Configuration only | Custom logic would have nowhere but the core |
+| 3 | Every plugin a service | A network hop per feature; in-process is the default (ADR-0010 dec 4) |
+| 4 | Domain columns on core tables | Couples the core schema to domains |
+| 6 | A downstream project's extension as the only reference extension | The proof of the boundary would live outside the platform's own repository and tests |
 
 ## Consequences
 

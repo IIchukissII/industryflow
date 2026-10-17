@@ -38,11 +38,11 @@ only by running it; on 3.5 → 4.1 the checkpoint resumes, offsets and state bot
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Drop the checkpoint on every major | Discards resumable offsets and live window state; the reset is the fallback, not the default |
-| Assume resume and skip verification | A boundary that silently reinitialises state or refuses to start is found in production |
-| Migrate the old state store into the new format by hand | No supported path; a "successful" migration could be silently wrong, and the reset is already safe |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 2 | Drop the checkpoint on every major | Discards resumable offsets and live window state; the reset is the fallback, not the default |
+| 2 | Assume resume and skip verification | A boundary that silently reinitialises state or refuses to start is found in production |
+| 3 | Migrate the old state store into the new format by hand | No supported path; a "successful" migration could be silently wrong, and the reset is already safe |
 
 ## Consequences
 

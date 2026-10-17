@@ -32,11 +32,13 @@ development, and must stay generic across industrial domains.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Permissive licence | A closed competitor can run the platform as a service without contributing back |
-| Fully proprietary, or self-hosted only | Forecloses adoption, or leaves the multi-tenant design unused for funding |
-| Open core with paid, closed add-ons | Two codebases and two products to maintain |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | A fully proprietary, closed platform | Forecloses community adoption and contradicts the open-core intent |
+| 2 | The permissive MIT licence the repository first carried | A closed competitor can run the platform as a service without contributing back |
+| 3 | Open core with paid, feature-gated closed add-ons | Two codebases and two products to maintain, and an open/closed split in one repository |
+| 4 | Self-hosted only, with no managed offering | Leaves the multi-tenant design unused for funding development |
+| 7 | The platform as one domain application's backend | Domain specifics would enter the core, ending its reuse across domains |
 
 ## Consequences
 
