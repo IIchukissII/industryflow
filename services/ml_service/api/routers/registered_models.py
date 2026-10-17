@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from mlflow.tracking import MlflowClient
 from mlflow.exceptions import MlflowException
 
+import auth
 from mlflow_namespace import is_safe_name, pick_latest, shape_summary, tenant_prefix
 from routers.models import get_company_id_dependency
 
@@ -166,7 +167,7 @@ async def get_registered_model(
     return model
 
 
-@router.patch("/{name}")
+@router.patch("/{name}", dependencies=[Depends(auth.require_writer)])
 async def update_registered_model_description(
     name: str,
     body: DescriptionUpdate,
