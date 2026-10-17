@@ -4,12 +4,17 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
+import { companiesReading } from '../utils/reading-admin';
 
-function CompaniesPage() {
+const detailOf = (error) => error.response?.data?.detail || error.message;
+
+function CompaniesPage({ nav }) {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingCompany, setEditingCompany] = useState(null);
+  const [formError, setFormError] = useState(null);
   const [formData, setFormData] = useState({
     company_name: '',
     is_active: true
@@ -19,9 +24,10 @@ function CompaniesPage() {
     try {
       const response = await api.get('/api/companies');
       setCompanies(response.data);
-      setLoading(false);
+      setLoadError(null);
     } catch (error) {
-      console.error('Error fetching companies:', error);
+      setLoadError(detailOf(error));
+    } finally {
       setLoading(false);
     }
   }, []);
@@ -35,6 +41,7 @@ function CompaniesPage() {
   const handleCreate = () => {
     setEditingCompany(null);
     setFormData({ company_name: '', is_active: true });
+    setFormError(null);
     setShowModal(true);
   };
 
@@ -44,6 +51,7 @@ function CompaniesPage() {
       company_name: company.company_name,
       is_active: company.is_active
     });
+    setFormError(null);
     setShowModal(true);
   };
 
@@ -51,120 +59,119 @@ function CompaniesPage() {
     e.preventDefault();
     try {
       if (editingCompany) {
-        // Update existing company
-        await api.put(
-          `/api/companies/${editingCompany.company_id}`,
-          formData
-        );
+        await api.put(`/api/companies/${editingCompany.company_id}`, formData);
       } else {
-        // Create new company
         await api.post('/api/companies', formData);
       }
       setShowModal(false);
       fetchCompanies();
     } catch (error) {
-      console.error('Error saving company:', error);
-      alert('Error saving company: ' + (error.response?.data?.detail || error.message));
+      setFormError(`The company was not saved: ${detailOf(error)}`);
     }
   };
 
-  const handleDelete = async (companyId) => {
-    if (!window.confirm('Deactivate this company? It and all of its users become inactive and are signed out. Its data is kept, and a superuser can reactivate it.')) {
+  const handleDelete = async (company) => {
+    if (!window.confirm(`Deactivate ${company.company_name}? It and all of its users become inactive and are signed out. Its data is kept, and a superuser can reactivate it.`)) {
       return;
     }
     try {
-      await api.delete(`/api/companies/${companyId}`);
+      await api.delete(`/api/companies/${company.company_id}`);
       fetchCompanies();
     } catch (error) {
-      console.error('Error deactivating company:', error);
-      alert('Error deactivating company: ' + (error.response?.data?.detail || error.message));
+      alert(`${company.company_name} was not deactivated: ${detailOf(error)}`);
     }
   };
 
   if (loading) {
-    return <div className="loading">Loading companies...</div>;
+    return <div className="adm-state"><span className="sdot pending" /> Loading companies</div>;
   }
 
   return (
-    <div className="admin-page">
-      <div className="page-header">
-        <h1>Companies Management</h1>
-        <button className="btn-primary" onClick={handleCreate}>
-          + Add Company
-        </button>
+    <div className="adm-page">
+      <div className="adm-head">
+        <p className="reading">
+          {loadError ? `The company list could not load: ${loadError}.` : companiesReading({ companies })}
+        </p>
+        <button type="button" className="btn btn-primary adm-primary" onClick={handleCreate}>Add company</button>
       </div>
 
-      <div className="table-container">
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>Company Name</th>
-              <th>Company ID</th>
-              <th>Status</th>
-              <th>Created At</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {companies.map(company => (
-              <tr key={company.company_id}>
-                <td><strong>{company.company_name}</strong></td>
-                <td><code>{company.company_id}</code></td>
-                <td>
-                  <span className={`status-badge ${company.is_active ? 'active' : 'inactive'}`}>
-                    {company.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td>{new Date(company.created_at).toLocaleString()}</td>
-                <td>
-                  <button className="btn-edit" onClick={() => handleEdit(company)}>
-                    Edit
-                  </button>
-                  <button className="btn-delete" onClick={() => handleDelete(company.company_id)}>
-                    Deactivate
-                  </button>
-                </td>
+      {nav}
+
+      {companies.length > 0 && (
+        <div className="adm-table-wrap">
+          <table className="data-table adm-table">
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Identifier</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th><span className="adm-sr">Actions</span></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {companies.map(company => (
+                <tr key={company.company_id}>
+                  <td className="adm-name">{company.company_name}</td>
+                  <td className="mono adm-dim adm-id">{company.company_id}</td>
+                  <td>
+                    <span className="adm-status">
+                      <span className={`sdot${company.is_active ? ' ok' : ''}`} />
+                      {company.is_active ? 'Active' : 'Deactivated'}
+                    </span>
+                  </td>
+                  <td className="mono adm-dim">{new Date(company.created_at).toLocaleString()}</td>
+                  <td className="adm-actions">
+                    <button type="button" className="btn" onClick={() => handleEdit(company)}>Edit</button>
+                    {/* A deactivated company is reactivated from Edit; deactivating it again does nothing. */}
+                    {company.is_active && (
+                      <button type="button" className="btn btn-danger" onClick={() => handleDelete(company)}>Deactivate</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {/* Modal for Create/Edit */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2>{editingCompany ? 'Edit Company' : 'Create New Company'}</h2>
+        <div className="adm-overlay" onClick={() => setShowModal(false)}>
+          <div
+            className="adm-dialog" role="dialog" aria-modal="true" aria-labelledby="adm-company-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="adm-dialog-head">
+              <h2 id="adm-company-title">{editingCompany ? 'Edit company' : 'Add a company'}</h2>
+              <button type="button" className="adm-close" aria-label="Close" onClick={() => setShowModal(false)}>×</button>
+            </div>
             <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label>Company Name *</label>
+              <div className="adm-field">
+                <label htmlFor="adm-company-name">Company name</label>
                 <input
+                  id="adm-company-name"
                   type="text"
                   value={formData.company_name}
-                  onChange={(e) => setFormData({...formData, company_name: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
                   required
-                  placeholder="Enter company name"
+                  autoFocus
                 />
               </div>
 
-              <div className="form-group">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={formData.is_active}
-                    onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
-                  />
-                  {' '}Active
-                </label>
-              </div>
+              <label className="adm-check">
+                <input
+                  type="checkbox"
+                  checked={formData.is_active}
+                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                />
+                Active
+              </label>
 
-              <div className="modal-actions">
-                <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary">
-                  {editingCompany ? 'Update' : 'Create'}
-                </button>
+              {formError && <p className="adm-error" role="alert">{formError}</p>}
+
+              <div className="adm-dialog-actions">
+                <button type="button" className="btn" onClick={() => setShowModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary">{editingCompany ? 'Save changes' : 'Add company'}</button>
               </div>
             </form>
           </div>

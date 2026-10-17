@@ -17,7 +17,7 @@ import './ModelUploadWizard.css';
 // only prose for the ones we know — an unknown key falls back to itself.
 const SEMANTICS_COPY = {
   anomaly_probability: 'A calibrated probability that a reading is anomalous.',
-  outlier_score: 'A continuous novelty score — more negative means more anomalous.',
+  outlier_score: 'A continuous novelty score: more negative means more anomalous.',
   reconstruction_error: "How far the model's reconstruction sits from the input.",
   direct_score: 'The model already emits a 0–1 anomaly score.',
 };
@@ -50,11 +50,11 @@ async function refusalText(res) {
 
 // The five stages, in order. Each renders a row in the running view.
 const STAGES = [
-  { key: 'mint', label: 'Mint upload capability', note: 'a one-upload handle, held only in memory' },
-  { key: 'stage', label: 'Stage the artifact', note: 'the gateway keys each file into the staging area' },
-  { key: 'transfer', label: 'Transfer the bytes', note: 'straight to the store, not through the mediator' },
-  { key: 'admit', label: 'Admit the artifact', note: 'refused if it carries executable object code' },
-  { key: 'register', label: 'Register the model', note: 'the serving side judges semantics and compatibility' },
+  { key: 'mint', label: 'Get an upload capability', note: 'A one-upload handle, held only in memory.' },
+  { key: 'stage', label: 'Stage the artifact', note: 'The gateway keys each file into the staging area.' },
+  { key: 'transfer', label: 'Transfer the files', note: 'Straight to the store, not through the mediator.' },
+  { key: 'admit', label: 'Admit the artifact', note: 'Refused if it carries executable object code.' },
+  { key: 'register', label: 'Register the model', note: 'The serving side checks the declared output and compatibility.' },
 ];
 
 function ModelUploadWizard({ onClose, onRegistered }) {
@@ -72,6 +72,13 @@ function ModelUploadWizard({ onClose, onRegistered }) {
   const [result, setResult] = useState(null); // registered model
   const fileInput = useRef(null);
   const cap = useRef(null); // the handle — in memory only, never persisted (ADR-0030 dec 10)
+
+  // Esc closes the wizard, except while an upload is running.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && phase !== 'running') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, phase]);
 
   // What this deployment can actually score, so the operator declares a semantics that has a home.
   useEffect(() => {
@@ -159,7 +166,7 @@ function ModelUploadWizard({ onClose, onRegistered }) {
       // be PUT to from here — which is what an unconfigured deployment (no PUBLIC_BASE_URL) produces.
       const sampleUrl = new URL(Object.values(staged.urls)[0], window.location.href);
       if (sampleUrl.host !== window.location.host) {
-        return fail('stage', 'Browser upload is not configured for this deployment: the object store is not reachable at this origin. Upload from the CLI instead — see docs/architecture/model-upload.md.');
+        return fail('stage', 'Browser upload is not configured for this deployment: the object store is not reachable at this origin. Upload from the CLI instead (docs/architecture/model-upload.md).');
       }
       mark('stage', 'ok');
 
@@ -206,19 +213,16 @@ function ModelUploadWizard({ onClose, onRegistered }) {
     } catch {
       // A thrown error is a transport failure, not a reasoned refusal.
       const running = STAGES.map((s) => s.key).find((k) => status[k] === 'run') || 'mint';
-      fail(running, 'The upload could not complete — a step could not be reached. Check your connection and try again.');
+      fail(running, 'A step could not be reached, so the upload stopped. Check your connection and try again.');
     }
   }, [files, meta, status]);
 
   return (
-    <div className="uw-scrim" onClick={onClose}>
-      <div className="uw-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Upload a model">
+    <div className="uw-scrim" onClick={phase === 'running' ? undefined : onClose}>
+      <div className="uw-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="uw-title">
         <div className="uw-head">
-          <div>
-            <div className="eyebrow uw-eyebrow"><Icon name="upload" size={13} /> Upload a model</div>
-            <h2 className="uw-title">Bring in a model trained elsewhere</h2>
-          </div>
-          <button className="icon-btn uw-close" onClick={onClose} aria-label="Close">×</button>
+          <h2 className="uw-title" id="uw-title">Upload a model trained elsewhere</h2>
+          <button type="button" className="uw-close" onClick={onClose} aria-label="Close" disabled={phase === 'running'}>×</button>
         </div>
 
         {phase === 'declare' && (
@@ -226,7 +230,7 @@ function ModelUploadWizard({ onClose, onRegistered }) {
             <p className="uw-lede">
               A model trained outside the platform is admitted through one mediated door: its artifact
               carries no executable code, you declare what its output means, and it must load and score
-              here before it can serve. Point at the model directory or its files — the <span className="mono">MLmodel</span> manifest must be among them.
+              here before it can serve. Choose the model's files; its <span className="mono">MLmodel</span> manifest must be among them.
             </p>
 
             {/* File selection */}
@@ -238,9 +242,10 @@ function ModelUploadWizard({ onClose, onRegistered }) {
               onClick={() => fileInput.current?.click()}
               role="button"
               tabIndex={0}
-              onKeyDown={(e) => { if (e.key === 'Enter') fileInput.current?.click(); }}
+              aria-label="Choose the model's files"
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.current?.click(); } }}
             >
-              <Icon name="upload" size={22} color="var(--gold)" />
+              <Icon name="upload" size={22} />
               <p className="uw-drop-title">Drop the model's files here, or choose them</p>
               <p className="uw-drop-hint">All of the artifact's files, including its <span className="mono">MLmodel</span> manifest</p>
               <input
@@ -260,12 +265,12 @@ function ModelUploadWizard({ onClose, onRegistered }) {
                     <div className="uw-file" key={m}>
                       <span className={`uw-file-name mono${m === MANIFEST_NAME ? ' manifest' : ''}`}>{m}</span>
                       <span className="uw-file-size mono">{(f.size / 1024).toFixed(0)} KB</span>
-                      <button className="uw-file-x" onClick={() => setFiles((p) => p.filter((x) => memberName(x) !== m))} aria-label={`Remove ${m}`}>×</button>
+                      <button type="button" className="uw-file-x" onClick={() => setFiles((p) => p.filter((x) => memberName(x) !== m))} aria-label={`Remove ${m}`}>×</button>
                     </div>
                   );
                 })}
                 {!hasManifest && (
-                  <p className="uw-warn"><Icon name="alert" size={13} color="var(--warn)" /> No <span className="mono">MLmodel</span> manifest yet — the platform can't tell what this artifact is without it.</p>
+                  <p className="uw-warn"><Icon name="alert" size={13} color="var(--warn)" /> Add the <span className="mono">MLmodel</span> manifest. Without it the platform cannot tell what this artifact is.</p>
                 )}
               </div>
             )}
@@ -299,9 +304,9 @@ function ModelUploadWizard({ onClose, onRegistered }) {
               <span className="uw-label">What does its output mean? <span className="uw-opt">declared, never guessed</span></span>
               {semanticsOptions === null ? (
                 caps === 'error' ? (
-                  <input className="uw-input" value={meta.semantics} onChange={(e) => setMeta({ ...meta, semantics: e.target.value })} placeholder="Couldn't load the vocabulary — type the declared semantics" />
+                  <input className="uw-input" value={meta.semantics} onChange={(e) => setMeta({ ...meta, semantics: e.target.value })} placeholder="The list did not load. Type the declared semantics" aria-label="Declared semantics" />
                 ) : (
-                  <p className="uw-desc faint">Loading the vocabulary this deployment advertises…</p>
+                  <p className="uw-desc faint">Loading what this deployment can score</p>
                 )
               ) : semanticsOptions.length === 0 ? (
                 <p className="uw-warn"><Icon name="alert" size={13} color="var(--warn)" /> This deployment has no detector loaded, so it can't score any uploaded model yet.</p>
@@ -313,8 +318,9 @@ function ModelUploadWizard({ onClose, onRegistered }) {
                       type="button"
                       className={`uw-sem-opt${meta.semantics === s ? ' on' : ''}`}
                       onClick={() => setMeta({ ...meta, semantics: s })}
+                      aria-pressed={meta.semantics === s}
                     >
-                      <span className="uw-sem-name mono">{prettySemantics(s)}</span>
+                      <span className="uw-sem-name">{prettySemantics(s)}</span>
                       <span className="uw-sem-desc">{SEMANTICS_COPY[s] || 'A semantics this deployment advertises.'}</span>
                     </button>
                   ))}
@@ -326,7 +332,7 @@ function ModelUploadWizard({ onClose, onRegistered }) {
             <div className="uw-sem">
               <span className="uw-label">Feature config <span className="uw-opt">computes its inputs when it scores</span></span>
               {featureConfigs === null ? (
-                <p className="uw-desc faint">Loading this tenant's feature configs…</p>
+                <p className="uw-desc faint">Loading this tenant's feature configs</p>
               ) : featureConfigs === 'error' || featureConfigs.length === 0 ? (
                 <p className="uw-warn uw-warn-block">
                   <Icon name="alert" size={13} color="var(--warn)" />
@@ -365,8 +371,8 @@ function ModelUploadWizard({ onClose, onRegistered }) {
             </div>
 
             <div className="uw-actions">
-              <button className="btn btn-secondary btn-sm" onClick={onClose}>Cancel</button>
-              <button className="btn btn-primary btn-sm" onClick={run} disabled={!canSubmit}>
+              <button type="button" className="btn" onClick={onClose}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={run} disabled={!canSubmit}>
                 <Icon name="upload" size={14} /> Upload &amp; register
               </button>
             </div>
@@ -402,7 +408,7 @@ function ModelUploadWizard({ onClose, onRegistered }) {
               <div className={`uw-refusal${failure.refusal ? ' reasoned' : ''}`}>
                 <div className="uw-refusal-head">
                   <Icon name="alert" size={15} color={failure.refusal ? 'var(--crit)' : 'var(--warn)'} />
-                  <span>{failure.refusal ? 'Refused, with a reason' : 'Could not complete'}</span>
+                  <span>{failure.refusal ? 'The platform refused this model' : 'The upload did not finish'}</span>
                 </div>
                 <p className="uw-refusal-msg">{failure.msg}</p>
               </div>
@@ -410,8 +416,8 @@ function ModelUploadWizard({ onClose, onRegistered }) {
 
             {phase === 'error' && (
               <div className="uw-actions">
-                <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
-                <button className="btn btn-primary btn-sm" onClick={() => { setStatus({}); setPhase('declare'); }}>Back</button>
+                <button type="button" className="btn" onClick={onClose}>Close</button>
+                <button type="button" className="btn btn-primary" onClick={() => { setStatus({}); setPhase('declare'); }}>Back to the form</button>
               </div>
             )}
           </div>
@@ -424,7 +430,7 @@ function ModelUploadWizard({ onClose, onRegistered }) {
               <h3 className="uw-done-title">{meta.name} is registered</h3>
               <p className="uw-desc">
                 It passed structural admission, and this environment can serve what it declares. It is
-                not live yet — deploy it from its drawer to run the load-and-score gate before it serves.
+                not live yet: deploy it from its details to run the load-and-score check before it serves.
               </p>
               {!meta.featureConfig && (
                 <p className="uw-warn uw-warn-block uw-done-warn">
@@ -433,8 +439,8 @@ function ModelUploadWizard({ onClose, onRegistered }) {
                 </p>
               )}
               <div className="uw-actions center">
-                <button className="btn btn-secondary btn-sm" onClick={onClose}>Done</button>
-                <button className="btn btn-primary btn-sm" onClick={() => onRegistered?.(result)}>View model</button>
+                <button type="button" className="btn" onClick={onClose}>Done</button>
+                <button type="button" className="btn btn-primary" onClick={() => onRegistered?.(result)}>Open the model</button>
               </div>
             </div>
           </div>
