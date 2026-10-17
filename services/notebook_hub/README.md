@@ -14,7 +14,7 @@ session and mints their capability handles. Profiles, handle lifecycle and deplo
 
 | File | Content |
 |---|---|
-| `identity.py` | Parses the verified identity headers (`X-IF-User`, `X-IF-Company-Id`, `X-IF-Role`), selects the profile from the role, derives pod labels and the identity-only environment, reconciles a hub login with the forwarded identity |
+| `identity.py` | Parses the verified identity headers (`X-IF-User`, `X-IF-Company-Id`, `X-IF-Role`), validates the authoring-role setting, selects the profile from the role, derives pod labels and the identity-only environment, reconciles a hub login with the forwarded identity |
 | `capabilities.py` | Capability handle mint / resolve / revoke and the per-server index `nbcap-user:<user>` ([ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md)) |
 | `jupyterhub_config.py` | Header-trusting authenticator with `refresh_user`, `pre_spawn_hook`, `post_stop_hook`, polling spawner subclass, idle culler, containment, spawner selection ([ADR-0018](../../ADR/ADR-0018-notebook-hub-spawner-portability.md)) |
 | `sso-nginx.conf` | SSO reverse proxy: validates the platform session against api-gateway, overwrites the identity headers and sets the proxy secret on hub routes |
@@ -31,6 +31,7 @@ session and mints their capability handles. Profiles, handle lifecycle and deplo
 | `NOTEBOOK_BASE_URL` | `/` | Hub path prefix (`/jupyter/` when embedded) |
 | `REDIS_URL` | required | Capability store |
 | `NOTEBOOK_SSO_PROXY_SECRET` | required | Shared with the SSO proxy; ≥ 32 alphanumeric characters; the hub does not start without it |
+| `NOTEBOOK_AUTHORING_ROLES` | `admin,engineer` | Comma-separated platform roles (`admin`, `engineer`, `observer`) that get the authoring profile; any other role gets analytics; an empty list or an unknown role stops the hub at start |
 | `NOTEBOOK_CAPABILITY_TTL_SECONDS` | `900` | Handle lifetime, extended on every spawner poll |
 | `NOTEBOOK_AUTH_REFRESH_SECONDS` | `60` | Hub login re-check interval |
 | `NOTEBOOK_IDLE_TIMEOUT_SECONDS` | `3600` | Idle culler timeout |

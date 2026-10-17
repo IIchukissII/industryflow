@@ -214,7 +214,7 @@ def test_a_genuine_fault_is_still_a_500(monkeypatch, loads):
     assert r.status_code == 500
 
 
-# --- the address is checked on every load, warm hits included (ADR-0030 rev 4 dec 8) ------------
+# --- the address is checked on every load, warm hits included (ADR-0030 dec 8) ------------
 
 def test_a_policy_tightening_refuses_an_already_warm_upload(monkeypatch, loads):
     """A cached model is not a standing admission: once the uploads bucket the deployment admits

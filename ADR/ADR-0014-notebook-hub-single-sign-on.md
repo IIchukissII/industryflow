@@ -23,10 +23,14 @@ edge already forwards a verified identity that its service trusts only from that
 2. **A trusted proxy validates the session and forwards a verified identity; the hub does not re-verify
    the session token.** On every request the proxy asks the platform's one session verification and
    forwards the verified user, tenant and role.
-3. **The hub accepts a forwarded identity only from that proxy, and the proxy overwrites any
-   client-supplied identity.** An identity that did not come through the proxy is never honoured.
+3. **The hub accepts a forwarded identity only with a proxy credential it verifies, and the proxy
+   overwrites any client-supplied identity.** The credential is a shared secret set only by the proxy,
+   only on hub traffic, and never held by an environment; every environment reaches the hub, so
+   reachability proves nothing. The network boundary is defence in depth, and a hub without the
+   credential does not start.
 4. **Role selects the spawn profile and the environment is bound to the forwarded tenant.** That tenant
-   is the one capabilities are minted against; the role-to-profile mapping is configuration.
+   is the one capabilities are minted against. The role-to-profile mapping is deployment configuration
+   naming platform roles only; a role the platform does not have stops the hub rather than mapping.
 5. **The entry credential is not a data credential.** Hub sign-on grants no data access; the session
    token never reaches the kernel.
 6. **No new public authentication surface is introduced.** The hub is mounted under a path of the
@@ -46,6 +50,7 @@ edge already forwards a verified identity that its service trusts only from that
 | C. The hub's own login and user store | A second login and account store (ADR-0011 dec 8) |
 | D. A client-supplied identity trusted without restricting who sends it | Trivially forged |
 | E. Hub session lifetime tied only to platform session expiry | A role change or sign-out would take effect only when a timer ran out |
+| F. Trust the forwarded identity by network origin alone | Environments reach the same hub application, so any of them could forge a login |
 
 ## Consequences
 
@@ -53,7 +58,7 @@ edge already forwards a verified identity that its service trusts only from that
 - A logged-in user reaches notebooks without a second login; session verification stays singular.
 
 **Negative**
-- The hub's trust rests on decision 3: an identity presented other than by the proxy is a forged login.
+- The hub's trust rests on one shared secret (decision 3): if it reached an environment, that environment could forge a login.
 - The proxy is a hop and an availability dependency on every hub request.
 - Re-checking costs a periodic check on hub traffic, and a role or tenant change stops running work.
 - Request-forgery protection for hub requests is the hub's own, not the platform API's.

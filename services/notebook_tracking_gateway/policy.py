@@ -53,7 +53,7 @@ _SUSPENDED_PREFIX = "nbcap-suspended:"
 @dataclass(frozen=True)
 class TrackingBinding:
     """The tenant a handle is bound to (ADR-0019). One tenant, always — a handle that writes is
-    still bound to exactly one tenant (ADR-0015 dec 1 rev 1)."""
+    still bound to exactly one tenant (ADR-0015 dec 1)."""
 
     user: str
     company_id: str

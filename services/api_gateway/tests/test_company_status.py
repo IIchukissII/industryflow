@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-A suspended company's users are refused at authentication (ADR-0004 dec 2 rev 2, ADR-0033 dec 3).
+A suspended company's users are refused at authentication (ADR-0004 dec 2, ADR-0033 dec 3).
 
 Sign-in, every session-authenticated request, refresh and capability-authenticated data requests
 read the company's active flag, through a cache of bounded staleness rather than a database read

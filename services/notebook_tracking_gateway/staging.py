@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Where an uploaded artifact rests while it is judged (ADR-0030 dec 4, Consequences rev 1) — the
+Where an uploaded artifact rests while it is judged (ADR-0030 dec 10, Consequences) — the
 **pure** key rules, no I/O.
 
 An uploaded artifact is staged, then admitted. That order is forced: the byte half of the structural

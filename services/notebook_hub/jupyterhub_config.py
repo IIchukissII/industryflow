@@ -18,7 +18,8 @@ unit-tested ``identity.py`` + ``capabilities.py``:
     credential — only opaque, per-session, single-tenant capability handles minted here (ADR-0015).
   * Contained per-user environment (ADR-0011 dec 7): non-root, no privilege escalation, dropped
     capabilities, resource limits. Egress is a NetworkPolicy on k8s; on Compose it is a dedicated
-    internal network (the documented non-parity, ADR-0018 dec 4).
+    kernel network with restricted membership that keeps a route off the host (the documented
+    non-parity, ADR-0018 dec 4).
 """
 import asyncio
 import os
@@ -44,6 +45,9 @@ AUTH_REFRESH_SECONDS = int(os.environ.get("NOTEBOOK_AUTH_REFRESH_SECONDS", "60")
 # The secret the SSO proxy presents on hub traffic (ADR-0014 dec 3). Required: without it the hub
 # cannot tell the proxy from a kernel, so it does not start (ValueError at config load).
 SSO_PROXY_SECRET = ident.validate_proxy_secret(os.environ.get(ident.PROXY_SECRET_ENV, ""))
+# Which platform roles get the authoring profile (ADR-0014 dec 4). An unknown role fails the config
+# load (ValueError) rather than silently mapping its users to the other profile.
+AUTHORING_ROLES = ident.parse_authoring_roles(os.environ.get(ident.AUTHORING_ROLES_ENV))
 
 # Per-user durable work storage (ADR-0020): a data scientist's notebooks persist at work/ across
 # the ephemeral container; the rest of the home (incl the read-only examples/ baked into the image)
@@ -268,10 +272,12 @@ async def bind_identity_and_profile(spawner):
         company_id=auth_state.get("company_id", ""),
         role=auth_state.get("role", ""),
     )
+    # The profile is chosen by role, not offered to the user (ADR-0011 dec 5, ADR-0014 dec 4).
+    profile = ident.select_profile(who.role, AUTHORING_ROLES)
     # Identity only — this carries no data credential (ADR-0012 dec 5).
-    spawner.environment.update(ident.pod_environment(who))
+    spawner.environment.update(ident.pod_environment(who, profile))
 
-    labels = ident.pod_labels(who)
+    labels = ident.pod_labels(who, profile)
     if SPAWNER == "docker":
         # DockerSpawner attaches labels via the container create kwargs.
         existing = dict(getattr(spawner, "extra_create_kwargs", {}) or {})
@@ -282,8 +288,6 @@ async def bind_identity_and_profile(spawner):
     else:
         spawner.extra_labels = {**getattr(spawner, "extra_labels", {}), **labels}
 
-    # The profile is chosen by role, not offered to the user (ADR-0011 dec 5).
-    profile = ident.select_profile(who.role)
     resources = PROFILE_RESOURCES[profile]
     spawner.cpu_limit = resources["cpu_limit"]
     spawner.mem_limit = resources["mem_limit"]

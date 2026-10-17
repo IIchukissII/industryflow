@@ -756,8 +756,8 @@ services:
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       # The shared capability store, for demand-minting upload handles (ADR-0030 dec 3). This is
-      # ADR-0015's capability store — NOT the Redis feature store ADR-0023 rev 1 removed from this
-      # service; what is written here is a revocable, single-tenant handle and nothing worse.
+      # ADR-0015's capability store — NOT a feature store (this service holds no windowing state,
+      # ADR-0023 dec 7); what is written here is a revocable, single-tenant handle and nothing worse.
       # Unset = this deployment accepts no externally-authored models, and says so.
       CAPABILITY_REDIS_URL: ${CAPABILITY_REDIS_URL:-redis://redis:6379/0}
       # Advertised alongside a minted handle so a client need not know the internal topology. When
@@ -804,7 +804,7 @@ services:
   # Multi-tenant, per-user, NON-ROOT notebooks via JupyterHub + DockerSpawner. Replaces the old
   # root, auth-disabled, shared-credential `jupyter` shim (retired, ADR-0018 dec 5). The kernel
   # holds only opaque, single-tenant capability handles minted by the hub (read-only except the
-  # tracking plane, ADR-0015 dec 1 rev 1) — never a DB password.
+  # tracking plane, ADR-0015 dec 1) — never a DB password.
   # Bring up:  docker compose --profile notebooks build
   #            docker compose --profile notebooks up -d notebook-hub notebook-sso
   # ==========================================================================
@@ -842,6 +842,8 @@ services:
       # Per-profile images (ADR-0011 dec 5): the hook picks one by the user's role profile.
       NOTEBOOK_IMAGE_AUTHORING: industryflow-notebook-authoring
       NOTEBOOK_IMAGE_ANALYTICS: industryflow-notebook-analytics
+      # Platform roles that get the authoring profile (ADR-0014 dec 4); an unknown role stops the hub.
+      NOTEBOOK_AUTHORING_ROLES: ${NOTEBOOK_AUTHORING_ROLES:-admin,engineer}
       # Kernels spawn onto the dedicated kernel network, not the platform network (ADR-0018 dec 4).
       NOTEBOOK_NETWORK: industryflow-notebook-kernels
       HUB_CONNECT_IP: notebook-hub

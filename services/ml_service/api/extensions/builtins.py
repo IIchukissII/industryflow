@@ -58,7 +58,7 @@ async def deviation(transformation, sensor_data, ctx):
 
 
 # The statistics a `statistical` feature can carry, all sourced from the same closed window of the
-# Spark-materialized aggregates (ADR-0023 rev 2). `deviation_from_run_mean` is the pre-rev-2 name
+# Spark-materialized aggregates (ADR-0023 dec 7, 9). `deviation_from_run_mean` is the legacy name
 # for the deviation: it never meant a "run" at serve time, and is accepted only as a deprecated
 # alias so existing feature configs keep resolving (ADR-0010 — no silent contract break).
 _LEGACY_STAT_TYPES = {"deviation_from_run_mean": "deviation_from_window_mean"}
@@ -73,7 +73,7 @@ async def statistical(transformation, sensor_data, ctx):
     ``window_mean``, or ``window_std``. All three read the same Spark-materialized baseline
     (ADR-0023) via the context's ``baseline_provider``, at the window named by ``granularity`` —
     the same window the offline training re-derivation uses, which is what keeps train and serve
-    computing one quantity rather than two (ADR-0023 rev 2 dec 9).
+    computing one quantity rather than two (ADR-0023 dec 9).
 
     When the baseline is unavailable — no aggregate row yet, or the read fails — the neutral value
     ``0.0`` is returned, never the raw sensor value, which would be an out-of-distribution number
@@ -93,7 +93,7 @@ async def statistical(transformation, sensor_data, ctx):
     if stat_type in _LEGACY_STAT_TYPES:
         canonical = _LEGACY_STAT_TYPES[stat_type]
         logger.warning(
-            "Feature '%s' uses deprecated stat_type '%s'; use '%s' (ADR-0023 rev 2)",
+            "Feature '%s' uses deprecated stat_type '%s'; use '%s' (ADR-0023 dec 9)",
             transformation.get("name"), stat_type, canonical,
         )
         stat_type = canonical

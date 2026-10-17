@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/drift", tags=["Drift"])
 
 # Default trailing window: one day of readings. Configurable per call; the cadence and the
-# authoritative threshold are the alert rule's (ADR-0021 dec 3 / deferred config).
+# authoritative threshold are the alert rule's (ADR-0021 dec 2-3, 5).
 DEFAULT_WINDOW_MINUTES = 24 * 60
 
 # How many of the window's rows are scored for prediction drift. Every row is one model call; a day
@@ -74,7 +74,7 @@ async def _current_predictions(
         return None, "the reference profile captured no prediction scores"
     refusal = prediction_column_refusal(profile)
     if refusal:
-        # Not a baseline, so nothing is scored against it (ADR-0021 rev 1 dec 4).
+        # Not a baseline, so nothing is scored against it (ADR-0021 dec 4).
         return None, refusal
 
     repository = request.app.state.ml_repository

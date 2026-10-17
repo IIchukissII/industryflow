@@ -17,7 +17,7 @@ forward and close every live window early. The streaming job, which consumes eve
 one that dead-letters them; this job does not publish them a second time. A reading naming a
 tenant, sensor or equipment the platform does not know is excluded the same way, at write time: its
 key is the aggregate's key, so dropping the aggregate excludes exactly those readings. The window widths and
-allowed lateness are the train/serve binding (ADR-0023 rev 2 dec 9), defined once in the shared
+allowed lateness are the train/serve binding (ADR-0023 dec 9), defined once in the shared
 window contract (industryflow_contracts.windows, ADR-0006 dec 7); aggregation_windows.py only adapts
 it to Spark's duration strings.
 """
@@ -115,7 +115,7 @@ def write_aggregations_to_db(batch_df, batch_id, aggregation_table, *,
     ADR-0005) does not create duplicates. Each tenant is written in its own transaction. A tenant
     whose schema does not exist, and an aggregate whose sensor or equipment the tenant does not
     know, are skipped and logged — they are the readings the streaming job dead-letters
-    (reading_guard.classify_references, one definition for both jobs; ADR-0006 rev 2 dec 4) — so
+    (reading_guard.classify_references, one definition for both jobs; ADR-0006 dec 4) — so
     one unknown key cannot fail every tenant's batch. Any other failure re-raises so Spark fails the batch and retries it, rather than
     silently dropping data (the upsert makes that retry safe; ADR-0006 dec 4).
     """

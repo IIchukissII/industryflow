@@ -115,6 +115,9 @@ spec:
               value: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.singleUser.authoring.image "tag" .Values.image.tag "digest" .Values.notebookHub.singleUser.authoring.digest) | quote }}
             - name: NOTEBOOK_IMAGE_ANALYTICS
               value: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.singleUser.analytics.image "tag" .Values.image.tag "digest" .Values.notebookHub.singleUser.analytics.digest) | quote }}
+            # Platform roles that get the authoring profile (ADR-0014 dec 4).
+            - name: NOTEBOOK_AUTHORING_ROLES
+              value: {{ .Values.notebookHub.authoringRoles | quote }}
             # Capability store (ADR-0015) — the same Redis the rest of the platform uses.
             - name: REDIS_URL
               value: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
@@ -267,7 +270,7 @@ data:
         listen {{ .Values.notebookHub.ssoProxy.port }};
 
         # Subrequest to the gateway: validates the if_access cookie and returns the verified
-        # identity in X-IF-* response headers. Companion endpoint to implement (ADR-0014).
+        # identity in X-IF-* response headers (ADR-0014 dec 2).
         location = /_notebook_auth {
             internal;
             proxy_pass http://{{ $apiSvc }}:{{ $apiPort }}{{ .Values.notebookHub.ssoProxy.verifyPath }};

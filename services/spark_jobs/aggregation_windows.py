@@ -5,7 +5,7 @@
 """
 The aggregation windows the Spark job materializes, in the form Spark's API takes them.
 
-This is the producer's half of the train/serve binding (ADR-0023 rev 2 dec 9). The serving baseline
+This is the producer's half of the train/serve binding (ADR-0023 dec 9). The serving baseline
 reads the most recent row of ``sensor_aggregations_<granularity>``; with append-mode emission
 (ADR-0006 dec 2) a window's row is written only once the watermark — the latest event time seen,
 minus the allowed lateness — has passed the window's end. So at time ``t`` the newest row is not the

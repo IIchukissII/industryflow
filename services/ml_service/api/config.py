@@ -48,12 +48,11 @@ class Config:
     MLFLOW_TRACKING_URI: str = os.getenv('MLFLOW_TRACKING_URI')
 
     # The platform's shared capability store (ADR-0015 dec 1), where a demand-minted upload handle's
-    # binding is recorded (ADR-0030 dec 3, ADR-0015 dec 4 rev 1).
+    # binding is recorded (ADR-0030 dec 3, ADR-0015 dec 4).
     #
-    # NOT the Redis feature store ADR-0023 rev 1 removed from this service. That was a second
-    # windowing substrate and it is gone for good; this is the store every capability plane already
-    # shares, and the entry written here is a revocable, single-tenant handle — nothing whose loss is
-    # worse than that (ADR-0015 dec 7).
+    # NOT a feature store: this service holds no windowing state (ADR-0023 dec 7). This is the store
+    # every capability plane already shares, and the entry written here is a revocable,
+    # single-tenant handle — nothing whose loss is worse than that (ADR-0015 dec 7).
     #
     # Absent = this deployment mints no upload capabilities, and the surface says so rather than
     # failing obscurely at the first request.

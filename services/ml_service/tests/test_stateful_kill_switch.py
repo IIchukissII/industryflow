@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-The stateful-feature kill-switch (ADR-0024 rev 1).
+The stateful-feature kill-switch (ADR-0024).
 
 Two properties carry the whole decision, and both are easy to implement *almost* correctly:
 

@@ -43,9 +43,10 @@ cannot tell which copy is right.
    order. ADR-0000 is this root, ADR-0001 the project framing, technical decisions from 0002. A number
    is never reused; a decision number within an ADR is never renumbered, because code and documents
    cite it.
-9. **Every ADR has the same compact shape.** Context, Decision (numbered), Alternatives (table),
-   Consequences (positive, negative), Deferred (table), References. One decision per record, in about
-   a hundred lines; a record that needs more holds several decisions.
+9. **Every ADR has the same compact shape.** A header (status, date, optional parent, related records
+   with the relation), then Context, Decision (numbered), Alternatives (table), Consequences (positive,
+   negative), Deferred (table), References. One decision per record, in about a hundred lines; a record
+   that needs more holds several decisions.
 
 ## Alternatives
 

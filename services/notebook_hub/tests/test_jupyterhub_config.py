@@ -442,6 +442,38 @@ def test_the_proxy_secret_never_reaches_a_kernel(profile):
     assert PROXY_SECRET not in "".join(map(str, spawner.environment.values()))
 
 
+@pytest.mark.parametrize("value", ["", "admin,data_scientist", "operator"])
+def test_the_hub_does_not_start_with_an_unknown_authoring_role(value):
+    """ADR-0014 dec 4: the role-to-profile mapping is configuration, checked against the platform's
+    roles; a misspelt role fails the load instead of silently giving its users the other profile."""
+    try:
+        with pytest.raises(ValueError, match="NOTEBOOK_AUTHORING_ROLES"):
+            _load("docker", NOTEBOOK_AUTHORING_ROLES=value)
+    finally:
+        os.environ.pop("NOTEBOOK_AUTHORING_ROLES", None)
+
+
+@pytest.mark.parametrize(
+    "configured, role, profile",
+    [
+        (None, "engineer", "authoring"),
+        (None, "observer", "analytics"),
+        ("admin", "engineer", "analytics"),
+        ("admin,observer", "observer", "authoring"),
+    ],
+)
+def test_the_configured_mapping_selects_the_spawn_profile(configured, role, profile):
+    try:
+        _, ns = _load_ns("docker", NOTEBOOK_AUTHORING_ROLES=configured)
+        ns["_STORE"] = FakeStore()
+        spawner = _Spawner(_User("u-1", str(uuid.uuid4()), role=role))
+        _spawn(ns, spawner)
+        assert spawner.environment["INDUSTRYFLOW_PROFILE"] == profile
+        assert spawner.extra_create_kwargs["labels"]["industryflow.io/profile"] == profile
+    finally:
+        os.environ.pop("NOTEBOOK_AUTHORING_ROLES", None)
+
+
 def test_compose_chp_binds_only_the_platform_network_alias():
     """chp must listen on the alias only the platform network resolves, so the kernel network
     reaches the hub API and not chp. JupyterHub rebuilds its bind URL from ip/port/base_url, which

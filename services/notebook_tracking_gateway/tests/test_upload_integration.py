@@ -156,7 +156,7 @@ def test_a_non_executing_artifact_round_trips_into_the_tenants_prefix(stack):
 def test_a_committed_upload_leaves_nothing_staged(stack):
     handle, body = _upload(stack["rc"], stack["cid_a"], SAFE_BLOBS)
     assert _commit(handle, body["upload_id"]).status_code == 200
-    # The handle authorised one upload and is spent (ADR-0015 dec 4 rev 1)...
+    # The handle authorised one upload and is spent (ADR-0015 dec 4)...
     assert _commit(handle, body["upload_id"]).status_code == 401
     assert stack["rc"].get(f"{_KEY_PREFIX}{handle}") is None
     # ...and, asked with a fresh one, the staged bytes are not there any more.

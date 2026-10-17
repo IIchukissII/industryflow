@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-The stateful-feature kill-switch (ADR-0024 rev 1).
+The stateful-feature kill-switch (ADR-0024).
 
 One global, operator-flipped flag: *are stateful features enabled?* When it is off, the engine
 fills each stateful transform's slot with its neutral value **without calling the transform**

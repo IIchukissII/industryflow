@@ -68,7 +68,7 @@ def check_address(*, company_id: str, mlflow_run_id: Optional[str], artifact_uri
     """Raise ModelNotAdmissible unless the record's address has an admissible shape for this tenant.
 
     The cheap half of ``check_admissible``: no IO, so it runs on every load, warm-cache hits
-    included (ADR-0030 rev 4 dec 8), and a tightened policy — a different uploads bucket, a stricter
+    included (ADR-0030 dec 8), and a tightened policy — a different uploads bucket, a stricter
     upload id — refuses an already-cached model at once rather than at its next cold load. A run's
     ownership is the half that asks the tracking store; it is proven on the cold load, and the cache
     key carries the tenant and run it was proven for.
