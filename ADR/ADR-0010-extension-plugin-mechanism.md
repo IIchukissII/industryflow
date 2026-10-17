@@ -44,7 +44,6 @@ configuration names.
 
 | Dec | Rejected alternative | Why rejected |
 |---|---|---|
-| 1 | Packaging entry points for discovery | Not rejected; unneeded ceremony now, and it layers on later without changing the contract |
 | 2 | Hardcoded dispatcher with per-domain flags | Domain branches in the core (ADR-0008 dec 7) |
 | 3 | One compatibility rule for every major: a breaking change is always a major bump | At 0.x it declares the contract stable while its first users still shape it |
 | 3 | Keeping that rule and spending 1.0 on the next break | Version 1.0 would mark an accident, not a decision that the contract is done |
