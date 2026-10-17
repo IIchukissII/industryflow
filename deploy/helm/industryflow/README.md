@@ -108,7 +108,7 @@ Only the MinIO server and the `minio-init` Job hold `MINIO_ACCESS_KEY`/`MINIO_SE
 
 | Principal keys | Consumer |
 |---|---|
-| `MLFLOW_STORE_*` | MLflow server |
+| `MLFLOW_STORE_*` | MLflow server, read-only on the artifact bucket |
 | `TRACKING_STORE_*` | Notebook tracking gateway |
 | `MODEL_READ_*` | ml-service-api, read-only on admitted uploads ([ADR-0030](../../../ADR/ADR-0030-externally-authored-model-admission.md)) |
 | `BACKUP_STORE_*` | db-backup CronJob |
