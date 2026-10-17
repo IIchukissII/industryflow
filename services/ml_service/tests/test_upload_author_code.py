@@ -33,6 +33,7 @@ import load_probe  # noqa: E402
 import model_compat  # noqa: E402
 import model_loader  # noqa: E402
 import skops_trust  # noqa: E402
+import auth  # noqa: E402
 from routers.models import router, get_company_id_dependency  # noqa: E402
 
 CID = str(uuid.uuid4())
@@ -194,6 +195,8 @@ def client(monkeypatch):
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_company_id_dependency] = lambda: CID
+    # A writer: registration and deployment are role-gated (test_write_roles.py).
+    app.dependency_overrides[auth.verify_jwt_token] = lambda: {"user_id": "user-1", "payload": {}, "role": "engineer"}
     app.state.ml_repository = FakeRepo()
     monkeypatch.setattr(model_loader, "check_admissible", lambda **kw: None)
     c = TestClient(app)

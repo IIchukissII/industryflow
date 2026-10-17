@@ -38,23 +38,29 @@ Paths under `services/ml_service/api/`.
 
 ## Endpoints
 
-Auth "token" is an access token (`if_access` cookie or bearer); "internal" is the internal service
-token ([authentication](../operations/authentication.md)).
+Auth "token" is an access token (`if_access` cookie or bearer); "writer" is a token whose account
+has role `engineer` or `admin`, or is a superuser, else **403**
+([roles](../operations/user-management.md#roles)); "internal" is the internal service token
+([authentication](../operations/authentication.md)).
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST, GET | `/api/feature-configs` | token | Create, list |
-| GET, PUT, DELETE | `/api/feature-configs/{config_id}` | token | Read, replace, delete |
+| GET | `/api/feature-configs` | token | List |
+| POST | `/api/feature-configs` | writer | Create |
+| GET | `/api/feature-configs/{config_id}` | token | Read |
+| PUT, DELETE | `/api/feature-configs/{config_id}` | writer | Replace, delete |
 | GET | `/api/feature-configs/equipment/{equipment_type}` | token | By equipment type |
-| POST, GET | `/api/models` | token | Register, list |
-| GET, DELETE | `/api/models/{model_id}` | token | Read, delete |
-| POST | `/api/models/{model_id}/deploy` | token | Load-and-score gate |
+| GET | `/api/models` | token | List |
+| POST | `/api/models` | writer | Register |
+| GET | `/api/models/{model_id}` | token | Read |
+| DELETE | `/api/models/{model_id}` | writer | Delete |
+| POST | `/api/models/{model_id}/deploy` | writer | Load-and-score gate |
 | GET | `/api/models/{model_id}/download` | token | Artifact |
 | GET | `/api/models/latest/{model_type}` | token | Latest by type |
 | POST | `/api/models/compare` | token | Compare |
-| POST | `/api/models/upload-capability` | token | Demand-mint an upload capability handle ([model upload](model-upload.md)) |
+| POST | `/api/models/upload-capability` | writer | Demand-mint an upload capability handle ([model upload](model-upload.md)) |
 | GET | `/api/registered-models`, `/api/registered-models/{name}` | token | Tenant-scoped MLflow registry read |
-| PATCH | `/api/registered-models/{name}` | token | Edit the description |
+| PATCH | `/api/registered-models/{name}` | writer | Edit the description |
 | GET | `/api/experiments`, `/api/experiments/{name}/runs` | token | Tenant-scoped experiment read |
 | GET | `/api/ml/capabilities` | none | Servable flavors and detectors, discovered from the registry |
 | POST | `/api/inference/predict` | token or internal | Score a reading |

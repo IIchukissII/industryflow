@@ -76,8 +76,9 @@ def _get(pool, token=None):
     return _client(pool).get("/who", headers={"Authorization": f"Bearer {token or _token()}"})
 
 
-def _row(user_active=True, company_active=True, company_id=uuid.uuid4()):
-    return {"user_active": user_active, "company_id": company_id, "company_active": company_active}
+def _row(user_active=True, company_active=True, company_id=uuid.uuid4(), role="observer", is_superuser=False):
+    return {"user_active": user_active, "company_id": company_id, "company_active": company_active,
+            "role": role, "is_superuser": is_superuser}
 
 
 def test_an_active_user_of_an_active_company_passes():
@@ -96,6 +97,23 @@ def test_an_active_user_of_an_active_company_passes():
 ])
 def test_an_unusable_account_is_refused_at_once(row):
     assert _get(FakePool(row)).status_code == 401
+
+
+def test_the_role_is_the_account_s_not_the_token_s():
+    """The role gate reads the role on the account row, re-read per request; a role claim in the
+    token (or anything else the client sends) is not consulted."""
+    app = FastAPI()
+
+    @app.get("/who")
+    async def who(user: dict = Depends(auth.verify_jwt_token)):
+        return {"role": user["role"], "is_superuser": user["is_superuser"]}
+
+    app.state.db_pool = FakePool(_row(role="observer"))
+    token = jwt.encode({"sub": str(USER), "role": "admin", "is_superuser": True,
+                        "exp": int(time.time()) + 600},
+                       config.config.JWT_SECRET_KEY, algorithm=auth.JWT_ALGORITHM)
+    r = TestClient(app).get("/who", headers={"Authorization": f"Bearer {token}"})
+    assert r.json() == {"role": "observer", "is_superuser": False}
 
 
 def test_a_user_with_no_company_is_not_refused_for_it():

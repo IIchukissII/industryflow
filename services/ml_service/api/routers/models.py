@@ -342,7 +342,7 @@ def _kernel_detector_or_refuse(named: Optional[str], flavor: Optional[str]) -> s
 # API Endpoints
 # ============================================================================
 
-@router.post("/upload-capability", status_code=201)
+@router.post("/upload-capability", status_code=201, dependencies=[Depends(auth.require_writer)])
 async def mint_upload_capability(
     request: Request,
     current_user: dict = Depends(auth.verify_jwt_token),
@@ -403,7 +403,7 @@ async def mint_upload_capability(
     }
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[Depends(auth.require_writer)])
 async def create_model(
     model_data: ModelCreateRequest,
     request: Request,
@@ -622,7 +622,7 @@ async def get_model(
     return model_data
 
 
-@router.post("/{model_id}/deploy")
+@router.post("/{model_id}/deploy", dependencies=[Depends(auth.require_writer)])
 async def deploy_model(
     model_id: str,
     request_data: ModelDeployRequest,
@@ -755,7 +755,7 @@ async def deploy_model(
     }
 
 
-@router.delete("/{model_id}")
+@router.delete("/{model_id}", dependencies=[Depends(auth.require_writer)])
 async def delete_model(
     model_id: str,
     request: Request,
