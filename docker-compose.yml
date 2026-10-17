@@ -386,6 +386,8 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    mem_limit: ${SPARK_MASTER_MEM_LIMIT:-384m}
 
   # Spark Worker — a SCALABLE pool: no container_name and no published port (the worker dials out
   # to the master and registers its own web UI there), so `SPARK_WORKER_REPLICAS` / `--scale
@@ -400,7 +402,7 @@ services:
     environment:
       <<: *db-tls-env
       SPARK_WORKER_CORES: 4
-      SPARK_WORKER_MEMORY: 4g
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-2g}
       SPARK_WORKER_WEBUI_PORT: 8081
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     volumes:
@@ -414,6 +416,8 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    mem_limit: ${SPARK_WORKER_MEM_LIMIT:-2560m}
 
   # Spark Streaming - Raw sensor data to TimescaleDB
   spark-streaming:
@@ -436,8 +440,8 @@ services:
       <<: [*db-tls-env, *spark-s3a-env]
       # Spark configuration
       SPARK_MASTER: spark://spark-master:7077
-      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-2g}
-      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-2g}
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-768m}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-768m}
       # Resource budget on the shared worker (ADR-0006): cores capped so streaming +
       # aggregations coexist (sum <= SPARK_WORKER_CORES). Raise these / add workers to scale.
       SPARK_CORES_MAX: ${SPARK_STREAMING_CORES_MAX:-1}
@@ -458,6 +462,8 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    mem_limit: ${SPARK_STREAMING_MEM_LIMIT:-1280m}
 
   # Spark Aggregations - Create 1min, 5min, 1hour aggregations
   spark-aggregations:
@@ -480,8 +486,8 @@ services:
       <<: [*db-tls-env, *spark-s3a-env]
       # Spark configuration
       SPARK_MASTER: spark://spark-master:7077
-      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-2g}
-      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-2g}
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-768m}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-768m}
       # Aggregations runs 3 windowed streams; give it the larger share of the worker
       # (sum with streaming <= SPARK_WORKER_CORES). Raise / add workers to scale.
       SPARK_CORES_MAX: ${SPARK_AGG_CORES_MAX:-3}
@@ -502,6 +508,8 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    mem_limit: ${SPARK_AGG_MEM_LIMIT:-1280m}
 
   # ==========================================================================
   # API Gateway - REST API with schema-per-tenant routing
