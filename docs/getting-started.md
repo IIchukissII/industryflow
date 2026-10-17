@@ -4,56 +4,66 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# IndustryFlow — Getting Started & Operations Guide
+# Getting started
 
-> The authoritative homes for concrete values are `docker-compose.yml`, `.env.example`, and
-> the SQL init scripts (per [ADR-0000](../ADR/ADR-0000-decision-records-and-source-of-truth.md));
-> this guide references them. For the auth model see [authentication](operations/authentication.md).
-
----
+Running the IndustryFlow `docker compose` stack locally: setup, first tenant and admin, endpoints,
+API examples and troubleshooting. Concrete values live in [`docker-compose.yml`](../docker-compose.yml)
+and [`.env.example`](../.env.example) ([ADR-0000](../ADR/ADR-0000-decision-records-and-source-of-truth.md));
+this page names them, it does not copy them.
 
 ## Prerequisites
 
-- Docker & Docker Compose
-- 8 GB+ RAM recommended
-- Ports available: 3000, 3001, 5000, 5432, 8000–8003, 8888, 9000–9001, 9090, 3100 (and supporting infra ports)
+| Requirement | Used by |
+|-------------|---------|
+| Docker with Compose v2 | the stack |
+| `openssl` on the host | `scripts/device-ca.sh`, `scripts/gen-internal-ca.sh` |
+| Python 3 with `requests` and `pandas` | the reference data producer |
+| 8 GB+ RAM | the stack |
 
-## 1. Clone and configure
+## 1. Configure
 
 ```bash
 git clone https://github.com/IIchukissII/industryflow
 cd industryflow
-cp .env.example .env   # then edit the values
+cp .env.example .env
 ```
 
-## 2. Start services
+| Variable group | Action |
+|----------------|--------|
+| Every `changeme_*` value (DB roles, MinIO principals, `JWT_SECRET_KEY`, `INTERNAL_SERVICE_TOKEN`, `GRAFANA_ADMIN_PASSWORD`, …) | Replace with generated secrets |
+| `FRONTEND_HTTPS_PORT`, `FRONTEND_PORT`, `INGESTION_MTLS_PORT` | Published ports of the HTTPS edge, its HTTP redirect and the device mTLS edge |
+| `CERT_EXTRA_SAN`, `TLS_CERT_DIR` | Edge certificate ([TLS](operations/tls.md)) |
+| `DEVICE_CA_DIR`, `DEVICE_CA_UID`, `DEVICE_CA_GID` | Device CA location and owner ([device mTLS](operations/device-mtls.md)) |
+| `ADMIN_USER_<n>_*` | First users (step 4) |
+| `DOCKER_GID`, `JUPYTERHUB_CRYPT_KEY`, `NOTEBOOK_SQL_PROXY_*` | Notebooks profile only |
+
+## 2. Initialise the device CA
+
+The ingestion edge and `device-crl-refresh` do not start without it.
 
 ```bash
-# Start core infrastructure
+scripts/device-ca.sh init
+```
+
+## 3. Start the stack
+
+```bash
 docker compose up -d
-
-# Wait for services to initialize (~2 minutes)
 docker compose ps
-
-# Check service health
 curl http://localhost:8000/health
 ```
 
-## 3. Create your first tenant and admin
+## 4. Create the first tenant and admin
 
-The database starts empty — no tenants are seeded, so nothing is hardcoded. Provision a
-tenant at runtime, then create an admin user in it:
+The database starts with no tenants.
 
 ```bash
-# Create a tenant (prints its company_id + schema)
+# Prints the company_id and schema
 scripts/create-tenant.sh "Your Company"
 
-# Put that company_id in .env, then seed the admin user
-#   ADMIN_USER_1_EMAIL=admin@your-company.example
-#   ADMIN_USER_1_PASSWORD=...
-#   ADMIN_USER_1_COMPANY_ID=<company_id from above>
-# The seeder runs in a one-off api-gateway container (its dependencies, DB settings and CA);
-# -e NAME copies the variable from this shell, so the password is never an argument.
+# In .env: ADMIN_USER_1_EMAIL, ADMIN_USER_1_PASSWORD, ADMIN_USER_1_COMPANY_ID=<company_id>
+# The seeder runs in a one-off api-gateway container; -e NAME copies the variable from this
+# shell, so the password is never an argument.
 set -a; . ./.env; set +a
 docker compose run --rm --no-deps -v ./scripts:/scripts:ro -e PYTHONPATH=/app \
   -e ADMIN_USER_1_EMAIL -e ADMIN_USER_1_PASSWORD -e ADMIN_USER_1_COMPANY_ID -e ADMIN_USER_1_ROLE \
@@ -61,214 +71,137 @@ docker compose run --rm --no-deps -v ./scripts:/scripts:ro -e PYTHONPATH=/app \
   api-gateway python /scripts/seed_users.py
 ```
 
-The seeded admin is a tenant admin. It is a cross-tenant superuser only with
-`ADMIN_USER_1_SUPERUSER=true` (see [user management](operations/user-management.md)). Additional
-users can be created by an admin through the API / admin UI.
+The seeded user is a tenant admin; `ADMIN_USER_1_SUPERUSER=true` makes it a cross-tenant superuser.
+Further users are created by an admin ([user management](operations/user-management.md)).
 
-## 4. Access interfaces
+## 5. Endpoints
 
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| **Frontend** | https://localhost | platform login |
-| **API Gateway** | http://localhost:8000 | — |
-| **Grafana** | http://localhost:3001 | admin / see `.env` |
-| **Notebooks (hub)** | https://localhost:8888 | platform **SSO** — opt-in `notebooks` profile (see below) |
-| **MLflow** | http://localhost:5000 | — |
-| **Prometheus** | http://localhost:9090 | — |
+Published on every interface:
 
-Only the HTTPS edge (`FRONTEND_HTTPS_PORT`, with `FRONTEND_PORT` redirecting to it; the notebook hub
-is served through it at `/jupyter/`) and the device mTLS edge are published on every interface. Everything else above (the service APIs, MLflow, MinIO, Prometheus,
-Grafana, Loki, the exporters and the Spark UI) is bound to `127.0.0.1` (ADR-0004 dec 1, ADR-0013 dec 1),
-so from another machine reach it through an SSH tunnel (`ssh -L 5000:localhost:5000 <host>`), not
-over the LAN. The browser uses the API through the edge (`https://<host>/api/…`), never on `:8000`.
+| Endpoint | URL | Auth |
+|----------|-----|------|
+| Frontend (HTTPS edge) | `https://localhost:<FRONTEND_HTTPS_PORT>` | platform login |
+| HTTP → HTTPS redirect | `http://localhost:<FRONTEND_PORT>` | — |
+| Notebook hub (through the edge) | `https://localhost:<FRONTEND_HTTPS_PORT>/jupyter/` | platform SSO |
+| Device ingestion (mTLS edge) | `https://localhost:<INGESTION_MTLS_PORT>/ingest` | device certificate |
 
-### Notebooks (multi-tenant, per-user, non-root)
+Bound to `127.0.0.1` only ([ADR-0004](../ADR/ADR-0004-api-authentication-sessions-and-transport.md),
+[ADR-0013](../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md)):
 
-Per-user JupyterHub notebooks (ADR-0011/0018) are an **opt-in profile** — they spawn per-user
-containers via DockerSpawner, so the hub needs the Docker socket (granted via a supplementary
-group, set `DOCKER_GID` = `getent group docker | cut -d: -f3`) and `JUPYTERHUB_CRYPT_KEY` in `.env`:
+| Service | Host port |
+|---------|-----------|
+| API gateway | `API_GATEWAY_PORT` |
+| ML service | `ML_SERVICE_PORT` |
+| TimescaleDB | `DB_PORT` |
+| Redis | `REDIS_PORT` |
+| Kafka | 9092 (host listener), 29092 |
+| Zookeeper | 2181 |
+| MinIO API / console | 9000 / 9001 |
+| MLflow | 5000 |
+| Spark master / UI | 7077 / 8083 |
+| Prometheus | `PROMETHEUS_PORT` |
+| Grafana | `GRAFANA_PORT` (`GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`) |
+| Loki | 3100 |
+| cAdvisor, node, postgres, redis, kafka exporters | 8080, 9100, 9187, 9121, 9308 |
+
+From another machine, reach a loopback-bound service through an SSH tunnel
+(`ssh -L 5000:localhost:5000 <host>`). The browser uses the API through the edge
+(`https://<host>:<FRONTEND_HTTPS_PORT>/api/…`).
+
+### Reaching the edge from another machine
+
+| Name | Requirement |
+|------|-------------|
+| `https://industryflow.local:<FRONTEND_HTTPS_PORT>` | mDNS on host and client, or a hosts entry `<host-ip> industryflow.local` |
+| `https://<host-ip>:<FRONTEND_HTTPS_PORT>` | the IP is in the certificate SAN |
+
+The self-signed default certificate covers `industryflow.local`, `industryflow`, `localhost` and
+`127.0.0.1`, plus `CERT_EXTRA_SAN`. `scripts/gen-internal-ca.sh` adds the host's primary IP. See
+[TLS](operations/tls.md).
+
+## 6. Notebooks (optional profile)
+
+Per-user JupyterHub notebooks ([ADR-0011](../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md),
+[ADR-0018](../ADR/ADR-0018-notebook-hub-spawner-portability.md)). The hub spawns per-user containers
+through the Docker socket, so set `DOCKER_GID` (`getent group docker | cut -d: -f3`) and
+`JUPYTERHUB_CRYPT_KEY` in `.env`.
 
 ```bash
 docker compose --profile notebooks build
-docker compose --profile notebooks up -d notebook-hub notebook-sso
-# Open https://<host>:8888 — log in once on the platform, the hub trusts that session (SSO).
+docker compose --profile notebooks up -d
 ```
 
-Each user gets their own **non-root** environment bound to their tenant; the kernel holds only
-short-lived, read-only **capability handles**, never a DB password (ADR-0012/0015).
+Open `https://<host>:<FRONTEND_HTTPS_PORT>/jupyter/` after logging in to the platform. Kernels hold
+capability handles, never a database password ([ADR-0012](../ADR/ADR-0012-notebook-credential-delivery.md),
+[ADR-0015](../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md)). Details:
+[notebooks](architecture/notebooks.md), [Python client](../clients/python/README.md).
 
-### Reaching the box from another machine (LAN)
+## 7. Stream test data
 
-`localhost` works on the box itself. From another machine, use the host's name or IP — the
-internal-CA TLS cert covers **both** (the hostname plus the host's primary IP, auto-added by
-`scripts/gen-internal-ca.sh`):
-
-- **`https://industryflow.local`** — resolves via **mDNS** when the box runs avahi with hostname
-  `industryflow` (it does on the reference box). Needs an mDNS-capable client on the same subnet
-  (Bonjour on Windows, `nss-mdns`/avahi on Linux, native on macOS).
-- **`https://<host-ip>`** (the server's IP; notebooks on `:8888`) — always works.
-- If `industryflow.local` does **not** resolve on your machine (no mDNS, or across subnets), add a
-  hosts entry: `<ip> industryflow.local` (`/etc/hosts`, or `C:\Windows\System32\drivers\etc\hosts`).
-
-## 5. Stream test data
-
-The reference producer (the Tennessee-Eastman example dataset) lives in the
-`tep-reference` extension and ingests over **device mTLS**, so it first needs a device
-certificate ([device-mtls.md](operations/device-mtls.md)):
+The reference producer in `extensions/tep-reference` streams the Tennessee-Eastman example dataset
+over device mTLS ([device mTLS](operations/device-mtls.md)).
 
 ```bash
-# Issue a device cert for the producer, bound to your tenant's company_id
-scripts/device-ca.sh init                                  # once
 scripts/device-ca.sh issue <company_id> tep-producer
 
-# Terminal 1: stream (data files resolve relative to the script; cert via env)
+# Terminal 1: stream
 DEVICE_CERT=deploy/device-ca/devices/<company_id>/tep-producer/current.chain.crt \
 DEVICE_KEY=deploy/device-ca/devices/<company_id>/tep-producer/current.key \
-INGESTION_URL=https://localhost:8443/ingest \
   python3 extensions/tep-reference/producer/stream_tep_data.py
 
-# Terminal 2: monitor
+# Terminal 2: watch the streaming job
 docker logs -f industryflow-spark-streaming
 ```
 
----
+| Producer variable | Default | Meaning |
+|-------------------|---------|---------|
+| `INGESTION_URL` | `https://localhost:8443/ingest` | mTLS edge endpoint |
+| `DEVICE_CERT`, `DEVICE_KEY` | — (required) | device certificate chain and key |
+| `INGEST_CA` | empty (server cert not verified) | CA bundle for the edge's server certificate |
+| `EQUIPMENT_ID`, `SITE_ID` | see the script | identifiers sent with each reading |
 
-## Architecture
+## Components
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Frontend (React)                            │
-│                    http://localhost:3000                        │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-┌────────────────────────────▼────────────────────────────────────┐
-│                   API Gateway (FastAPI)                         │
-│              Authentication & Request Routing                   │
-└─────┬──────────────┬──────────────┬────────────────┬───────────┘
-      │              │              │                │
-┌─────▼──────┐ ┌────▼─────┐ ┌──────▼──────┐ ┌──────▼────────┐
-│  Alert     │ │   ML     │ │  Ingestion  │ │  Monitoring   │
-│  Service   │ │ Service  │ │   Service   │ │    Stack      │
-└─────┬──────┘ └────┬─────┘ └──────┬──────┘ └───────────────┘
-      │              │              │
-      └──────────────┼──────────────┘
-                     │
-      ┌──────────────▼──────────────┐
-      │      Apache Kafka           │
-      └──────────┬──────────────────┘
-                 │
-      ┌──────────▼──────────────────┐
-      │    Apache Spark             │
-      └──────────┬──────────────────┘
-                 │
-      ┌──────────▼──────────────────┐
-      │    TimescaleDB + Redis + MinIO │
-      └─────────────────────────────┘
-```
-
-### Core services
-
-| Component | Purpose | Port | Technology |
-|-----------|---------|------|------------|
-| **API Gateway** | Request routing, auth | 8000 | FastAPI |
-| **Ingestion Service** | Sensor data ingestion | 8003 | Python/Kafka |
-| **Alert Detector** | Rule evaluation, writes alerts | — | Python/Kafka |
-| **ML Service** | Model training/inference | 8002 | FastAPI + MLflow |
-| **Spark Streaming** | Real-time processing | — | PySpark |
-| **Spark Aggregations** | Data aggregation | — | PySpark |
-
-### Infrastructure
-
-| Component | Purpose | Port | Details |
-|-----------|---------|------|---------|
-| **TimescaleDB** | Time-series database | 5432 | PostgreSQL + TimescaleDB |
-| **Kafka** | Message broker | 9092 | sensor-data-raw topic |
-| **Redis** | Cache & feature store | 6379 | In-memory data store |
-| **MinIO** | Object storage | 9000 | S3-compatible (ML models) |
-| **MLflow** | ML experiment tracking | 5000 | Model registry |
-| **Zookeeper** | Kafka coordination | 2181 | Required for Kafka |
-
-### Monitoring stack
-
-| Component | Purpose | Port |
-|-----------|---------|------|
-| **Prometheus** | Metrics collection | 9090 |
-| **Grafana** | Dashboards | 3001 |
-| **Loki** | Log aggregation | 3100 |
-| **Promtail** | Log collection | — |
-| **Exporters** | cAdvisor, Node, PostgreSQL, Redis, Kafka | various |
-
-See the [monitoring guide](operations/monitoring.md) for the complete metrics, logs, and dashboards reference.
-
----
-
-## Configuration
-
-Key variables in `.env` (authoritative list lives in `.env.example`):
-
-```bash
-# Database
-DB_HOST=timescaledb
-DB_PORT=5432
-DB_NAME=industryflow
-DB_USER=postgres
-DB_PASSWORD=<secure-password>
-
-# Services
-API_GATEWAY_PORT=8000
-ML_SERVICE_PORT=8002
-
-# Monitoring
-GRAFANA_PORT=3001
-GRAFANA_ADMIN_PASSWORD=<secure-password>
-PROMETHEUS_PORT=9090
-
-# Kafka
-KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-KAFKA_TOPIC_SENSOR_DATA=sensor-data-raw
-
-# MLflow
-MLFLOW_TRACKING_URI=http://mlflow:5000
-MLFLOW_S3_ENDPOINT_URL=http://minio:9000
-```
-
-### Resource requirements
-
-**Minimum:** 4 cores / 8 GB RAM / 50 GB disk.
-**Recommended:** 8+ cores / 16 GB RAM / 100 GB SSD.
-
----
+| Component | Compose service | Role | Docs |
+|-----------|-----------------|------|------|
+| Frontend / TLS edge | `frontend` | React app; same-origin reverse proxy to the APIs and the hub | [TLS](operations/tls.md) |
+| API gateway | `api-gateway` | Auth, tenant data, alert rules and history, websocket | [API](api/README.md) |
+| ML service | `ml-service-api` | Models, feature configs, inference, drift evaluation | [ML](architecture/ml-and-features.md) |
+| Ingestion edge | `ingestion-edge` | Device mTLS termination, CRL check | [device mTLS](operations/device-mtls.md) |
+| Ingestion service | `ingestion-service` | Produces readings to Kafka; reachable only from the edge | [stream processing](architecture/stream-processing.md) |
+| Device CRL refresh | `device-crl-refresh` | Re-signs the device CRL | [device mTLS](operations/device-mtls.md) |
+| Spark streaming | `spark-streaming` | Kafka → TimescaleDB measurements | [stream processing](architecture/stream-processing.md) |
+| Spark aggregations | `spark-aggregations` | 1 min / 5 min / 1 hour aggregates | [stream processing](architecture/stream-processing.md) |
+| Alert detector | `alert-service-detector` | Consumes Kafka, evaluates rules, writes alerts | [alerting](architecture/alerting.md) |
+| TimescaleDB | `timescaledb` | System of record, schema-per-tenant | [data & storage](architecture/data-and-storage.md) |
+| Kafka / Zookeeper | `kafka`, `zookeeper` | Sensor-data topic | [stream processing](architecture/stream-processing.md) |
+| Redis | `redis` | Gateway cache, alert-worker latest-value snapshot, notebook capability store | — |
+| MinIO | `minio` | Model artifacts, Spark checkpoints, backups, cold layer | [data & storage](architecture/data-and-storage.md) |
+| MLflow | `mlflow` | Tracking server and model registry | [ML](architecture/ml-and-features.md) |
+| Monitoring | `prometheus`, `grafana`, `loki`, `promtail`, exporters | Metrics, dashboards, logs | [monitoring](operations/monitoring.md) |
+| Backup | `db-backup` (profile `backup`) | Database backups | [backup](operations/backup-and-recovery.md) |
+| Cold export | `cold-export` (profile `cold-export`) | Exports history to the cold layer | [ADR-0025](../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md) |
 
 ## API examples
 
-### Authentication
-
-These examples use the **API/service** bearer flow against the gateway. The browser app
-authenticates differently — httpOnly cookies + CSRF over HTTPS — see
-**[operations/authentication.md](operations/authentication.md)**.
+Bearer flow for API clients. Browsers use httpOnly cookies + CSRF
+([authentication](operations/authentication.md)). Full reference: `http://localhost:8000/docs`.
 
 ```bash
-curl -X POST http://localhost:8000/auth/jwt/login \
+# Login: returns access_token and refresh_token
+curl -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d 'username=<email>&password=<password>'
-# Returns: {"access_token": "...", "token_type": "bearer"}
-```
 
-### Sensor data
+# Latest measurements
+curl http://localhost:8000/api/measurements/latest -H "Authorization: Bearer <token>"
 
-```bash
-curl http://localhost:8000/api/sensors/latest \
+# One sensor over a window
+curl "http://localhost:8000/api/measurements/<sensor_id>?start=<iso8601>&end=<iso8601>&order=asc" \
   -H "Authorization: Bearer <token>"
 
-curl "http://localhost:8000/api/sensors/<sensor_id>?start_time=<iso8601>&end_time=<iso8601>" \
-  -H "Authorization: Bearer <token>"
-```
-
-### Alert rules
-
-```bash
-curl http://localhost:8000/api/alert-rules \
-  -H "Authorization: Bearer <token>"
+# Alert rules
+curl http://localhost:8000/api/alert-rules -H "Authorization: Bearer <token>"
 
 curl -X POST http://localhost:8000/api/alert-rules \
   -H "Authorization: Bearer <token>" \
@@ -283,68 +216,43 @@ curl -X POST http://localhost:8000/api/alert-rules \
   }'
 ```
 
-Interactive API docs: http://localhost:8000/docs (Swagger UI, when running).
+| Alert-rule field | Values |
+|------------------|--------|
+| `detection_type` | `threshold`, `ml`, `statistical` (`ml` and `statistical` require `model_id`) |
+| `condition` | `greater_than`, `less_than`, `equals`, `not_equals`, `between`, `outside_range` |
+| `severity` | `low`, `medium`, `high`, `critical` |
 
----
+## Tests
 
-## Testing
+| Suite | Command |
+|-------|---------|
+| A service's unit tests | `pip install ./libs/industryflow_contracts -r services/<service>/requirements-dev.txt && pytest services/<service>/tests` |
+| Python client | `pip install -e 'clients/python[dev]' && pytest clients/python/tests` |
+| Config guards | `pip install pytest pyyaml ./libs/industryflow_contracts && pytest tests/config_guards` |
+| Load test (running stack, device cert) | `cd tests/performance && python3 performance_test.py` |
 
-```bash
-# Service unit tests (where present)
-pytest services/ml_service/tests/
-pytest services/spark_jobs/tests/
-
-# Performance / load testing harness
-python3 tests/performance/performance_test.py        # see the scripts in tests/performance/
-```
-
-### Generate test data
-
-```bash
-# Reference producer (device mTLS — see step 5 for the cert). Data resolves relative to the script.
-DEVICE_CERT=deploy/device-ca/devices/<company_id>/tep-producer/current.chain.crt \
-DEVICE_KEY=deploy/device-ca/devices/<company_id>/tep-producer/current.key \
-  python3 extensions/tep-reference/producer/stream_tep_data.py
-```
-
----
+The CI matrix and required checks: [CI](operations/ci.md).
 
 ## Troubleshooting
 
-**Services won't start**
-```bash
-docker system df
-docker system prune          # if low on disk space
-docker compose logs <service-name>
-docker compose restart <service-name>
-```
+| Symptom | Check |
+|---------|-------|
+| A service does not start | `docker compose logs <service>`; `docker system df` for disk space |
+| `ingestion-edge` restarts, `device-crl-refresh` exits | `scripts/device-ca.sh init` was not run (step 2) |
+| Database connection errors | `docker logs industryflow-timescaledb`; `docker exec industryflow-timescaledb psql -U postgres -c "SELECT 1"` |
+| No messages in Kafka | `docker exec industryflow-kafka kafka-topics --list --bootstrap-server localhost:9092`; `docker exec industryflow-kafka kafka-consumer-groups --list --bootstrap-server localhost:9092` |
+| Device rejected at the edge | [device mTLS](operations/device-mtls.md) |
+| Monitoring | [monitoring troubleshooting](operations/monitoring.md#troubleshooting) |
 
-**Database connection errors**
-```bash
-docker logs industryflow-timescaledb
-docker exec industryflow-timescaledb psql -U postgres -c "SELECT 1"
-```
+## Performance settings
 
-**Kafka not receiving messages**
-```bash
-docker exec industryflow-kafka kafka-topics --list --bootstrap-server localhost:9092
-docker exec industryflow-kafka kafka-consumer-groups --list --bootstrap-server localhost:9092
-```
+| Setting | Location |
+|---------|----------|
+| Compression and retention policies | tenant hypertables, `infrastructure/timescaledb/init-scripts/` |
+| Spark cores per job | `SPARK_STREAMING_CORES_MAX`, `SPARK_AGG_CORES_MAX` (`docker-compose.yml`) |
+| Spark shuffle partitions | `SPARK_SHUFFLE_PARTITIONS` (`docker-compose.yml`) |
+| Spark memory | `SPARK_DRIVER_MEMORY`, `SPARK_EXECUTOR_MEMORY` (`.env`) |
+| Spark workers | `SPARK_WORKER_REPLICAS` (`.env`) |
 
-For monitoring issues, see the [monitoring guide](operations/monitoring.md#troubleshooting).
-
----
-
-## Performance-relevant design
-
-Implemented mechanisms (not benchmarked throughput claims):
-
-- Columnar compression + retention policies on the TimescaleDB hypertables.
-- Pre-computed 1 min / 5 min / 1 hour aggregation windows (Spark).
-- Redis-based feature store for real-time inference.
-- Configurable Spark resource budgets — `SPARK_CORES_MAX` / `SPARK_SQL_SHUFFLE_PARTITIONS`
-  per job (`docker-compose.yml`); raise them or add workers to scale.
-- Async database connection pooling.
-
-Capacity, SPOF and HA gaps are tracked in
-[operations/production-readiness.md](operations/production-readiness.md).
+Capacity and HA gaps: [production readiness](operations/production-readiness.md),
+[high availability](operations/high-availability.md).
