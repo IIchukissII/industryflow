@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import './AppShell.css';
 import api from '../services/api';
+import authFetch from '../services/http';
 import { signOut } from '../services/session';
 import Icon from './Icon';
 
@@ -12,39 +13,63 @@ import Icon from './Icon';
 // the Ground (the sources and their interpretation), the Watch (what guards the Core).
 const NAV = [
   {
-    group: 'The Core',
+    group: 'The core',
     items: [
       { href: '/', label: 'Core', icon: 'grid', exact: true },
-      { href: '/alerts', label: 'Alerts', icon: 'bell' },
+      { href: '/alerts', label: 'Alerts', icon: 'bell', count: 'openAlerts' },
     ],
   },
   {
-    group: 'The Ground',
+    group: 'The ground',
     items: [
       { href: '/equipment', label: 'Equipment', icon: 'box' },
       { href: '/notebooks', label: 'Notebooks', icon: 'activity' },
     ],
   },
   {
-    group: 'The Watch',
+    group: 'The watch',
     items: [
-      { href: '/alert-rules', label: 'Alert Rules', icon: 'sliders' },
+      { href: '/alert-rules', label: 'Alert rules', icon: 'sliders' },
       { href: '/ml-models', label: 'Models', icon: 'cpu' },
     ],
   },
 ];
 
-function NavItem({ href, label, icon, active }) {
+const OPEN_ALERTS_POLL_MS = 30000;
+
+function NavItem({ href, label, icon, active, count }) {
   return (
-    <a href={href} className={`nav-item${active ? ' active' : ''}`}>
+    <a href={href} className={`nav-item${active ? ' active' : ''}`} aria-current={active ? 'page' : undefined}>
       <Icon name={icon} size={17} />
       <span>{label}</span>
+      {count > 0 && (
+        <span className="nav-count" aria-label={`${count} open`}>{count}</span>
+      )}
     </a>
+  );
+}
+
+// The one status line the shell shows: the live stream on pages that stream, otherwise nothing
+// unless the API is unreachable.
+function Status({ wsConnected, lastUpdate, apiUp }) {
+  if (apiUp === false) {
+    return <span className="stat stat-bad"><span className="sdot bad" />API unreachable</span>;
+  }
+  if (wsConnected === undefined) return null;
+  return (
+    <span className="stat">
+      <span className={`sdot ${wsConnected ? 'ok' : 'pending'}`} />
+      <span>
+        {wsConnected ? 'Live' : 'Connecting'}
+        {lastUpdate && <span className="stat-time">, last reading <span className="mono">{lastUpdate}</span></span>}
+      </span>
+    </span>
   );
 }
 
 export default function AppShell({ user, title, wsConnected, lastUpdate, children }) {
   const [apiUp, setApiUp] = useState(null);
+  const [openAlerts, setOpenAlerts] = useState(0);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -58,6 +83,22 @@ export default function AppShell({ user, title, wsConnected, lastUpdate, childre
     return () => { alive = false; clearInterval(t); };
   }, []);
 
+  // Open (unacknowledged) alerts, counted beside Alerts in the nav on every page.
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await authFetch('/api/alerts?acknowledged=false&limit=500');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (alive) setOpenAlerts(Array.isArray(data) ? data.length : 0);
+      } catch { /* best-effort; the count just stays as it was */ }
+    };
+    load();
+    const t = setInterval(load, OPEN_ALERTS_POLL_MS);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
   const handleLogout = async () => {
     await signOut({ post: (url) => api.post(url) });
     localStorage.removeItem('user');
@@ -66,66 +107,58 @@ export default function AppShell({ user, title, wsConnected, lastUpdate, childre
 
   const path = typeof window !== 'undefined' ? window.location.pathname : '/';
   const isActive = (item) => (item.exact ? path === item.href : path.startsWith(item.href));
+  const counts = { openAlerts };
 
   return (
     <div className={`shell${open ? ' nav-open' : ''}`}>
       <aside className="rail">
         <a href="/" className="brand">
-          <img src="/logo-mark.svg" alt="" width="30" height="30" />
+          <img src="/logo-mark.svg" alt="" width="28" height="28" />
           <span className="brand-name">Industry<span className="wm-accent">Flow</span></span>
         </a>
 
-        <nav className="nav">
+        <nav className="nav" aria-label="Main">
           {NAV.map((sec) => (
             <div className="nav-group" key={sec.group}>
-              <div className="nav-group-label eyebrow">{sec.group}</div>
+              <div className="nav-group-label">{sec.group}</div>
               {sec.items.map((it) => (
-                <NavItem key={it.href} {...it} active={isActive(it)} />
+                <NavItem key={it.href} {...it} active={isActive(it)} count={it.count ? counts[it.count] : 0} />
               ))}
             </div>
           ))}
-          <div className="nav-group">
-            <div className="nav-group-label eyebrow">System</div>
+        </nav>
+
+        <div className="rail-foot">
+          <div className="rail-links">
             <NavItem href="/help" label="Help" icon="help" active={isActive({ href: '/help' })} />
             <NavItem href="/settings" label="Settings" icon="gear" active={isActive({ href: '/settings' })} />
             {user && user.is_superuser && (
               <NavItem href="/admin" label="Admin" icon="users" active={isActive({ href: '/admin' })} />
             )}
           </div>
-        </nav>
-
-        <div className="rail-foot">
           <div className="acct">
-            <span className="acct-badge"><Icon name="user" size={15} /></span>
             <span className="acct-meta">
               <span className="acct-email">{user ? user.email : 'Guest'}</span>
-              <span className="acct-role mono">{user ? (user.is_superuser ? 'superuser' : user.role || 'member') : ''}</span>
+              <span className="acct-role">{user ? (user.is_superuser ? 'Superuser' : user.role || 'Member') : ''}</span>
             </span>
+            <button type="button" className="icon-btn" aria-label="Sign out" title="Sign out" onClick={handleLogout}>
+              <Icon name="logout" size={16} />
+            </button>
           </div>
-          <button className="icon-btn" title="Sign out" onClick={handleLogout}>
-            <Icon name="logout" size={16} />
-          </button>
         </div>
       </aside>
 
       <div className="shell-main">
         <header className="topbar">
-          <button className="icon-btn rail-toggle" onClick={() => setOpen((v) => !v)} title="Menu">
+          <button
+            type="button" className="icon-btn rail-toggle" aria-label="Open menu" aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+          >
             <Icon name="menu" size={18} />
           </button>
           <h1 className="topbar-title">{title}</h1>
           <div className="topbar-status">
-            {lastUpdate && <span className="ts mono">updated {lastUpdate}</span>}
-            {wsConnected !== undefined && (
-              <span className="stat">
-                <span className={`sdot ${wsConnected ? 'ok' : 'pending'}`} />
-                {wsConnected ? 'Live' : 'Connecting'}
-              </span>
-            )}
-            <span className="stat">
-              <span className={`sdot ${apiUp === null ? 'pending' : apiUp ? 'ok' : 'bad'}`} />
-              {apiUp === false ? 'API offline' : 'API'}
-            </span>
+            <Status wsConnected={wsConnected} lastUpdate={lastUpdate} apiUp={apiUp} />
           </div>
         </header>
 

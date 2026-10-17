@@ -17,8 +17,8 @@
 
 /* equipment arc labels — quiet by default, glowing amber/cinnabar when the group is troubled */
 .conv-eqlabel {
-  font-family: var(--font-mono); font-size: 15px; letter-spacing: 0.05em;
-  text-transform: uppercase; fill: var(--faint); pointer-events: none;
+  font-family: var(--font-display); font-style: italic; font-size: 19px;
+  fill: var(--muted); pointer-events: none;
 }
 .conv-eqlabel.st-warn { fill: var(--warn); }
 .conv-eqlabel.st-crit { fill: var(--crit); }
@@ -40,18 +40,16 @@
 .conv-node.sel { stroke: var(--gold-glow); stroke-width: 2.5; }
 
 .conv-core-pill {
-  margin-top: 5px; font-family: var(--font-mono); font-size: 10px; font-weight: 500;
-  letter-spacing: 0.12em; text-transform: uppercase; padding: 3px 10px; border-radius: 999px;
+  margin-top: 6px; font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 999px;
 }
 .conv-core-pill.st-warn { color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .conv-core-pill.st-crit { color: var(--crit); border: 1px solid color-mix(in srgb, var(--crit) 45%, transparent); background: color-mix(in srgb, var(--crit) 14%, transparent); }
 
 /* the core overlay is click-through; the alerts action opts back into pointer events */
 .conv-core-action {
-  pointer-events: auto; margin-top: 9px; cursor: pointer;
-  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em;
-  color: var(--muted); background: transparent;
-  border: 1px solid var(--line); border-radius: 999px; padding: 5px 13px;
+  pointer-events: auto; margin-top: 10px; cursor: pointer;
+  font-size: 13px; color: var(--text-soft); background: transparent;
+  border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; min-height: 32px;
   transition: color 0.15s, border-color 0.15s;
 }
 .conv-core-action:hover { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
@@ -74,20 +72,13 @@
   text-align: center; gap: 3px;
 }
 .conv-core-val {
-  font-family: var(--font-display); font-weight: 600; font-optical-sizing: auto;
-  font-size: clamp(38px, 7vw, 64px); line-height: 1; letter-spacing: -0.02em;
+  font-family: var(--font-display); font-weight: 400; font-optical-sizing: auto;
+  font-size: clamp(44px, 6.4vw, 76px); line-height: 1; letter-spacing: -0.02em;
   color: var(--text); font-variant-numeric: tabular-nums;
 }
 .conv-core-unit { font-family: var(--font-sans); font-weight: 500; font-size: 0.32em; color: var(--muted); margin-left: 4px; }
-.conv-core-name { font-size: 14px; color: var(--muted); max-width: 180px; }
-.conv-core-eq {
-  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--faint);
-}
-.conv-empty {
-  position: absolute; left: 50%; bottom: 14%; transform: translateX(-50%);
-  color: var(--muted); font-size: 14px;
-}
+.conv-core-name { font-size: 14px; color: #c9cdd6; max-width: 200px; margin-top: 4px; }
+.conv-core-eq { font-family: var(--font-display); font-style: italic; font-size: 13px; color: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) {
   .conv-pulse { animation: none; opacity: 0; }

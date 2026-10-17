@@ -10,9 +10,9 @@ import ChartControls from './ChartControls';
 import { dedupeAscending } from '../utils/series';
 import './SensorChart.css';
 
-// One accessible series colour on the dark chart surface (#131722). A single series needs no
-// legend box — the header names it — so this is the only categorical hue in play.
-const SURFACE = '#131722';
+// The chart is drawn on the page ground itself, not in a box of its own. A single series needs
+// no legend — the heading names it — so the gold of the selected channel is the only hue.
+const SURFACE = 'rgba(0, 0, 0, 0)';
 const SERIES = '#cfa94e';
 const UP = '#26a69a';
 const DOWN = '#ef5350';
@@ -32,7 +32,7 @@ const fmtTime = (t) =>
   t == null ? '' : new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 
-const SensorChart = ({ sensorId }) => {
+const SensorChart = ({ sensorId, name, unit }) => {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
@@ -59,11 +59,11 @@ const SensorChart = ({ sensorId }) => {
 
     const chart = createChart(el, {
       width: el.clientWidth,
-      height: 380,
-      layout: { background: { color: SURFACE }, textColor: '#a7abb6', fontSize: 11 },
-      grid: { vertLines: { color: '#1c2030' }, horzLines: { color: '#1c2030' } },
-      timeScale: { timeVisible: true, secondsVisible: true, borderColor: '#2a2e39' },
-      rightPriceScale: { borderColor: '#2a2e39' },
+      height: 300,
+      layout: { background: { color: SURFACE }, textColor: '#9aa0ac', fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" },
+      grid: { vertLines: { visible: false }, horzLines: { color: '#161c2c' } },
+      timeScale: { timeVisible: true, secondsVisible: true, borderVisible: false },
+      rightPriceScale: { borderVisible: false },
       crosshair: {
         mode: 1,
         vertLine: { color: '#3a4256', width: 1, style: 3, labelBackgroundColor: '#2a2e39' },
@@ -220,18 +220,18 @@ const SensorChart = ({ sensorId }) => {
   }
 
   const shown = hover || latest;
-  const title = meta.name || `Sensor ${sensorId.slice(0, 8)}`;
+  const title = meta.name || name || `Sensor ${sensorId.slice(0, 8)}`;
 
   return (
     <div className="sensor-chart">
       <div className="sensor-chart__head">
         <div className="sensor-chart__id">
-          <span className={`sensor-chart__dot ${live ? 'is-live' : ''}`} />
-          <span className="sensor-chart__name" title={title}>{title}</span>
+          <span className={`sensor-chart__dot ${live ? 'is-live' : ''}`} aria-hidden="true" />
+          <h2 className="sensor-chart__name" title={title}>{title}</h2>
         </div>
         <div className="sensor-chart__readout">
           <span className="sensor-chart__value">{fmt(shown?.value)}</span>
-          <span className="sensor-chart__unit">{meta.unit}</span>
+          <span className="sensor-chart__unit">{meta.unit || unit}</span>
           <span className="sensor-chart__ts">{shown?.time ? fmtTime(shown.time) : ''}</span>
         </div>
       </div>
@@ -250,8 +250,8 @@ const SensorChart = ({ sensorId }) => {
         {status !== 'ready' && (
           <div className="sensor-chart__overlay">
             {status === 'loading' && <span className="sensor-chart__spinner" aria-label="Loading" />}
-            {status === 'empty' && <span>No data in this range yet</span>}
-            {status === 'error' && <span className="sensor-chart__err">Couldn’t load chart data — retrying…</span>}
+            {status === 'empty' && <span>No readings in this range yet</span>}
+            {status === 'error' && <span className="sensor-chart__err">The chart could not load its data.</span>}
           </div>
         )}
       </div>
