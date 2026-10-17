@@ -45,17 +45,24 @@ by the database that wrote it.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Raw kept long in the hot store | Row-wise transport for analytical scans |
-| Compressed chunks copied to the object store | A backup, not readable without the database |
-| A table format from the start | Compaction work for problems not yet present |
-| Partition by equipment or sensor | Small-file directory explosion |
-| One shared path keyed by tenant column | Breaks schema-per-tenant isolation |
-| A durable object-store key in the kernel | A transferable secret in untrusted code |
-| Export inside the streaming job | Couples batch failures to the stream |
-| Re-export a day when late rows arrive | Overwrites the only copy of history |
-| Verify a drop by a count taken at export | Misses changes after export or that keep the count |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Raw kept long in the hot store, queried directly | Row-wise transactional transport for analytical scans |
+| 1 | Compressed chunks copied to the object store | A backup, not readable without the database that wrote it |
+| 2 | A fixed retention timer dropping raw rows from the hot store | Drops rows whether or not a verified export holds them |
+| 3 | Verify a drop by a row count reconciled at export | Misses changes after the export and changes that keep the count |
+| 4 | A day archived once, in one file | A late reading for an exported day is either never archived or forces the day to be rewritten |
+| 4 | Re-export a whole day when late rows arrive | Overwrites the only copy of history to add a few rows |
+| 5 | One shared path keyed by a tenant column | Breaks schema-per-tenant isolation |
+| 5 | A durable object-store key in the kernel | A transferable secret in untrusted code |
+| 6 | Partition by equipment or sensor | Small-file directory explosion |
+| 7 | Aggregates copied into the cold layer beside raw | Derivable state stored twice, free to drift |
+| 8 | A table format from the start | Compaction and metadata work for problems not yet present |
+| 9 | A heavyweight workflow scheduler for the export | Disproportionate to one linear daily task |
+| 9 | Export inside the streaming job | Couples batch export failures to the latency-critical stream |
+| 11 | An exporter principal that may also delete in the cold bucket | A faulty or compromised exporter could destroy the only copy of history |
+| 12 | The cold layer built only when the first serious history read or a hot-store burden triggers it | Raw history kept accumulating in the hot store, and the read path is needed before the first large read |
+| 13 | Mirroring by the exporter or under a credential that can delete | A mirror whose writer can delete does not survive the failure it guards against |
 
 ## Consequences
 

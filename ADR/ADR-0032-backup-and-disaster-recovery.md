@@ -36,12 +36,13 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Back up the databases only | Misses the cold layer and model artifacts |
-| Rely on the object store's own replication | In-cluster replication shares the failure domain and copies deletions; managed cross-region versioned replication is one way to meet decision 3 |
-| One recovery objective for the whole platform | Over-protects derivable state or under-protects the only copy of raw history |
-| Back up derivable state too | Puts revocable handles into a long-lived artifact and keeps checkpoints that may be discarded |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Back up the databases only | Misses the cold layer and model artifacts, which exist nowhere else |
+| 1 | Back up the capability store | Puts live, revocable handles into a long-lived artifact |
+| 1 | Back up streaming checkpoints | Keeps state that a major upgrade may deliberately discard |
+| 2 | One recovery objective for the whole platform | Over-protects derivable state or under-protects the only copy of raw history |
+| 3 | Rely on the object store's own replication | In-cluster replication shares the failure domain and copies deletions; managed cross-region versioned replication is one way to meet decision 3 |
 
 ## Consequences
 

@@ -34,13 +34,14 @@ manual, slow and irreproducible, and a gate that depends on a person remembering
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| An integration branch before the trunk | Runs no test the trunk lacks; delays patches, makes the newest tag ambiguous |
-| A box-validated status gating releases | Deferred until the box finds what synthesised state cannot reproduce |
-| Tagging box-validated commits | Records a validation, blocks nothing |
-| Only the targeted live integration proofs | A service outside every slice has no proof |
-| Zero restarts with longer start-up waits | Tuned to one runner's speed |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | An integration branch before the trunk | Runs no test the trunk lacks; delays patches, makes the newest tag ambiguous |
+| 3 | Any restart as the failure signal | Fails every cold start that races its dependencies, so the gate is routinely red and ignored |
+| 3 | Zero restarts with longer start-up waits | Tuned to one runner's speed |
+| 3 | Only the targeted live integration proofs | A service outside every slice has no proof |
+| 6 | A box-validated status gating releases | Deferred until the box finds what synthesised state cannot reproduce |
+| 6 | Tagging box-validated commits | Records a validation, blocks nothing |
 
 ## Consequences
 

@@ -37,13 +37,20 @@ disagree about what a feature means. Offline training data cannot read the live 
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| A serving-side windowing store beside the stream | Duplicated state; train/serve skew |
-| Rolling features computed in the serving process | Recreates a windowing engine next to the existing one |
-| Inference moved into the stream as well | Per-tenant artifacts and blast radius; a separate decision |
-| One feature table keyed by a tenant column | Breaks schema-per-tenant isolation |
-| Training bound by granularity alone | The lateness gap reintroduces skew |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Keep two windowing substrates, the stream's and a serving-side store | Duplicated state computing one value two ways, a standing train/serve skew |
+| 1 | Rolling features computed in the serving process over fetched history | Recreates a windowing engine next to the existing one |
+| 1 | Inference moved into the stream as well | Per-tenant artifacts and blast radius make it a separate decision |
+| 2 | A dedicated feature table for the windowed baseline | Duplicates a value the aggregate tables already carry |
+| 4 | One feature table keyed by a tenant column | Breaks schema-per-tenant isolation |
+| 7 | No cache in front of the aggregate read | Every scored reading pays a database read for a value that changes once per window |
+| 7 | Snapshot keys by equipment and sensor alone | Isolation would rest on identifiers happening not to collide |
+| 8 | The stateful feature keeping its serving-side window until a trigger fires | The skew trigger fired; the baseline class is built |
+| 9 | A whole-run or other non-causal mean as the training equivalent | A quantity inference cannot produce at any window, so the model learns a feature it is never served |
+| 9 | Training bound by granularity alone, the window just before the reading | Serving sees that window only after the lateness, so the gap reintroduces skew |
+| 9 | Window granularity carried per feature in its configuration | Width and lateness are one contract for stream, serving and training; a per-feature value lets a side drift |
+| 9 | A default statistic when a feature names none | A feature that named no statistic was silently served a deviation |
 
 ## Consequences
 

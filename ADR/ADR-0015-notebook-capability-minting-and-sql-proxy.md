@@ -45,16 +45,20 @@ is one the client can widen again.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| A. Self-contained signed tokens | Replayable until expiry; revocation needs a per-use lookup anyway |
-| B. A per-tenant database password in the kernel | A database credential in untrusted code (ADR-0012 dec 2) |
-| C. An off-the-shelf pooler as the proxy | Does not resolve a handle to a tenant |
-| D. Lifetime-only capabilities | Expiry as the only control (ADR-0012 dec 6) |
-| E. A fresh handle per request | Churn and a refresh path in the kernel for no isolation gain |
-| F. One shared upstream principal plus a filter on role switches | The boundary would rest on parsing every spelling of a role change |
-| G. Timer refresh, expiry for stopped environments | A stopped environment's handles stay valid a full lifetime |
-| H. Check a SQL handle only at connect | Revocation would leave open sessions working |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Self-contained signed tokens | Replayable until expiry, and revocation needs a per-use lookup anyway |
+| 1 | Read-only fixed on every handle | Experiment tracking and model upload are writing planes |
+| 2 | Lifetime-only capabilities | Expiry would be the only control (ADR-0012 dec 6) |
+| 2 | A fresh handle per request | Churn and a refresh path in the kernel for no isolation gain |
+| 2 | Timer refresh, with expiry for stopped environments | A stopped environment's handles stay valid for a full lifetime |
+| 2 | Checking a SQL handle only at connect | Revocation would leave open sessions working |
+| 4 | The spawner as the sole minting authority for every plane | A plane held by a person has no spawn to mint at |
+| 5 | A per-tenant database password in the kernel | A database credential in untrusted code (ADR-0012 dec 2) |
+| 5 | One shared upstream principal narrowed by a role switch | The switch is a statement on the session the kernel drives, so it can be repeated into another tenant or undone |
+| 5 | One shared upstream principal plus a filter on role switches | The boundary would rest on parsing every spelling of a role change |
+| 6 | An off-the-shelf pooler as the proxy | It does not resolve a handle to a tenant |
+| 6 | A pooler behind the proxy sharing upstream sessions | A pooled session would outlive or be shared beyond the one handle it was opened for |
 
 ## Consequences
 

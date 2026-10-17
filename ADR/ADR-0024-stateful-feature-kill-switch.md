@@ -35,14 +35,17 @@ it cannot know which transforms are stateful.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Per-feature toggles in each configuration | Changes vector shape; the incident is class-wide |
-| Neutralize after calling the transform | Still loads the degraded store |
-| Flag in an environment setting | Not live without a restart |
-| Flag in the cache store | Absent when that store is |
-| Flag in a third store | New serving dependency for a total outage already served neutral |
-| The per-call fallback alone | No relief, no control, no visibility |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 2 | Flag in an environment setting | Not live without a restart |
+| 2 | Flag in the cache store | Absent exactly when that store is the problem |
+| 2 | Flag in a third store outside everything it guards | A new serving dependency for a total outage that is already served neutral |
+| 3 | Disable a feature by removing it from the configuration | Changes vector shape and breaks the bound model; not live and not cheaply reversible |
+| 3 | The raw sensor value as the fallback for a failed baseline read | Not neutral; it puts an out-of-distribution value in a deviation slot |
+| 4 | Neutralize after calling the transform | Still loads the degraded store |
+| 4 | The per-call exception fallback alone | No relief, no operator control, no visibility |
+| 6 | Per-feature toggles in each configuration as the first cut | Changes vector shape, and the incident is class-wide |
+| 7 | Fail closed: treat an unreadable switch as off | Auto-trip without hysteresis; a transient blip would neutralize the class and flap |
 
 ## Consequences
 

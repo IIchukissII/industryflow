@@ -35,14 +35,16 @@ sees. A revoked device must lose access at once, and an expired revocation list 
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Root signs devices directly | The root must be online; its compromise re-roots the fleet |
-| Identity in the common name | Deprecated (RFC 6125) and unstructured |
-| One intermediate per tenant | Per-tenant key and list lifecycle not yet justified |
-| CA-generated device keys | Defeats the secure element |
-| Short lifetimes, no revocation | A stolen device keeps access until expiry |
-| Automatic root-list re-signing | Brings the root online |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | Root signs devices directly | The root must be online; its compromise re-roots the fleet |
+| 1 | One intermediate per tenant | Per-tenant key and list lifecycle not yet justified |
+| 2 | CA-generated device keys | Defeats the secure element |
+| 3 | Identity in the common name | Deprecated (RFC 6125) and unstructured |
+| 6 | Short lifetimes, no revocation | A stolen device keeps access until expiry |
+| 7 | Reusing the browser-facing server certificate path for devices | Opposite trust direction; it says nothing about a device's tenant |
+| 8 | Moving the issuing key into a cluster to re-sign the list there | A plain stored secret is weaker protection than the key has outside |
+| 8 | Automatic root-list re-signing | Brings the root online |
 
 ## Consequences
 

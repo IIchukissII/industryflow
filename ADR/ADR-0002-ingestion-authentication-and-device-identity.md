@@ -41,12 +41,17 @@ highest-throughput path.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| JWT or per-device API keys | Replayable bearer secrets, not bound to the hardware key |
-| mTLS verified inside the service | Trust-store handling and rotation in every replica |
-| Tenant in a header or body without certificate binding | A caller-asserted tenant routes the write |
-| Honour every edge's header convention | A convention the edge does not write passes a client-supplied identity through |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | JWT bearer tokens for device ingestion | Replayable, not bound to the hardware key, and needs a login no gateway can perform |
+| 1 | Per-device API keys | Still a replayable bearer secret, with its own issuance and revocation beside a CA |
+| 2 | mTLS verified inside the ingestion service | Trust-store handling and rotation in every replica, and cryptography in application code |
+| 3 | Honouring every header convention a supported edge might write | A convention the edge does not write is not overwritten, so a client-supplied identity passes as verified |
+| 5 | A tenant in a header or body without certificate binding | A caller-asserted tenant routes the write |
+| 6 | Resolving the tenant by scanning every tenant schema per request | A per-request cost that grows with tenants, fed by a caller-supplied value |
+| 8 | mTLS for every producer at once, with no transition | Forces every existing producer onto PKI in one step, with no migration path |
+| 8 | JWT ingestion accepted beside mTLS while producers migrate | Two mechanisms widen the surface once every producer presents a certificate |
+| 8 | A database role for the ingestion service | A standing credential with no use once the tenant comes from the certificate |
 
 ## Consequences
 

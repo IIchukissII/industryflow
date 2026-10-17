@@ -49,13 +49,26 @@ artifact that runs author code on load would grant code execution on the trusted
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| Point the existing registration gate at an upload | Turns three inherited guarantees into assertions |
-| An upload service, or the serving side, with a write principal | A second privileged writer to every tenant's models |
-| Sandbox an executable load | A containment bet that must hold forever |
-| Serve uploads via the tracking server | Needs the fabricated run decision 8 refuses |
-| Relay bytes through the mediator | Couples it to artifact size (ADR-0019 dec 6) |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| — | Point the existing registration gate at an upload, change nothing else | Turns three inherited guarantees into assertions and keeps a loader whose blast radius changed |
+| 1 | Refuse external models; train only in the kernel | Answers a real requirement with an environment that cannot meet it |
+| 2 | An upload service, or the serving side, with a write principal | A second privileged writer to every tenant's models |
+| 2 | Admission policy judged at the gateway | Puts a second, hand-kept copy of the semantics vocabulary and detector registry outside the serving side |
+| 2 | A serving side with no store credential, reaching uploads through the tracking server | Needs the fabricated run decision 8 refuses and a broader reader of every tenant's uploads |
+| 3 | Reuse the kernel's tracking capability audience | Hands the upload surface to every running kernel and erases the one fact that separates the two populations' rules |
+| 3 | The mediator verifying the platform session itself | A verifier of the symmetric signature can forge a session for any user in any tenant |
+| 4 | Sandbox an executable load | A containment bet that must hold forever |
+| 4 | A closed list of frameworks whose formats are safe | Needs amending for every framework and refuses a safe format nobody listed |
+| 4 | The framework's deserialisation switch as the control for typed formats | That switch governs executable formats only; typed loads are controlled by the serving side's provenance grant |
+| 5 | Infer the semantics until declarations exist | Contradicts ADR-0028 dec 2 |
+| 5 | Judge the declaration at the deployment gate | A model whose output means nothing here would sit in the registry in a state it cannot describe |
+| 7 | A version comparison in place of the empirical check | Checks assertions only against assertions |
+| 7 | A load-and-score path beside the deployment gate | A second answer to a question the deployment gate already answers |
+| 8 | A synthesised tracking run for an upload | Makes an environment the platform never observed look observed |
+| 10 | Relay bytes through the mediator | Couples it to artifact size (ADR-0019 dec 6) |
+| 10 | Only an in-network client, the browser deferred | Re-opens decision 3, which already made the browser a client |
+| 10 | A cross-origin allowlist on the store for the app's origin | One origin through the edge needs no cross-origin exposure at all |
 
 ## Consequences
 

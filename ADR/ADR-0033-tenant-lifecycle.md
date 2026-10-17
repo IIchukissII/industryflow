@@ -34,12 +34,14 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| The API service creates schemas and roles directly | An execute grant on a privileged function does the same without the privilege |
-| Provision every store eagerly at signup | Prefixes cost nothing until written; a multi-store creation can half-fail |
-| Soft delete only | A request to delete a tenant's data could never be honoured |
-| Delete synchronously in the API request | A timeout across stores leaves the partial state decision 4 forbids |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | The API service creates schemas and roles directly | An execute grant on a privileged function does the same without the privilege |
+| 1 | The API inserts the registry entry and an operator script run as the database superuser creates the schema | A tenant is unusable until a manual step, and routine provisioning needs the superuser |
+| 2 | Provision every store eagerly at signup | Prefixes cost nothing until written; a multi-store creation can half-fail |
+| 3 | Soft delete only | A request to delete a tenant's data could never be honoured |
+| 4 | Delete synchronously in the API request | A timeout across stores leaves the partial state decision 4 forbids |
+| 5 | Delete by removing the registry entry only | The tenant's data in every store becomes unfindable without being gone |
 
 ## Consequences
 

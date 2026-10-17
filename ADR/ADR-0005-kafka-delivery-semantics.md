@@ -34,12 +34,16 @@ no end-to-end guarantee, and exactly-once adds coordination to every stage.
 
 ## Alternatives
 
-| Alternative | Why rejected |
-|---|---|
-| At-most-once (auto-commit, swallowed errors, start at latest) | Silently loses readings and their alerts |
-| Exactly-once via Kafka transactions | Coordination cost to remove duplicates idempotent sinks already neutralise |
-| Auto-commit with per-interval processing | The timer is independent of per-message success |
-| Per-consumer delivery policy | Leaves no end-to-end guarantee |
+| Dec | Rejected alternative | Why rejected |
+|---|---|---|
+| 1 | At-most-once delivery | Silently loses readings and the alerts they would raise |
+| 1 | Exactly-once via Kafka transactions | Coordination cost in every stage to remove duplicates idempotent sinks already neutralise |
+| 1 | At-least-once with each consumer choosing its own offset and error policy | Stages that opt out leave no end-to-end guarantee |
+| 2 | Timer-based auto-commit | The commit advances independently of whether processing succeeded |
+| 2 | Auto-commit with processing finished before each commit interval | Still races: a crash or error inside the interval drops or mis-commits messages |
+| 3 | Swallowing a handler error while the offset advances | The reading is dropped without trace |
+| 3 | Dead-lettering every failure after retries, infrastructure outages included | An outage would drain valid readings to the dead letter instead of delaying them |
+| 4 | A durable-data consumer starting a new group at the latest offset | A first start or a group reset skips the backlog |
 
 ## Consequences
 
