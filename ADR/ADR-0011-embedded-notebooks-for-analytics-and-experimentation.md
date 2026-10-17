@@ -95,6 +95,11 @@ So embedding notebooks is not primarily a UI problem. It is the problem of admit
 - **Notebook persistence, versioning, and audit.** Where authored notebooks live, how they are versioned, and what record is kept of who executed what against which tenant are deferred; an execution audit trail is desirable but unspecified here.
 - **Quota and cost model.** Concrete per-tenant concurrency caps, resource limits, and idle-reclamation timing (decision 7) are values owned by the deployment configuration, not this ADR.
 
+## Resolved since acceptance
+
+- **Experiment-tracking multi-tenancy (decision 9).** Decided by ADR-0013 and realised by ADR-0019: the tracking store stays shared, and every access to it is mediated by a trusted gateway that confines the access to the caller's tenant. The gate of decision 9 is lifted on those terms. An authoring environment reaches experiment tracking only through that gateway, with a capability of its own, and never with a tracking-store or object-store credential.
+- **Where authored notebooks live.** Decided by ADR-0020: on durable per-user storage that outlives the ephemeral environment and holds no credential. How notebooks are versioned, and the record of who executed what against which tenant, remain deferred.
+
 ## References
 
 - ADR-0003 — tenant-to-schema resolution and the trusted-code `search_path` isolation model this ADR deliberately excepts for notebooks.
