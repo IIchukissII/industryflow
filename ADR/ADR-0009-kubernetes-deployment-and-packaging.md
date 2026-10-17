@@ -125,6 +125,25 @@ The chart at acceptance realizes decisions that were placeholders in the first p
   registries. The in-cluster object store now runs a maintained, signed third-party build of the same
   server, pinned by digest like every other third-party image. It runs non-root, so the store's
   volume is owned by that user. The decision is unchanged; only the image's publisher moved.
+- **Database role passwords (2026-10-17).** The count of five in the database-initialization entry
+  held when it was written. The database has since gained a read-only monitoring role, the
+  cold-layer exporter's role (ADR-0025) and the notebook SQL proxy's enrolment role (ADR-0015); the
+  last two exist only when their component is deployed. The chart derives the set of role passwords
+  from one list, which feeds both the database's initialization and the Secret it reads, so the
+  set cannot diverge between the two and this record no longer carries a count.
+- **Secret scoping (decision 4, 2026-10-17).** The chart renders one Secret per workload, holding
+  only the keys that workload uses, rather than one Secret shared by every pod; an operator may
+  instead supply a single existing Secret and scope it in the backend. The chart refuses to render
+  while any secret value is still a placeholder. The choice of secrets backend remains deferred.
+- **Autoscaling mechanism (2026-10-17).** The chart carries an opt-in autoscaler on CPU
+  utilization for the request-serving stateless services, off by default, together with disruption
+  budgets and replica spreading for the stateless tier. That is the mechanism only: which workloads
+  scale, and on which metrics and thresholds, remains the deferred autoscaling policy.
+- **Components packaged under their own ADRs (2026-10-17).** The chart also renders the notebook
+  stack behind its own toggle (ADR-0011, ADR-0018), the device revocation-list freshness watch
+  (ADR-0007 dec 8), the cold-layer export job (ADR-0025) and the database backup job (ADR-0032,
+  proposed). Their decisions live in those records; the packaging decisions of this record apply
+  to them unchanged.
 
 ## References
 
