@@ -129,15 +129,25 @@ kubectl -n <namespace> logs -f job/db-backup-manual-1
 
 `db-restore.sh <database> [<stamp>|latest] [--target <db>]` (same image) downloads one dump and:
 
-1. drops and recreates the target database (`DROP DATABASE … WITH (FORCE)`): **destructive**;
-2. creates the `timescaledb` extension and calls `timescaledb_pre_restore()`;
-3. runs `pg_restore --no-owner --no-privileges`;
-4. calls `timescaledb_post_restore()`, whatever the result.
+1. refuses, before touching the target, when the dump names a role the cluster lacks or `PGUSER`
+   is not a superuser;
+2. drops and recreates the target database (`DROP DATABASE … WITH (FORCE)`) with the dumped owner:
+   **destructive**;
+3. for a dump that contains `timescaledb`: creates the extension and calls
+   `timescaledb_pre_restore()`;
+4. runs `pg_restore`, keeping owners and privileges;
+5. calls `timescaledb_post_restore()`, whatever the result;
+6. applies the database's own grants and settings to the target.
+
+| Restored as dumped | Includes |
+|---|---|
+| Owners | tables, schemas, functions (a `SECURITY DEFINER` function keeps its owner), the database |
+| Privileges | table, column, sequence, schema, function and database grants; default privileges |
+| Settings | per-database settings (also with `--target`) |
 
 It exits non-zero on any `pg_restore` error other than the expected `timescaledb` extension
 collision, or when no statement error was reported but `pg_restore` failed. A failed restore is
-incomplete; do not cut over to it. `--no-privileges` means table grants and default privileges from
-the dump are not restored.
+incomplete; do not cut over to it.
 
 ### Rehearsal into a scratch database
 
@@ -161,11 +171,10 @@ Compare row counts and recent timestamps per tenant with the source, then drop t
 | Step | Action |
 |------|--------|
 | 1 | Start an empty TimescaleDB; the init scripts create the roles (passwords from the environment) and base schema |
-| 2 | Only if roles are missing: apply `<prefix>/globals/<stamp>.sql` with `psql`, then set each role's password (`--no-role-passwords`) |
+| 2 | Apply `<prefix>/globals/<stamp>.sql` with `psql`: it recreates the runtime roles (`tenant_reader_*`, `tenant_sqlproxy_*`); `role … already exists` errors for the init-script roles are expected. Roles carry no passwords (`--no-role-passwords`) |
 | 3 | `docker compose run --rm --entrypoint db-restore.sh db-backup industryflow latest` |
 | 4 | `docker compose run --rm --entrypoint db-restore.sh db-backup mlflow latest` |
-| 5 | Check that each service role can read its tables (grants are not restored, see above) |
-| 6 | Verify row counts and recent timestamps per tenant before cutover |
+| 5 | Verify row counts and recent timestamps per tenant before cutover |
 
 ### Cold layer
 

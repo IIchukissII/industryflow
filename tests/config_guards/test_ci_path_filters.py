@@ -157,3 +157,17 @@ def test_workflows_that_run_minio_init_watch_its_script():
         if not covered(script, workflow_filter(wf.name)):
             missed.append(wf.name)
     assert not missed, f"workflows that run minio-init but never re-run when it changes: {missed}"
+
+
+def test_workflows_that_run_the_backup_image_watch_its_build_context():
+    # The restore proof runs the db-backup image's scripts; a filter missing them never re-runs it.
+    context = _files_under("infrastructure/backup")
+    missed = []
+    for wf in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        doc = load_yaml(f".github/workflows/{wf.name}")
+        runs = " ".join(s.get("run", "") for j in doc["jobs"].values() for s in j.get("steps", []))
+        if "db-backup" not in runs or "changes" not in doc["jobs"]:
+            continue
+        globs = workflow_filter(wf.name)
+        missed += [f"{wf.name}: {p}" for p in context if not covered(p, globs)]
+    assert not missed, "workflows that run the db-backup image but miss its files:\n" + "\n".join(missed)

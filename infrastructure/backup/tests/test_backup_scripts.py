@@ -31,6 +31,17 @@ pg_restore: warning: errors ignored on restore: 1
 OTHER = """pg_restore: error: could not execute query: ERROR:  relation "sensors" does not exist
 Command was: ALTER TABLE ONLY tenant_x.sensor_measurements ADD CONSTRAINT fk FOREIGN KEY (sensor_id) REFERENCES tenant_x.sensors(sensor_id);
 """
+TOC = """;
+; Archive created at 2026-01-01 02:00:00 UTC
+;
+4321; 1262 16384 DATABASE - industryflow postgres
+4322; 0 0 DATABASE PROPERTIES - industryflow postgres
+4323; 0 0 ACL - DATABASE industryflow postgres
+2; 3079 16385 EXTENSION - timescaledb
+4324; 0 0 COMMENT - EXTENSION timescaledb
+230; 1259 16400 TABLE public companies postgres
+4325; 0 0 ACL public TABLE companies postgres
+"""
 
 
 def _exe(path: Path, body: str):
@@ -48,9 +59,22 @@ def env(tmp_path):
     _exe(bin_dir / "aws", f"#!{sys.executable}\nimport runpy, sys\n"
                           f"sys.argv[0] = 'aws'\nrunpy.run_path({str(HERE / 'fake_aws.py')!r}, run_name='__main__')\n")
     calls = tmp_path / "psql.log"
-    _exe(bin_dir / "psql", f'#!/usr/bin/env bash\necho "$*" >> {calls}\n')
-    _exe(bin_dir / "pg_restore",
-         '#!/usr/bin/env bash\ncat "$FAKE_PG_RESTORE_STDERR" >&2\nexit "${FAKE_PG_RESTORE_RC:-0}"\n')
+    # The role check (-f …/roles.sql) prints $FAKE_PSQL_REFUSED: nothing means every role exists.
+    _exe(bin_dir / "psql", f'#!/usr/bin/env bash\necho "$*" >> {calls}\n'
+                           'case "$*" in *roles.sql*) printf "%s" "${FAKE_PSQL_REFUSED:-}" ;; esac\n')
+    # -l prints the table of contents; -f writes the script (-L: the database-level one); otherwise
+    # it is the restore itself.
+    toc = tmp_path / "toc.list"
+    toc.write_text(TOC)
+    _exe(bin_dir / "pg_restore", f'#!/usr/bin/env bash\necho "$*" >> {tmp_path / "pg_restore.log"}\n'
+         'out=; list=; prev=\n'
+         'for a; do case "$a" in -l) cat "${FAKE_PG_RESTORE_TOC:-' + str(toc) + '}"; exit 0 ;; esac\n'
+         '  [ "$prev" = -f ] && out="$a"; [ "$prev" = -L ] && list="$a"; prev="$a"; done\n'
+         'if [ -n "$out" ]; then\n'
+         '  if [ -n "$list" ]; then printf "%s" "${FAKE_PG_RESTORE_DB_SQL:-}" > "$out"\n'
+         '  else printf "%s" "${FAKE_PG_RESTORE_SQL:-}" > "$out"; fi\n'
+         '  exit 0\nfi\n'
+         'cat "$FAKE_PG_RESTORE_STDERR" >&2\nexit "${FAKE_PG_RESTORE_RC:-0}"\n')
     _exe(bin_dir / "pg_dump", '#!/usr/bin/env bash\nwhile [ "$1" != "-f" ]; do shift; done; echo dump > "$2"\n')
     _exe(bin_dir / "pg_dumpall", "#!/usr/bin/env bash\necho '-- globals'\n")
     e = {
@@ -79,16 +103,100 @@ def _calls(env):
 
 # --- db-restore.sh --------------------------------------------------------------------------------
 
-def _restore(env, stderr: str, rc: int):
+def _restore(env, stderr: str, rc: int, **extra):
     (env["tmp"] / "restore.err").write_text(stderr)
     _put(env, env["env"]["S3_ENDPOINT_URL"], "backups", "timescaledb/industryflow/20260101T020000Z.dump", b"x")
-    e = dict(env["env"], FAKE_PG_RESTORE_STDERR=str(env["tmp"] / "restore.err"), FAKE_PG_RESTORE_RC=str(rc))
+    e = dict(env["env"], FAKE_PG_RESTORE_STDERR=str(env["tmp"] / "restore.err"), FAKE_PG_RESTORE_RC=str(rc),
+             **extra)
     return subprocess.run(["bash", str(SCRIPTS / "db-restore.sh"), "industryflow", "latest", "--target", "rehearsal"],
                           env=e, capture_output=True, text=True)
 
 
 def test_restore_succeeds_when_pg_restore_reports_nothing(env):
     assert _restore(env, "", 0).returncode == 0
+
+
+def test_restore_keeps_owners_and_privileges(env):
+    r = _restore(env, "", 0)
+    assert r.returncode == 0, r.stdout + r.stderr
+    # The restore itself (the call with -d) passes neither flag that drops owners or grants.
+    restore = [c for c in (env["tmp"] / "pg_restore.log").read_text().splitlines() if " -d " in f" {c} "]
+    assert len(restore) == 1, restore
+    assert "--no-owner" not in restore[0] and "--no-privileges" not in restore[0] and " -O" not in restore[0]
+    assert " -x" not in f" {restore[0]}"
+    assert 'CREATE DATABASE "rehearsal" OWNER "postgres";' in env["psql"].read_text()
+
+
+def test_restore_refuses_a_dump_naming_a_missing_role_before_touching_the_target(env):
+    r = _restore(env, "", 0, FAKE_PSQL_REFUSED="missing role: tenant_reader_x\n")
+    assert r.returncode == 1
+    assert "missing role: tenant_reader_x" in r.stdout
+    assert "DROP DATABASE" not in env["psql"].read_text()
+
+
+def test_restore_applies_database_level_grants_to_the_target(env):
+    r = _restore(env, "", 0, FAKE_PG_RESTORE_DB_SQL="GRANT ALL ON DATABASE industryflow TO mlflow_user;\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "restoring database-level grants" in r.stdout
+
+
+def test_restore_skips_timescaledb_steps_for_a_plain_database(env):
+    toc = env["tmp"] / "plain.list"
+    toc.write_text("4321; 1262 16384 DATABASE - mlflow postgres\n")
+    r = _restore(env, "", 0, FAKE_PG_RESTORE_TOC=str(toc))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "timescaledb" not in env["psql"].read_text()
+
+
+def _sourced(env, call, *args):
+    return subprocess.run(["bash", "-c", f'source {SCRIPTS / "db-restore.sh"}; {call} "$@"', "_", *args],
+                          env=env["env"], capture_output=True, text=True)
+
+
+def test_dump_roles_names_every_owner_grantee_grantor_and_default_privilege_role(env):
+    sql = env["tmp"] / "schema.sql"
+    sql.write_text("\n".join([
+        "ALTER TABLE public.companies OWNER TO postgres;",
+        'ALTER SCHEMA tenant_a OWNER TO "Weird ""Owner""";',
+        "GRANT SELECT ON TABLE public.companies TO api_gateway_user;",
+        'GRANT SELECT,INSERT ON TABLE tenant_a.sensors TO "tenant_reader_a";',
+        "GRANT ALL ON SCHEMA public TO mlflow_user WITH GRANT OPTION;",
+        "REVOKE ALL ON FUNCTION public.provision_company(p_company_name text, p_is_active boolean) FROM PUBLIC;",
+        "ALTER DEFAULT PRIVILEGES FOR ROLE api_gateway_user IN SCHEMA public GRANT SELECT ON TABLES TO ml_service_user;",
+        "GRANT SELECT ON TABLE x.y TO cold_export_user GRANTED BY spark_streaming_user;",
+        "    EXECUTE format('GRANT USAGE ON SCHEMA %I TO body_only_user', v);",
+        "",
+    ]))
+    r = _sourced(env, "dump_roles", str(sql))
+    assert r.returncode == 0, r.stderr
+    assert sorted(r.stdout.splitlines()) == sorted([
+        "postgres", 'Weird "Owner"', "api_gateway_user", "tenant_reader_a", "mlflow_user",
+        "ml_service_user", "cold_export_user", "spark_streaming_user"])
+
+
+def test_retarget_database_rewrites_only_the_source_database(env):
+    sql = env["tmp"] / "db.sql"
+    # As pg_restore -C writes it: the database's own CREATE and \connect come whatever -L lists.
+    sql.write_text("CREATE DATABASE mlflow WITH TEMPLATE = template0 ENCODING = 'UTF8';\n"
+                   "\\connect mlflow\n"
+                   'GRANT ALL ON DATABASE mlflow TO mlflow_user;\nALTER DATABASE "mlflow" SET x TO 1;\n'
+                   "GRANT ALL ON DATABASE mlflow2 TO a;\nSET row_security = off;\n")
+    r = _sourced(env, "retarget_database", "mlflow", "mlflow_rehearsal", str(sql))
+    assert r.stdout.splitlines() == [
+        'GRANT ALL ON DATABASE "mlflow_rehearsal" TO mlflow_user;',
+        'ALTER DATABASE "mlflow_rehearsal" SET x TO 1;',
+        "GRANT ALL ON DATABASE mlflow2 TO a;",
+        "SET row_security = off;",
+    ]
+
+
+def test_database_level_entries_and_owner(env):
+    toc = env["tmp"] / "t.list"
+    toc.write_text(TOC)
+    entries = _sourced(env, "database_level_entries", str(toc)).stdout.splitlines()
+    assert [e.split(" ", 3)[3] for e in entries] == [
+        "DATABASE PROPERTIES - industryflow postgres", "ACL - DATABASE industryflow postgres"]
+    assert _sourced(env, "database_owner", str(toc)).stdout == "postgres\n"
 
 
 def test_restore_excuses_only_the_extension_collision(env):
