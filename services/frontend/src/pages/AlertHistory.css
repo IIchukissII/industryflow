@@ -3,144 +3,91 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Alert history — the operations feed as a control-room view. Reuses the platform tokens and
- * shared classes (.panel, .kpi, .badge, .btn, .sdot); severity maps onto the status palette
- * via a per-element --sev custom property, so the page reads as one system with the rest.
+ * Alerts: the sentence, the day as one strip, then what is open and what came before.
+ * Severity reaches each row through a --sev custom property set from the status palette.
  */
 
-.alh-wrap { max-width: 1400px; margin: 0 auto; }
+.alh { max-width: 1100px; display: flex; flex-direction: column; gap: 32px; }
 .alh-state { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 60px 20px; color: var(--muted); }
 
-.alh-kpis { margin-bottom: var(--gap); }
+.alh-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.alh-actions { display: flex; align-items: center; gap: 16px; padding-top: 8px; }
+.alh-actions a { color: #7fb2ea; font-size: 14px; }
+.alh-actions a:hover { color: #a9cbf1; }
 
-/* ---- filters ------------------------------------------------------------- */
-.alh-filters-panel { padding: 16px 20px; margin-bottom: var(--gap); }
-.alh-filters { display: flex; gap: 14px; flex-wrap: wrap; }
-.alh-field { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 6px; }
-.alh-field-label {
-  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
-  text-transform: uppercase; color: var(--faint);
-}
-.alh-select {
-  background: var(--bg); color: var(--text);
-  border: 1px solid var(--line); border-radius: var(--r-sm);
-  padding: 8px 11px; font-family: var(--font-mono); font-size: 12px; cursor: pointer;
-}
-.alh-select:focus { outline: none; border-color: var(--signal); box-shadow: var(--ring); }
+.alh-h { font-size: 21px; font-weight: 500; margin-bottom: 8px; display: flex; align-items: baseline; gap: 10px; }
+.alh-count { font-size: 14px; color: var(--muted); }
 
-/* sensor filter chip — arrives gold from a Convergence node, click to clear */
+/* ---- the day ------------------------------------------------------------- */
+.alh-day-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.alh-day-head h2 { font-family: var(--font-sans); font-size: 14px; font-weight: 500; color: #c9cdd6; }
+.alh-summary { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.alh-summary p { margin: 0; }
+.alh-summary .mono { color: var(--text-soft); }
+.alh-spark { display: inline-block; vertical-align: middle; }
+
+.alh-timeline { display: flex; align-items: flex-end; gap: 4px; height: 80px; border-bottom: 1px solid var(--line); }
+.alh-bar-col { flex: 1; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-end; height: 100%; position: relative; }
+.alh-bar { background: #5c6478; border-radius: 2px 2px 0 0; }
+.alh-bar.empty { background: #1a2033; }
+.alh-bar-label {
+  position: absolute; top: calc(100% + 6px); left: 0;
+  font-family: var(--font-mono); font-size: 11px; color: #7d8496; white-space: nowrap;
+}
+.alh-day { padding-bottom: 18px; }
+
+/* ---- filters --------------------------------------------------------------- */
+.alh-filters { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.alh-field { display: flex; flex-direction: column; gap: 4px; min-width: 160px; }
+.alh-field span { font-size: 13px; color: var(--muted); }
+.alh-field select { width: auto; min-height: 36px; border-radius: 999px; padding: 6px 14px; background: transparent; }
 .alh-sensor-chip {
-  display: inline-flex; align-items: center; gap: 9px; cursor: pointer;
-  background: var(--gold-soft); color: var(--gold);
-  border: 1px solid color-mix(in srgb, var(--gold) 42%, transparent); border-radius: var(--r-sm);
-  padding: 8px 12px; font-family: var(--font-mono); font-size: 12px;
+  display: inline-flex; align-items: center; gap: 9px; cursor: pointer; min-height: 36px;
+  background: var(--gold-soft); color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--gold) 42%, transparent); border-radius: 999px;
+  padding: 6px 14px; font-size: 13px;
 }
 .alh-sensor-chip:hover { border-color: var(--gold); }
 .alh-sensor-chip span { color: var(--muted); }
 
-/* ---- charts row ---------------------------------------------------------- */
-.alh-charts { display: grid; grid-template-columns: 2fr 1fr; gap: var(--gap); margin-bottom: var(--gap); }
-.alh-chart { padding: 0; }
-.alh-chart .panel-head { padding: 16px 20px; }
-
-/* timeline: alerts per hour — thin signal bars, recessive empties (dataviz mark specs) */
-.alh-timeline { display: flex; align-items: flex-end; gap: 3px; height: 200px; padding: 0 20px 16px; }
-.alh-bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; }
-.alh-bar-count { height: 18px; font-family: var(--font-mono); font-size: 10px; color: var(--signal); line-height: 18px; }
-.alh-bar {
-  width: 100%; background: var(--signal); border-radius: 3px 3px 0 0; min-height: 2px;
-  transition: background 0.15s, box-shadow 0.15s;
-}
-.alh-bar:not(.empty):hover { background: var(--signal-strong); box-shadow: 0 0 10px rgba(74, 144, 217, 0.35); }
-.alh-bar.empty { background: var(--line); }
-.alh-bar-label { height: 16px; font-size: 10px; color: var(--faint); margin-top: 5px; }
-
-/* severity distribution: one proportion bar per level, coloured by its status token */
-.alh-sevdist { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
-.alh-sev-row { display: flex; flex-direction: column; gap: 5px; }
-.alh-sev-head { display: flex; justify-content: space-between; align-items: baseline; }
-.alh-sev-name { font-size: 12px; color: var(--muted); text-transform: capitalize; }
-.alh-sev-count { font-size: 13px; color: var(--sev); }
-.alh-sev-track { height: 8px; background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 999px; overflow: hidden; }
-.alh-sev-fill { height: 100%; background: var(--sev); border-radius: 999px; transition: width 0.3s ease-out; }
-
-/* ---- recent alerts list -------------------------------------------------- */
-.alh-list-panel { padding: 0; }
-.alh-list-panel .panel-head { padding: 16px 20px; }
-.alh-count { font-family: var(--font-mono); font-size: 13px; color: var(--faint); font-weight: 400; }
-.alh-list { padding: 0 20px 16px; max-height: 460px; overflow-y: auto; }
-.alh-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 20px; color: var(--muted); }
-.alh-empty p { margin: 0; }
+/* ---- alert rows ------------------------------------------------------------ */
+.alh-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.alh-empty { margin: 0; color: var(--muted); font-size: 15px; padding: 6px 0; }
 
 .alh-alert {
-  display: flex; align-items: center; justify-content: space-between; gap: 14px;
-  padding: 12px 14px; margin-bottom: 8px;
-  background: var(--panel-2);
-  border: 1px solid var(--line-soft);
-  border-left: 3px solid var(--sev);
-  border-radius: var(--r-sm);
+  display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 16px; align-items: start;
+  padding: 14px 0; border-bottom: 1px solid #161c2c;
 }
-.alh-alert.is-ack { opacity: 0.62; }
-.alh-alert-body { flex: 1; min-width: 0; }
-.alh-alert-msg { font-size: 13.5px; color: var(--text); margin-bottom: 5px; }
-.alh-alert-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11.5px; color: var(--muted); }
-.alh-alert-meta span { display: inline-flex; align-items: center; gap: 5px; }
-.alh-score { color: var(--signal); font-family: var(--font-mono); }
+.alh-alert.is-open {
+  padding: 18px 20px; margin-bottom: 10px; border: 1px solid var(--line);
+  border-radius: var(--r-lg); background: var(--panel);
+}
+.alh-mark { margin-top: 6px; width: 9px; height: 9px; transform: rotate(45deg); background: var(--sev); }
+.alh-alert.is-ack .alh-mark { opacity: 0.55; }
+.alh-alert-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.alh-alert-msg { font-size: 15px; color: var(--text); }
+.alh-alert.is-ack .alh-alert-msg { color: #d6d9e0; font-size: 14px; }
+.alh-alert-meta { font-size: 13px; color: var(--muted); }
+.alh-alert-meta .mono { color: #c9cdd6; }
 
-.alh-alert-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.alh-sev-badge {
-  color: var(--sev); border-color: color-mix(in srgb, var(--sev) 35%, transparent);
-  background: color-mix(in srgb, var(--sev) 10%, transparent);
-  text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em;
-}
+.alh-alert-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.alh-alert.is-open .btn-primary { min-height: 40px; padding: 10px 16px; font-size: 14px; }
+.alh-ack-done { font-size: 13px; color: var(--muted); white-space: nowrap; }
 
-.alh-ack-btn {
-  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--muted); background: transparent; border: 1px solid var(--line);
-  border-radius: var(--r-sm); padding: 4px 9px; cursor: pointer; white-space: nowrap;
-  transition: color 0.12s, border-color 0.12s;
-}
-.alh-ack-btn:hover { color: var(--text); border-color: var(--muted); }
-.alh-ack-btn:focus-visible { outline: none; box-shadow: var(--ring); }
-.alh-ack-done {
-  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
-  font-size: 11px; color: var(--live);
-}
-
-/* ---- operator label control (ADR-0022) ----------------------------------- */
-/* Three-way "was this alert real?" control on each alert row. Uses the shared status
-   tokens; the active verdict is highlighted so it doubles as the verdict readout. */
-.alh-label { display: inline-flex; gap: 3px; }
+/* the real / false / unsure verdict: a quiet segmented control; the chosen one is lit */
+.alh-label { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; }
 .alh-verdict {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: 3px 7px;
-  cursor: pointer;
-  transition: color 0.12s, background 0.12s, border-color 0.12s;
+  font-size: 13px; color: var(--muted); background: transparent; border: 0; border-radius: 999px;
+  padding: 5px 11px; min-height: 30px; cursor: pointer;
 }
-.alh-verdict:hover:not(:disabled) { color: var(--text); border-color: var(--muted); }
-.alh-verdict:disabled { opacity: 0.5; cursor: default; }
-.alh-verdict:focus-visible { outline: none; box-shadow: var(--ring); }
+.alh-verdict:hover:not(:disabled) { color: var(--text); }
+.alh-verdict:disabled { cursor: not-allowed; opacity: 0.55; }
+.alh-verdict.active { background: var(--panel-3); color: var(--text); }
+.alh-verdict-ok.active { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--live) 55%, transparent); }
+.alh-verdict-bad.active { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--crit) 55%, transparent); }
 
-.alh-verdict-ok.active    { color: var(--live); border-color: rgba(45, 212, 191, 0.45); background: rgba(45, 212, 191, 0.10); }
-.alh-verdict-bad.active   { color: var(--crit); border-color: rgba(244, 73, 109, 0.45); background: rgba(244, 73, 109, 0.10); }
-.alh-verdict-muted.active { color: var(--text); border-color: var(--muted); background: var(--panel-2); }
-
-/* ---- responsive ---------------------------------------------------------- */
-@media (max-width: 860px) {
-  .alh-charts { grid-template-columns: 1fr; }
+@media (max-width: 720px) {
+  .alh-alert { grid-template-columns: 12px minmax(0, 1fr); }
+  .alh-alert-right { grid-column: 2; justify-content: flex-start; }
+  .alh-alert.is-open { padding: 16px; }
 }
-@media (max-width: 560px) {
-  .alh-filters { flex-direction: column; }
-  .alh-alert { flex-direction: column; align-items: stretch; }
-  .alh-alert-right { flex-wrap: wrap; }
-}
-
-/* precision-over-time sparkline in the KPI (ADR-0022) */
-.alh-spark { display: block; margin: 6px 0 2px; overflow: visible; }

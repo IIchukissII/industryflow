@@ -89,38 +89,9 @@
 }
 
 /* Buttons */
-.btn-primary {
-  background: var(--signal);
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 500;
-  transition: all 0.2s;
-}
 
-.btn-primary:hover {
-  background: #1e4fd9;
-  transform: translateY(-1px);
-}
 
-.btn-secondary {
-  background: #2a2e39;
-  color: #d1d4dc;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 500;
-  transition: all 0.2s;
-}
 
-.btn-secondary:hover {
-  background: #363a45;
-}
 
 .btn-edit {
   background: #26a69a;

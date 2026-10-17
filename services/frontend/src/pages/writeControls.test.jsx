@@ -42,6 +42,7 @@ vi.mock('../services/http', () => ({
 vi.mock('../services/equipmentApi', () => ({
   getEquipment: () => Promise.resolve([EQUIPMENT]),
   getEquipmentById: () => Promise.resolve(EQUIPMENT),
+  getEquipmentSensors: () => Promise.resolve([]),
   deleteEquipment: () => Promise.resolve(),
 }));
 
@@ -105,18 +106,19 @@ describe('write controls by role', () => {
   test('observer: equipment can be viewed, not created, edited or deleted', async () => {
     signIn({ role: 'observer' });
     await renderPage('Equipment');
-    expect(await screen.findByText('Pump')).toBeInTheDocument();
-    expect(screen.getByText('View Details')).toBeInTheDocument();
-    expect(screen.queryByText('+ Create New Equipment')).toBeNull();
+    expect(await screen.findByRole('heading', { name: 'Pump' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Details' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add equipment' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete machine' })).toBeNull();
   });
 
   test('engineer: equipment create/edit/delete offered', async () => {
     signIn({ role: 'engineer' });
     await renderPage('Equipment');
-    expect(await screen.findByText('Pump')).toBeInTheDocument();
-    expect(screen.getByText('+ Create New Equipment')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Pump' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add equipment' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete machine' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
   });
 });
