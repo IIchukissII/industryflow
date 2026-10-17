@@ -18,8 +18,8 @@ from typing import Any, Awaitable, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
 
-# Extension-API version (semver). A major bump is a breaking contract change, never silent
-# (ADR-0010 dec 3 / ADR-0000 supersession discipline). 0.2.0 adds the optional `stateful` /
+# Extension-API version (semver). From 1.0 a breaking change is a major bump; while 0.x, a minor
+# bump may break the contract (ADR-0010 dec 3 rev 2). 0.2.0 adds the optional `stateful` /
 # `neutral` capability tags to register_transform (ADR-0024 dec 1) — additive, with
 # back-compatible defaults, so transforms written against 0.1.0 keep working untouched.
 # 0.3.0 adds the optional `semantics` / `handles_flavors` declarations to register_detector
