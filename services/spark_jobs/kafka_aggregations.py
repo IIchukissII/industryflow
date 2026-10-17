@@ -32,7 +32,7 @@ from psycopg2.extras import execute_values
 
 from aggregation_windows import AGGREGATION_WINDOWS, table_name, watermark_delay, window_duration
 from reading_guard import (
-    canonical_uuid, classify_references, company_id_to_schema, parse_readings,
+    DEFAULT_SOURCE_TOPIC, canonical_uuid, classify_references, company_id_to_schema, parse_readings,
     read_tenant_references, rejection_reason,
 )
 
@@ -222,7 +222,7 @@ def create_aggregation_stream(spark, granularity):
         .readStream \
         .format("kafka") \
         .option("kafka.bootstrap.servers", kafka_bootstrap) \
-        .option("subscribe", "sensor-data-raw") \
+        .option("subscribe", os.getenv("KAFKA_TOPIC_SENSOR_DATA", DEFAULT_SOURCE_TOPIC)) \
         .option("startingOffsets", "latest") \
         .option("maxOffsetsPerTrigger", "10000") \
         .load()
