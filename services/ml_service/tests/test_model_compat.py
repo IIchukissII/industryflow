@@ -31,12 +31,11 @@ from model_compat import (  # noqa: E402
 def artifact(monkeypatch):
     """Let a test state what the artifact declares, and what this environment happens to have."""
 
-    def _setup(declared: dict, present: dict, flavor: str = "mlflow.sklearn", importable=True):
+    def _setup(declared: dict, present: dict, flavor: str = "mlflow.sklearn"):
         monkeypatch.setattr(model_compat, "_read_declarations", lambda uri: (flavor, declared))
         # `present` is the whole truth about this environment: it answers both "is this declared
         # package here" and "is the flavor's framework here".
         monkeypatch.setattr(model_compat, "_installed", lambda pkg: present.get(pkg))
-        monkeypatch.setattr(model_compat, "_flavor_importable", lambda f: importable)
 
     return _setup
 
@@ -78,7 +77,6 @@ class TestTheOpenFrameworkSet:
             {"torch": "2.9.0", "numpy": "2.5.1"},
             {"numpy": "2.5.1"},  # no torch here
             flavor="mlflow.pytorch",
-            importable=False,
         )
         result = evaluate("runs:/abc/model")
         assert result.status == INCOMPATIBLE
@@ -90,7 +88,7 @@ class TestTheOpenFrameworkSet:
     def test_a_missing_framework_is_refused_even_when_the_flavor_module_imports(self, artifact):
         # mlflow imports its frameworks LAZILY, so `import mlflow.pytorch` can succeed in an image with
         # no torch at all. Anchor the refusal on the framework being installed, not on that import.
-        artifact({"torch": "2.9.0"}, {}, flavor="mlflow.pytorch", importable=True)
+        artifact({"torch": "2.9.0"}, {}, flavor="mlflow.pytorch")
         result = evaluate("runs:/abc/model")
         assert result.status == INCOMPATIBLE
         assert result.flavor_supported is False
@@ -198,7 +196,7 @@ class TestFaultsAreStructuredNotProse:
         assert result.present["numpy"] == "2.5.1"
 
     def test_a_missing_library_is_a_fault_on_that_library(self, artifact):
-        artifact({"torch": "2.9.0"}, {}, flavor="mlflow.pytorch", importable=False)
+        artifact({"torch": "2.9.0"}, {}, flavor="mlflow.pytorch")
         result = evaluate("runs:/abc/model")
         assert "torch" in result.faults
         assert result.present["torch"] is None          # the gap in the column IS the finding

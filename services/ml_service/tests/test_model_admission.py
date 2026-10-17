@@ -31,8 +31,12 @@ import extensions.builtins_detectors  # noqa: F401,E402  (registers the built-in
 import load_probe  # noqa: E402
 import model_compat  # noqa: E402
 import model_loader  # noqa: E402
+import skops_trust  # noqa: E402
 import uploaded_model  # noqa: E402
 from routers.models import router, get_company_id_dependency  # noqa: E402
+
+SAFE_FLAVORS = {"python_function": {"loader_module": "mlflow.sklearn"},
+                "sklearn": {"serialization_format": "skops"}}
 
 CID = str(uuid.uuid4())
 OTHER = str(uuid.uuid4())
@@ -144,6 +148,8 @@ def client(monkeypatch, owned_runs):
 
     monkeypatch.setattr(model_compat, "evaluate_uri", compatible)
     monkeypatch.setattr(model_compat, "evaluate_run", compatible)
+    # The manifest read by the author-code check (its own suite: test_upload_author_code).
+    monkeypatch.setattr(skops_trust, "read_flavors", lambda uri: SAFE_FLAVORS)
     c = TestClient(app)
     c.repo = app.state.ml_repository
     return c

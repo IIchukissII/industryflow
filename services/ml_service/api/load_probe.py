@@ -17,9 +17,10 @@ evidence, instead of accepting a stranger's word for both halves. Dropping it to
 comparison would leave assertions checked against assertions, which ADR-0027 dec 5 rejects.
 
 This module decides; ``load_probe_worker`` observes, in a process of its own. The split is not
-ceremony: the worker's environment refuses object-deserialisation, and that switch is process-wide —
-set in the service it would silently bind the notebook path too, which ADR-0030 dec 4 deliberately
-did not decide.
+ceremony: the worker's environment refuses object-deserialisation for its whole life, and that switch
+is process-wide — set for the life of the service it would silently bind the notebook path too, which
+ADR-0030 dec 4 deliberately did not decide. (The service turns it off only for the duration of an
+uploaded load, under ``skops_trust._PICKLE_SWITCH``.)
 
 **A probe that could not run is not a probe that passed.** Every failure mode here — crash, timeout,
 unreadable output — resolves to a refusal, because the gate's question is "has this been shown to

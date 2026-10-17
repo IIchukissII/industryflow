@@ -22,6 +22,7 @@ import extensions
 import load_probe
 import model_compat
 import model_loader
+import skops_trust
 import upload_capability
 import uploaded_model
 from drift.reference_profile import prediction_column_refusal
@@ -278,6 +279,37 @@ async def _admit_address_or_refuse(
         ) from exc
 
 
+async def _refuse_author_code_or_reject(artifact_uri: str, *, on_refused: int) -> None:
+    """Refuse an uploaded model whose load would run code its author chose (ADR-0030 dec 4 rev 4).
+
+    Asked at registration and at deployment, before the compatibility gate reads the artifact and
+    before the load probe runs, and again by every load. It reads the manifest only and imports
+    nothing it names, so it runs here, in the serving process.
+    """
+    try:
+        flavors = await asyncio.to_thread(skops_trust.read_flavors, artifact_uri)
+    except Exception as exc:  # noqa: BLE001 — the store is outside our control; no verdict either way
+        logger.warning(f"Could not read the manifest of {artifact_uri}: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Could not read the uploaded model's manifest, so it cannot be established that "
+                "loading it runs no code its author supplied. This is transient — retry."
+            ),
+        ) from exc
+    try:
+        skops_trust.refuse_author_code(flavors)
+    except skops_trust.UnsafeArtifact as exc:
+        logger.warning(f"Refusing uploaded model at {artifact_uri}: {exc}")
+        raise HTTPException(status_code=on_refused, detail={
+            "message": (
+                "Loading this model would run code its author chose, which an uploaded model may "
+                "never do (ADR-0030 dec 4)."
+            ),
+            "reason": str(exc),
+        }) from exc
+
+
 def _kernel_detector_or_refuse(named: Optional[str], flavor: Optional[str]) -> str:
     """The detector a kernel-authored model is scored by, held to what the registry declares.
 
@@ -426,6 +458,9 @@ async def create_model(
     await _admit_address_or_refuse(
         company_id, payload.get("mlflow_run_id"), payload.get("artifact_uri"), on_refused=422,
     )
+
+    if provenance == uploaded_model.PROVENANCE_UPLOADED:
+        await _refuse_author_code_or_reject(payload["artifact_uri"], on_refused=422)
 
     compatibility = await _evaluate_or_reject(
         payload.get("mlflow_run_id"),
@@ -650,6 +685,13 @@ async def deploy_model(
                 "detector": detector,
             })
 
+        uploaded = uploaded_model.provenance_of(
+            mlflow_run_id=model_data.get("mlflow_run_id"),
+            artifact_uri=model_data.get("artifact_uri"),
+        ) == uploaded_model.PROVENANCE_UPLOADED
+        if uploaded:
+            await _refuse_author_code_or_reject(model_data["artifact_uri"], on_refused=409)
+
         compatibility = await _evaluate_or_reject(
             model_data.get("mlflow_run_id"),
             on_incompatible=409,
@@ -677,10 +719,7 @@ async def deploy_model(
         # Here rather than at registration because this is where the answer has to be true: the
         # verdict expires, and this is the gate that already knows that. It EXTENDS this gate rather
         # than adding a third — a parallel path would be a second answer to a settled question.
-        if uploaded_model.provenance_of(
-            mlflow_run_id=model_data.get("mlflow_run_id"),
-            artifact_uri=model_data.get("artifact_uri"),
-        ) == uploaded_model.PROVENANCE_UPLOADED:
+        if uploaded:
             result = await load_probe.probe(model_data["artifact_uri"])
             if result.refused:
                 logger.warning(f"Refusing to deploy uploaded model '{model_label}': {result.error}")
