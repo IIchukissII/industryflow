@@ -3,123 +3,52 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Notebooks page — the embedded workspace framed as a control-room instrument panel, reusing the
- * platform's tokens (no new palette/type). The notebook itself is the content; the chrome is
- * deliberately quiet, and the one expressive element is the session readout.
+ * Notebooks: the sentence, then the embedded environment filling the working area. The
+ * notebook is the content; the frame around it stays quiet.
  */
 
-.nb-page {
-  display: flex;
-  flex-direction: column;
-  /* Fill the console: the framed session should occupy the working area, not float in it. */
-  min-height: calc(100vh - var(--topbar-h) - 52px);
+.nb {
+  display: flex; flex-direction: column; gap: 24px;
+  /* fill the console: the environment occupies the working area, not floats in it */
+  min-height: calc(100vh - var(--topbar-h) - 64px);
 }
 
-/* The framed session: a panel that grows to fill the page, with the iframe edge-to-edge inside. */
+.nb-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.nb-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 4px; }
+.nb-actions .btn { min-height: 44px; padding: 10px 16px; font-size: 14px; text-decoration: none; }
+
 .nb-frame {
-  flex: 1;
-  min-height: 460px;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  position: relative; flex: 1; min-height: 460px; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
 }
+.nb-iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
 
-.nb-frame-head {
-  /* extends .panel-head */
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-/* Session readout — instrument metadata, set in mono like every other telemetry value. */
-.nb-session {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  min-width: 0;
-}
-.nb-session-label {
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  color: var(--faint);
-}
-.nb-session-sep { color: var(--line); }
-.nb-session-meta {
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.nb-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.nb-action {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: 5px 10px;
-  cursor: pointer;
-  text-decoration: none;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.nb-action:hover {
-  color: var(--text);
-  border-color: var(--signal);
-  background: var(--signal-soft);
-}
-
-.nb-frame-body { position: relative; flex: 1; min-height: 0; background: var(--bg); }
-
-.nb-iframe {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  display: block;
-}
-
-/* Connecting state — a quiet boot sequence in the console's own voice, over the dark surface. */
+/* starting: a quiet note over the frame until the hub answers */
 .nb-boot {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 28px;
-  /* center the readout horizontally, top-third vertically so it doesn't look stranded */
-  justify-content: center;
-  background:
-    radial-gradient(120% 80% at 50% 0%, var(--signal-soft), transparent 60%),
-    var(--bg);
+  position: absolute; inset: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: center; padding: 0 24px;
+  background: var(--panel);
 }
+.nb-boot-inner { display: flex; align-items: flex-start; gap: 16px; }
 .nb-boot-pulse {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--live);
-  box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.45);
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; align-self: flex-start; margin-top: 7px;
+  background: var(--text-soft);
+  box-shadow: 0 0 0 0 rgba(233, 229, 220, 0.4);
   animation: nb-pulse 1.6s ease-out infinite;
-  flex-shrink: 0;
 }
-.nb-boot-lines { font-size: 12.5px; line-height: 1.7; }
-.nb-boot-line { color: var(--text); }
-.nb-boot-line.faint { color: var(--faint); font-size: 11.5px; }
-.nb-boot-slow { color: var(--muted); margin-top: 6px; max-width: 46ch; }
-.nb-boot-slow a, .nb-action ~ .nb-boot-slow a { color: var(--signal); }
+.nb-boot-lines { max-width: 46ch; display: flex; flex-direction: column; gap: 6px; }
+.nb-boot-lines p { margin: 0; }
+.nb-boot-lines > p:first-child { font-family: var(--font-display); font-size: 21px; font-weight: 500; color: var(--text); }
+.nb-boot-sub { font-size: 14px; color: var(--muted); }
+.nb-boot-sub a { color: #7fb2ea; }
+.nb-boot-sub a:hover { color: #a9cbf1; }
 
 @keyframes nb-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.45); }
-  70%  { box-shadow: 0 0 0 14px rgba(45, 212, 191, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(233, 229, 220, 0.4); }
+  70%  { box-shadow: 0 0 0 14px rgba(233, 229, 220, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(233, 229, 220, 0); }
 }
 
 @media (max-width: 720px) {
-  .nb-session-meta { white-space: normal; }
+  .nb-frame { min-height: 420px; border-radius: 14px; }
 }

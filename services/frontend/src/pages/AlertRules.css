@@ -2,191 +2,99 @@
  * SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Alert rules: the sentence, the rules as rows that say what each one watches and when it
+ * fires, and the create/edit form. Everything is scoped under .ar.
  */
 
-.alert-rules-page {
-  padding: 20px;
-  background: #0a0e27;
-  min-height: 100vh;
-  color: #d1d4dc;
+.ar { max-width: 1100px; display: flex; flex-direction: column; gap: 32px; }
+.ar-state { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 60px 0; color: var(--muted); }
+.ar-state-bad { color: #ef7a64; }
+
+.ar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.ar-add { min-height: 44px; padding: 10px 16px; font-size: 14px; }
+.ar-notice { margin: 0; color: #ef7a64; font-size: 14px; }
+
+.ar-h { font-size: 21px; font-weight: 500; }
+.ar-rules-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
+.ar-seg-n { color: inherit; opacity: 0.7; margin-left: 2px; }
+/* the shared .seg hover rule outranks its pressed colour; keep the chosen label legible */
+.ar .seg button[aria-pressed='true']:hover { color: var(--ink); }
+.ar-empty { margin: 0; color: var(--muted); font-size: 15px; padding: 10px 0; }
+
+/* ---- rules --------------------------------------------------------------- */
+.ar-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ar-rule {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: center;
+  padding: 18px 0; border-bottom: 1px solid #161c2c;
+}
+.ar-rule-main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ar-rule-name {
+  font-family: var(--font-sans); font-size: 15px; font-weight: 500; color: var(--text);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.ar-rule-desc { margin: 0; font-size: 14px; color: #b9bfcc; max-width: 70ch; }
+.ar-rule-what { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.ar-rule-what .mono { color: #c9cdd6; }
+.ar-rule.is-off .ar-rule-name { color: #c9cdd6; }
+.ar-off { font-size: 12px; padding: 1px 8px; }
+
+.ar-rule-actions { display: flex; align-items: center; gap: 8px; }
+.ar-rule-actions .btn { min-height: 40px; padding: 9px 14px; font-size: 14px; }
+
+@media (max-width: 720px) {
+  .ar-rule { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .ar-rules-head .seg { max-width: 100%; overflow-x: auto; }
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 30px;
+/* ---- the form ------------------------------------------------------------ */
+.ar-modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: rgba(4, 6, 12, 0.78);
 }
-
-.page-header h1 {
-  color: #d1d4dc;
-  font-size: 28px;
-  margin: 0;
+.ar-modal {
+  width: min(640px, 100%); max-height: calc(100vh - 32px); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+  box-shadow: var(--shadow);
 }
-
-
-
-.tabs {
-  display: flex;
-  gap: 10px;
-  border-bottom: 2px solid #2a2e39;
-  margin-bottom: 20px;
+.ar-modal-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 20px 24px; border-bottom: 1px solid var(--line-soft);
 }
-
-.tab {
-  background: transparent;
-  border: none;
-  color: #787b86;
-  padding: 12px 20px;
-  cursor: pointer;
-  font-size: 14px;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
-  transition: all 0.2s;
+.ar-modal-head h2 { font-size: 21px; font-weight: 500; overflow-wrap: anywhere; }
+.ar-modal-close {
+  width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid transparent; border-radius: 12px;
+  color: var(--muted); font-size: 28px; line-height: 1; cursor: pointer;
 }
+.ar-modal-close:hover { color: var(--text); border-color: var(--line); }
 
-.tab:hover {
-  color: #d1d4dc;
+.ar-form { padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 20px; }
+.ar-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ar-field label, .ar-group legend { font-size: 13px; color: var(--muted); }
+.ar-field input, .ar-field select { font-size: 14px; min-height: 40px; }
+.ar-num { max-width: 180px; }
+.ar-hint { margin: 0; font-size: 13px; color: var(--muted); }
+.ar-hint a { color: #7fb2ea; }
+.ar-hint-warn { color: var(--warn); }
+
+.ar-group { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.ar-group legend { padding: 0; margin-bottom: 8px; }
+.ar-seg { flex-wrap: wrap; align-self: flex-start; border-radius: 22px; }
+.ar-seg button { min-height: 36px; }
+
+.ar-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.ar-row .ar-num { max-width: none; }
+
+.ar-check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; color: var(--text); cursor: pointer; }
+.ar-check input { width: 18px; height: 18px; accent-color: var(--text); margin: 0; }
+
+.ar-form-error { margin: 0; color: #ef7a64; font-size: 14px; }
+.ar-form-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; padding-top: 4px; }
+.ar-form-actions .btn { min-height: 44px; padding: 10px 18px; font-size: 14px; }
+
+@media (max-width: 480px) {
+  .ar-modal-head { padding: 16px; }
+  .ar-form { padding: 16px; }
 }
-
-.tab.active {
-  color: var(--signal);
-  border-bottom-color: var(--signal);
-}
-
-.tab-content {
-  background: #131722;
-  border-radius: 8px;
-  padding: 20px;
-  min-height: 400px;
-}
-
-/* Table Styles */
-.rules-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.rules-table thead {
-  background: #1e222d;
-}
-
-.rules-table th {
-  text-align: left;
-  padding: 12px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #787b86;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  border-bottom: 2px solid #2a2e39;
-}
-
-.rules-table td {
-  padding: 12px;
-  border-bottom: 1px solid #2a2e39;
-  font-size: 13px;
-  color: #d1d4dc;
-}
-
-.rules-table tbody tr {
-  transition: background 0.2s;
-}
-
-.rules-table tbody tr:hover {
-  background: #1e222d;
-}
-
-.btn-action {
-  background: transparent;
-  border: 1px solid #2a2e39;
-  color: #787b86;
-  padding: 6px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.2s;
-}
-
-.btn-action:hover {
-  border-color: var(--signal);
-  color: var(--signal);
-}
-
-/* Add to the end of AlertRules.css */
-
-/* Modal Styles */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: #131722;
-  border: 1px solid #2a2e39;
-  border-radius: 8px;
-  padding: 30px;
-  max-width: 600px;
-  width: 90%;
-  max-height: 90vh;
-  overflow-y: auto;
-}
-
-.modal-content h2 {
-  margin: 0 0 20px 0;
-  color: #d1d4dc;
-  font-size: 24px;
-}
-
-.form-group {
-  margin-bottom: 20px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 8px;
-  color: #787b86;
-  font-size: 13px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.form-group input,
-.form-group select {
-  width: 100%;
-  padding: 10px;
-  background: #1e222d;
-  border: 1px solid #2a2e39;
-  border-radius: 4px;
-  color: #d1d4dc;
-  font-size: 14px;
-}
-
-.form-group input:focus,
-.form-group select:focus {
-  outline: none;
-  border-color: var(--signal);
-}
-
-.form-group input[type="checkbox"] {
-  width: auto;
-  margin: 0;
-}
-
-.form-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  margin-top: 30px;
-}
-
-

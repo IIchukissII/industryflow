@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import AppShell from '../components/AppShell';
+import { notebooksReading } from '../utils/reading-notebooks';
 import './Notebooks.css';
 
 // The notebook hub is mounted same-origin under /jupyter/ (the frontend reverse-proxies it to the
@@ -34,69 +35,42 @@ export default function Notebooks({ user }) {
 
   return (
     <AppShell user={user} title="Notebooks">
-      <div className="nb-page">
-        <div className="page-head">
-          <div>
-            <div className="eyebrow">Embedded workspace</div>
-            <h1>Notebooks</h1>
-            <div className="sub">
-              Explore and model your tenant&apos;s data in a sandboxed environment — nothing to
-              install, no credentials to manage.
-            </div>
+      <div className="nb">
+        <div className="nb-head">
+          <p className="reading">{notebooksReading({ loaded, slow })}</p>
+          <div className="nb-actions">
+            <button type="button" className="btn" onClick={reload}>Reload</button>
+            <a className="btn" href={HUB_URL} target="_blank" rel="noreferrer">Open in a new tab</a>
           </div>
-          <span className={`badge ${loaded ? 'badge-live' : 'badge-warn'}`}>
-            <span className={`sdot ${loaded ? 'ok' : 'pending'}`} />
-            {loaded ? 'Session live' : 'Connecting'}
-          </span>
         </div>
 
-        <section className="panel nb-frame">
-          <div className="panel-head nb-frame-head">
-            {/* Signature: an instrument-style readout of the isolation posture this product is
-                built on — the embed reads as native to a console that foregrounds tenant safety. */}
-            <div className="nb-session mono">
-              <span className={`sdot ${loaded ? 'ok' : 'pending'}`} />
-              <span className="nb-session-label">Session</span>
-              <span className="nb-session-sep" aria-hidden="true">/</span>
-              <span className="nb-session-meta">single-tenant · read-only data · sandboxed kernel</span>
-            </div>
-            <div className="nb-actions">
-              <button className="nb-action" onClick={reload} title="Restart the embedded session">
-                Reload
-              </button>
-              <a className="nb-action" href={HUB_URL} target="_blank" rel="noreferrer">
-                Open in new tab <span aria-hidden="true">↗</span>
-              </a>
-            </div>
-          </div>
-
-          <div className="nb-frame-body">
-            {!loaded && (
-              <div className="nb-boot" role="status">
+        <section className="nb-frame" aria-label="Notebook environment">
+          {!loaded && (
+            <div className="nb-boot" role="status">
+              <div className="nb-boot-inner">
                 <span className="nb-boot-pulse" aria-hidden="true" />
-                <div className="nb-boot-lines mono">
-                  <div className="nb-boot-line">establishing secure session</div>
-                  <div className="nb-boot-line faint">
-                    minting single-tenant capability · spawning your environment
-                  </div>
+                <div className="nb-boot-lines">
+                  <p>Starting your environment</p>
+                  <p className="nb-boot-sub">
+                    Its data access is issued for your tenant only, and its kernel runs in a sandbox.
+                  </p>
                   {slow && (
-                    <div className="nb-boot-line nb-boot-slow">
-                      first launch can take a moment while your environment starts —{' '}
-                      <a href={HUB_URL} target="_blank" rel="noreferrer">open it in a new tab</a> if
-                      it stalls.
-                    </div>
+                    <p className="nb-boot-sub">
+                      If nothing appears, <a href={HUB_URL} target="_blank" rel="noreferrer">open it in a new tab</a> to
+                      see what the hub reports.
+                    </p>
                   )}
                 </div>
               </div>
-            )}
-            <iframe
-              ref={frame}
-              title="IndustryFlow notebooks"
-              src={HUB_URL}
-              className="nb-iframe"
-              onLoad={() => setLoaded(true)}
-            />
-          </div>
+            </div>
+          )}
+          <iframe
+            ref={frame}
+            title="IndustryFlow notebooks"
+            src={HUB_URL}
+            className="nb-iframe"
+            onLoad={() => setLoaded(true)}
+          />
         </section>
       </div>
     </AppShell>
