@@ -24,7 +24,7 @@ import company_status
 from config import get_settings
 from database import AsyncSessionLocal
 from dependencies import normalize_company_id_to_schema
-from users import ACCESS_COOKIE
+from users import ACCESS_COOKIE, JWT_ALGORITHM
 from sqlalchemy import select, text
 from models.user import User
 
@@ -147,7 +147,7 @@ async def _session_ended(session: SocketSession) -> bool:
 def _token_claims(token: str) -> Optional[dict]:
     """The verified claims of an unexpired access JWT that names a user and an expiry, else None."""
     try:
-        payload = jwt.decode(token, SECRET, algorithms=["HS256"], audience="fastapi-users:auth")
+        payload = jwt.decode(token, SECRET, algorithms=[JWT_ALGORITHM], audience="fastapi-users:auth")
     except JWTError:
         return None
     if payload.get("sub") is None or payload.get("exp") is None:

@@ -43,7 +43,6 @@ class Config:
 
     # JWT Configuration
     JWT_SECRET_KEY: str = os.getenv('JWT_SECRET_KEY')
-    JWT_ALGORITHM: str = os.getenv('JWT_ALGORITHM', 'HS256')
     
     # MLflow Tracking
     MLFLOW_TRACKING_URI: str = os.getenv('MLFLOW_TRACKING_URI')
