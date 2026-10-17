@@ -3,139 +3,120 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ML & feature engineering
+# ML and feature engineering
 
-How IndustryFlow turns raw sensor readings into anomaly scores: configurable feature
-engineering, MLflow-tracked models, and real-time inference — all **domain-generic**, with
-domain specifics supplied as [extensions](../operations/extensions.md). Code under
-`services/ml_service/api/` is authoritative.
+Feature configurations, the model registry, inference, detectors and drift in `ml-service-api`.
+Code in `services/ml_service/api/` is authoritative. Domain transforms and detectors are
+[extensions](../operations/extensions.md).
 
-## Feature engineering (configuration-driven)
+| Decision | ADR |
+|---|---|
+| Extension contract and mechanism (transforms, detectors) | [ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md), [ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md) |
+| Window baselines read from the Spark aggregates; neutral value on a missing baseline | [ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md) |
+| Stateful-feature kill-switch | [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md) |
+| Artifact formats, supported flavor set, skops trust by provenance | [ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) |
+| Score semantics declared, never inferred; detector recorded at registration | [ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) |
+| Model tracking and registry per tenant | [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md), [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md) |
+| Drift monitoring | [ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md) |
+| Operator feedback and retrain recommendation | [ADR-0022](../../ADR/ADR-0022-concept-drift-operator-feedback.md), [alerting.md](alerting.md) |
+| Externally-authored models | [ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md), [model-upload.md](model-upload.md) |
 
-A model's input features are defined by a **feature configuration** stored per tenant in
-`feature_engineering_configs` (not in code). A config lists `base_sensors` and an ordered list
-of `transformations`, each with a `type` and params. The `FeatureEngineeringEngine` reads the
-config and produces the feature vector; it holds no fixed feature list and no domain knowledge.
+## Components
 
-Each transformation `type` is resolved through the **extension registry**
-(**[ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md)** contract,
-**[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)** mechanism). The platform ships generic
-built-ins — `identity`, `polynomial`, `interaction`, `deviation`, `statistical`,
-`rolling_stat` — and a domain registers new transform types in its own module without editing
-the engine. Window statistics (e.g. deviation from a rolling mean) read their baseline from the
-**Spark-materialized aggregates** (`sensor_aggregations_*`, tenant-scoped, ADR-0006) rather than a
-separate windowing store — one windowing substrate, not two
-(**[ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md)**). When the baseline
-is unavailable (no aggregate row yet, or a read error) the transform degrades to a **neutral
-`0.0`** ("no deviation"), never the raw sensor value, so a degraded read cannot manufacture
-spurious anomalies. Which aggregate window is the baseline is per-transform configuration
-(`params.granularity`, default 1 min).
+| Component | Code |
+|---|---|
+| Feature engine | `feature_engineering/engine.py` |
+| Baseline provider (reads `sensor_aggregations_<granularity>`) | `feature_engineering/baseline_provider.py` |
+| Kill-switch (`public.platform_config.stateful_features_enabled`) | `feature_engineering/kill_switch.py` |
+| Built-in transforms | `extensions/builtins.py` |
+| Built-in detectors | `extensions/builtins_detectors.py` |
+| Model loading, skops trust | `model_loader.py`, `skops_trust.py`, `model_uri.py` |
+| Warm model cache (LRU, `MODEL_CACHE_SIZE`, default 8) | `model_cache.py` |
+| Drift (reference profile capture, scoring) | `drift/` |
+| Deployment load probe | `load_probe.py`, `load_probe_worker.py` |
 
-## Models & MLflow
+## Endpoints
 
-Models are tracked in **MLflow** (experiments, runs, metrics) with artifacts in MinIO/S3. The
-ML service exposes models (including a tenant-scoped registered-models read path) and feature configs, and records each model's
-`feature_config_id` so inference knows how to engineer its inputs. (Automated end-to-end
-training from the UI is not yet wired — models are produced via the MLflow/notebook workflow.)
-At registration a model may also carry a **`reference_profile`** — a compact, tenant-scoped
-sample of its training-window distribution — which is the baseline for drift monitoring below
-(**[ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md)**).
+| Method | Path | Purpose |
+|---|---|---|
+| POST, GET | `/api/feature-configs` | Create, list |
+| GET, PUT, DELETE | `/api/feature-configs/{config_id}` | Read, replace, delete |
+| GET | `/api/feature-configs/equipment/{equipment_type}` | By equipment type |
+| POST, GET | `/api/models` | Register, list |
+| GET, DELETE | `/api/models/{model_id}` | Read, delete |
+| POST | `/api/models/{model_id}/deploy` | Load-and-score gate |
+| GET | `/api/models/{model_id}/download` | Artifact |
+| GET | `/api/models/latest/{model_type}` | Latest by type |
+| POST | `/api/models/compare` | Compare |
+| POST | `/api/models/upload-capability` | Mint an upload capability ([model-upload.md](model-upload.md)) |
+| GET | `/api/registered-models`, `/api/registered-models/{name}` | Tenant-scoped MLflow registry read |
+| PATCH | `/api/registered-models/{name}` | Edit the description |
+| GET | `/api/experiments`, `/api/experiments/{name}/runs` | Tenant-scoped experiment read |
+| GET | `/api/ml/capabilities` | Servable flavors and detectors, discovered from the registry |
+| POST | `/api/inference/predict` | Score a reading |
+| POST | `/api/drift/evaluate` | Data and prediction drift for a model |
 
-## Inference
+## Feature configuration
 
-`POST /api/inference/predict`:
+Stored per tenant in `feature_engineering_configs`: `base_sensors` and an ordered list of
+`transformations`, each with a `type` and params. `ml_models.feature_config_id` links a model to its
+config.
 
-1. Resolves the tenant from the verified identity and loads the model record + its feature
-   config.
-2. Engineers the feature vector from the incoming sensor data (windowed baselines read from the
-   Spark-materialized aggregates, ADR-0023).
-3. **Scores** the features through the **anomaly-detector registry**: the detector the model
-   record names returns a 0–1 score and a threshold decision. The detector is recorded at
-   registration (`ml_models.detector`): a notebook-trained model names one or gets the `sklearn`
-   compatibility detector; an uploaded model gets the one that implements its declared score
-   semantics for its flavor. A model whose record names none is refused, not scored with a default.
-   A model that already emits a 0–1 anomaly score is registered with the `direct` detector — a float
-   output is never read as a score on its own. A domain can register a custom or model-free
-   detector without touching the core scorer
-   (**[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)**).
+| Built-in transform | Stateful |
+|---|---|
+| `identity` | no |
+| `polynomial` | no |
+| `interaction` | no |
+| `deviation` | no |
+| `statistical` | yes |
+| `rolling_stat` | yes |
 
-   **What the score MEANS is declared, never inferred from the model's output**
-   (**[ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md)**). It cannot be
-   inferred: `predict() == 1` means *normal* to an IsolationForest and *anomaly* to an XGBoost
-   classifier, and an autoencoder emits no verdict at all — its signal is reconstruction error. The
-   built-ins therefore score an IsolationForest from `decision_function`, a classifier from
-   `predict_proba`, and an autoencoder from how badly it reconstructs its input. A model whose
-   semantics cannot be established is **refused, not scored** — a confident wrong score is worse than
-   an honest refusal, because these are the numbers alerts are raised on. (The cost of getting this
-   wrong is not theoretical: reading the ±1 label instead scored *every* IsolationForest reading as an
-   anomaly — #236.)
+Stateful transforms read their baseline window from `params.granularity` (default `1min`, from
+`industryflow_contracts.windows`).
 
-   Ask a deployment what it can actually serve with **`GET /api/ml/capabilities`**, which is discovered
-   from the registry rather than maintained by hand. A framework the image does not carry (torch today)
-   is named there as unservable, and refused at registration and deployment with a reason
-   (**[ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md)**).
+## Detectors
 
-**sklearn models are loaded with a trust list the serving side chooses by provenance**
-(**[ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md)** dec 13). skops does not
-trust the internal tree structures of tree-based estimators by default. Models trained in a kernel get
-an explicit grant for exactly those types; uploaded models get none. The trust list an artifact
-carries in its own MLmodel is never read: ml_service deserialises skops sklearn models itself and
-wraps them in MLflow's pyfunc, so MLflow's pickle switch (off on the upload path) governs only pickle
-formats (ADR-0027 dec 13 rev 2). In a notebook, log a tree-based model with
-`mlflow.sklearn.log_model(model, name="model", skops_trusted_types=industryflow.SKOPS_TRUSTED_TYPES)`:
-mlflow test-loads on save, so the call fails without it.
+`ml_models.detector` names the detector; a model with none is refused.
 
-The alert detection worker calls inference for ML-based rules using the shared
-`INTERNAL_SERVICE_TOKEN` (it has no human to log in); see
-**[authentication.md](../operations/authentication.md)** and
-**[alerting.md](alerting.md)**.
+| Detector | Semantics | Flavors | Score from |
+|---|---|---|---|
+| `sklearn` | anomaly probability (compatibility name) | `mlflow.sklearn`, `mlflow.xgboost` | Estimator capability, `predict_proba` first |
+| `direct` | direct 0–1 score | `mlflow.sklearn`, `mlflow.xgboost` | Model output; outside 0–1 is refused |
+| `outlier` | outlier score | `mlflow.sklearn` | `decision_function` |
+| `autoencoder` | reconstruction error | `mlflow.sklearn`, `mlflow.pyfunc` | Reconstruction distance |
 
-Loaded models are held in a **process-local warm cache** keyed by tenant, provenance and the
-model's address (its run, or its admitted upload), so the anomaly detector and the drift evaluator
-reuse a warm model instead of cold-loading from MLflow on every call (bounded LRU,
-`MODEL_CACHE_SIZE`). A cold load runs off the event loop, and first holds the record's address to the
-caller's tenant: a run must belong to one of the tenant's experiments, an artifact location must be an
-upload the gateway admitted under the tenant's prefix. The address's shape (and, for an upload, the
-whole admitted-upload rule) is re-checked on every call, warm hits included, so a tightened policy
-refuses a cached model at once.
+## Model record (`ml_models`)
 
-## Model drift monitoring
+| Column | Added by | Meaning |
+|---|---|---|
+| `feature_config_id` | `06-feature-engineering-tables.sql` | Feature config for inference |
+| `reference_profile` (JSONB) | `14-model-drift-reference-profile.sql` | Drift baseline; absent → drift unavailable |
+| `compatibility_status`, `compatibility_detail`, `compatibility_checked_at` | `18-model-compatibility-status.sql` | Training vs serving environment verdict, set at registration and deployment; null = never evaluated |
+| `provenance`, `artifact_uri` | `19-model-provenance.sql` | Kernel-trained (by run) or uploaded (by admitted location) |
+| `detector` | `20-model-detector.sql` | Detector for serving |
 
-A deployed model silently decays as equipment ages and conditions change: the live data drifts
-from what it was trained on and its judgments quietly stop meaning what they did. Drift is a
-different question from real-time anomaly detection — *"has the world moved away from this
-model's training distribution?"* — **windowed and statistical, not per-event**
-(**[ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md)**).
+## Inference (`POST /api/inference/predict`)
 
-- **Baseline.** At registration a model stores a `reference_profile`: a compact,
-  deterministically down-sampled, tenant-scoped sample of its training-window columns
-  (optionally including the model's own output scores). A model without one reports *drift
-  unavailable* until retrained — honest, rather than guessing a baseline.
-- **Compute.** `POST /api/drift/evaluate` reads a trailing window of the tenant's recent data,
-  aligns it into rows (the instants at which every compared sensor reported), compares it against
-  the reference with **`evidently`**, and returns **data drift** (input distributions) and
-  **prediction drift** (the model's output distribution). The current scores for prediction drift
-  are produced by scoring an evenly spaced sample of the window's rows the way `/predict` scores a
-  reading — feature config, then the model's detector — so a reference's prediction column must
-  hold the same 0–1 detector scores. A profile whose prediction column holds anything else (labels,
-  raw outputs, values off the 0–1 scale) is refused at registration; one already stored is not
-  scored against. Where current scores cannot be produced, or the stored column is not a baseline,
-  data drift is still returned with a `prediction_drift_reason`. The primary scalar is the drifted-feature *share*.
-- **Where it lives.** The baseline is the `reference_profile JSONB` column on `ml_models`
-  (init script `14-model-drift-reference-profile.sql`), built at registration by the capture helper
-  in `ml_service/api/drift/`. The alert-rule API validates that a `statistical` rule binds a model
-  and an in-range drift threshold; cadence and window are service config. Status: unit-tested and
-  running on the compose deployment; not yet run on a Kubernetes cluster (issue #19).
-- **Ownership.** The **alert service owns detection** (one home for threshold/ml/statistical)
-  and delegates the statistical compute here — exactly as the real-time ml rules delegate to
-  `/api/inference`. The drift signal surfaces through the reserved `statistical` alert lane; see
-  **[alerting.md](alerting.md)**.
-- **Label-free first, then operator feedback.** v1 needs no ground truth. Performance/concept
-  drift is added by **[ADR-0022](../../ADR/ADR-0022-concept-drift-operator-feedback.md)**:
-  operators label fired alerts *real / false / unsure* (a durable per-tenant `alert_labels`
-  store, separate from the 90-day alerts hypertable), from which the platform derives
-  **precision + false-positive rate over time** (`GET /api/alerts/label-metrics`) and raises a
-  **retrain *recommendation*** when a model shows sustained drift **and** precision decay.
-  Recall is not derivable from fired-alert labels (no false-negative signal), and the loop
-  *recommends* — it does not train, since retraining is manual/notebook today. See
-  **[alerting.md](alerting.md)**.
+| Step | Detail |
+|---|---|
+| Tenant | From the verified identity, or the `company_id` body field with `X-Internal-Service-Token` |
+| Load | Model record and feature config; model from the warm cache or a cold load off the event loop |
+| Address check | A run must belong to one of the tenant's experiments; an artifact must be an admitted upload under the tenant's prefix; re-checked on every call |
+| Features | Feature config applied; stateful slots neutralised when the kill-switch is off |
+| Score | Detector named by the record; response `degraded: true` when any feature was neutralised |
+
+Kernel-trained tree-based sklearn models need the skops grant at log time:
+`mlflow.sklearn.log_model(model, name="model", skops_trusted_types=industryflow.SKOPS_TRUSTED_TYPES)`.
+
+## Drift (`POST /api/drift/evaluate`)
+
+| Item | Detail |
+|---|---|
+| Baseline | `ml_models.reference_profile`, captured at registration by `drift/reference_profile.py` |
+| Current window | Trailing window of the tenant's data, aligned to instants where every compared sensor reported |
+| Engine | `evidently` |
+| Output | Data drift (drifted-feature share) and prediction drift; `prediction_drift_reason` when prediction drift cannot be computed |
+| Prediction column | Must hold 0–1 detector scores; anything else is refused at registration |
+| Caller | alert-service-detector `statistical` rules ([alerting.md](alerting.md)) |
+
+Model training is manual, in notebooks ([notebooks.md](notebooks.md)); no training service exists.
