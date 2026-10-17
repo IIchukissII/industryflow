@@ -108,10 +108,15 @@ So ingestion authentication is really **two different trust domains wearing one 
 
 ## Deferred decisions
 
-- **PKI architecture.** CA hierarchy (root/intermediate), the exact certificate fields and encoding for `company_id`/`device_id`, device provisioning and enrolment workflow, certificate lifetime, and revocation mechanism (CRL/OCSP) are a dedicated PKI ADR — mirroring the sibling's split between gateway behaviour (sibling ADR-0004) and PKI/identity (sibling ADR-0007). This ADR fixes only that IndustryFlow runs its own CA and reads tenant/device identity from the certificate.
+- ~~**PKI architecture.** CA hierarchy (root/intermediate), the exact certificate fields and encoding for `company_id`/`device_id`, device provisioning and enrolment workflow, certificate lifetime, and revocation mechanism (CRL/OCSP) are a dedicated PKI ADR — mirroring the sibling's split between gateway behaviour (sibling ADR-0004) and PKI/identity (sibling ADR-0007). This ADR fixes only that IndustryFlow runs its own CA and reads tenant/device identity from the certificate.~~ *Resolved since acceptance:* see below.
 - ~~**Reverse-proxy product and configuration.**~~ *Resolved in part by rev 1, decision 3:* how many identity header conventions a deployment honours is no longer open — exactly one, the one its edge writes, with the other refused. The choice of proxy product and the concrete header names carrying the verified identity remain implementation concerns owned by the deployment artifacts, not this ADR.
 - **General tenant→schema resolution.** How the validated `company_id` maps to a schema and is applied safely on *all* paths (not just ingestion) is ADR-0003; this ADR supplies it a verified identity for the ingestion case.
 - **Service-to-service auth.** Whether internal service-to-service calls (gateway→alert, etc.) use mTLS, JWT, or network trust is out of scope here and belongs with ADR-0004.
+
+## Resolved since acceptance
+
+- **PKI architecture (2026-10-17).** The dedicated PKI decision is ADR-0007. It decides a two-tier hierarchy with an offline root, device-generated keys, the tenant and device identity carried in a subject alternative name and bound to the tenant at issuance, bounded certificate lifetimes, and revocation by a list that the terminating edge checks. This changes no decision above.
+- **Network isolation of decision 3 (2026-10-17).** The isolation decision 3 requires is enforced in both deployment shapes: the ingestion service is reachable only from the terminating edge, and it reaches only the message broker. This changes no decision above.
 
 ## References
 
