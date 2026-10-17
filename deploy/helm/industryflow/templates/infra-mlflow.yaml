@@ -86,7 +86,7 @@ spec:
             - --allowed-hosts
             - "*"
           env:
-            # The artifact-bucket principal (read/write on that bucket only) — boto reads AWS_* names.
+            # The artifact-bucket principal (read-only on that bucket) — boto reads AWS_* names.
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:

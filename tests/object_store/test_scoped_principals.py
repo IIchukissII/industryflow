@@ -114,7 +114,8 @@ def can(home, who, op, key) -> bool:
 ALLOWED = {
     "spark-checkpoint": [("put", f"{CP}/state/1"), ("get", f"{CP}/state/0"), ("list", f"{CP}/state/"),
                          ("delete", f"{CP}/state/1")],
-    "mlflow-artifacts": [("put", f"{ART}/tenant_bbbb/1/x"), ("get", TRACKED), ("delete", f"{ART}/tenant_bbbb/1/x")],
+    # The MLflow server serves artifact reads (serving resolves models:/ through it), nothing else.
+    "mlflow-artifacts": [("get", TRACKED), ("get", UPLOADED), ("list", f"{ART}/tenant_aaaa/")],
     "tracking-gateway": [("put", f"{ART}/_upload-staging/tenant_aaaa/u2/m"), ("get", UPLOADED),
                          ("delete", f"{ART}/_upload-staging/tenant_aaaa/u2/m")],
     "model-read": [("get", UPLOADED), ("list", f"{ART}/tenant_aaaa/uploads/u1/")],
@@ -134,7 +135,9 @@ ALLOWED = {
 REFUSED = {
     # The checkpoint principal stays checkpoint-only (ADR-0025 dec 11).
     "spark-checkpoint": [("get", TRACKED), ("put", f"{COLD}/x"), ("get", f"{BAK}/timescaledb/a.dump")],
-    "mlflow-artifacts": [("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("put", f"{CP}/x"), ("list", f"{BAK}/")],
+    # Writes go through the tracking gateway alone (ADR-0030 dec 2); the server's proxy is unauthenticated.
+    "mlflow-artifacts": [("put", f"{ART}/tenant_bbbb/1/x"), ("delete", TRACKED), ("put", f"{ART}/_upload-staging/x"),
+                         ("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("put", f"{CP}/x"), ("list", f"{BAK}/")],
     "tracking-gateway": [("get", f"{BAK}/timescaledb/a.dump"), ("put", f"{COLD}/x")],
     # Serving reads admitted uploads and nothing else: not tracked runs, not other buckets, no write.
     "model-read": [("put", f"{ART}/tenant_aaaa/uploads/u1/evil"), ("delete", UPLOADED), ("get", TRACKED),
