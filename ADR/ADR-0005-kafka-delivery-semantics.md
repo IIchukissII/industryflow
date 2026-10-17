@@ -70,10 +70,16 @@ This ADR fixes the delivery semantics for the whole Kafka pipeline. It is a comp
 
 ## Deferred decisions
 
-- **Dead-letter mechanism.** Whether failed messages go to a dedicated DLQ topic, a table, or another sink, and the retry/backoff policy before a message is dead-lettered, are implementation concerns owned by the consumer configuration, not fixed here.
-- **Alert deduplication key and cooldown window.** The exact key and suppression window that make alert writes idempotent (decision 6) are an alert-service design detail.
+- ~~**Dead-letter mechanism.** Whether failed messages go to a dedicated DLQ topic, a table, or another sink, and the retry/backoff policy before a message is dead-lettered, are implementation concerns owned by the consumer configuration, not fixed here.~~ *Resolved since acceptance:* see below.
+- ~~**Alert deduplication key and cooldown window.** The exact key and suppression window that make alert writes idempotent (decision 6) are an alert-service design detail.~~ *Resolved since acceptance:* see below.
 - **Exactly-once, if it ever becomes necessary.** If a future sink cannot be made idempotent, revisiting EOS for that path is left open.
 - **Topic/partition and consumer-group sizing.** Throughput tuning (partition counts, consumer parallelism) is a configuration concern, not a semantics decision.
+
+## Resolved since acceptance
+
+- **Dead-letter mechanism (2026-10-17).** An unprocessable message is dead-lettered, with the reason and the message's origin, to a dedicated topic owned by one consumer: the alert consumer and the stream that writes raw measurements each own one, and the aggregation stream excludes the same messages without publishing them a second time. A message that cannot be valid, because it is malformed or names something that does not exist, is dead-lettered at once. In the alert consumer, a failure of unknown cause is retried a bounded number of times and then dead-lettered. A failure of the infrastructure itself, such as the database or the broker being unreachable, is never dead-lettered: it is not a property of the message, so the work is retried, with a backoff that grows to a ceiling, until the dependency returns. The dead-letter write is fully acknowledged before the offset moves, and an offset is not committed when that write fails. The retry counts and backoff are configuration. This changes no decision above.
+- **Alert deduplication key and cooldown (2026-10-17).** An alert write is idempotent on two levels. An exact redelivery derives the same alert identity and is a no-op. A different reading in the same scope (for a rule-based alert, the rule, sensor and equipment; for a retraining recommendation, the model) is suppressed while an alert of that scope already lies within the cooldown window of its event time. The window check reads the stored alerts, so the cooldown holds across restarts, and writes in one scope are serialised in the database, so it also holds across concurrent consumers. The cooldown lengths are configuration. This changes no decision above.
+- **Where the aggregation stream starts (2026-10-17).** Decision 4 binds consumers responsible for not losing data. The aggregation stream's output is derived from readings the measurements stream already keeps, and where it starts after a reset is decided in [ADR-0029](ADR-0029-spark-major-upgrade-checkpoint-cutover.md) decision 3: at the stream's tail, with a bounded loss of the windows open at the reset instant. Decision 4 is unchanged for every consumer that is the only path by which a reading is kept.
 
 ## References
 
