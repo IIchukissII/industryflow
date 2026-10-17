@@ -90,7 +90,7 @@ describe('write controls by role', () => {
     signIn({ role: 'observer' });
     await renderPage('AlertRules');
     expect(await screen.findByText('Hot')).toBeInTheDocument();
-    expect(screen.queryByText('+ New Rule')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New rule' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
   });
@@ -99,8 +99,9 @@ describe('write controls by role', () => {
     signIn({ role: 'admin' });
     await renderPage('AlertRules');
     expect(await screen.findByText('Hot')).toBeInTheDocument();
-    expect(screen.getByText('+ New Rule')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New rule' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
   });
 
   test('observer: equipment can be viewed, not created, edited or deleted', async () => {

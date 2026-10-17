@@ -2,30 +2,97 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useId } from 'react';
 import './AlertRules.css';
 import authFetch from '../services/http';
 import { canWrite } from '../utils/roles';
+import { alertRulesReading, kindWord, RULE_KINDS } from '../utils/reading-alertrules';
+
+const RANGE = ['between', 'outside_range'];
+
+const CONDITIONS = [
+  { value: 'greater_than', label: 'Above' },
+  { value: 'less_than', label: 'Below' },
+  { value: 'equals', label: 'Equal to' },
+  { value: 'between', label: 'Between' },
+  { value: 'outside_range', label: 'Outside a range' },
+];
+
+const SEVERITIES = ['low', 'medium', 'high', 'critical'];
+
+const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+
+// A stored id, shortened for reading; the full id stays in the tooltip.
+function Id({ value }) {
+  const s = String(value);
+  return <span className="mono" title={s}>{s.length > 12 ? `${s.slice(0, 8)}…` : s}</span>;
+}
+
+const Num = ({ v }) => <span className="mono">{v}</span>;
+
+// What the rule watches, in words.
+function RuleTarget({ rule }) {
+  if (rule.sensor_id) return <>sensor <Id value={rule.sensor_id} /></>;
+  if (rule.equipment_id) return <>machine <Id value={rule.equipment_id} /></>;
+  if (rule.sensor_pattern) return <>sensors matching <span className="mono">{rule.sensor_pattern}</span></>;
+  return <>every sensor</>;
+}
+
+// The value a threshold rule compares a reading against, in words.
+function ThresholdCondition({ rule }) {
+  switch (rule.condition) {
+    case 'greater_than': return <>above <Num v={rule.threshold} /></>;
+    case 'less_than': return <>below <Num v={rule.threshold} /></>;
+    case 'equals': return <>equal to <Num v={rule.threshold} /></>;
+    case 'between': return <>between <Num v={rule.threshold_min} /> and <Num v={rule.threshold_max} /></>;
+    case 'outside_range': return <>outside <Num v={rule.threshold_min} /> to <Num v={rule.threshold_max} /></>;
+    default: return <>with no condition set</>;
+  }
+}
+
+// What the rule watches and when it fires, as one sentence.
+function RuleSentence({ rule }) {
+  const target = <RuleTarget rule={rule} />;
+  const sev = <>, at {rule.severity} severity.</>;
+  const model = <Id value={rule.model_id ?? 'not set'} />;
+  if (rule.detection_type === 'ml') {
+    return (
+      <>
+        Model rule. Model {model} scores readings from {target}; the rule fires past an anomaly
+        threshold of <Num v={rule.anomaly_threshold ?? 0.85} />{sev}
+      </>
+    );
+  }
+  if (rule.detection_type === 'statistical') {
+    return (
+      <>
+        Drift rule. Fires when model {model} passes a drifted-feature share of{' '}
+        {rule.threshold != null ? <Num v={rule.threshold} /> : 'the service default'}, for {target}{sev}
+      </>
+    );
+  }
+  return <>{cap(kindWord(rule.detection_type))} rule. Fires on a reading <ThresholdCondition rule={rule} /> from {target}{sev}</>;
+}
 
 function AlertRules() {
   // Creating, editing and deleting rules needs engineer or admin (observer is read-only).
   const [writable] = useState(() => canWrite());
-  const [activeTab, setActiveTab] = useState('all');
+  const [kind, setKind] = useState('all');
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [notice, setNotice] = useState(null);
   const [editingRule, setEditingRule] = useState(null);
   const [showForm, setShowForm] = useState(false);
 
   const fetchRules = useCallback(async () => {
-    setLoading(true);
     try {
       const response = await authFetch('/api/alert-rules?enabled_only=false');
-      if (response.ok) {
-        const data = await response.json();
-        setRules(data);
-      }
+      if (!response.ok) throw new Error(`the server answered ${response.status}`);
+      setRules(await response.json());
+      setLoadError(null);
     } catch (error) {
-      console.error('Error fetching alert rules:', error);
+      setLoadError(error.message);
     } finally {
       setLoading(false);
     }
@@ -37,6 +104,11 @@ function AlertRules() {
     (async () => { await fetchRules(); })();
   }, [fetchRules]);
 
+  const handleNew = () => {
+    setEditingRule(null);
+    setShowForm(true);
+  };
+
   const handleEdit = (rule) => {
     setEditingRule(rule);
     setShowForm(true);
@@ -47,264 +119,143 @@ function AlertRules() {
     setShowForm(false);
   };
 
+  // Resolves to an error message for the form to show, or null once saved.
   const handleSaveRule = async (payload) => {
     try {
-      let response;
-
-      if (payload.rule_id) {
-        response = await authFetch(`/api/alert-rules/${payload.rule_id}`, {
+      const response = payload.rule_id
+        ? await authFetch(`/api/alert-rules/${payload.rule_id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
-        });
-      } else {
-        response = await authFetch('/api/alert-rules', {
+        })
+        : await authFetch('/api/alert-rules', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        const detail = typeof body.detail === 'string' ? body.detail : `the server answered ${response.status}`;
+        return `The rule was not saved: ${detail}. Correct it and save again.`;
       }
-
-      if (response.ok) {
-        await fetchRules();
-        handleCloseForm();
-        alert(payload.rule_id ? 'Rule updated successfully!' : 'Rule created successfully!');
-      } else {
-        const error = await response.json();
-        alert(`Failed to save rule: ${error.detail || 'Unknown error'}`);
-      }
+      await fetchRules();
+      handleCloseForm();
+      setNotice(null);
+      return null;
     } catch (error) {
-      console.error('Error saving rule:', error);
-      alert('Error saving rule');
+      return `The rule was not saved: ${error.message}. Check the connection and save again.`;
     }
   };
 
-  const handleDelete = async (ruleId) => {
-    if (!window.confirm('Are you sure you want to delete this rule?')) {
-      return;
-    }
-
+  const handleDelete = async (rule) => {
+    if (!window.confirm(`Delete the rule ${rule.name}? It stops raising alerts; past alerts stay.`)) return;
     try {
-      const response = await authFetch(`/api/alert-rules/${ruleId}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        await fetchRules();
-        alert('Rule deleted successfully!');
-      } else {
-        alert('Failed to delete rule');
-      }
+      const response = await authFetch(`/api/alert-rules/${rule.rule_id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(`the server answered ${response.status}`);
+      setNotice(null);
+      await fetchRules();
     } catch (error) {
-      console.error('Error deleting rule:', error);
-      alert('Error deleting rule');
+      setNotice(`${rule.name} was not deleted: ${error.message}. Try again.`);
     }
   };
 
-  const getFilteredRules = () => {
-    if (activeTab === 'all') return rules;
-    if (activeTab === 'default') return rules.filter(r => r.is_default);
-    if (activeTab === 'overrides') return rules.filter(r => !r.is_default && r.sensor_id);
-    if (activeTab === 'ml') return rules.filter(r => r.detection_type === 'ml');
-    return rules;
-  };
-
-  const filteredRules = getFilteredRules();
-
-
-
-  const DetectionBadge = ({ type }) => {
-    const colors = {
-      threshold: '#26a69a',
-      ml: 'var(--signal)',
-      statistical: '#b98b32'
-    };
+  if (loading) return <div className="ar-state"><span className="sdot pending" /> Loading alert rules</div>;
+  if (loadError) {
     return (
-      <span style={{
-        background: colors[type] || '#787b86',
-        color: 'white',
-        padding: '4px 8px',
-        borderRadius: '4px',
-        fontSize: '11px',
-        fontWeight: '600',
-        textTransform: 'uppercase'
-      }}>
-        {type.replace('_', ' ')}
-      </span>
+      <div className="ar-state ar-state-bad" role="alert">
+        The alert rules could not load: {loadError}.
+        <button type="button" className="btn" onClick={() => { setLoading(true); fetchRules(); }}>Try again</button>
+      </div>
     );
-  };
+  }
 
-  const SeverityBadge = ({ severity }) => {
-    const colors = {
-      critical: 'var(--crit)',
-      high: 'var(--crit)',
-      medium: 'var(--warn)',
-      low: 'var(--signal)'
-    };
-    return (
-      <span style={{
-        color: colors[severity] || '#787b86',
-        fontWeight: '600',
-        fontSize: '12px',
-        textTransform: 'uppercase'
-      }}>
-        {severity}
-      </span>
-    );
-  };
+  const countOf = (type) => rules.filter((r) => r.detection_type === type).length;
+  const shown = kind === 'all' ? rules : rules.filter((r) => r.detection_type === kind);
 
   return (
-    <div className="App">
-
-      <div className="alert-rules-page">
-        <div className="page-header">
-          <div>
-            <h1>Alert Rules Management</h1>
-            <p style={{ color: '#787b86', margin: '5px 0 0 0', fontSize: '14px' }}>
-              Configure threshold and ML-based alert rules for sensor monitoring
-            </p>
-          </div>
-          {writable && (
-            <button className="btn-primary" onClick={() => setShowForm(true)}>
-              + New Rule
-            </button>
-          )}
-        </div>
-
-        <div className="tabs">
-          <button
-            className={`tab ${activeTab === 'all' ? 'active' : ''}`}
-            onClick={() => setActiveTab('all')}
-          >
-            All Rules ({rules.length})
-          </button>
-          <button
-            className={`tab ${activeTab === 'default' ? 'active' : ''}`}
-            onClick={() => setActiveTab('default')}
-          >
-            Default Rules ({rules.filter(r => r.is_default).length})
-          </button>
-          <button
-            className={`tab ${activeTab === 'overrides' ? 'active' : ''}`}
-            onClick={() => setActiveTab('overrides')}
-          >
-            Sensor Overrides ({rules.filter(r => !r.is_default && r.sensor_id).length})
-          </button>
-          <button
-            className={`tab ${activeTab === 'ml' ? 'active' : ''}`}
-            onClick={() => setActiveTab('ml')}
-          >
-            ML Models ({rules.filter(r => r.detection_type === 'ml').length})
-          </button>
-        </div>
-
-        <div className="tab-content">
-          {loading ? (
-            <p style={{ textAlign: 'center', color: '#787b86', padding: '40px' }}>
-              Loading rules...
-            </p>
-          ) : filteredRules.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#787b86', padding: '40px' }}>
-              No rules found
-            </p>
-          ) : (
-            <table className="rules-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Target</th>
-                  <th>Detection Type</th>
-                  <th>Condition</th>
-                  <th>Severity</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRules.map(rule => (
-                  <tr key={rule.rule_id}>
-                    <td>
-                      <div style={{ fontWeight: '500' }}>{rule.name}</div>
-                      {rule.is_default && (
-                        <div style={{ fontSize: '11px', color: '#787b86', marginTop: '2px' }}>
-                          Default Rule
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      <div style={{ fontSize: '12px' }}>
-                        {rule.sensor_id || rule.sensor_pattern || rule.equipment_id || 'All'}
-                      </div>
-                    </td>
-                    <td>
-                      <DetectionBadge type={rule.detection_type} />
-                    </td>
-                    <td>
-                      {rule.detection_type === 'threshold' && rule.condition && (
-                        <span style={{ fontSize: '12px' }}>
-                          {rule.condition === 'between' || rule.condition === 'outside_range'
-                            ? `${rule.threshold_min} - ${rule.threshold_max}`
-                            : `${rule.condition} ${rule.threshold}`}
-                        </span>
-                      )}
-                      {rule.detection_type === 'ml' && (
-                        <span style={{ fontSize: '12px' }}>ML Score {rule.anomaly_threshold ?? 0.85}</span>
-                      )}
-                      {rule.detection_type === 'statistical' && (
-                        <span style={{ fontSize: '12px' }}>Drift share {rule.threshold ?? 'default'}</span>
-                      )}
-                    </td>
-                    <td>
-                      <SeverityBadge severity={rule.severity} />
-                    </td>
-                    <td>
-                      <span style={{
-                        color: rule.enabled ? '#26a69a' : '#787b86',
-                        fontWeight: '500'
-                      }}>
-                        {rule.enabled ? 'Enabled' : 'Disabled'}
-                      </span>
-                    </td>
-                    <td>
-                      {writable && (
-                        <>
-                          <button
-                            className="btn-action"
-                            onClick={() => handleEdit(rule)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="btn-action"
-                            style={{ marginLeft: '5px' }}
-                            onClick={() => handleDelete(rule.rule_id)}
-                          >
-                            Delete
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {showForm && (
-          <EditRuleModal
-            rule={editingRule}
-            onClose={handleCloseForm}
-            onSave={handleSaveRule}
-          />
+    <div className="ar">
+      <div className="ar-head">
+        <p className="reading">{alertRulesReading({ rules })}</p>
+        {writable && (
+          <button type="button" className="btn btn-primary ar-add" onClick={handleNew}>New rule</button>
         )}
       </div>
+
+      {notice && <p className="ar-notice" role="alert">{notice}</p>}
+
+      {rules.length > 0 && (
+        <section className="ar-rules" aria-labelledby="ar-rules-h">
+          <div className="ar-rules-head">
+            <h2 id="ar-rules-h" className="ar-h">Rules</h2>
+            <div className="seg" role="group" aria-label="Show rules of one kind">
+              <button type="button" aria-pressed={kind === 'all'} onClick={() => setKind('all')}>
+                All <span className="mono ar-seg-n">{rules.length}</span>
+              </button>
+              {RULE_KINDS.map((k) => (
+                <button key={k.type} type="button" aria-pressed={kind === k.type} onClick={() => setKind(k.type)}>
+                  {cap(k.word)} <span className="mono ar-seg-n">{countOf(k.type)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {shown.length === 0 ? (
+            <p className="ar-empty">No {kindWord(kind)} rules.</p>
+          ) : (
+            <ul className="ar-list">
+              {shown.map((rule) => (
+                <li key={rule.rule_id} className={`ar-rule${rule.enabled ? '' : ' is-off'}`}>
+                  <div className="ar-rule-main">
+                    <h3 className="ar-rule-name">
+                      {rule.name}
+                      {!rule.enabled && <span className="badge ar-off">Off</span>}
+                    </h3>
+                    {rule.description && <p className="ar-rule-desc">{rule.description}</p>}
+                    <p className="ar-rule-what">
+                      <RuleSentence rule={rule} />
+                    </p>
+                  </div>
+                  {writable && (
+                    <div className="ar-rule-actions">
+                      <button type="button" className="btn" onClick={() => handleEdit(rule)}>Edit</button>
+                      <button type="button" className="btn btn-danger" onClick={() => handleDelete(rule)}>Delete</button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {showForm && (
+        <EditRuleModal
+          rule={editingRule}
+          onClose={handleCloseForm}
+          onSave={handleSaveRule}
+        />
+      )}
     </div>
   );
 }
 
-// Edit Rule Modal Component
+// A segmented choice inside the form: buttons, never a submit.
+function Seg({ label, value, options, onChange }) {
+  return (
+    <div className="seg ar-seg" role="group" aria-label={label}>
+      {options.map((o) => (
+        <button key={o.value} type="button" aria-pressed={value === o.value} onClick={() => onChange(o.value)}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// The create/edit form.
 function EditRuleModal({ rule, onClose, onSave }) {
+  const uid = useId();
+  const fid = (name) => `${uid}-${name}`;
   const [formData, setFormData] = useState({
     rule_id: rule?.rule_id,
     company_id: rule?.company_id || '',
@@ -316,15 +267,16 @@ function EditRuleModal({ rule, onClose, onSave }) {
     equipment_id: rule?.equipment_id || '',
     site_id: rule?.site_id || '',
     condition: rule?.condition || 'greater_than',
-    threshold: rule?.threshold || '',
-    threshold_min: rule?.threshold_min || '',
-    threshold_max: rule?.threshold_max || '',
+    // ?? not ||: a stored threshold of 0 is a value, not a blank.
+    threshold: rule?.threshold ?? '',
+    threshold_min: rule?.threshold_min ?? '',
+    threshold_max: rule?.threshold_max ?? '',
     model_id: rule?.model_id || '',
     severity: rule?.severity || 'medium',
     priority: rule?.priority || 0,
     enabled: rule?.enabled !== false,
-    is_default: rule?.is_default || false,
   });
+  const set = (patch) => setFormData((f) => ({ ...f, ...patch }));
 
   const [ruleLevel, setRuleLevel] = useState(
     rule?.equipment_id ? 'equipment' : rule?.sensor_id ? 'sensor' : 'pattern'
@@ -333,6 +285,8 @@ function EditRuleModal({ rule, onClose, onSave }) {
   const [equipment, setEquipment] = useState([]);
   const [models, setModels] = useState([]);
   const [loadingData, setLoadingData] = useState(true); // always fetches on mount
+  const [formError, setFormError] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   const fetchSensorsAndEquipment = useCallback(async () => {
     setLoadingData(true);
@@ -375,8 +329,16 @@ function EditRuleModal({ rule, onClose, onSave }) {
     (async () => { await fetchSensorsAndEquipment(); })();
   }, [fetchSensorsAndEquipment]);
 
-  const handleSubmit = (e) => {
+  // Escape closes the form.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setFormError(null);
 
     const payload = {
       name: formData.name,
@@ -395,13 +357,13 @@ function EditRuleModal({ rule, onClose, onSave }) {
     } else if (ruleLevel === 'pattern' && formData.sensor_pattern) {
       payload.sensor_pattern = formData.sensor_pattern;
     } else if (!rule) {
-      alert('Please select a target for the alert rule');
+      setFormError('Choose what the rule watches: a sensor pattern, a sensor or a machine.');
       return;
     }
 
     if (formData.detection_type === 'threshold') {
       payload.condition = formData.condition;
-      if (formData.condition === 'outside_range' || formData.condition === 'between') {
+      if (RANGE.includes(formData.condition)) {
         payload.threshold_min = parseFloat(formData.threshold_min);
         payload.threshold_max = parseFloat(formData.threshold_max);
       } else {
@@ -412,7 +374,7 @@ function EditRuleModal({ rule, onClose, onSave }) {
     if (formData.detection_type === 'ml') {
       // An ML rule is scored by a model; the server refuses one without it.
       if (!formData.model_id) {
-        alert('Select the model this ML rule is scored by');
+        setFormError('Choose the model this rule is scored by.');
         return;
       }
       payload.model_id = formData.model_id;
@@ -422,7 +384,7 @@ function EditRuleModal({ rule, onClose, onSave }) {
       // drifted-feature share (0–1) that trips the alert. Left blank, the evaluator
       // applies the service default.
       if (!formData.model_id) {
-        alert('Select the model this drift rule watches');
+        setFormError('Choose the model this drift rule watches.');
         return;
       }
       payload.model_id = formData.model_id;
@@ -435,153 +397,180 @@ function EditRuleModal({ rule, onClose, onSave }) {
       payload.rule_id = formData.rule_id;
     }
 
-    onSave(payload);
+    setSaving(true);
+    const err = await onSave(payload);
+    setSaving(false);
+    if (err) setFormError(err);
   };
 
   const handleRuleLevelChange = (level) => {
     setRuleLevel(level);
     // Clear all target fields when switching levels
-    setFormData({
-      ...formData,
-      sensor_id: '',
-      equipment_id: '',
-      sensor_pattern: ''
-    });
+    set({ sensor_id: '', equipment_id: '', sensor_pattern: '' });
   };
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <h2>{rule ? 'Edit Rule' : 'Create New Rule'}</h2>
+  // A rule being edited keeps its stored target and model selectable, even when the live
+  // lists (sensor cache, equipment, models) do not carry it: a required select with no
+  // matching option would block saving.
+  const missing = (list, key, value) => Boolean(value) && !list.some((x) => x[key] === value);
+  const isRange = RANGE.includes(formData.condition);
+  const needsModel = formData.detection_type === 'statistical' || formData.detection_type === 'ml';
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Rule Name</label>
+  return (
+    <div className="ar-modal-overlay" onClick={onClose}>
+      <div
+        className="ar-modal" role="dialog" aria-modal="true" aria-labelledby={fid('title')}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="ar-modal-head">
+          <h2 id={fid('title')}>{rule ? `Edit ${rule.name}` : 'New rule'}</h2>
+          <button type="button" className="ar-modal-close" aria-label="Close" onClick={onClose}>×</button>
+        </div>
+
+        <form className="ar-form" onSubmit={handleSubmit}>
+          <div className="ar-field">
+            <label htmlFor={fid('name')}>Name</label>
             <input
+              id={fid('name')}
               type="text"
               value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              onChange={(e) => set({ name: e.target.value })}
               required
             />
           </div>
 
-          <div className="form-group">
-            <label>Description</label>
+          <div className="ar-field">
+            <label htmlFor={fid('desc')}>Description</label>
             <input
+              id={fid('desc')}
               type="text"
               value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              onChange={(e) => set({ description: e.target.value })}
             />
           </div>
 
-          <div className="form-group">
-            <label>Rule Target Level</label>
-            <select
+          <fieldset className="ar-group">
+            <legend>Watches</legend>
+            <Seg
+              label="What the rule watches"
               value={ruleLevel}
-              onChange={(e) => handleRuleLevelChange(e.target.value)}
-            >
-              <option value="pattern">Pattern Matching (e.g., temp_*)</option>
-              <option value="sensor">Specific Sensor</option>
-              <option value="equipment">Equipment Level</option>
-            </select>
-          </div>
+              onChange={handleRuleLevelChange}
+              options={[
+                { value: 'pattern', label: 'Sensor pattern' },
+                { value: 'sensor', label: 'One sensor' },
+                { value: 'equipment', label: 'A machine' },
+              ]}
+            />
 
-          {ruleLevel === 'pattern' && (
-            <div className="form-group">
-              <label>Sensor Pattern</label>
-              <input
-                type="text"
-                value={formData.sensor_pattern}
-                onChange={(e) => setFormData({ ...formData, sensor_pattern: e.target.value })}
-                placeholder="temp_*, press_*, *_motor_*"
-                required
-              />
-              <small style={{ color: '#787b86', fontSize: '11px', marginTop: '4px', display: 'block' }}>
-                Use * as wildcard. Examples: temp_* (all temperature sensors), *_A1 (all sensors ending in _A1)
-              </small>
-            </div>
-          )}
-
-          {ruleLevel === 'sensor' && (
-            <div className="form-group">
-              <label>Select Sensor</label>
-              {loadingData ? (
-                <p style={{ color: '#787b86', fontSize: '12px' }}>Loading sensors...</p>
-              ) : (
-                <select
-                  value={formData.sensor_id}
-                  onChange={(e) => setFormData({ ...formData, sensor_id: e.target.value })}
+            {ruleLevel === 'pattern' && (
+              <div className="ar-field">
+                <label htmlFor={fid('pattern')}>Sensor pattern</label>
+                <input
+                  id={fid('pattern')}
+                  type="text"
+                  className="mono"
+                  value={formData.sensor_pattern}
+                  onChange={(e) => set({ sensor_pattern: e.target.value })}
+                  placeholder="temp_*"
+                  aria-describedby={fid('pattern-hint')}
                   required
-                >
-                  <option value="">-- Select a sensor --</option>
-                  {sensors.map(sensor => (
-                    <option key={sensor.sensor_id} value={sensor.sensor_id}>
-                      {sensor.sensor_name} ({sensor.sensor_id})
-                      {sensor.equipment_name && ` - ${sensor.equipment_name}`}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {sensors.length === 0 && !loadingData && (
-                <small style={{ color: '#ffa726', fontSize: '11px', marginTop: '4px', display: 'block' }}>
-                  No sensors found. Make sure sensors are streaming data.
-                </small>
-              )}
-            </div>
-          )}
+                />
+                <p id={fid('pattern-hint')} className="ar-hint">
+                  * matches any run of characters: <span className="mono">temp_*</span> matches every
+                  sensor whose id starts with temp_, <span className="mono">*_A1</span> every one ending in _A1.
+                </p>
+              </div>
+            )}
 
-          {ruleLevel === 'equipment' && (
-            <div className="form-group">
-              <label>Select Equipment</label>
-              {loadingData ? (
-                <p style={{ color: '#787b86', fontSize: '12px' }}>Loading equipment...</p>
-              ) : (
-                <select
-                  value={formData.equipment_id}
-                  onChange={(e) => setFormData({ ...formData, equipment_id: e.target.value })}
-                  required
-                >
-                  <option value="">-- Select equipment --</option>
-                  {equipment.map(eq => (
-                    <option key={eq.equipment_id} value={eq.equipment_id}>
-                      {eq.name} ({eq.equipment_id}) - {eq.equipment_type}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {equipment.length === 0 && !loadingData && (
-                <small style={{ color: '#ffa726', fontSize: '11px', marginTop: '4px', display: 'block' }}>
-                  No equipment found. Create equipment first.
-                </small>
-              )}
-            </div>
-          )}
-
-          <div className="form-group">
-            <label>Detection Type</label>
-            <select
-              value={formData.detection_type}
-              onChange={(e) => setFormData({ ...formData, detection_type: e.target.value })}
-            >
-              <option value="threshold">Threshold</option>
-              <option value="ml">ML Model</option>
-              <option value="statistical">Statistical (Model Drift)</option>
-            </select>
-          </div>
-
-          {(formData.detection_type === 'statistical' || formData.detection_type === 'ml') && (
-            <>
-              <div className="form-group">
-                <label>Model to Watch</label>
+            {ruleLevel === 'sensor' && (
+              <div className="ar-field">
+                <label htmlFor={fid('sensor')}>Sensor</label>
                 {loadingData ? (
-                  <p style={{ color: '#787b86', fontSize: '12px' }}>Loading models...</p>
+                  <p className="ar-hint">Loading sensors</p>
                 ) : (
                   <select
-                    value={formData.model_id}
-                    onChange={(e) => setFormData({ ...formData, model_id: e.target.value })}
+                    id={fid('sensor')}
+                    value={formData.sensor_id}
+                    onChange={(e) => set({ sensor_id: e.target.value })}
                     required
                   >
-                    <option value="">-- Select a model --</option>
+                    <option value="">Choose a sensor</option>
+                    {missing(sensors, 'sensor_id', formData.sensor_id) && (
+                      <option value={formData.sensor_id}>{formData.sensor_id} (not reporting now)</option>
+                    )}
+                    {sensors.map(sensor => (
+                      <option key={sensor.sensor_id} value={sensor.sensor_id}>
+                        {sensor.sensor_name} ({sensor.sensor_id})
+                        {sensor.equipment_name && `, ${sensor.equipment_name}`}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {sensors.length === 0 && !loadingData && (
+                  <p className="ar-hint ar-hint-warn">No sensor is reporting. A sensor appears here once its device sends a reading.</p>
+                )}
+              </div>
+            )}
+
+            {ruleLevel === 'equipment' && (
+              <div className="ar-field">
+                <label htmlFor={fid('equipment')}>Machine</label>
+                {loadingData ? (
+                  <p className="ar-hint">Loading equipment</p>
+                ) : (
+                  <select
+                    id={fid('equipment')}
+                    value={formData.equipment_id}
+                    onChange={(e) => set({ equipment_id: e.target.value })}
+                    required
+                  >
+                    <option value="">Choose a machine</option>
+                    {missing(equipment, 'equipment_id', formData.equipment_id) && (
+                      <option value={formData.equipment_id}>{formData.equipment_id}</option>
+                    )}
+                    {equipment.map(eq => (
+                      <option key={eq.equipment_id} value={eq.equipment_id}>
+                        {eq.name} ({eq.equipment_id}), {eq.equipment_type}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {equipment.length === 0 && !loadingData && (
+                  <p className="ar-hint ar-hint-warn">No machines yet. <a href="/equipment">Add one on Equipment</a> first.</p>
+                )}
+              </div>
+            )}
+          </fieldset>
+
+          <fieldset className="ar-group">
+            <legend>Detection</legend>
+            <Seg
+              label="How the rule detects"
+              value={formData.detection_type}
+              onChange={(v) => set({ detection_type: v })}
+              options={[
+                { value: 'threshold', label: 'Threshold' },
+                { value: 'ml', label: 'Model score' },
+                { value: 'statistical', label: 'Model drift' },
+              ]}
+            />
+
+            {needsModel && (
+              <div className="ar-field">
+                <label htmlFor={fid('model')}>{formData.detection_type === 'ml' ? 'Scored by model' : 'Model to watch'}</label>
+                {loadingData ? (
+                  <p className="ar-hint">Loading models</p>
+                ) : (
+                  <select
+                    id={fid('model')}
+                    value={formData.model_id}
+                    onChange={(e) => set({ model_id: e.target.value })}
+                    required
+                  >
+                    <option value="">Choose a model</option>
+                    {missing(models, 'model_id', formData.model_id) && (
+                      <option value={formData.model_id}>{formData.model_id}</option>
+                    )}
                     {models.map(model => (
                       <option key={model.model_id} value={model.model_id}>
                         {model.model_name || model.name} ({model.status})
@@ -590,121 +579,118 @@ function EditRuleModal({ rule, onClose, onSave }) {
                   </select>
                 )}
                 {models.length === 0 && !loadingData && (
-                  <small style={{ color: '#ffa726', fontSize: '11px', marginTop: '4px', display: 'block' }}>
-                    No models found. Register a model before adding a model-bound rule.
-                  </small>
+                  <p className="ar-hint ar-hint-warn">No models yet. <a href="/ml-models">Register one on Models</a> before adding a model rule.</p>
                 )}
               </div>
-            </>
-          )}
+            )}
 
-          {formData.detection_type === 'statistical' && (
-            <>
-
-              <div className="form-group">
-                <label>Drift Threshold</label>
+            {formData.detection_type === 'statistical' && (
+              <div className="ar-field">
+                <label htmlFor={fid('drift')}>Drifted share that fires</label>
                 <input
+                  id={fid('drift')}
                   type="number"
+                  className="mono ar-num"
                   step="0.01"
                   min="0"
                   max="1"
                   value={formData.threshold}
-                  onChange={(e) => setFormData({ ...formData, threshold: e.target.value })}
+                  onChange={(e) => set({ threshold: e.target.value })}
                   placeholder="0.30"
+                  aria-describedby={fid('drift-hint')}
                 />
-                <small style={{ color: '#787b86', fontSize: '11px', marginTop: '4px', display: 'block' }}>
-                  Alert when the share of drifted features (0–1) exceeds this. A drift alert
-                  means the live data has moved from the model's training baseline — investigate
-                  or consider retraining. Leave blank for the service default.
-                </small>
+                <p id={fid('drift-hint')} className="ar-hint">
+                  The rule fires when the share of drifted features (0 to 1) exceeds this: the live
+                  data has moved from the model&apos;s training baseline. Leave it blank for the
+                  service default.
+                </p>
               </div>
-            </>
-          )}
+            )}
 
-          {formData.detection_type === 'threshold' && (
-            <>
-              <div className="form-group">
-                <label>Condition</label>
-                <select
-                  value={formData.condition}
-                  onChange={(e) => setFormData({ ...formData, condition: e.target.value })}
-                >
-                  <option value="greater_than">Greater Than</option>
-                  <option value="less_than">Less Than</option>
-                  <option value="equals">Equals</option>
-                  <option value="between">Between</option>
-                  <option value="outside_range">Outside Range</option>
-                </select>
-              </div>
-
-              {(formData.condition === 'between' || formData.condition === 'outside_range') ? (
-                <>
-                  <div className="form-group">
-                    <label>Minimum Value</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.threshold_min}
-                      onChange={(e) => setFormData({ ...formData, threshold_min: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Maximum Value</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.threshold_max}
-                      onChange={(e) => setFormData({ ...formData, threshold_max: e.target.value })}
-                      required
-                    />
-                  </div>
-                </>
-              ) : (
-                <div className="form-group">
-                  <label>Threshold Value</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.threshold}
-                    onChange={(e) => setFormData({ ...formData, threshold: e.target.value })}
-                    required
-                  />
+            {formData.detection_type === 'threshold' && (
+              <div className="ar-row">
+                <div className="ar-field">
+                  <label htmlFor={fid('cond')}>Fires on a reading</label>
+                  <select
+                    id={fid('cond')}
+                    value={formData.condition}
+                    onChange={(e) => set({ condition: e.target.value })}
+                  >
+                    {CONDITIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </select>
                 </div>
-              )}
-            </>
-          )}
 
-          <div className="form-group">
-            <label>Severity</label>
-            <select
+                {isRange ? (
+                  <>
+                    <div className="ar-field">
+                      <label htmlFor={fid('min')}>From</label>
+                      <input
+                        id={fid('min')}
+                        type="number"
+                        className="mono ar-num"
+                        step="0.01"
+                        value={formData.threshold_min}
+                        onChange={(e) => set({ threshold_min: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="ar-field">
+                      <label htmlFor={fid('max')}>To</label>
+                      <input
+                        id={fid('max')}
+                        type="number"
+                        className="mono ar-num"
+                        step="0.01"
+                        value={formData.threshold_max}
+                        onChange={(e) => set({ threshold_max: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="ar-field">
+                    <label htmlFor={fid('value')}>Value</label>
+                    <input
+                      id={fid('value')}
+                      type="number"
+                      className="mono ar-num"
+                      step="0.01"
+                      value={formData.threshold}
+                      onChange={(e) => set({ threshold: e.target.value })}
+                      required
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </fieldset>
+
+          <fieldset className="ar-group">
+            <legend>Severity</legend>
+            <Seg
+              label="Severity"
               value={formData.severity}
-              onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
-          </div>
+              onChange={(v) => set({ severity: v })}
+              options={SEVERITIES.map((s) => ({ value: s, label: cap(s) }))}
+            />
+          </fieldset>
 
-          <div className="form-group">
-            <label style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <input
-                type="checkbox"
-                checked={formData.enabled}
-                onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
-              />
-              Enabled
-            </label>
-          </div>
+          <label className="ar-check" htmlFor={fid('enabled')}>
+            <input
+              id={fid('enabled')}
+              type="checkbox"
+              checked={formData.enabled}
+              onChange={(e) => set({ enabled: e.target.checked })}
+            />
+            Active: the rule raises alerts
+          </label>
 
-          <div className="form-actions">
-            <button type="button" className="btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="btn-primary">
-              Save Rule
+          {formError && <p className="ar-form-error" role="alert">{formError}</p>}
+
+          <div className="ar-form-actions">
+            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? 'Saving' : rule ? 'Save rule' : 'Create rule'}
             </button>
           </div>
         </form>
