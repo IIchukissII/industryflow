@@ -47,7 +47,7 @@ hub sends `Content-Security-Policy: frame-ancestors 'self'`.
 |---|---|---|---|
 | notebook-sso | nginx `auth_request` to `/auth/verify`, forwards `X-IF-*` | 8080 (internal) | `services/notebook_hub/sso-nginx.conf` |
 | notebook-hub | JupyterHub, spawner by `NOTEBOOK_SPAWNER` (`docker` / `kube`), base URL `NOTEBOOK_BASE_URL` (`/jupyter/`) | 8000 | `services/notebook_hub/jupyterhub_config.py`, `identity.py`, `capabilities.py` |
-| notebook-authoring image | JupyterLab, DS stack, `industryflow[sql]` client | | `services/notebook_hub/Dockerfile.authoring` |
+| notebook-authoring image | JupyterLab, DS stack, `industryflow[sql,cold]` client | | `services/notebook_hub/Dockerfile.authoring` |
 | notebook-analytics image | Voila, data-API client; hub lands on `/voila` | | `services/notebook_hub/Dockerfile.analytics` |
 | notebook-sql-proxy | Postgres-wire proxy | 6432 | `services/notebook_sql_proxy/` |
 | notebook-tracking-gateway | MLflow proxy with per-route tenant rules; upload stage/commit | 5050 | `services/notebook_tracking_gateway/` |

@@ -14,7 +14,7 @@ object store (the broker 307-redirects to the pre-signed URL), so many files can
 parallel, column- and partition-pruned — the whole point of the cold layer (ADR-0025 dec 1).
 
 The HTTP transport is injectable, so the ergonomics are testable without a running broker or object
-store. pandas/pyarrow are imported lazily (heavy, and optional extras).
+store. pandas/pyarrow are imported lazily (heavy); pyarrow is the ``cold`` extra.
 """
 from __future__ import annotations
 
