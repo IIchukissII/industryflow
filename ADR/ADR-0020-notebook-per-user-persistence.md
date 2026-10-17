@@ -3,20 +3,23 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0020 — Notebook per-user work persistence (durable storage, ephemeral compute)
+# ADR-0020 — Notebook per-user work persistence (durable storage, ephemeral compute) (rev 1)
 
 - **ID:** ADR-0020
 - **Status:** Accepted
-- **Date:** 2026-06-28
+- **Date:** 2026-06-28 (rev 1: 2026-10-17)
 - **Project:** IndustryFlow
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (embedded notebooks — resolves its deferred "where authored notebooks live")
 - **Companions:** [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner parity), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (ephemeral capabilities)
+- **Supersedes:** ADR-0020 rev 0 (2026-06-28 — gave every user a durable work volume; rev 1 restates decisions 1 and 5 for the authoring profile, the only profile that authors)
 
 ## Context and problem
 
 ADR-0011 spawns one **ephemeral** notebook environment per user, "reclaimed when idle" (dec 1, 7), and explicitly **deferred** *where authored notebooks live*. Built as deferred, the singleuser container is removed on stop with no storage, so a data scientist loses their notebooks every time their server restarts — including when the hub reclaims an idle server or a new image ships. That makes the authoring profile unusable for real work.
 
 The open question: add durable storage **without** weakening the security posture — the kernel must still hold no persisted data credential, the compute must still be ephemeral and idle-reclaimed, and tenants must stay isolated.
+
+**Revision 1 (2026-10-17).** Decisions 1 and 5 give *every* user a work volume and every image a work directory. The problem this record answers is the authoring profile's: the analytics profile renders read-only dashboards, authors nothing, and has nothing to keep. The build attached durable storage to authoring environments only, from the first implementation, and only the authoring image prepares the work directory. Rev 1 restates both decisions to that scope; nothing else changes.
 
 ## Decision drivers
 
@@ -29,6 +32,8 @@ The open question: add durable storage **without** weakening the security postur
 
 1. **Per-user durable storage for authored work, mounted at a work subdirectory — not the whole home.** Each user gets one persistent volume mounted at a work subdirectory of their home; their notebooks live there and survive restarts. The rest of the home (and the read-only `examples/` baked into the image, ADR-0011) stays **image-supplied and ephemeral**, so an immutable example or a stack upgrade is always the fresh image's, never a stale copy frozen in a volume. The storage is **per user**, named/claimed by the (already tenant-bound) username.
 
+   > **rev 1 (2026-10-17): durable work storage belongs to the authoring profile; an analytics environment is ephemeral in full.** Each user spawned with the authoring profile gets the one persistent work volume described above. An analytics environment requests no storage and keeps nothing across restarts, which costs it nothing because it authors nothing. A user whose role later grants authoring receives the volume at their next authoring spawn.
+
 2. **The compute stays ephemeral and idle-reclaimed.** The container or pod is still removed on stop; only the work volume persists. ADR-0011 dec 1/7's "reclaimed when idle" is made concrete with an **idle-culler service**: it stops servers idle past a timeout, holding a **minimal scoped token** — enough to list users, read their activity and servers, and stop servers, and nothing more — least-privilege, not an ambient admin credential. Reclaiming an idle server now costs nothing: the work is safe on the volume and the next spawn restores it from a fresh image.
 
 3. **Capabilities are never persisted.** The SQL / API / tracking capability handles (ADR-0015) are injected into the environment at spawn and live only in the process; nothing writes them to the work volume. A restored volume carries notebooks, not credentials — the kernel re-authenticates with freshly-minted handles every spawn.
@@ -36,6 +41,8 @@ The open question: add durable storage **without** weakening the security postur
 4. **No cross-tenant human administration.** Server lifecycle is automatic (idle-culler) and self-service (a user starts/stops *their own* server through the hub UI). The platform `admin` role is a **tenant** role, so it is deliberately **not** mapped to a JupyterHub admin — that would grant cross-tenant access to other tenants' environments, violating ADR-0011's isolation. Operating on another tenant's server is not a capability the system grants anyone.
 
 5. **Parity across spawners (ADR-0018).** DockerSpawner uses a per-user **named volume**; KubeSpawner uses a per-user **PVC** (auto-ensured). Both mount at the same work subdirectory; the images create that directory owned by the non-root user so a fresh volume initialises writable. (The concrete paths, volume naming and culler scopes are in `docs/architecture/notebooks.md`.) Everything else (capability minting, profile, containment) is unchanged and spawner-agnostic.
+
+   > **rev 1 (2026-10-17): parity holds for the authoring profile, and only the authoring image prepares the work directory.** Under either spawner an authoring environment mounts its volume at the same work subdirectory, and an analytics environment mounts none.
 
 ## Alternatives considered
 
@@ -52,12 +59,16 @@ The open question: add durable storage **without** weakening the security postur
 
 ### Negative
 - Per-user volumes/PVCs accumulate and need a lifecycle (quota, reclaim on offboarding) — see deferred.
+  *(rev 1)* They accumulate per authoring user, not per user.
 - A user can fill their `work/` volume; per-user storage quota is a deferred operational control.
 - Persisted notebooks raise the audit question ADR-0011 already deferred (who ran what); still deferred.
 
 ## Deferred decisions
 
 - **Storage quota + reclamation.** Per-user volume size caps and the offboarding/GC policy (when a departed user's volume is reclaimed) are operational config, deferred.
+  *Resolved since acceptance, in part.* On Kubernetes each claim requests a configured size, which
+  caps the volume. On a Docker host a named volume has no size cap. Reclamation on offboarding is not
+  built on either spawner and remains deferred.
 - **Execution audit trail.** Inherited from ADR-0011; persisted work does not by itself record who executed what against which tenant.
 - **Idle timeout + cull cadence values.** The exact timeout/period are env-tunable configuration, not architecture.
 
