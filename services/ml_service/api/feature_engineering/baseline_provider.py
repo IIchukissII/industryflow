@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Aggregate-backed baseline provider (ADR-0023 rev 1).
+Aggregate-backed baseline provider (ADR-0023 dec 7).
 
 The windowed baseline a feature transform needs — the recent rolling mean of a sensor — is
 already materialized by the Spark aggregation job as ``sensor_aggregations_<granularity>``
@@ -30,7 +30,7 @@ from industryflow_contracts import tenancy, windows
 logger = logging.getLogger(__name__)
 
 # Aggregate granularities the Spark job materializes, and their tables, from the one window contract
-# the job and the offline training re-derivation also use (ADR-0006 dec 7, ADR-0023 rev 2 dec 9): the
+# the job and the offline training re-derivation also use (ADR-0006 dec 7, ADR-0023 dec 9): the
 # newest row this provider reads at time t is window floor((t - lateness) / width) - 1, and training
 # reproduces that same window from the same numbers. Allow-listed because the granularity selects a
 # TABLE NAME, which cannot be a bound query parameter — this is the injection guard for that
@@ -144,7 +144,7 @@ class AggregateBaselineProvider:
     ) -> Optional[float]:
         """Return just the latest closed window's mean.
 
-        The pre-rev-2 provider API. The core reads ``compute_baseline`` now, but the provider is
+        The legacy provider API. The core reads ``compute_baseline`` now, but the provider is
         handed to *domain* transforms through ``TransformContext``, so an extension may already
         call this — dropping it would be a breaking extension-API change (ADR-0010 dec 3) for no
         gain. Kept as a thin read over the same baseline, not a second computation.

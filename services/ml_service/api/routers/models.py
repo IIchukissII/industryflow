@@ -280,7 +280,7 @@ async def _admit_address_or_refuse(
 
 
 async def _refuse_author_code_or_reject(artifact_uri: str, *, on_refused: int) -> None:
-    """Refuse an uploaded model whose load would run code its author chose (ADR-0030 dec 4 rev 4).
+    """Refuse an uploaded model whose load would run code its author chose (ADR-0030 dec 4).
 
     Asked at registration and at deployment, before the compatibility gate reads the artifact and
     before the load probe runs, and again by every load. It reads the manifest only and imports
@@ -353,7 +353,7 @@ async def mint_upload_capability(
     This is the platform session becoming an upload — *derived from* a session, never *presented as*
     one. The mediator that holds the artifact-store credential resolves the opaque handle and learns
     nothing else; teaching it to verify sessions instead would let a compromise there forge any
-    user's session in any tenant, since the signature is symmetric (ADR-0015 dec 7, dec 4 rev 1).
+    user's session in any tenant, since the signature is symmetric (ADR-0015 dec 7, dec 4).
 
     Minted here because this service already establishes the tenant from a verified principal for its
     own reasons (ADR-0003 dec 1), and is the authority that will judge the artifact at the
@@ -444,7 +444,7 @@ async def create_model(
         )
 
     # A reference profile's prediction column is a baseline only if it holds the declared detector's
-    # scores on their scale (ADR-0021 rev 1 dec 4). One that does not would raise prediction drift on
+    # scores on their scale (ADR-0021 dec 4). One that does not would raise prediction drift on
     # a model that has not moved, so it is refused here rather than stored and found out later.
     if payload.get("reference_profile"):
         refusal = prediction_column_refusal(payload["reference_profile"])

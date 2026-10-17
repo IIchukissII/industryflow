@@ -54,9 +54,9 @@ hub sends `Content-Security-Policy: frame-ancestors 'self'`.
 
 ## Profiles
 
-| Profile | Roles (default) | Image | Landing | Capability handles | Persistence |
+| Profile | Roles (`NOTEBOOK_AUTHORING_ROLES`, default) | Image | Landing | Capability handles | Persistence |
 |---|---|---|---|---|---|
-| `authoring` | `admin`, `engineer`, `data_scientist` | `NOTEBOOK_IMAGE_AUTHORING` | JupyterLab | api, sql; tracking when `INDUSTRYFLOW_TRACKING_URL` is set; cold when `INDUSTRYFLOW_COLD_BROKER_URL` is set | Per-user volume `NOTEBOOK_VOLUME_TEMPLATE` at `<home>/work`; a PVC on Kubernetes |
+| `authoring` | `admin`, `engineer` | `NOTEBOOK_IMAGE_AUTHORING` | JupyterLab | api, sql; tracking when `INDUSTRYFLOW_TRACKING_URL` is set; cold when `INDUSTRYFLOW_COLD_BROKER_URL` is set | Per-user volume `NOTEBOOK_VOLUME_TEMPLATE` at `<home>/work`; a PVC on Kubernetes |
 | `analytics` | Every other role | `NOTEBOOK_IMAGE_ANALYTICS` | `/voila` | api | None |
 
 Either image falls back to `NOTEBOOK_IMAGE`. Hub settings:
@@ -124,7 +124,7 @@ safe to re-run.
 | Environment | Per-user container | Per-user pod |
 | Egress | Network `industryflow-notebook-kernels`, shared with `notebook-hub`, `api-gateway`, `notebook-sql-proxy`, `notebook-tracking-gateway`, `notebook-cold-broker`, `minio` | Single-user egress NetworkPolicy (`networkpolicy.yaml`) |
 | Docker access | Hub in supplementary group `DOCKER_GID` | RBAC for pods and PVCs (`notebook-hub.yaml`) |
-| Enable | [getting started, step 6](../getting-started.md#6-notebooks-optional-profile) | `notebookHub.enabled: true`, `notebookHub.baseUrl: /jupyter/` |
+| Enable | [getting started, step 6](../getting-started.md#6-notebooks-optional-profile) | `notebookHub.enabled: true`, `notebookHub.baseUrl: /jupyter/`, `notebookHub.authoringRoles` |
 | Validation | Compose smoke checks the kernel network on every PR | Renders and lints in CI; not run on a cluster |
 
 Idle culling: `jupyterhub-idle-culler` with token scopes `list:users`, `read:users:activity`,

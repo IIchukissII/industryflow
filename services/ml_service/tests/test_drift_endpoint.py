@@ -185,7 +185,7 @@ def test_a_model_nothing_can_interpret_still_reports_data_drift(evaluate):
 
 
 def test_a_reference_of_labels_is_not_a_prediction_baseline(evaluate, monkeypatch):
-    """A stored profile whose prediction column holds labels, not detector scores (ADR-0021 rev 1
+    """A stored profile whose prediction column holds labels, not detector scores (ADR-0021
     dec 4): prediction drift is refused with the reason, nothing is scored against it, and data
     drift — which compares inputs — is still reported."""
     rng = np.random.default_rng(6)

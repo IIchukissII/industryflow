@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-The ML service re-reads the account behind every token (ADR-0004 dec 2 rev 2, ADR-0033 dec 3).
+The ML service re-reads the account behind every token (ADR-0004 dec 2, ADR-0033 dec 3).
 
 A validly signed access token is not enough: a deactivated or deleted user, or a user of a suspended
 company, is refused at once rather than when the token expires. The account store is a fake pool.

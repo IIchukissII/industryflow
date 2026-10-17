@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Unit tests for the aggregate-backed baseline path (ADR-0023 rev 1):
+Unit tests for the aggregate-backed baseline path (ADR-0023 dec 7):
 
 - the ``statistical`` transform degrades to the neutral value (0.0), never the raw sensor value,
   when the baseline is unavailable, and sources the mean from the baseline provider; and
@@ -106,7 +106,7 @@ async def test_unknown_stat_type_is_neutral():
 
 @pytest.mark.asyncio
 async def test_legacy_stat_type_still_resolves():
-    """Configs written before ADR-0023 rev 2 keep working — the rename is not a silent break."""
+    """Configs naming the legacy stat_type keep working — the rename is not a silent break."""
     result = await STATISTICAL(_transform(stat_type="deviation_from_run_mean"),
                                {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0)))
     assert result == pytest.approx(2.5)

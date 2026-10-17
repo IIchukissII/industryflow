@@ -10,7 +10,7 @@ A capability is an opaque, high-entropy handle backed by a short-lived entry in 
 (deletion), so revocation is immediate and central with expiry only the backstop (dec 2). Each
 handle is bound to one tenant and one audience, and audiences are never interchangeable (dec 3).
 Read-only is a bound fact per handle, not a property of every handle: the data planes are minted
-read-only, the tracking plane read-write within its tenant namespace (dec 1 rev 1).
+read-only, the tracking plane read-write within its tenant namespace (dec 1).
 
 Lifecycle (dec 2, ADR-0012 dec 6). The hub records every handle it mints for a server in a
 per-user index in the same store, so that it can:
@@ -71,7 +71,7 @@ class CapabilityStore(Protocol):
 @dataclass(frozen=True)
 class Binding:
     """The facts a handle is bound to (ADR-0015 dec 1): one user, one tenant, one audience, and
-    whether it may write (read-only for every plane but tracking, dec 1 rev 1)."""
+    whether it may write (read-only for every plane but tracking, dec 1)."""
 
     user: str
     company_id: str

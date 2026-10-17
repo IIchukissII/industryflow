@@ -83,7 +83,7 @@ async def test_a_record_with_no_audience_denies_everywhere():
 
 @pytest.mark.asyncio
 async def test_read_only_true_does_not_make_an_upload_handle_a_tracking_handle():
-    # read_only is a bound fact (ADR-0015 dec 1 rev 1), not the thing that picks a plane.
+    # read_only is a bound fact (ADR-0015 dec 1), not the thing that picks a plane.
     raw = _rec("upload", read_only=True)
     assert await policy.resolve_tracking_binding(_store(**{"nbcap:h": raw}), "h") is None
 

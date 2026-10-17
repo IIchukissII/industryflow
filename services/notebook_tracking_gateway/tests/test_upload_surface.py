@@ -359,7 +359,7 @@ def test_a_manifest_at_the_limit_is_still_judged():
     assert _commit(c, uid).status_code == 200
 
 
-# --- an upload handle authorises one upload (ADR-0015 dec 4 rev 1) -------------------------------
+# --- an upload handle authorises one upload (ADR-0015 dec 4) -------------------------------
 
 def test_a_committed_handle_is_spent():
     store = FakeStore()

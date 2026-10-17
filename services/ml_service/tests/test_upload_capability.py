@@ -3,10 +3,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Unit tests for demand-minting the upload capability (ADR-0030 dec 3, ADR-0015 dec 4 rev 1). Pure
+Unit tests for demand-minting the upload capability (ADR-0030 dec 3, ADR-0015 dec 4). Pure
 rule, no store — mirroring the other capability-rule tests.
 
-The property under test is not "a handle comes back". It is that the conditions ADR-0015 dec 4 rev 1
+The property under test is not "a handle comes back". It is that the conditions ADR-0015 dec 4
 attaches to demand-minting are kept by construction: the tenant is the caller's verified one and is
 never invented, the handle is opaque and short-lived, and the audience is one the spawner cannot
 mint — because the audience is what holds uploads and kernels to different admission rules.
@@ -51,7 +51,7 @@ def test_mint_binds_the_verified_user_and_exactly_one_tenant():
 
 
 def test_the_upload_plane_is_not_read_only():
-    # ADR-0015 dec 1 rev 1: a bound fact per handle. This plane writes one artifact; its boundary is
+    # ADR-0015 dec 1: a bound fact per handle. This plane writes one artifact; its boundary is
     # the tenant namespace the mediator enforces, not read-only-ness.
     s = FakeStore()
     uc.mint(s.set, user="alice", company_id=CID)
@@ -179,7 +179,7 @@ def test_the_route_mints_for_an_active_tenant():
 
 
 def test_the_route_indexes_the_handle_under_its_user():
-    # Ending the user's sessions revokes it with their other capabilities (ADR-0004 dec 2 rev 2).
+    # Ending the user's sessions revokes it with their other capabilities (ADR-0004 dec 2).
     store = FakeAsyncStore()
     r = _mint_route(store)
     assert store.kv[uc.user_index_key("user-1")] == {r.json()["capability"]}

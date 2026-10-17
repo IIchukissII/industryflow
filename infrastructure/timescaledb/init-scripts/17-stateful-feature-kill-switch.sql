@@ -2,7 +2,7 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
--- Stateful-feature kill-switch (ADR-0024 rev 1)
+-- Stateful-feature kill-switch (ADR-0024)
 -- Version: 1.0
 -- Date: July 12, 2026
 -- Purpose: The live, operator-flipped switch that neutralizes the stateful feature class when the

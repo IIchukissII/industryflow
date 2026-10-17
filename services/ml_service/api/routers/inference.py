@@ -145,7 +145,7 @@ call, hits included; a cold load is the full path in
         provenance=record_provenance(model_data),
     )
     try:
-        # The address is re-checked before the cache is consulted (ADR-0030 rev 4 dec 8), so a warm
+        # The address is re-checked before the cache is consulted (ADR-0030 dec 8), so a warm
         # model is never served from an address the current policy refuses.
         model_loader.check_address(
             company_id=company_id, mlflow_run_id=address['mlflow_run_id'],

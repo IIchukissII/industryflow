@@ -10,7 +10,7 @@ import './ModelUploadWizard.css';
 // ADR-0030: a model trained outside the platform comes back through one mediated door — mint an
 // upload capability, stage the artifact, PUT the bytes straight to the store, commit (structural
 // admission), then register (the serving side judges declared semantics + compatibility). Decision
-// 10 (rev 2) made that reachable from the browser, same-origin, at the edge. This wizard drives it.
+// 10 makes that reachable from the browser, same-origin, at the edge. This wizard drives it.
 
 // Human labels for the semantics vocabulary the registry advertises. The VALUES come from the server
 // (/api/ml/capabilities) so a new detector's semantics appears without a frontend change; these are

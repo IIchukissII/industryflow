@@ -52,19 +52,50 @@ def test_parse_identity_rejects_bad_input(headers):
         ident.parse_identity(headers)
 
 
-@pytest.mark.parametrize("role", ["admin", "engineer", "data_scientist"])
+@pytest.mark.parametrize("role", ["admin", "engineer"])
 def test_authoring_roles_get_authoring_profile(role):
-    assert ident.select_profile(role) == ident.PROFILE_AUTHORING
+    assert ident.select_profile(role, ident.DEFAULT_AUTHORING_ROLES) == ident.PROFILE_AUTHORING
 
 
-@pytest.mark.parametrize("role", ["operator", "viewer", "", "unknown"])
+@pytest.mark.parametrize("role", ["observer", "data_scientist", "", "unknown"])
 def test_other_roles_get_readonly_analytics(role):
-    assert ident.select_profile(role) == ident.PROFILE_ANALYTICS
+    assert ident.select_profile(role, ident.DEFAULT_AUTHORING_ROLES) == ident.PROFILE_ANALYTICS
+
+
+def test_default_authoring_roles_are_platform_roles():
+    assert ident.DEFAULT_AUTHORING_ROLES == {"admin", "engineer"}
+    assert ident.DEFAULT_AUTHORING_ROLES <= ident.PLATFORM_ROLES
+
+
+def test_authoring_roles_unset_is_the_default():
+    assert ident.parse_authoring_roles(None) == ident.DEFAULT_AUTHORING_ROLES
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("admin", {"admin"}),
+        ("admin, engineer ,observer", {"admin", "engineer", "observer"}),
+        ("engineer,engineer,", {"engineer"}),
+    ],
+)
+def test_authoring_roles_are_configurable(value, expected):
+    roles = ident.parse_authoring_roles(value)
+    assert roles == expected
+    assert ident.select_profile("observer", roles) == (
+        ident.PROFILE_AUTHORING if "observer" in expected else ident.PROFILE_ANALYTICS
+    )
+
+
+@pytest.mark.parametrize("value", ["", " , ", "admin,data_scientist", "Admin", "operator"])
+def test_authoring_roles_fail_closed_on_empty_or_unknown(value):
+    with pytest.raises(ValueError, match=ident.AUTHORING_ROLES_ENV):
+        ident.parse_authoring_roles(value)
 
 
 def test_pod_labels_bind_tenant_and_profile():
     cid = str(uuid.uuid4())
-    got = ident.pod_labels(ident.Identity(user="u", company_id=cid, role="operator"))
+    got = ident.pod_labels(ident.Identity(user="u", company_id=cid, role="observer"), ident.PROFILE_ANALYTICS)
     assert got["industryflow.io/company-id"] == cid
     assert got["industryflow.io/profile"] == ident.PROFILE_ANALYTICS
     assert got["app.kubernetes.io/name"] == "notebook-singleuser"
@@ -72,7 +103,9 @@ def test_pod_labels_bind_tenant_and_profile():
 
 def test_pod_environment_carries_identity_not_credentials():
     cid = str(uuid.uuid4())
-    env = ident.pod_environment(ident.Identity(user="alice", company_id=cid, role="engineer"))
+    env = ident.pod_environment(
+        ident.Identity(user="alice", company_id=cid, role="engineer"), ident.PROFILE_AUTHORING
+    )
     assert env == {
         "INDUSTRYFLOW_USER": "alice",
         "INDUSTRYFLOW_COMPANY_ID": cid,
