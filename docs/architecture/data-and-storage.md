@@ -3,165 +3,129 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# Data & storage
+# Data and storage
 
-How IndustryFlow stores tenant data: schema-per-tenant isolation on PostgreSQL + TimescaleDB,
-with compressed time-series hypertables. The SQL under
-`infrastructure/timescaledb/init-scripts/` is authoritative for the schema; this is the shape.
+Where tenant data lives: PostgreSQL + TimescaleDB with one schema per tenant, and the cold layer in
+the object store. The SQL in `infrastructure/timescaledb/init-scripts/` is authoritative for the
+schema.
 
-## Multi-tenancy: schema-per-tenant
+| Decision | ADR |
+|---|---|
+| Schema-per-tenant; tenant resolved from a verified identity, applied with `SET LOCAL search_path` in a transaction | [ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md) |
+| Idempotent writes against `UNIQUE` keys | [ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) |
+| Cold layer, export → verify → drop, raw retention owned by the exporter | [ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md) |
+| Tenant provisioning | [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) (proposed) |
+| Applying init-script changes to a live database | [ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md) (proposed) |
 
-Each tenant (company) owns a dedicated PostgreSQL **schema** named `tenant_<uuid>` (the
-company UUID with dashes replaced by underscores). A shared `public.companies` registry maps
-`company_id` → `schema_name`. Tenant tables (equipment, sensors, measurements, aggregations,
-alerts, ML models, feature configs) live inside each tenant schema; the `public` schema holds
-only the cross-tenant registry and the auth `user` table.
+## Tenant identity sources
 
-**Why schemas, not row-level security:** strong isolation without an RLS predicate on every
-query, and clean per-tenant lifecycle (create/drop a schema). Tenants are **provisioned at
-runtime** — nothing is hardcoded; `scripts/create-tenant.sh` inserts the company row and calls
-`create_tenant_schema()`, which builds the schema and all its tables.
+| Caller | `company_id` taken from |
+|---|---|
+| API request | `company_id` JWT claim |
+| Device reading | Client-certificate SAN, stamped by ingestion ([ADR-0002](../../ADR/ADR-0002-ingestion-authentication-and-device-identity.md)) |
+| Spark, alert worker | The Kafka message (stamped by ingestion) |
+| Notebook kernel | The capability handle ([notebooks.md](notebooks.md)) |
 
-A request's tenant is resolved from a **verified** identity, never the request body:
+Provisioning: `scripts/create-tenant.sh "<Company Name>" [<company-id>]` inserts the
+`public.companies` row and calls `create_tenant_schema()`.
 
-- API calls — the `company_id` **JWT claim** (validated as a UUID), so there is no per-request
-  schema scan.
-- Device ingestion — the `company_id` in the **client-certificate SAN**.
+## Tenant names
 
-The resolved UUID is validated and applied with `SET LOCAL search_path TO tenant_<uuid>,
-public` **inside a transaction**, so the tenant path never lingers on a pooled connection.
-See **[ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)**.
-
-### One tenant-naming module
-
-Every name derived from a tenant lives in one place, `libs/industryflow_contracts`
-(`industryflow_contracts.tenancy`), which every service image installs and the Spark jobs ship to
-their executors with `--py-files`. Each function parses the `company_id` as a UUID first and builds
-from its canonical form only:
+All tenant-derived names come from `libs/industryflow_contracts` (`industryflow_contracts.tenancy`).
+Every service image installs it (named build context `contracts`); the Spark jobs ship it to
+executors with `--py-files`.
 
 | Name | Function | Form |
 |---|---|---|
 | Schema | `schema_name` | `tenant_<uuid with underscores>` |
-| Read-only role (ADR-0011) | `reader_role_name` | `tenant_reader_<uuid with underscores>` |
-| SQL-proxy login (ADR-0015) | `sql_login_name` | `tenant_sqlproxy_<uuid with underscores>` |
-| MLflow names (ADR-0019) | `mlflow_name_prefix` | `tenant_<uuid with underscores>.` |
+| Read-only role | `reader_role_name` | `tenant_reader_<uuid with underscores>` |
+| SQL-proxy login | `sql_login_name` | `tenant_sqlproxy_<uuid with underscores>` |
+| MLflow names | `mlflow_name_prefix` | `tenant_<uuid with underscores>.` |
 | MLflow artifacts, admitted uploads | `mlflow_artifact_prefix` | `tenant_<uuid with underscores>/` |
-| Cold archive (ADR-0025) | `cold_object_prefix` | `tenant_<uuid>` (canonical hyphens) |
+| Cold archive | `cold_object_prefix` | `tenant_<uuid>` (hyphens) |
+| Schema → tenant | `company_id_from_schema` | inverse of `schema_name` |
+| Catalog filter | `SCHEMA_LIKE` | `tenant\_%` |
 
-The two spellings are deliberate. The identifier form needs underscores because a hyphen is not
-legal in an unquoted SQL identifier, and the tracking plane reuses it so a tenant has one name
-across the database and the model registry. The cold archive's prefix is a storage path, and every
-archive already exported sits under the hyphenated form. Background jobs that enumerate tenants
-read the catalog with `SCHEMA_LIKE` and accept only names `company_id_from_schema` maps back.
+| Guard | Fails on |
+|---|---|
+| `tests/config_guards/test_tenant_contract_copies.py` | A service or script spelling a tenant name or restating the window contract in code |
+| `tests/config_guards/test_images_carry_contracts.py` | An image whose code imports the package but does not install it |
 
-No service builds a tenant name itself: `tests/config_guards` scans every service's source and fails
-on one, and checks that every image whose code imports the package carries it. Images get it from
-the named build context `contracts` (`additional_contexts` in compose, `build-contexts` in CI). The
-database cannot import Python, so its own SQL derivations (tenant creation, provisioning, the role
-scripts) are held by the same guards to the shapes that agree with the package.
+## Tables
 
-## Tables (per tenant schema)
+`public` schema:
 
-- `equipment`, `sensors` — the asset model (generic; domain entities live in
-  [extension-owned tables](../operations/extensions.md), not as columns here).
-- `sensor_measurements` — raw readings, a TimescaleDB **hypertable**, `UNIQUE(time, sensor_id)`
-  for idempotent writes.
-- `sensor_aggregations_1min` / `_5min` / `_1hour` — rolled-up windows, hypertables with
-  `UNIQUE(time, sensor_id, equipment_id)` (the unique key includes the partition column).
-- `alert_rules`, `alerts` — alerting configuration and history.
-- `ml_models`, `model_predictions`, `feature_engineering_configs` — the ML surface.
+| Table | Content | Created by |
+|---|---|---|
+| `companies` | `company_id` → `schema_name` registry | `01-init-schema.sql` |
+| `user` | Platform users (fastapi-users) | `services/api_gateway/models/user.py` |
+| `platform_config` | Platform switches (`stateful_features_enabled`, [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) | `17-stateful-feature-kill-switch.sql` |
+| `cold_export_drops` | Committed cold-export drops | `16-cold-layer-raw-retention.sql` |
 
-## Time-series: hypertables, compression, retention
+Per tenant schema (`create_tenant_schema()` in `04-complete-tenant-creation.sql`):
 
-`sensor_measurements` and the aggregation tables are **hypertables** — TimescaleDB partitions
-them into time chunks transparently, which keeps inserts fast and time-range queries pruned to
-the relevant chunks.
+| Table | Kind | Key / retention | Defined in |
+|---|---|---|---|
+| `equipment`, `sensors` | Plain | `UNIQUE (equipment_id, sensor_name)` on `sensors` | `04-complete-tenant-creation.sql` |
+| `sensor_measurements` | Hypertable on `time` | `UNIQUE (time, sensor_id)`; no retention policy (cold export drops it) | `04-complete-tenant-creation.sql`, `16-cold-layer-raw-retention.sql` |
+| `sensor_aggregations_1min` / `_5min` / `_1hour` | Hypertable on `time` | `UNIQUE (time, sensor_id, equipment_id)`; retention 90 d / 180 d / 1 y | `04-complete-tenant-creation.sql` |
+| `alert_rules` | Plain | | `02-tenant-alert-tables.sql` |
+| `alerts` | Hypertable on `triggered_at` | Retention 90 d | `02-tenant-alert-tables.sql` |
+| `alert_labels` | Plain | No retention | `15-alert-labels.sql` |
+| `ml_models` | Plain | | `03-tenant-ml-tables.sql`; columns added by `14`, `18`–`20` |
+| `model_predictions` | Hypertable on `timestamp` | Retention 180 d | `03-tenant-ml-tables.sql` |
+| `feature_engineering_configs` | Plain | | `06-feature-engineering-tables.sql` |
 
-Older chunks are **compressed** columnar (segment-by `equipment_id`, order-by `time`), which
-shrinks high-volume sensor data substantially and speeds scans over compressed ranges; recent
-chunks stay uncompressed for fast writes. Compress-after and the aggregation tables' tiered
-retention (90d / 180d / 1yr) are configured per the init scripts.
+Compression (`segmentby equipment_id`, `orderby time DESC`) after: raw 7 d; aggregations
+14 d / 30 d / 60 d. Extension-owned domain tables: [operations/extensions.md](../operations/extensions.md).
 
-**Raw retention is owned by the cold layer, not a blind timer.** There is deliberately *no*
-TimescaleDB `add_retention_policy` on `sensor_measurements`: a timer would drop chunks whether or
-not they were archived. Instead the cold-export job is the sole authority that drops a raw chunk,
-and only after a verified Parquet export (see below). The effective raw-retention horizon is the
-export horizon (`COLD_EXPORT_HORIZON_DAYS`, default 30 days). See
-**[ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md)**.
+Init scripts run only on an empty data volume. On a live database a new or changed script is applied
+by hand.
 
-## Cold layer: long-horizon history (ADR-0025)
+## Roles
 
-Three storage layers answer three different questions: the **stream** (Spark state) answers
-"is an anomaly happening now?", the **hot** store (TimescaleDB) answers "what happened in the
-last hours/days?", and the **cold** layer answers "give me years, all columns — I am training."
-Reading years of raw row-wise over the Postgres wire is OLTP transport for an OLAP scan; the cold
-layer stores the same raw content as partitioned **Parquet** in the object store, read in
-parallel with column and partition pruning.
+Created in `00-create-roles.sh` (and `12-metrics-role.sql`, `13-notebook-sql-proxy-role.sh`).
+Per-tenant grants are made by `create_tenant_schema()`.
 
-The exporter (`services/cold_export/`) is a single-node columnar writer — **not** Spark — run as
-a Kubernetes CronJob (on the box: `docker compose --profile cold-export up cold-export`). Its one
-invariant is the ordering **export → verify → drop**, enforced in the script, never in the
-orchestrator: for each tenant it reads a day from one database snapshot, writes it as a Parquet
-part, reconciles the written row count against the source, lists the part in the day's
-`_manifest.json`, and only then drops the chunk. The drop re-reads the day under a lock and drops
-nothing if any row arrived, changed or left since the snapshot (a row-count-and-digest check in
-`cold_export_drop_day`); the next run exports it. It is idempotent and self-healing — "export
-everything older than N days not yet exported" — so a failed run re-picks the same days next time.
-Runs never overlap, whatever starts them: a run holds a database advisory lock for its whole
-duration, and a run that finds it held logs that and exits successfully having done nothing (the
-run in progress is doing its work). The lock dies with the holder's session, so a crashed run
-never blocks the next.
+| Role | Used by | Tenant-schema access | Connection limit |
+|---|---|---|---|
+| `api_gateway_user` | api-gateway | SELECT, INSERT, UPDATE, DELETE | 50 |
+| `spark_streaming_user` | spark-streaming, spark-aggregations | SELECT, INSERT, UPDATE | 50 |
+| `alert_service_user` | alert-service-detector | SELECT, INSERT, UPDATE, DELETE | 50 |
+| `ml_service_user` | ml-service-api | SELECT, INSERT, UPDATE, DELETE | 10 |
+| `cold_export_user` | cold-export | SELECT on `sensor_measurements`; EXECUTE on `cold_export_day_fingerprint`, `cold_export_drop_day` | 5 |
+| `mlflow_user` | mlflow (own `mlflow` database) | none | 20 |
+| `metrics_user` | postgres-exporter (`pg_monitor`) | none | 5 |
+| `tenant_reader_<uuid>` | Assumed by the SQL proxy via `SET ROLE` (`NOLOGIN`) | SELECT on current and future tables of its own schema | |
+| `tenant_sqlproxy_<uuid>` | SQL proxy login per tenant (`NOINHERIT`) | Member of its own reader role only | |
+| `notebook_sql_proxy` | SQL proxy enrolment | none | 5 |
 
-A verified part is never rewritten. Rows that arrive for a day after it was dropped land in a new
-chunk and are exported as a further part (`measurements-0001.parquet`, …) with its own reconciled
-count; a row whose natural key the archive already holds is not exported twice. The manifest lists
-every verified part of the day, and readers read exactly the listed parts. Whether a listed part's
-drop committed is recorded by the database in the drop's own transaction
-(`public.cold_export_drops`), so a crash on either side of the drop resumes correctly.
+Ingestion has no database role ([ADR-0002](../../ADR/ADR-0002-ingestion-authentication-and-device-identity.md)).
+`tests/config_guards/test_db_connection_budget.py` checks that `max_connections` covers the sum of these limits.
 
-Isolation carries into the object store under the *existing* policy, not a new one:
+## Cold layer
 
-- **Write side (ADR-0003).** Tenants come from the verified `public.companies` registry; each
-  tenant's Parquet lives under its own `tenant_<uuid>/…` prefix via the single canonical
-  `company_id → prefix` mapping (`cold_object_prefix`, which the read-side broker uses too) — never a shared path keyed by
-  a column. The schema it reads and drops is derived from the `company_id` by the canonical
-  mapping; a registry `schema_name` that disagrees is refused, not used. The exporter connects as the least-privilege `cold_export_user` (SELECT on raw only)
-  and drops chunks through a `SECURITY DEFINER` function, so it never owns the table. Its
-  object-store principal is **write-scoped** to the cold bucket (put/get/list), never the root
-  MinIO keys.
-- **Read side (ADR-0012 / ADR-0015).** Notebooks read the cold layer through the
-  **cold-store broker** (`services/notebook_cold_broker/`), the object-store twin of the SQL
-  proxy. The authoring kernel holds no durable object-store credential — only a per-session
-  **cold capability** handle (`INDUSTRYFLOW_COLD_CAPABILITY`, minted by the spawner). It presents
-  that handle to the broker, which resolves it to one tenant, confines every key to that tenant's
-  `tenant_<uuid>/` prefix, and returns short-TTL, **read-only** pre-signed GET URLs so bytes flow
-  directly kernel↔object store (in parallel, column/partition-pruned). The broker holds a
-  **read-only** cold-bucket principal — distinct from the exporter's write principal and the root
-  keys. The `industryflow.IndustryFlowCold` client wraps it (`list_files` / `read_parquet` /
-  `read_all`). A data scientist on tenant A can no more read tenant B's Parquet than tenant B's
-  schema.
+Raw `sensor_measurements` older than the export horizon, as Parquet in the object store.
 
-Where it lives: the exporter in `services/cold_export/` (`exporter.py` holds the ordering
-invariant, `naming.py` the one tenant-prefix mapping); the role, the `SECURITY DEFINER`
-`cold_export_drop_day` and the removal of the blind raw retention policy in init script
-`16-cold-layer-raw-retention.sql` (with matching grants in `04-complete-tenant-creation.sql`,
-`00-create-roles.sh` and `pg_hba.conf`); the broker in `services/notebook_cold_broker/`; the
-`cold` audience in `services/notebook_hub/capabilities.py`; the CronJob in the Helm chart
-(`cronjob-cold-export.yaml`) and the compose `cold-export` profile; the cold bucket and its
-write-scoped and read-only principals are created by the object store's bootstrap job, the one
-place that holds the store's root credential.
+| Component | Where |
+|---|---|
+| Exporter (single-node PyArrow) | `services/cold_export/` — `exporter.py` (ordering), `source.py` (database reads, run lock), `store.py` (object store), `naming.py` (paths), `ports.py` |
+| Schedule | Helm `cronjob-cold-export.yaml` (`coldExport.schedule`, `concurrencyPolicy: Forbid`); compose `docker compose --profile cold-export up cold-export` |
+| Horizon | `COLD_EXPORT_HORIZON_DAYS` / `coldExport.horizonDays`, default 30 |
+| Bucket | `COLD_STORE_BUCKET` / `coldExport.store.bucket`, default `industryflow-cold` |
+| Database side | `16-cold-layer-raw-retention.sql`: `cold_export_day_fingerprint`, `cold_export_drop_day` (`SECURITY DEFINER`), `public.cold_export_drops` |
+| Object-store principals | Write-scoped exporter principal; read-only broker principal; created by `minio-init` / Helm `job-minio-init.yaml` |
+| Read path | `services/notebook_cold_broker/`, client `industryflow.IndustryFlowCold` ([notebooks.md](notebooks.md)) |
+| Backup | `db-backup` mirrors the cold bucket (`COLD_SOURCE_*`, Helm `backup.cold.enabled`) |
 
-ADR-0025 deliberately deferred parts of the cold layer to a future trigger (a table format, a
-distributed Spark exporter, the concrete retention horizon). Those triggers, the signals that
-detect them, and what to build when they fire are tracked in
-[cold-layer-evolution.md](cold-layer-evolution.md) — build nothing until its trigger fires.
+Exporter behaviour per tenant and day:
 
-## Roles & grants
+| Step | Detail |
+|---|---|
+| Run lock | Session advisory lock for the whole run; a run that finds it held exits 0 |
+| Export | Day read from one snapshot, written as a part: `measurements.parquet`, then `measurements-0001.parquet`, … for rows that arrive later |
+| Verify | Written row count reconciled against the source; part listed in the day's `_manifest.json` |
+| Drop | `cold_export_drop_day` re-checks the day's fingerprint (count + digest) under a lock and drops nothing if it changed; the drop is recorded in `public.cold_export_drops` |
+| Schema | Derived from `company_id`; a registry `schema_name` that disagrees is refused |
 
-Each service that touches the database connects as its own least-privilege role
-(`api_gateway_user`, `spark_streaming_user`, `alert_service_user`, `ml_service_user`,
-`cold_export_user`), and `create_tenant_schema()` grants each role only the access it needs
-within every tenant schema (e.g. Spark insert, the gateway full CRUD, cold-export SELECT on raw
-plus EXECUTE on `cold_export_day_fingerprint` and `cold_export_drop_day`). Ingestion is mTLS-only and holds no database role at
-all — it produces to Kafka and Spark performs the writes (ADR-0002). Role connection limits
-apply — size service connection pools (workers × pool size) within them.
+Deferred cold-layer items and their triggers: [cold-layer-evolution.md](cold-layer-evolution.md).
