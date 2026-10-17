@@ -118,7 +118,7 @@ jobs:
           - { name: api-gateway,            context: services/api_gateway,     file: services/api_gateway/Dockerfile,
               smoke: "env DB_HOST=x DB_PORT=5432 DB_NAME=x API_GATEWAY_DB_USER=x API_GATEWAY_DB_PASSWORD=x REDIS_HOST=x REDIS_PORT=6379 REDIS_DB=0 JWT_SECRET_KEY=smoke-only-not-a-secret-0123456789abcdef CORS_ORIGINS=https://x python -c \"import main; print('api-gateway serves', main.app.title)\"" }
           - { name: ingestion-service,      context: services/ingestion_service, file: services/ingestion_service/Dockerfile,
-              smoke: "env INGESTION_SERVICE_PORT=8003 KAFKA_BOOTSTRAP_SERVERS=x:9092 DEVICE_IDENTITY_HEADERS=x-client python -c \"import main; print('ingestion serves', main.app.title)\"" }
+              smoke: "env INGESTION_SERVICE_PORT=8003 KAFKA_BOOTSTRAP_SERVERS=x:9092 KAFKA_TOPIC_SENSOR_DATA=x DEVICE_IDENTITY_HEADERS=x-client python -c \"import main; print('ingestion serves', main.app.title)\"" }
           # No `smoke`: the edge has its own smoke step below (nginx -t per deployment + behaviour).
           - { name: frontend,               context: services/frontend,        file: services/frontend/Dockerfile }
           # numpy/sklearn/xgboost are C-extension stacks: an ABI mismatch is invisible to a resolve and

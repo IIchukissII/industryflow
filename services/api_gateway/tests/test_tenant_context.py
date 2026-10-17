@@ -81,7 +81,7 @@ async def test_capability_db_is_read_only(fake_session):
     await _drive_db(dependencies.get_tenant_db, ctx)
 
     sql = " ".join(fake_session.executed)
-    assert "SET LOCAL search_path TO tenant_" in sql
+    assert 'SET LOCAL search_path TO "tenant_' in sql
     assert "transaction read only" in sql.lower()
 
 
@@ -93,5 +93,5 @@ async def test_session_db_is_not_read_only(fake_session):
     await _drive_db(dependencies.get_tenant_db, ctx)
 
     sql = " ".join(fake_session.executed)
-    assert "SET LOCAL search_path TO tenant_" in sql
+    assert 'SET LOCAL search_path TO "tenant_' in sql
     assert "read only" not in sql.lower()

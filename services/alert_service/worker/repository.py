@@ -82,7 +82,7 @@ class AlertRepository:
         """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute(f"SET LOCAL search_path TO {schema_name}, public")
+                await conn.execute(f'SET LOCAL search_path TO "{schema_name}", public')
                 yield conn
 
     async def get_active_rules(self, company_id: str) -> List[Dict]:
