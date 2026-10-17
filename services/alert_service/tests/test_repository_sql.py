@@ -104,7 +104,7 @@ def test_search_path_is_only_ever_set_transaction_locally():
         pool.log.clear()
         asyncio.run(call)
         stmts = _statements(pool.log)
-        assert stmts[0][0] == f"SET LOCAL search_path TO {SCHEMA}, public"
+        assert stmts[0][0] == f'SET LOCAL search_path TO "{SCHEMA}", public'
         assert all(in_tx for _, _, in_tx in stmts), stmts
         assert not any(s.startswith("SET search_path") for s, _, _ in stmts)
 
