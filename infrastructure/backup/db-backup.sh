@@ -150,7 +150,8 @@ main() {
     aws "${AWS_ARGS[@]}" s3 mb "s3://${S3_BUCKET}" || true
   fi
 
-  # Cluster-wide role/grant definitions — restored before any per-database dump.
+  # Cluster-wide roles and role memberships (object grants live in each database dump) — restored
+  # before any per-database dump.
   log "dumping globals (roles)"
   pg_dumpall --globals-only --no-role-passwords -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" \
     > "${WORKDIR}/globals.sql"
