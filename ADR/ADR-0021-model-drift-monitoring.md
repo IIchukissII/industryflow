@@ -3,100 +3,69 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# ADR-0021 — Model drift monitoring (the `statistical` alert lane) (rev 1)
+# ADR-0021 — Model drift monitoring (the statistical alert lane)
 
-- **ID:** ADR-0021
 - **Status:** Accepted
-- **Date:** 2026-06-28 (rev 1: 2026-10-13)
-- **Project:** IndustryFlow
-- **Parent:** ADR-0001 (framing)
-- **Companions:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md)/[ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (model registry + tracking). Realizes the alert-rule schema's reserved `statistical` detection type.
-- **Supersedes:** ADR-0021 rev 0 (2026-06-28 — said prediction drift compares the model's output distribution over time without saying which output, or what the baseline's output column holds; rev 1 binds both sides to the declared detector's scores, decisions 1 and 4)
+- **Date:** 2026-06-28; changed 2026-10-17
+- **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
+- **Related:** [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (declared detector
+  and scale), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (labelled drift),
+  [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors)
 
-## Context and problem
+## Context
 
-The platform now trains, registers, and serves models (anomaly detectors driving alerts; notebook-authored models). A deployed model silently decays: equipment ages, seasons turn, set-points change, so the live data drifts away from what the model was trained on and its judgments quietly stop meaning what they did. Nothing today notices.
-
-The alert service answers *"is this reading anomalous right now?"* — per-event, real-time, via the Kafka worker + ml-service inference. Drift is a different question on a different timescale: *"has the world moved away from this model's training distribution?"* — **windowed and statistical, not per-event.** Forcing it into the per-reading worker would be a category error.
-
-Two facts already in the codebase shape the answer:
-- the alert-rule schema already reserves **`detection_type='statistical'`** (`CHECK (detection_type IN ('threshold','ml','statistical'))`) — an alert lane built for exactly this and never wired;
-- **`evidently`** is already an ml-service dependency (unused), and every model records its training baseline coordinates (`training_start_date`/`training_end_date`/`mlflow_run_id`/`training_metrics`).
-
-So this is mostly *wiring foundations that already exist*, not new infrastructure. What is undecided — and what this ADR fixes — is the shape: what drift we detect, who owns it, how it surfaces, and what the baseline is.
-
-**Revision 1 (2026-10-13).** Decision 1 defined prediction drift as a shift in "the model's own output distribution (anomaly rate / score distribution)" and left open which output that is. ADR-0028 has since established that a model's raw output has no meaning the platform may assume — the same integer is normal for one family and anomalous for another — and that only the model's declared detector turns output into a score. Review found prediction drift had never been computed from that score: the current side was not produced at all, and nothing constrained what the reference profile's prediction column held. Two distributions are comparable only if they measure the same quantity on the same scale; a raw label on one side and a score on the other is a drift alarm waiting to happen on a model that has not moved. Rev 1 binds both sides to the detector (decisions 1 and 4).
-
-## Decision drivers
-
-- **Reuse the existing surfaces.** The `statistical` alert lane, `evidently`, the model metadata, and the alert history/severity/notification machinery should carry drift — not a parallel system.
-- **Label-free first.** Sensor streams are unlabeled in real time; the v1 must detect drift *without ground truth*, with labelled performance drift as a later, bigger step.
-- **One detection home, ML math where the ML stack is.** Threshold/ml/statistical detection should live in one place (the alert service); the heavy statistical compute belongs where `evidently` and the tenant data path already are (ml-service) — exactly the split the real-time ml rules already use.
-- **Tenant isolation (ADR-0003/0011).** Drift is evaluated per model, per tenant, over tenant-scoped data, against a per-tenant baseline.
-- **Decisions before implementation.** This ADR is the decision; code follows in a later pass.
+A deployed model decays silently as the live data moves away from its training data. Per-reading
+anomaly detection does not notice; drift is a windowed, statistical question on a longer timescale.
+Sensor streams carry no ground truth in real time. The alert schema reserves a statistical lane, and
+the ML service already holds a drift library and the tenant data path.
 
 ## Decision
 
-1. **v1 detects label-free drift: data drift + prediction drift.** *Data drift* — the input-feature distribution of a recent window vs the model's training baseline (`evidently`). *Prediction drift* — a shift in the model's own output distribution (anomaly rate / score distribution) over time. Both need no ground truth. **Performance/concept drift** (precision/recall decay) needs operator labels and is **deferred** (see below).
+1. **Drift is detected without labels: data drift and prediction drift.** Prediction drift compares the
+   declared detector's scores on its declared scale, never raw output, scoring the trailing window as
+   live inference would; a model whose detector refuses reports no prediction drift and says why.
+2. **Drift surfaces through the statistical alert lane.** A rule binds a model and a threshold.
+3. **The alert service owns drift detection; the ML service computes the score.** A scheduled
+   evaluator beside the rules engine applies thresholds and delegates computation over an internal
+   endpoint.
+4. **The baseline is a reference profile supplied at registration and stored with the platform-registry
+   record; the platform builds none itself.** A profile whose prediction column is not detector scores
+   is refused, and a model without one reports drift unavailable rather than guessing a baseline.
+5. **Drift is evaluated on a schedule over a trailing window, independent of the per-reading path.**
+6. **Every evaluation is tenant-scoped.** One model, one tenant, that tenant's data and profile.
 
-   > **rev 1 (2026-10-13): current prediction scores come from scoring the window through the model's declared detector.** The "output" whose distribution is compared is the anomaly score the model's **declared detector** produces (ADR-0028 dec 1), on its declared scale — never the model's raw prediction, which ADR-0028 dec 2 forbids interpreting. For each evaluation the current side is obtained by scoring the trailing window's readings through that detector, exactly as live inference would score them; a model whose detector refuses to score cannot report prediction drift, and says so rather than substituting another quantity. How much of the window is scored is configuration.
+## Alternatives
 
-2. **Drift surfaces through the reserved `statistical` alert lane.** A drift rule (`detection_type='statistical'`, bound to a model + a drift threshold) raises a normal alert — *"model `vpd-forecaster` input drift 0.42 > 0.30 — consider retraining"* — into the same alert history, severity, and notification path as threshold/ml alerts. No new alerting surface; the Models page may later show a drift indicator from the same signal.
-
-3. **The alert service owns drift detection; ml-service computes the drift score.** A **scheduled drift evaluator runs in the alert service beside the real-time rules engine** — keeping all detection (threshold/ml/statistical) in one home: it schedules evaluations, applies each rule's threshold, and fires the alert. The **statistical computation is delegated to ml-service** over an internal endpoint (windowed tenant data + reference profile → `evidently` → drift score), exactly mirroring how the real-time ml rules already delegate scoring to ml-service's inference endpoint. The alert service stays the decision/alert home without duplicating `evidently` or the tenant data path.
-
-4. **A reference profile is captured at training time and stored with the model.** Drift is meaningless without a baseline, so when a model is trained/registered the platform records a compact distribution snapshot (column statistics / an `evidently` reference) over the training window, stored **with the model and tenant-scoped** — an MLflow artifact for tracked models (via the ADR-0019 gateway), or the `ml_models` training metadata otherwise. A model with no reference profile reports *drift unavailable* until retrained with one, rather than guessing a baseline from possibly-compacted history.
-
-   > **rev 1 (2026-10-13): the reference prediction column holds detector scores on the declared scale.** Where a reference profile carries the model's predictions over its training window, that column holds what decision 1's current side holds: the declared detector's scores, on its declared scale — not labels, not raw outputs, not another model's scores. A profile whose prediction column was produced any other way is not a baseline for prediction drift. Data drift is unaffected: it compares input features, aligned on the instants at which every compared input was observed.
-
-5. **Windowed and periodic, not per-event.** Drift is evaluated on a schedule (cadence configurable) over a trailing window, independent of the per-reading anomaly path. The two never share a code path; they share only the alert sink.
-
-6. **Tenant-scoped throughout.** Each evaluation is for one model in one tenant, reads that tenant's data through the existing scoped path, and compares against that tenant's model's reference profile. No cross-tenant baseline or evaluation.
-
-## Alternatives considered
-
-- **Detect drift in the real-time Kafka worker.** *Rejected:* drift is windowed/statistical; per-event evaluation is the wrong timescale and would either be wrong or hammer the system.
-- **A standalone drift microservice.** *Rejected for now:* drift is a detection concern and the alert service is the detection home; a new service adds an operational surface for no isolation or scaling benefit the alert-service evaluator + ml-service compute don't already give.
-- **Compute drift entirely inside the alert service.** *Rejected:* it would duplicate `evidently` and the tenant data-read path that already live in ml-service; delegating the score (as the real-time ml rules do) keeps one ML home.
-- **Fuse drift into the Spark aggregation layer.** *Considered:* attractive if drift windows align with the heavy aggregations, but it splits detection ownership away from the alert service and couples drift cadence to the Spark job; kept as a possible compute backend, not the v1 owner.
-- **Ship labelled performance drift now.** *Rejected for v1:* it needs an operator feedback/labelling loop and a label store — a separate, larger initiative; data+prediction drift delivers value without it.
-
-- **Compare raw model outputs on both sides *(rev 1)*.** *Rejected:* raw output means different things for different model families (ADR-0028), and for a model that emits a label the distribution of labels is a coarse proxy for what the detector actually alerts on. Comparing the score the alert lane acts on is the only comparison whose movement means what the alert says.
+| Alternative | Why rejected |
+|---|---|
+| Detect in the real-time stream worker | Wrong timescale |
+| A standalone drift service | Detection already has a home |
+| Compute inside the alert service | Duplicates the ML service's library and data path |
+| Compute in the stream aggregation | Splits detection ownership; couples cadence to the stream job |
+| Labelled performance drift first | Needs a label loop; ADR-0022 |
+| Compare raw model outputs | Raw output means different things per family (ADR-0028) |
 
 ## Consequences
 
-### Positive
-- Silent model decay becomes a visible, actionable alert on the surface operators already watch, reusing the reserved `statistical` lane and the dormant `evidently` dependency.
-- One detection home (threshold/ml/statistical) with ML math delegated to the one ML service — consistent with the existing real-time pattern.
-- Tenant-isolated, baseline-grounded, and label-free, so it ships without a feedback UI.
+**Positive**
+- Model decay becomes an alert on the surface operators watch; the models view also evaluates a model
+  against its baseline on demand.
 
-### Negative
-- Requires a reference profile per model; models predating this report *drift unavailable* until retrained (acceptable, honest).
-- Adds a scheduled evaluator to the alert service and an internal drift endpoint to ml-service (new surfaces, but small and pattern-consistent).
-- Data/prediction drift signals *distribution change*, not *performance loss* — a drift alert means "investigate/consider retraining," not "the model is wrong." The copy must say so to avoid alarm fatigue.
+**Negative**
+- A model registered without a profile, including any notebook-trained one whose author built none, is
+  not monitored; a model only in the notebook registry has no baseline.
+- Drift signals distribution change, not performance loss.
 
-## Deferred decisions
+## Deferred
 
-- **Performance/concept drift via operator feedback.** Labelling alerts (true/false), a label store, precision/recall-over-time, and the closed-loop **auto-retrain trigger** (note: the `/api/training` stub was removed — retraining is manual/notebook today). The largest follow-on.
-- **Reference-profile serialization + storage location** per model source (MLflow artifact vs `ml_models` metadata vs a per-tenant table), and how the notebook/training flow emits it.
-- **Drift method + thresholds + cadence.** Which `evidently` tests/metrics, default thresholds, evaluation window, and schedule — configuration, not architecture.
-- **Models-page drift indicator.** Surfacing the same signal in the Models UI beside metrics/versions.
-- **Compute backend.** Whether the ml-service endpoint computes inline or offloads heavy windows to Spark.
-
-## Resolved since acceptance
-
-- **Implementation.** Every decision above is realised; no decision changed in doing so. The "rev 1"
-  that this record's status line once carried was this implementation note, not a revision of a
-  decision, and is not one under ADR-0000 dec 5; the revision now numbered rev 1 is the one recorded
-  above (2026-10-13). Where each decision lives in code, and its validation
-  status, is in `docs/architecture/ml-and-features.md` and `docs/architecture/alerting.md`.
-- **Reference-profile serialization** (deferred above) is resolved for the in-platform path: the
-  profile is stored with the model as a compact, down-sampled sample that the drift library consumes
-  directly — not raw training rows and not a bare histogram — so decision 3's compute engine is
-  unchanged.
+| Open question | Settled by |
+|---|---|
+| How the notebook or training flow emits a reference profile | First notebook-trained model needing drift, or a training service |
+| Scheduled drift outcomes on the models view | The maintainer, on operator demand |
+| Offloading large windows from inline computation | First window too large to compute inline |
 
 ## References
-- Reserved `statistical` detection type: `infrastructure/timescaledb/init-scripts/02-tenant-alert-tables.sql`.
-- Existing real-time ml delegation: `services/alert_service/worker/rules_engine.py` → ml-service `/api/inference/predict`.
-- `evidently` (unused dep): `services/ml_service/api/requirements.txt`. Model baseline metadata: `infrastructure/timescaledb/init-scripts/03-tenant-ml-tables.sql`.
-- ADR-0010 (pluggable detectors), ADR-0013/0019 (registry + tracking), ADR-0011 (notebook/model arc).
+
+- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md),
+  [docs/architecture/alerting.md](../docs/architecture/alerting.md): baseline, window, schedule.
+- `services/ml_service/api/drift/`, `services/alert_service/worker/rules_engine.py`.
