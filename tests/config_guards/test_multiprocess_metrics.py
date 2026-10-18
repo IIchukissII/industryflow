@@ -35,7 +35,8 @@ def test_every_metrics_service_aggregates_its_workers():
     for d in METRICS_SERVICES:
         df = _dockerfile(d)
         rel = d.relative_to(ROOT)
-        assert re.search(r"^ENV PROMETHEUS_MULTIPROC_DIR=/tmp/\S+$", df, re.M), f"{rel}: no PROMETHEUS_MULTIPROC_DIR under /tmp"
+        assert re.search(r"^ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc$", df, re.M), f"{rel}: no PROMETHEUS_MULTIPROC_DIR"
+        assert "mkdir -p /tmp/prometheus-multiproc" in df, f"{rel}: the image must create the directory (imports outside CMD)"
         cmd = next(line for line in df.splitlines() if line.startswith("CMD "))
         assert 'rm -rf \\"$PROMETHEUS_MULTIPROC_DIR\\"' in cmd and 'mkdir -p \\"$PROMETHEUS_MULTIPROC_DIR\\"' in cmd, (
             f"{rel}: CMD must empty and create the directory before uvicorn starts")

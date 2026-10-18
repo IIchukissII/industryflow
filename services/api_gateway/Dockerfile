@@ -20,7 +20,8 @@ COPY . .
 
 # Run as a non-root user (uid 10001). Listens on an unprivileged port; writes nothing to the
 # image filesystem (so it runs fine with a read-only root FS + a writable /tmp).
-RUN useradd -u 10001 -r -s /usr/sbin/nologin appuser
+RUN useradd -u 10001 -r -s /usr/sbin/nologin appuser \
+ && mkdir -p /tmp/prometheus-multiproc && chown 10001:10001 /tmp/prometheus-multiproc
 USER 10001
 
 # Expose port
@@ -30,6 +31,7 @@ EXPOSE 8000
 # holds its own DB pool, so it is part of the connection budget (database.py).
 ENV API_GATEWAY_WORKERS=2
 # Request metrics from every uvicorn worker, aggregated at /metrics: without a shared directory
-# each scrape reads one worker's counters. Emptied at start so a restart drops stale files.
+# each scrape reads one worker's counters. Emptied at start so a restart drops stale files; also
+# created above, so importing the app outside this CMD (smoke tests) finds it.
 ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
 CMD ["sh", "-c", "rm -rf \"$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$PROMETHEUS_MULTIPROC_DIR\" && exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers \"$API_GATEWAY_WORKERS\""]
