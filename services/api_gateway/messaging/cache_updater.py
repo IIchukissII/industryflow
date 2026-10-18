@@ -47,11 +47,15 @@ async def update_redis_cache():
                     schema_name = tenancy.schema_name(company_id)
 
                     try:
-                        # Query latest value for each sensor in this tenant
+                        # Latest value for each sensor in this tenant: one (sensor_id, time DESC)
+                        # index probe per sensor. A DISTINCT ON over the window reads every row of
+                        # the last hour on each poll, which grows with the ingest rate.
                         # Note: No company_id in SELECT - it's implicit in schema
                         query = f"""
-                            WITH latest_per_sensor AS (
-                                SELECT DISTINCT ON (sensor_id)
+                            SELECT m.*
+                            FROM "{schema_name}".sensors s
+                            CROSS JOIN LATERAL (
+                                SELECT
                                     time,
                                     sensor_id,
                                     equipment_id,
@@ -60,10 +64,11 @@ async def update_redis_cache():
                                     unit,
                                     quality_code
                                 FROM "{schema_name}".sensor_measurements
-                                WHERE time > NOW() - INTERVAL '1 hour'
-                                ORDER BY sensor_id, time DESC
-                            )
-                            SELECT * FROM latest_per_sensor
+                                WHERE sensor_id = s.sensor_id
+                                  AND time > NOW() - INTERVAL '1 hour'
+                                ORDER BY time DESC
+                                LIMIT 1
+                            ) m
                             LIMIT 1000
                         """
                         
