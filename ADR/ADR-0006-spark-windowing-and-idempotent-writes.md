@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0006 — Spark windowing and idempotent writes
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-10-17
+- **Date:** 2026-06-26; changed 2026-10-18
 - **Parent:** ADR-0001
 - **Related:** ADR-0005 (at-least-once), ADR-0023 (features), ADR-0029 (checkpoint cutover), ADR-0009 (Kubernetes)
 
@@ -34,6 +34,10 @@ repeat. Unbounded window state exhausts memory, and model features are computed 
 7. **Window width and allowed lateness are a feature contract with one shared definition.** The
    writer, the feature server and offline training read them from the shared library, and a check
    refuses any restatement.
+8. **The aggregation's state partition count is part of its checkpoint's identity, and it is sized to
+   the series count, not to the cluster.** The engine fixes the count when a checkpoint is created and
+   ignores a new value afterwards, so a changed count starts fresh checkpoints rather than doing
+   nothing. Each batch commits state per partition, so the count sets the job's fixed per-batch cost.
 
 ## Alternatives
 
@@ -50,6 +54,9 @@ repeat. Unbounded window state exhausts memory, and model features are computed 
 | 5 | A per-node checkpoint volume with each stateful query pinned to one node | Forbids a horizontal worker pool and strands the checkpoint with a lost node |
 | 7 | Window width and allowed lateness set per deployment | A deployment change silently changes the meaning of every trained feature |
 | 7 | Window values copied per component and tested equal | A copy the test does not list drifts |
+| 8 | Change the count in place on an existing checkpoint | The engine silently keeps the old count; the setting does nothing |
+| 8 | Refuse to start when the configured and checkpointed counts differ | Reads engine-internal checkpoint metadata, and still leaves the operator to reset by hand |
+| 8 | Keep a count sized for cluster parallelism (8, or the engine default of 200) | Per-batch state commits then dominate CPU on a small host, whatever the data rate |
 
 ## Consequences
 
@@ -62,6 +69,8 @@ repeat. Unbounded window state exhausts memory, and model features are computed 
   and dead letters need watching.
 - A raw correction is an explicit operation outside the stream; changing a window value invalidates trained models.
 - A scaled-out streaming path depends on the object store.
+- Changing the state partition count costs each series' open window (written from post-change
+  readings only) and leaves the old checkpoint to delete.
 
 ## Deferred
 
