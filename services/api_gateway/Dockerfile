@@ -29,4 +29,7 @@ EXPOSE 8000
 # Run API server. API_GATEWAY_WORKERS sets the uvicorn worker count per container; each worker
 # holds its own DB pool, so it is part of the connection budget (database.py).
 ENV API_GATEWAY_WORKERS=2
-CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers \"$API_GATEWAY_WORKERS\""]
+# Request metrics from every uvicorn worker, aggregated at /metrics: without a shared directory
+# each scrape reads one worker's counters. Emptied at start so a restart drops stale files.
+ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+CMD ["sh", "-c", "rm -rf \"$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$PROMETHEUS_MULTIPROC_DIR\" && exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers \"$API_GATEWAY_WORKERS\""]

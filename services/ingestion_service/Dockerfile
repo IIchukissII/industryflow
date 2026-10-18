@@ -29,5 +29,8 @@ ENV PYTHONPATH=/app
 RUN useradd -u 10001 -r -s /usr/sbin/nologin appuser
 USER 10001
 
-# Run application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]
+# Request metrics from every uvicorn worker, aggregated at /metrics: without a shared directory
+# each scrape reads one worker's counters. Emptied at start so a restart drops stale files.
+ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+ENV INGESTION_WORKERS=1
+CMD ["sh", "-c", "rm -rf \"$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$PROMETHEUS_MULTIPROC_DIR\" && exec uvicorn main:app --host 0.0.0.0 --port 8003 --workers \"$INGESTION_WORKERS\""]

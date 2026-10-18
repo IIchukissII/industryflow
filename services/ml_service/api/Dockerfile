@@ -46,4 +46,7 @@ EXPOSE 8002
 
 # Run with uvicorn. Worker count x the DB pool size must stay within the DB role's
 # connection limit (ml_service_user = 10): 2 workers x max 4 = 8.
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002", "--workers", "2"]
+# Request metrics from every uvicorn worker, aggregated at /metrics: without a shared directory
+# each scrape reads one worker's counters. Emptied at start so a restart drops stale files.
+ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+CMD ["sh", "-c", "rm -rf \"$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$PROMETHEUS_MULTIPROC_DIR\" && exec uvicorn main:app --host 0.0.0.0 --port 8002 --workers 2"]
