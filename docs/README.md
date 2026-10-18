@@ -39,6 +39,7 @@ Index of every page under `docs/` and of the component READMEs. Decisions live i
 | [monitoring](operations/monitoring.md) | Compose metrics, logs, dashboards; kill-switch runbook |
 | [backup and recovery](operations/backup-and-recovery.md) | Backups and restore |
 | [high availability](operations/high-availability.md) | Disruption budgets, autoscaling, stateful backends |
+| [capacity](operations/capacity.md) | Measured ingest capacity on one host, load-test tools |
 | [production readiness](operations/production-readiness.md) | Readiness per area and open gaps |
 | [CI](operations/ci.md) | CI workflows and required checks |
 

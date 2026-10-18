@@ -138,7 +138,7 @@ Swagger UI: `http://localhost:8000/docs`. Login and token examples:
 | A service's unit tests | `pip install ./libs/industryflow_contracts -r services/<service>/requirements-dev.txt && pytest services/<service>/tests` |
 | Python client | `pip install -e 'clients/python[dev]' && pytest clients/python/tests` |
 | Config guards | `pip install pytest pyyaml ./libs/industryflow_contracts && pytest tests/config_guards` |
-| Load test with the TEP reference data (running stack, TEP equipment provisioned, device cert) | `cd tests/performance && python3 performance_test.py` |
+| Load test (running stack, device cert, provisioned sensors) | [capacity](operations/capacity.md#reproduce) |
 
 CI workflows and required checks: [CI](operations/ci.md).
 
@@ -158,8 +158,8 @@ CI workflows and required checks: [CI](operations/ci.md).
 | `SPARK_CPU_SHARES` | 256 | CPU weight of the Spark containers under contention (others 1024); the ingest path goes first |
 | `SPARK_WORKER_REPLICAS` | 1 | Spark workers |
 
-Compression and retention: [data and storage](architecture/data-and-storage.md#tables). Capacity and
-HA gaps: [production readiness](operations/production-readiness.md),
+Compression and retention: [data and storage](architecture/data-and-storage.md#tables). Measured
+capacity: [capacity](operations/capacity.md). HA gaps: [production readiness](operations/production-readiness.md),
 [high availability](operations/high-availability.md).
 
 ## Troubleshooting
