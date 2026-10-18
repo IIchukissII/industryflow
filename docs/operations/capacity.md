@@ -9,7 +9,7 @@ Measured ingest capacity of the Compose stack on one host, how to reproduce it, 
 
 ## Measured on one node: 8 GB RAM, 4 cores
 
-Single-node deployment: the whole platform runs on the one host while it ingests, with the default
+Single-node deployment: the whole platform runs on the host during the test, with the default
 [performance settings](../getting-started.md#performance-settings).
 
 | Running on the node | Containers |
@@ -28,7 +28,7 @@ Load: one reading per request through the mTLS edge, one tenant, 11 sensors.
 |---|---|---|---|---|---|---|
 | 350 | 120 s | 0 | 31 ms | all | 75% | Pass |
 | 500 | 120 s | 0 | 35 ms | all | 82% | Pass |
-| 500 | 56 min | 0 | 33–176 ms per minute; 3 minutes 0.6–5.4 s | all | 82% | No errors, all landed |
+| 500 | 56 min | 0 | 33–176 ms per minute; 3 minutes 0.6–5.4 s | all | 82% | Pass on errors and landed |
 | 750 | 120 s | 0 | 165 ms | all | 95% | Pass |
 | 1 000 (offered) | 120 s | 0 | 6.4 s | all | 97% | 876/s achieved |
 
@@ -58,8 +58,8 @@ Ceiling: about 875 readings/s, bound by CPU.**
 | `ingestion-edge` (TLS) | 0.24 |
 | `timescaledb`, `kafka`, `spark-streaming`, `spark-aggregations`, `minio` | 0.12–0.13 each |
 
-Spark runs at a lower CPU weight than the ingest path (`SPARK_CPU_SHARES`): under contention, ingest
-keeps its latency and Kafka buffers what Spark falls behind on.
+Spark runs at a lower CPU weight than the ingest path (`SPARK_CPU_SHARES`). Under contention the ingest
+path keeps its latency, and Kafka holds what Spark has not processed yet.
 
 ## Raising capacity
 
@@ -71,8 +71,14 @@ keeps its latency and Kafka buffers what Spark falls behind on.
 
 ## Reproduce
 
-Tools in `tests/performance/`. Run the generator from a separate machine; on the Docker host run only
-the sampler. Never poll `docker stats` during a run: on a small host it starves the ingest edge.
+Tools in `tests/performance/`. Run the generator on a separate machine, on a wired network; on the Docker
+host run only the sampler.
+
+| Tool | Runs on | Needs |
+|---|---|---|
+| `loadgen.py` | Load machine | Python 3, `httpx`, a device certificate |
+| `sample_host.sh` | Docker host | cgroup v2, Docker's systemd cgroup driver |
+| `analyze.py` | Anywhere | Python 3, the sampler's log |
 
 | Step | Command |
 |---|---|
@@ -80,10 +86,16 @@ the sampler. Never poll `docker stats` during a run: on a small host it starves 
 | Sensor map | JSON object `name -> sensor UUID` of sensors in the device's tenant |
 | Start the sampler (Docker host) | `bash tests/performance/sample_host.sh /tmp/sample.log &` |
 | Load, one process per 125 readings/s | `python3 tests/performance/loadgen.py --url https://<host>:8443/ingest --cert <crt> --key <key> --sensor-map <map.json> --equipment-id <uuid> --site-id <site> --rate 125 --duration 120 --run-start <iso-time> --csv out-K.csv --workers 2 --worker K` (K = 0, 1 for 250 readings/s) |
-| Count landed rows | `SELECT count(*) FROM "<tenant-schema>".sensor_measurements WHERE time >= '<iso-time>'` |
+| Count landed rows | `SELECT count(*) FROM "<tenant-schema>".sensor_measurements WHERE time >= '<iso-time>' AND time < '<iso-time>'::timestamptz + '<sent> microseconds'::interval` |
+| Stop the sampler | `kill %1` in the sampler's shell |
 | Summarize host and containers | `python3 tests/performance/analyze.py /tmp/sample.log <start-epoch> <end-epoch>` |
 
-`loadgen.py` needs `httpx`. Every reading carries a unique timestamp from `--run-start`, so the landed
-count is exact. A generator process above 125 readings/s lags its own event loop: achieved rate drops
-and latency rises while the server's `/ingest` p95 stays low. Compare with the server-side
-`http_request_duration_seconds` before blaming the platform.
+Reading `n` is stamped `--run-start` plus `n` microseconds, so the landed count for any prefix of a run
+is exact. Server-side latency is `http_request_duration_seconds{handler="/ingest"}` in Prometheus.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Client p95 in seconds and achieved rate below the offered rate; server `/ingest` p95 low | A generator process above 125 readings/s lags its own event loop | One `loadgen.py` process per 125 readings/s |
+| Timeouts in bursts; Docker host CPU drops at the same time | Load machine's network dropped out (Wi-Fi) | Wired network |
+| Edge latency rises with no server-side change | `docker stats` polling on the Docker host starves the ingest edge | Sample with `sample_host.sh` only |
+| A container missing from `analyze.py` output | Started after the sampler | Restart the sampler after the stack is up |

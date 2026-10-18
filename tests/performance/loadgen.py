@@ -11,7 +11,8 @@ collides and landed rows can be counted exactly. Run one process per 125 reading
 lags its own event loop, which shows up as latency and a lower achieved rate. N processes take
 --workers N, --worker 0..N-1 and the same --run-start; their sequences interleave.
 
-Writes one CSV row per request (start, seq, status, ms) and prints a JSON summary.
+Writes one CSV row per request (start, seq, status, ms) to --csv and prints a JSON summary. SIGTERM or
+SIGINT stops sending, waits for requests in flight, then writes both; use a new --csv path per run.
 """
 import argparse
 import asyncio
