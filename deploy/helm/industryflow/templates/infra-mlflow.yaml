@@ -85,7 +85,12 @@ spec:
             - "5000"
             - --allowed-hosts
             - "*"
+            - --workers
+            - {{ .Values.infra.mlflow.workers | quote }}
           env:
+            # MLflow's GenAI job runner and its queue consumers: nothing here submits a job.
+            - name: MLFLOW_SERVER_ENABLE_JOB_EXECUTION
+              value: "false"
             # The artifact-bucket principal (read-only on that bucket) — boto reads AWS_* names.
             - name: AWS_ACCESS_KEY_ID
               valueFrom:

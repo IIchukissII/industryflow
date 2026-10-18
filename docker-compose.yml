@@ -78,6 +78,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
       KAFKA_LOG_RETENTION_HOURS: 168
+      # The image defaults to a 1g heap; the broker leans on the page cache, not the heap.
+      KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS:--Xms512m -Xmx512m}
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
@@ -89,6 +91,8 @@ services:
       - industryflow-network
       - ingestion-back
     restart: unless-stopped
+    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    mem_limit: ${KAFKA_MEM_LIMIT:-1g}
 
   # Stages the TimescaleDB TLS cert into a postgres-owned volume with 0600 perms (ADR-0017):
   # Postgres refuses a key it doesn't own / that is group-readable, which a bind mount can't
@@ -320,6 +324,9 @@ services:
       # The artifact-bucket principal minio-init creates (read-only on that bucket).
       AWS_ACCESS_KEY_ID: ${MLFLOW_STORE_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${MLFLOW_STORE_SECRET_KEY}
+      # The server-side job runner serves MLflow's GenAI jobs, which nothing here submits; on, it
+      # starts a runner and seven queue consumers (~1.4 GB on the 2026-10-18 load-test box).
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
     # List form (not a folded scalar): the `&` in a URI query string truncates a `command: >`
     # block, which silently dropped --host/--port and left MLflow bound to localhost. TLS to the
     # DB is supplied by PGSSLMODE/PGSSLROOTCERT above, so the URI needs no query params.
@@ -341,6 +348,9 @@ services:
       - "5000"
       - --allowed-hosts
       - "*"
+      # MLflow's default is 4 uvicorn processes, ~180 MB each.
+      - --workers
+      - ${MLFLOW_WORKERS:-1}
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -359,6 +369,8 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    mem_limit: ${MLFLOW_MEM_LIMIT:-768m}
 
   # ==========================================================================
   # PHASE 2: SPARK STREAMING SERVICES
@@ -378,6 +390,8 @@ services:
       SPARK_MASTER_HOST: spark-master
       SPARK_MASTER_PORT: 7077
       SPARK_MASTER_WEBUI_PORT: 8080
+      # The master and worker daemons' own heap (Spark's default is 1g); not the jobs' memory.
+      SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEMORY:-256m}
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
     volumes:
       # Stock image: mount the PrometheusServlet config so the master serves
@@ -402,7 +416,8 @@ services:
     environment:
       <<: *db-tls-env
       SPARK_WORKER_CORES: 4
-      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-2g}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-1g}
+      SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEMORY:-256m}
       SPARK_WORKER_WEBUI_PORT: 8081
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     volumes:
@@ -417,7 +432,7 @@ services:
       - industryflow-network
     restart: unless-stopped
     # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
-    mem_limit: ${SPARK_WORKER_MEM_LIMIT:-2560m}
+    mem_limit: ${SPARK_WORKER_MEM_LIMIT:-2304m}
 
   # Spark Streaming - Raw sensor data to TimescaleDB
   spark-streaming:
@@ -440,8 +455,8 @@ services:
       <<: [*db-tls-env, *spark-s3a-env]
       # Spark configuration
       SPARK_MASTER: spark://spark-master:7077
-      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-768m}
-      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-768m}
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-512m}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-512m}
       # Resource budget on the shared worker (ADR-0006): cores capped so streaming +
       # aggregations coexist (sum <= SPARK_WORKER_CORES). Raise these / add workers to scale.
       SPARK_CORES_MAX: ${SPARK_STREAMING_CORES_MAX:-1}
@@ -463,7 +478,7 @@ services:
       - industryflow-network
     restart: unless-stopped
     # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
-    mem_limit: ${SPARK_STREAMING_MEM_LIMIT:-1280m}
+    mem_limit: ${SPARK_STREAMING_MEM_LIMIT:-1g}
 
   # Spark Aggregations - Create 1min, 5min, 1hour aggregations
   spark-aggregations:
@@ -486,8 +501,8 @@ services:
       <<: [*db-tls-env, *spark-s3a-env]
       # Spark configuration
       SPARK_MASTER: spark://spark-master:7077
-      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-768m}
-      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-768m}
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-512m}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-512m}
       # Aggregations runs 3 windowed streams; give it the larger share of the worker
       # (sum with streaming <= SPARK_WORKER_CORES). Raise / add workers to scale.
       SPARK_CORES_MAX: ${SPARK_AGG_CORES_MAX:-3}
@@ -509,7 +524,7 @@ services:
       - industryflow-network
     restart: unless-stopped
     # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
-    mem_limit: ${SPARK_AGG_MEM_LIMIT:-1280m}
+    mem_limit: ${SPARK_AGG_MEM_LIMIT:-1g}
 
   # ==========================================================================
   # API Gateway - REST API with schema-per-tenant routing
