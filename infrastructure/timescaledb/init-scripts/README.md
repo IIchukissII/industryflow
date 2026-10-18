@@ -45,8 +45,9 @@ On an existing database a new or changed script is applied by hand ([manual oper
 | `20-model-detector.sql` | `ml_models.detector` | [ADR-0028](../../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) |
 | `21-company-provisioning.sql` | `provision_company()`, `update_company()`, `end_suspended_tenant_sql_sessions()`, `company_provisioning_guard()` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 | `22-sensor-display-name.sql` | `add_display_name_column_to_sensors()`: `sensors.display_name`; backfill over existing tenants | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
+| `23-sensor-latest-reading-index.sql` | `add_latest_reading_index_to_sensor_measurements()`: index `sensor_measurements (sensor_id, time DESC)`; backfill over existing tenants | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
 
-`create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20 and 22.
+`create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22 and 23.
 Scripts 06 and later are idempotent; the per-tenant ones also apply themselves to every existing
 tenant schema.
 
