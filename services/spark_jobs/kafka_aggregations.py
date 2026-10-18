@@ -46,6 +46,28 @@ AGG_COLUMNS = [
 # Natural key used for ON CONFLICT (must match the table's UNIQUE constraint).
 AGG_CONFLICT_KEY = ("time", "sensor_id", "equipment_id")
 
+# Partitions of each query's window state. Every micro-batch commits one state-store version per
+# partition, so this sets the job's fixed per-batch cost; a few series per tenant need few.
+DEFAULT_STATE_PARTITIONS = 2
+
+
+def state_partitions():
+    """The state partition count (``SPARK_SQL_SHUFFLE_PARTITIONS``, default ``DEFAULT_STATE_PARTITIONS``)."""
+    n = int(os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", DEFAULT_STATE_PARTITIONS))
+    if n < 1:
+        raise ValueError(f"SPARK_SQL_SHUFFLE_PARTITIONS must be at least 1, got {n}")
+    return n
+
+
+def checkpoint_path(checkpoint_base, table, partitions):
+    """
+    One query's checkpoint, keyed by its state partition count (ADR-0006 dec 8).
+
+    Spark fixes the partition count in the checkpoint and ignores a new value on restart, so a
+    changed count gets a fresh checkpoint here rather than doing nothing.
+    """
+    return f"{checkpoint_base}/{table}-p{partitions}"
+
 
 def configure_s3a(builder, checkpoint_location):
     """
@@ -238,7 +260,7 @@ def create_aggregation_stream(spark, granularity):
         .outputMode("append") \
         .foreachBatch(lambda df, batch_id: write_aggregations_to_db(df, batch_id, table)) \
         .trigger(processingTime='5 seconds') \
-        .option("checkpointLocation", f"{checkpoint_base}/{table}") \
+        .option("checkpointLocation", checkpoint_path(checkpoint_base, table, state_partitions())) \
         .start()
 
     return query
@@ -250,13 +272,11 @@ if __name__ == "__main__":
     builder = SparkSession.builder \
         .appName("IndustryFlow-Aggregations") \
         .master(os.getenv("SPARK_MASTER", "local[*]")) \
-        .config("spark.sql.shuffle.partitions",
-                os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200")) \
+        .config("spark.sql.shuffle.partitions", str(state_partitions())) \
         .config("spark.ui.prometheus.enabled", "true")
     # Resource budget on a shared standalone cluster: cap this app's cores so streaming and
     # aggregations coexist on one worker (the deployment sets the split, so it scales). Unset
-    # = Spark default (grab all cores). NOTE: spark.sql.shuffle.partitions is pinned into a
-    # streaming query's checkpoint — changing it requires a fresh checkpoint.
+    # = Spark default (grab all cores).
     cores_max = os.getenv("SPARK_CORES_MAX")
     if cores_max:
         builder = builder.config("spark.cores.max", cores_max)
