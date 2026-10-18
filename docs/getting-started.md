@@ -155,6 +155,7 @@ CI workflows and required checks: [CI](operations/ci.md).
 | `SPARK_*_MEM_LIMIT` | master `384m`, worker `2304m`, each job `1g` | Container memory ceilings; raise with the heaps |
 | `KAFKA_HEAP_OPTS` / `KAFKA_MEM_LIMIT` | `-Xms512m -Xmx512m` / `1g` | Broker heap; container memory ceiling |
 | `MLFLOW_WORKERS` / `MLFLOW_MEM_LIMIT` | 1 / `768m` | Tracking-server processes; container memory ceiling |
+| `SPARK_CPU_SHARES` | 256 | CPU weight of the Spark containers under contention (others 1024); the ingest path goes first |
 | `SPARK_WORKER_REPLICAS` | 1 | Spark workers |
 
 Compression and retention: [data and storage](architecture/data-and-storage.md#tables). Capacity and
