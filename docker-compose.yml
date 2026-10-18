@@ -402,6 +402,9 @@ services:
     restart: unless-stopped
     # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
     mem_limit: ${SPARK_MASTER_MEM_LIMIT:-384m}
+    # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
+    # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
+    cpu_shares: ${SPARK_CPU_SHARES:-256}
 
   # Spark Worker — a SCALABLE pool: no container_name and no published port (the worker dials out
   # to the master and registers its own web UI there), so `SPARK_WORKER_REPLICAS` / `--scale
@@ -433,6 +436,9 @@ services:
     restart: unless-stopped
     # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
     mem_limit: ${SPARK_WORKER_MEM_LIMIT:-2304m}
+    # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
+    # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
+    cpu_shares: ${SPARK_CPU_SHARES:-256}
 
   # Spark Streaming - Raw sensor data to TimescaleDB
   spark-streaming:
@@ -479,6 +485,9 @@ services:
     restart: unless-stopped
     # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
     mem_limit: ${SPARK_STREAMING_MEM_LIMIT:-1g}
+    # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
+    # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
+    cpu_shares: ${SPARK_CPU_SHARES:-256}
 
   # Spark Aggregations - Create 1min, 5min, 1hour aggregations
   spark-aggregations:
@@ -526,6 +535,9 @@ services:
     restart: unless-stopped
     # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
     mem_limit: ${SPARK_AGG_MEM_LIMIT:-1g}
+    # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
+    # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
+    cpu_shares: ${SPARK_CPU_SHARES:-256}
 
   # ==========================================================================
   # API Gateway - REST API with schema-per-tenant routing
