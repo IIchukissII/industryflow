@@ -7,19 +7,30 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 Measured ingest capacity of the Compose stack on one host, how to reproduce it, and how to raise it.
 
-## Measured on 8 GB RAM, 4 cores
+## Measured on one node: 8 GB RAM, 4 cores
 
-Compose stack with the default [performance settings](../getting-started.md#performance-settings),
-one reading per request through the mTLS edge, one tenant, 11 sensors.
+Single-node deployment: the whole platform runs on the one host while it ingests, with the default
+[performance settings](../getting-started.md#performance-settings).
+
+| Running on the node | Containers |
+|---|---|
+| Ingest path | `ingestion-edge`, `ingestion-service`, `kafka`, `zookeeper` |
+| Stream processing | `spark-master`, `spark-worker`, `spark-streaming`, `spark-aggregations` |
+| Storage | `timescaledb`, `minio`, `redis` |
+| Platform | `frontend`, `api-gateway`, `alert-service-detector`, `ml-service-api`, `mlflow` |
+| Notebooks profile | `notebook-hub`, `notebook-sso`, `notebook-sql-proxy`, `notebook-tracking-gateway`, `notebook-cold-broker` |
+| Monitoring | `prometheus`, `grafana`, `loki`, `promtail`, `cadvisor`, `node-exporter`, `kafka-exporter`, `postgres-exporter`, `redis-exporter` |
+| Other workload | 3 containers unrelated to the platform |
+
+Load: one reading per request through the mTLS edge, one tenant, 11 sensors.
 
 | Rate (readings/s) | Duration | Errors | Ingest p95 | Landed | Host CPU | Verdict |
 |---|---|---|---|---|---|---|
-| 50 | 120 s | 0 | 29 ms | all | 79% | Pass |
-| 100 | 120 s | 0 | 28 ms | all | 72% | Pass |
-| 250 | 120 s | 0 | 40 ms | all | 82% | Pass |
-| 250 | 60 min | 0 | 46 ms | all | 80% | Pass |
-| 350 | 120 s | 0 | 140 ms | all | 81% | Pass |
-| 500 (offered) | 120 s | 10 (502) | 5.9 s | all accepted | 94% | 435/s achieved |
+| 350 | 120 s | 0 | 31 ms | all | 75% | Pass |
+| 500 | 120 s | 0 | 35 ms | all | 82% | Pass |
+| 500 | 56 min | 0 | 33–176 ms per minute; 3 minutes 0.6–5.4 s | all | 82% | No errors, all landed |
+| 750 | 120 s | 0 | 165 ms | all | 95% | Pass |
+| 1 000 (offered) | 120 s | 0 | 6.4 s | all | 97% | 876/s achieved |
 
 | Pass criterion | Value |
 |---|---|
@@ -28,27 +39,24 @@ one reading per request through the mTLS edge, one tenant, 11 sensors.
 | Ingest p95 | < 500 ms at the device |
 | Containers | no restart, no out-of-memory kill |
 
-**Sustained capacity: 250 readings/s for one hour; 350 readings/s passes for 120 s. Ceiling: about
-430 readings/s, bound by CPU.** Above the ceiling the edge also runs out of ephemeral ports towards
-`ingestion-service` (`connect() … Address not available`, 502), because it opens one upstream
-connection per request.
+**Sustained capacity of one node: 500 readings/s (56-minute soak); 750 readings/s passes for 120 s.
+Ceiling: about 875 readings/s, bound by CPU.**
 
 | Rate | Equivalent |
 |---|---|
-| 250 readings/s | 900 000 per hour, 21.6 million per day |
-| 250 sensors | at 1 Hz |
-| 2 500 sensors | at 0.1 Hz |
+| 500 readings/s | 1.8 million per hour, 43.2 million per day |
+| 500 sensors | at 1 Hz |
+| 5 000 sensors | at 0.1 Hz |
 
-## Where the CPU goes at 350 readings/s
+## Where the CPU goes at 750 readings/s
 
 | Container | Cores |
 |---|---|
-| `ingestion-service` | 0.60 |
-| `ingestion-edge` (TLS) | 0.49 |
-| `spark-worker` (executors) | 0.48 |
-| `alert-service-detector` | 0.45 |
-| `kafka` | 0.17 |
-| `spark-streaming`, `spark-aggregations`, `timescaledb`, `minio` | 0.11–0.12 each |
+| `ingestion-service` | 0.89 |
+| `alert-service-detector` | 0.65 |
+| `spark-worker` (executors) | 0.62 |
+| `ingestion-edge` (TLS) | 0.24 |
+| `timescaledb`, `kafka`, `spark-streaming`, `spark-aggregations`, `minio` | 0.12–0.13 each |
 
 Spark runs at a lower CPU weight than the ingest path (`SPARK_CPU_SHARES`): under contention, ingest
 keeps its latency and Kafka buffers what Spark falls behind on.
