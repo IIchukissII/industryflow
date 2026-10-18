@@ -342,6 +342,8 @@ infra:
     image: industryflow-mlflow
     digest: ""
     port: 5000
+    # Server processes (MLflow's default is 4, ~180 MB each); the pod's limit is 512Mi.
+    workers: 1
     external: { trackingUri: "" }
 
 # ---------------------------------------------------------------------------

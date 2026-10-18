@@ -50,6 +50,9 @@ spec:
               value: "2181"
             - name: ZOOKEEPER_TICK_TIME
               value: "2000"
+            # The image's 512M default heap equals the limit below, leaving no room for the JVM.
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms256m -Xmx256m"
           volumeMounts:
             - name: data
               mountPath: /var/lib/zookeeper/data
