@@ -34,7 +34,8 @@ COPY api/ .
 # Create models directory, owned by the non-root runtime user (models are written at runtime).
 RUN mkdir -p /app/models \
  && useradd -u 10001 -r -s /usr/sbin/nologin appuser \
- && chown -R 10001:10001 /app/models
+ && chown -R 10001:10001 /app/models \
+ && mkdir -p /tmp/prometheus-multiproc && chown 10001:10001 /tmp/prometheus-multiproc
 USER 10001
 
 # Set environment variables
@@ -46,4 +47,8 @@ EXPOSE 8002
 
 # Run with uvicorn. Worker count x the DB pool size must stay within the DB role's
 # connection limit (ml_service_user = 10): 2 workers x max 4 = 8.
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002", "--workers", "2"]
+# Request metrics from every uvicorn worker, aggregated at /metrics: without a shared directory
+# each scrape reads one worker's counters. Emptied at start so a restart drops stale files; also
+# created above, so importing the app outside this CMD (smoke tests) finds it.
+ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+CMD ["sh", "-c", "rm -rf \"$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$PROMETHEUS_MULTIPROC_DIR\" && exec uvicorn main:app --host 0.0.0.0 --port 8002 --workers 2"]
