@@ -6,7 +6,8 @@
 # Runs ON the Docker host during a load test (docs/operations/capacity.md). Every 5 s: host memory,
 # swap and CPU counters, and each container's cumulative CPU and current memory, read straight from
 # cgroup v2 files. Never `docker stats`: polling it over every container loads the daemon enough to
-# starve the ingest edge on a small host.
+# starve the ingest edge on a small host. Needs cgroup v2 with Docker's systemd cgroup driver
+# (/sys/fs/cgroup/system.slice/docker-<id>.scope); containers started after the sampler are not sampled.
 # Usage: sample_host.sh <out_file>   (stop with kill; then analyze.py)
 set -u
 out=$1
