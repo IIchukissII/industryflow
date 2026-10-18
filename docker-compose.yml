@@ -91,7 +91,7 @@ services:
       - industryflow-network
       - ingestion-back
     restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
     mem_limit: ${KAFKA_MEM_LIMIT:-1g}
 
   # Stages the TimescaleDB TLS cert into a postgres-owned volume with 0600 perms (ADR-0017):
@@ -325,7 +325,7 @@ services:
       AWS_ACCESS_KEY_ID: ${MLFLOW_STORE_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${MLFLOW_STORE_SECRET_KEY}
       # The server-side job runner serves MLflow's GenAI jobs, which nothing here submits; on, it
-      # starts a runner and seven queue consumers (~1.4 GB on the 2026-10-18 load-test box).
+      # starts a runner and seven queue consumers (~1.4 GB on an 8 GB host).
       MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
     # List form (not a folded scalar): the `&` in a URI query string truncates a `command: >`
     # block, which silently dropped --host/--port and left MLflow bound to localhost. TLS to the
@@ -369,7 +369,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
     mem_limit: ${MLFLOW_MEM_LIMIT:-768m}
 
   # ==========================================================================
@@ -400,7 +400,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
     mem_limit: ${SPARK_MASTER_MEM_LIMIT:-384m}
     # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
     # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
@@ -434,7 +434,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
     mem_limit: ${SPARK_WORKER_MEM_LIMIT:-2304m}
     # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
     # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
@@ -483,7 +483,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
     mem_limit: ${SPARK_STREAMING_MEM_LIMIT:-1g}
     # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
     # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
@@ -533,7 +533,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (load test 2026-10-18).
+    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
     mem_limit: ${SPARK_AGG_MEM_LIMIT:-1g}
     # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
     # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
