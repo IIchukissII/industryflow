@@ -66,7 +66,7 @@ Per tenant schema, created by `create_tenant_schema()`:
 |---|---|---|---|---|
 | `equipment` | | | | |
 | `sensors` | | `UNIQUE (equipment_id, sensor_name)` | | |
-| `sensor_measurements` | `time`, 1 d | `UNIQUE (time, sensor_id)` | `equipment_id`, 7 d | None; the cold export drops it |
+| `sensor_measurements` | `time`, 1 d | `UNIQUE (time, sensor_id)`; index `(sensor_id, time DESC)` | `equipment_id`, 7 d | None; the cold export drops it |
 | `sensor_aggregations_1min` | `time`, 7 d | `UNIQUE (time, sensor_id, equipment_id)` | `equipment_id`, 14 d | 90 d |
 | `sensor_aggregations_5min` | `time`, 30 d | same | `equipment_id`, 30 d | 180 d |
 | `sensor_aggregations_1hour` | `time`, 90 d | same | `equipment_id`, 60 d | 1 y |

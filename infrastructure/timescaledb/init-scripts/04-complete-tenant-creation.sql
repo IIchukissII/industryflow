@@ -69,6 +69,8 @@ BEGIN
     PERFORM add_detector_column_to_ml_models(v_schema_name);
     -- The sensor's optional human label (defined in 22-*, resolved at call time).
     PERFORM add_display_name_column_to_sensors(v_schema_name);
+    -- The newest-reading-per-sensor index (defined in 23-*, resolved at call time).
+    PERFORM add_latest_reading_index_to_sensor_measurements(v_schema_name);
 
     -- Grant table permissions
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO api_gateway_user', v_schema_name);
