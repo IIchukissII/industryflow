@@ -214,3 +214,24 @@ def test_every_aggregation_table_is_declared_once():
 ])
 def test_latest_emitted_window(granularity, t, expected):
     assert aw.latest_emitted_window(t, granularity) == expected
+
+
+# --- state partitions are part of the checkpoint (ADR-0006 dec 8) --------------------------------
+
+def test_state_partitions_default_and_override(monkeypatch):
+    monkeypatch.delenv("SPARK_SQL_SHUFFLE_PARTITIONS", raising=False)
+    assert job.state_partitions() == job.DEFAULT_STATE_PARTITIONS
+    monkeypatch.setenv("SPARK_SQL_SHUFFLE_PARTITIONS", "4")
+    assert job.state_partitions() == 4
+    monkeypatch.setenv("SPARK_SQL_SHUFFLE_PARTITIONS", "0")
+    with pytest.raises(ValueError):
+        job.state_partitions()
+
+
+def test_a_changed_partition_count_gets_its_own_checkpoint():
+    # Spark keeps the count a checkpoint was created with, so the same path for two counts would
+    # leave a change silently ignored.
+    a = job.checkpoint_path("s3a://ckpt", "sensor_aggregations_1min", 2)
+    b = job.checkpoint_path("s3a://ckpt", "sensor_aggregations_1min", 8)
+    assert a != b
+    assert a == "s3a://ckpt/sensor_aggregations_1min-p2"

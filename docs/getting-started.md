@@ -147,7 +147,8 @@ CI workflows and required checks: [CI](operations/ci.md).
 | Name | Default | Meaning |
 |---|---|---|
 | `SPARK_STREAMING_CORES_MAX` / `SPARK_AGG_CORES_MAX` | 1 / 3 | Cores per Spark job |
-| `SPARK_SHUFFLE_PARTITIONS` | 8 | Spark shuffle partitions |
+| `SPARK_SHUFFLE_PARTITIONS` | 8 | Shuffle partitions of the measurement job; fixed once its checkpoint exists |
+| `SPARK_AGG_STATE_PARTITIONS` | 2 | Window-state partitions per aggregation query; a change starts fresh aggregation checkpoints |
 | `SPARK_DRIVER_MEMORY` / `SPARK_EXECUTOR_MEMORY` | `512m` / `512m` | Spark heap per job |
 | `SPARK_WORKER_MEMORY` | `1g` | Memory the worker gives both executors together |
 | `SPARK_DAEMON_MEMORY` | `256m` | Heap of the Spark master and worker daemons |

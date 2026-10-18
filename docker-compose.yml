@@ -506,7 +506,8 @@ services:
       # Aggregations runs 3 windowed streams; give it the larger share of the worker
       # (sum with streaming <= SPARK_WORKER_CORES). Raise / add workers to scale.
       SPARK_CORES_MAX: ${SPARK_AGG_CORES_MAX:-3}
-      SPARK_SQL_SHUFFLE_PARTITIONS: ${SPARK_SHUFFLE_PARTITIONS:-8}
+      # Window-state partitions per query. A change starts fresh checkpoints (ADR-0006 dec 8).
+      SPARK_SQL_SHUFFLE_PARTITIONS: ${SPARK_AGG_STATE_PARTITIONS:-2}
 
       # Kafka configuration
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}

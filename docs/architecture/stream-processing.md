@@ -63,6 +63,16 @@ A failure of the database or Kafka fails the batch.
 | Helm | `/opt/spark/checkpoints` | ReadWriteOnce PVC per job; Spark in `local[*]` mode |
 | Helm, on the object store | `s3a://…` | [Helm chart](../../deploy/helm/industryflow/README.md#spark-checkpoint-on-the-object-store) |
 
+| Query | Path under `CHECKPOINT_LOCATION` |
+|---|---|
+| Measurements | `sensor_measurements` |
+| Aggregations | `sensor_aggregations_<granularity>-p<N>`, `N` = state partitions (`SPARK_AGG_STATE_PARTITIONS`, default 2) |
+
+Changing `N` starts the aggregation queries on fresh checkpoints from the latest offsets
+([ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) dec 8): each series' window
+open at the switch is written from post-switch readings only. The previous `-p<M>` (or unsuffixed)
+directories are no longer read; delete them once the new queries run.
+
 A local path disables S3A. The S3A jars (`hadoop-aws`, AWS SDK v2 `bundle`) are baked into all three
 Spark images; the Kafka connector is `spark-sql-kafka-0-10_2.13`.
 
