@@ -43,7 +43,7 @@ WRITES = [
 OWN_AUTHORIZATION = {
     "/auth/jwt/login", "/auth/jwt/logout", "/auth/login", "/auth/refresh", "/auth/logout",
     "/users/me", "/api/users", "/api/users/{user_id}",
-    "/api/companies", "/api/companies/{company_id}",
+    "/api/companies", "/api/companies/{company_id}", "/api/companies/{company_id}/deletion",
 }
 
 
