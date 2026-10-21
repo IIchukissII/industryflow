@@ -5,6 +5,8 @@
 """
 REST API endpoints for alert rule management with schema-per-tenant routing
 Supports CRUD operations and detection mode switching
+
+The gateway is the single HTTP surface for alert rules (ADR-0031 decision 1).
 """
 import json
 from typing import Any, Dict, Optional

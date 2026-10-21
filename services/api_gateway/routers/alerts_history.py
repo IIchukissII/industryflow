@@ -4,6 +4,9 @@
 
 """
 REST API endpoints for alert history management with schema-per-tenant routing
+
+The gateway is the single HTTP surface for alert history, acknowledgement, operator labels and
+precision (ADR-0031 decision 1).
 """
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession

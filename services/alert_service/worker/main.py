@@ -4,6 +4,8 @@
 
 """
 Alert Detection Service - Schema-per-Tenant Architecture
+
+A worker with no HTTP API of its own; alerting's HTTP surface is the API gateway (ADR-0031 decision 2).
 """
 import asyncio
 import asyncpg
