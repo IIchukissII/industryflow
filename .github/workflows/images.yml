@@ -177,7 +177,7 @@ jobs:
               smoke: "python -c \"import pyarrow, pyarrow.parquet, pyarrow.fs, numpy, cold_export.main; print('cold-export imports ok', pyarrow.__version__, numpy.__version__)\"" }
           # The tenant-delete job (ADR-0033 dec 4): its entry point and both adapters import.
           - { name: tenant-delete,          context: services/tenant_delete,    file: services/tenant_delete/Dockerfile, security_refresh: true,
-              smoke: "python -c \"import psycopg2, redis, tenant_delete.main, tenant_delete.registry, tenant_delete.capability_store; print('tenant-delete imports ok')\"" }
+              smoke: "python -c \"import psycopg2, redis, boto3, industryflow_contracts, tenant_delete.main, tenant_delete.registry, tenant_delete.capability_store, tenant_delete.cold_store; print('tenant-delete imports ok')\"" }
     steps:
       - uses: actions/checkout@v7
 

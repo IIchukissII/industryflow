@@ -47,6 +47,7 @@ COMPOSE_CONSUMERS = {
     "db-backup": ("BACKUP_STORE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"),
     "cold-export": ("COLD_STORE", "COLD_STORE_ACCESS_KEY", "COLD_STORE_SECRET_KEY"),
     "notebook-cold-broker": ("COLD_READ", "COLD_READ_ACCESS_KEY", "COLD_READ_SECRET_KEY"),
+    "tenant-delete": ("TENANT_DELETE_COLD", "TENANT_DELETE_COLD_ACCESS_KEY", "TENANT_DELETE_COLD_SECRET_KEY"),
 }
 
 
@@ -162,10 +163,22 @@ def test_each_principal_holds_only_the_verbs_it_uses():
     granted = _granted()
     writes = {n for n, g in granted.items() if any(v & _WRITE_VERBS for v in g.values())}
     deletes = {n for n, g in granted.items() if any("s3:DeleteObject" in v for v in g.values())}
-    assert writes == {"spark-checkpoint", "tracking-gateway", "db-backup", "cold-export-rw"}, sorted(writes)
-    # The cold exporter never removes history it archived (ADR-0025 dec 11).
-    assert deletes == {"spark-checkpoint", "tracking-gateway", "db-backup"}, sorted(deletes)
+    # (Deleting counts as writing here; tenant-delete-cold may only delete, checked below.)
+    assert writes == {"spark-checkpoint", "tracking-gateway", "db-backup", "cold-export-rw",
+                      "tenant-delete-cold"}, sorted(writes)
+    # The cold exporter never removes history it archived (ADR-0025 dec 11); only the tenant-delete
+    # job removes cold objects (dec 14).
+    assert deletes == {"spark-checkpoint", "tracking-gateway", "db-backup", "tenant-delete-cold"}, sorted(deletes)
     assert granted["mlflow-artifacts"] == {"art": {"s3:GetObject"}}, granted["mlflow-artifacts"]
+
+
+def test_only_the_tenant_delete_job_deletes_in_the_cold_bucket_and_it_sees_nothing():
+    # ADR-0025 dec 14: no principal both writes and deletes the only copy of history, and the
+    # deleter can neither read nor write an object.
+    granted = _granted()
+    cold_deleters = {n for n, g in granted.items() if "s3:DeleteObject" in g.get("cold", set())}
+    assert cold_deleters == {"tenant-delete-cold"}, sorted(cold_deleters)
+    assert granted["tenant-delete-cold"] == {"cold": {"s3:DeleteObject"}}, granted["tenant-delete-cold"]
 
 
 def test_the_backup_cold_mirror_reads_with_the_cold_read_principal():

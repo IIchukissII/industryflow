@@ -51,10 +51,13 @@ PRINCIPALS = {
     "db-backup": ("BACKUP_STORE", "t-backup"),
     "cold-export-rw": ("COLD_STORE", "t-cold-writer"),
     "cold-broker-ro": ("COLD_READ", "t-cold-reader"),
+    "tenant-delete-cold": ("TENANT_DELETE_COLD", "t-cold-deleter"),
 }
 CP, ART, BAK, COLD = (BUCKETS[k] for k in ("SPARK_CHECKPOINT_BUCKET", "ARTIFACT_BUCKET", "BACKUP_BUCKET", "COLD_STORE_BUCKET"))
 UPLOADED = f"{ART}/tenant_aaaa/uploads/u1/model.skops"
 TRACKED = f"{ART}/tenant_aaaa/7/abc/artifacts/model/model.skops"
+# A deleted tenant's cold object, which only the tenant-delete job may remove (ADR-0025 dec 14).
+DELETED_TENANT_COLD = f"{COLD}/tenant_cccc/year=2026/d.parquet"
 
 
 def _env(home: Path, **overrides) -> dict:
@@ -85,7 +88,8 @@ def home(tmp_path_factory):
     assert rules.count("_upload-staging/") == 1, rules
     seed = h / "seed.bin"
     seed.write_bytes(b"x" * 64)
-    for key in (UPLOADED, TRACKED, f"{CP}/state/0", f"{BAK}/timescaledb/a.dump", f"{COLD}/tenant_aaaa/year=2026/p.parquet"):
+    for key in (UPLOADED, TRACKED, f"{CP}/state/0", f"{BAK}/timescaledb/a.dump", f"{COLD}/tenant_aaaa/year=2026/p.parquet",
+                DELETED_TENANT_COLD, f"{COLD}/not-a-tenant/x"):
         assert _mc(h, "cp", str(seed), f"root/{key}").returncode == 0
     for name, (_, access) in PRINCIPALS.items():
         assert _mc(h, "alias", "set", name, ENDPOINT, access, f"{access}-secret-0123456789").returncode == 0
@@ -130,6 +134,8 @@ ALLOWED = {
     # Also the backup job's cold mirror source: it lists the whole bucket, then reads each object.
     "cold-broker-ro": [("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("list", f"{COLD}/tenant_aaaa/"),
                        ("list", f"{COLD}/")],
+    # Lists a tenant's prefix and removes what is under it, nothing more.
+    "tenant-delete-cold": [("list", f"{COLD}/tenant_cccc/"), ("delete", DELETED_TENANT_COLD)],
 }
 
 REFUSED = {
@@ -147,6 +153,10 @@ REFUSED = {
     "cold-export-rw": [("delete", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("get", TRACKED)],
     "cold-broker-ro": [("put", f"{COLD}/tenant_aaaa/x"), ("delete", f"{COLD}/tenant_aaaa/year=2026/p.parquet"),
                        ("get", TRACKED)],
+    # Never reads or writes history, and deletes only under tenant prefixes of the cold bucket.
+    "tenant-delete-cold": [("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("put", f"{COLD}/tenant_aaaa/x"),
+                           ("delete", f"{COLD}/not-a-tenant/x"), ("delete", TRACKED),
+                           ("delete", f"{BAK}/timescaledb/a.dump"), ("get", TRACKED)],
 }
 
 

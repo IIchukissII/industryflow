@@ -301,6 +301,8 @@ services:
       COLD_STORE_SECRET_KEY: ${COLD_STORE_SECRET_KEY:-}
       COLD_READ_ACCESS_KEY: ${COLD_READ_ACCESS_KEY:-}
       COLD_READ_SECRET_KEY: ${COLD_READ_SECRET_KEY:-}
+      TENANT_DELETE_COLD_ACCESS_KEY: ${TENANT_DELETE_COLD_ACCESS_KEY:-}
+      TENANT_DELETE_COLD_SECRET_KEY: ${TENANT_DELETE_COLD_SECRET_KEY:-}
     entrypoint: ["/bin/sh", "/opt/minio-init.sh"]
     volumes:
       - ./infrastructure/minio/minio-init.sh:/opt/minio-init.sh:ro
@@ -1336,8 +1338,13 @@ services:
     build:
       context: ./services/tenant_delete
       dockerfile: Dockerfile
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     container_name: industryflow-tenant-delete
     profiles: ["tenant-delete"]
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
     environment:
       <<: *db-tls-env
       TIMESCALEDB_HOST: ${DB_HOST}
@@ -1346,6 +1353,12 @@ services:
       TENANT_DELETE_DB_USER: tenant_delete_user
       TENANT_DELETE_DB_PASSWORD: ${TENANT_DELETE_DB_PASSWORD:-}
       TENANT_DELETE_REDIS_URL: redis://redis:6379/0
+      # The cold layer, with its list-and-delete principal (ADR-0025 dec 14).
+      TENANT_DELETE_COLD_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      TENANT_DELETE_COLD_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
+      TENANT_DELETE_COLD_REGION: ${COLD_STORE_REGION:-us-east-1}
+      TENANT_DELETE_COLD_ACCESS_KEY: ${TENANT_DELETE_COLD_ACCESS_KEY:-}
+      TENANT_DELETE_COLD_SECRET_KEY: ${TENANT_DELETE_COLD_SECRET_KEY:-}
       # The deployment's own retentions, from the same variables kafka and db-backup read.
       TENANT_DELETE_BROKER_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS:-168}
       TENANT_DELETE_BACKUP_RETENTION_DAYS: ${BACKUP_RETAIN_PER_DB:-14}
