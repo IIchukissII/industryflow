@@ -60,6 +60,7 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 | 4 | Delete in a background task of the API | Ties the operation's durability to the lifetime of an API process |
 | 4 | Purge the tracking store's rows directly | Bypasses the store's own lifecycle and risks dangling references in a store all tenants share |
 | 4 | The delete job collects the tracking store's deleted entries itself | Needs the store's backend credentials, which only the tracking server holds |
+| 4 | The delete job holds its own delete principal on the model-artifact store | A second privileged writer beside the tracking gateway, the store's one door (ADR-0030 dec 2) |
 | 4 | The delete job holds a notebook-hub administrator credential | ADR-0020 rejects a standing hub credential that crosses tenants |
 | 4 | Purge the tenant's messages from the shared broker | Needs administrative writes to a shared cluster for data that ages out within its retention |
 | 4 | Per-tenant backup keys destroyed on delete | Needs key management the platform does not have; expiry meets decision 4 |
