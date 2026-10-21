@@ -66,7 +66,7 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 | Backup mechanism and cadence for model artifacts and authored notebooks | Maintainer |
 | Encryption and key management at rest beyond the target's own | Maintainer |
 | Tenant-granular restore | Maintainer |
-| Deleting a tenant from backups: expiry versus per-tenant keys | Jointly with ADR-0033 |
+| Per-tenant backup keys destroyed on delete, beside expiry | Jointly with ADR-0033, with the encryption question above |
 
 ## References
 

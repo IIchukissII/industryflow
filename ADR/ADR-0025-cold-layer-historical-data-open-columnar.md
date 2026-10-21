@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0025 — Cold layer for historical telemetry in an open columnar format
 
 - **Status:** Accepted
-- **Date:** 2026-07-08; changed 2026-10-17
+- **Date:** 2026-07-08; changed 2026-10-21
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md) (framing)
 - **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant mapping), [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (scheduled jobs, object store), [ADR-0012](ADR-0012-notebook-credential-delivery.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (brokered reads, no secret in the kernel), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (the cold layer's backup)
 
@@ -41,7 +41,11 @@ by the database that wrote it.
 11. **The exporter is a separate job whose principal can write but not delete in the cold bucket.** The
     stream's principal gains no access; the default engine is a single-node columnar writer.
 12. **The layer is built; table format, distributed export and aggregate history wait for triggers.**
-13. **The cold layer is mirrored append-only by a principal that can only read it (ADR-0032 dec 4).**
+13. **The cold layer is mirrored by a principal that can only read it (ADR-0032 dec 4).** The mirror keeps
+    an object one backup retention period after the cold layer no longer holds it.
+14. **A tenant's cold objects are removed only by the tenant-delete job (ADR-0033 dec 4).** Its principal can
+    list and delete in the cold bucket but neither write nor read objects, so no principal both writes and
+    deletes the only copy of history.
 
 ## Alternatives
 
@@ -63,6 +67,8 @@ by the database that wrote it.
 | 11 | An exporter principal that may also delete in the cold bucket | A faulty or compromised exporter could destroy the only copy of history |
 | 12 | The cold layer built only when the first serious history read or a hot-store burden triggers it | Raw history kept accumulating in the hot store, and the read path is needed before the first large read |
 | 13 | Mirroring by the exporter or under a credential that can delete | A mirror whose writer can delete does not survive the failure it guards against |
+| 13 | An append-only mirror | A deleted tenant's raw history would never leave it (ADR-0033 dec 4) |
+| 14 | Deletion by the exporter | Gives the cold layer's one writer the power to destroy history (dec 11) |
 
 ## Consequences
 
