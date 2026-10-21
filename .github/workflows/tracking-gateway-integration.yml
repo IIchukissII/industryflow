@@ -192,10 +192,9 @@ jobs:
       - name: Provision a tenant and an uploader, the way an operator does
         id: uploader
         run: |
-          company_id=$(cat /proc/sys/kernel/random/uuid)
+          company_id=$(scripts/create-tenant.sh "CI Upload Tenant")
           password=$(openssl rand -hex 24)
           echo "::add-mask::$password"
-          scripts/create-tenant.sh "CI Upload Tenant" "$company_id"
           printf '%s\n' "$password" | docker compose run --rm -T --no-deps \
             -v "$PWD/scripts:/scripts:ro" -e PYTHONPATH=/app --entrypoint python \
             api-gateway /scripts/manage_users.py create --email ci-uploader@example.com \
