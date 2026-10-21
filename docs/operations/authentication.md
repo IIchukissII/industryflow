@@ -78,6 +78,7 @@ refresh, on a socket and on a capability handle
 |---|---|
 | Gateway cache | Per-process, `COMPANY_STATUS_CACHE_SECONDS`; the replica that changes the flag sees it at once |
 | Suspension marker | `nbcap-suspended:<company_id>` in the capability store, read by the SQL proxy, tracking gateway, cold-store broker, notebook hub and upload minter |
+| Devices | Refused at ingestion (HTTP 403) within `TENANT_STATUS_PUBLISH_SECONDS` (10 s), from the `tenant-status` stream ([stream processing](../architecture/stream-processing.md#kafka-topics)); counter `ingestion_suspended_tenant_refusals_total` |
 | Writers of tenant data | Read the registry, not the marker: the stream jobs dead-letter the tenant's readings at once (`suspended_tenant`); the alert worker drops its rules at the next reload (`RULE_RELOAD_INTERVAL`) |
 | Reactivation | Removes the marker; restores no session |
 

@@ -38,6 +38,9 @@ def _source_sql(path: str, name: str) -> str:
 STREAM_READ = _source_sql("services/spark_jobs/reading_guard.py", "TENANT_STATUS_SELECT")
 # asyncpg's positional parameter, run here through psycopg2.
 ALERT_LISTING = _source_sql("services/alert_service/worker/repository.py", "TENANT_SCHEMAS_SELECT").replace("$1", "%s")
+# The alert worker's tenant-status publisher (services/alert_service/worker/tenant_status_publisher.py).
+STATUS_PUBLISH = _source_sql("services/alert_service/worker/tenant_status_publisher.py",
+                             "REGISTRY_STATUS_SELECT").replace("$1", "%s")
 
 
 def _connect():
@@ -104,6 +107,17 @@ def test_the_alert_worker_lists_a_tenant_only_while_it_is_active(tenant):
     _suspend(cur, company_id, False)
     try:
         assert (schema,) not in _as(cur, "alert_service_user", ALERT_LISTING, (like,))
+    finally:
+        _suspend(cur, company_id, True)
+
+
+def test_the_status_publisher_reads_every_tenant_with_its_status(tenant):
+    cur, company_id, schema = tenant
+    like = "tenant\\_%"
+    assert (schema, True) in _as(cur, "alert_service_user", STATUS_PUBLISH, (like,))
+    _suspend(cur, company_id, False)
+    try:
+        assert (schema, False) in _as(cur, "alert_service_user", STATUS_PUBLISH, (like,))
     finally:
         _suspend(cur, company_id, True)
 

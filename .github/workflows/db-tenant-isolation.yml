@@ -49,6 +49,7 @@ jobs:
               - 'services/api_gateway/routers/alert_rules.py'
               - 'services/api_gateway/routers/alerts_history.py'
               - 'services/alert_service/worker/repository.py'
+              - 'services/alert_service/worker/tenant_status_publisher.py'
               - 'services/spark_jobs/reading_guard.py'
               - 'libs/industryflow_contracts/**'
               - 'docker-compose.yml'

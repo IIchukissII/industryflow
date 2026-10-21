@@ -17,6 +17,7 @@ import re
 
 from industryflow_contracts import tenancy
 
+import tenant_status
 from config import DEVICE_IDENTITY_HEADER_CONVENTIONS, get_settings
 
 # Device identity URI SAN: industryflow:tenant/<company_uuid>/device/<device_id> (ADR-0007 dec 3).
@@ -76,6 +77,11 @@ async def get_ingestion_identity(request: Request) -> dict:
     if not cert:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing client certificate")
     try:
-        return _identity_from_client_cert(cert)
+        identity = _identity_from_client_cert(cert)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Certificate tenant is not a valid UUID")
+    # A suspended tenant's devices are refused (ADR-0033 dec 3), from the tenant-status stream.
+    if tenant_status.status.is_suspended(identity["company_id"]):
+        tenant_status.REFUSED.inc()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant suspended")
+    return identity

@@ -5,6 +5,8 @@
 import os
 from functools import lru_cache
 
+from industryflow_contracts import tenant_status
+
 # The header conventions a terminating mTLS edge uses to forward the verified client
 # certificate (ADR-0002 dec 2): our compose nginx edge sets X-Client-*, ingress-nginx
 # (ADR-0009) sets ssl-client-*. A deployment names exactly one; the other is foreign there.
@@ -14,9 +16,9 @@ DEVICE_IDENTITY_HEADER_CONVENTIONS = ("x-client", "ssl-client")
 class Settings:
     """Configuration for Ingestion Service - NO DEFAULTS.
 
-    Ingestion is device-only and stateless: it authenticates producers by mTLS and produces
-    to Kafka. It holds no database role, no JWT secret and no CORS policy (ADR-0002): no
-    browser ever calls it.
+    Ingestion is device-only and stateless: it authenticates producers by mTLS, produces to
+    Kafka and reads the tenant-status stream from it. It holds no database role, no JWT secret
+    and no CORS policy (ADR-0002): no browser ever calls it.
     """
 
     # Server
@@ -30,6 +32,10 @@ class Settings:
     # (one of DEVICE_IDENTITY_HEADER_CONVENTIONS). Required: guessing it, or accepting
     # either, would let a header the edge does not set reach the identity check.
     DEVICE_IDENTITY_HEADERS: str = os.getenv("DEVICE_IDENTITY_HEADERS", "")
+
+    # The tenant-status stream suspended tenants are refused from (ADR-0033 dec 3); the alert worker
+    # publishes it under the same name. The default is the shared contract's.
+    KAFKA_TOPIC_TENANT_STATUS: str = os.getenv("KAFKA_TOPIC_TENANT_STATUS", tenant_status.DEFAULT_TOPIC)
 
     def __init__(self):
         if not self.KAFKA_TOPIC_SENSOR_DATA:
