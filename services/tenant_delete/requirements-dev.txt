@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+-r requirements.txt
+pytest==9.1.1

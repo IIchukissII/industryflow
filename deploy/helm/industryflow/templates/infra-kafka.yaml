@@ -126,6 +126,8 @@ spec:
               value: "1"
             - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
               value: "true"
+            - name: KAFKA_LOG_RETENTION_HOURS
+              value: {{ .Values.infra.kafka.retentionHours | quote }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/kafka/data
