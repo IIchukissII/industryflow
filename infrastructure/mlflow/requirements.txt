@@ -170,7 +170,7 @@ packaging==26.2
     #   skops
 pandas==2.3.3
     # via mlflow
-pillow==12.2.0
+pillow==13.0.0
     # via matplotlib
 prettytable==3.18.0
     # via skops
