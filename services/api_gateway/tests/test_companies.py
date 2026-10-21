@@ -48,11 +48,14 @@ class _Result:
 
 
 class FakeDB:
-    def __init__(self, active=True, fail_with=None):
+    def __init__(self, active=True, fail_with=None, fail_request_with=None, deletion=None, steps=()):
         self.sql = []
         self.commits = 0
         self.active = active
         self.fail_with = fail_with
+        self.fail_request_with = fail_request_with
+        self.deletion = deletion
+        self.steps = list(steps)
         self.user_ids = [uuid.uuid4(), uuid.uuid4()]
 
     async def execute(self, clause, params=None):
@@ -60,6 +63,16 @@ class FakeDB:
         self.sql.append((sql, dict(params or {})))
         if self.fail_with and "provision_company" in sql:
             raise self.fail_with
+        if "request_company_deletion" in sql:
+            if self.fail_request_with:
+                raise self.fail_request_with
+            self.deletion = _Row(company_id=params["company_id"], requested_at=NOW,
+                                 requested_by=params["actor"], completed_at=None)
+            return _Result([self.deletion])
+        if "FROM public.company_deletions" in sql:
+            return _Result([self.deletion] if self.deletion else [])
+        if "FROM public.company_deletion_steps" in sql:
+            return _Result(self.steps)
         if "provision_company" in sql or "update_company" in sql:
             cid = (params or {}).get("company_id", OWN)
             name = (params or {}).get("name") or "Acme"
@@ -76,6 +89,7 @@ class FakeDB:
 
     async def commit(self):
         self.commits += 1
+        self.sql.append(("COMMIT", {}))
 
 
 class FakeStore:
@@ -291,3 +305,102 @@ def test_lifecycle_actions_leave_a_structured_record(as_user, caplog):
     records = [r.company_lifecycle for r in caplog.records if hasattr(r, "company_lifecycle")]
     assert records and records[-1]["action"] == "deactivate"
     assert records[-1]["company_id"] == str(OTHER) and records[-1]["actor"]
+
+
+# --- the durable lifecycle record (ADR-0033 dec 6) -------------------------------------------------
+
+def _records(db):
+    return [(i, p) for i, (sql, p) in enumerate(db.sql) if "record_company_lifecycle" in sql]
+
+
+@pytest.mark.parametrize("method, path, body, active, action", [
+    ("POST", "/api/companies", {"company_name": "Acme"}, True, "create"),
+    ("PUT", f"/api/companies/{OTHER}", {"is_active": False}, True, "deactivate"),
+    ("PUT", f"/api/companies/{OTHER}", {"is_active": True}, False, "reactivate"),
+    ("PUT", f"/api/companies/{OTHER}", {"company_name": "New"}, True, "rename"),
+    ("DELETE", f"/api/companies/{OTHER}", None, True, "deactivate"),
+])
+def test_every_action_is_recorded_in_its_own_transaction(as_user, method, path, body, active, action):
+    c, db, _ = as_user(is_superuser=True, db=FakeDB(active=active))
+    assert c.request(method, path, json=body).status_code in (200, 201)
+    [(at, params)] = _records(db)
+    assert params["action"] == action and params["actor"]
+    # Recorded inside the action's transaction: after the action's statement, before its commit.
+    sqls = [sql for sql, _ in db.sql]
+    acted = next(i for i, sql in enumerate(sqls) if "provision_company" in sql or "update_company" in sql)
+    committed = sqls.index("COMMIT")
+    assert acted < at < committed
+
+
+# --- deletion request (ADR-0033 dec 4, 7) -----------------------------------------------------------
+
+def test_superuser_requests_deletion_through_the_definer_function(as_user):
+    c, db, _ = as_user(is_superuser=True, db=FakeDB(active=False))
+    r = c.post(f"/api/companies/{OTHER}/deletion")
+    assert r.status_code == 202
+    assert r.json()["company_id"] == str(OTHER) and r.json()["completed_at"] is None
+    (sql, params), = _calls(db, "request_company_deletion")
+    assert params["company_id"] == OTHER and params["actor"]
+    assert db.commits == 1
+    # The request deletes nothing itself: the job does, store by store.
+    assert not any("DROP" in s or "DELETE FROM" in s for s, _ in db.sql)
+
+
+def test_tenant_admin_cannot_request_or_read_a_deletion(as_user):
+    c, db, _ = as_user()
+    assert c.post(f"/api/companies/{OWN}/deletion").status_code == 403
+    assert c.get(f"/api/companies/{OWN}/deletion").status_code == 403
+    assert db.sql == []
+
+
+class _PgError(Exception):
+    def __init__(self, sqlstate, hint=None):
+        self.sqlstate, self.hint = sqlstate, hint
+
+
+def _refusal(sqlstate, hint=None):
+    orig = SimpleNamespace(sqlstate=sqlstate)
+    orig.__cause__ = _PgError(sqlstate, hint)
+    return IntegrityError("stmt", {}, orig)
+
+
+@pytest.mark.parametrize("sqlstate, hint, status, detail", [
+    ("P0002", None, 404, "Company not found"),
+    ("55000", "not_suspended", 409, "Only a suspended company can be deleted"),
+    ("55000", "suspended_too_recently", 409, "The company has not been suspended long enough to be deleted"),
+    ("23505", None, 409, "A deletion of this company is already requested"),
+])
+def test_deletion_refusals_are_mapped(as_user, sqlstate, hint, status, detail):
+    c, db, _ = as_user(is_superuser=True, db=FakeDB(fail_request_with=_refusal(sqlstate, hint)))
+    r = c.post(f"/api/companies/{OTHER}/deletion")
+    assert (r.status_code, r.json()["detail"]) == (status, detail)
+    assert db.commits == 0
+
+
+def test_a_company_with_a_deletion_request_cannot_be_changed(as_user):
+    db = FakeDB(active=False)
+
+    async def refuse(clause, params=None, _orig=db.execute):
+        if "update_company" in str(clause):
+            raise _refusal("55000", "deletion_requested")
+        return await _orig(clause, params)
+
+    db.execute = refuse
+    c, _, _ = as_user(is_superuser=True, db=db)
+    r = c.put(f"/api/companies/{OTHER}", json={"is_active": True})
+    assert r.status_code == 409 and "deletion request" in r.json()["detail"]
+
+
+def test_the_deletion_reports_each_store_removed(as_user):
+    deletion = _Row(company_id=OTHER, requested_at=NOW, requested_by=OWN, completed_at=None)
+    steps = [_Row(store="capabilities", completed_at=NOW, retained_until=None, detail={"handles": 3})]
+    c, _, _ = as_user(is_superuser=True, db=FakeDB(deletion=deletion, steps=steps))
+    r = c.get(f"/api/companies/{OTHER}/deletion")
+    assert r.status_code == 200
+    assert r.json()["steps"] == [{"store": "capabilities", "completed_at": NOW.isoformat().replace("+00:00", "Z"),
+                                  "retained_until": None, "detail": {"handles": 3}}]
+
+
+def test_no_deletion_requested_is_a_404(as_user):
+    c, _, _ = as_user(is_superuser=True)
+    assert c.get(f"/api/companies/{OTHER}/deletion").status_code == 404

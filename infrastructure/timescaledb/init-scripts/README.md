@@ -43,10 +43,11 @@ On an existing database a new or changed script is applied by hand ([manual oper
 | `18-model-compatibility-status.sql` | `ml_models.compatibility_status`, `compatibility_detail`, `compatibility_checked_at` | [ADR-0027](../../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) |
 | `19-model-provenance.sql` | `ml_models.provenance`, `artifact_uri` | [ADR-0030](../../../ADR/ADR-0030-externally-authored-model-admission.md) |
 | `20-model-detector.sql` | `ml_models.detector` | [ADR-0028](../../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) |
-| `21-company-provisioning.sql` | `provision_company()`, `update_company()`, `end_suspended_tenant_sql_sessions()`, `company_provisioning_guard()` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
+| `21-company-provisioning.sql` | `provision_company()`, `update_company()` (keeps `suspended_at`; refuses a company with a deletion request), `end_suspended_tenant_sql_sessions()`, `company_provisioning_guard()` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 | `22-sensor-display-name.sql` | `add_display_name_column_to_sensors()`: `sensors.display_name`; backfill over existing tenants | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
 | `23-sensor-latest-reading-index.sql` | `add_latest_reading_index_to_sensor_measurements()`: index `sensor_measurements (sensor_id, time DESC)`; backfill over existing tenants | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
 | `24-writers-read-tenant-status.sql` | `spark_streaming_user`, `alert_service_user` `SELECT (schema_name, is_active)` on `public.companies` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
+| `25-company-deletion.sql` | `companies.suspended_at`, `deleted_at`; `company_lifecycle_events`, `record_company_lifecycle()`; `company_deletions`, `company_deletion_steps`, `request_company_deletion()`, `company_deletion_wait()` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 
 `create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22 and 23.
 Scripts 06 and later are idempotent; the per-tenant ones also apply themselves to every existing

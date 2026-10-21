@@ -12,7 +12,13 @@ who may call them is decided here (ADR-0004 dec 5):
 - create: superuser only. Creates the company and its tenant schema.
 - update: a tenant admin may rename their own company; (de)activating one is superuser-only.
 - delete: superuser only, and it DEACTIVATES. The company and all of its users are made inactive
-  and their sessions revoked; the schema and its data stay. Nothing in the API drops a tenant.
+  and their sessions revoked; the schema and its data stay.
+- deletion: superuser only. Requests the irreversible delete of a tenant suspended for at least the
+  wait of ADR-0033 dec 7; the database refuses any other. A dedicated job carries it out store by
+  store (dec 4); the API only records the request and reports what has been removed.
+
+Every action is recorded in the durable lifecycle record (25-company-deletion.sql), in the
+transaction of the action itself, so an action and its record commit or fail together (dec 6).
 
 Every transition to inactive — an update that clears the flag, or a delete — then takes the same
 path (``_suspended``): the company is marked suspended in the capability store, so no notebook
@@ -30,6 +36,8 @@ from typing import List, Optional
 from datetime import datetime
 from uuid import UUID
 import logging
+
+import json
 
 import company_status
 from dependencies import get_db_with_tenant, require_role
@@ -61,6 +69,21 @@ class CompanyResponse(BaseModel):
     created_at: datetime
 
 
+class DeletionStep(BaseModel):
+    store: str
+    completed_at: datetime
+    retained_until: Optional[datetime] = None
+    detail: dict
+
+
+class DeletionResponse(BaseModel):
+    company_id: UUID
+    requested_at: datetime
+    requested_by: UUID
+    completed_at: Optional[datetime] = None
+    steps: List[DeletionStep] = []
+
+
 def _require_superuser(current_user: User) -> None:
     """Provisioning a tenant (create/delete a company) requires a superuser (ADR-0004)."""
     if not current_user.is_superuser:
@@ -80,13 +103,31 @@ def _sqlstate(e: DBAPIError) -> Optional[str]:
     return getattr(e.orig, "sqlstate", None) or getattr(e.orig, "pgcode", None)
 
 
-def _provisioning_error(e: DBAPIError) -> HTTPException:
+def _hint(e: DBAPIError) -> str:
+    """The server's HINT: asyncpg's error, which SQLAlchemy's adapter wraps as its cause."""
+    cause = getattr(e.orig, "__cause__", None)
+    return getattr(cause, "hint", None) or getattr(e.orig, "hint", None) or ""
+
+
+# What the lifecycle functions refuse as "not now" (SQLSTATE 55000), told apart by their HINT.
+_PREREQUISITE = {
+    "deletion_requested": "The company has a deletion request and can no longer be changed",
+    "not_suspended": "Only a suspended company can be deleted",
+    "suspended_too_recently": "The company has not been suspended long enough to be deleted",
+}
+
+
+def _provisioning_error(e: DBAPIError, duplicate: str = "A company with this name already exists") -> HTTPException:
     """Map what the provisioning functions refuse to a client answer; anything else is a 500."""
     state = _sqlstate(e)
-    if state == "23505":  # unique_violation: the name is taken
-        return HTTPException(status_code=409, detail="A company with this name already exists")
+    if state == "23505":  # unique_violation: the name is taken, or the request already made
+        return HTTPException(status_code=409, detail=duplicate)
     if state == "23514":  # check_violation: the name failed the registry's validation
         return HTTPException(status_code=422, detail="Invalid company name")
+    if state == "P0002":  # no_data_found
+        return HTTPException(status_code=404, detail="Company not found")
+    if state == "55000":  # object_not_in_prerequisite_state
+        return HTTPException(status_code=409, detail=_PREREQUISITE.get(_hint(e), "The company cannot be changed now"))
     logger.error(f"Company provisioning failed: {e}")
     return HTTPException(status_code=500, detail="Company provisioning failed")
 
@@ -99,8 +140,13 @@ async def _company_user_ids(db: AsyncSession, company_id: UUID) -> list:
     return [r.id for r in result.fetchall()]
 
 
-def _audit(action: str, company_id, actor: User, **details) -> None:
-    """One structured record per lifecycle action: who did what to which company (ADR-0033 dec 6)."""
+async def _record(db: AsyncSession, action: str, company_id, actor: User, **details) -> None:
+    """Record who did what to which company (ADR-0033 dec 6), in the caller's transaction, before
+    its commit: the durable record is the lifecycle table, and the structured log line mirrors it."""
+    await db.execute(
+        text("SELECT public.record_company_lifecycle(:company_id, :action, :actor, CAST(:detail AS jsonb))"),
+        {"company_id": company_id, "action": action, "actor": actor.id, "detail": json.dumps(details)},
+    )
     record = {"action": action, "company_id": str(company_id), "actor": str(actor.id), **details}
     logger.info(
         "company lifecycle " + " ".join(f"{k}={v}" for k, v in record.items()),
@@ -207,11 +253,10 @@ async def create_company(
             {"name": company.company_name, "is_active": company.is_active},
         )
         row = result.fetchone()
+        await _record(db, "create", row.company_id, current_user)
         await db.commit()
     except DBAPIError as e:
         raise _provisioning_error(e)
-
-    _audit("create", row.company_id, current_user)
     return _row(row)
 
 
@@ -250,6 +295,12 @@ async def update_company(
         if not row:
             raise HTTPException(status_code=404, detail="Company not found")
         user_ids = await _company_user_ids(db, company_id) if is_active is False else []
+        if is_active is False:
+            await _record(db, "deactivate", company_id, current_user, sessions_ended_for=len(user_ids))
+        elif is_active is True:
+            await _record(db, "reactivate", company_id, current_user)
+        if company.company_name is not None:
+            await _record(db, "rename", company_id, current_user)
         await db.commit()
     except DBAPIError as e:
         raise _provisioning_error(e)
@@ -257,12 +308,8 @@ async def update_company(
     # Deactivating is suspending, by whichever route it is asked for: the same path as delete.
     if is_active is False:
         await _suspended(db, company_id, user_ids)
-        _audit("deactivate", company_id, current_user, sessions_ended_for=len(user_ids))
     elif is_active is True:
         await _reactivated(company_id)
-        _audit("reactivate", company_id, current_user)
-    if company.company_name is not None:
-        _audit("rename", company_id, current_user)
     return _row(row)
 
 
@@ -292,6 +339,7 @@ async def delete_company(
             {"company_id": company_id},
         )
         user_ids = [r.id for r in users.fetchall()]
+        await _record(db, "deactivate", company_id, current_user, users_deactivated=len(user_ids))
         await db.commit()
     except DBAPIError as e:
         raise _provisioning_error(e)
@@ -299,5 +347,66 @@ async def delete_company(
     # After the commit: a deactivated user can no longer refresh even if this step fails part way
     # (refresh checks is_active), so revocation here only ends the sessions sooner.
     await _suspended(db, company_id, user_ids)
-    _audit("delete", company_id, current_user, users_deactivated=len(user_ids))
     return _row(row)
+
+
+async def _deletion(db: AsyncSession, company_id: UUID) -> Optional[dict]:
+    result = await db.execute(
+        text("SELECT company_id, requested_at, requested_by, completed_at "
+             "FROM public.company_deletions WHERE company_id = :company_id"),
+        {"company_id": company_id},
+    )
+    row = result.fetchone()
+    if row is None:
+        return None
+    steps = await db.execute(
+        text("SELECT store, completed_at, retained_until, detail FROM public.company_deletion_steps "
+             "WHERE company_id = :company_id ORDER BY completed_at, store"),
+        {"company_id": company_id},
+    )
+    return {
+        "company_id": row.company_id, "requested_at": row.requested_at,
+        "requested_by": row.requested_by, "completed_at": row.completed_at,
+        "steps": [{"store": s.store, "completed_at": s.completed_at, "retained_until": s.retained_until,
+                   "detail": s.detail or {}} for s in steps.fetchall()],
+    }
+
+
+@router.post("/{company_id}/deletion", response_model=DeletionResponse, status_code=202)
+async def request_deletion(
+    company_id: UUID,
+    db: AsyncSession = Depends(get_db_with_tenant),
+    current_user: User = Depends(require_role("admin"))
+):
+    """
+    Request the irreversible delete of a company (superuser only; ADR-0033 dec 4, 7). The database
+    accepts it only for a company suspended for at least the wait, records the request and its actor,
+    and from then on refuses to reactivate or rename the company. The delete job carries it out.
+    """
+    _require_superuser(current_user)
+    try:
+        await db.execute(
+            text("SELECT * FROM public.request_company_deletion(:company_id, :actor)"),
+            {"company_id": company_id, "actor": current_user.id},
+        )
+        await db.commit()
+    except DBAPIError as e:
+        raise _provisioning_error(e, duplicate="A deletion of this company is already requested")
+    logger.info(f"company lifecycle action=delete_requested company_id={company_id} actor={current_user.id}",
+                extra={"company_lifecycle": {"action": "delete_requested", "company_id": str(company_id),
+                                             "actor": str(current_user.id)}})
+    return await _deletion(db, company_id)
+
+
+@router.get("/{company_id}/deletion", response_model=DeletionResponse)
+async def get_deletion(
+    company_id: UUID,
+    db: AsyncSession = Depends(get_db_with_tenant),
+    current_user: User = Depends(require_role("admin"))
+):
+    """A company's deletion request and every store it has been removed from so far (superuser only)."""
+    _require_superuser(current_user)
+    deletion = await _deletion(db, company_id)
+    if deletion is None:
+        raise HTTPException(status_code=404, detail="No deletion requested for this company")
+    return deletion
