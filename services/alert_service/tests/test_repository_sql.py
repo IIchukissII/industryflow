@@ -148,9 +148,10 @@ def test_dedup_statement_checks_the_window_both_ways_and_no_ops_an_exact_replay(
 
 
 def test_rules_load_only_for_schemas_that_are_exactly_a_tenants():
-    """The worker enumerates tenants from the catalog (it serves them all). A schema that merely starts
-    like one — role-shaped or a hand-made look-alike — is not a tenant, and its "company_id" must not be
-    invented by string surgery on the name (ADR-0003 dec 5: one mapping, inverted strictly)."""
+    """The worker enumerates the active tenants the registry holds whose schema exists. A schema that
+    merely starts like one — role-shaped or a hand-made look-alike — is not a tenant, and its
+    "company_id" must not be invented by string surgery on the name (ADR-0003 dec 5: one mapping,
+    inverted strictly)."""
     names = (SCHEMA, "tenant_reader_0b2f503a_6e59_4f4f_b0cd_b82547a20cf2", "tenant_registry", SCHEMA.upper())
 
     class CatalogConn(Conn):
@@ -170,3 +171,13 @@ def test_rules_load_only_for_schemas_that_are_exactly_a_tenants():
     assert rules == {CO: []}
     listing = next(e for e in _statements(pool.log) if "information_schema.schemata" in e[0])
     assert listing[1] == (repository.tenancy.SCHEMA_LIKE,), "the LIKE pattern is bound, escaped, from the mapping"
+
+
+def test_rules_load_only_for_tenants_the_registry_holds_as_active():
+    """ADR-0033 dec 3: a suspended tenant gets no rules, so its readings raise no alert. The listing is
+    the registry's active tenants, joined to the catalog so a registered tenant without a schema is
+    not evaluated either."""
+    sql = " ".join(repository.TENANT_SCHEMAS_SELECT.split())
+    assert "FROM public.companies c" in sql
+    assert "JOIN information_schema.schemata s ON s.schema_name = c.schema_name" in sql
+    assert "WHERE c.is_active" in sql

@@ -18,8 +18,8 @@ import logging
 import os
 
 from reading_guard import (  # shipped via --py-files
-    DEFAULT_DLQ_TOPIC, DEFAULT_SOURCE_TOPIC, SOURCE_COLUMNS, UNKNOWN_TENANT, canonical_uuid, classify_references,
-    company_id_to_schema,
+    DEFAULT_DLQ_TOPIC, DEFAULT_SOURCE_TOPIC, SOURCE_COLUMNS, SUSPENDED_TENANT, UNKNOWN_TENANT, canonical_uuid,
+    classify_references, company_id_to_schema,
     parse_readings, publish_dead_letters, read_tenant_references, rejection_reason,
 )
 
@@ -155,9 +155,9 @@ def _make_measurement_upsert(db_cfg, schema_name):
 
 def lookup_references(db_cfg, keys):
     """
-    Read, once per tenant per batch, what `classify_references` needs: whether the tenant's schema
-    exists and which of the batch's sensor/equipment ids exist in it. Catalog reads, so a tenant
-    with no schema yields False rather than an error.
+    Read, once per tenant per batch, what `classify_references` needs: whether the registry holds the
+    tenant as active with its schema in place, and which of the batch's sensor/equipment ids exist in
+    it. A tenant that is unknown, schema-less or suspended yields its refusal rather than an error.
     """
     import psycopg2
 
@@ -167,18 +167,18 @@ def lookup_references(db_cfg, keys):
         sensors.add(canonical_uuid(sensor_id))
         equipment.add(canonical_uuid(equipment_id))
 
-    tenant_exists, known_sensors, known_equipment = {}, {}, {}
+    tenant_refusal, known_sensors, known_equipment = {}, {}, {}
     conn = psycopg2.connect(**db_cfg)
     try:
         conn.autocommit = True
         with conn.cursor() as cur:
             for company_id, (sensors, equipment) in by_company.items():
-                (tenant_exists[company_id], known_sensors[company_id],
+                (tenant_refusal[company_id], known_sensors[company_id],
                  known_equipment[company_id]) = read_tenant_references(
                     cur, company_id_to_schema(company_id), sensors, equipment)
     finally:
         conn.close()
-    return tenant_exists, known_sensors, known_equipment
+    return tenant_refusal, known_sensors, known_equipment
 
 
 def process_batch(batch_df, batch_id, *, lookup, dead_letter, upsert):
@@ -213,8 +213,8 @@ def process_batch(batch_df, batch_id, *, lookup, dead_letter, upsert):
             dead_letter(rejected)
             logger.warning(f"Batch {batch_id}: dead-lettered readings by reason: {counts}")
 
-        no_schema = {r[0] for r in refused if r[3] == UNKNOWN_TENANT}
-        for company_id in sorted({k[0] for k in keys} - no_schema):
+        refused_tenants = {r[0] for r in refused if r[3] in (UNKNOWN_TENANT, SUSPENDED_TENANT)}
+        for company_id in sorted({k[0] for k in keys} - refused_tenants):
             schema_name = company_id_to_schema(company_id)
             tenant_data = valid.filter(col("company_id") == company_id).select(*MEASUREMENT_COLUMNS)
             try:

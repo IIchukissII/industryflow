@@ -17,6 +17,7 @@ import pytest
 
 import aggregation_windows as aw
 import kafka_aggregations as job
+import reading_guard as rg
 from reading_guard import company_id_to_schema, parse_readings
 
 CID = "11111111-1111-1111-1111-111111111111"
@@ -133,12 +134,15 @@ def _agg_row(company_id, sensor_id=SID, equipment_id=EID):
             "anomaly_count": 0, "anomaly_percentage": 0.0}
 
 
-def _known(*schemas):
-    """A references reader for which only ``schemas`` exist, each knowing SID and EID."""
+def _known(*schemas, suspended=()):
+    """A references reader for which only ``schemas`` are active tenants, each knowing SID and EID,
+    and ``suspended`` are registered but inactive."""
     def references(cur, schema_name, sensor_ids, equipment_ids):
+        if schema_name in suspended:
+            return rg.SUSPENDED_TENANT, set(), set()
         if schema_name not in schemas:
-            return False, set(), set()
-        return True, {SID} & sensor_ids, {EID} & equipment_ids
+            return rg.UNKNOWN_TENANT, set(), set()
+        return None, {SID} & sensor_ids, {EID} & equipment_ids
     return references
 
 
@@ -156,6 +160,19 @@ def test_an_unknown_tenant_is_skipped_and_the_others_are_written():
     assert written == [f'"{company_id_to_schema(CID)}"."sensor_aggregations_1min"',
                        f'"{company_id_to_schema(other)}"."sensor_aggregations_1min"']
     assert conn.commits == 2  # one transaction per tenant
+
+
+def test_a_suspended_tenant_is_skipped_like_the_streaming_job_rejects_it():
+    # ADR-0033 dec 3: an inactive tenant's aggregates are not written, as its raw readings are not.
+    other = "22222222-2222-2222-2222-222222222222"
+    written = []
+    job.write_aggregations_to_db(
+        _Rows([_agg_row(CID), _agg_row(other)]), 0, "sensor_aggregations_1min",
+        connect=_Conn,
+        references=_known(company_id_to_schema(CID), suspended=(company_id_to_schema(other),)),
+        upsert=lambda cur, target, values: written.append(target),
+    )
+    assert written == [f'"{company_id_to_schema(CID)}"."sensor_aggregations_1min"']
 
 
 def test_an_unknown_sensor_or_equipment_is_excluded_like_the_streaming_job_rejects_it():
