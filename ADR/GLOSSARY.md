@@ -15,6 +15,9 @@ wins.
 |---|---|---|
 | Open-core | One open codebase under the copyleft licence; the commercial offering is a licence exception for closed integration, not withheld features | ADR-0001 dec 1, 3 |
 | Tenant | One customer organisation, identified by `company_id` (a UUID). "Tenant" in prose, `company_id` for the identifier | ADR-0001, ADR-0003 |
+| Suspend | Reversibly stop a tenant: nothing of it is honoured or issued, and its data is kept | ADR-0033 dec 3 |
+| Delete (tenant) | Irreversibly remove a suspended tenant from every store that holds its data | ADR-0033 dec 4, 7 |
+| Tombstone | The registry entry a deleted tenant leaves, refused as deleted and never reused | ADR-0033 dec 8 |
 | Schema-per-tenant | Each tenant's data lives in its own PostgreSQL schema `tenant_<company_id>` (hyphens as underscores), not in shared tables with a tenant column | ADR-0003 |
 | Tenant-to-schema resolution | Mapping a verified caller's `company_id` to its schema through one validated, shared implementation | ADR-0003 dec 1-7 |
 | Trusted mediation | Trusted server-side code holds the privileged principal and forces every operation into the caller's tenant; the caller presents only a narrow capability. Instances: API gateway, SQL proxy, tracking gateway, cold-store broker, upload path. A new tenant-access path reuses it | ADR-0003, ADR-0012, ADR-0015, ADR-0019, ADR-0025 dec 5, ADR-0030 dec 2-3 |
