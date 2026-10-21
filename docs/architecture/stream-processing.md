@@ -24,7 +24,7 @@ device ──mTLS──▶ ingestion-edge ─▶ ingestion-service ─▶ Kafka 
 
 | Name | Role | Port | Config |
 |---|---|---|---|
-| `ingestion-service` | Validates the reading, stamps the verified `company_id`, produces to Kafka; rejects a timestamp more than 300 s ahead (HTTP 422); no database access | 8003 | `services/ingestion_service/` |
+| `ingestion-service` | Validates the reading, stamps the verified `company_id`, produces to Kafka; rejects a timestamp more than 300 s ahead (HTTP 422) and a suspended tenant (HTTP 403, from `tenant-status`); no database access | 8003 | `services/ingestion_service/` |
 | `spark-streaming` | Upserts raw readings; reads from `earliest` | 4040 (metrics) | `services/spark_jobs/kafka_to_timescaledb.py` |
 | `spark-aggregations` | Windows readings into 1 min / 5 min / 1 h aggregates; reads from `latest` | 4040 (metrics) | `services/spark_jobs/kafka_aggregations.py`, `aggregation_windows.py` |
 | Reading guard | One definition of an unwritable reading, shared by both jobs | | `services/spark_jobs/reading_guard.py` |
@@ -38,6 +38,7 @@ device ──mTLS──▶ ingestion-edge ─▶ ingestion-service ─▶ Kafka 
 | `sensor-data-raw` | `ingestion-service` | `spark-streaming`, `spark-aggregations`, `alert-service-detector` | `KAFKA_TOPIC_SENSOR_DATA` |
 | `sensor-data-raw.measurements.dlq` | `spark-streaming` | Operators | `KAFKA_TOPIC_MEASUREMENTS_DLQ` |
 | `<KAFKA_TOPIC_SENSOR_DATA>.dlq` | `alert-service-detector` | Operators | `KAFKA_TOPIC_DLQ` ([alerting](alerting.md)) |
+| `tenant-status` | `alert-service-detector`: every registered tenant's status every `TENANT_STATUS_PUBLISH_SECONDS` (10 s) | `ingestion-service`, outside any group, from `latest`; a status unheard for 60 s is forgotten | `KAFKA_TOPIC_TENANT_STATUS` ([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) dec 3; message in `libs/industryflow_contracts/industryflow_contracts/tenant_status.py`) |
 
 A growing `*.dlq` topic fires the Helm rule `IndustryFlowDeadLetteredReadings`
 ([platform alert rules](../../deploy/observability/README.md#platform-alert-rules)).

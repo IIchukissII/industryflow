@@ -126,5 +126,14 @@ def client(monkeypatch):
     monkeypatch.setattr(main, "send_sensor_data", fake_send, raising=True)
     monkeypatch.setattr(main, "AsyncKafkaProducerSingleton", FakeSingleton, raising=True)
 
+    # No broker: the tenant-status follower does nothing, and each test starts with no status heard.
+    import tenant_status
+
+    async def no_follow(consumer_factory, retry_seconds=5.0):
+        return None
+
+    monkeypatch.setattr(tenant_status, "follow", no_follow, raising=True)
+    monkeypatch.setattr(tenant_status, "status", tenant_status.TenantStatus(), raising=True)
+
     with TestClient(main.app) as c:
         yield c, produced

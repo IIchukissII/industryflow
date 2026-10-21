@@ -11,6 +11,8 @@ import sys
 import ssl
 import logging
 
+from industryflow_contracts import tenant_status
+
 logger = logging.getLogger(__name__)
 
 
@@ -78,6 +80,12 @@ class AlertServiceConfig:
     # Service Settings
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     RULE_RELOAD_INTERVAL = int(os.getenv('RULE_RELOAD_INTERVAL', '60'))
+
+    # The tenant-status stream ingestion refuses suspended tenants from (ADR-0033 dec 3): its own
+    # timer, short, independent of the rule reload. Defaults from the shared contract.
+    KAFKA_TOPIC_TENANT_STATUS = os.getenv('KAFKA_TOPIC_TENANT_STATUS', tenant_status.DEFAULT_TOPIC)
+    TENANT_STATUS_PUBLISH_SECONDS = float(
+        os.getenv('TENANT_STATUS_PUBLISH_SECONDS', str(tenant_status.PUBLISH_INTERVAL_SECONDS)))
 
     # ML service (service-to-service). Used by the real-time ml rules (inference) and the
     # scheduled drift evaluator (ADR-0021). INTERNAL_SERVICE_TOKEN authenticates the call so
