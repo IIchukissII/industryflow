@@ -135,8 +135,8 @@ def write_aggregations_to_db(batch_df, batch_id, aggregation_table, *,
     Each window is keyed by (time, sensor_id, equipment_id); on conflict the row is
     updated, so a retried micro-batch (expected under the at-least-once pipeline,
     ADR-0005) does not create duplicates. Each tenant is written in its own transaction. A tenant
-    whose schema does not exist, and an aggregate whose sensor or equipment the tenant does not
-    know, are skipped and logged — they are the readings the streaming job dead-letters
+    the registry does not hold as active (unknown, schema-less or suspended, ADR-0033 dec 3), and an
+    aggregate whose sensor or equipment the tenant does not know, are skipped and logged — they are the readings the streaming job dead-letters
     (reading_guard.classify_references, one definition for both jobs; ADR-0006 dec 4) — so
     one unknown key cannot fail every tenant's batch. Any other failure re-raises so Spark fails the batch and retries it, rather than
     silently dropping data (the upsert makes that retry safe; ADR-0006 dec 4).
@@ -158,11 +158,11 @@ def write_aggregations_to_db(batch_df, batch_id, aggregation_table, *,
             schema_name = company_id_to_schema(company_id)  # validates the UUID
             with conn.cursor() as cur:
                 keys = sorted({(r["company_id"], r["sensor_id"], r["equipment_id"]) for r in tenant_rows})
-                exists, known_sensors, known_equipment = references(
+                refusal, known_sensors, known_equipment = references(
                     cur, schema_name,
                     {canonical_uuid(k[1]) for k in keys}, {canonical_uuid(k[2]) for k in keys})
                 refused = {k[:3]: k[3] for k in classify_references(
-                    keys, {company_id: exists}, {company_id: known_sensors},
+                    keys, {company_id: refusal}, {company_id: known_sensors},
                     {company_id: known_equipment})}
                 if refused:
                     tenant_rows = [r for r in tenant_rows

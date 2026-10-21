@@ -46,6 +46,7 @@ On an existing database a new or changed script is applied by hand ([manual oper
 | `21-company-provisioning.sql` | `provision_company()`, `update_company()`, `end_suspended_tenant_sql_sessions()`, `company_provisioning_guard()` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 | `22-sensor-display-name.sql` | `add_display_name_column_to_sensors()`: `sensors.display_name`; backfill over existing tenants | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
 | `23-sensor-latest-reading-index.sql` | `add_latest_reading_index_to_sensor_measurements()`: index `sensor_measurements (sensor_id, time DESC)`; backfill over existing tenants | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
+| `24-writers-read-tenant-status.sql` | `spark_streaming_user`, `alert_service_user` `SELECT (schema_name, is_active)` on `public.companies` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 
 `create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22 and 23.
 Scripts 06 and later are idempotent; the per-tenant ones also apply themselves to every existing
@@ -56,8 +57,8 @@ tenant schema.
 | Role | Used by | Access | Connection limit |
 |---|---|---|---|
 | `api_gateway_user` | `api-gateway` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT` on `public.companies`; `EXECUTE` on `provision_company()`, `update_company()`, `end_suspended_tenant_sql_sessions()` | 50 |
-| `spark_streaming_user` | `spark-streaming`, `spark-aggregations` | `SELECT/INSERT/UPDATE` on tenant tables | 50 |
-| `alert_service_user` | `alert-service-detector` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables | 50 |
+| `spark_streaming_user` | `spark-streaming`, `spark-aggregations` | `SELECT/INSERT/UPDATE` on tenant tables; `SELECT (schema_name, is_active)` on `public.companies` | 50 |
+| `alert_service_user` | `alert-service-detector` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT (schema_name, is_active)` on `public.companies` | 50 |
 | `ml_service_user` | `ml-service-api` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT` on `public.companies`, `public.platform_config` | 10 |
 | `mlflow_user` | `mlflow` | `mlflow` database | 20 |
 | `metrics_user` | `postgres-exporter` | `pg_monitor` | 5 |

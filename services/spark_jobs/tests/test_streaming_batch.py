@@ -43,8 +43,9 @@ def batch(spark, messages):
 
 
 class Sinks:
-    def __init__(self, tenants=(A, B), sensors=None, equipment=None):
+    def __init__(self, tenants=(A, B), sensors=None, equipment=None, suspended=()):
         self.tenants = set(tenants)
+        self.suspended = set(suspended)
         self.sensors = sensors or {A: {S_A}, B: {S_B}}
         self.equipment = equipment or {A: {E_A}, B: {E_B}}
         self.dead = []
@@ -55,7 +56,8 @@ class Sinks:
 
     def lookup(self, keys):
         companies = {k[0] for k in keys}
-        return ({c: c in self.tenants for c in companies},
+        return ({c: None if c in self.tenants else
+                 rg.SUSPENDED_TENANT if c in self.suspended else rg.UNKNOWN_TENANT for c in companies},
                 {c: self.sensors.get(c, set()) for c in companies},
                 {c: self.equipment.get(c, set()) for c in companies})
 
@@ -96,6 +98,15 @@ def test_unwritable_readings_are_dead_lettered_and_every_tenant_still_writes(spa
     ])
     # Dead letters go out before any write: if publishing them fails, nothing has moved.
     assert sinks.events[0] == "dead_letter"
+
+
+def test_a_suspended_tenants_readings_are_dead_lettered_not_written(spark):
+    # ADR-0033 dec 3: the writer refuses an inactive tenant from the registry, so its devices'
+    # readings reach no table even when ingestion let them through.
+    sinks = Sinks(tenants=(A,), suspended=(B,))
+    sinks.run(batch(spark, [msg(A, S_A, E_A, 1.0), msg(B, S_B, E_B, 2.0)]))
+    assert sinks.written == {rg.company_id_to_schema(A): [1.0]}
+    assert sinks.dead == [(2.0, rg.SUSPENDED_TENANT)]
 
 
 def test_a_clean_batch_publishes_no_dead_letters(spark):

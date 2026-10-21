@@ -20,6 +20,8 @@ import reading_guard as rg
 CID = "11111111-2222-3333-4444-555555555555"
 SID = "aaaaaaaa-0000-0000-0000-000000000001"
 EID = "bbbbbbbb-0000-0000-0000-000000000001"
+SUSPENDED = "33333333-2222-3333-4444-555555555555"
+UNMAPPED = "44444444-2222-3333-4444-555555555555"
 
 
 def reading(**overrides):
@@ -82,10 +84,11 @@ def test_classify_references():
     orphan_sensor = "aaaaaaaa-0000-0000-0000-00000000dead"
     orphan_equipment = "bbbbbbbb-0000-0000-0000-00000000dead"
     keys = [(CID, SID, EID), (CID, orphan_sensor, EID), (CID, SID, orphan_equipment),
-            (other, SID, EID), (CID, SID.upper(), EID.upper())]
+            (other, SID, EID), (CID, SID.upper(), EID.upper()), (SUSPENDED, SID, EID),
+            (UNMAPPED, SID, EID)]
     rejected = rg.classify_references(
         keys,
-        tenant_exists={CID: True, other: False},
+        tenant_refusal={CID: None, other: rg.UNKNOWN_TENANT, SUSPENDED: rg.SUSPENDED_TENANT},
         known_sensors={CID: {SID}},
         known_equipment={CID: {EID}},
     )
@@ -93,7 +96,41 @@ def test_classify_references():
         (CID, orphan_sensor, EID, rg.UNKNOWN_SENSOR),
         (CID, SID, orphan_equipment, rg.UNKNOWN_EQUIPMENT),
         (other, SID, EID, rg.UNKNOWN_TENANT),
+        (SUSPENDED, SID, EID, rg.SUSPENDED_TENANT),
+        (UNMAPPED, SID, EID, rg.UNKNOWN_TENANT),
     ]
+
+
+class _Cursor:
+    """Answers the reads `read_tenant_references` makes, in order, from canned rows."""
+
+    def __init__(self, registry, table_exists=True):
+        self.answers = [registry, (table_exists,), None, None]
+        self.queries = []
+
+    def execute(self, sql, params=None):
+        self.queries.append(sql)
+
+    def fetchone(self):
+        return self.answers[len(self.queries) - 1]
+
+    def fetchall(self):
+        return [(SID,)] if "sensors" in self.queries[-1] else [(EID,)]
+
+
+@pytest.mark.parametrize("registry,table_exists,refusal", [
+    (None, True, rg.UNKNOWN_TENANT),        # a schema the registry does not hold fails closed
+    ((False,), True, rg.SUSPENDED_TENANT),  # ADR-0033 dec 3
+    ((True,), False, rg.UNKNOWN_TENANT),    # registered, but its schema is gone
+    ((True,), True, None),
+])
+def test_read_tenant_references_refuses_from_the_registry(registry, table_exists, refusal):
+    cur = _Cursor(registry, table_exists)
+    got, sensors, equipment = rg.read_tenant_references(
+        cur, rg.company_id_to_schema(CID), {SID}, {EID})
+    assert got == refusal
+    assert "public.companies" in cur.queries[0]
+    assert (sensors, equipment) == (({SID}, {EID}) if refusal is None else (set(), set()))
 
 
 def test_company_id_to_schema_validates():
