@@ -212,7 +212,7 @@ services:
   # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
   # CAP_CHOWN, and a no-op when the volume is already owned correctly.
   minio-data-owner:
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:cd7f5d19d115615d809f27343b1e5cfbdc84f38e1c9a29475535b74ec5bade50
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:a325524e95db52fbd25f68d55b661b232e346c56d0481e99bb0e77315c3e9cb8
     container_name: industryflow-minio-data-owner
     user: "0:0"
     network_mode: none
@@ -235,7 +235,7 @@ services:
   # a maintained third-party build of the same server (ADR-0025 dec 10, ADR-0009). Non-root (65532),
   # distroless: no curl, so the healthcheck speaks HTTP over bash's /dev/tcp.
   minio:
-    image: cgr.dev/chainguard/minio:latest@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
+    image: cgr.dev/chainguard/minio:latest@sha256:ad134b2dd572ae0d989d6807c3e45516cc75a34883a8021db2ff04be5d1d496a
     depends_on:
       minio-data-owner:
         condition: service_completed_successfully
@@ -266,7 +266,7 @@ services:
   # safe on every `up`; the services that need a bucket or principal gate on it completing.
   minio-init:
     # The -dev variant: the init script needs a shell, grep and mktemp, which the minimal one lacks.
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:cd7f5d19d115615d809f27343b1e5cfbdc84f38e1c9a29475535b74ec5bade50
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:a325524e95db52fbd25f68d55b661b232e346c56d0481e99bb0e77315c3e9cb8
     container_name: industryflow-minio-init
     depends_on:
       minio:
@@ -665,7 +665,7 @@ services:
   # mTLS ingestion edge (ADR-0002): verifies device client certs against the device CA +
   # CRL and forwards the verified identity to ingestion-service (the only way in).
   ingestion-edge:
-    image: nginx:1.31-alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
+    image: nginx:1.31-alpine@sha256:892bb2152464f0c5d8972593a5f5afaf8054552580b699d95f8ff4af08c2d33d
     container_name: industryflow-ingestion-edge
     ports:
       - "${INGESTION_MTLS_PORT:-8443}:8443"
@@ -690,7 +690,7 @@ services:
   # `device-ca.sh root-crl`). The healthcheck goes unhealthy when either CRL nears expiry. It holds
   # a signing key, so it has no network at all and runs as the CA dir's owner (DEVICE_CA_UID/GID).
   device-crl-refresh:
-    image: alpine/openssl:3.5.9@sha256:e8a2319d15637db5296c0ff540bb028cfabc480b22fcdd4a020582393d32673f
+    image: alpine/openssl:3.5.9@sha256:bf66acee200e5f4959af448eafc9be0634d8ecdf42205873c83cd5ddffb1cdfd
     container_name: industryflow-device-crl-refresh
     network_mode: none
     user: "${DEVICE_CA_UID:-1000}:${DEVICE_CA_GID:-1000}"
@@ -1049,7 +1049,7 @@ services:
   # No host port and no cert: it is never reached directly, only through the frontend.
   notebook-sso:
     profiles: ["notebooks"]
-    image: nginx:1.31-alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
+    image: nginx:1.31-alpine@sha256:892bb2152464f0c5d8972593a5f5afaf8054552580b699d95f8ff4af08c2d33d
     container_name: industryflow-notebook-sso
     environment:
       # sso-nginx.conf is a template the image renders at start into /etc/nginx/nginx.conf; the
@@ -1157,7 +1157,7 @@ services:
 
   # Redis Exporter - Cache metrics
   redis-exporter:
-    image: oliver006/redis_exporter:v1.93.0@sha256:6ca518a72f30f7f576ef92963de1b91d3c3f5fd3aeac949f878bfda183587820
+    image: oliver006/redis_exporter:v1.94.0@sha256:0842ef7110e62b40bbde2d5c11f38c6fbd99f7100c75e3866637c1b335a1eff7
     container_name: industryflow-redis-exporter
     environment:
       REDIS_ADDR: "redis:6379"
