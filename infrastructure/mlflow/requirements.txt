@@ -34,7 +34,7 @@ cachetools==7.1.4
     # via
     #   mlflow-skinny
     #   mlflow-tracing
-certifi==2026.6.17
+certifi==2026.10.19
     # via requests
 cffi==2.1.0
     # via cryptography
@@ -170,7 +170,7 @@ packaging==26.2
     #   skops
 pandas==2.3.3
     # via mlflow
-pillow==12.2.0
+pillow==13.0.0
     # via matplotlib
 prettytable==3.18.0
     # via skops
