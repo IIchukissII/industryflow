@@ -11,8 +11,9 @@
 --          decided by the API (services/api_gateway/routers/companies.py).
 --          Idempotent: safe to run repeatedly, and on an existing database (psql -f).
 --
--- There is no teardown: a company is deactivated, never dropped. Its schema, data and reader role
--- stay; deleting tenant data is an operator action, not an API call.
+-- No function here drops anything: a company is suspended (deactivated) here, and deleted only
+-- through the deletion request of 25-company-deletion.sql and the job that carries it out
+-- (ADR-0033 dec 3, 4).
 
 -- =============================================================================
 -- GUARD: NOTHING UNTRUSTED ON THE DEFINER'S SEARCH PATH
@@ -129,9 +130,25 @@ BEGIN
         v_name := public.company_name_checked(p_company_name);
     END IF;
 
+    -- A deletion, once requested, is irreversible (ADR-0033 dec 3): the tenant is neither
+    -- reactivated nor renamed after it. (The table exists from 25-company-deletion.sql on.)
+    IF to_regclass('public.company_deletions') IS NOT NULL AND EXISTS (
+        SELECT 1 FROM public.company_deletions d WHERE d.company_id = p_company_id
+    ) THEN
+        RAISE EXCEPTION 'company % has a deletion request', p_company_id USING ERRCODE = '55000',
+            HINT = 'deletion_requested';
+    END IF;
+
+    -- suspended_at starts the wait before a delete may be requested (ADR-0033 dec 7): set when the
+    -- tenant becomes inactive, kept while it stays so, cleared when it is reactivated.
     UPDATE public.companies c
     SET company_name = coalesce(v_name, c.company_name),
-        is_active = coalesce(p_is_active, c.is_active)
+        is_active = coalesce(p_is_active, c.is_active),
+        suspended_at = CASE
+            WHEN p_is_active IS NULL THEN c.suspended_at
+            WHEN p_is_active THEN NULL
+            ELSE coalesce(c.suspended_at, now())
+        END
     WHERE c.company_id = p_company_id;
     v_found := FOUND;
 

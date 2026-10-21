@@ -101,7 +101,9 @@ alone is per-tenant.
 | Rename | `PUT /api/companies/{id}` | Through `update_company()` |
 | Deactivate | Superuser `DELETE /api/companies/{id}`, or `PUT` with `"is_active": false` | Tenant and all its users inactive, sessions revoked ([suspended tenants](authentication.md#suspended-tenants)); schema and data kept. A superuser cannot deactivate their own tenant (400) |
 | Reactivate | Superuser `PUT` with `"is_active": true` | Tenant active; users re-enabled one by one (`PATCH /api/users/{id}` `is_active`) |
-| Drop a tenant's data | Operator action on the database | No API |
+| Request deletion | Superuser `POST /api/companies/{id}/deletion` | Accepted only for a tenant suspended at least 30 days ([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) dec 7): 404 unknown, 409 not suspended, suspended too recently or already requested. From then on the tenant cannot be reactivated or renamed |
+| Deletion progress | Superuser `GET /api/companies/{id}/deletion` | The request and each store removed so far, with until when a store that ages data out may still hold it |
+| Lifecycle record | `public.company_lifecycle_events` | Every create, rename, deactivate, reactivate and deletion request: actor, time, detail; written in the action's transaction, kept after the tenant is deleted |
 
 Tenant names are 1-255 characters, no control characters, unique
 ([`21-company-provisioning.sql`](../../infrastructure/timescaledb/init-scripts/21-company-provisioning.sql)).
