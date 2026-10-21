@@ -31,8 +31,9 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
    separate, irreversible request, valid only for a suspended tenant.
 4. **Delete removes the tenant from every store that holds its data.** One privileged, resumable operation,
    run by a dedicated operator job and not by the API, removes it store by store and records each removal.
-   Each store is emptied through its own mediator, the tracking store through its API and the notebook
-   hub for its users' volumes, and every device certificate of the tenant is revoked. Backups and the
+   Each store is emptied through its own mediator, the tracking store through its API and its own
+   collection of what is deleted, and the notebook hub for its users' volumes; every device certificate
+   of the tenant is revoked. Backups and the
    broker's retention age the tenant out on their own schedule, and the record states when.
 5. **Removing the registry row alone is not offered.** Ending a tenant goes through decisions 3 and 4.
 6. **Lifecycle actions are privileged and recorded.** Provisioning, suspension and deletion are
@@ -58,6 +59,8 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 | 4 | Delete synchronously in the API request | A timeout across stores leaves the partial state decision 4 forbids |
 | 4 | Delete in a background task of the API | Ties the operation's durability to the lifetime of an API process |
 | 4 | Purge the tracking store's rows directly | Bypasses the store's own lifecycle and risks dangling references in a store all tenants share |
+| 4 | The delete job collects the tracking store's deleted entries itself | Needs the store's backend credentials, which only the tracking server holds |
+| 4 | The delete job holds its own delete principal on the model-artifact store | A second privileged writer beside the tracking gateway, the store's one door (ADR-0030 dec 2) |
 | 4 | The delete job holds a notebook-hub administrator credential | ADR-0020 rejects a standing hub credential that crosses tenants |
 | 4 | Purge the tenant's messages from the shared broker | Needs administrative writes to a shared cluster for data that ages out within its retention |
 | 4 | Per-tenant backup keys destroyed on delete | Needs key management the platform does not have; expiry meets decision 4 |
