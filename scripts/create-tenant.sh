@@ -3,51 +3,42 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Provision a tenant at runtime: create the company row and its isolated schema.
-# Nothing about a tenant is hardcoded in the repo — the operator brings the name/id here.
+# Provision a tenant at runtime through public.provision_company(), the one provisioning path
+# (ADR-0033 dec 1), run as the API gateway's role, so the operator CLI holds no privilege the API
+# lacks. The platform generates the company_id. Idempotent on the name: an existing company's id is
+# printed instead.
 #
 # Usage:
-#   scripts/create-tenant.sh "<Company Name>" [company-uuid]
-#   TENANT_NAME="<Company Name>" TENANT_ID=<uuid> scripts/create-tenant.sh
+#   scripts/create-tenant.sh "<Company Name>"
+#   TENANT_NAME="<Company Name>" scripts/create-tenant.sh
 #
-# If no UUID is given one is generated. Prints the resulting company_id + schema; use that
-# company_id for ADMIN_USER_*_COMPANY_ID (then run scripts/seed_users.py) or for the API.
+# Prints the company_id on stdout; use it for ADMIN_USER_*_COMPANY_ID (then run
+# scripts/seed_users.py), scripts/manage_users.py or the API.
 set -e
 
 NAME="${1:-$TENANT_NAME}"
-ID="${2:-$TENANT_ID}"
 
-if [ -z "$NAME" ]; then
-    echo "usage: scripts/create-tenant.sh \"<Company Name>\" [company-uuid]" >&2
+if [ -z "$NAME" ] || [ $# -gt 1 ]; then
+    echo "usage: scripts/create-tenant.sh \"<Company Name>\"" >&2
     exit 1
 fi
-# Keep the SQL simple/safe: this is an operator CLI, not a request handler.
-case "$NAME$ID" in
-    *"'"*) echo "error: single quotes are not supported in the name/id" >&2; exit 1 ;;
-esac
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 
-SQL=$(cat <<SQL
-DO \$do\$
-DECLARE
-    v_id UUID := COALESCE(NULLIF('${ID}', ''), gen_random_uuid()::text)::uuid;
-BEGIN
-    INSERT INTO public.companies (company_id, company_name, schema_name)
-    VALUES (v_id, '${NAME}', '')
-    ON CONFLICT (company_name) DO NOTHING;
-
-    -- Resolve the id in case the company already existed (name is UNIQUE).
-    SELECT company_id INTO v_id FROM public.companies WHERE company_name = '${NAME}';
-
-    PERFORM create_tenant_schema(v_id, '${NAME}');
-
-    RAISE NOTICE 'tenant ready  company_name=%  company_id=%  schema=%',
-        '${NAME}', v_id, (SELECT schema_name FROM public.companies WHERE company_id = v_id);
-END
-\$do\$;
+# The name travels as a psql variable (:'name' quotes it), never spliced into the SQL text.
+SQL=$(cat <<'SQL'
+SET ROLE api_gateway_user;
+SELECT EXISTS (SELECT 1 FROM public.companies WHERE company_name = :'name') AS known,
+       (SELECT company_id FROM public.companies WHERE company_name = :'name') AS existing_company_id \gset
+\if :known
+\echo :existing_company_id
+\else
+SELECT company_id AS new_company_id FROM public.provision_company(:'name') \gset
+\echo :new_company_id
+\endif
 SQL
 )
 
-printf '%s\n' "$SQL" | docker compose exec -T timescaledb sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+printf '%s\n' "$SQL" | docker compose exec -T timescaledb sh -c \
+    'psql -X -q -v ON_ERROR_STOP=1 -v name="$1" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' sh "$NAME"
