@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0020 — Notebook per-user work persistence
 
 - **Status:** Accepted
-- **Date:** 2026-06-28; changed 2026-10-17
+- **Date:** 2026-06-28; changed 2026-10-21
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md)
-- **Related:** [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner parity),
+- **Related:** [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner parity), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion, dec 6),
   [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (ephemeral capabilities)
 
 ## Context
@@ -29,6 +29,8 @@ credentials, make compute long-lived or cross tenants.
    admin role, a tenant role, is not a hub administrator.
 5. **Parity across spawners for the authoring profile.** A named volume on a Docker host, a claim on
    Kubernetes, at the same subdirectory, which the authoring image creates owned by the non-root user.
+6. **The hub reclaims a deleted user's volume itself.** It learns of the deletion from the platform's
+   durable deletion record (ADR-0033 dec 4), so no hub credential leaves the hub.
 
 ## Alternatives
 
@@ -39,6 +41,7 @@ credentials, make compute long-lived or cross tenants.
 | 1 | A work volume for every user, analytics profile included | Durable storage for a profile that authors nothing, leaving volumes to reclaim |
 | 2 | A standing hub admin or service token | An ambient credential that crosses tenants |
 | 4 | The platform admin role mapped to a hub administrator | A tenant role would reach other tenants' environments |
+| 6 | The tenant-delete job removes volumes through the container platform | Gives it privilege over storage the hub owns and names |
 
 ## Consequences
 
@@ -54,7 +57,7 @@ credentials, make compute long-lived or cross tenants.
 
 | Open question | Settled by |
 |---|---|
-| Reclaiming a departed user's volume | First offboarding or storage pressure |
+| Reclaiming the volume of a user removed without deleting the tenant | First storage pressure |
 | A size cap on Docker-host volumes | First volume that fills its host |
 | An execution audit trail | ADR-0011's deferral |
 
