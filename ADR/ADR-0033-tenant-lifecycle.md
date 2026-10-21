@@ -25,8 +25,9 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
    from the tenant identifier through each mediator's one mapping, so none can be half-provisioned.
 3. **Offboarding has two steps: suspend, then delete.** *Suspend* is reversible: no session, capability,
    device or database identity of the tenant is honoured or issued, and its open database sessions end.
-   Ingestion refuses the tenant's devices, and every component that writes tenant data refuses an
-   inactive tenant's readings from the registry, so a lost suspension signal fails closed. *Delete* is a
+   Ingestion refuses the tenant's devices from a tenant-status stream the platform publishes on the
+   broker, the only store it reaches, and every component that writes tenant data refuses an inactive
+   tenant's readings from the registry, so a lost or late status fails closed. *Delete* is a
    separate, irreversible request, valid only for a suspended tenant.
 4. **Delete removes the tenant from every store that holds its data.** One privileged, resumable operation,
    run by a dedicated operator job and not by the API, removes it store by store and records each removal.
@@ -52,6 +53,8 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 | 3 | Soft delete only | A request to delete a tenant's data could never be honoured |
 | 3 | Revoke the tenant's device certificates at suspension | Revocation is permanent, so suspension would stop being reversible |
 | 3 | Enforce suspension only where access is granted | The writers that read the broker directly would keep accepting the tenant's data |
+| 3 | Ingestion reads the capability store's suspension marker | Gives a device-facing service reach to a store that holds every tenant's live handles |
+| 3 | No refusal at ingestion, only at the writers | A suspended tenant's devices keep loading the shared broker for the whole suspension |
 | 4 | Delete synchronously in the API request | A timeout across stores leaves the partial state decision 4 forbids |
 | 4 | Delete in a background task of the API | Ties the operation's durability to the lifetime of an API process |
 | 4 | Purge the tracking store's rows directly | Bypasses the store's own lifecycle and risks dangling references in a store all tenants share |
