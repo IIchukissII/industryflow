@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0032 — Backup and disaster recovery for every durable store
 
 - **Status:** Proposed
-- **Date:** 2026-10-13; changed 2026-10-17
+- **Date:** 2026-10-13; changed 2026-10-21
 - **Parent:** ADR-0001
 - **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a backup holds every tenant), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability store, dec 7), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (notebook volumes), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (cold layer, the only copy of raw history; dec 13 its mirror), [ADR-0029](ADR-0029-spark-major-upgrade-checkpoint-cutover.md) (checkpoints), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (forward-only migrations)
 
@@ -26,7 +26,9 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 3. **Disaster recovery means a copy outside the failure domain.** A backup sharing storage, cluster or site
    with its source is *undo*; disaster recovery needs a copy of every authoritative store elsewhere.
 4. **The cold layer is backed up as an object store, not as a database.** Its objects are copied to a
-   separate failure domain for as long as the cold layer keeps them.
+   separate failure domain for as long as the cold layer keeps them. An object the cold layer no longer
+   holds leaves the copy once one backup retention period has passed, so an accidental deletion stays
+   recoverable that long and a deleted tenant's history does not outlive it.
 5. **A backup is held to the standard of the most privileged store it contains.** A write-only backup
    principal writes it; no capability, kernel, tenant session or tenant-facing plane can read it.
 6. **A restore is proven by doing it.** Restores are rehearsed on a schedule against a scratch target and
@@ -43,6 +45,7 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 | 1 | Back up streaming checkpoints | Keeps state that a major upgrade may deliberately discard |
 | 2 | One recovery objective for the whole platform | Over-protects derivable state or under-protects the only copy of raw history |
 | 3 | Rely on the object store's own replication | In-cluster replication shares the failure domain and copies deletions; managed cross-region versioned replication is one way to meet decision 3 |
+| 4 | Keep the cold copy append-only | A deleted tenant's raw history would never leave it (ADR-0033 dec 4) |
 
 ## Consequences
 
