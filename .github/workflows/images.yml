@@ -115,17 +115,17 @@ jobs:
           # placeholder values: they configure nothing, they only let the import run.
           # Images with nothing to load or start (nginx, pg_dump) carry none; the Spark images carry a
           # version/artifact check instead of an import (their risk is the JVM side — see below).
-          - { name: api-gateway,            context: services/api_gateway,     file: services/api_gateway/Dockerfile,
+          - { name: api-gateway,            context: services/api_gateway,     file: services/api_gateway/Dockerfile, security_refresh: true,
               smoke: "env DB_HOST=x DB_PORT=5432 DB_NAME=x API_GATEWAY_DB_USER=x API_GATEWAY_DB_PASSWORD=x REDIS_HOST=x REDIS_PORT=6379 REDIS_DB=0 JWT_SECRET_KEY=smoke-only-not-a-secret-0123456789abcdef CORS_ORIGINS=https://x python -c \"import main; print('api-gateway serves', main.app.title)\"" }
-          - { name: ingestion-service,      context: services/ingestion_service, file: services/ingestion_service/Dockerfile,
+          - { name: ingestion-service,      context: services/ingestion_service, file: services/ingestion_service/Dockerfile, security_refresh: true,
               smoke: "env INGESTION_SERVICE_PORT=8003 KAFKA_BOOTSTRAP_SERVERS=x:9092 KAFKA_TOPIC_SENSOR_DATA=x DEVICE_IDENTITY_HEADERS=x-client python -c \"import main; print('ingestion serves', main.app.title)\"" }
           # No `smoke`: the edge has its own smoke step below (nginx -t per deployment + behaviour).
           - { name: frontend,               context: services/frontend,        file: services/frontend/Dockerfile }
           # numpy/sklearn/xgboost are C-extension stacks: an ABI mismatch is invisible to a resolve and
           # fatal on import (this is the pyarrow-14-under-numpy-2 break, #209).
-          - { name: ml-service-api,         context: services/ml_service,       file: services/ml_service/api/Dockerfile,
+          - { name: ml-service-api,         context: services/ml_service,       file: services/ml_service/api/Dockerfile, security_refresh: true,
               smoke: "python -c \"import numpy, sklearn, xgboost, mlflow, evidently, main; print('ml-service serves', main.app.title, numpy.__version__)\"" }
-          - { name: alert-service-detector, context: services/alert_service,    file: services/alert_service/worker/Dockerfile,
+          - { name: alert-service-detector, context: services/alert_service,    file: services/alert_service/worker/Dockerfile, security_refresh: true,
               smoke: "python -c \"import main; print('alert-detector imports ok')\"" }
           # The Spark images DO run a process (a PySpark job / an executor), and their migration risk
           # is the JVM side a dependency resolve never sees: the base's Spark/Scala version and the
@@ -137,42 +137,43 @@ jobs:
           # process a batch — that needs Kafka+TimescaleDB, which ADR-0026 keeps off CI and ADR-0029
           # dec 5 assigns to the box run.
           #
-          # `patch_os: true` marks the images that patch their own OS at build (`apt-get upgrade`)
-          # because the base pins an Ubuntu older than its CVEs. Those are the only images whose
-          # layer cache must not be allowed to go stale — see the Build step's build-args.
-          - { name: spark-streaming,        context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.streaming, patch_os: true,
+          # `security_refresh: true` marks the images whose layer cache must not go stale (see the
+          # Build step's build-args): these Spark images patch their own OS at build (`apt-get
+          # upgrade`) because the base pins an Ubuntu older than its CVEs, and the Python images
+          # take pip (with its vendored certifi) and their unpinned transitive dependencies at build.
+          - { name: spark-streaming,        context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.streaming, security_refresh: true,
               smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.55.14.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version > /tmp/v 2>&1 && grep -q 'version 4.1' /tmp/v && grep -q 'Scala version 2.13' /tmp/v && echo \"from pyspark.sql import SparkSession; s = SparkSession.builder.master('local[1]').getOrCreate(); assert s.range(100).count() == 100; [s._jvm.java.lang.Class.forName(c) for c in ('org.apache.hadoop.fs.s3a.S3AFileSystem', 'software.amazon.awssdk.services.s3.S3Client')]; print('spark-local-ok')\" > /tmp/j.py && /opt/spark/bin/spark-submit /tmp/j.py > /tmp/o 2>&1; grep -q spark-local-ok /tmp/o || { tail -40 /tmp/o; exit 1; }; python3 -m py_compile /app/spark_streaming/healthcheck.py && echo \"import importlib.util as u; s = u.spec_from_file_location('job', '/app/spark_streaming/kafka_to_timescaledb.py'); m = u.module_from_spec(s); s.loader.exec_module(m); print('job-imports-ok')\" > /tmp/a.py && /opt/spark/bin/spark-submit --py-files /app/spark_streaming/reading_guard.py,/app/spark_streaming/industryflow_contracts.zip /tmp/a.py > /tmp/a 2>&1; grep -q job-imports-ok /tmp/a || { tail -40 /tmp/a; exit 1; }; echo spark-4.1-image-ok" }
-          - { name: spark-aggregations,     context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.aggregations, patch_os: true,
+          - { name: spark-aggregations,     context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.aggregations, security_refresh: true,
               smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.55.14.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version > /tmp/v 2>&1 && grep -q 'version 4.1' /tmp/v && grep -q 'Scala version 2.13' /tmp/v && echo \"from pyspark.sql import SparkSession; s = SparkSession.builder.master('local[1]').getOrCreate(); assert s.range(100).count() == 100; [s._jvm.java.lang.Class.forName(c) for c in ('org.apache.hadoop.fs.s3a.S3AFileSystem', 'software.amazon.awssdk.services.s3.S3Client')]; print('spark-local-ok')\" > /tmp/j.py && /opt/spark/bin/spark-submit /tmp/j.py > /tmp/o 2>&1; grep -q spark-local-ok /tmp/o || { tail -40 /tmp/o; exit 1; }; python3 -m py_compile /app/spark_streaming/healthcheck.py && echo \"import importlib.util as u; s = u.spec_from_file_location('job', '/app/spark_streaming/kafka_aggregations.py'); m = u.module_from_spec(s); s.loader.exec_module(m); print('job-imports-ok')\" > /tmp/a.py && /opt/spark/bin/spark-submit --py-files /app/spark_streaming/aggregation_windows.py,/app/spark_streaming/reading_guard.py,/app/spark_streaming/industryflow_contracts.zip /tmp/a.py > /tmp/a 2>&1; grep -q job-imports-ok /tmp/a || { tail -40 /tmp/a; exit 1; }; echo spark-4.1-image-ok" }
-          - { name: spark-worker,           context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.worker, patch_os: true,
+          - { name: spark-worker,           context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.worker, security_refresh: true,
               smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.55.14.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version > /tmp/v 2>&1 && grep -q 'version 4.1' /tmp/v && grep -q 'Scala version 2.13' /tmp/v && echo \"from pyspark.sql import SparkSession; s = SparkSession.builder.master('local[1]').getOrCreate(); assert s.range(100).count() == 100; [s._jvm.java.lang.Class.forName(c) for c in ('org.apache.hadoop.fs.s3a.S3AFileSystem', 'software.amazon.awssdk.services.s3.S3Client')]; print('spark-local-ok')\" > /tmp/j.py && /opt/spark/bin/spark-submit /tmp/j.py > /tmp/o 2>&1; grep -q spark-local-ok /tmp/o || { tail -40 /tmp/o; exit 1; }; echo spark-4.1-image-ok" }
           # THE ONE THAT WOULD HAVE CAUGHT #222. mlflow is pure-python and its 95-package closure
           # resolves cleanly on 3.14 — and then the SERVER dies importing importlib.abc.Traversable.
           # Importing the client is not enough; it is `mlflow.server` that breaks.
-          - { name: mlflow,                 context: infrastructure/mlflow,     file: infrastructure/mlflow/Dockerfile,
+          - { name: mlflow,                 context: infrastructure/mlflow,     file: infrastructure/mlflow/Dockerfile, security_refresh: true,
               smoke: "python -c \"import mlflow.server.fastapi_app; print('mlflow SERVER imports ok', __import__('mlflow').__version__)\"" }
-          - { name: notebook-hub,           context: services/notebook_hub,     file: services/notebook_hub/Dockerfile,
+          - { name: notebook-hub,           context: services/notebook_hub,     file: services/notebook_hub/Dockerfile, security_refresh: true,
               smoke: "cd /opt/hub && env NOTEBOOK_SPAWNER=docker NOTEBOOK_SSO_PROXY_SECRET=0123456789abcdef0123456789abcdef NOTEBOOK_NETWORK=x NOTEBOOK_IMAGE=x PLATFORM_VERIFY_URL=http://x REDIS_HOST=x REDIS_PORT=6379 python -c \"import os; from traitlets.config import Config; c = Config(); f = os.path.abspath('jupyterhub_config.py'); exec(compile(open(f).read(), f, 'exec'), {'c': c, 'get_config': lambda: c, '__file__': f, '__name__': '__main__'}); print('hub config loads', c.JupyterHub.spawner_class)\" && jupyterhub --version" }
-          - { name: notebook-sql-proxy,     context: services/notebook_sql_proxy, file: services/notebook_sql_proxy/Dockerfile,
+          - { name: notebook-sql-proxy,     context: services/notebook_sql_proxy, file: services/notebook_sql_proxy/Dockerfile, security_refresh: true,
               smoke: "python -c \"import server; print('sql-proxy imports ok')\"" }
           # Imports what the container SERVES, not merely what it depends on. `import fastapi, redis`
           # proves the deps installed and would have passed happily on an image whose own modules the
           # Dockerfile never copied — which is exactly how a crashloop shipped past a green build and
           # 87 green unit tests (ADR-0030). The CMD is `python -m gateway`; importing it is the
           # cheapest thing that asks the question the smoke is named for.
-          - { name: notebook-tracking-gateway, context: services/notebook_tracking_gateway, file: services/notebook_tracking_gateway/Dockerfile,
+          - { name: notebook-tracking-gateway, context: services/notebook_tracking_gateway, file: services/notebook_tracking_gateway/Dockerfile, security_refresh: true,
               smoke: "python -c \"import gateway; print('tracking-gateway ok')\"" }
-          - { name: notebook-cold-broker,   context: services/notebook_cold_broker, file: services/notebook_cold_broker/Dockerfile,
+          - { name: notebook-cold-broker,   context: services/notebook_cold_broker, file: services/notebook_cold_broker/Dockerfile, security_refresh: true,
               smoke: "python -c \"import broker; print('cold-broker imports ok')\"" }
-          - { name: notebook-authoring,     context: clients/python,            file: services/notebook_hub/Dockerfile.authoring,
+          - { name: notebook-authoring,     context: clients/python,            file: services/notebook_hub/Dockerfile.authoring, security_refresh: true,
               smoke: "python -c \"import numpy, pandas, pyarrow.parquet, sklearn, mlflow, industryflow; print('authoring kernel ok', numpy.__version__)\"" }
-          - { name: notebook-analytics,     context: clients/python,            file: services/notebook_hub/Dockerfile.analytics,
+          - { name: notebook-analytics,     context: clients/python,            file: services/notebook_hub/Dockerfile.analytics, security_refresh: true,
               smoke: "python -c \"import numpy, pandas, industryflow; print('analytics kernel ok', numpy.__version__)\"" }
           - { name: db-backup,              context: infrastructure/backup,     file: infrastructure/backup/Dockerfile,
               smoke: "bash -n /usr/local/bin/db-backup.sh && bash -n /usr/local/bin/db-restore.sh && pg_dump --version && pg_restore --version && psql --version && aws --version" }
           # pyarrow is the cold layer's Parquet writer, and pyarrow-vs-numpy is a compiled ABI pair:
           # pyarrow 14 imports fine until numpy 2 arrives, then dies (#209). An import is the whole test.
-          - { name: cold-export,            context: services/cold_export,      file: services/cold_export/Dockerfile,
+          - { name: cold-export,            context: services/cold_export,      file: services/cold_export/Dockerfile, security_refresh: true,
               smoke: "python -c \"import pyarrow, pyarrow.parquet, pyarrow.fs, numpy, cold_export.main; print('cold-export imports ok', pyarrow.__version__, numpy.__version__)\"" }
     steps:
       - uses: actions/checkout@v7
@@ -196,16 +197,19 @@ jobs:
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
-      # A `patch_os` image fixes its base's CVEs with `apt-get upgrade` at build time, and the Trivy
-      # gate below is what proves it worked. But the build restores layers from a persistent cache, so
-      # with no changing input that RUN is replayed verbatim on every build and the image's patch level
-      # silently freezes at whatever the last cache write held — the gate then fails on CVEs the
-      # Dockerfile is supposed to have already fixed, which is how #257/#259 went red without touching
-      # an image. A UTC date as the cache key keeps the patch layer at most a day stale while leaving
-      # every other layer (the ~200 MB of baked S3A jars) cached. Only `patch_os` images take the arg;
-      # passing it to the rest would rebuild them daily for nothing.
+      # A `security_refresh` image takes security fixes at build time: the Spark images by `apt-get
+      # upgrade`, the Python images by upgrading pip and resolving their unpinned transitive
+      # dependencies. The Trivy gate below is what proves it worked. But the build restores layers
+      # from a persistent cache, so with
+      # no changing input that RUN is replayed verbatim on every build and the image's patch level
+      # silently freezes at whatever the last cache write held — the gate then fails on CVEs a fresh
+      # build would not have, which is how #257/#259 (OS) and the certifi advisory GHSA-6q48-6c7w-9gw2
+      # (Python) went red without touching an image. A UTC date as the cache key keeps those layers at
+      # most a day stale while leaving every layer before them (the ~200 MB of baked S3A jars, the
+      # apt toolchains) cached. Only `security_refresh` images take the arg; the rest have nothing a
+      # rebuild would change (tests/config_guards/test_image_security_refresh.py checks both sides).
       - name: Security-patch cache epoch
-        if: matrix.patch_os
+        if: matrix.security_refresh
         id: epoch
         run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
@@ -221,7 +225,7 @@ jobs:
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: ${{ matrix.patch_os && format('SECURITY_REFRESH={0}', steps.epoch.outputs.day) || '' }}
+          build-args: ${{ matrix.security_refresh && format('SECURITY_REFRESH={0}', steps.epoch.outputs.day) || '' }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
