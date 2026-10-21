@@ -16,12 +16,13 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements from parent directory
 COPY requirements.txt .
 
-# SECURITY_REFRESH is a cache epoch the workflow advances daily (.github/workflows/images.yml). The
-# pins below are direct only, so the resolve picks each transitive dependency (certifi, urllib3, ...)
-# fresh — but only when the layer re-runs, and the persistent build cache replays it verbatim. This
-# RUN moves the cache key of every layer after it, so a transitive security release lands within a day.
+# SECURITY_REFRESH is a cache epoch the workflow advances daily (.github/workflows/images.yml). pip
+# and its vendored certifi come from the base image, and the pins below are direct only, so pip and
+# each transitive dependency are taken fresh — but only when the layer re-runs, and the persistent
+# build cache replays it verbatim. This RUN moves the cache key of every layer after it, so a security
+# release of pip or a transitive dependency lands within a day.
 ARG SECURITY_REFRESH=unset
-RUN echo "security refresh: ${SECURITY_REFRESH}"
+RUN echo "security refresh: ${SECURITY_REFRESH}" && pip install --no-cache-dir --upgrade pip
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt

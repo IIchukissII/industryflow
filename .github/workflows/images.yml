@@ -140,7 +140,7 @@ jobs:
           # `security_refresh: true` marks the images whose layer cache must not go stale (see the
           # Build step's build-args): these Spark images patch their own OS at build (`apt-get
           # upgrade`) because the base pins an Ubuntu older than its CVEs, and the Python images
-          # resolve their unpinned transitive dependencies at build.
+          # take pip (with its vendored certifi) and their unpinned transitive dependencies at build.
           - { name: spark-streaming,        context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.streaming, security_refresh: true,
               smoke: "test -f /opt/spark/jars/hadoop-aws-3.4.2.jar && test -f /opt/spark/jars/bundle-2.55.14.jar && python3 -c 'import psycopg2' && /opt/spark/bin/spark-submit --version > /tmp/v 2>&1 && grep -q 'version 4.1' /tmp/v && grep -q 'Scala version 2.13' /tmp/v && echo \"from pyspark.sql import SparkSession; s = SparkSession.builder.master('local[1]').getOrCreate(); assert s.range(100).count() == 100; [s._jvm.java.lang.Class.forName(c) for c in ('org.apache.hadoop.fs.s3a.S3AFileSystem', 'software.amazon.awssdk.services.s3.S3Client')]; print('spark-local-ok')\" > /tmp/j.py && /opt/spark/bin/spark-submit /tmp/j.py > /tmp/o 2>&1; grep -q spark-local-ok /tmp/o || { tail -40 /tmp/o; exit 1; }; python3 -m py_compile /app/spark_streaming/healthcheck.py && echo \"import importlib.util as u; s = u.spec_from_file_location('job', '/app/spark_streaming/kafka_to_timescaledb.py'); m = u.module_from_spec(s); s.loader.exec_module(m); print('job-imports-ok')\" > /tmp/a.py && /opt/spark/bin/spark-submit --py-files /app/spark_streaming/reading_guard.py,/app/spark_streaming/industryflow_contracts.zip /tmp/a.py > /tmp/a 2>&1; grep -q job-imports-ok /tmp/a || { tail -40 /tmp/a; exit 1; }; echo spark-4.1-image-ok" }
           - { name: spark-aggregations,     context: services/spark_jobs,       file: services/spark_jobs/Dockerfile.aggregations, security_refresh: true,
@@ -150,7 +150,7 @@ jobs:
           # THE ONE THAT WOULD HAVE CAUGHT #222. mlflow is pure-python and its 95-package closure
           # resolves cleanly on 3.14 — and then the SERVER dies importing importlib.abc.Traversable.
           # Importing the client is not enough; it is `mlflow.server` that breaks.
-          - { name: mlflow,                 context: infrastructure/mlflow,     file: infrastructure/mlflow/Dockerfile,
+          - { name: mlflow,                 context: infrastructure/mlflow,     file: infrastructure/mlflow/Dockerfile, security_refresh: true,
               smoke: "python -c \"import mlflow.server.fastapi_app; print('mlflow SERVER imports ok', __import__('mlflow').__version__)\"" }
           - { name: notebook-hub,           context: services/notebook_hub,     file: services/notebook_hub/Dockerfile, security_refresh: true,
               smoke: "cd /opt/hub && env NOTEBOOK_SPAWNER=docker NOTEBOOK_SSO_PROXY_SECRET=0123456789abcdef0123456789abcdef NOTEBOOK_NETWORK=x NOTEBOOK_IMAGE=x PLATFORM_VERIFY_URL=http://x REDIS_HOST=x REDIS_PORT=6379 python -c \"import os; from traitlets.config import Config; c = Config(); f = os.path.abspath('jupyterhub_config.py'); exec(compile(open(f).read(), f, 'exec'), {'c': c, 'get_config': lambda: c, '__file__': f, '__name__': '__main__'}); print('hub config loads', c.JupyterHub.spawner_class)\" && jupyterhub --version" }
@@ -198,8 +198,9 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       # A `security_refresh` image takes security fixes at build time: the Spark images by `apt-get
-      # upgrade`, the Python images by resolving their unpinned transitive dependencies. The Trivy gate
-      # below is what proves it worked. But the build restores layers from a persistent cache, so with
+      # upgrade`, the Python images by upgrading pip and resolving their unpinned transitive
+      # dependencies. The Trivy gate below is what proves it worked. But the build restores layers
+      # from a persistent cache, so with
       # no changing input that RUN is replayed verbatim on every build and the image's patch level
       # silently freezes at whatever the last cache write held — the gate then fails on CVEs a fresh
       # build would not have, which is how #257/#259 (OS) and the certifi advisory GHSA-6q48-6c7w-9gw2
