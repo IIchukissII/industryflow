@@ -18,6 +18,7 @@ from repository import RuleRepository, AlertRepository
 from rules_engine import RulesEngine
 from kafka_consumer import AlertKafkaConsumer
 from feature_store import FeatureStore
+import tenant_status_publisher
 
 # Configure logging
 logging.basicConfig(
@@ -55,6 +56,7 @@ class AlertService:
         self.ml_eval_task = None
         self.drift_eval_task = None
         self.consume_task = None
+        self.status_task = None
         self.stop_requested = False
     
     async def initialize(self):
@@ -255,16 +257,25 @@ class AlertService:
             self.kafka_consumer.consume_messages()
         )
 
+        # Publish every tenant's status for ingestion (ADR-0033 dec 3), on its own timer.
+        self.status_task = asyncio.create_task(tenant_status_publisher.run(
+            self.db_pool, self.kafka_consumer.producer.send_and_wait,
+            config.KAFKA_TOPIC_TENANT_STATUS, config.TENANT_STATUS_PUBLISH_SECONDS,
+        ))
+
         logger.info("Alert Detection Service is running")
         logger.info(f"Rule reload interval: {config.RULE_RELOAD_INTERVAL}s")
         logger.info("ML evaluation interval: 10s")
         logger.info(f"Drift evaluation interval: {config.DRIFT_EVAL_INTERVAL}s")
+        logger.info(f"Tenant status: {config.KAFKA_TOPIC_TENANT_STATUS} every "
+                    f"{config.TENANT_STATUS_PUBLISH_SECONDS}s")
 
         tasks = {
             self.reload_task: "reload_task",
             self.ml_eval_task: "ml_eval_task",
             self.drift_eval_task: "drift_eval_task",
             self.consume_task: "consume_task",
+            self.status_task: "status_task",
         }
         await wait_for_first_exit(tasks, lambda: self.running)
 
@@ -275,7 +286,8 @@ class AlertService:
         self.running = False
         if self.kafka_consumer:
             self.kafka_consumer.running = False
-        for task in (self.reload_task, self.ml_eval_task, self.drift_eval_task, self.consume_task):
+        for task in (self.reload_task, self.ml_eval_task, self.drift_eval_task, self.consume_task,
+                     self.status_task):
             if task:
                 task.cancel()
     
@@ -293,6 +305,8 @@ class AlertService:
             self.drift_eval_task.cancel()
         if self.consume_task:
             self.consume_task.cancel()
+        if self.status_task:
+            self.status_task.cancel()
         
         # Stop Kafka consumer
         if self.kafka_consumer:

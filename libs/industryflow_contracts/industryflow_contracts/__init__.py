@@ -14,6 +14,9 @@ isolation or meaning:
   * ``windows`` — the width and allowed lateness of each aggregation granularity (ADR-0006 dec 7).
     The Spark job that writes the windows, the provider that serves features from them and the
     offline re-derivation that trains on them must use the same numbers (ADR-0023 dec 9).
+  * ``tenant_status`` — the topic and message of the tenant-status stream the alert worker publishes
+    and ingestion reads (ADR-0033 dec 3). A publisher and a reader that disagreed about either would
+    leave a suspended tenant's devices ingesting with nothing failing.
 
 Each image installs this package (or, for the Spark jobs, ships it with ``--py-files``) from the
 one source in ``libs/industryflow_contracts``; no service carries its own copy. Standard library

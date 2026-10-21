@@ -8,13 +8,16 @@ High-throughput sensor data ingestion endpoint (Port 8003)
 """
 from fastapi import FastAPI, Depends, HTTPException, status
 from prometheus_fastapi_instrumentator import Instrumentator
+from aiokafka import AIOKafkaConsumer
 from datetime import datetime, timezone
+import asyncio
 import logging
 
 from config import get_settings
 from schemas import SensorDataInput, SensorDataResponse
 from dependencies import get_ingestion_identity
 from kafka_producer import AsyncKafkaProducerSingleton, send_sensor_data
+import tenant_status
 
 # Configure logging
 logging.basicConfig(
@@ -24,6 +27,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+# The tenant-status follower (startup_event); cancelled on shutdown.
+_status_task = None
 
 # FastAPI app
 app = FastAPI(
@@ -52,6 +58,21 @@ async def startup_event():
     await AsyncKafkaProducerSingleton.get_producer()
     logger.info("✅ Kafka producer initialized")
 
+    # Refuse suspended tenants from the tenant-status stream (ADR-0033 dec 3): a consumer outside
+    # any group, from the newest offset, so every replica hears every tenant within one interval.
+    global _status_task
+    _status_task = asyncio.create_task(tenant_status.follow(lambda: AIOKafkaConsumer(
+        settings.KAFKA_TOPIC_TENANT_STATUS,
+        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+        group_id=None,
+        enable_auto_commit=False,
+        auto_offset_reset="latest",
+        # The publisher's first send creates the topic; notice it within a status interval or so,
+        # not the client's five-minute default.
+        metadata_max_age_ms=30_000,
+    )))
+    logger.info(f"Tenant status: {settings.KAFKA_TOPIC_TENANT_STATUS}")
+
     logger.info("✅ Ingestion Service started successfully")
     logger.info("=" * 80)
 
@@ -59,6 +80,9 @@ async def startup_event():
 async def shutdown_event():
     """Clean shutdown"""
     logger.info("🛑 Ingestion Service shutting down...")
+
+    if _status_task is not None:
+        _status_task.cancel()
 
     # Close Kafka producer
     await AsyncKafkaProducerSingleton.close()
