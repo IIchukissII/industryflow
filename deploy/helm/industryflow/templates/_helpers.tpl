@@ -92,6 +92,8 @@ no password). Returned space-separated; callers `splitList " "` it.
 {{- if .Values.notebookHub.enabled }}{{ $keys = append $keys "NOTEBOOK_SQL_PROXY_DB_PASSWORD" }}{{ end -}}
 {{- /* The cold_export_user role (ADR-0025). */ -}}
 {{- if .Values.coldExport.enabled }}{{ $keys = append $keys "COLD_EXPORT_DB_PASSWORD" }}{{ end -}}
+{{- /* The tenant_delete_user role (ADR-0033 dec 4). */ -}}
+{{- if .Values.tenantDelete.enabled }}{{ $keys = append $keys "TENANT_DELETE_DB_PASSWORD" }}{{ end -}}
 {{- join " " $keys -}}
 {{- end -}}
 

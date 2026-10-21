@@ -83,6 +83,7 @@ jobs:
           # The live proof (test_cold_export_integration.py) is `integration` and excluded here —
           # it needs TimescaleDB + MinIO and would only skip. It runs in cold-layer-integration.yml.
           - { service: cold_export,         path: services/cold_export/tests, args: "--ignore=services/cold_export/tests/test_cold_export_integration.py" }
+          - { service: tenant_delete,         path: services/tenant_delete/tests }
           # The backup image's scripts, run under bash against stand-in aws/psql/pg_* binaries.
           - { service: backup,              path: infrastructure/backup/tests, install: "pip install pytest==9.1.1" }
           # The notebook client is packaged (pyproject extras), so it overrides the install.

@@ -313,6 +313,10 @@ infra:
     inCluster: true
     image: confluentinc/cp-kafka:7.9.10@sha256:07c3d60362e67c296f7f34b690b1240e5ecdcde4a84f5e73cab320fb4041f58c
     port: 9092
+    # Log retention. The in-cluster broker is configured with it, and the tenant-delete job records it
+    # as how long a deleted tenant's readings may remain; with an external broker, set it to that
+    # cluster's retention so the record is true.
+    retentionHours: 168
     storage: 20Gi
     external: { bootstrap: "" }
     resources:
@@ -415,6 +419,20 @@ coldExport:
   resources:
     requests: { cpu: 200m, memory: 512Mi }
     limits: { cpu: "1", memory: 2Gi }
+
+# ---------------------------------------------------------------------------
+# Tenant deletion (ADR-0033 dec 4): a periodic pass over the requested deletions that removes each
+# tenant store by store and records what it removed; the database is emptied last. A pass with
+# nothing requested does nothing. Deletions are requested through the API (superuser).
+# ---------------------------------------------------------------------------
+tenantDelete:
+  enabled: true
+  image: industryflow-tenant-delete
+  digest: ""
+  schedule: "*/15 * * * *"
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }
 
 # ---------------------------------------------------------------------------
 # Observability integration (ADR-0016). The chart does NOT run Prometheus/Grafana/Loki —
@@ -561,6 +579,7 @@ secrets:
     # principal is distinct from the root MINIO_ACCESS_KEY/SECRET above. Only consumed when
     # coldExport.enabled.
     COLD_EXPORT_DB_PASSWORD: "CHANGE_ME"
+    TENANT_DELETE_DB_PASSWORD: "CHANGE_ME"
     COLD_STORE_ACCESS_KEY: "CHANGE_ME"
     COLD_STORE_SECRET_KEY: "CHANGE_ME"
     # Read side (ADR-0025 dec 5): the cold-store broker's READ-ONLY principal (get/list on the cold

@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The registry and the job's record (psycopg2, libpq TLS), and the capability store (Redis).
+psycopg2-binary==2.9.13
+redis==8.1.0

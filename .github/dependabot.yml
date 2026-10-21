@@ -65,6 +65,7 @@ updates:
       - "/services/notebook_cold_broker/tests"
       - "/services/cold_export"
       - "/services/cold_export/tests"
+      - "/services/tenant_delete"
       - "/services/spark_jobs"
       - "/infrastructure/timescaledb/tests"
     schedule:

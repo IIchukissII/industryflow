@@ -65,6 +65,14 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'cold_export_user') THEN
             EXECUTE format('CREATE ROLE cold_export_user WITH LOGIN PASSWORD %L', '${COLD_EXPORT_DB_PASSWORD}');
         END IF;
+
+        -- Tenant-delete job role (ADR-0033 dec 4). It holds no table privilege: it reads the pending
+        -- deletions and records each store's removal only through the SECURITY DEFINER functions of
+        -- 26-company-deletion-job.sql, the last of which drops the tenant's database objects.
+        -- Password may be unset when the job is not deployed; the role is still created so grants resolve.
+        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tenant_delete_user') THEN
+            EXECUTE format('CREATE ROLE tenant_delete_user WITH LOGIN PASSWORD %L', '${TENANT_DELETE_DB_PASSWORD}');
+        END IF;
     END \$\$;
     
     -- =============================================================================
@@ -82,6 +90,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     ALTER ROLE metrics_user CONNECTION LIMIT 5;
     -- Single-node daily batch (one connection at a time); a small ceiling is plenty.
     ALTER ROLE cold_export_user CONNECTION LIMIT 5;
+    -- One job, one connection at a time, plus its run lock.
+    ALTER ROLE tenant_delete_user CONNECTION LIMIT 2;
 
     -- Statement timeouts
     ALTER ROLE api_gateway_user SET statement_timeout = '30s';
@@ -92,6 +102,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     -- Batch scans over a day of raw across a hypertable can be slow; give the exporter room
     -- (a bounded ceiling, not disabled). It reads one day per statement.
     ALTER ROLE cold_export_user SET statement_timeout = '3600s';
+    -- Dropping a tenant schema drops every chunk of its hypertables in one statement.
+    ALTER ROLE tenant_delete_user SET statement_timeout = '1800s';
     
     -- =============================================================================
     -- PUBLIC SCHEMA PERMISSIONS
@@ -107,6 +119,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     GRANT USAGE ON SCHEMA public TO ml_service_user;
     -- Cold-export enumerates tenants from public.companies (verified identity — ADR-0025 dec 5).
     GRANT USAGE ON SCHEMA public TO cold_export_user;
+    GRANT USAGE ON SCHEMA public TO tenant_delete_user;
 
     -- public."user" is created at runtime by api_gateway_user (fastapi-users), so it
     -- does NOT exist yet at init time. Granting SELECT on it directly here would abort
@@ -125,4 +138,5 @@ echo "✓ alert_service_user (50 connections)"
 echo "✓ ml_service_user (10 connections)"
 echo "✓ mlflow_user (20 connections)"
 echo "✓ cold_export_user (5 connections, SELECT + drop-chunk only)"
+echo "✓ tenant_delete_user (2 connections, deletion functions only)"
 echo "=========================================="
