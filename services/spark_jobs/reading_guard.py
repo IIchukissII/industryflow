@@ -23,8 +23,10 @@ Two kinds of check, both here so the two jobs apply one definition:
   * stateless — decidable from the reading alone, expressed as a Spark column so the aggregation job
     can drop the same readings *before* its watermark (a far-future timestamp would otherwise drag
     the watermark forward and close every live window early);
-  * referential — whether the tenant schema, the sensor and the equipment exist; decided on the
-    driver from one lookup per tenant per batch (`classify_references`, pure).
+  * referential — whether the tenant is registered and active, and whether the sensor and the
+    equipment exist; decided on the driver from one lookup per tenant per batch
+    (`classify_references`, pure). A suspended tenant's readings are refused here as well as at
+    every point of access (ADR-0033 dec 3), from the registry, so they fail closed.
 
 The pure parts import nothing beyond the standard library and the platform's shared contracts
 package (itself standard-library only); the Spark helpers import pyspark lazily.
@@ -53,6 +55,7 @@ INVALID_COMPANY_ID = "invalid_company_id"
 INVALID_DEVICE_ID = "invalid_sensor_or_equipment_id"
 FUTURE_TIMESTAMP = "future_timestamp"
 UNKNOWN_TENANT = "unknown_tenant"
+SUSPENDED_TENANT = "suspended_tenant"
 UNKNOWN_SENSOR = "unknown_sensor"
 UNKNOWN_EQUIPMENT = "unknown_equipment"
 
@@ -60,6 +63,11 @@ UNKNOWN_EQUIPMENT = "unknown_equipment"
 REQUIRED_FIELDS = ("time", "sensor_id", "equipment_id", "site_id", "company_id", "value")
 
 UUID_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+
+# Whether the registry holds a tenant schema as active (ADR-0033 dec 3). Run as the stream jobs' role,
+# which may read only these two columns of the registry (24-writers-read-tenant-status.sql); the live
+# test infrastructure/timescaledb/tests/test_writers_read_tenant_status.py runs this very statement.
+TENANT_STATUS_SELECT = "SELECT is_active FROM public.companies WHERE schema_name = %s"
 
 # Kafka metadata kept on every parsed reading so a dead letter points at its source message.
 SOURCE_COLUMNS = ("json_string", "kafka_topic", "kafka_partition", "kafka_offset")
@@ -77,38 +85,47 @@ def canonical_uuid(value) -> str:
     return str(uuid.UUID(str(value)))
 
 
-def classify_references(keys, tenant_exists, known_sensors, known_equipment):
+def classify_references(keys, tenant_refusal, known_sensors, known_equipment):
     """
     Decide, for each (company_id, sensor_id, equipment_id) a batch carries, whether it can be written.
 
-    ``tenant_exists`` maps company_id -> bool; ``known_sensors`` / ``known_equipment`` map company_id
-    -> the set of canonical ids present in that tenant's tables. Returns ``[(company_id, sensor_id,
-    equipment_id, reason)]`` for the keys that cannot be written, with the ids exactly as the batch
-    carried them (so they join back onto its rows). Keys the stateless check already passed are
-    well-formed UUIDs.
+    ``tenant_refusal`` maps company_id -> None for a tenant that may be written, or the reason it may
+    not (``UNKNOWN_TENANT``, ``SUSPENDED_TENANT``); a company it does not map is unknown.
+    ``known_sensors`` / ``known_equipment`` map company_id -> the set of canonical ids present in
+    that tenant's tables. Returns ``[(company_id, sensor_id, equipment_id, reason)]`` for the keys
+    that cannot be written, with the ids exactly as the batch carried them (so they join back onto
+    its rows). Keys the stateless check already passed are well-formed UUIDs.
     """
     rejected = []
     for company_id, sensor_id, equipment_id in keys:
-        if not tenant_exists.get(company_id, False):
-            reason = UNKNOWN_TENANT
-        elif canonical_uuid(sensor_id) not in known_sensors.get(company_id, set()):
-            reason = UNKNOWN_SENSOR
-        elif canonical_uuid(equipment_id) not in known_equipment.get(company_id, set()):
-            reason = UNKNOWN_EQUIPMENT
-        else:
-            continue
+        reason = tenant_refusal.get(company_id, UNKNOWN_TENANT)
+        if reason is None:
+            if canonical_uuid(sensor_id) not in known_sensors.get(company_id, set()):
+                reason = UNKNOWN_SENSOR
+            elif canonical_uuid(equipment_id) not in known_equipment.get(company_id, set()):
+                reason = UNKNOWN_EQUIPMENT
+            else:
+                continue
         rejected.append((company_id, sensor_id, equipment_id, reason))
     return rejected
 
 
 def read_tenant_references(cur, schema_name, sensor_ids, equipment_ids):
     """
-    One tenant's referential facts, read on ``cur``: ``(exists, known_sensors, known_equipment)``.
+    One tenant's referential facts, read on ``cur``: ``(refusal, known_sensors, known_equipment)``.
 
-    ``exists`` is whether the tenant's schema carries its measurements table — a catalog read, so a
-    tenant with no schema is False rather than an error. The id arguments are canonical UUIDs; the
-    known sets are the subset present in the tenant's tables, canonical too.
+    ``refusal`` is None when the registry holds the tenant as active and its schema carries its
+    measurements table; ``SUSPENDED_TENANT`` when the registry holds it inactive; ``UNKNOWN_TENANT``
+    when the registry does not hold it or the table is missing — so neither a missing schema nor a
+    schema the registry has forgotten is an error, and both are refused. The id arguments are
+    canonical UUIDs; the known sets are the subset present in the tenant's tables, canonical too.
     """
+    cur.execute(TENANT_STATUS_SELECT, (schema_name,))
+    registered = cur.fetchone()
+    if registered is None:
+        return UNKNOWN_TENANT, set(), set()
+    if not registered[0]:
+        return SUSPENDED_TENANT, set(), set()
     cur.execute(
         "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c "
         "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
@@ -116,14 +133,14 @@ def read_tenant_references(cur, schema_name, sensor_ids, equipment_ids):
         (schema_name,),
     )
     if not cur.fetchone()[0]:
-        return False, set(), set()
+        return UNKNOWN_TENANT, set(), set()
     cur.execute(f'SELECT sensor_id::text FROM "{schema_name}".sensors '
                 f'WHERE sensor_id = ANY(%s::uuid[])', (sorted(sensor_ids),))
     known_sensors = {r[0] for r in cur.fetchall()}
     cur.execute(f'SELECT equipment_id::text FROM "{schema_name}".equipment '
                 f'WHERE equipment_id = ANY(%s::uuid[])', (sorted(equipment_ids),))
     known_equipment = {r[0] for r in cur.fetchall()}
-    return True, known_sensors, known_equipment
+    return None, known_sensors, known_equipment
 
 
 # ------------------------------------------------------------------------------------ Spark helpers

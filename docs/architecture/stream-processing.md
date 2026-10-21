@@ -45,13 +45,15 @@ A growing `*.dlq` topic fires the Helm rule `IndustryFlowDeadLetteredReadings`
 ## Unwritable readings
 
 A reading that is malformed, lacks a required field, carries a non-UUID id, is stamped more than
-300 s ahead (`MAX_FUTURE_SKEW_SECONDS`), or names a tenant schema, sensor or equipment that does not
-exist:
+300 s ahead (`MAX_FUTURE_SKEW_SECONDS`), names a tenant the registry does not hold or whose schema is
+missing (`unknown_tenant`), names a suspended tenant (`suspended_tenant`,
+[ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) dec 3), or names a sensor or equipment that does
+not exist:
 
 | Job | Handling |
 |---|---|
 | spark-streaming | Published to `sensor-data-raw.measurements.dlq` with the reason and its topic/partition/offset, before the batch's writes; the rest of the batch is written |
-| spark-aggregations | Stateless rules applied before the watermark; the unknown tenant/sensor/equipment rule applied at write time on the aggregate key; not published again |
+| spark-aggregations | Stateless rules applied before the watermark; the unknown/suspended tenant and unknown sensor/equipment rules applied at write time on the aggregate key; not published again |
 
 A failure of the database or Kafka fails the batch.
 

@@ -56,6 +56,18 @@ _SAVE_ALERT_ONCE = """
 """
 
 
+# The tenants the worker evaluates: active in the registry, with a schema (ADR-0033 dec 3). The
+# worker's role may read only these two registry columns (24-writers-read-tenant-status.sql); the live
+# test infrastructure/timescaledb/tests/test_writers_read_tenant_status.py runs this very statement.
+TENANT_SCHEMAS_SELECT = """
+    SELECT c.schema_name
+    FROM public.companies c
+    JOIN information_schema.schemata s ON s.schema_name = c.schema_name
+    WHERE c.is_active AND c.schema_name LIKE $1
+    ORDER BY c.schema_name
+"""
+
+
 def dedup_lock_key(schema_name: str, scope: Tuple) -> int:
     """64-bit advisory-lock key for one dedup scope in one tenant schema.
 
@@ -178,14 +190,11 @@ class AlertRepository:
         return inserted, row['prior_at']
 
     async def get_tenant_schemas(self) -> List[str]:
-        """Get all tenant schemas: the catalog's candidates that are exactly a tenant's schema name."""
+        """The schemas of the tenants to evaluate: those the registry holds as active and whose schema
+        exists. A suspended tenant gets no rules, so none of its readings raises an alert (ADR-0033
+        dec 3), and a schema the registry does not hold is not evaluated either."""
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
-                SELECT schema_name
-                FROM information_schema.schemata
-                WHERE schema_name LIKE $1
-                ORDER BY schema_name
-            """, tenancy.SCHEMA_LIKE)
+            rows = await conn.fetch(TENANT_SCHEMAS_SELECT, tenancy.SCHEMA_LIKE)
         schemas = []
         for row in rows:
             try:
