@@ -33,7 +33,7 @@ evidently==0.7.23
 # client (registered-models, experiments), the metrics client (inference) and evidently (drift).
 # That is the honest reason these are here rather than a wish for a lighter list. The tracking
 # gateway's dev requirements carry fastapi + httpx for exactly the same purpose.
-fastapi==0.143.0
+fastapi==0.146.0
 httpx==0.28.1
 python-jose[cryptography]==3.5.0
 asyncpg==0.32.0
