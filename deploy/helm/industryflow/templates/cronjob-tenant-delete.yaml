@@ -1,0 +1,107 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.tenantDelete.enabled }}
+{{- /*
+  Tenant deletion (ADR-0033 dec 4): one pass over the requested deletions. Each tenant is removed
+  store by store and each removal recorded, so a failed pass resumes where it stopped; the database
+  is emptied last. It authenticates as tenant_delete_user, which acts only through the deletion
+  functions of 26-company-deletion-job.sql.
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "industryflow.fullname" . }}-tenant-delete
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tenant-delete
+    app.kubernetes.io/component: lifecycle
+spec:
+  schedule: {{ .Values.tenantDelete.schedule | quote }}
+  # One pass at a time; the job's own lock makes an overlap a no-op as well.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: tenant-delete
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            fsGroup: {{ .Values.securityContext.fsGroup }}
+            seccompProfile:
+              type: RuntimeDefault
+          {{- end }}
+          containers:
+            - name: tenant-delete
+              image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.tenantDelete.image "tag" .Values.image.tag "digest" .Values.tenantDelete.digest) | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              {{- if .Values.securityContext.enabled }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              {{- end }}
+              env:
+                - name: TIMESCALEDB_HOST
+                  value: {{ include "industryflow.dbHost" . | quote }}
+                - name: TIMESCALEDB_PORT
+                  value: {{ .Values.infra.timescaledb.port | quote }}
+                - name: TIMESCALEDB_DB
+                  value: "industryflow"
+                - name: TENANT_DELETE_DB_USER
+                  value: "tenant_delete_user"
+                - name: TENANT_DELETE_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "tenant-delete") }}
+                      key: TENANT_DELETE_DB_PASSWORD
+                - name: TENANT_DELETE_REDIS_URL
+                  value: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
+                # The deployment's own retentions, from the values the broker and db-backup use.
+                - name: TENANT_DELETE_BROKER_RETENTION_HOURS
+                  value: {{ .Values.infra.kafka.retentionHours | quote }}
+                - name: TENANT_DELETE_BACKUP_RETENTION_DAYS
+                  value: {{ .Values.backup.retainPerDatabase | quote }}
+                {{- if .Values.tls.db.enabled }}
+                # TLS to the DB (ADR-0017); libpq reads sslmode/sslrootcert directly.
+                - name: DB_SSLMODE
+                  value: {{ .Values.tls.db.sslmode | quote }}
+                - name: DB_SSLROOTCERT
+                  value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
+                {{- end }}
+              {{- with .Values.tenantDelete.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- if .Values.tls.db.enabled }}
+              volumeMounts:
+                - name: db-ca
+                  mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
+                  subPath: ca.crt
+                  readOnly: true
+              {{- end }}
+          {{- if .Values.tls.db.enabled }}
+          volumes:
+            - name: db-ca
+              secret:
+                secretName: {{ .Values.tls.db.secretName | quote }}
+                items:
+                  - key: ca.crt
+                    path: ca.crt
+          {{- end }}
+{{- end }}

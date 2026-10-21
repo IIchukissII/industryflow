@@ -77,7 +77,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
-      KAFKA_LOG_RETENTION_HOURS: 168
+      # The tenant-delete job records this as how long a deleted tenant's readings may remain.
+      KAFKA_LOG_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS:-168}
       # The image defaults to a 1g heap; the broker leans on the page cache, not the heap.
       KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS:--Xms512m -Xmx512m}
     volumes:
@@ -158,6 +159,8 @@ services:
       NOTEBOOK_SQL_PROXY_DB_PASSWORD: ${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}
       # Cold-layer exporter role (ADR-0025) — created at init; the exporter connects as it.
       COLD_EXPORT_DB_PASSWORD: ${COLD_EXPORT_DB_PASSWORD:-}
+      # Tenant-delete job role (ADR-0033 dec 4) — created at init; the job connects as it.
+      TENANT_DELETE_DB_PASSWORD: ${TENANT_DELETE_DB_PASSWORD:-}
       # Read-only monitoring role (pg_monitor) the postgres-exporter connects as (ADR-0016 dec 3).
       METRICS_DB_PASSWORD: ${METRICS_DB_PASSWORD}
     # Server settings (connections, memory) live in postgresql.conf, mounted below; the image reads
@@ -1321,6 +1324,31 @@ services:
       COLD_STORE_ACCESS_KEY: ${COLD_STORE_ACCESS_KEY:-}
       COLD_STORE_SECRET_KEY: ${COLD_STORE_SECRET_KEY:-}
       COLD_EXPORT_HORIZON_DAYS: ${COLD_EXPORT_HORIZON_DAYS:-30}
+    volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
+    networks:
+      - industryflow-network
+    restart: "no"
+
+  # Carries out requested tenant deletions, store by store (ADR-0033 dec 4). On demand:
+  #   docker compose --profile tenant-delete run --rm tenant-delete
+  tenant-delete:
+    build:
+      context: ./services/tenant_delete
+      dockerfile: Dockerfile
+    container_name: industryflow-tenant-delete
+    profiles: ["tenant-delete"]
+    environment:
+      <<: *db-tls-env
+      TIMESCALEDB_HOST: ${DB_HOST}
+      TIMESCALEDB_PORT: ${DB_PORT}
+      TIMESCALEDB_DB: ${DB_NAME}
+      TENANT_DELETE_DB_USER: tenant_delete_user
+      TENANT_DELETE_DB_PASSWORD: ${TENANT_DELETE_DB_PASSWORD:-}
+      TENANT_DELETE_REDIS_URL: redis://redis:6379/0
+      # The deployment's own retentions, from the same variables kafka and db-backup read.
+      TENANT_DELETE_BROKER_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS:-168}
+      TENANT_DELETE_BACKUP_RETENTION_DAYS: ${BACKUP_RETAIN_PER_DB:-14}
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:

@@ -21,6 +21,7 @@ TOGGLES = {
     "notebooks": ["--set", "notebookHub.enabled=true"],
     "no-cold-export": ["--set", "coldExport.enabled=false"],
     "notebooks-no-cold-export": ["--set", "notebookHub.enabled=true", "--set", "coldExport.enabled=false"],
+    "no-tenant-delete": ["--set", "tenantDelete.enabled=false"],
 }
 
 
