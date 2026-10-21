@@ -8,6 +8,13 @@
 FROM python:3.14-slim
 
 WORKDIR /app
+# SECURITY_REFRESH is a cache epoch the workflow advances daily (.github/workflows/images.yml). The
+# pins below are direct only, so the resolve picks each transitive dependency (certifi, urllib3, ...)
+# fresh — but only when the layer re-runs, and the persistent build cache replays it verbatim. This
+# RUN moves the cache key of every layer after it, so a transitive security release lands within a day.
+ARG SECURITY_REFRESH=unset
+RUN echo "security refresh: ${SECURITY_REFRESH}"
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
