@@ -6,5 +6,5 @@
 # FastAPI's TestClient (no Redis, no S3).
 pytest==9.1.1
 pytest-asyncio==1.4.0
-fastapi==0.143.0
+fastapi==0.149.0
 httpx==0.28.1

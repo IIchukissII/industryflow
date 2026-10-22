@@ -5,11 +5,11 @@
 # Tracking gateway runtime (ADR-0019): FastAPI app, httpx to MLflow, boto3 for artifact
 # pre-signing, the shared store for capability resolution. The live MLflow/S3 path is
 # cluster-validated (see README / issue #19).
-fastapi==0.143.0
+fastapi==0.149.0
 uvicorn==0.54.0
 httpx==0.28.1
 redis==8.1.0
-boto3==1.43.113
+boto3==1.43.115
 
 # The artifact manifest is YAML; parsed with safe_load only (admission.py) — a gate that
 # refuses code execution must not construct arbitrary Python while reading the upload.
