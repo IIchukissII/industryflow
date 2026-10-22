@@ -56,6 +56,15 @@ class TrackingConfig:
 
 
 @dataclass(frozen=True)
+class DeviceCaConfig:
+    """The device CA's public files, as the edge holds them: chain, CRL bundle, issued register."""
+
+    chain: str
+    crl: str
+    register: str
+
+
+@dataclass(frozen=True)
 class DeleteConfig:
     db: DbConfig
     redis_url: str
@@ -64,6 +73,8 @@ class DeleteConfig:
     cold: ColdConfig | None
     # None where the deployment runs no tracking gateway, likewise.
     tracking: TrackingConfig | None
+    # None where the deployment verifies no device CA, likewise.
+    device_ca: DeviceCaConfig | None
     # How long the broker and the backups may still hold a deleted tenant's data: the deployment's
     # own retention settings, passed in where the job is deployed, so the record states the truth.
     broker_retention: timedelta
@@ -111,11 +122,19 @@ def load_config() -> DeleteConfig:
             gateway_url=_require("TENANT_DELETE_TRACKING_URL"),
             token=_require("TENANT_DELETE_TRACKING_TOKEN"),
         )
+    device_ca = None
+    if os.getenv("TENANT_DELETE_DEVICE_CA_CHAIN"):
+        device_ca = DeviceCaConfig(
+            chain=_require("TENANT_DELETE_DEVICE_CA_CHAIN"),
+            crl=_require("TENANT_DELETE_DEVICE_CA_CRL"),
+            register=_require("TENANT_DELETE_DEVICE_CA_REGISTER"),
+        )
     return DeleteConfig(
         db=db,
         redis_url=_require("TENANT_DELETE_REDIS_URL"),
         cold=cold,
         tracking=tracking,
+        device_ca=device_ca,
         broker_retention=timedelta(hours=_positive("TENANT_DELETE_BROKER_RETENTION_HOURS")),
         backup_retention=timedelta(days=_positive("TENANT_DELETE_BACKUP_RETENTION_DAYS")),
     )

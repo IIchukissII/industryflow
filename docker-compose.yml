@@ -1377,11 +1377,19 @@ services:
       # no secret set the step is not offered and a deletion waits on the store.
       TENANT_DELETE_TRACKING_URL: ${TRACKING_OPERATOR_TOKEN:+http://notebook-tracking-gateway:5050}
       TENANT_DELETE_TRACKING_TOKEN: ${TRACKING_OPERATOR_TOKEN:-}
+      # The device CA's public files, as the edge reads them: the job verifies every device certificate
+      # of the tenant is revoked (device-ca.sh revoke-tenant); it never sees the CA's keys.
+      TENANT_DELETE_DEVICE_CA_CHAIN: /etc/industryflow/device-ca/ca-chain.crt
+      TENANT_DELETE_DEVICE_CA_CRL: /etc/industryflow/device-ca/crl/device-ca.crl
+      TENANT_DELETE_DEVICE_CA_REGISTER: /etc/industryflow/device-ca/crl/issued.tsv
       # The deployment's own retentions, from the same variables kafka and db-backup read.
       TENANT_DELETE_BROKER_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS:-168}
       TENANT_DELETE_BACKUP_RETENTION_DAYS: ${BACKUP_RETAIN_PER_DB:-14}
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
+      # The chain and the CRL directory only; the keys stay outside the container.
+      - "${DEVICE_CA_DIR:-./deploy/device-ca}/ca-chain.crt:/etc/industryflow/device-ca/ca-chain.crt:ro"
+      - "${DEVICE_CA_DIR:-./deploy/device-ca}/crl:/etc/industryflow/device-ca/crl:ro"
     networks:
       - industryflow-network
     restart: "no"

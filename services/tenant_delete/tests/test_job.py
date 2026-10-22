@@ -52,7 +52,8 @@ class Registry:
 
 
 def _step(name, seen):
-    def step(company_id, users):
+    def step(company_id, users, requested_at):
+        assert requested_at == NOW
         seen.append((name, company_id, tuple(users)))
         return job.Removal(detail={"store": name})
     return step
@@ -90,7 +91,7 @@ def test_a_store_not_yet_empty_is_called_again_and_not_recorded():
     seen = []
     reg = Registry([(A, [])])
     steps = {s: _step(s, seen) for s in STORES}
-    steps["cold_layer"] = lambda company_id, users: seen.append(("cold_layer", company_id, ())) or None
+    steps["cold_layer"] = lambda company_id, users, requested_at: seen.append(("cold_layer", company_id, ())) or None
     outcome = job.run(reg, steps, timedelta(days=14))
     assert outcome.waiting == {A: ["cold_layer"]} and outcome.completed == []
     assert [s for _, s, _ in reg.records] == ["capability_store", "broker"]
