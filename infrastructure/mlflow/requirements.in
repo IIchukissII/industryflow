@@ -12,4 +12,4 @@
 # scikit-learn and kiwisolver resolve differently on arm64, and hashes would bind the image to one arch.
 mlflow==3.17.1
 psycopg2-binary==2.9.13
-boto3==1.43.112
+boto3==1.43.114
