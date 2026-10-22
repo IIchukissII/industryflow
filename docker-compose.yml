@@ -212,7 +212,7 @@ services:
   # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
   # CAP_CHOWN, and a no-op when the volume is already owned correctly.
   minio-data-owner:
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:cd7f5d19d115615d809f27343b1e5cfbdc84f38e1c9a29475535b74ec5bade50
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:f0b1d3d6ae12391d9bbe88345dee6da67027c93cda18dc5c9a463c2cc7d61b29
     container_name: industryflow-minio-data-owner
     user: "0:0"
     network_mode: none
@@ -235,7 +235,7 @@ services:
   # a maintained third-party build of the same server (ADR-0025 dec 10, ADR-0009). Non-root (65532),
   # distroless: no curl, so the healthcheck speaks HTTP over bash's /dev/tcp.
   minio:
-    image: cgr.dev/chainguard/minio:latest@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
+    image: cgr.dev/chainguard/minio:latest@sha256:d88920d6a50bd0b088223b688be3b76c63e6205dbe494437f67ba1240ea12880
     depends_on:
       minio-data-owner:
         condition: service_completed_successfully
@@ -266,7 +266,7 @@ services:
   # safe on every `up`; the services that need a bucket or principal gate on it completing.
   minio-init:
     # The -dev variant: the init script needs a shell, grep and mktemp, which the minimal one lacks.
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:cd7f5d19d115615d809f27343b1e5cfbdc84f38e1c9a29475535b74ec5bade50
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:f0b1d3d6ae12391d9bbe88345dee6da67027c93cda18dc5c9a463c2cc7d61b29
     container_name: industryflow-minio-init
     depends_on:
       minio:
@@ -692,7 +692,7 @@ services:
   # `device-ca.sh root-crl`). The healthcheck goes unhealthy when either CRL nears expiry. It holds
   # a signing key, so it has no network at all and runs as the CA dir's owner (DEVICE_CA_UID/GID).
   device-crl-refresh:
-    image: alpine/openssl:3.5.9@sha256:e8a2319d15637db5296c0ff540bb028cfabc480b22fcdd4a020582393d32673f
+    image: alpine/openssl:3.5.9@sha256:bf66acee200e5f4959af448eafc9be0634d8ecdf42205873c83cd5ddffb1cdfd
     container_name: industryflow-device-crl-refresh
     network_mode: none
     user: "${DEVICE_CA_UID:-1000}:${DEVICE_CA_GID:-1000}"
@@ -1159,7 +1159,7 @@ services:
 
   # Redis Exporter - Cache metrics
   redis-exporter:
-    image: oliver006/redis_exporter:v1.93.0@sha256:6ca518a72f30f7f576ef92963de1b91d3c3f5fd3aeac949f878bfda183587820
+    image: oliver006/redis_exporter:v1.94.0@sha256:0842ef7110e62b40bbde2d5c11f38c6fbd99f7100c75e3866637c1b335a1eff7
     container_name: industryflow-redis-exporter
     environment:
       REDIS_ADDR: "redis:6379"
