@@ -975,8 +975,8 @@ services:
 
   # Experiment-tracking gateway (ADR-0019): authoring kernels point their MLflow client here
   # (MLFLOW_TRACKING_URI) with their tracking capability as the bearer token. The gateway scopes
-  # every experiment/run/model/artifact to the caller's tenant and holds MLflow's backend +
-  # object-store credentials. Artifacts come back as tenant-scoped pre-signed URLs (dec 6). Not
+  # every experiment/run/model/artifact to the caller's tenant and holds the artifact store's
+  # read/write principal (MLflow's database credential stays with the server). Artifacts come back as tenant-scoped pre-signed URLs (dec 6). Not
   # host-published — only spawned kernels (same network) reach it at notebook-tracking-gateway:5050.
   notebook-tracking-gateway:
     profiles: ["notebooks"]
@@ -1004,6 +1004,8 @@ services:
       # path); provisioned by minio-init when these are set.
       TRACKING_S3_ACCESS_KEY: ${TRACKING_STORE_ACCESS_KEY:-}
       TRACKING_S3_SECRET_KEY: ${TRACKING_STORE_SECRET_KEY:-}
+      # The tenant-delete job's secret for the operator plane (ADR-0033 dec 4); unset, no such plane.
+      TRACKING_OPERATOR_TOKEN: ${TRACKING_OPERATOR_TOKEN:-}
     depends_on:
       redis:
         condition: service_started
@@ -1361,9 +1363,40 @@ services:
       TENANT_DELETE_COLD_REGION: ${COLD_STORE_REGION:-us-east-1}
       TENANT_DELETE_COLD_ACCESS_KEY: ${TENANT_DELETE_COLD_ACCESS_KEY:-}
       TENANT_DELETE_COLD_SECRET_KEY: ${TENANT_DELETE_COLD_SECRET_KEY:-}
+      # The tracking store, through the tracking gateway's operator plane (notebooks profile); with
+      # no secret set the step is not offered and a deletion waits on the store.
+      TENANT_DELETE_TRACKING_URL: ${TRACKING_OPERATOR_TOKEN:+http://notebook-tracking-gateway:5050}
+      TENANT_DELETE_TRACKING_TOKEN: ${TRACKING_OPERATOR_TOKEN:-}
       # The deployment's own retentions, from the same variables kafka and db-backup read.
       TENANT_DELETE_BROKER_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS:-168}
       TENANT_DELETE_BACKUP_RETENTION_DAYS: ${BACKUP_RETAIN_PER_DB:-14}
+    volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
+    networks:
+      - industryflow-network
+    restart: "no"
+
+  # The tracking store's own collection of deleted tenants (ADR-0033 dec 4): hard-deletes the
+  # experiments the gateway renamed out of every tenant's name space and soft-deleted. The tracking
+  # server's image and credentials; run after tenant-delete, then run tenant-delete again.
+  tracking-collect:
+    build:
+      context: ./infrastructure/mlflow
+      dockerfile: Dockerfile
+    container_name: industryflow-tracking-collect
+    profiles: ["tenant-delete"]
+    environment:
+      BACKEND_STORE_URI: postgresql://${MLFLOW_DB_USER}@${DB_HOST}:${DB_PORT}/mlflow
+      PGPASSWORD: ${MLFLOW_DB_PASSWORD}
+      PGSSLMODE: ${DB_SSLMODE:-verify-full}
+      PGSSLROOTCERT: /etc/ssl/industryflow/ca.crt
+      # Run artifacts are removed through the server, whose principal cannot delete: only an
+      # already-emptied prefix passes.
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    command: ["python", "/opt/industryflow/collect_deleted.py"]
+    depends_on:
+      mlflow:
+        condition: service_healthy
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:

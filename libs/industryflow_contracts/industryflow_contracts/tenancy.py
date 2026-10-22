@@ -93,6 +93,19 @@ def mlflow_name_prefix(company_id) -> str:
     return tenant_token(company_id) + "."
 
 
+# Where a deleted tenant's experiments are renamed to before they are soft-deleted (ADR-0033 dec 4):
+# outside every tenant's name space, because the tracking gateway forces each name a kernel sends
+# under ``tenant_<…>.``, so only the operator path can put an experiment here. The tracking server's
+# collection hard-deletes exactly the deleted experiments under this root, and never a tenant's own
+# deleted (still restorable) entries.
+MLFLOW_DELETED_NAME_ROOT = "_deleted."
+
+
+def mlflow_deleted_name_prefix(company_id) -> str:
+    """The prefix a deleted tenant's experiments are renamed under, ``_deleted.tenant_<…>.``."""
+    return MLFLOW_DELETED_NAME_ROOT + mlflow_name_prefix(company_id)
+
+
 def mlflow_artifact_prefix(company_id) -> str:
     """The object-store key prefix of the tenant's MLflow artifacts and admitted uploads, ``tenant_<…>/``.
 

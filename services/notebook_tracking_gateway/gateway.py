@@ -16,7 +16,11 @@ capability as the bearer token (``MLFLOW_TRACKING_TOKEN``). The gateway:
      directly between the kernel and the object store — no object-store credential in the kernel
      (ADR-0019 dec 6).
 
-It also serves a second, narrower population: a **person uploading an externally-authored artifact**
+It also serves two narrower populations. The tenant-delete job empties a deleted tenant out of the
+tracking store through an operator-only operation (``offboarding``, ADR-0033 dec 4), authenticated by
+a secret only that job and this gateway hold, never by a capability.
+
+The second is a **person uploading an externally-authored artifact**
 (ADR-0030). That plane exists here because this component holds the only credential that may write
 the artifact store — not because admission is decided here; what may be *served* is the serving
 side's judgement, at the gates it already operates (ADR-0030 dec 2).
@@ -38,14 +42,17 @@ cluster-bound part (``build_app``/``main``), validated against a real stack (iss
 """
 from __future__ import annotations
 
+import hmac
 import os
 import uuid
 from typing import Any, Awaitable, Callable, Optional, Protocol, Tuple
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from industryflow_contracts import tenancy
 
 import admission
+import offboarding
 import policy
 import routes
 import scoping
@@ -65,6 +72,8 @@ _MANIFEST_MAX_BYTES = 256 * 1024
 # the client uploads/downloads/lists artifacts here instead of touching the object store directly —
 # so no object-store credential is ever in the kernel (ADR-0019 dec 1).
 _ARTIFACT_PREFIX = "/api/2.0/mlflow-artifacts/artifacts"
+# The operator surface (ADR-0033 dec 4): not MLflow's protocol, and its caller is not a kernel.
+_OPERATOR_PREFIX = "/api/2.0/industryflow-operator"
 
 
 class Upstream(Protocol):
@@ -100,7 +109,7 @@ StoreGet = Callable[[str], Awaitable[Optional[object]]]
 StoreConsume = Callable[[str], Awaitable[int]]
 
 def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
-              bucket: str = "", *, store_consume: StoreConsume) -> FastAPI:
+              bucket: str = "", *, store_consume: StoreConsume, operator_token: Optional[str] = None) -> FastAPI:
     app = FastAPI(title="IndustryFlow notebook tracking gateway")
 
     async def tenant(request: Request) -> policy.TrackingBinding:
@@ -138,6 +147,34 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
     async def artifact_list(request: Request, binding: policy.TrackingBinding = Depends(tenant)):
         prefix = _artifact_key(binding.company_id, request.query_params.get("path", ""))
         return JSONResponse({"files": artifacts.list_files(prefix)})
+
+    # --- the operator plane: a deleted tenant out of the tracking store (ADR-0033 dec 4) ---
+
+    if operator_token:
+        def operator(request: Request) -> None:
+            """The tenant-delete job's secret, or 401. No capability resolves here, whatever its audience."""
+            auth = request.headers.get("authorization", "")
+            presented = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+            if not hmac.compare_digest(presented.encode(), operator_token.encode()):
+                raise HTTPException(status_code=401, detail="operator credential refused")
+
+        @app.delete(_OPERATOR_PREFIX + "/tenants/{company_id}", dependencies=[Depends(operator)])
+        async def empty_tenant(company_id: str):
+            """Remove the tenant from the tracking store and answer with what remains (all zero: gone).
+
+            Idempotent; the tenant-delete job repeats it until the tracking server's collection has
+            removed the deleted experiments too. The tenant must already be suspended, so nothing
+            writes for it meanwhile; that is the job's precondition, not this gateway's to check.
+            """
+            try:
+                cid = tenancy.canonical_company_id(company_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="not a tenant id")
+            try:
+                remaining = await offboarding.empty_tenant(upstream, artifacts, cid)
+            except offboarding.OffboardingError as e:
+                raise HTTPException(status_code=502, detail=str(e))
+            return JSONResponse({"company_id": cid, "remaining": remaining})
 
     # --- the upload plane: staged, judged on structure, then admitted (ADR-0030) ---
 
@@ -575,7 +612,10 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
                 token = resp.get("NextContinuationToken")
             return out
 
-    app = build_app(store.get, _HttpUpstream(), _S3Store(), bucket=bucket, store_consume=store.delete)
+    # Unset: the operator plane is not served at all, and a tenant deletion waits on this store.
+    operator_token = os.environ.get("TRACKING_OPERATOR_TOKEN") or None
+    app = build_app(store.get, _HttpUpstream(), _S3Store(), bucket=bucket, store_consume=store.delete,
+                    operator_token=operator_token)
     uvicorn.run(app, host=os.environ.get("TRACKING_HOST", "0.0.0.0"), port=int(os.environ.get("TRACKING_PORT", "5050")))
 
 

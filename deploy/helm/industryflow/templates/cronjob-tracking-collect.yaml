@@ -1,0 +1,99 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if and .Values.tenantDelete.enabled .Values.notebookHub.enabled .Values.infra.mlflow.inCluster }}
+{{- /*
+  The tracking store's own collection of deleted tenants (ADR-0033 dec 4): hard-deletes the
+  experiments the tracking gateway renamed out of every tenant's name space and soft-deleted, with
+  their runs and logged models. The tracking server's image and its database credential, which the
+  tenant-delete job never holds; the job records the store once nothing of the tenant remains.
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "industryflow.fullname" . }}-tracking-collect
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tracking-collect
+    app.kubernetes.io/component: lifecycle
+spec:
+  schedule: {{ .Values.tenantDelete.trackingCollect.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: tracking-collect
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            fsGroup: {{ .Values.securityContext.fsGroup }}
+            seccompProfile:
+              type: RuntimeDefault
+          {{- end }}
+          containers:
+            - name: tracking-collect
+              image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.infra.mlflow.image "tag" .Values.image.tag "digest" .Values.infra.mlflow.digest) | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              {{- if .Values.securityContext.enabled }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                # mlflow keeps some local state, as the server does.
+                readOnlyRootFilesystem: false
+                capabilities:
+                  drop: ["ALL"]
+              {{- end }}
+              command: ["python", "/opt/industryflow/collect_deleted.py"]
+              env:
+                - name: BACKEND_STORE_URI
+                  value: {{ printf "postgresql://%s@%s:%v/mlflow" .Values.config.MLFLOW_DB_USER (include "industryflow.dbHost" .) .Values.infra.timescaledb.port | quote }}
+                # The server's backend password, for libpq; never in the URI or the command line.
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "mlflow") }}
+                      key: MLFLOW_DB_PASSWORD
+                # Run artifacts are removed through the server, whose principal cannot delete: only
+                # a prefix the gateway already emptied passes.
+                - name: MLFLOW_TRACKING_URI
+                  value: {{ include "industryflow.mlflowUri" . | quote }}
+                {{- if .Values.tls.db.enabled }}
+                - name: PGSSLMODE
+                  value: {{ .Values.tls.db.sslmode | quote }}
+                - name: PGSSLROOTCERT
+                  value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
+                {{- end }}
+              {{- with .Values.tenantDelete.trackingCollect.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- if .Values.tls.db.enabled }}
+              volumeMounts:
+                - name: db-ca
+                  mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
+                  subPath: ca.crt
+                  readOnly: true
+              {{- end }}
+          {{- if .Values.tls.db.enabled }}
+          volumes:
+            - name: db-ca
+              secret:
+                secretName: {{ .Values.tls.db.secretName | quote }}
+                items:
+                  - key: ca.crt
+                    path: ca.crt
+          {{- end }}
+{{- end }}
