@@ -48,12 +48,22 @@ class ColdConfig:
 
 
 @dataclass(frozen=True)
+class TrackingConfig:
+    """The tracking gateway's operator plane and the secret it takes (ADR-0033 dec 4)."""
+
+    gateway_url: str
+    token: str
+
+
+@dataclass(frozen=True)
 class DeleteConfig:
     db: DbConfig
     redis_url: str
     # None where the deployment runs no cold layer: its step is then not offered, and a deletion
     # waits on it rather than recording a store it never looked at.
     cold: ColdConfig | None
+    # None where the deployment runs no tracking gateway, likewise.
+    tracking: TrackingConfig | None
     # How long the broker and the backups may still hold a deleted tenant's data: the deployment's
     # own retention settings, passed in where the job is deployed, so the record states the truth.
     broker_retention: timedelta
@@ -95,10 +105,17 @@ def load_config() -> DeleteConfig:
             access_key=_require("TENANT_DELETE_COLD_ACCESS_KEY"),
             secret_key=_require("TENANT_DELETE_COLD_SECRET_KEY"),
         )
+    tracking = None
+    if os.getenv("TENANT_DELETE_TRACKING_URL"):
+        tracking = TrackingConfig(
+            gateway_url=_require("TENANT_DELETE_TRACKING_URL"),
+            token=_require("TENANT_DELETE_TRACKING_TOKEN"),
+        )
     return DeleteConfig(
         db=db,
         redis_url=_require("TENANT_DELETE_REDIS_URL"),
         cold=cold,
+        tracking=tracking,
         broker_retention=timedelta(hours=_positive("TENANT_DELETE_BROKER_RETENTION_HOURS")),
         backup_retention=timedelta(days=_positive("TENANT_DELETE_BACKUP_RETENTION_DAYS")),
     )

@@ -20,6 +20,7 @@ from .cold_store import ColdStore
 from .config import load_config
 from .job import broker_step, run
 from .registry import Registry
+from .tracking_store import TrackingStore
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("tenant_delete")
@@ -38,6 +39,8 @@ def main() -> int:
                                   aws_access_key_id=cfg.cold.access_key,
                                   aws_secret_access_key=cfg.cold.secret_key)
             steps["cold_layer"] = ColdStore(client, cfg.cold.bucket).purge
+        if cfg.tracking is not None:
+            steps["tracking_store"] = TrackingStore(cfg.tracking.gateway_url, cfg.tracking.token).purge
         outcome = run(Registry(cfg.db.dsn_kwargs()), steps, cfg.backup_retention)
     except Exception:  # noqa: BLE001 - any failure is a failed run
         logger.exception("tenant-delete run failed")

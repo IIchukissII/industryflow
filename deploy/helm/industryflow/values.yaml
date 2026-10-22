@@ -433,6 +433,12 @@ tenantDelete:
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 256Mi }
+  # The tracking store's collection of deleted tenants (notebookHub, whose gateway empties them).
+  trackingCollect:
+    schedule: "7,22,37,52 * * * *"
+    resources:
+      requests: { cpu: 50m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
 
 # ---------------------------------------------------------------------------
 # Observability integration (ADR-0016). The chart does NOT run Prometheus/Grafana/Loki —
@@ -589,6 +595,8 @@ secrets:
     COLD_READ_SECRET_KEY: "CHANGE_ME"
     TENANT_DELETE_COLD_ACCESS_KEY: "CHANGE_ME"
     TENANT_DELETE_COLD_SECRET_KEY: "CHANGE_ME"
+    # The tenant-delete job's secret for the tracking gateway's operator plane (ADR-0033 dec 4).
+    TRACKING_OPERATOR_TOKEN: "CHANGE_ME"
     JWT_SECRET_KEY: "CHANGE_ME"
     INTERNAL_SERVICE_TOKEN: "CHANGE_ME"
     # The object store's ROOT credential: held by the MinIO server and the minio-init Job only.

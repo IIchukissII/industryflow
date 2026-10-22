@@ -7,7 +7,8 @@ Carries out requested tenant deletions, store by store (ADR-0033 dec 4).
 
 The database says which stores a deletion must empty (``company_deletion_required_stores()``) and
 records each one emptied; this walks the pending deletions and, for every store not yet recorded,
-runs that store's step and records what it removed. A step that this deployment cannot yet carry out
+runs that store's step and records what it removed. A store this deployment has no step for, and one
+whose step has done its part but is not yet empty (the tracking store awaits its server's collection),
 is left unrecorded, so the deletion stays pending and the run says what it is waiting on. Once every
 store is recorded the database itself is emptied, last, and the tenant becomes a tombstone.
 
@@ -32,8 +33,9 @@ class Removal:
     retained_until: Optional[datetime] = None
 
 
-# A step empties one store of one tenant: (company_id, user_ids) -> what it removed.
-Step = Callable[[str, list], Removal]
+# A step empties one store of one tenant: (company_id, user_ids) -> what it removed, or None while the
+# store is not yet empty; the next run calls it again.
+Step = Callable[[str, list], Optional[Removal]]
 
 
 class Registry(Protocol):
@@ -48,7 +50,7 @@ class Registry(Protocol):
 @dataclass
 class Outcome:
     completed: list = field(default_factory=list)
-    waiting: dict = field(default_factory=dict)         # company_id -> stores no step could empty
+    waiting: dict = field(default_factory=dict)         # company_id -> stores not yet empty
     failed: dict = field(default_factory=dict)          # company_id -> error
 
 
@@ -82,6 +84,9 @@ def _delete(registry, steps, required, company_id, removed, backup_retention, ou
         if users is None:
             users = registry.user_ids(company_id)
         removal = step(company_id, users)
+        if removal is None:
+            waiting.append(store)
+            continue
         registry.record(company_id, store, removal)
         logger.info("tenant %s: removed from %s %s", company_id, store, removal.detail)
     if waiting:

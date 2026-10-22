@@ -91,6 +91,16 @@ spec:
                       name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "tenant-delete") }}
                       key: TENANT_DELETE_COLD_SECRET_KEY
                 {{- end }}
+                {{- if .Values.notebookHub.enabled }}
+                # The tracking store, through the tracking gateway's operator plane (ADR-0033 dec 4).
+                - name: TENANT_DELETE_TRACKING_URL
+                  value: {{ printf "http://%s-notebook-tracking-gateway:%v" (include "industryflow.fullname" .) .Values.notebookHub.trackingGateway.port | quote }}
+                - name: TENANT_DELETE_TRACKING_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "tenant-delete") }}
+                      key: TRACKING_OPERATOR_TOKEN
+                {{- end }}
                 # The deployment's own retentions, from the values the broker and db-backup use.
                 - name: TENANT_DELETE_BROKER_RETENTION_HOURS
                   value: {{ .Values.infra.kafka.retentionHours | quote }}

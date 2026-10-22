@@ -27,7 +27,7 @@ RUN pip install --no-cache-dir /tmp/industryflow-contracts && rm -rf /tmp/indust
 # Every module the app imports. An omission here does not fail a test — it ships an image that
 # crashloops on `import`, which is why `tests/test_image_contents.py` checks this list against the
 # directory rather than trusting that it was remembered.
-COPY policy.py routes.py scoping.py gateway.py admission.py staging.py ./
+COPY policy.py routes.py scoping.py gateway.py admission.py staging.py offboarding.py ./
 
 # Run as a non-root user (uid 10001).
 RUN useradd -u 10001 -r -s /usr/sbin/nologin appuser
