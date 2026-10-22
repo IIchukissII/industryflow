@@ -77,7 +77,10 @@ def _delete_from_hub(api_url: str, token: str):
 
 def _db():  # pragma: no cover - needs the database
     import psycopg2
+    import psycopg2.extras
 
+    # uuid and uuid[] as UUIDs: without it psycopg2 hands an array back as its text, '{...}'.
+    psycopg2.extras.register_uuid()
     return psycopg2.connect(
         host=os.environ["NOTEBOOK_RECLAIM_DB_HOST"],
         port=os.environ.get("NOTEBOOK_RECLAIM_DB_PORT", "5432"),

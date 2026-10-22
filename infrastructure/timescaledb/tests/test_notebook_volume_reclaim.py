@@ -26,13 +26,18 @@ requested = deletion_job.requested
 
 psycopg2 = pytest.importorskip("psycopg2")
 from psycopg2 import errors  # noqa: E402
+from psycopg2.extras import register_uuid  # noqa: E402
+
+# As the hub's service reads them (reclaim._db): uuid[] as a list of UUIDs, not its text.
+register_uuid()
 
 HUB = "notebook_hub_reclaim_user"
 
 
 def _pending(cur):
-    return {str(c): [str(u) for u in users]
-            for c, users in _as(cur, HUB, "SELECT * FROM public.pending_notebook_volume_reclaims()")}
+    rows = _as(cur, HUB, "SELECT * FROM public.pending_notebook_volume_reclaims()")
+    assert all(isinstance(users, list) and all(isinstance(u, uuid.UUID) for u in users) for _, users in rows)
+    return {str(c): [str(u) for u in users] for c, users in rows}
 
 
 def test_a_requested_deletion_awaits_its_reclaim_until_the_hub_records_it(requested):
