@@ -18,6 +18,7 @@ import redis
 from .capability_store import CapabilityStore
 from .cold_store import ColdStore
 from .config import load_config
+from .device_certificates import DeviceCertificates
 from .job import broker_step, run
 from .registry import Registry
 from .tracking_store import TrackingStore
@@ -41,6 +42,9 @@ def main() -> int:
             steps["cold_layer"] = ColdStore(client, cfg.cold.bucket).purge
         if cfg.tracking is not None:
             steps["tracking_store"] = TrackingStore(cfg.tracking.gateway_url, cfg.tracking.token).purge
+        if cfg.device_ca is not None:
+            steps["device_certificates"] = DeviceCertificates(
+                cfg.device_ca.chain, cfg.device_ca.crl, cfg.device_ca.register).verify
         outcome = run(Registry(cfg.db.dsn_kwargs()), steps, cfg.backup_retention)
     except Exception:  # noqa: BLE001 - any failure is a failed run
         logger.exception("tenant-delete run failed")

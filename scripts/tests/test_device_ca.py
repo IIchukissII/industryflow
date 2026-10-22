@@ -97,6 +97,34 @@ def test_issue_renew_revoke_cross_tenant(ca):
     assert status[other_tenant] == "V" and status[prefix_sibling] == "V"
 
 
+def test_revoke_tenant_revokes_every_device_of_that_tenant_only(ca):
+    root, run = ca
+    gone, kept = str(uuid.uuid4()), str(uuid.uuid4())
+    certs = {}
+    for tenant, device in ((gone, "gw-1"), (gone, "gw-1"), (gone, "line-2"), (kept, "gw-1")):
+        serial = _serial(run("issue", tenant, device).stdout)
+        certs[serial] = (tenant, root / "devices" / tenant / device / f"{serial}.crt")
+    assert all(_verify(root, c) for _, c in certs.values())
+
+    # The tenant is canonicalized, so an upper-case request names the same tenant.
+    out = run("revoke-tenant", gone.upper()).stdout
+    assert "revoked: 3 certificate(s)" in out
+    for tenant, cert in certs.values():
+        assert _verify(root, cert) == (tenant == kept)
+
+    # Idempotent: nothing left to revoke is a success, and the CRL is still re-signed.
+    again = run("revoke-tenant", gone)
+    assert "revoked: 0 certificate(s)" in again.stdout
+    assert all(_verify(root, c) == (t == kept) for t, c in certs.values())
+
+
+def test_revoke_tenant_needs_a_uuid(ca):
+    _, run = ca
+    for args in ((), ("not-a-uuid",)):
+        r = run("revoke-tenant", *args, check=False)
+        assert r.returncode != 0
+
+
 def test_revoke_needs_the_tenant(ca):
     _, run = ca
     r = run("revoke", "gw-1", check=False)

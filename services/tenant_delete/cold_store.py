@@ -24,7 +24,7 @@ class ColdStore:
         self._client = client
         self._bucket = bucket
 
-    def purge(self, company_id: str, user_ids: list) -> Removal:
+    def purge(self, company_id: str, user_ids: list, requested_at=None) -> Removal:
         prefix = tenancy.cold_object_prefix(company_id) + "/"
         removed, previous = 0, None
         # Listing again after each batch, not paginating one listing: the deletes change what a

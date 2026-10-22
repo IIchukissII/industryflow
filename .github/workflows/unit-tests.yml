@@ -88,7 +88,7 @@ jobs:
           - { service: backup,              path: infrastructure/backup/tests, install: "pip install pytest==9.1.1" }
           # The notebook client is packaged (pyproject extras), so it overrides the install.
           - { service: python_client,       path: clients/python/tests, install: "pip install -e 'clients/python[dev,cold]'" }
-          # The device CA's issue/renew/revoke, run against a throwaway CA with the runner's openssl.
+          # The device CA's issue/renew/revoke/revoke-tenant and register, against a throwaway CA and the runner's openssl.
           - { service: device_ca,           path: scripts/tests/test_device_ca.py, install: "pip install pytest==9.1.1" }
           # The shared contracts package itself. The repository-wide guards that every service takes
           # its tenant names and window contract from it live in tests/config_guards.

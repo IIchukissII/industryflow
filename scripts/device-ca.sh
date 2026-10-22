@@ -22,7 +22,10 @@
 #                                           with current.* naming the newest
 #   revoke <company_uuid> <device_id>     revoke every valid cert of that tenant's device
 #                                           (renewals included) and refresh the CRL
-#   crl                                   re-sign the intermediate's CRL (routine; no root key)
+#   revoke-tenant <company_uuid>          revoke every valid cert of every device of that tenant
+#                                           (a deleted tenant, ADR-0033 dec 4) and refresh the CRL
+#   crl                                   re-sign the intermediate's CRL (routine; no root key) and
+#                                           write the signed issued register beside it
 #   root-crl                              re-sign the root's CRL (offline-root ceremony only)
 #   check [crl] [chain]                   fail if a published CRL is close to expiry
 #   chain                                 print the verify chain path (root+intermediate)
@@ -186,6 +189,8 @@ cmd_issue() {
     rm -f "$out/current.$ext"
     if [ -f "$out/$serial.$ext" ]; then ln -s "$serial.$ext" "$out/current.$ext"; fi
   done
+  # A new CRL and register: the register names every certificate the newest CRL's number covers.
+  cmd_crl >/dev/null
   echo "issued: $out/$serial.crt   serial=$serial   SAN=URI:${SAN_PREFIX}/${company}/device/${device}"
 }
 
@@ -204,20 +209,39 @@ cmd_revoke() {
   [ -n "$1" ] && [ -n "$2" ] || die "usage: device-ca.sh revoke <company_uuid> <device_id>"
   identity_args "$1" "$2"
   [ -f "$INT/index.txt" ] || die "CA not initialized — run: device-ca.sh init"
+  revoke_where "$company/$device"
+  [ "$n" -gt 0 ] || die "no valid certificate for tenant $company device $device"
+  cmd_crl
+  echo "revoked: $n certificate(s) of $company/$device (CRL refreshed)"
+}
+
+revoke_where() {
+  # Revokes every still-valid issued certificate whose SAN identity "<tenant>/<device>" matches the
+  # grep pattern $1 (fixed string unless $2 is "regex"); sets $n to how many.
   write_int_cnf
   n=0
   for serial in $(awk -F '\t' '$1 == "V" { print $4 }' "$INT/index.txt"); do
     cert="$INT/newcerts/$serial.pem"
     [ -f "$cert" ] || die "issued cert $serial is missing from $INT/newcerts"
-    if san_names "$cert" | grep -qxF "$company/$device"; then
+    if [ "${2:-}" = regex ]; then match=$(san_names "$cert" | grep -cxE "$1" || true)
+    else match=$(san_names "$cert" | grep -cxF "$1" || true); fi
+    if [ "$match" -gt 0 ]; then
       openssl ca -config "$CNF" -revoke "$cert"
       echo "revoked serial $serial"
       n=$((n + 1))
     fi
   done
-  [ "$n" -gt 0 ] || die "no valid certificate for tenant $company device $device"
+}
+
+cmd_revoke_tenant() {
+  # A deleted tenant (ADR-0033 dec 4): revokes every still-valid certificate of every device of the
+  # tenant, and refreshes the CRL. Idempotent: a tenant with nothing left to revoke succeeds with 0.
+  [ -n "$1" ] || die "usage: device-ca.sh revoke-tenant <company_uuid>"
+  identity_args "$1" placeholder
+  [ -f "$INT/index.txt" ] || die "CA not initialized — run: device-ca.sh init"
+  revoke_where "$company/.+" regex
   cmd_crl
-  echo "revoked: $n certificate(s) of $company/$device (CRL refreshed)"
+  echo "revoked: $n certificate(s) of tenant $company (CRL refreshed)"
 }
 
 publish_bundle() {
@@ -234,7 +258,31 @@ cmd_crl() {
   write_int_cnf
   openssl ca -config "$CNF" -gencrl -out "$CA/crl/intermediate.crl.tmp"
   mv "$CA/crl/intermediate.crl.tmp" "$CA/crl/intermediate.crl"
+  write_register
   publish_bundle
+}
+
+write_register() {
+  # The issued register, beside the CRL it names: every certificate the intermediate ever signed,
+  # "<serial> <notAfter> <tenant> <device>" (tab-separated), and the number of that CRL. Public, no
+  # key: a verifier holding only the chain and the CRL learns which certificates of a tenant exist,
+  # so it can check every unexpired one is revoked (ADR-0033 dec 4). Signed with the issuing key.
+  [ -f "$INT/intermediate.key" ] || die "no issuing key at $INT/intermediate.key"
+  reg="$CA/crl/issued.tsv"
+  crlnum=$(openssl crl -in "$CA/crl/intermediate.crl" -noout -crlnumber | sed 's/^crlNumber=//')
+  {
+    echo "# IndustryFlow device CA: every certificate the issuing intermediate signed (ADR-0007)"
+    printf 'crl_number\t%s\n' "$crlnum"
+    awk -F '\t' '{ print $4 "\t" $2 }' "$INT/index.txt" | while IFS="$(printf '\t')" read -r serial not_after; do
+      cert="$INT/newcerts/$serial.pem"
+      [ -f "$cert" ] || die "issued cert $serial is missing from $INT/newcerts"
+      san_names "$cert" | while IFS=/ read -r t d; do printf '%s\t%s\t%s\t%s\n' "$serial" "$not_after" "$t" "$d"; done
+    done
+  } > "$reg.tmp"
+  openssl dgst -sha256 -sign "$INT/intermediate.key" -out "$reg.sig.tmp" "$reg.tmp"
+  mv "$reg.sig.tmp" "$reg.sig"
+  mv "$reg.tmp" "$reg"
+  echo "register: $reg (+ .sig)"
 }
 
 cmd_root_crl() {
@@ -289,9 +337,10 @@ case "$sub" in
   init)   cmd_init ;;
   issue)  cmd_issue "$@" ;;
   revoke) cmd_revoke "$@" ;;
+  revoke-tenant) cmd_revoke_tenant "$@" ;;
   crl)    cmd_crl ;;
   root-crl) cmd_root_crl ;;
   check)  cmd_check "$@" ;;
   chain)  cmd_chain ;;
-  *) echo "usage: device-ca.sh {init|issue <uuid> <device_id> [csr]|revoke <uuid> <device_id>|crl|root-crl|check [crl] [chain]|chain}" >&2; exit 1 ;;
+  *) echo "usage: device-ca.sh {init|issue <uuid> <device_id> [csr]|revoke <uuid> <device_id>|revoke-tenant <uuid>|crl|root-crl|check [crl] [chain]|chain}" >&2; exit 1 ;;
 esac

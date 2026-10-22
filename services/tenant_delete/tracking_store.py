@@ -31,7 +31,7 @@ class TrackingStore:
         self._timeout = timeout
         self._open = opener
 
-    def purge(self, company_id: str, user_ids: list) -> Optional[Removal]:
+    def purge(self, company_id: str, user_ids: list, requested_at=None) -> Optional[Removal]:
         cid = tenancy.canonical_company_id(company_id)
         request = urllib.request.Request(self._url + _PATH + cid, method="DELETE",
                                          headers={"Authorization": f"Bearer {self._token}"})
