@@ -18,6 +18,7 @@ BUILDERS = [
     tenancy.reader_role_name,
     tenancy.sql_login_name,
     tenancy.mlflow_name_prefix,
+    tenancy.mlflow_deleted_name_prefix,
     tenancy.mlflow_artifact_prefix,
     tenancy.cold_object_prefix,
 ]
@@ -30,6 +31,7 @@ def test_every_name_the_platform_derives_from_a_tenant():
     assert tenancy.reader_role_name(CID) == "tenant_reader_550e8400_e29b_41d4_a716_446655440000"
     assert tenancy.sql_login_name(CID) == "tenant_sqlproxy_550e8400_e29b_41d4_a716_446655440000"
     assert tenancy.mlflow_name_prefix(CID) == TOKEN + "."
+    assert tenancy.mlflow_deleted_name_prefix(CID) == "_deleted." + TOKEN + "."
     assert tenancy.mlflow_artifact_prefix(CID) == TOKEN + "/"
     assert tenancy.cold_object_prefix(CID) == "tenant_550e8400-e29b-41d4-a716-446655440000"
 

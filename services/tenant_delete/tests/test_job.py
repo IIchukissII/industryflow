@@ -86,6 +86,17 @@ def test_a_store_without_a_step_keeps_the_deletion_pending():
     assert [s for _, s, _ in reg.records] == ["capability_store", "broker"]
 
 
+def test_a_store_not_yet_empty_is_called_again_and_not_recorded():
+    seen = []
+    reg = Registry([(A, [])])
+    steps = {s: _step(s, seen) for s in STORES}
+    steps["cold_layer"] = lambda company_id, users: seen.append(("cold_layer", company_id, ())) or None
+    outcome = job.run(reg, steps, timedelta(days=14))
+    assert outcome.waiting == {A: ["cold_layer"]} and outcome.completed == []
+    assert [s for _, s, _ in reg.records] == ["capability_store", "broker"]
+    assert ("cold_layer", A, ()) in seen and ("complete", A) not in reg.calls
+
+
 def test_one_tenants_failure_does_not_stop_the_others():
     reg = Registry([(A, []), (B, [])], fail_complete_for={A})
     outcome = job.run(reg, {s: _step(s, []) for s in STORES}, timedelta(days=14))

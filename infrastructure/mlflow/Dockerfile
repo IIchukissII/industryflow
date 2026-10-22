@@ -23,6 +23,9 @@ RUN echo "security refresh: ${SECURITY_REFRESH}" && pip install --no-cache-dir -
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
+# The collection of deleted tenants' experiments (ADR-0033 dec 4), run as its own one-shot workload.
+COPY collect_deleted.py /opt/industryflow/collect_deleted.py
+
 # Run as a non-root user (uid 10001) with a writable home/workdir for any local state mlflow
 # keeps (artifacts go to S3, backend to the DB).
 RUN useradd -u 10001 -r -m -d /home/mlflow -s /usr/sbin/nologin mlflow

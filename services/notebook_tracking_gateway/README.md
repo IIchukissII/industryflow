@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Tracking gateway
 
-The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md)): it resolves the kernel's tracking capability handle (`MLFLOW_TRACKING_TOKEN`) to one tenant and confines every MLflow call to that tenant's namespace. MLflow's backend and object-store credentials live only here ([ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) dec 1).
+The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md)): it resolves the kernel's tracking capability handle (`MLFLOW_TRACKING_TOKEN`) to one tenant and confines every MLflow call to that tenant's namespace. The artifact store's read/write principal lives only here ([ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) dec 1); MLflow's database credential stays with the tracking server.
 
 ## Endpoints
 
@@ -17,6 +17,7 @@ The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/AD
 | GET | `/api/2.0/mlflow-artifacts/artifacts` | tracking handle | Artifact listing, tenant-scoped |
 | POST | `/api/2.0/industryflow-upload/stage` | upload handle | Stage an externally-authored artifact under `_upload-staging/` ([ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md)) |
 | POST | `/api/2.0/industryflow-upload/commit` | upload handle | Judge and admit into `<tenant>/uploads/`, or discard |
+| DELETE | `/api/2.0/industryflow-operator/tenants/<company_id>` | `TRACKING_OPERATOR_TOKEN` | Empty a deleted tenant ([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) dec 4): delete its registered models, artifacts and staged uploads; rename its experiments to `_deleted.tenant_<…>.<id>` and soft-delete them with their runs and logged models. Answers what remains; experiments count until `infrastructure/mlflow/collect_deleted.py` collects them. Absent when the token is unset |
 
 | Rule | Behaviour |
 |---|---|
@@ -34,6 +35,7 @@ The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/AD
 | `gateway.py` | FastAPI app: auth → route match → ownership lookup → request scoping → MLflow → response scoping; injectable `Upstream` / `ArtifactStore` |
 | `staging.py` | Staging keys under `STAGING_ROOT = "_upload-staging/"` |
 | `admission.py` | Structural judgement of a staged upload |
+| `offboarding.py` | Empty a deleted tenant out of the tracking store; what remains |
 
 ## Settings
 
@@ -50,6 +52,7 @@ The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/AD
 | `TRACKING_S3_ACCESS_KEY` | required | Object-store principal (`TRACKING_STORE_*`) |
 | `TRACKING_S3_SECRET_KEY` | required | Its secret |
 | `TRACKING_S3_REGION` | `us-east-1` | Signing region |
+| `TRACKING_OPERATOR_TOKEN` | unset (no operator plane) | The tenant-delete job's secret |
 
 ## Tests
 

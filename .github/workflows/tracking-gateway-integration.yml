@@ -154,6 +154,38 @@ jobs:
               pip install -q ./libs/industryflow_contracts -r services/notebook_tracking_gateway/tests/requirements-integration.txt &&
               pytest services/notebook_tracking_gateway/tests/test_*_integration.py -m integration -v"
 
+      # A deleted tenant out of the tracking store (ADR-0033 dec 4): emptied through the operator
+      # plane, collected by the real tracking-collect container, then checked. The gateway runs with
+      # .env.example's TRACKING_OPERATOR_TOKEN.
+      - name: "Tenant delete: empty a tenant through the operator plane"
+        run: |
+          # Passed by name, never as a value on the command line.
+          export TRACKING_OPERATOR_TOKEN="$(sed -n 's/^TRACKING_OPERATOR_TOKEN=//p' .env)"
+          docker run --rm --network industryflow-network -v "$PWD:/w" -w /w \
+            -e IF_REQUIRE_LIVE_STACK=1 -e OFFBOARDING_STATE=/w/.offboarding-state.json \
+            -e TRACKING_GATEWAY_URL=http://notebook-tracking-gateway:5050 \
+            -e TRACKING_REDIS_URL=redis://redis:6379/0 -e MLFLOW_DIRECT_URL=http://mlflow:5000 \
+            -e TRACKING_OPERATOR_TOKEN \
+            python:3.14-slim bash -c "
+              pip install -q ./libs/industryflow_contracts -r services/notebook_tracking_gateway/tests/requirements-integration.txt &&
+              pytest -p no:cacheprovider services/notebook_tracking_gateway/tests/test_offboarding_live.py -m integration -k emptied -v"
+
+      - name: "Tenant delete: the tracking server's collection"
+        run: docker compose --profile tenant-delete run --rm --build tracking-collect
+
+      - name: "Tenant delete: collected, and no other tenant touched"
+        run: |
+          # Passed by name, never as a value on the command line.
+          export TRACKING_OPERATOR_TOKEN="$(sed -n 's/^TRACKING_OPERATOR_TOKEN=//p' .env)"
+          docker run --rm --network industryflow-network -v "$PWD:/w" -w /w \
+            -e IF_REQUIRE_LIVE_STACK=1 -e OFFBOARDING_STATE=/w/.offboarding-state.json \
+            -e TRACKING_GATEWAY_URL=http://notebook-tracking-gateway:5050 \
+            -e TRACKING_REDIS_URL=redis://redis:6379/0 -e MLFLOW_DIRECT_URL=http://mlflow:5000 \
+            -e TRACKING_OPERATOR_TOKEN \
+            python:3.14-slim bash -c "
+              pip install -q ./libs/industryflow_contracts -r services/notebook_tracking_gateway/tests/requirements-integration.txt &&
+              pytest -p no:cacheprovider services/notebook_tracking_gateway/tests/test_offboarding_live.py -m integration -k collected -v"
+
       - name: Dump service logs on failure
         if: failure()
         run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml --profile notebooks logs timescaledb minio redis mlflow notebook-tracking-gateway
