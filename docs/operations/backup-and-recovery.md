@@ -51,13 +51,15 @@ the newest `RETAIN_PER_DB` per prefix. The bucket is created if absent.
 | `COLD_SOURCE_ENDPOINT_URL` | `S3_ENDPOINT_URL` | Cold bucket endpoint |
 | `COLD_SOURCE_ACCESS_KEY_ID` / `COLD_SOURCE_SECRET_ACCESS_KEY` | the `AWS_*` pair | Read-only cold principal |
 | `COLD_BACKUP_PREFIX` | `cold` | Mirror prefix in `S3_BUCKET` |
+| `COLD_MIRROR_RETAIN_DAYS` | `RETAIN_PER_DB` | Days an object gone from the source stays in the mirror |
 
 ### Cold mirror
 
 | Property | Behaviour |
 |---|---|
 | Incremental | An object is copied when the mirror lacks it or holds a different size; every `_manifest.json` is re-copied each run |
-| Append-only | Nothing is deleted from the mirror and it is not pruned |
+| Ageing | An object the source no longer holds stays for `COLD_MIRROR_RETAIN_DAYS` after it was first seen missing, then is deleted ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 4); first-missing times in `<cold-prefix>/_absent.tsv` |
+| Empty source | When the source lists nothing but the mirror holds objects, ageing is skipped for that run |
 | Verified | Each copied object's size is read back; a mismatch fails the run |
 | Principals | Source read with the read-only cold principal (`COLD_READ_ACCESS_KEY`); mirror written with the backup principal, which cannot read the cold bucket |
 | Cross-store | Objects stream through the job, so source and target may be different stores |

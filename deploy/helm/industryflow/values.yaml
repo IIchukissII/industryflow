@@ -587,6 +587,8 @@ secrets:
     # stack is deployed. Distinct from the write principal above.
     COLD_READ_ACCESS_KEY: "CHANGE_ME"
     COLD_READ_SECRET_KEY: "CHANGE_ME"
+    TENANT_DELETE_COLD_ACCESS_KEY: "CHANGE_ME"
+    TENANT_DELETE_COLD_SECRET_KEY: "CHANGE_ME"
     JWT_SECRET_KEY: "CHANGE_ME"
     INTERNAL_SERVICE_TOKEN: "CHANGE_ME"
     # The object store's ROOT credential: held by the MinIO server and the minio-init Job only.

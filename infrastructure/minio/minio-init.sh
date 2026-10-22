@@ -19,6 +19,7 @@
 #   db-backup          backup                 read/write/delete           the backup job (dump, prune, restore)
 #   cold-export-rw     cold                   read/write                  the cold-layer exporter (ADR-0025 dec 11)
 #   cold-broker-ro     cold                   read only                   the cold-store broker (ADR-0025 dec 5)
+#   tenant-delete-cold cold, tenant_*         list/delete, no read/write  the tenant-delete job (ADR-0025 dec 14)
 #
 # A principal is provisioned when both its keys are set and skipped (with a line saying so) when
 # both are empty; one key without the other is a configuration error and fails the run.
@@ -78,6 +79,15 @@ write_policy() {  # put/get/list, no delete — the cold exporter never removes 
 ]}
 EOF
 }
+delete_policy() {  # list and delete under one key pattern, no read or write: it removes, never sees
+  cat <<EOF
+{"Version": "2012-10-17", "Statement": [
+  {"Effect": "Allow", "Action": ["s3:GetBucketLocation"], "Resource": ["arn:aws:s3:::$1"]},
+  {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::$1"], "Condition": {"StringLike": {"s3:prefix": ["$2"]}}},
+  {"Effect": "Allow", "Action": ["s3:DeleteObject"], "Resource": ["arn:aws:s3:::$1/$2"]}
+]}
+EOF
+}
 read_policy() {  # get/list on one bucket, or only under one key pattern of it when $2 is given
   if [ -z "${2:-}" ]; then
     list='"Resource": ["arn:aws:s3:::'"$1"'"]'
@@ -127,4 +137,6 @@ principal db-backup BACKUP_STORE_ACCESS_KEY BACKUP_STORE_SECRET_KEY "${BACKUP_BU
 # The cold policies keep the names deployments already carry, so a re-run converges in place.
 principal cold-export-rw COLD_STORE_ACCESS_KEY COLD_STORE_SECRET_KEY "${COLD_STORE_BUCKET:-}" write_policy "${COLD_STORE_BUCKET:-}"
 principal cold-broker-ro COLD_READ_ACCESS_KEY COLD_READ_SECRET_KEY "${COLD_STORE_BUCKET:-}" read_policy "${COLD_STORE_BUCKET:-}"
+# Only the tenant-delete job removes cold objects (ADR-0025 dec 14), and only under tenant prefixes.
+principal tenant-delete-cold TENANT_DELETE_COLD_ACCESS_KEY TENANT_DELETE_COLD_SECRET_KEY "${COLD_STORE_BUCKET:-}" delete_policy "${COLD_STORE_BUCKET:-}" "tenant_*"
 echo "object store ready"
