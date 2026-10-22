@@ -9,7 +9,10 @@ policy is only as good as what the store actually enforces, so this runs the ini
 live server and then acts AS each principal: what its consumer needs must work, and its neighbours'
 buckets — and, for the read principals, every write — must be refused.
 
-Needs a MinIO and the `mc` client: MINIO_TEST_ENDPOINT, MINIO_TEST_ROOT_USER,
+Deletes are sent as a bare DeleteObject, as the consumers send them: `mc rm` reads the object's
+metadata first, so a delete-only principal would fail it, and a refusal would prove nothing.
+
+Needs a MinIO, the `mc` client and boto3: MINIO_TEST_ENDPOINT, MINIO_TEST_ROOT_USER,
 MINIO_TEST_ROOT_PASSWORD, MC (path to mc). Without them it skips — unless IF_REQUIRE_LIVE_STACK=1
 (as CI sets), which turns the skip into a failure so the gate cannot pass by not running.
 """
@@ -21,7 +24,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import boto3
 import pytest
+from botocore.config import Config
+from botocore.exceptions import ClientError
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "infrastructure" / "minio" / "minio-init.sh"
@@ -101,6 +107,19 @@ def _mc(home: Path, *args) -> subprocess.CompletedProcess:
                           capture_output=True, text=True, timeout=60)
 
 
+def _delete(who: str, key: str) -> bool:
+    access = PRINCIPALS[who][1]
+    s3 = boto3.client("s3", endpoint_url=ENDPOINT, region_name="us-east-1", aws_access_key_id=access,
+                      aws_secret_access_key=f"{access}-secret-0123456789",
+                      config=Config(s3={"addressing_style": "path"}, retries={"max_attempts": 1}))
+    bucket, _, name = key.partition("/")
+    try:
+        s3.delete_object(Bucket=bucket, Key=name)
+    except ClientError:
+        return False
+    return True
+
+
 def can(home, who, op, key) -> bool:
     if op == "get":
         r = _mc(home, "cat", f"{who}/{key}")
@@ -109,7 +128,7 @@ def can(home, who, op, key) -> bool:
     elif op == "put":
         r = _mc(home, "cp", str(home / "seed.bin"), f"{who}/{key}")
     elif op == "delete":
-        r = _mc(home, "rm", f"{who}/{key}")
+        return _delete(who, key)
     else:
         raise ValueError(op)
     return r.returncode == 0
