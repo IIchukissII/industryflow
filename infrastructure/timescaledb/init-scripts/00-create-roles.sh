@@ -73,6 +73,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tenant_delete_user') THEN
             EXECUTE format('CREATE ROLE tenant_delete_user WITH LOGIN PASSWORD %L', '${TENANT_DELETE_DB_PASSWORD}');
         END IF;
+
+        -- Notebook hub reclaim role (ADR-0020 dec 6). No table privilege: it lists the users awaiting
+        -- a volume reclaim and records that one store, only through 27-notebook-volume-reclaim.sql.
+        -- Password may be unset when the notebook stack is not deployed; the role is still created.
+        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'notebook_hub_reclaim_user') THEN
+            EXECUTE format('CREATE ROLE notebook_hub_reclaim_user WITH LOGIN PASSWORD %L', '${NOTEBOOK_HUB_RECLAIM_DB_PASSWORD}');
+        END IF;
     END \$\$;
     
     -- =============================================================================
@@ -92,6 +99,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     ALTER ROLE cold_export_user CONNECTION LIMIT 5;
     -- One job, one connection at a time, plus its run lock.
     ALTER ROLE tenant_delete_user CONNECTION LIMIT 2;
+    -- One hub service, one connection at a time.
+    ALTER ROLE notebook_hub_reclaim_user CONNECTION LIMIT 2;
 
     -- Statement timeouts
     ALTER ROLE api_gateway_user SET statement_timeout = '30s';
@@ -104,6 +113,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     ALTER ROLE cold_export_user SET statement_timeout = '3600s';
     -- Dropping a tenant schema drops every chunk of its hypertables in one statement.
     ALTER ROLE tenant_delete_user SET statement_timeout = '1800s';
+    ALTER ROLE notebook_hub_reclaim_user SET statement_timeout = '30s';
     
     -- =============================================================================
     -- PUBLIC SCHEMA PERMISSIONS
@@ -120,6 +130,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     -- Cold-export enumerates tenants from public.companies (verified identity — ADR-0025 dec 5).
     GRANT USAGE ON SCHEMA public TO cold_export_user;
     GRANT USAGE ON SCHEMA public TO tenant_delete_user;
+    GRANT USAGE ON SCHEMA public TO notebook_hub_reclaim_user;
 
     -- public."user" is created at runtime by api_gateway_user (fastapi-users), so it
     -- does NOT exist yet at init time. Granting SELECT on it directly here would abort

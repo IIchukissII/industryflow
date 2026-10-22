@@ -165,8 +165,41 @@ spec:
             - name: INDUSTRYFLOW_COLD_BROKER_URL
               value: {{ printf "http://%s-notebook-cold-broker:%v" $fullname .Values.notebookHub.coldBroker.port | quote }}
             {{- end }}
+            {{- if .Values.tenantDelete.enabled }}
+            # The reclaim service's database identity (ADR-0020 dec 6): it reads the deletion record
+            # and records the notebook volumes reclaimed, nothing else.
+            - name: NOTEBOOK_RECLAIM_DB_HOST
+              value: {{ include "industryflow.dbHost" . | quote }}
+            - name: NOTEBOOK_RECLAIM_DB_PORT
+              value: {{ .Values.infra.timescaledb.port | quote }}
+            - name: NOTEBOOK_RECLAIM_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-hub") }}
+                  key: NOTEBOOK_HUB_RECLAIM_DB_PASSWORD
+            {{- if .Values.tls.db.enabled }}
+            - name: NOTEBOOK_RECLAIM_DB_SSLMODE
+              value: {{ .Values.tls.db.sslmode | quote }}
+            - name: NOTEBOOK_RECLAIM_DB_SSLROOTCERT
+              value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
+            {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.notebookHub.hub.resources | nindent 12 }}
+          {{- if and .Values.tenantDelete.enabled .Values.tls.db.enabled }}
+          volumeMounts:
+            - name: db-ca
+              mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
+              subPath: ca.crt
+              readOnly: true
+      volumes:
+        - name: db-ca
+          secret:
+            secretName: {{ .Values.tls.db.secretName | quote }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service

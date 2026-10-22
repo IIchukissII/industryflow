@@ -161,6 +161,8 @@ services:
       COLD_EXPORT_DB_PASSWORD: ${COLD_EXPORT_DB_PASSWORD:-}
       # Tenant-delete job role (ADR-0033 dec 4) — created at init; the job connects as it.
       TENANT_DELETE_DB_PASSWORD: ${TENANT_DELETE_DB_PASSWORD:-}
+      # Notebook hub reclaim role (ADR-0020 dec 6) — created at init; the hub's reclaim service connects as it.
+      NOTEBOOK_HUB_RECLAIM_DB_PASSWORD: ${NOTEBOOK_HUB_RECLAIM_DB_PASSWORD:-}
       # Read-only monitoring role (pg_monitor) the postgres-exporter connects as (ADR-0016 dec 3).
       METRICS_DB_PASSWORD: ${METRICS_DB_PASSWORD}
     # Server settings (connections, memory) live in postgresql.conf, mounted below; the image reads
@@ -914,10 +916,18 @@ services:
       # Where authoring kernels reach the cold-store broker (ADR-0025 read side); the kernel presents
       # its cold capability to read long-horizon history as Parquet. Forwarded to authoring spawns only.
       INDUSTRYFLOW_COLD_BROKER_URL: ${INDUSTRYFLOW_COLD_BROKER_URL:-http://notebook-cold-broker:5060}
+      # The volume-reclaim service's database identity (ADR-0020 dec 6); unset, the service does not
+      # run and a tenant deletion waits on the notebook volumes.
+      NOTEBOOK_RECLAIM_DB_HOST: ${DB_HOST}
+      NOTEBOOK_RECLAIM_DB_PORT: ${DB_PORT}
+      NOTEBOOK_RECLAIM_DB_NAME: ${DB_NAME}
+      NOTEBOOK_RECLAIM_DB_PASSWORD: ${NOTEBOOK_HUB_RECLAIM_DB_PASSWORD:-}
+      NOTEBOOK_RECLAIM_DB_SSLMODE: ${DB_SSLMODE:-verify-full}
     volumes:
       # DockerSpawner talks to the Docker daemon to spawn per-user containers.
       - /var/run/docker.sock:/var/run/docker.sock
       - notebook-hub-data:/srv/jupyterhub
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     # Reach the Docker socket WITHOUT running the hub as root: add the host's docker group as a
     # supplementary group (set DOCKER_GID in .env — `getent group docker | cut -d: -f3`).
     group_add:
