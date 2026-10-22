@@ -349,7 +349,6 @@ async def bind_identity_and_profile(spawner):
             spawner.volumes = {NB_VOLUME_TEMPLATE: NB_WORK_DIR}
         else:
             spawner.storage_pvc_ensure = True
-            spawner.pvc_name_template = NB_VOLUME_TEMPLATE
             spawner.storage_capacity = os.environ.get("NOTEBOOK_STORAGE_CAPACITY", "2Gi")
             spawner.volumes = [{"name": "work", "persistentVolumeClaim": {"claimName": NB_VOLUME_TEMPLATE}}]
             spawner.volume_mounts = [{"name": "work", "mountPath": NB_WORK_DIR}]
@@ -386,14 +385,44 @@ c.JupyterHub.load_roles = [
     },
 ]
 
+# Reclaim a deleted tenant's volumes (ADR-0020 dec 6): a managed service reads the platform's deletion
+# record with its own narrow database identity and deletes the tenant's users from the hub, which has
+# each spawner remove the user's volume (delete_forever, below). Its token can delete users and nothing
+# else. Off where the deployment gives the hub no reclaim identity; a tenant deletion then waits.
+if os.environ.get("NOTEBOOK_RECLAIM_DB_PASSWORD"):
+    c.JupyterHub.services.append({
+        "name": "volume-reclaim",
+        "command": [sys.executable, os.path.join(os.path.dirname(__file__), "reclaim.py")],
+        # A managed service inherits no environment beyond the hub's API settings.
+        "environment": {k: v for k, v in os.environ.items() if k.startswith("NOTEBOOK_RECLAIM_")},
+    })
+    c.JupyterHub.load_roles.append({
+        "name": "volume-reclaim",
+        "services": ["volume-reclaim"],
+        "scopes": ["delete:users"],
+    })
+
 
 # ---------------------------------------------------------------------------
 # Spawner wiring — KubeSpawner (pods) or DockerSpawner (containers), per ADR-0018
 # ---------------------------------------------------------------------------
 if SPAWNER == "docker":
+    from docker.errors import NotFound  # noqa: E402
     from dockerspawner import DockerSpawner  # noqa: E402
 
-    c.JupyterHub.spawner_class = with_capability_lifecycle(DockerSpawner)
+    class _VolumeOwningDockerSpawner(DockerSpawner):
+        """Removes the user's work volume when the hub deletes the user (ADR-0020 dec 6), as
+        KubeSpawner removes its claim; DockerSpawner itself leaves named volumes behind."""
+
+        async def delete_forever(self):
+            name = self.format_volume_name(NB_VOLUME_TEMPLATE, self)
+            try:
+                await self.docker("remove_volume", name)
+            except NotFound:
+                return  # never authored, or already removed
+            self.log.info("removed work volume %s of deleted user %s", name, self.user.name)
+
+    c.JupyterHub.spawner_class = with_capability_lifecycle(_VolumeOwningDockerSpawner)
     c.DockerSpawner.pre_spawn_hook = bind_identity_and_profile
     # The per-user image is chosen per profile in the hook (above); set a class default so the
     # image is runnable standalone, and the network it shares with the hub + proxy.
@@ -451,3 +480,7 @@ else:
     # persistence for the authoring profile is ensured in the spawn hook (ADR-0020); analytics
     # spawns request no storage, so the class default stays off here.
     c.KubeSpawner.storage_pvc_ensure = False
+    # The claim's name is class-wide, not per spawn: deleting a user from the hub deletes the claim
+    # by this name (delete_forever, ADR-0020 dec 6), whichever profile the user last had.
+    c.KubeSpawner.pvc_name_template = NB_VOLUME_TEMPLATE
+    c.KubeSpawner.delete_pvc = True

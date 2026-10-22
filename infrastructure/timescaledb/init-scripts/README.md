@@ -49,6 +49,7 @@ On an existing database a new or changed script is applied by hand ([manual oper
 | `24-writers-read-tenant-status.sql` | `spark_streaming_user`, `alert_service_user` `SELECT (schema_name, is_active)` on `public.companies` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 | `25-company-deletion.sql` | `companies.suspended_at`, `deleted_at`; `company_lifecycle_events`, `record_company_lifecycle()`; `company_deletions`, `company_deletion_steps`, `request_company_deletion()`, `company_deletion_wait()` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 | `26-company-deletion-job.sql` | `company_deletion_required_stores()`, `pending_company_deletions()`, `company_deletion_user_ids()`, `record_company_deletion_step()`, `complete_company_deletion()` (drops the tenant's schema, roles, users and export rows; tombstone); EXECUTE for `tenant_delete_user` only | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
+| `27-notebook-volume-reclaim.sql` | `pending_notebook_volume_reclaims()` (pending deletions whose volumes are not recorded, with their users), `record_notebook_volumes_reclaimed()` (records `notebook_volumes` only); EXECUTE for `notebook_hub_reclaim_user` only | [ADR-0020](../../../ADR/ADR-0020-notebook-per-user-persistence.md) |
 
 `create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22 and 23.
 Scripts 06 and later are idempotent; the per-tenant ones also apply themselves to every existing
@@ -62,6 +63,7 @@ tenant schema.
 | `spark_streaming_user` | `spark-streaming`, `spark-aggregations` | `SELECT/INSERT/UPDATE` on tenant tables; `SELECT (schema_name, is_active)` on `public.companies` | 50 |
 | `alert_service_user` | `alert-service-detector` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT (schema_name, is_active)` on `public.companies` | 50 |
 | `tenant_delete_user` | `tenant-delete` | EXECUTE on the deletion functions of script 26; no table privilege | 2 |
+| `notebook_hub_reclaim_user` | `notebook-hub` (volume reclaim) | EXECUTE on the functions of script 27; no table privilege | 2 |
 | `ml_service_user` | `ml-service-api` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT` on `public.companies`, `public.platform_config` | 10 |
 | `mlflow_user` | `mlflow` | `mlflow` database | 20 |
 | `metrics_user` | `postgres-exporter` | `pg_monitor` | 5 |
@@ -79,6 +81,7 @@ Ingestion has no database role. `tests/config_guards/test_db_connection_budget.p
 | `SPARK_STREAMING_DB_PASSWORD` | `spark_streaming_user` |
 | `ALERT_SERVICE_DB_PASSWORD` | `alert_service_user` |
 | `TENANT_DELETE_DB_PASSWORD` | `tenant_delete_user` |
+| `NOTEBOOK_HUB_RECLAIM_DB_PASSWORD` | `notebook_hub_reclaim_user` |
 | `ML_SERVICE_DB_PASSWORD` | `ml_service_user` |
 | `MLFLOW_DB_PASSWORD` | `mlflow_user` |
 | `METRICS_DB_PASSWORD` | `metrics_user` |

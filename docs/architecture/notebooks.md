@@ -127,8 +127,10 @@ safe to re-run.
 | Enable | [getting started, step 6](../getting-started.md#6-notebooks-optional-profile) | `notebookHub.enabled: true`, `notebookHub.baseUrl: /jupyter/`, `notebookHub.authoringRoles` |
 | Validation | Compose smoke checks the kernel network on every PR | Renders and lints in CI; not run on a cluster |
 
-Idle culling: `jupyterhub-idle-culler` with token scopes `list:users`, `read:users:activity`,
-`read:servers`, `delete:servers`.
+| Hub service | Does | Token scopes |
+|---|---|---|
+| `idle-culler` | Stops idle servers | `list:users`, `read:users:activity`, `read:servers`, `delete:servers` |
+| `volume-reclaim` | For each deletion awaiting it, deletes the tenant's users from the hub (each spawner's `delete_forever` removes the user's volume or PVC), then records `notebook_volumes`; database role `notebook_hub_reclaim_user` ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-persistence.md) dec 6). Runs when `NOTEBOOK_RECLAIM_DB_PASSWORD` is set | `delete:users` |
 
 ## Isolation tests
 

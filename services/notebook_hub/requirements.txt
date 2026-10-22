@@ -14,3 +14,5 @@ redis==8.1.0
 # Idle reclamation (ADR-0020 / ADR-0011 dec 1,7): a managed service that culls idle servers with
 # a minimal scoped token. Work is durable (per-user volume), so reclaiming is free.
 jupyterhub-idle-culler==2.0.0
+# The volume-reclaim service reads the platform's deletion record (ADR-0020 dec 6).
+psycopg2-binary==2.9.13

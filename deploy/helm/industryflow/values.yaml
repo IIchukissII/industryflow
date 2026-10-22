@@ -586,6 +586,7 @@ secrets:
     # coldExport.enabled.
     COLD_EXPORT_DB_PASSWORD: "CHANGE_ME"
     TENANT_DELETE_DB_PASSWORD: "CHANGE_ME"
+    NOTEBOOK_HUB_RECLAIM_DB_PASSWORD: "CHANGE_ME"
     COLD_STORE_ACCESS_KEY: "CHANGE_ME"
     COLD_STORE_SECRET_KEY: "CHANGE_ME"
     # Read side (ADR-0025 dec 5): the cold-store broker's READ-ONLY principal (get/list on the cold
