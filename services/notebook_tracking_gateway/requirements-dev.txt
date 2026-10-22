@@ -9,7 +9,7 @@
 # job, not a local inconvenience: every module the tests import needs its dependency listed.
 pytest==9.1.1
 pytest-asyncio==1.4.0
-fastapi==0.143.0
+fastapi==0.148.0
 httpx==0.28.1
 # admission.py parses the artifact manifest (safe_load only). Mirrors requirements.txt.
 PyYAML==6.0.3

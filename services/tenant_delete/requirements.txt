@@ -6,4 +6,4 @@
 psycopg2-binary==2.9.13
 redis==8.1.0
 # The cold layer, with the list-and-delete principal (ADR-0025 dec 14).
-boto3==1.43.113
+boto3==1.43.114
