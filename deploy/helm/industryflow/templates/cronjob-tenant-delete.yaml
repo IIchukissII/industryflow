@@ -101,6 +101,17 @@ spec:
                       name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "tenant-delete") }}
                       key: TRACKING_OPERATOR_TOKEN
                 {{- end }}
+                {{- if .Values.ingress.mtls.enabled }}
+                # The device-CA Secret the edge verifies against, with the issued register the CA
+                # publishes beside its CRL: the job verifies every device certificate of the tenant
+                # is revoked (device-ca.sh revoke-tenant). It holds no key of the CA.
+                - name: TENANT_DELETE_DEVICE_CA_CHAIN
+                  value: "/etc/industryflow/device-ca/ca.crt"
+                - name: TENANT_DELETE_DEVICE_CA_CRL
+                  value: "/etc/industryflow/device-ca/ca.crl"
+                - name: TENANT_DELETE_DEVICE_CA_REGISTER
+                  value: "/etc/industryflow/device-ca/issued.tsv"
+                {{- end }}
                 # The deployment's own retentions, from the values the broker and db-backup use.
                 - name: TENANT_DELETE_BROKER_RETENTION_HOURS
                   value: {{ .Values.infra.kafka.retentionHours | quote }}
@@ -117,20 +128,34 @@ spec:
               resources:
                 {{- toYaml . | nindent 16 }}
               {{- end }}
-              {{- if .Values.tls.db.enabled }}
+              {{- if or .Values.tls.db.enabled .Values.ingress.mtls.enabled }}
               volumeMounts:
+                {{- if .Values.tls.db.enabled }}
                 - name: db-ca
                   mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
                   subPath: ca.crt
                   readOnly: true
+                {{- end }}
+                {{- if .Values.ingress.mtls.enabled }}
+                - name: device-ca
+                  mountPath: /etc/industryflow/device-ca
+                  readOnly: true
+                {{- end }}
               {{- end }}
-          {{- if .Values.tls.db.enabled }}
+          {{- if or .Values.tls.db.enabled .Values.ingress.mtls.enabled }}
           volumes:
+            {{- if .Values.tls.db.enabled }}
             - name: db-ca
               secret:
                 secretName: {{ .Values.tls.db.secretName | quote }}
                 items:
                   - key: ca.crt
                     path: ca.crt
+            {{- end }}
+            {{- if .Values.ingress.mtls.enabled }}
+            - name: device-ca
+              secret:
+                secretName: {{ .Values.ingress.mtls.caSecret | quote }}
+            {{- end }}
           {{- end }}
 {{- end }}

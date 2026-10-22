@@ -33,9 +33,9 @@ class Removal:
     retained_until: Optional[datetime] = None
 
 
-# A step empties one store of one tenant: (company_id, user_ids) -> what it removed, or None while the
-# store is not yet empty; the next run calls it again.
-Step = Callable[[str, list], Optional[Removal]]
+# A step empties one store of one tenant: (company_id, user_ids, requested_at) -> what it removed, or
+# None while the store is not yet empty; the next run calls it again.
+Step = Callable[[str, list, datetime], Optional[Removal]]
 
 
 class Registry(Protocol):
@@ -62,16 +62,17 @@ def run(registry: Registry, steps: dict, backup_retention: timedelta) -> Optiona
             return None
         required = registry.required_stores()
         outcome = Outcome()
-        for company_id, _requested_at, removed in registry.pending():
+        for company_id, requested_at, removed in registry.pending():
             try:
-                _delete(registry, steps, required, company_id, set(removed), backup_retention, outcome)
+                _delete(registry, steps, required, company_id, requested_at, set(removed), backup_retention,
+                        outcome)
             except Exception as e:  # noqa: BLE001 - one tenant's failure must not stop the others
                 logger.exception("tenant %s: deletion failed; the next run resumes it", company_id)
                 outcome.failed[company_id] = repr(e)
         return outcome
 
 
-def _delete(registry, steps, required, company_id, removed, backup_retention, outcome):
+def _delete(registry, steps, required, company_id, requested_at, removed, backup_retention, outcome):
     users = None
     waiting = []
     for store in required:
@@ -83,7 +84,7 @@ def _delete(registry, steps, required, company_id, removed, backup_retention, ou
             continue
         if users is None:
             users = registry.user_ids(company_id)
-        removal = step(company_id, users)
+        removal = step(company_id, users, requested_at)
         if removal is None:
             waiting.append(store)
             continue
@@ -101,7 +102,7 @@ def _delete(registry, steps, required, company_id, removed, backup_retention, ou
 def broker_step(retention: timedelta, clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> Step:
     """The shared broker ages a tenant's in-flight readings out within its retention (ADR-0033 dec 4).
     Ingestion has refused the tenant since its suspension, so nothing newer than now remains."""
-    def step(company_id, users):
+    def step(company_id, users, requested_at=None):
         return Removal(detail={"retention_hours": retention.total_seconds() / 3600},
                        retained_until=clock() + retention)
     return step

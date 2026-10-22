@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0007 — Device certificate authority
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-10-17
+- **Date:** 2026-06-26; changed 2026-10-23
 - **Parent:** ADR-0001
-- **Related:** ADR-0002 (device mTLS), ADR-0003 (vouched tenant), ADR-0004 (server cert), ADR-0009 (secrets)
+- **Related:** ADR-0002 (device mTLS), ADR-0003 (vouched tenant), ADR-0004 (server cert), ADR-0009 (secrets), ADR-0033 (dec 4: a deleted tenant's devices revoked)
 
 ## Context
 
@@ -32,6 +32,10 @@ sees. A revoked device must lose access at once, and an expired revocation list 
    The intermediate's list is re-signed routinely beside the issuing key, or from outside a cluster
    that only watches its age. The root's list is re-signed only at the offline ceremony, and every
    approaching expiry is raised in advance.
+9. **Beside each list the authority publishes a register of every certificate it issued, signed with the
+   issuing key.** It names that list and holds no key, so a verifier with only public files can check
+   that every unexpired certificate of a tenant is revoked. A tenant is revoked as a whole by one
+   operator command at the authority.
 
 ## Alternatives
 
@@ -45,6 +49,9 @@ sees. A revoked device must lose access at once, and an expired revocation list 
 | 7 | Reusing the browser-facing server certificate path for devices | Opposite trust direction; it says nothing about a device's tenant |
 | 8 | Moving the issuing key into a cluster to re-sign the list there | A plain stored secret is weaker protection than the key has outside |
 | 8 | Automatic root-list re-signing | Brings the root online |
+| 9 | Proof of revocation from the list alone | A list names what was revoked, never what was issued, so a missed certificate is invisible |
+| 9 | An unsigned register with a published digest | Whoever can replace the register can replace its digest |
+| 9 | A register that only grows at issuance | Drifts from the list it is checked against; one written with each list names it |
 
 ## Consequences
 
@@ -54,6 +61,7 @@ sees. A revoked device must lose access at once, and an expired revocation list 
 
 **Negative**
 - Operating a CA is ongoing work, and the tenant guarantee rests on the enrollment step.
+- Issued identities, though no keys, are published beside the list.
 - Revocation is an availability dependency; a device that fails to renew loses access; one
   intermediate's compromise spans tenants.
 

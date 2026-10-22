@@ -659,7 +659,8 @@ ingress:
     host: ingest.industryflow.local
     verifyDepth: 2
     # The device-CA Secret must carry ca.crt (the chain) AND ca.crl (the CRL bundle): revocation
-    # is checked at the edge (ADR-0007 dec 6). The CRL is refreshed out of band; the issuing key
+    # is checked at the edge (ADR-0007 dec 6). The tenant-delete job reads issued.tsv and
+    # issued.tsv.sig from it too, to verify a deleted tenant's devices are revoked (ADR-0033 dec 4). The CRL is refreshed out of band; the issuing key
     # does not live in the cluster (ADR-0007 dec 8). This job only watches the CRL's age, and
     # fails, raising IndustryFlowDeviceCrlStale, while either CRL is within its warning window.
     crlCheck:

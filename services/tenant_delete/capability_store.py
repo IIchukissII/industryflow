@@ -59,7 +59,7 @@ class CapabilityStore:
                 found.append(key)
         return found
 
-    def purge(self, company_id: str, user_ids: list) -> Removal:
+    def purge(self, company_id: str, user_ids: list, requested_at=None) -> Removal:
         company_id = company_id.lower()
         handles = set(self._matching(f"{_KEY_PREFIX}*", company_id))
         indexes, sessions = [], []

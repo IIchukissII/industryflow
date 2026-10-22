@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0033 — Tenant lifecycle: provisioning through one privileged function, offboarding from every store
 
 - **Status:** Proposed
-- **Date:** 2026-10-13; changed 2026-10-21
+- **Date:** 2026-10-13; changed 2026-10-23
 - **Parent:** ADR-0001
 - **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (schema-per-tenant, the tenant mapping), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (dec 2: suspension ends sessions), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (dec 3: refused readings are dead-lettered), [ADR-0007](ADR-0007-public-key-infrastructure.md) (device revocation), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (tracking store), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (dec 5: per-tenant SQL identity), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md), [ADR-0020](ADR-0020-notebook-per-user-persistence.md), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (tenant data outside the database), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (backups), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (the tenant schema)
 
@@ -32,8 +32,9 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 4. **Delete removes the tenant from every store that holds its data.** One privileged, resumable operation,
    run by a dedicated operator job and not by the API, removes it store by store and records each removal.
    Each store is emptied through its own mediator, the tracking store through its API and its own
-   collection of what is deleted, and the notebook hub for its users' volumes; every device certificate
-   of the tenant is revoked. Backups and the
+   collection of what is deleted, and the notebook hub for its users' volumes. Every device certificate
+   of the tenant is revoked where the issuing key lives, and the job verifies it from the authority's
+   published, signed files before it records the store. Backups and the
    broker's retention age the tenant out on their own schedule, and the record states when.
 5. **Removing the registry row alone is not offered.** Ending a tenant goes through decisions 3 and 4.
 6. **Lifecycle actions are privileged and recorded.** Provisioning, suspension and deletion are
@@ -62,6 +63,11 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 | 4 | The delete job collects the tracking store's deleted entries itself | Needs the store's backend credentials, which only the tracking server holds |
 | 4 | The delete job holds its own delete principal on the model-artifact store | A second privileged writer beside the tracking gateway, the store's one door (ADR-0030 dec 2) |
 | 4 | The delete job holds a notebook-hub administrator credential | ADR-0020 rejects a standing hub credential that crosses tenants |
+| 4 | The delete job holds the device authority's directory and revokes itself | Puts the issuing key in a networked job that already holds credentials to several stores (ADR-0007 dec 8) |
+| 4 | The device authority reads pending deletions and records its own store, as the notebook hub does | Gives the authority, which has no network by design, a database identity and a network path |
+| 4 | The delete job records the device store on the operator's word that revocation is done | Unverifiable; a certificate missed at revocation would stay valid behind a recorded store |
+| 4 | The device authority's published files reach the job through the cold-layer bucket | The cold layer is optional and holds tenant data; the edge's own copy of the files already reaches the job |
+| 4 | The compose revocation-list service revokes deleted tenants itself | Makes an irreversible revocation happen with no operator act, in a service whose one job is keeping the list fresh |
 | 4 | Purge the tenant's messages from the shared broker | Needs administrative writes to a shared cluster for data that ages out within its retention |
 | 4 | Per-tenant backup keys destroyed on delete | Needs key management the platform does not have; expiry meets decision 4 |
 | 5 | Delete by removing the registry entry only | The tenant's data in every store becomes unfindable without being gone |
@@ -79,7 +85,8 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 **Negative**
 - Every new tenant-scoped store owes a deletion path.
 - A bug in the privileged functions affects every tenant.
-- Delete is not built; the product's delete action suspends.
+- The product's delete action suspends; a deletion is requested and carried out by operators.
+- A deletion waits on the device store until an operator revokes the tenant at the device authority.
 - A deleted tenant's data persists in backups and broker retention until each ages it out.
 - Reactivating a tenant after delete is impossible by design, including its device certificates.
 
