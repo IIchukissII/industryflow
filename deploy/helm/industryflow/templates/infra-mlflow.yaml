@@ -69,12 +69,13 @@ spec:
           # The same server flags compose runs: the backend store in the DB (not the image's local
           # default, which a pod restart erases), artifacts proxied to the object store, and clients
           # handed `mlflow-artifacts:` so they never need an object-store credential (ADR-0019).
-          # $(VAR)s are expanded by Kubernetes from the env below and the envFrom sources.
+          # $(VAR)s are expanded by Kubernetes from the env below and the envFrom sources; no secret
+          # goes in the args (tests/config_guards/test_no_secret_on_argv.py).
           args:
             - mlflow
             - server
             - --backend-store-uri
-            - {{ printf "postgresql://$(MLFLOW_DB_USER):$(MLFLOW_DB_PASSWORD)@%s:%v/mlflow" (include "industryflow.dbHost" .) .Values.infra.timescaledb.port | quote }}
+            - {{ printf "postgresql://$(MLFLOW_DB_USER)@%s:%v/mlflow" (include "industryflow.dbHost" .) .Values.infra.timescaledb.port | quote }}
             - --default-artifact-root
             - mlflow-artifacts:/
             - --artifacts-destination
@@ -91,6 +92,12 @@ spec:
             # MLflow's GenAI job runner and its queue consumers: nothing here submits a job.
             - name: MLFLOW_SERVER_ENABLE_JOB_EXECUTION
               value: "false"
+            # The backend password reaches libpq here, never in the args (where `ps` shows it).
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "mlflow") }}
+                  key: MLFLOW_DB_PASSWORD
             # The artifact-bucket principal (read-only on that bucket) — boto reads AWS_* names.
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
