@@ -20,6 +20,11 @@ RUN echo "security refresh: ${SECURITY_REFRESH}" && pip install --no-cache-dir -
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# The platform's shared tenant-naming contract (libs/industryflow_contracts; ADR-0003 dec 5-7),
+# supplied as the named build context `contracts`.
+COPY --from=contracts . /tmp/industryflow-contracts
+RUN pip install --no-cache-dir /tmp/industryflow-contracts && rm -rf /tmp/industryflow-contracts
+
 COPY . ./tenant_delete/
 
 RUN useradd -u 10001 -r -s /usr/sbin/nologin appuser

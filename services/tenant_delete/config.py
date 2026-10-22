@@ -37,9 +37,23 @@ class DbConfig:
 
 
 @dataclass(frozen=True)
+class ColdConfig:
+    """The cold layer and the job's list-and-delete principal on it (ADR-0025 dec 14)."""
+
+    endpoint: str
+    bucket: str
+    region: str
+    access_key: str
+    secret_key: str
+
+
+@dataclass(frozen=True)
 class DeleteConfig:
     db: DbConfig
     redis_url: str
+    # None where the deployment runs no cold layer: its step is then not offered, and a deletion
+    # waits on it rather than recording a store it never looked at.
+    cold: ColdConfig | None
     # How long the broker and the backups may still hold a deleted tenant's data: the deployment's
     # own retention settings, passed in where the job is deployed, so the record states the truth.
     broker_retention: timedelta
@@ -72,9 +86,19 @@ def load_config() -> DeleteConfig:
         sslmode=os.getenv("DB_SSLMODE", "verify-full"),
         sslrootcert=os.getenv("DB_SSLROOTCERT", "/etc/ssl/industryflow/ca.crt"),
     )
+    cold = None
+    if os.getenv("TENANT_DELETE_COLD_BUCKET"):
+        cold = ColdConfig(
+            endpoint=_require("TENANT_DELETE_COLD_ENDPOINT"),
+            bucket=_require("TENANT_DELETE_COLD_BUCKET"),
+            region=os.getenv("TENANT_DELETE_COLD_REGION", "us-east-1"),
+            access_key=_require("TENANT_DELETE_COLD_ACCESS_KEY"),
+            secret_key=_require("TENANT_DELETE_COLD_SECRET_KEY"),
+        )
     return DeleteConfig(
         db=db,
         redis_url=_require("TENANT_DELETE_REDIS_URL"),
+        cold=cold,
         broker_retention=timedelta(hours=_positive("TENANT_DELETE_BROKER_RETENTION_HOURS")),
         backup_retention=timedelta(days=_positive("TENANT_DELETE_BACKUP_RETENTION_DAYS")),
     )

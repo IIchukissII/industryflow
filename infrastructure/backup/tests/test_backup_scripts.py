@@ -268,7 +268,7 @@ def test_the_cold_bucket_is_mirrored_across_stores(env):
     assert not any("secret" in " ".join(c["argv"]) for c in calls)
 
 
-def test_the_mirror_is_incremental_and_append_only(env):
+def test_the_mirror_is_incremental(env):
     _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
     _put(env, COLD, "industryflow-cold", MANIFEST, b'{"rows": 5}')
     assert _mirror(env).returncode == 0
@@ -280,9 +280,60 @@ def test_the_mirror_is_incremental_and_append_only(env):
     assert r.returncode == 0, r.stdout + r.stderr
     assert _mirrored(env, LATE).read_bytes() == b"PAR1-late"
     assert _mirrored(env, MANIFEST).read_bytes() == b'{"rows": 7, "parts": 2}'
-    assert _mirrored(env, PART).read_bytes() == b"PAR1-day"  # never deleted from the mirror
+    assert _mirrored(env, PART).read_bytes() == b"PAR1-day"  # kept: gone from the source only now
     copies = [c for c in _calls(env) if c["argv"][:2] == ["s3", "cp"] and c["argv"][2] == "-"]
     assert len(copies) == 2 + 2  # first run: part + manifest; second: late part + manifest only
+
+
+DAY = 86400
+T0 = 1_760_000_000
+
+
+def _absent(env):
+    path = _mirrored(env, "_absent.tsv")
+    return dict(line.split("\t") for line in path.read_text().splitlines()) if path.exists() else {}
+
+
+def test_an_object_gone_from_the_source_leaves_the_mirror_after_one_retention(env):
+    # ADR-0032 dec 4: recoverable for one retention period, then gone — a deleted tenant's history
+    # does not outlive the backup's retention (ADR-0033 dec 4).
+    _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
+    _put(env, COLD, "industryflow-cold", LATE, b"PAR1-late")
+    assert _mirror(env, COLD_MIRROR_NOW=str(T0)).returncode == 0
+    (_store(env, COLD) / "industryflow-cold" / PART).unlink()
+
+    r = _mirror(env, COLD_MIRROR_NOW=str(T0 + DAY), COLD_MIRROR_RETAIN_DAYS="14")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _mirrored(env, PART).exists() and _absent(env) == {PART: str(T0 + DAY)}
+
+    r = _mirror(env, COLD_MIRROR_NOW=str(T0 + DAY + 14 * DAY - 1), COLD_MIRROR_RETAIN_DAYS="14")
+    assert r.returncode == 0 and _mirrored(env, PART).exists()
+
+    r = _mirror(env, COLD_MIRROR_NOW=str(T0 + DAY + 14 * DAY), COLD_MIRROR_RETAIN_DAYS="14")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not _mirrored(env, PART).exists() and _absent(env) == {}
+    assert _mirrored(env, LATE).read_bytes() == b"PAR1-late"  # what the source still holds stays
+
+
+def test_an_object_back_in_the_source_stops_ageing(env):
+    _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
+    _put(env, COLD, "industryflow-cold", LATE, b"PAR1-late")
+    assert _mirror(env, COLD_MIRROR_NOW=str(T0)).returncode == 0
+    (_store(env, COLD) / "industryflow-cold" / PART).unlink()
+    assert _mirror(env, COLD_MIRROR_NOW=str(T0 + DAY)).returncode == 0
+    _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
+    assert _mirror(env, COLD_MIRROR_NOW=str(T0 + 30 * DAY)).returncode == 0
+    assert _mirrored(env, PART).exists() and _absent(env) == {}
+
+
+def test_an_empty_source_beside_a_populated_mirror_ages_nothing(env):
+    # A wrong bucket or credential lists nothing; ageing on that would empty the backup.
+    _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
+    assert _mirror(env, COLD_MIRROR_NOW=str(T0)).returncode == 0
+    (_store(env, COLD) / "industryflow-cold" / PART).unlink()
+    r = _mirror(env, COLD_MIRROR_NOW=str(T0 + 365 * DAY))
+    assert r.returncode == 0 and "ageing skipped" in r.stdout
+    assert _mirrored(env, PART).exists()
 
 
 def test_a_short_copy_fails_the_backup(env):

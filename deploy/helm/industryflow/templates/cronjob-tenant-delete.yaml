@@ -72,6 +72,25 @@ spec:
                       key: TENANT_DELETE_DB_PASSWORD
                 - name: TENANT_DELETE_REDIS_URL
                   value: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
+                {{- if .Values.coldExport.enabled }}
+                # The cold layer, with its list-and-delete principal (ADR-0025 dec 14).
+                - name: TENANT_DELETE_COLD_ENDPOINT
+                  value: {{ .Values.coldExport.store.endpoint | default (include "industryflow.minioEndpoint" .) | quote }}
+                - name: TENANT_DELETE_COLD_BUCKET
+                  value: {{ .Values.coldExport.store.bucket | quote }}
+                - name: TENANT_DELETE_COLD_REGION
+                  value: {{ .Values.coldExport.store.region | quote }}
+                - name: TENANT_DELETE_COLD_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "tenant-delete") }}
+                      key: TENANT_DELETE_COLD_ACCESS_KEY
+                - name: TENANT_DELETE_COLD_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "tenant-delete") }}
+                      key: TENANT_DELETE_COLD_SECRET_KEY
+                {{- end }}
                 # The deployment's own retentions, from the values the broker and db-backup use.
                 - name: TENANT_DELETE_BROKER_RETENTION_HOURS
                   value: {{ .Values.infra.kafka.retentionHours | quote }}

@@ -12,10 +12,13 @@
 #
 # Then it mirrors the cold-layer bucket (ADR-0025) into the same backup target. Once the cold export
 # drops a day from the database, the cold bucket holds the only copy of that raw history — a database
-# dump no longer contains it — so the backup copies it too. The mirror is incremental and append-only:
-# objects missing from the mirror (or of a different size) are copied, manifests are re-copied every
-# run (they grow as late rows are archived), and nothing is ever deleted from the mirror, so a delete
-# or an overwrite on the source cannot propagate into the backup.
+# dump no longer contains it — so the backup copies it too. The mirror is incremental: objects missing
+# from the mirror (or of a different size) are copied and manifests are re-copied every run (they grow
+# as late rows are archived). An object the source no longer holds stays in the mirror for one backup
+# retention period after it was first seen missing, then leaves it (ADR-0032 dec 4): an accidental
+# delete on the source stays recoverable that long, and a deleted tenant's history does not outlive
+# it (ADR-0033 dec 4). When each mirrored object went missing is kept beside the mirror, in
+# <COLD_BACKUP_PREFIX>/_absent.tsv.
 #
 # This is the baseline; recovery granularity is the backup interval (RPO = schedule period).
 # Continuous WAL archiving for true PITR (pgBackRest) is the documented tier-2 upgrade — see
@@ -37,6 +40,8 @@
 #   COLD_SOURCE_ACCESS_KEY_ID COLD_SOURCE_SECRET_ACCESS_KEY
 #                                   a read-only principal for it (default: the backup credentials)
 #   COLD_BACKUP_PREFIX              key prefix of the mirror in S3_BUCKET (default: "cold")
+#   COLD_MIRROR_RETAIN_DAYS         how long an object gone from the source stays mirrored
+#                                   (default: RETAIN_PER_DB, the dumps' retention at a daily schedule)
 
 set -euo pipefail
 
@@ -97,8 +102,46 @@ mirror_cold_bucket() {
     fi
     copied=$((copied + 1))
   done 3< "${work}/source"
+  age_out_cold_mirror "$work" "$prefix" || { rm -rf "$work"; return 1; }
   rm -rf "$work"
   log "  cold mirror: ${copied} object(s) copied, ${kept} already mirrored"
+}
+
+# Remove from the mirror what the source has not held for COLD_MIRROR_RETAIN_DAYS (ADR-0032 dec 4).
+# $1 holds the run's listings (source, mirror); $2 is the mirror's prefix. COLD_MIRROR_NOW (epoch
+# seconds) stands in for the clock in tests.
+age_out_cold_mirror() {
+  local work="$1" prefix="$2" state_key="${2}/_absent.tsv"
+  local retain_days="${COLD_MIRROR_RETAIN_DAYS:-${RETAIN_PER_DB:-14}}" now expired=0 key
+  now="${COLD_MIRROR_NOW:-$(date -u +%s)}"
+  if ! [ -s "${work}/source" ] && grep -qv "^${state_key}"$'\t' "${work}/mirror" 2>/dev/null; then
+    # An empty source beside a populated mirror is far likelier a wrong bucket or credential than a
+    # cold layer that lost everything; ageing on it would empty the backup one retention later.
+    log "  cold mirror: the source lists nothing but the mirror holds objects; ageing skipped"
+    return 0
+  fi
+  _dst_aws s3 cp "s3://${S3_BUCKET}/${state_key}" "${work}/absent" --only-show-errors 2>/dev/null \
+    || : > "${work}/absent"
+  : > "${work}/expired"; : > "${work}/absent.next"
+  awk -F'\t' -v OFS='\t' -v p="${prefix}/" -v state="$state_key" -v now="$now" \
+      -v retain=$(( retain_days * 86400 )) -v expired="${work}/expired" -v pending="${work}/absent.next" '
+    FILENAME == ARGV[1] { in_source[$1] = 1; next }
+    FILENAME == ARGV[2] { since[$1] = $2; next }
+    $1 == state || index($1, p) != 1 { next }
+    {
+      k = substr($1, length(p) + 1)
+      if (k in in_source) next
+      s = (k in since) ? since[k] : now
+      if (now - s >= retain) print $1 > expired
+      else print k, s > pending
+    }' "${work}/source" "${work}/absent" "${work}/mirror"
+  while IFS= read -r key <&4; do
+    [ -n "$key" ] || continue
+    _dst_aws s3 rm "s3://${S3_BUCKET}/${key}" --only-show-errors
+    expired=$((expired + 1))
+  done 4< "${work}/expired"
+  _dst_aws s3 cp "${work}/absent.next" "s3://${S3_BUCKET}/${state_key}" --only-show-errors
+  log "  cold mirror: ${expired} object(s) gone from the source for ${retain_days} days removed, $(wc -l < "${work}/absent.next") ageing"
 }
 
 prune() {
