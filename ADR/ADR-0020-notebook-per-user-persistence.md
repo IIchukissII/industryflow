@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0020 — Notebook per-user work persistence
 
 - **Status:** Accepted
-- **Date:** 2026-06-28; changed 2026-10-21
+- **Date:** 2026-06-28; changed 2026-10-22
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md)
 - **Related:** [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner parity), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion, dec 6),
   [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (ephemeral capabilities)
@@ -29,8 +29,11 @@ credentials, make compute long-lived or cross tenants.
    admin role, a tenant role, is not a hub administrator.
 5. **Parity across spawners for the authoring profile.** A named volume on a Docker host, a claim on
    Kubernetes, at the same subdirectory, which the authoring image creates owned by the non-root user.
-6. **The hub reclaims a deleted user's volume itself.** It learns of the deletion from the platform's
-   durable deletion record (ADR-0033 dec 4), so no hub credential leaves the hub.
+6. **The hub reclaims a deleted tenant's volumes itself and records the reclaim.** It learns of the
+   deletion from the platform's durable deletion record (ADR-0033 dec 4) through a database identity
+   that can only list the users awaiting a reclaim and record this one store, so no hub credential
+   leaves the hub. A hub service scoped to finding, stopping and removing users does the work, and a
+   user with no volume is reclaimed by recording that.
 
 ## Alternatives
 
@@ -42,6 +45,10 @@ credentials, make compute long-lived or cross tenants.
 | 2 | A standing hub admin or service token | An ambient credential that crosses tenants |
 | 4 | The platform admin role mapped to a hub administrator | A tenant role would reach other tenants' environments |
 | 6 | The tenant-delete job removes volumes through the container platform | Gives it privilege over storage the hub owns and names |
+| 6 | The tenant-delete job asks the hub to reclaim over an endpoint | Needs a hub credential outside the hub |
+| 6 | The hub records through the tenant-delete job's database identity | Lets the hub record any store and empty the database |
+| 6 | The reclaim service holds a user-administration scope | An ambient credential that can change any user, as dec 2 rejects |
+| 6 | Nothing recorded for users who never authored | Their tenant's deletion never completes |
 
 ## Consequences
 
@@ -52,6 +59,7 @@ credentials, make compute long-lived or cross tenants.
 - Volumes accumulate per authoring user; a Docker-host volume has no size cap, a Kubernetes claim is
   capped by its requested size.
 - Persisted notebooks do not record who executed what.
+- The hub holds a database identity, limited to the deletion record's reclaim functions.
 
 ## Deferred
 

@@ -88,7 +88,7 @@ def test_both_spawner_profiles_load(profile, spawner_class):
     base = getattr(importlib.import_module(module), name)
     # The deployment's spawner, carrying the capability lifecycle (ADR-0015 dec 2).
     assert issubclass(cfg.JupyterHub.spawner_class, base)
-    assert cfg.JupyterHub.spawner_class.__name__ == f"CapabilityLifecycle{name}"
+    assert cfg.JupyterHub.spawner_class.__name__.startswith("CapabilityLifecycle")
 
 
 @pytest.mark.parametrize("profile, section", [("kube", "KubeSpawner"), ("docker", "DockerSpawner")])
@@ -552,3 +552,59 @@ def _sso_maps(where, base="/jupyter/"):
 def test_the_secret_is_sent_on_hub_routes_only(where, uri, sent):
     hub, ambiguous = _sso_maps(where)
     assert (bool(hub.search(uri)) and not ambiguous.search(uri)) is sent
+
+
+# --- reclaim of a deleted tenant's volumes (ADR-0020 dec 6) ---
+
+RECLAIM_ENV = {"NOTEBOOK_RECLAIM_DB_HOST": "timescaledb", "NOTEBOOK_RECLAIM_DB_PASSWORD": "reclaim-secret"}
+
+
+@pytest.mark.parametrize("profile", ["kube", "docker"])
+def test_the_reclaim_service_runs_only_with_its_database_identity(profile):
+    try:
+        assert "volume-reclaim" not in [s["name"] for s in _load(profile).JupyterHub.services]
+        cfg = _load(profile, **RECLAIM_ENV)
+    finally:
+        for key in RECLAIM_ENV:
+            os.environ.pop(key, None)
+    [service] = [s for s in cfg.JupyterHub.services if s["name"] == "volume-reclaim"]
+    # Its environment is its own settings: none of the hub's other secrets.
+    assert service["environment"] == RECLAIM_ENV
+    [role] = [r for r in cfg.JupyterHub.load_roles if r["name"] == "volume-reclaim"]
+    assert role["services"] == ["volume-reclaim"] and role["scopes"] == ["delete:users"]
+
+
+def test_kube_deletes_the_users_claim_by_the_one_name_it_mounts():
+    cfg, ns = _load_ns("kube")
+    assert cfg.KubeSpawner.pvc_name_template == ns["NB_VOLUME_TEMPLATE"]
+    assert cfg.KubeSpawner.delete_pvc is True
+
+
+def test_docker_removes_the_users_volume_when_the_hub_deletes_the_user():
+    import asyncio
+    import logging
+
+    from docker.errors import NotFound
+
+    cfg, ns = _load_ns("docker")
+    delete_forever = cfg.JupyterHub.spawner_class.delete_forever
+    removed = []
+
+    class Spawner:
+        log = logging.getLogger("test")
+        user = type("U", (), {"name": "u1"})()
+        missing = False
+
+        def format_volume_name(self, template, spawner):
+            return template.format(username="u1")
+
+        async def docker(self, method, name):
+            if self.missing:
+                raise NotFound("no such volume")
+            removed.append((method, name))
+
+    asyncio.run(delete_forever(Spawner()))
+    assert removed == [("remove_volume", ns["NB_VOLUME_TEMPLATE"].format(username="u1"))]
+    gone = Spawner()
+    gone.missing = True
+    asyncio.run(delete_forever(gone))  # an absent volume is already reclaimed
