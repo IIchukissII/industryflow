@@ -225,6 +225,11 @@ jobs:
         id: uploader
         run: |
           company_id=$(scripts/create-tenant.sh "CI Upload Tenant")
+          # Recorded once (ADR-0033 dec 6): the idempotent re-run prints the same id and records nothing.
+          test "$(scripts/create-tenant.sh "CI Upload Tenant")" = "$company_id"
+          records=$(echo "SELECT count(*) FROM public.company_lifecycle_events WHERE company_id = :'id' AND action = 'create' AND detail->>'via' = 'scripts/create-tenant.sh';" \
+            | docker compose exec -T timescaledb sh -c 'psql -X -tA -v id="$1" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' sh "$company_id")
+          test "$records" = 1 || { echo "::error::create-tenant.sh recorded $records create events"; exit 1; }
           password=$(openssl rand -hex 24)
           echo "::add-mask::$password"
           printf '%s\n' "$password" | docker compose run --rm -T --no-deps \
