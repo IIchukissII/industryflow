@@ -45,7 +45,7 @@ RUN echo "security refresh: ${SECURITY_REFRESH}" && pip install --no-cache-dir -
 # speak a versioned protocol to each other, and 5.x tightened XSRF handling on exactly that path. A
 # 4.x singleuser under a 5.x hub is a skew nothing else in CI would catch.
 RUN pip install --no-cache-dir \
-    jupyterhub==6.0.1 \
+    jupyterhub==6.1.1 \
     jupyterlab==4.0.9
 
 # The data-science stack, pinned in kernel/requirements.txt (in this build context) so the
