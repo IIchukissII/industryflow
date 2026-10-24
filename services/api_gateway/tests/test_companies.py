@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, InvalidRequestError
 
 import main
 from capability_auth import suspended_key
@@ -48,9 +48,13 @@ class _Result:
 
 
 class FakeDB:
+    """The request's session, as get_db_with_tenant yields it: one transaction (session.begin()), so
+    a statement after its commit is refused, as SQLAlchemy refuses it."""
+
     def __init__(self, active=True, fail_with=None, fail_request_with=None, deletion=None, steps=()):
         self.sql = []
         self.commits = 0
+        self.committed = False
         self.active = active
         self.fail_with = fail_with
         self.fail_request_with = fail_request_with
@@ -59,6 +63,11 @@ class FakeDB:
         self.user_ids = [uuid.uuid4(), uuid.uuid4()]
 
     async def execute(self, clause, params=None):
+        if self.committed:
+            raise InvalidRequestError("Can't operate on closed transaction inside context manager.")
+        return await self._execute(clause, params)
+
+    async def _execute(self, clause, params=None):
         sql = " ".join(str(clause).split())
         self.sql.append((sql, dict(params or {})))
         if self.fail_with and "provision_company" in sql:
@@ -88,8 +97,46 @@ class FakeDB:
         return _Result([])
 
     async def commit(self):
+        if self.committed:
+            raise InvalidRequestError("Can't operate on closed transaction inside context manager.")
+        self.committed = True
         self.commits += 1
         self.sql.append(("COMMIT", {}))
+
+    def own_session(self):
+        """A session of the route's own (companies._own_session), recorded in the same log."""
+        return _OwnSession(self)
+
+
+class _OwnSession:
+    def __init__(self, db):
+        self._db = db
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def begin(self):
+        return _OwnTransaction(self._db)
+
+    async def execute(self, clause, params=None):
+        return await self._db._execute(clause, params)
+
+
+class _OwnTransaction:
+    def __init__(self, db):
+        self._db = db
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, *exc):
+        if exc_type is None:
+            self._db.commits += 1
+            self._db.sql.append(("COMMIT", {}))
+        return False
 
 
 class FakeStore:
@@ -127,12 +174,14 @@ def as_user(monkeypatch, store):
         db = db or FakeDB()
 
         async def _db():
+            db.committed = False  # every request gets a session of its own
             yield db
 
         main.app.dependency_overrides[current_active_user] = lambda: SimpleNamespace(
             id=uuid.uuid4(), email="a@example.com", company_id=OWN, role=role,
             is_active=True, is_superuser=is_superuser)
         main.app.dependency_overrides[get_db_with_tenant] = _db
+        monkeypatch.setattr(companies, "_own_session", db.own_session)
         return TestClient(main.app, raise_server_exceptions=False), db, revoked
 
     yield make
