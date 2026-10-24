@@ -6,7 +6,8 @@
 # Provision a tenant at runtime through public.provision_company(), the one provisioning path
 # (ADR-0033 dec 1), run as the API gateway's role, so the operator CLI holds no privilege the API
 # lacks. The platform generates the company_id. Idempotent on the name: an existing company's id is
-# printed instead.
+# printed instead. The provisioning is recorded in the lifecycle record in the same transaction
+# (ADR-0033 dec 6); the CLI has no platform user, so it records the operator's login instead.
 #
 # Usage:
 #   scripts/create-tenant.sh "<Company Name>"
@@ -34,11 +35,16 @@ SELECT EXISTS (SELECT 1 FROM public.companies WHERE company_name = :'name') AS k
 \if :known
 \echo :existing_company_id
 \else
+BEGIN;
 SELECT company_id AS new_company_id FROM public.provision_company(:'name') \gset
+SELECT public.record_company_lifecycle(:'new_company_id', 'create', NULL,
+    jsonb_build_object('via', 'scripts/create-tenant.sh', 'operator', :'operator')) \gset
+COMMIT;
 \echo :new_company_id
 \endif
 SQL
 )
 
 printf '%s\n' "$SQL" | docker compose exec -T timescaledb sh -c \
-    'psql -X -q -v ON_ERROR_STOP=1 -v name="$1" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' sh "$NAME"
+    'psql -X -q -v ON_ERROR_STOP=1 -v name="$1" -v operator="$2" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+    sh "$NAME" "$(id -un)"

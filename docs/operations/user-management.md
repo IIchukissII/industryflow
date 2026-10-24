@@ -97,7 +97,7 @@ alone is per-tenant.
 | Task | How | Effect |
 |---|---|---|
 | Provision (API) | Superuser `POST /api/companies` | Company row and `tenant_<uuid>` schema in one transaction ([ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md)) via the SECURITY DEFINER `provision_company()` |
-| Provision (operator) | `scripts/create-tenant.sh "<company-name>"` | The same `provision_company()`, run as `api_gateway_user` (`psql` in the `timescaledb` container); prints the generated `company_id`. Idempotent on the name |
+| Provision (operator) | `scripts/create-tenant.sh "<company-name>"` | The same `provision_company()`, run as `api_gateway_user` (`psql` in the `timescaledb` container); prints the generated `company_id`; records `create` in `public.company_lifecycle_events` with the operator's login. Idempotent on the name |
 | Rename | `PUT /api/companies/{id}` | Through `update_company()` |
 | Deactivate | Superuser `DELETE /api/companies/{id}`, or `PUT` with `"is_active": false` | Tenant and all its users inactive, sessions revoked ([suspended tenants](authentication.md#suspended-tenants)); schema and data kept. A superuser cannot deactivate their own tenant (400) |
 | Reactivate | Superuser `PUT` with `"is_active": true` | Tenant active; users re-enabled one by one (`PATCH /api/users/{id}` `is_active`) |
