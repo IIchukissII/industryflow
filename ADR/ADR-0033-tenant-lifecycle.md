@@ -5,8 +5,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR-0033 — Tenant lifecycle: provisioning through one privileged function, offboarding from every store
 
-- **Status:** Proposed
-- **Date:** 2026-10-13; changed 2026-10-23
+- **Status:** Accepted
+- **Date:** 2026-10-24
 - **Parent:** ADR-0001
 - **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (schema-per-tenant, the tenant mapping), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (dec 2: suspension ends sessions), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (dec 3: refused readings are dead-lettered), [ADR-0007](ADR-0007-public-key-infrastructure.md) (device revocation), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (tracking store), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (dec 5: per-tenant SQL identity), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md), [ADR-0020](ADR-0020-notebook-per-user-persistence.md), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (tenant data outside the database), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (backups), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (the tenant schema)
 
