@@ -108,8 +108,13 @@ def test_docker_names_the_volume_as_dockerspawner_does(username):
 
 
 @pytest.mark.parametrize("username", USERNAMES)
-def test_kube_names_the_claim_as_kubespawner_does(username):
+def test_kube_names_the_claim_as_kubespawner_does(username, monkeypatch):
+    import kubespawner.spawner
     from kubespawner import KubeSpawner
+
+    # Built without a cluster: KubeSpawner loads a kube config and an API client when constructed.
+    monkeypatch.setattr(kubespawner.spawner, "load_config", lambda **kwargs: None)
+    monkeypatch.setattr(kubespawner.spawner, "shared_client", lambda name: None)
 
     async def expected():
         spawner = KubeSpawner(user=_user(username), _mock=True, pvc_name_template=TEMPLATE)
