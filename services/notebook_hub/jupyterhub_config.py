@@ -230,9 +230,11 @@ def with_capability_lifecycle(base):
     """The deployment's spawner class with the capability lifecycle attached (ADR-0015 dec 2).
 
     Every poll of a running server refreshes its handles; a server whose handles were all revoked
-    reports itself stopped at its next poll, so the hub takes the same path as for a server that
-    died — route removed, server stopped, post_stop_hook run — and the user's next visit spawns a
-    fresh one with fresh handles.
+    is stopped here and reports itself stopped from then on, so the hub takes the same path as for
+    a server that died — route removed, post_stop_hook run — and the user's next visit spawns a
+    fresh one with fresh handles. It must be stopped here: the hub stops a server only while its
+    poll says it runs (JupyterHub User.stop), and then forgets it, so a server merely reported
+    stopped would keep running, unmanaged.
     """
 
     class CapabilityLifecycleSpawner(base):
@@ -251,6 +253,7 @@ def with_capability_lifecycle(base):
             status = await super().poll_and_notify()
             if status is None and not await keep_capabilities_alive(self):
                 self.log.warning("capabilities of %s were revoked; stopping it", self._log_name)
+                await self.stop()
                 self._capabilities_revoked = True
             return status
 
@@ -387,14 +390,21 @@ c.JupyterHub.load_roles = [
 
 # Reclaim a deleted tenant's volumes (ADR-0020 dec 6): a managed service reads the platform's deletion
 # record with its own narrow database identity and deletes the tenant's users from the hub, which has
-# each spawner remove the user's volume (delete_forever, below). Its token can delete users and nothing
-# else. Off where the deployment gives the hub no reclaim identity; a tenant deletion then waits.
+# each spawner remove the user's volume (delete_forever, below); it then confirms with the spawner
+# backend that no volume remains. Its token can delete users and nothing else. Off where the
+# deployment gives the hub no reclaim identity; a tenant deletion then waits.
 if os.environ.get("NOTEBOOK_RECLAIM_DB_PASSWORD"):
     c.JupyterHub.services.append({
         "name": "volume-reclaim",
         "command": [sys.executable, os.path.join(os.path.dirname(__file__), "reclaim.py")],
-        # A managed service inherits no environment beyond the hub's API settings.
-        "environment": {k: v for k, v in os.environ.items() if k.startswith("NOTEBOOK_RECLAIM_")},
+        # A managed service inherits no environment beyond the hub's API settings. It checks the
+        # spawner backend by the name the spawner gives the volume, so it is told both.
+        "environment": {
+            **{k: v for k, v in os.environ.items() if k.startswith("NOTEBOOK_RECLAIM_")},
+            **{k: os.environ[k] for k in ("DOCKER_HOST",) if k in os.environ},
+            "NOTEBOOK_RECLAIM_SPAWNER": SPAWNER,
+            "NOTEBOOK_RECLAIM_VOLUME_TEMPLATE": NB_VOLUME_TEMPLATE,
+        },
     })
     c.JupyterHub.load_roles.append({
         "name": "volume-reclaim",
@@ -416,6 +426,12 @@ if SPAWNER == "docker":
 
         async def delete_forever(self):
             name = self.format_volume_name(NB_VOLUME_TEMPLATE, self)
+            # A container the hub no longer manages may still mount it, and Docker refuses to remove
+            # a volume in use; its user is deleted, so it goes first.
+            for held in await self.docker("containers", all=True, filters={"volume": name}):
+                await self.docker("remove_container", held["Id"], force=True)
+                self.log.warning("removed container %s of deleted user %s, which still mounted %s",
+                                 held["Id"][:12], self.user.name, name)
             try:
                 await self.docker("remove_volume", name)
             except NotFound:
