@@ -154,23 +154,31 @@ async def _record(db: AsyncSession, action: str, company_id, actor: User, **deta
     )
 
 
-async def _suspended(db: AsyncSession, company_id: UUID, user_ids: list) -> None:
+def _own_session():
+    # Imported lazily: database.py builds the engine at import time.
+    from database import AsyncSessionLocal
+
+    return AsyncSessionLocal()
+
+
+async def _suspended(company_id: UUID, user_ids: list) -> None:
     """After a transition to inactive has committed: end the tenant's open SQL sessions, refuse
     the company's capabilities everywhere, then end every session of its users and the
     capabilities derived from them.
 
     The SQL sessions are ended in a transaction of their own, after the suspension's commit made
     the tenant's login NOLOGIN: ended any earlier, a client could reconnect before that commit
-    (21-company-provisioning.sql). Idempotent, so repeating the request completes a run that
-    failed part way. The registry is already inactive by then, so authentication refuses the
+    (21-company-provisioning.sql). It is a session of its own too: the request's session ended
+    with that commit (get_db_with_tenant). Idempotent, so repeating the request completes a run
+    that failed part way. The registry is already inactive by then, so authentication refuses the
     users meanwhile (company_status.py).
     """
     try:
-        await db.execute(
-            text("SELECT public.end_suspended_tenant_sql_sessions(:company_id)"),
-            {"company_id": company_id},
-        )
-        await db.commit()
+        async with _own_session() as session, session.begin():
+            await session.execute(
+                text("SELECT public.end_suspended_tenant_sql_sessions(:company_id)"),
+                {"company_id": company_id},
+            )
     except DBAPIError as e:
         raise _provisioning_error(e)
     company_status.forget(company_id)
@@ -307,7 +315,7 @@ async def update_company(
 
     # Deactivating is suspending, by whichever route it is asked for: the same path as delete.
     if is_active is False:
-        await _suspended(db, company_id, user_ids)
+        await _suspended(company_id, user_ids)
     elif is_active is True:
         await _reactivated(company_id)
     return _row(row)
@@ -346,7 +354,7 @@ async def delete_company(
 
     # After the commit: a deactivated user can no longer refresh even if this step fails part way
     # (refresh checks is_active), so revocation here only ends the sessions sooner.
-    await _suspended(db, company_id, user_ids)
+    await _suspended(company_id, user_ids)
     return _row(row)
 
 
@@ -389,13 +397,15 @@ async def request_deletion(
             text("SELECT * FROM public.request_company_deletion(:company_id, :actor)"),
             {"company_id": company_id, "actor": current_user.id},
         )
+        # Read back in the request's own transaction: its session ends with the commit.
+        deletion = await _deletion(db, company_id)
         await db.commit()
     except DBAPIError as e:
         raise _provisioning_error(e, duplicate="A deletion of this company is already requested")
     logger.info(f"company lifecycle action=delete_requested company_id={company_id} actor={current_user.id}",
                 extra={"company_lifecycle": {"action": "delete_requested", "company_id": str(company_id),
                                              "actor": str(current_user.id)}})
-    return await _deletion(db, company_id)
+    return deletion
 
 
 @router.get("/{company_id}/deletion", response_model=DeletionResponse)
