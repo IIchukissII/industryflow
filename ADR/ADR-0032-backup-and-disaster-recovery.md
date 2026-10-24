@@ -5,8 +5,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR-0032 — Backup and disaster recovery for every durable store
 
-- **Status:** Proposed
-- **Date:** 2026-10-13; changed 2026-10-21
+- **Status:** Accepted
+- **Date:** 2026-10-24
 - **Parent:** ADR-0001
 - **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a backup holds every tenant), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability store, dec 7), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (notebook volumes), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (cold layer, the only copy of raw history; dec 13 its mirror), [ADR-0029](ADR-0029-spark-major-upgrade-checkpoint-cutover.md) (checkpoints), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (forward-only migrations)
 
