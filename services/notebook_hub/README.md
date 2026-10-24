@@ -16,7 +16,7 @@ session and mints their capability handles. Profiles, handle lifecycle and deplo
 |---|---|
 | `identity.py` | Parses the verified identity headers (`X-IF-User`, `X-IF-Company-Id`, `X-IF-Role`), validates the authoring-role setting, selects the profile from the role, derives pod labels and the identity-only environment, reconciles a hub login with the forwarded identity |
 | `capabilities.py` | Capability handle mint / resolve / revoke and the per-server index `nbcap-user:<user>` ([ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md)) |
-| `reclaim.py` | `volume-reclaim` service: deletes a deleted tenant's users from the hub and records `notebook_volumes` ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-persistence.md) dec 6) |
+| `reclaim.py` | `volume-reclaim` service: deletes a deleted tenant's users from the hub, confirms with the spawner backend that no volume remains, and records `notebook_volumes` ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-persistence.md) dec 6) |
 | `jupyterhub_config.py` | Header-trusting authenticator with `refresh_user`, `pre_spawn_hook`, `post_stop_hook`, polling spawner subclass, volume removal on user deletion, idle culler, volume-reclaim service, containment, spawner selection ([ADR-0018](../../ADR/ADR-0018-notebook-hub-spawner-portability.md)) |
 | `sso-nginx.conf` | SSO reverse proxy: validates the platform session against api-gateway, overwrites the identity headers and sets the proxy secret on hub routes |
 | `Dockerfile` | Hub image (JupyterHub + configurable-http-proxy), uid 10001, ports 8000/8081 |

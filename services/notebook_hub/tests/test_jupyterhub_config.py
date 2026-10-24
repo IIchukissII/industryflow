@@ -201,7 +201,8 @@ def test_a_respawn_revokes_what_the_previous_run_still_held():
 
 
 class _BaseSpawner:
-    """Stands in for DockerSpawner/KubeSpawner under the lifecycle subclass."""
+    """Stands in for DockerSpawner/KubeSpawner under the lifecycle subclass; ``running`` is the
+    backend (the container or pod)."""
 
     def __init__(self, spawner):
         self.__dict__.update(spawner.__dict__)
@@ -211,6 +212,9 @@ class _BaseSpawner:
     async def start(self):
         self.running = True
 
+    async def stop(self):
+        self.running = False
+
     async def poll(self):
         return None if self.running else 0
 
@@ -218,7 +222,11 @@ class _BaseSpawner:
         status = await self.poll()
         if status is None:
             return None
-        self.notified = True  # the hub's stop path: route removed, server stopped
+        # The hub's path for a server that stopped: route removed, then JupyterHub's User.stop,
+        # which stops the backend only while poll() says it runs, and forgets the server.
+        self.notified = True
+        if await self.poll() is None:
+            await self.stop()
         return status
 
 
@@ -247,6 +255,7 @@ def test_a_server_whose_handles_were_revoked_elsewhere_is_stopped():
     assert asyncio.run(live.poll_and_notify()) is None   # noticed...
     assert asyncio.run(live.poll_and_notify()) == 0      # ...and reported stopped at the next poll
     assert live.notified is True
+    assert live.running is False                         # the container itself is gone, not orphaned
 
     asyncio.run(live.start())  # a respawn is a fresh server
     assert asyncio.run(live.poll()) is None
@@ -568,8 +577,9 @@ def test_the_reclaim_service_runs_only_with_its_database_identity(profile):
         for key in RECLAIM_ENV:
             os.environ.pop(key, None)
     [service] = [s for s in cfg.JupyterHub.services if s["name"] == "volume-reclaim"]
-    # Its environment is its own settings: none of the hub's other secrets.
-    assert service["environment"] == RECLAIM_ENV
+    # Its environment is its own settings and how the hub names volumes: none of the hub's other secrets.
+    assert service["environment"] == {**RECLAIM_ENV, "NOTEBOOK_RECLAIM_SPAWNER": profile,
+                                      "NOTEBOOK_RECLAIM_VOLUME_TEMPLATE": "industryflow-nb-{username}"}
     [role] = [r for r in cfg.JupyterHub.load_roles if r["name"] == "volume-reclaim"]
     assert role["services"] == ["volume-reclaim"] and role["scopes"] == ["delete:users"]
 
@@ -598,13 +608,48 @@ def test_docker_removes_the_users_volume_when_the_hub_deletes_the_user():
         def format_volume_name(self, template, spawner):
             return template.format(username="u1")
 
-        async def docker(self, method, name):
+        async def docker(self, method, *args, **kwargs):
+            if method == "containers":
+                return []
             if self.missing:
                 raise NotFound("no such volume")
-            removed.append((method, name))
+            removed.append((method, *args))
 
     asyncio.run(delete_forever(Spawner()))
     assert removed == [("remove_volume", ns["NB_VOLUME_TEMPLATE"].format(username="u1"))]
     gone = Spawner()
     gone.missing = True
     asyncio.run(delete_forever(gone))  # an absent volume is already reclaimed
+
+
+def test_docker_removes_a_container_still_mounting_the_deleted_users_volume():
+    """Docker refuses to remove a volume in use (409), and the hub swallows that error."""
+    import asyncio
+    import logging
+
+    cfg, ns = _load_ns("docker")
+    delete_forever = cfg.JupyterHub.spawner_class.delete_forever
+    volume = ns["NB_VOLUME_TEMPLATE"].format(username="u1")
+    calls = []
+
+    class Spawner:
+        log = logging.getLogger("test")
+        user = type("U", (), {"name": "u1"})()
+        mounted = {"c0ffee000000": volume}
+
+        def format_volume_name(self, template, spawner):
+            return template.format(username="u1")
+
+        async def docker(self, method, *args, **kwargs):
+            calls.append((method, args, kwargs))
+            if method == "containers":
+                return [{"Id": cid} for cid, v in self.mounted.items() if v == kwargs["filters"]["volume"]]
+            if method == "remove_container":
+                self.mounted.pop(args[0])
+            if method == "remove_volume" and volume in self.mounted.values():
+                raise RuntimeError("409 volume is in use")
+
+    asyncio.run(delete_forever(Spawner()))
+    assert [(m, a) for m, a, _ in calls] == [
+        ("containers", ()), ("remove_container", ("c0ffee000000",)), ("remove_volume", (volume,))]
+    assert calls[1][2] == {"force": True}

@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0020 — Notebook per-user work persistence
 
 - **Status:** Accepted
-- **Date:** 2026-06-28; changed 2026-10-22
+- **Date:** 2026-06-28; changed 2026-10-24
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md)
 - **Related:** [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner parity), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion, dec 6),
   [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (ephemeral capabilities)
@@ -33,7 +33,9 @@ credentials, make compute long-lived or cross tenants.
    deletion from the platform's durable deletion record (ADR-0033 dec 4) through a database identity
    that can only list the users awaiting a reclaim and record this one store, so no hub credential
    leaves the hub. A hub service scoped to finding, stopping and removing users does the work, and a
-   user with no volume is reclaimed by recording that.
+   user with no volume is reclaimed by recording that. The store is recorded only once the spawner
+   backend, asked with the hub's own access by the name the spawner gives the volume, holds none of
+   the tenant's volumes; one that remains is removed there, or the deletion stays pending.
 
 ## Alternatives
 
@@ -49,6 +51,8 @@ credentials, make compute long-lived or cross tenants.
 | 6 | The hub records through the tenant-delete job's database identity | Lets the hub record any store and empty the database |
 | 6 | The reclaim service holds a user-administration scope | An ambient credential that can change any user, as dec 2 rejects |
 | 6 | Nothing recorded for users who never authored | Their tenant's deletion never completes |
+| 6 | The hub's deletion of a user taken as proof its volume is gone | The hub deletes the user even when removing the volume failed, so the record would claim an emptied store that is not |
+| 6 | The spawner reports a failed removal to the reclaim service | A second record of what the backend itself answers, lost on a hub restart |
 
 ## Consequences
 
@@ -60,6 +64,8 @@ credentials, make compute long-lived or cross tenants.
   capped by its requested size.
 - Persisted notebooks do not record who executed what.
 - The hub holds a database identity, limited to the deletion record's reclaim functions.
+- The reclaim service reaches the spawner backend with the hub's own access, and computes volume
+  names with the spawner's own naming.
 
 ## Deferred
 
