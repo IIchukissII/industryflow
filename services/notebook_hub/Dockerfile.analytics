@@ -40,7 +40,7 @@ RUN echo "security refresh: ${SECURITY_REFRESH}" && pip install --no-cache-dir -
 # The jupyterhub pin tracks the HUB's (services/notebook_hub/requirements.txt): singleuser and hub
 # speak a versioned protocol, and a 4.x singleuser under the 5.x hub is a skew nothing else catches.
 RUN pip install --no-cache-dir \
-    jupyterhub==6.0.1 \
+    jupyterhub==6.1.1 \
     voila==0.5.7
 
 # Visualisation stack for dashboards (no ML/training libs — operators don't author models).

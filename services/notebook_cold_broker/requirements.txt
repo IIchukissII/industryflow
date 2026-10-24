@@ -5,7 +5,7 @@
 # Cold-store broker runtime (ADR-0025 dec 5, read side): a FastAPI app that resolves a cold
 # capability against the shared store and mints read-only, tenant-prefix-scoped pre-signed GET
 # URLs with boto3. Read-only cousin of the tracking gateway; no httpx (no upstream proxy).
-fastapi==0.143.0
+fastapi==0.157.0
 uvicorn==0.54.0
 redis==8.1.0
-boto3==1.43.113
+boto3==1.43.116
