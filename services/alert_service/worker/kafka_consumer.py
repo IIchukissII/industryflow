@@ -88,11 +88,12 @@ class AlertKafkaConsumer:
             enable_auto_commit=False
         )
 
-        # Producer for the dead-letter topic. acks='all' + idempotence so a message is durably
-        # replicated before it counts as dead-lettered (ADR-0005).
+        # Producer for the dead-letter topic and the tenant-status stream. acks='all' + idempotence
+        # so a message is durably replicated before it counts as sent (ADR-0005). No serializer:
+        # it sends bytes, and each sender encodes its own contract (the tenant status arrives
+        # encoded by industryflow_contracts.tenant_status).
         self.producer = AIOKafkaProducer(
             bootstrap_servers=self.config.KAFKA_BOOTSTRAP_SERVERS,
-            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
             acks='all',
             enable_idempotence=True
         )
@@ -226,13 +227,13 @@ class AlertKafkaConsumer:
         try:
             await self.producer.send_and_wait(
                 self._dlq_topic,
-                value={
+                value=json.dumps({
                     "original": original,
                     "error": reason,
                     "topic": message.topic,
                     "partition": message.partition,
                     "offset": message.offset,
-                },
+                }).encode("utf-8"),
             )
             logger.error(
                 f"Message dead-lettered to {self._dlq_topic} "
