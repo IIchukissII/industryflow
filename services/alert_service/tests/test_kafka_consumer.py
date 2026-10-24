@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import asyncpg
 import pytest
-from aiokafka import TopicPartition
+from aiokafka import AIOKafkaProducer, TopicPartition
 from aiokafka.errors import CommitFailedError, KafkaError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 import kafka_consumer  # noqa: E402
 from errors import MessageValidationError, is_infrastructure_error  # noqa: E402
 from kafka_consumer import AlertKafkaConsumer  # noqa: E402
+from industryflow_contracts import tenant_status  # noqa: E402
 
 CO = "0b2f503a-6e59-4f4f-b0cd-b82547a20cf2"
 SENSOR = "11111111-1111-1111-1111-111111111111"
@@ -81,14 +82,18 @@ class FakeConsumer:
 
 
 class FakeProducer:
+    """Like the worker's producer, which has no serializer: a value that is not bytes is refused."""
+
     def __init__(self):
         self.sent = []
         self.fail = False
 
-    async def send_and_wait(self, topic, value=None):
+    async def send_and_wait(self, topic, value=None, key=None):
+        if not isinstance(value, (bytes, bytearray)):
+            raise TypeError(f"the producer sends bytes, got {type(value).__name__}")
         if self.fail:
             raise OSError("broker unavailable")
-        self.sent.append((topic, value))
+        self.sent.append((topic, json.loads(value)))
 
 
 class ScriptedEngine:
@@ -269,3 +274,38 @@ def test_every_poll_touches_the_heartbeat(tmp_path, sleeps):
     c.running = True
     _run(c)
     assert hb.stat().st_mtime > before - 600
+
+
+# --- the shared producer ----------------------------------------------------------------------------
+
+def _worker_producer(monkeypatch, tmp_path):
+    """The real AIOKafkaProducer, built with exactly the arguments start() passes; never connected."""
+    built = {}
+
+    class Unstarted:
+        def __init__(self, *args, **kwargs):
+            built["args"], built["kwargs"] = args, kwargs
+
+        async def start(self):
+            pass
+
+    monkeypatch.setattr(kafka_consumer, "AIOKafkaConsumer", Unstarted)
+    monkeypatch.setattr(kafka_consumer, "AIOKafkaProducer", Unstarted)
+    c = _consumer([], ScriptedEngine(), tmp_path, KAFKA_BOOTSTRAP_SERVERS="kafka:9092",
+                  KAFKA_TOPIC_SENSOR_DATA="sensor-data-raw", KAFKA_GROUP_ID="alert-service")
+    asyncio.run(c.start())
+
+    async def build():
+        return AIOKafkaProducer(**built["kwargs"])
+    return asyncio.run(build())
+
+
+def test_the_tenant_status_message_passes_the_producer_unchanged(monkeypatch, tmp_path):
+    """The producer is shared with the tenant-status publisher, whose contract hands it bytes. A JSON
+    value serializer on it failed every status round ("Object of type bytes is not JSON
+    serializable"), so ingestion never heard a suspension."""
+    producer = _worker_producer(monkeypatch, tmp_path)
+    key, value = tenant_status.encode("3926f3d5-d81f-4a81-a54b-b9ba8a3edf89", False)
+    # aiokafka's own serialization step: what send() puts on the wire.
+    assert producer._serialize(key, value, []) == (key, value)
+    assert tenant_status.decode(value) == ("3926f3d5-d81f-4a81-a54b-b9ba8a3edf89", False)
