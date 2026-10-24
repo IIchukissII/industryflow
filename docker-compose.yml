@@ -214,7 +214,7 @@ services:
   # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
   # CAP_CHOWN, and a no-op when the volume is already owned correctly.
   minio-data-owner:
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:cd7f5d19d115615d809f27343b1e5cfbdc84f38e1c9a29475535b74ec5bade50
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:3f349bd07076e8e4040dc5c32598b632268accba8ac7f460cb077670ee2e3407
     container_name: industryflow-minio-data-owner
     user: "0:0"
     network_mode: none
@@ -237,7 +237,7 @@ services:
   # a maintained third-party build of the same server (ADR-0025 dec 10, ADR-0009). Non-root (65532),
   # distroless: no curl, so the healthcheck speaks HTTP over bash's /dev/tcp.
   minio:
-    image: cgr.dev/chainguard/minio:latest@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
+    image: cgr.dev/chainguard/minio:latest@sha256:73297936408b731668ca0e835ac9add1a35cb6026a125c2f0cd476d9ef48222c
     depends_on:
       minio-data-owner:
         condition: service_completed_successfully
@@ -268,7 +268,7 @@ services:
   # safe on every `up`; the services that need a bucket or principal gate on it completing.
   minio-init:
     # The -dev variant: the init script needs a shell, grep and mktemp, which the minimal one lacks.
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:cd7f5d19d115615d809f27343b1e5cfbdc84f38e1c9a29475535b74ec5bade50
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:3f349bd07076e8e4040dc5c32598b632268accba8ac7f460cb077670ee2e3407
     container_name: industryflow-minio-init
     depends_on:
       minio:
@@ -1090,7 +1090,7 @@ services:
 
   # Prometheus - Metrics collection and storage
   prometheus:
-    image: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
     container_name: industryflow-prometheus
     ports:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
@@ -1173,7 +1173,7 @@ services:
 
   # Redis Exporter - Cache metrics
   redis-exporter:
-    image: oliver006/redis_exporter:v1.93.0@sha256:6ca518a72f30f7f576ef92963de1b91d3c3f5fd3aeac949f878bfda183587820
+    image: oliver006/redis_exporter:v1.95.0@sha256:afb21407aba3df1b4010899f155fc6b1ba2026c97b725d72aca4019d772e7b6b
     container_name: industryflow-redis-exporter
     environment:
       REDIS_ADDR: "redis:6379"
@@ -1230,7 +1230,7 @@ services:
 
   # Loki - Log aggregation
   loki:
-    image: grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193
+    image: grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
     container_name: industryflow-loki
     ports:
       - "127.0.0.1:3100:3100"

@@ -334,7 +334,7 @@ infra:
     inCluster: true
     # Maintained third-party MinIO build (the upstream images were withdrawn). Non-root (65532),
     # distroless. Pinned by immutable digest; the tag is kept for readability.
-    image: cgr.dev/chainguard/minio:latest@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
+    image: cgr.dev/chainguard/minio:latest@sha256:73297936408b731668ca0e835ac9add1a35cb6026a125c2f0cd476d9ef48222c
     apiPort: 9000
     consolePort: 9001
     storage: 20Gi
@@ -361,7 +361,7 @@ objectStore:
   buckets:
     sparkCheckpoint: spark-checkpoints
   # mc image for the bootstrap Job. The -dev variant carries the shell the script needs.
-  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:cd7f5d19d115615d809f27343b1e5cfbdc84f38e1c9a29475535b74ec5bade50
+  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:3f349bd07076e8e4040dc5c32598b632268accba8ac7f460cb077670ee2e3407
 
 # ---------------------------------------------------------------------------
 # Logical database backups (tier-1 DR) — a CronJob dumps each database to S3/MinIO
@@ -481,7 +481,7 @@ observability:
       port: 9187
     redis:
       enabled: true
-      image: oliver006/redis_exporter:v1.93.0@sha256:6ca518a72f30f7f576ef92963de1b91d3c3f5fd3aeac949f878bfda183587820
+      image: oliver006/redis_exporter:v1.95.0@sha256:afb21407aba3df1b4010899f155fc6b1ba2026c97b725d72aca4019d772e7b6b
       port: 9121
     kafka:
       enabled: true
