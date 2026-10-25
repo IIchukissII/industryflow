@@ -3,10 +3,15 @@
 {{- if .Values.observability.prometheusRules.enabled }}
 {{- $pr := .Values.observability.prometheusRules }}
 {{- /*
-  Platform alert rules. Deliberately built on metrics that always exist — `up` (every scraped
-  target) and the exporters' own up/lag series — rather than app-specific metric names, so the
-  rules stay valid as services come and go. Requires the Prometheus Operator CRDs.
+  Platform alert rules. The platform group is single-sourced (ADR-0016 dec 1) from
+  infrastructure/prometheus/rules/platform.yml through the files/prometheus-rules.yml symlink, the
+  file Compose's Prometheus loads; its selectors match the platform="industryflow" label the
+  ServiceMonitors attach. The Kubernetes group holds the rules on kube-state-metrics series, which
+  exist only here. Requires the Prometheus Operator CRDs.
 */}}
+{{- $mtls := and .Values.ingress.enabled .Values.ingress.mtls.enabled }}
+{{- $crl := and $mtls .Values.ingress.mtls.crlCheck.enabled }}
+{{- $cert := and $mtls .Values.ingress.mtls.certCheck.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -18,51 +23,11 @@ metadata:
     {{- end }}
 spec:
   groups:
-    - name: industryflow.platform
+    {{- (.Files.Get "files/prometheus-rules.yml" | fromYaml).groups | toYaml | nindent 4 }}
+    {{- if or $crl $cert }}
+    - name: industryflow.kubernetes
       rules:
-        - alert: IndustryFlowTargetDown
-          expr: up{job=~".*industryflow.*"} == 0
-          for: {{ $pr.targetDownFor }}
-          labels:
-            severity: critical
-          annotations:
-            summary: "Scrape target down"
-            description: "{{`{{ $labels.job }}/{{ $labels.instance }}`}} has been unreachable for {{ $pr.targetDownFor }}."
-        - alert: IndustryFlowPostgresDown
-          expr: pg_up == 0
-          for: {{ $pr.targetDownFor }}
-          labels:
-            severity: critical
-          annotations:
-            summary: "TimescaleDB exporter reports the database down"
-            description: "pg_up == 0 (postgres-exporter cannot reach TimescaleDB)."
-        - alert: IndustryFlowRedisDown
-          expr: redis_up == 0
-          for: {{ $pr.targetDownFor }}
-          labels:
-            severity: warning
-          annotations:
-            summary: "Redis is down"
-            description: "redis_up == 0 (redis-exporter cannot reach Redis)."
-        - alert: IndustryFlowKafkaConsumerLag
-          expr: kafka_consumergroup_lag > {{ $pr.kafkaConsumerLagThreshold }}
-          for: {{ $pr.kafkaConsumerLagFor }}
-          labels:
-            severity: warning
-          annotations:
-            summary: "Kafka consumer lag is high"
-            description: "Consumer group {{`{{ $labels.consumergroup }}`}} lag on {{`{{ $labels.topic }}`}} exceeds {{ $pr.kafkaConsumerLagThreshold }}."
-        # ADR-0005: a reading that could not be processed is dead-lettered, never dropped, but a
-        # dead letter nobody looks at is a drop with extra steps. The DLQ topic's offset growth is
-        # the count of dead-lettered readings (the kafka exporter publishes it for every topic).
-        - alert: IndustryFlowDeadLetteredReadings
-          expr: sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".+\\.dlq"}[{{ $pr.deadLetterWindow }}])) > 0
-          labels:
-            severity: warning
-          annotations:
-            summary: "Readings were dead-lettered"
-            description: "{{`{{ $value | humanize }}`}} message(s) reached {{`{{ $labels.topic }}`}} in the last {{ $pr.deadLetterWindow }}. Inspect them there; they raised no alert."
-        {{- if and .Values.ingress.enabled .Values.ingress.mtls.enabled .Values.ingress.mtls.crlCheck.enabled }}
+        {{- if $crl }}
         # ADR-0007 dec 8, 10: an expired device CRL or CA certificate makes the edge refuse every
         # device. Raised from the device-crl-check job no longer succeeding (kube-state-metrics),
         # well before either expires. Keyed on the last SUCCESS, so it clears on the first good run after a refresh.
@@ -74,7 +39,7 @@ spec:
             summary: "Device CRL or CA certificate is close to expiry"
             description: "The device-crl-check job log names it. Refresh the CRL in the {{ .Values.ingress.mtls.caSecret }} Secret, or replace the CA certificate (docs/operations/device-mtls.md). Once either expires, every device is refused at ingestion."
         {{- end }}
-        {{- if and .Values.ingress.enabled .Values.ingress.mtls.enabled .Values.ingress.mtls.certCheck.enabled }}
+        {{- if $cert }}
         # ADR-0007 dec 10: a device whose newest unrevoked certificate nears expiry owes a renewal.
         # One device, not the fleet, so a warning; keyed on the last success like the CRL rule.
         - alert: IndustryFlowDeviceCertExpiring
@@ -85,4 +50,5 @@ spec:
             summary: "A device certificate is close to expiry"
             description: "The device-cert-check job log names the device. Renew it (docs/operations/device-mtls.md) and republish the CRL and register to the {{ .Values.ingress.mtls.caSecret }} Secret; an expired certificate is refused at ingestion."
         {{- end }}
+    {{- end }}
 {{- end }}

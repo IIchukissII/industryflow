@@ -69,18 +69,50 @@ jobs:
         if: failure()
         run: docker logs minio
 
+  # The platform alert rules (ADR-0016 dec 1), checked by the pinned Prometheus and Alertmanager both
+  # deployments run: the rules' unit tests (a dead letter raises the alert, including a topic's first
+  # letter; another stack's series do not), Compose's Prometheus config with the rules resolved as
+  # it mounts them, and the shipped Alertmanager config.
+  alert-rules:
+    name: alert-rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROMETHEUS_IMAGE: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+      ALERTMANAGER_IMAGE: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rule unit tests
+        run: |
+          docker run --rm --network none -v "$PWD/infrastructure/prometheus:/p:ro" -w /p/rules/tests \
+            --entrypoint promtool "$PROMETHEUS_IMAGE" test rules platform_test.yml
+      - name: Compose's Prometheus config, rules included
+        run: |
+          docker run --rm --network none \
+            -v "$PWD/infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            -v "$PWD/infrastructure/prometheus/rules:/etc/prometheus/rules:ro" \
+            --entrypoint promtool "$PROMETHEUS_IMAGE" check config /etc/prometheus/prometheus.yml
+      - name: Shipped Alertmanager config
+        run: |
+          docker run --rm --network none -v "$PWD/infrastructure/alertmanager:/a:ro" \
+            --entrypoint amtool "$ALERTMANAGER_IMAGE" check-config /a/alertmanager.yml
+
   # Stable aggregate status for branch protection, matching the other workflows' gates. No path
   # filter here, so both jobs always run and the gate passes only when both did.
   config-guards-gate:
     name: config-guards-gate
-    needs: [config-guards, object-store-principals]
+    needs: [config-guards, object-store-principals, alert-rules]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Gate
+        # Every job in `needs`, read from the context itself, so a job added there cannot be left
+        # out of the check.
+        env:
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          echo "config-guards=${{ needs.config-guards.result }} object-store-principals=${{ needs.object-store-principals.result }}"
-          if [ "${{ needs.config-guards.result }}" != "success" ] || [ "${{ needs.object-store-principals.result }}" != "success" ]; then
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key)=\(.value.result)"'
+          if echo "$NEEDS" | jq -e 'to_entries | map(select(.value.result != "success")) | length > 0' >/dev/null; then
             echo "::error::a configuration guard failed"; exit 1
           fi

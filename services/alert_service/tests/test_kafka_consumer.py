@@ -158,7 +158,8 @@ def test_malformed_record_is_dead_lettered_and_the_batch_still_commits(tmp_path,
     _run(c)
     assert [t for t, _ in c.producer.sent] == ["sensor-data-raw.dlq"]
     dead = c.producer.sent[0][1]
-    assert dead["offset"] == 0 and dead["original"] == "{not json" and "JSON" in dead["error"]
+    assert dead["offset"] == 0 and dead["original"] == "{not json" and "JSON" in dead["reason"]
+    assert dead["consumer"] == "alert-service-detector"
     assert len(engine.seen) == 1
     assert c.consumer.commits == [{TP: 2}]
 
@@ -168,7 +169,7 @@ def test_reading_without_company_id_is_dead_lettered_not_silently_committed(tmp_
     c = _consumer([[_record(0, {"sensor_id": SENSOR, "value": 1.0})]], engine, tmp_path)
     _run(c)
     assert len(c.producer.sent) == 1
-    assert "company_id" in c.producer.sent[0][1]["error"]
+    assert "company_id" in c.producer.sent[0][1]["reason"]
     assert engine.seen == []
     assert c.consumer.commits == [{TP: 1}]
 
@@ -187,7 +188,7 @@ def test_unknown_error_is_retried_then_dead_lettered(tmp_path, sleeps):
     c = _consumer([[_record(0, _reading())]], engine, tmp_path)
     _run(c)
     assert len(c.producer.sent) == 1
-    assert "retries exhausted" in c.producer.sent[0][1]["error"]
+    assert "retries exhausted" in c.producer.sent[0][1]["reason"]
     assert sleeps == [1.0, 2.0]
     assert c.consumer.commits == [{TP: 1}]
 

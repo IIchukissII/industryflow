@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Alertmanager for the platform alert rules (ADR-0016 dec 4). Receivers are the operator's: as
+# shipped, alerts are grouped and held, visible in the Alertmanager UI and Prometheus, and sent
+# nowhere. To notify, point ALERTMANAGER_CONFIG at a copy of this file with a receiver configured
+# (docs/operations/monitoring.md#alert-delivery).
+route:
+  receiver: operator
+  group_by: [alertname, topic]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: operator
