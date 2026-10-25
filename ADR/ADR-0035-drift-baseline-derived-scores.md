@@ -8,8 +8,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Proposed
 - **Date:** 2026-10-25
 - **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring.md)
-- **Related:** [ADR-0021](ADR-0021-model-drift-monitoring.md) (dec 4 withdrawn on acceptance, replaced
-  here), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (the declared detector that
+- **Related:** [ADR-0021](ADR-0021-model-drift-monitoring.md) (dec 4: the baseline decision this
+  replaces), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (the declared detector that
   scores), [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (dec 6: the deployment gate),
   [ADR-0030](ADR-0030-externally-authored-model-admission.md) (dec 7: uploads scored at that gate; dec 8:
   a declared baseline or visibly un-monitorable)
@@ -55,7 +55,7 @@ judges any other model declaratively, without loading it (ADR-0027 dec 6).
 
 | Dec | Rejected alternative | Why rejected |
 |---|---|---|
-| 1 | The supplier provides the score column with the sample (ADR-0021 dec 4 as accepted) | The platform can check only a range, which cannot tell the declared detector's scores from another quantity on the same scale |
+| 1 | The supplier provides the score column with the sample | The platform can check only a range, which cannot tell the declared detector's scores from another quantity on the same scale |
 | 1 | The platform capturing the reference profile itself at training time | The platform has no training flow of its own; whoever trains the model supplies its sample |
 | 1 | Deriving the feature sample from stored history when none is supplied | Stored history may be compacted and is not what the model learned from |
 | 1 | Raw training rows as the sample | Unbounded in size for a baseline that a sample represents |
