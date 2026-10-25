@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR-0035 — Drift baseline: a supplied feature sample, scores derived by the platform
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-25
 - **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring.md)
 - **Related:** [ADR-0021](ADR-0021-model-drift-monitoring.md) (dec 4: the baseline decision this

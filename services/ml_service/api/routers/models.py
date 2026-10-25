@@ -444,7 +444,7 @@ async def create_model(
         )
 
     # A reference profile's prediction column is a baseline only if it holds the declared detector's
-    # scores on their scale (ADR-0021 dec 4). One that does not would raise prediction drift on
+    # scores on their scale (ADR-0021 dec 1). One that does not would raise prediction drift on
     # a model that has not moved, so it is refused here rather than stored and found out later.
     if payload.get("reference_profile"):
         refusal = prediction_column_refusal(payload["reference_profile"])

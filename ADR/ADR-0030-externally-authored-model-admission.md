@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-07-16; changed 2026-10-17
 - **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the artifact declares; the serving environment satisfies or refuses)
-- **Related:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (sole writer of the artifact store), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (declared semantics), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability audiences), [ADR-0021](ADR-0021-model-drift-monitoring.md) (training baseline), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the public edge)
+- **Related:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (sole writer of the artifact store), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (declared semantics), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability audiences), [ADR-0035](ADR-0035-drift-baseline-derived-scores.md) (the declared baseline, dec 8), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the public edge)
 
 ## Context
 
