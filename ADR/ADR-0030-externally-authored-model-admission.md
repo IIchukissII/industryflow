@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0030 — Admission of externally-authored models
 
 - **Status:** Accepted
-- **Date:** 2026-07-16; changed 2026-10-17
+- **Date:** 2026-07-16; changed 2026-10-25
 - **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the artifact declares; the serving environment satisfies or refuses)
 - **Related:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (sole writer of the artifact store), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (declared semantics), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability audiences), [ADR-0035](ADR-0035-drift-baseline-derived-scores.md) (the declared baseline, dec 8), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the public edge)
 
@@ -41,8 +41,8 @@ artifact that runs author code on load would grant code execution on the trusted
 8. **Provenance is a first-class fact, never synthesised to look internal.** An upload is admitted only
    at one upload under the caller's tenant's uploads area, checked at registration, deployment and every
    load, and carries a declared baseline or is visibly un-monitorable.
-9. **This record admits no flavor outside ADR-0027's supported set.** The out-of-process boundary stays
-   ADR-0028 dec 7's.
+9. **This record admits no flavor outside ADR-0027's supported set.** A runtime that serves a framework
+   out of process widens that set by ADR-0036, not here.
 10. **The upload plane is reachable through the one public edge, and bytes go client to store under a
     single-object presigned write scoped to a staging area outside every tenant namespace.** The edge
     serves plane and staging by sub-path on the app's own origin, so the store has no cross-origin policy.

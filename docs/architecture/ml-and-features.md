@@ -14,6 +14,7 @@ Feature configurations, the model registry, inference, detectors and drift in `m
 | Window baselines read from the Spark aggregates; neutral value on a missing baseline | [ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md) |
 | Stateful-feature kill-switch | [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md) |
 | Artifact formats, supported flavor set, skops trust by provenance | [ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) |
+| Out-of-process runtime for torch/GPU (not built) | [ADR-0036](../../ADR/ADR-0036-out-of-process-model-runtime.md) |
 | Score semantics declared, never inferred; detector recorded at registration | [ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) |
 | Model tracking and registry per tenant | [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md), [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md) |
 | Drift monitoring | [ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md); baseline [ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md) |
@@ -94,6 +95,10 @@ Stateful transforms read their baseline window from `params.granularity` (defaul
 | `direct` | direct 0–1 score | `mlflow.sklearn`, `mlflow.xgboost` | Model output; outside 0–1 is refused |
 | `outlier` | outlier score | `mlflow.sklearn` | `decision_function` |
 | `autoencoder` | reconstruction error | `mlflow.sklearn`, `mlflow.pyfunc` | Reconstruction distance |
+
+Every detector runs in-process. Frameworks the serving image does not carry (torch, GPU) are refused at
+the gate; serving them in a separate runtime from an ONNX export is accepted but not built
+([ADR-0036](../../ADR/ADR-0036-out-of-process-model-runtime.md)).
 
 ## Model record (`ml_models`)
 
