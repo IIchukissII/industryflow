@@ -16,7 +16,7 @@ Feature configurations, the model registry, inference, detectors and drift in `m
 | Artifact formats, supported flavor set, skops trust by provenance | [ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) |
 | Score semantics declared, never inferred; detector recorded at registration | [ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) |
 | Model tracking and registry per tenant | [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md), [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md) |
-| Drift monitoring | [ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md) |
+| Drift monitoring | [ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md); baseline [ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md) |
 | Operator feedback and retrain recommendation | [ADR-0022](../../ADR/ADR-0022-concept-drift-operator-feedback.md), [alerting](alerting.md) |
 | Externally-authored models | [ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md), [model upload](model-upload.md) |
 
@@ -122,11 +122,12 @@ Kernel-trained tree-based sklearn models need the skops grant at log time:
 
 | Item | Detail |
 |---|---|
-| Baseline | `ml_models.reference_profile`, supplied in the registration request (format: `drift/reference_profile.py`); no notebook-side helper emits it ([ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md) dec 4) |
+| Baseline | `ml_models.reference_profile`, supplied in the registration request (format: `drift/reference_profile.py`); no notebook-side helper emits it ([ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md)) |
 | Current window | Trailing window of the tenant's data, aligned to instants where every compared sensor reported |
 | Engine | `evidently` |
 | Output | Data drift (drifted-feature share) and prediction drift; `prediction_drift_reason` when prediction drift cannot be computed |
-| Prediction column | Must hold 0–1 detector scores; anything else is refused at registration |
+| Prediction column | Supplied with the sample; must hold 0–1 detector scores, anything else is refused at registration |
+| Not built ([ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md)) | Scores derived from the sample through the declared detector at the deployment gate; the sample checked against the bound feature configuration; a sample in the upload wizard |
 | Caller | `alert-service-detector` `statistical` rules ([alerting](alerting.md)) |
 
 Model training is manual, in notebooks ([notebooks](notebooks.md)); no training service exists.

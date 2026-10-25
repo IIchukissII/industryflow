@@ -164,7 +164,7 @@ def compute_drift(
             are not row-aligned.
 
     A prediction column that does not hold detector scores on the declared scale is not a
-    baseline (ADR-0021 dec 4): prediction drift is then refused — ``prediction_drift`` is
+    baseline (ADR-0021 dec 1): prediction drift is then refused — ``prediction_drift`` is
     ``None`` and ``prediction_drift_reason`` says why — and data drift, which compares inputs, is
     still reported.
     """
