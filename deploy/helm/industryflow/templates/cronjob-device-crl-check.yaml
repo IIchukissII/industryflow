@@ -4,10 +4,10 @@
 {{- $c := .Values.ingress.mtls.crlCheck }}
 {{- /*
   Device-CRL freshness watch (ADR-0007 dec 8). The ingress controller refuses EVERY device once a
-  CRL in the device-CA Secret expires. In a cluster the CRL is refreshed out of band (the issuing
-  key does not live in the cluster), so the chart only watches its age: this job fails when
-  either CRL is inside its warning window, and the IndustryFlowDeviceCrlStale rule raises the
-  failure. It reads only the public CA chain and CRL; it holds no key.
+  CRL in the device-CA Secret expires, or a CA certificate of its chain (dec 10). In a cluster the
+  CRL is refreshed out of band (the issuing key does not live in the cluster), so the chart only
+  watches its age: this job fails when either CRL or a CA certificate is inside its warning window,
+  and the IndustryFlowDeviceCrlStale rule raises the failure. It reads only the public CA chain and CRL; it holds no key.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -64,6 +64,8 @@ spec:
                   value: {{ $c.warnDays | quote }}
                 - name: ROOT_CRL_WARN_DAYS
                   value: {{ $c.rootWarnDays | quote }}
+                - name: CA_CERT_WARN_DAYS
+                  value: {{ $c.caCertWarnDays | quote }}
               {{- if .Values.securityContext.enabled }}
               securityContext:
                 allowPrivilegeEscalation: false

@@ -154,3 +154,94 @@ def test_unsafe_device_id_is_refused(ca, device):
     _, run = ca
     r = run("issue", str(uuid.uuid4()), device, check=False)
     assert r.returncode != 0
+
+
+@pytest.fixture
+def fresh_ca(tmp_path):
+    def run(*args, check=True, **env):
+        return subprocess.run(
+            ["sh", str(SCRIPT), *args],
+            env={**os.environ, "DEVICE_CA_DIR": str(tmp_path), **env},
+            capture_output=True,
+            text=True,
+            check=check,
+        )
+
+    run("init")
+    return tmp_path, run
+
+
+def test_check_certs_raises_a_device_whose_renewal_is_owed(fresh_ca):
+    # ADR-0007 dec 5: the check fails on a device's NEWEST unrevoked certificate only. A device
+    # renewed in time, or revoked, is not owed anything.
+    root, run = fresh_ca
+    tenant = str(uuid.uuid4())
+    run("issue", tenant, "owed", DEVICE_DAYS="5")
+    run("issue", tenant, "renewed", DEVICE_DAYS="5")
+    run("issue", tenant, "renewed")
+    run("issue", tenant, "revoked", DEVICE_DAYS="5")
+    run("revoke", tenant, "revoked")
+    run("issue", tenant, "fine")
+
+    r = run("check-certs", check=False)
+    assert r.returncode == 1
+    assert f"EXPIRING: device {tenant}/owed " in r.stderr
+    for device in ("renewed", "revoked", "fine"):
+        assert f"/{device} " not in r.stderr + r.stdout
+    assert "ok: 2 device(s) valid beyond 14d" in r.stdout
+
+    run("issue", tenant, "owed")
+    assert run("check-certs").returncode == 0
+
+
+def test_check_certs_reports_an_expired_device_without_failing(fresh_ca):
+    # The edge already refuses it; revocation is what decommissions it.
+    root, run = fresh_ca
+    tenant = str(uuid.uuid4())
+    serial = _serial(run("issue", tenant, "gone").stdout)
+    index = root / "intermediate" / "index.txt"
+    rows = [line.split("\t") for line in index.read_text().splitlines()]
+    for row in rows:
+        if row[3] == serial:
+            row[1] = "200101000000Z"
+    index.write_text("".join("\t".join(row) + "\n" for row in rows))
+    run("crl")
+
+    r = run("check-certs")
+    assert f"expired: device {tenant}/gone (2020-01-01 00:00:00 UTC)" in r.stdout
+
+
+def test_check_certs_refuses_a_register_it_cannot_trust(fresh_ca):
+    root, run = fresh_ca
+    run("issue", str(uuid.uuid4()), "gw-1", DEVICE_DAYS="5")
+    reg = root / "crl" / "issued.tsv"
+    signed = reg.read_bytes()
+
+    # Hiding the expiring device breaks the signature.
+    reg.write_text("\n".join(reg.read_text().splitlines()[:2]) + "\n")
+    r = run("check-certs", check=False)
+    assert r.returncode != 0
+    assert "signature does not verify" in r.stderr
+
+    # A genuine but older register does not describe the published CRL.
+    sig = reg.with_name("issued.tsv.sig")
+    old_sig = sig.read_bytes()
+    run("crl")
+    reg.write_bytes(signed)
+    sig.write_bytes(old_sig)
+    r = run("check-certs", check=False)
+    assert r.returncode != 0
+    assert "republish both together" in r.stderr
+
+
+def test_check_raises_a_ca_certificate_close_to_expiry(tmp_path):
+    # An expiring intermediate refuses every device, like an expired CRL.
+    env = {**os.environ, "DEVICE_CA_DIR": str(tmp_path)}
+    subprocess.run(["sh", str(SCRIPT), "init"], env={**env, "INT_DAYS": "30"},
+                   capture_output=True, check=True)
+    r = subprocess.run(["sh", str(SCRIPT), "check"], env=env, capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "STALE: CA certificate CN=IndustryFlow Device Issuing CA" in r.stderr
+    ok = subprocess.run(["sh", str(SCRIPT), "check"], env={**env, "CA_CERT_WARN_DAYS": "7"},
+                        capture_output=True, text=True)
+    assert ok.returncode == 0, ok.stderr
