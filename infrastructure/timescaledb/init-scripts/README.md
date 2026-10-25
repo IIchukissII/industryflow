@@ -3,20 +3,44 @@ SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# TimescaleDB init scripts
+# TimescaleDB schema scripts
 
-Initialisation of the `industryflow` and `mlflow` databases: scripts, roles and manual operations.
+The platform schema sequence for the `industryflow` and `mlflow` databases, the runner that applies it,
+the roles it creates and their operations ([ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md)).
 The tables they create: [data and storage](../../../docs/architecture/data-and-storage.md#tables).
-Applying changes to a live database: [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md).
 
 ## Execution
 
-| Deployment | Mount | Runs |
-|---|---|---|
-| Compose | `/docker-entrypoint-initdb.d` | In filename order, on an empty data volume only |
-| Helm | `/docker-entrypoint-initdb.d` via the `<release>-db-init` ConfigMap (`files/db-init` symlink) | Same |
+`../migrate.sh` is the only applier, on an empty and a live database alike. It applies every pending
+script in filename order and records each in `public.schema_ledger`.
 
-On an existing database a new or changed script is applied by hand ([manual operations](#manual-operations)).
+| Deployment | Runner | Clients wait by |
+|---|---|---|
+| Compose | `db-migrate` one-shot service, on every `up` | `depends_on: db-migrate: service_completed_successfully` (all but `db-backup`) |
+| Helm | `<release>-db-migrate-<revision>` Job, on every install and upgrade; scripts from the `<release>-db-migrations` ConfigMap (`files/db-migrations`, `files/migrate.sh` symlinks) | `schema-ready` init container: `migrate.sh verify --wait` as the client's own role |
+
+| Kind (header `-- migration-kind:` / `# migration-kind:`) | Applied | When its digest changes |
+|---|---|---|
+| `migration` | Once | Refused: a migration is never edited after release; add a new script |
+| `definition` (provisioning, the functions it calls, the roles list) | Once, and again on change | Re-applied |
+
+A script without a kind is refused. A database with no ledger (initialised before the runner) applies
+every script once. Every script is idempotent.
+
+| Runner command | Effect |
+|---|---|
+| `migrate.sh apply` | Apply pending scripts under an advisory lock; non-zero on a refused or failing script |
+| `migrate.sh verify [--wait]` | Read-only: `0` current, `1` pending, `2` refused; `--wait` retries for `MIGRATE_WAIT_SECONDS` |
+| `migrate.sh status` | Print each script's action, kind and name |
+| `migrate.sh reapply <definition>...` | Apply named definitions again although unchanged, then anything pending |
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGSSLMODE`, `PGSSLROOTCERT` | libpq | Connection; `apply` needs the database owner |
+| `PGDATABASE` | `industryflow` | Database holding the ledger |
+| `MIGRATIONS_DIR` | `/migrations` | Directory of numbered scripts |
+| `MIGRATE_WAIT_SECONDS` | `300` | How long `apply` waits for the database and `verify --wait` for a current ledger |
+| `*_DB_PASSWORD` | | Role passwords read by `00-create-roles.sh` and `13-notebook-sql-proxy-role.sh` ([roles](#roles)) |
 
 ## Scripts
 
@@ -50,10 +74,10 @@ On an existing database a new or changed script is applied by hand ([manual oper
 | `25-company-deletion.sql` | `companies.suspended_at`, `deleted_at`; `company_lifecycle_events`, `record_company_lifecycle()`; `company_deletions`, `company_deletion_steps`, `request_company_deletion()`, `company_deletion_wait()` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 | `26-company-deletion-job.sql` | `company_deletion_required_stores()`, `pending_company_deletions()`, `company_deletion_user_ids()`, `record_company_deletion_step()`, `complete_company_deletion()` (drops the tenant's schema, roles, users and export rows; tombstone); EXECUTE for `tenant_delete_user` only | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 | `27-notebook-volume-reclaim.sql` | `pending_notebook_volume_reclaims()` (pending deletions whose volumes are not recorded, with their users), `record_notebook_volumes_reclaimed()` (records `notebook_volumes` only); EXECUTE for `notebook_hub_reclaim_user` only | [ADR-0020](../../../ADR/ADR-0020-notebook-per-user-persistence.md) |
+| `28-schema-ledger-read.sql` | `SELECT` on `public.schema_ledger` for the service roles (the `schema-ready` check) | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
 
 `create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22 and 23.
-Scripts 06 and later are idempotent; the per-tenant ones also apply themselves to every existing
-tenant schema.
+The per-tenant definitions also apply themselves to every existing tenant schema (ADR-0034 dec 3).
 
 ## Roles
 
@@ -92,7 +116,10 @@ Ingestion has no database role. `tests/config_guards/test_db_connection_budget.p
 
 | Task | Command |
 |---|---|
-| Apply a SQL script to an existing database | `psql -v ON_ERROR_STOP=1 -U postgres -d industryflow -f <script>.sql` |
+| Apply pending scripts (Compose) | `docker compose up db-migrate` |
+| Show the plan (Compose) | `docker compose run --rm db-migrate status` |
+| Create an optional role whose password was set after its script ran (Compose) | `docker compose run --rm db-migrate reapply 00-create-roles.sh 13-notebook-sql-proxy-role.sh 28-schema-ledger-read.sql` |
+| Read the ledger | `SELECT script, kind, applied_at FROM public.schema_ledger ORDER BY script;` |
 | Deactivate a tenant in SQL | `SELECT update_company('<company-id>', NULL, false);` then, in a new transaction, `SELECT end_suspended_tenant_sql_sessions('<company-id>');` |
 | List tenant schemas | `SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'tenant_%';` |
 | Check a role's grants in a tenant | `SELECT table_name, privilege_type FROM information_schema.table_privileges WHERE table_schema = 'tenant_<uuid>' AND grantee = '<role>';` |
@@ -104,7 +131,9 @@ Provisioning and deactivating tenants through the API or script:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `permission denied for table …` in a tenant created before a grant script | Grant backfill not applied | Re-apply the script that adds the grant (08, 10, 15, 16) |
-| `column "…" does not exist` on `ml_models` | Column migration not applied to that schema | Re-apply 06, 14, 18, 19 or 20, or `SELECT add_<…>_to_ml_models('tenant_<uuid>');` |
-| `column s.display_name does not exist` | 22 not applied to that schema | Re-apply 22, or `SELECT add_display_name_column_to_sensors('tenant_<uuid>');` |
-| Changed init script has no effect | Init scripts run on an empty data volume only | Apply the script by hand |
+| `migrate: refused <script>: migration changed after it was applied` | A released migration was edited | Revert the edit; put the change in a new numbered script |
+| `migrate: refused <script>: no migration-kind header` | New script without a kind | Add `-- migration-kind: migration` or `definition` |
+| A service never starts; `schema-ready` logs `waiting for N pending script(s)` | The `db-migrate` Job failed or has not run | `kubectl logs job/<release>-db-migrate-<revision>` |
+| Clients do not start; `db-migrate` exited non-zero | A script failed | `docker compose logs db-migrate`; fix the script, `docker compose up db-migrate` |
+| `migrate: cannot read the ledger` from `verify` | The role lacks `SELECT` on the ledger | `reapply 28-schema-ledger-read.sql` |
+| An optional role is missing although its password is set | Its script ran before the password was set | `reapply` the role script ([manual operations](#manual-operations)) |

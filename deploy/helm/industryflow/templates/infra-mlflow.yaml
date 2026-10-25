@@ -46,6 +46,9 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       {{- end }}
+      {{- /* ADR-0034 dec 10: its database and role exist once the runner has created them. */}}
+      initContainers:
+        {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" . "user" .Values.config.MLFLOW_DB_USER "workload" "mlflow" "passwordKey" "MLFLOW_DB_PASSWORD" "database" "mlflow") | nindent 8 }}
       containers:
         - name: mlflow
           image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.infra.mlflow.image "tag" .Values.image.tag "digest" .Values.infra.mlflow.digest) | quote }}
@@ -133,13 +136,14 @@ spec:
               subPath: ca.crt
               readOnly: true
           {{- end }}
-      {{- if .Values.tls.db.enabled }}
       volumes:
+        {{- include "industryflow.schemaReadyVolumes" . | nindent 8 }}
+        {{- if .Values.tls.db.enabled }}
         - name: db-ca
           secret:
             secretName: {{ .Values.tls.db.secretName | quote }}
             items:
               - key: ca.crt
                 path: ca.crt
-      {{- end }}
+        {{- end }}
 {{- end }}

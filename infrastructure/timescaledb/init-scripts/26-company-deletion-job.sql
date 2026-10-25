@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- The tenant-delete job's database interface (ADR-0033 dec 4, 8)
 -- Purpose: The job removes a requested tenant from every store, one store at a time, and records
 --          each removal so a crashed run resumes where it stopped. Which stores a deletion must

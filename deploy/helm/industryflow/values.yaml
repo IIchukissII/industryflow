@@ -560,6 +560,17 @@ config:
 # scoped Secret per workload containing only the keys that workload needs
 # (apps.<name>.secretKeys / infra), so no pod receives the full bundle.
 # ---------------------------------------------------------------------------
+# Platform schema migrations (ADR-0034 dec 4, 7-10): the db-migrate Job applies the pending
+# scripts on every install and upgrade; each database client's schema-ready init container waits
+# up to waitSeconds for the ledger to be current before its service starts.
+dbMigrations:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  waitSeconds: 600
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
 secrets:
   create: true
   existingSecret: ""

@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- /*
+  The platform schema sequence and its runner (ADR-0034 dec 4, 7-10), from the canonical
+  infrastructure/timescaledb/init-scripts and migrate.sh via the files/ symlinks (one source with
+  the Compose path; Helm follows symlinks when loading the chart). The db-migrate Job applies it;
+  every database client's schema-ready init container verifies the ledger against it. Rendered
+  for an in-cluster and an external database alike. README.md is excluded.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "industryflow.fullname" . }}-db-migrations
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: db-migrate
+data:
+  migrate.sh: |
+{{ .Files.Get "files/migrate.sh" | indent 4 }}
+{{- $root := . }}
+{{- range $path, $_ := .Files.Glob "files/db-migrations/*.sql" }}
+  {{ base $path }}: |
+{{ $root.Files.Get $path | indent 4 }}
+{{- end }}
+{{- range $path, $_ := .Files.Glob "files/db-migrations/*.sh" }}
+  {{ base $path }}: |
+{{ $root.Files.Get $path | indent 4 }}
+{{- end }}

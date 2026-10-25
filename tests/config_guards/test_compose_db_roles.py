@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The compose side of the database roles: every role password an init script reads is passed to
-the database and templated in .env.example, the monitoring plane never logs in as the superuser
+the migration runner that applies the scripts (ADR-0034) and templated in .env.example, the monitoring plane never logs in as the superuser
 (ADR-0016 dec 3), and no shared dashboard can query tenant data (ADR-0016 dec 5)."""
 
 from __future__ import annotations
@@ -28,10 +28,16 @@ def _env_example() -> set[str]:
     return set(re.findall(r"^([A-Z0-9_]+)=", text, re.M))
 
 
-def test_every_role_password_reaches_the_database_container():
-    env = COMPOSE["timescaledb"]["environment"]
+def test_every_role_password_reaches_the_migration_runner():
+    env = COMPOSE["db-migrate"]["environment"]
     missing = _init_script_passwords() - set(env)
     assert not missing, f"init scripts read passwords compose never passes: {sorted(missing)}"
+
+
+def test_the_database_container_holds_no_role_password():
+    # The scripts run in db-migrate, not under the image's init hook; the server needs none of them.
+    held = {k for k in COMPOSE["timescaledb"]["environment"] if k.endswith("_DB_PASSWORD")}
+    assert not held, f"the database container still receives role passwords: {sorted(held)}"
 
 
 def test_every_role_password_is_templated_in_env_example():

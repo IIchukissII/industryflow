@@ -83,6 +83,6 @@ On an existing database ([init scripts](../../infrastructure/timescaledb/init-sc
 
 | Step | Command |
 |---|---|
-| Re-run the principals script (idempotent; removes tenant-reader memberships from `notebook_sql_proxy`, creates missing tenant logins) | `docker compose exec timescaledb bash /docker-entrypoint-initdb.d/13-notebook-sql-proxy-role.sh` |
+| Re-run the principals script (idempotent; removes tenant-reader memberships from `notebook_sql_proxy`, creates missing tenant logins) | `docker compose run --rm db-migrate reapply 13-notebook-sql-proxy-role.sh` |
 | Load the `+notebook_sql_tenants` rule in `pg_hba.conf` | `docker compose exec timescaledb psql -U <db-user> -d <db-name> -c 'SELECT pg_reload_conf()'` |
 | Set `NOTEBOOK_SQL_PROXY_TENANT_KEY` and recreate the proxy | each tenant login is enrolled on its first connection |

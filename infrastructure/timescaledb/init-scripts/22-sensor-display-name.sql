@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Sensor Display Name Migration (ADR-0034 dec 2-3)
 -- Purpose: An optional human label per sensor.
 --

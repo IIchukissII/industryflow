@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- ML Alert Integration Permissions Migration
 -- Version: 1.0
 -- Date: November 23, 2025

@@ -86,6 +86,39 @@ jobs:
           dev=deploy/device-ca/devices/00000000-0000-4000-8000-000000000001/smoke-device
           test -f "$dev/current.chain.crt" && test -f "$dev/current.key"
 
+      # ADR-0034 dec 6 (ADR-0026 dec 4): the platform database is seeded by the PREVIOUS release, from
+      # its own commit, with a tenant written through it, so the stack below upgrades real previous
+      # state rather than initialising an empty volume. The previous release keeps this run's .env, as
+      # an operator's does across an upgrade. A previous release without the runner initialised the
+      # database under the image's init hook and left no ledger, which is the first upgrade of every
+      # live database; one with the runner left its ledger, which is every upgrade after it.
+      - name: Seed the platform database at the PREVIOUS release (the upgrade path is what breaks)
+        env:
+          PREV: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$PREV"
+          git worktree add --detach "$RUNNER_TEMP/prev" "$PREV"
+          cp .env "$RUNNER_TEMP/prev/.env"
+          prev() { docker compose -p "$(basename "$PWD")" --project-directory "$RUNNER_TEMP/prev" -f "$RUNNER_TEMP/prev/docker-compose.yml" "$@"; }
+          services=timescaledb
+          prev config --services | grep -qx db-migrate && services="timescaledb db-migrate"
+          echo "previous release $PREV brings up: $services"
+          prev up -d --wait --wait-timeout 300 $services
+          if [ "$services" = timescaledb ]; then
+            # Under the init hook the server is "ready" on its socket while the scripts still run,
+            # then restarts; the scripts are done once the hook says so.
+            for i in $(seq 1 90); do
+              prev logs timescaledb 2>&1 | grep -q "PostgreSQL init process complete" && break; sleep 2
+            done
+            prev logs timescaledb 2>&1 | grep -q "PostgreSQL init process complete" \
+              || { echo "::error::the previous release never finished initialising"; prev logs timescaledb | tail -40; exit 1; }
+            until prev exec -T timescaledb pg_isready -q; do sleep 2; done
+          fi
+          prev exec -T timescaledb sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT company_id FROM public.provision_company('"'"'upgrade-seed'"'"')"'
+          prev exec -T timescaledb sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT coalesce(to_regclass('"'"'public.schema_ledger'"'"')::text, '"'"'no ledger'"'"')"'
+          # Stop the previous release and keep its volumes: the stack below starts on them.
+          prev down
+
       # ADR-0026 dec 4. Build the seed with the JupyterHub the hub is upgrading FROM, so the schema is
       # genuinely the old one rather than something we assert is old. `new_session_factory` creates the
       # tables and stamps alembic at that version's head — an empty database with a real previous-major schema.
@@ -189,6 +222,18 @@ jobs:
             fi
           done < /tmp/after.txt
           exit $rc
+
+      - name: The runner upgraded the seeded database and the ledger is current
+        run: |
+          docker compose logs db-migrate 2>&1 | tail -5
+          docker compose logs db-migrate 2>&1 | grep -q "ledger current" \
+            || { echo "::error::db-migrate did not report a current ledger"; exit 1; }
+          docker compose run --rm db-migrate verify \
+            || { echo "::error::the ledger is behind after the upgrade"; exit 1; }
+          seed=$(docker compose exec -T timescaledb sh -c \
+            'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM public.companies WHERE company_name = '"'"'upgrade-seed'"'"'"')
+          [ "$seed" = 1 ] || { echo "::error::the tenant the previous release wrote is gone"; exit 1; }
+          echo "OK    the previous release's tenant survived the upgrade; ledger current"
 
       - name: The hub migrated the seeded schema and is serving
         run: |

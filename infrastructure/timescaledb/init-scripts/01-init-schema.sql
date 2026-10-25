@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- IndustryFlow Public Schema
 -- Version: 5.0 - SCHEMA-PER-TENANT ARCHITECTURE
 -- Date: November 7, 2025
@@ -38,7 +40,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER companies_updated_at_trigger
+CREATE OR REPLACE TRIGGER companies_updated_at_trigger
     BEFORE UPDATE ON public.companies
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 

@@ -45,6 +45,8 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           {{- end }}
+          initContainers:
+            {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" . "user" "tenant_delete_user" "workload" "tenant-delete" "passwordKey" "TENANT_DELETE_DB_PASSWORD") | nindent 12 }}
           containers:
             - name: tenant-delete
               image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.tenantDelete.image "tag" .Values.image.tag "digest" .Values.tenantDelete.digest) | quote }}
@@ -142,8 +144,8 @@ spec:
                   readOnly: true
                 {{- end }}
               {{- end }}
-          {{- if or .Values.tls.db.enabled .Values.ingress.mtls.enabled }}
           volumes:
+            {{- include "industryflow.schemaReadyVolumes" . | nindent 12 }}
             {{- if .Values.tls.db.enabled }}
             - name: db-ca
               secret:
@@ -157,5 +159,4 @@ spec:
               secret:
                 secretName: {{ .Values.ingress.mtls.caSecret | quote }}
             {{- end }}
-          {{- end }}
 {{- end }}

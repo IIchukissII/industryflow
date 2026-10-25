@@ -52,8 +52,8 @@ jobs:
       - name: Provide compose env
         run: cp .env.example .env
 
-      - name: Start TimescaleDB + MinIO + Redis (init scripts create cold_export_user + drop fn)
-        run: docker compose up -d --wait timescaledb minio redis
+      - name: Start TimescaleDB + MinIO + Redis (db-migrate creates cold_export_user + drop fn)
+        run: docker compose up -d --wait timescaledb db-migrate minio redis
 
       - name: Provision cold bucket + scoped principals (write + read-only)
         run: docker compose up minio-init

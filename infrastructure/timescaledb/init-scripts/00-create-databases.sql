@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: migration
+
 -- IndustryFlow Database Initialization
 -- Version: 3.0 - New Architecture
 -- Date: November 7, 2025

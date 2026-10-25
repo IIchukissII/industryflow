@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Model Compatibility Status Migration (ADR-0027)
 -- Version: 1.0
 -- Date: July 14, 2026

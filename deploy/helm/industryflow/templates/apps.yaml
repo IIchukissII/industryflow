@@ -18,7 +18,8 @@
 {{- /* Apps that hold a DB role (a *_DB_PASSWORD secret key) talk to TimescaleDB and must mount
        the CA for verify-full (ADR-0017). ingestion (mTLS-only) and the frontend hold none. */}}
 {{- $usesDb := false }}
-{{- range $k := ($app.secretKeys | default list) }}{{- if hasSuffix "_DB_PASSWORD" $k }}{{- $usesDb = true }}{{- end }}{{- end }}
+{{- $dbKey := "" }}
+{{- range $k := ($app.secretKeys | default list) }}{{- if hasSuffix "_DB_PASSWORD" $k }}{{- $usesDb = true }}{{- $dbKey = $k }}{{- end }}{{- end }}
 {{- $dbCa := and $root.Values.tls.db.enabled $usesDb }}
 ---
 apiVersion: apps/v1
@@ -82,6 +83,13 @@ spec:
         fsGroup: {{ $app.fsGroup | default $sc.fsGroup }}
         seccompProfile:
           type: RuntimeDefault
+      {{- end }}
+      {{- if $usesDb }}
+      {{- /* ADR-0034 dec 10: start only once the ledger is current, checked as this app's own role
+             (<PREFIX>_DB_USER in config, <PREFIX>_DB_PASSWORD in its scoped Secret). */}}
+      {{- $dbUserKey := printf "%s_DB_USER" (trimSuffix "_DB_PASSWORD" $dbKey) }}
+      initContainers:
+        {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" $root "user" (required (printf "config.%s is required for apps.%s" $dbUserKey $name) (index $root.Values.config $dbUserKey)) "workload" $name "passwordKey" $dbKey) | nindent 8 }}
       {{- end }}
       containers:
         - name: {{ $name }}
@@ -180,8 +188,11 @@ spec:
               readOnly: true
             {{- end }}
           {{- end }}
-      {{- if or $hasPVC $writableMounts $dbCa }}
+      {{- if or $hasPVC $writableMounts $dbCa $usesDb }}
       volumes:
+        {{- if $usesDb }}
+        {{- include "industryflow.schemaReadyVolumes" $root | nindent 8 }}
+        {{- end }}
         {{- if $hasPVC }}
         - name: data
           persistentVolumeClaim:

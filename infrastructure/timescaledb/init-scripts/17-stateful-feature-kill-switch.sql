@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: migration
+
 -- Stateful-feature kill-switch (ADR-0024)
 -- Version: 1.0
 -- Date: July 12, 2026

@@ -12,7 +12,7 @@
 # Owners and privileges are restored as dumped: object owners (a SECURITY DEFINER function runs as
 # its owner; default privileges belong to the role that creates the objects), table, schema and
 # function grants, default privileges, and the database's own owner, grants and settings. So every
-# role the dump names must already exist — the init scripts create the service roles, the globals
+# role the dump names must already exist — the schema sequence creates the service roles, the globals
 # backup the runtime ones (tenant readers and logins). A dump naming a missing role is refused before
 # the target is touched. PGUSER must be a superuser: only a superuser can restore objects to other
 # owners.
