@@ -36,8 +36,12 @@ kernel ─▶ api-gateway data API      (X-IF-Capability, audience api)
        ─▶ notebook-cold-broker      (audience cold)     ─▶ pre-signed GETs under tenant_<uuid>/
 ```
 
-The frontend `/notebooks` page iframes `/jupyter/` (`services/frontend/src/pages/Notebooks.jsx`); the
-hub sends `Content-Security-Policy: frame-ancestors 'self'`.
+| Frontend page | Shows | Source |
+|---|---|---|
+| `/notebooks` | `/jupyter/` in an iframe: the role's profile ([profiles](#profiles)), so the `analytics` landing for every role not mapped to authoring | `services/frontend/src/pages/Notebooks.jsx` |
+| `/experiments` | The tenant's experiments and their runs (params, metrics, status, the registered model a run became), read-only, from `/api/experiments` | `services/frontend/src/pages/Experiments.jsx` |
+
+The hub sends `Content-Security-Policy: frame-ancestors 'self'`.
 
 ## Components
 
@@ -146,5 +150,4 @@ Proxy and gateway tests: their READMEs.
 | Item |
 |---|
 | Curated Voila dashboard content; locking the analytics server API to render-only |
-| `/analytics` and `/experiments` frontend pages |
 | A Kubernetes cluster run of the notebook hub |

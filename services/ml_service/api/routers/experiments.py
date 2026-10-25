@@ -4,14 +4,11 @@
 
 """
 Experiment/run read-path — the SESSION-authed, tenant-safe view of MLflow experiments and their runs
-for the frontend (ADR-0019).
+the frontend's experiments page reads (ADR-0019 dec 7).
 
-ADR-0019 records experiment/run browsing as owed: the read-path it needs was removed with the
-``/api/mlflow/*`` shim, which set a tenant ``search_path`` on MLflow's *shared* database — a no-op
-that returned every tenant's experiments. Nothing replaced it, so the browser has had no way to see
-experiments since. This router is that replacement, built on the same convention the tracking
-gateway already enforces for kernels: every experiment is stored as ``tenant_<uuid>.<name>``, listed
-behind a server-side prefix filter, and stripped to the plain name on the way out.
+It follows the convention the tracking gateway enforces for kernels: every experiment is stored as
+``tenant_<uuid>.<name>``, listed behind a server-side prefix filter, and stripped to the plain name on
+the way out.
 
 The tenant rule is applied twice on purpose. Listing filters by prefix in MLflow, and
 ``shape_experiment`` re-checks the prefix on every row it returns, so a filter that is wrong (or an

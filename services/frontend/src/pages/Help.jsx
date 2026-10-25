@@ -16,7 +16,7 @@ const SECTIONS = [
     lead: 'IndustryFlow shows your equipment’s live readings and gives you the tools to act on them. Everything you see belongs to your organization alone.',
     blocks: [
       { term: 'Signing in', def: 'Use the email and password your administrator set up. You stay signed in on this device until you sign out with the button beside your email at the bottom of the sidebar.' },
-      { term: 'Finding your way', def: 'The sidebar has three groups. The core holds the Core and Alerts: what is happening now. The ground holds Equipment and Notebooks: the machines and the work on their data. The watch holds Alert rules and Models: what decides when to raise an alert.' },
+      { term: 'Finding your way', def: 'The sidebar has three groups. The core holds the Core and Alerts: what is happening now. The ground holds Equipment, Notebooks and Experiments: the machines and the work on their data. The watch holds Alert rules and Models: what decides when to raise an alert.' },
       { term: 'Your role', def: 'Observers see everything but change nothing. Engineers also change equipment, alert rules and models, and handle alerts. Admins also manage the users of their organization. Your role is shown beneath your email.' },
     ],
     tip: 'Change your password under Settings.',
@@ -40,7 +40,7 @@ const SECTIONS = [
     blocks: [
       { term: 'Two kinds of notebook', def: 'Notebooks opens your workspace. Depending on your role, it opens either as finished notebooks run as interactive dashboards, or as a full JupyterLab for writing code. Your deployment decides which roles get which.' },
       { term: 'Reading your data', def: 'Inside a notebook, the built-in industryflow client reads your organization’s data with no credentials to manage. You can also run SQL; the connection is read-only and limited to your organization.' },
-      { term: 'Tracking experiments', def: 'Log runs, parameters and metrics with the standard MLflow client. It is already set up for your organization, so you only see your own experiments.' },
+      { term: 'Tracking experiments', def: 'Log runs, parameters and metrics with the standard MLflow client. It is already set up for your organization, so you only see your own experiments. Experiments lists them with each run\'s parameters and metrics, and the model a run became.' },
       { term: 'Registering models', def: 'Register a trained model to publish it. It appears on the Models page under the name you gave it.' },
       { term: 'The Models page', def: 'Your registry. Select a model to see its description, metrics and version history. Engineers and admins can also upload a model trained elsewhere and promote a model to production.' },
     ],
