@@ -96,7 +96,7 @@ def test_profile_is_json_round_trippable():
     assert json.loads(json.dumps(prof))["columns"] == ["a", "b"]
 
 
-# --- the prediction column holds detector scores on the declared scale (ADR-0021 dec 4) ----
+# --- the prediction column holds detector scores on the declared scale (ADR-0021 dec 1) ----
 
 @pytest.mark.parametrize("scores", [
     [-1.0, 1.0, 1.0],          # an IsolationForest's labels
