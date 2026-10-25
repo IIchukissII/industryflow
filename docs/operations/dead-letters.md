@@ -34,7 +34,8 @@ Letters expire with the topic's retention (broker default).
 `IndustryFlowDeadLetteredReadings` fires while a letter reached a dead-letter topic in the last 15m,
 including a topic's first letter, on Compose and Kubernetes
 ([`infrastructure/prometheus/rules/platform.yml`](../../infrastructure/prometheus/rules/platform.yml)).
-It clears 15m after the last letter. Replaying does not clear it: letters are never removed.
+It clears 15m after the last letter. Replaying does not clear it: letters are never removed. Letters
+that were already there when Prometheus started (or its data was reset) do not raise it.
 
 ## Commands
 

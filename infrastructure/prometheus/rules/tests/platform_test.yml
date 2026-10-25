@@ -39,6 +39,8 @@ tests:
   # A topic created by its first letter starts at 1; that first letter still raises it.
   - interval: 1m
     input_series:
+      - series: 'kafka_brokers{platform="industryflow"}'
+        values: '1x50'
       - series: 'kafka_topic_partition_current_offset{platform="industryflow", topic="sensor-data-raw.dlq", partition="0"}'
         values: '_x20 1x30'
     alert_rule_test:
@@ -73,3 +75,21 @@ tests:
             exp_annotations:
               summary: "Scrape target down"
               description: "api-gateway/api-gateway:8000 has been unreachable for 5m."
+
+  # A Prometheus that has just started finds old letters on an existing topic: nothing new, no alert.
+  - interval: 1m
+    input_series:
+      - series: 'kafka_brokers{platform="industryflow"}'
+        values: '1x30'
+      - series: 'kafka_topic_partition_current_offset{platform="industryflow", topic="sensor-data-raw.measurements.dlq", partition="0"}'
+        values: '3x30'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: IndustryFlowDeadLetteredReadings
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: IndustryFlowDeadLetteredReadings
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: IndustryFlowDeadLetteredReadings
+        exp_alerts: []
