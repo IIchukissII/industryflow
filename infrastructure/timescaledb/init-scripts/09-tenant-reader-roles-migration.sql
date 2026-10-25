@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Per-Tenant Read-Only Role Migration
 -- Version: 1.0
 -- Date: 2026-06-27

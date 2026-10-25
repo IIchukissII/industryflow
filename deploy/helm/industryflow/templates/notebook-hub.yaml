@@ -94,6 +94,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.tenantDelete.enabled }}
+      {{- /* ADR-0034 dec 10: the reclaim service reads the platform database. */}}
+      initContainers:
+        {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" . "user" "notebook_hub_reclaim_user" "workload" "notebook-hub" "passwordKey" "NOTEBOOK_HUB_RECLAIM_DB_PASSWORD") | nindent 8 }}
+      {{- end }}
       containers:
         - name: hub
           image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.hub.image "tag" .Values.image.tag "digest" .Values.notebookHub.hub.digest) | quote }}
@@ -192,14 +197,19 @@ spec:
               mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
               subPath: ca.crt
               readOnly: true
+          {{- end }}
+      {{- if .Values.tenantDelete.enabled }}
       volumes:
+        {{- include "industryflow.schemaReadyVolumes" . | nindent 8 }}
+        {{- if .Values.tls.db.enabled }}
         - name: db-ca
           secret:
             secretName: {{ .Values.tls.db.secretName | quote }}
             items:
               - key: ca.crt
                 path: ca.crt
-          {{- end }}
+        {{- end }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

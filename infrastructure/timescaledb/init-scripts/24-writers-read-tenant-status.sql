@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: migration
+
 -- Writers Read Tenant Status (ADR-0033 dec 3, ADR-0034 dec 1)
 -- Purpose: The stream jobs and the alert worker write tenant data, so each refuses a tenant the
 --          registry does not hold as active. They read exactly the two columns that decision needs:

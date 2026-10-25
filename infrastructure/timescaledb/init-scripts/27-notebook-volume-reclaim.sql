@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- The notebook hub's window onto the deletion record (ADR-0020 dec 6, ADR-0033 dec 4)
 -- Purpose: The hub reclaims a deleted tenant's notebook volumes itself and records that it did. It
 --          reads which users await a reclaim and records the notebook_volumes store, and nothing

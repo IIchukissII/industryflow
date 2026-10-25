@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Latest Reading Index Migration (ADR-0034 dec 3)
 -- Purpose: Find one sensor's newest reading by index, whatever the volume of other sensors.
 --

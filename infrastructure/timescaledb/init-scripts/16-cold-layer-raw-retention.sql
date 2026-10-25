@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Cold-Layer Raw Retention Migration (ADR-0025)
 -- Version: 1.1
 -- Date: 2026-07-11 (1.1: 2026-10-13 — fingerprint-checked drop, drop record)

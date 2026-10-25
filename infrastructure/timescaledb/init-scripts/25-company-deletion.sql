@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Tenant deletion: the request, its record and the lifecycle record (ADR-0033 dec 4, 6, 7, 8)
 -- Purpose: Delete is an explicit operator request, valid only for a tenant suspended for at least
 --          30 days (dec 7), carried out store by store by a dedicated job that records each removal

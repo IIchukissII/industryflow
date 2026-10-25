@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Add Alert Tables to Tenant Schema Template
 -- Version: 5.0 - SCHEMA-PER-TENANT ARCHITECTURE
 -- Date: November 7, 2025

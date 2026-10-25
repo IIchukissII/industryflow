@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Model Provenance Migration (ADR-0030)
 -- Version: 1.0
 -- Date: July 16, 2026

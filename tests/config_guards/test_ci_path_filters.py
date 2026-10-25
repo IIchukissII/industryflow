@@ -141,7 +141,7 @@ def test_compose_smoke_starts_every_edge():
     }
     assert {"frontend", "notebook-sso", "ingestion-edge"} <= edges, edges
     steps = load_yaml(".github/workflows/compose-smoke.yml")["jobs"]["compose-smoke"]["steps"]
-    up = next(s["run"] for s in steps if "docker compose" in s.get("run", "") and " up " in s["run"])
+    up = next(s["run"] for s in steps if s.get("name", "").startswith("Start the stack"))
     missing = sorted(e for e in edges if e not in up.split())
     assert not missing, f"compose-smoke never starts the edge(s) {missing}"
 

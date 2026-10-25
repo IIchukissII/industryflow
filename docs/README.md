@@ -49,7 +49,7 @@ Index of every page under `docs/` and of the component READMEs. Decisions live i
 |---|---|
 | [deploy/helm/industryflow](../deploy/helm/industryflow/README.md) | Helm chart |
 | [deploy/observability](../deploy/observability/README.md) | Cluster monitoring stack |
-| [infrastructure/timescaledb/init-scripts](../infrastructure/timescaledb/init-scripts/README.md) | Database init scripts and roles |
+| [infrastructure/timescaledb/init-scripts](../infrastructure/timescaledb/init-scripts/README.md) | Database schema scripts, the migration runner and roles |
 | [services/frontend](../services/frontend/README.md) | Frontend and TLS edge |
 | [services/notebook_hub](../services/notebook_hub/README.md) | Notebook hub |
 | [services/notebook_sql_proxy](../services/notebook_sql_proxy/README.md) | SQL proxy |

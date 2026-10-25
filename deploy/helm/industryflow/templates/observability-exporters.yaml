@@ -47,6 +47,8 @@ spec:
       {{- if $root.Values.securityContext.enabled }}
       {{- include "industryflow.exporterSecurityContext" $root | nindent 6 }}
       {{- end }}
+      initContainers:
+        {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" $root "user" "metrics_user" "workload" "postgres-exporter" "passwordKey" "METRICS_DB_PASSWORD") | nindent 8 }}
       containers:
         - name: postgres-exporter
           image: {{ $ex.postgres.image | quote }}
@@ -84,15 +86,16 @@ spec:
               subPath: ca.crt
               readOnly: true
           {{- end }}
-      {{- if $root.Values.tls.db.enabled }}
       volumes:
+        {{- include "industryflow.schemaReadyVolumes" $root | nindent 8 }}
+        {{- if $root.Values.tls.db.enabled }}
         - name: db-ca
           secret:
             secretName: {{ $root.Values.tls.db.secretName | quote }}
             items:
               - key: ca.crt
                 path: ca.crt
-      {{- end }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

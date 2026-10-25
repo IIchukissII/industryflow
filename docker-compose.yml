@@ -148,23 +148,6 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
-      
-      # Application role passwords (for init scripts)
-      API_GATEWAY_DB_PASSWORD: ${API_GATEWAY_DB_PASSWORD}
-      SPARK_STREAMING_DB_PASSWORD: ${SPARK_STREAMING_DB_PASSWORD}
-      ALERT_SERVICE_DB_PASSWORD: ${ALERT_SERVICE_DB_PASSWORD}
-      ML_SERVICE_DB_PASSWORD: ${ML_SERVICE_DB_PASSWORD}
-      MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD}
-      # Notebook SQL proxy enrolment role (ADR-0015) — created only when set (notebooks profile).
-      NOTEBOOK_SQL_PROXY_DB_PASSWORD: ${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}
-      # Cold-layer exporter role (ADR-0025) — created at init; the exporter connects as it.
-      COLD_EXPORT_DB_PASSWORD: ${COLD_EXPORT_DB_PASSWORD:-}
-      # Tenant-delete job role (ADR-0033 dec 4) — created at init; the job connects as it.
-      TENANT_DELETE_DB_PASSWORD: ${TENANT_DELETE_DB_PASSWORD:-}
-      # Notebook hub reclaim role (ADR-0020 dec 6) — created at init; the hub's reclaim service connects as it.
-      NOTEBOOK_HUB_RECLAIM_DB_PASSWORD: ${NOTEBOOK_HUB_RECLAIM_DB_PASSWORD:-}
-      # Read-only monitoring role (pg_monitor) the postgres-exporter connects as (ADR-0016 dec 3).
-      METRICS_DB_PASSWORD: ${METRICS_DB_PASSWORD}
     # Server settings (connections, memory) live in postgresql.conf, mounted below; the image reads
     # no POSTGRES_* tuning variables.
     command:
@@ -175,7 +158,6 @@ services:
       - hba_file=/etc/postgresql/pg_hba.conf
     volumes:
       - timescaledb-data:/var/lib/postgresql/data
-      - ./infrastructure/timescaledb/init-scripts:/docker-entrypoint-initdb.d
       - ./infrastructure/timescaledb/config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - ./infrastructure/timescaledb/config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
       - db-certs:/etc/postgresql/certs:ro
@@ -187,6 +169,51 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+
+  # Platform schema migrations (ADR-0034 dec 4, 7-10): applies the pending numbered scripts in
+  # order and records each in the ledger, then exits. It is the only applier, on a fresh volume
+  # and a live database alike; every database client starts only after it has completed. It is
+  # a network client under ADR-0017 (verify-full) and connects as the database owner, which
+  # creating databases, roles and extensions needs; the shell scripts read the role passwords.
+  db-migrate:
+    image: timescale/timescaledb:latest-pg15@sha256:6343bdc87ca132c6b53acb26113a6bad1821d188fa39975a745f32ddd9757634
+    container_name: industryflow-db-migrate
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    entrypoint: ["sh", "/opt/migrate.sh"]
+    command: ["apply"]
+    environment:
+      PGHOST: ${DB_HOST}
+      PGPORT: ${DB_PORT}
+      PGDATABASE: ${DB_NAME}
+      PGUSER: ${DB_USER}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGSSLMODE: ${DB_SSLMODE:-verify-full}
+      PGSSLROOTCERT: /etc/ssl/industryflow/ca.crt
+      MIGRATIONS_DIR: /migrations
+      API_GATEWAY_DB_PASSWORD: ${API_GATEWAY_DB_PASSWORD}
+      SPARK_STREAMING_DB_PASSWORD: ${SPARK_STREAMING_DB_PASSWORD}
+      ALERT_SERVICE_DB_PASSWORD: ${ALERT_SERVICE_DB_PASSWORD}
+      ML_SERVICE_DB_PASSWORD: ${ML_SERVICE_DB_PASSWORD}
+      MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD}
+      # Notebook SQL proxy enrolment role (ADR-0015): created only when set (notebooks profile).
+      NOTEBOOK_SQL_PROXY_DB_PASSWORD: ${NOTEBOOK_SQL_PROXY_DB_PASSWORD:-}
+      # Cold-layer exporter role (ADR-0025); the exporter connects as it.
+      COLD_EXPORT_DB_PASSWORD: ${COLD_EXPORT_DB_PASSWORD:-}
+      # Tenant-delete job role (ADR-0033 dec 4); the job connects as it.
+      TENANT_DELETE_DB_PASSWORD: ${TENANT_DELETE_DB_PASSWORD:-}
+      # Notebook hub reclaim role (ADR-0020 dec 6); the hub's reclaim service connects as it.
+      NOTEBOOK_HUB_RECLAIM_DB_PASSWORD: ${NOTEBOOK_HUB_RECLAIM_DB_PASSWORD:-}
+      # Read-only monitoring role (pg_monitor) the postgres-exporter connects as (ADR-0016 dec 3).
+      METRICS_DB_PASSWORD: ${METRICS_DB_PASSWORD}
+    volumes:
+      - ./infrastructure/timescaledb/migrate.sh:/opt/migrate.sh:ro
+      - ./infrastructure/timescaledb/init-scripts:/migrations:ro
+      - *ca-mount
+    networks:
+      - industryflow-network
+    restart: "no"
 
   # Redis - Caching layer
   redis:
@@ -361,8 +388,8 @@ services:
       - --workers
       - ${MLFLOW_WORKERS:-1}
     depends_on:
-      timescaledb:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       # The artifact bucket and this server's principal exist only once minio-init has run.
       minio-init:
         condition: service_completed_successfully
@@ -460,8 +487,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-      timescaledb:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       spark-master:
         condition: service_started
       minio-init:
@@ -509,8 +536,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-      timescaledb:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       spark-master:
         condition: service_started
       minio-init:
@@ -586,8 +613,8 @@ services:
       API_GATEWAY_DB_POOL_SIZE: ${API_GATEWAY_DB_POOL_SIZE:-5}
       API_GATEWAY_DB_MAX_OVERFLOW: ${API_GATEWAY_DB_MAX_OVERFLOW:-2}
     depends_on:
-      timescaledb:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     volumes:
@@ -757,8 +784,8 @@ services:
       DRIFT_SHARE_THRESHOLD: ${DRIFT_SHARE_THRESHOLD:-0.5}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
-      timescaledb:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       # Ready, not just started: the detector exits when its consumer loop dies (and is restarted),
       # so starting it before the broker accepts connections only buys a startup restart loop.
       kafka:
@@ -833,11 +860,14 @@ services:
     networks:
       - industryflow-network
     depends_on:
-      - timescaledb
+      db-migrate:
+        condition: service_completed_successfully
       # The capability store (ADR-0030 dec 3): an upload handle's authority IS its
       # store entry, so minting without the store is not a degraded mint, it is none.
-      - redis
-      - mlflow
+      redis:
+        condition: service_started
+      mlflow:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       # python-slim has no curl; use stdlib urllib (always present in the image).
@@ -935,8 +965,13 @@ services:
     group_add:
       - "${DOCKER_GID:-999}"
     depends_on:
-      - redis
-      - api-gateway
+      redis:
+        condition: service_started
+      api-gateway:
+        condition: service_started
+      # The volume-reclaim service connects to the platform database (ADR-0020 dec 6).
+      db-migrate:
+        condition: service_completed_successfully
     networks:
       industryflow-network:
         # Resolves only on the platform network: chp's bind address (HUB_PUBLIC_URL).
@@ -978,8 +1013,10 @@ services:
     volumes:
       - *ca-mount
     depends_on:
-      - redis
-      - timescaledb
+      redis:
+        condition: service_started
+      db-migrate:
+        condition: service_completed_successfully
     networks:
       - industryflow-network
       - notebook-kernels
@@ -1169,8 +1206,8 @@ services:
     networks:
       - industryflow-network
     depends_on:
-      timescaledb:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # Redis Exporter - Cache metrics
@@ -1329,6 +1366,8 @@ services:
     depends_on:
       minio-init:
         condition: service_completed_successfully
+      db-migrate:
+        condition: service_completed_successfully
     environment:
       <<: *db-tls-env
       TIMESCALEDB_HOST: ${DB_HOST}
@@ -1360,6 +1399,8 @@ services:
     profiles: ["tenant-delete"]
     depends_on:
       minio-init:
+        condition: service_completed_successfully
+      db-migrate:
         condition: service_completed_successfully
     environment:
       <<: *db-tls-env
@@ -1417,6 +1458,8 @@ services:
     depends_on:
       mlflow:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:

@@ -92,7 +92,7 @@ Copy `deploy/certs/ca.crt` to each device.
 | `db-cert-init` (one-shot, runs on every `up`) | Copies `db.crt` / `db.key` / `ca.crt` from `TLS_CERT_DIR` into the `db-certs` volume, owned by uid 70, key `0600`. Without `TLS_CERT_DIR` it keeps an earlier staged certificate, else self-signs one. It publishes the staged CA to the `db-ca` volume |
 | Client CA mount | `${TLS_CERT_DIR:-db-ca}` at `/etc/ssl/industryflow` (read-only) |
 | Client settings | `DB_SSLMODE` (default `verify-full`), `DB_SSLROOTCERT=/etc/ssl/industryflow/ca.crt` |
-| `pg_hba.conf` | `infrastructure/timescaledb/config/pg_hba.conf`, shared with the chart: `hostssl` + `scram-sha-256` on private ranges only; `local … trust` (Unix socket, init scripts) is the only non-TLS path. `metrics_user` (postgres-exporter) has its own `hostssl` rule |
+| `pg_hba.conf` | `infrastructure/timescaledb/config/pg_hba.conf`, shared with the chart: `hostssl` + `scram-sha-256` on private ranges only; `local … trust` (Unix socket inside the database container) is the only non-TLS path. `metrics_user` (postgres-exporter) has its own `hostssl` rule |
 
 ### Helm
 

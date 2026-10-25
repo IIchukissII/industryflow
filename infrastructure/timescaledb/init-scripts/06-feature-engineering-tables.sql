@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Feature Engineering Configuration Tables
 -- Version: 1.0
 -- Date: November 22, 2025

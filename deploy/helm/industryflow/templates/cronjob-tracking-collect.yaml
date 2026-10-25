@@ -44,6 +44,8 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           {{- end }}
+          initContainers:
+            {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" . "user" .Values.config.MLFLOW_DB_USER "workload" "mlflow" "passwordKey" "MLFLOW_DB_PASSWORD" "database" "mlflow") | nindent 12 }}
           containers:
             - name: tracking-collect
               image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.infra.mlflow.image "tag" .Values.image.tag "digest" .Values.infra.mlflow.digest) | quote }}
@@ -87,13 +89,14 @@ spec:
                   subPath: ca.crt
                   readOnly: true
               {{- end }}
-          {{- if .Values.tls.db.enabled }}
           volumes:
+            {{- include "industryflow.schemaReadyVolumes" . | nindent 12 }}
+            {{- if .Values.tls.db.enabled }}
             - name: db-ca
               secret:
                 secretName: {{ .Values.tls.db.secretName | quote }}
                 items:
                   - key: ca.crt
                     path: ca.crt
-          {{- end }}
+            {{- end }}
 {{- end }}

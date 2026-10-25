@@ -4,6 +4,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+# migration-kind: definition
+
 # Notebook SQL access proxy principals (ADR-0015 dec 5).
 #
 # The session a kernel's bytes reach is confined to ONE tenant by Postgres itself, not by what the

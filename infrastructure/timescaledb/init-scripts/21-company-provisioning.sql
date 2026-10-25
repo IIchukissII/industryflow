@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Company (tenant) provisioning through the API
 -- Purpose: give the API gateway a narrow, audited write path to the tenant registry. The
 --          gateway role holds only SELECT on public.companies and cannot create schemas or

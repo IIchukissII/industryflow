@@ -171,11 +171,12 @@ Compare row counts and recent timestamps per tenant with the source, then drop t
 
 | Step | Action |
 |---|---|
-| 1 | Start an empty TimescaleDB; the init scripts create the roles (passwords from the environment) and base schema |
-| 2 | Apply `<prefix>/globals/<stamp>.sql` with `psql`: it recreates the runtime roles (`tenant_reader_*`, `tenant_sqlproxy_*`); `role … already exists` errors for the init-script roles are expected. Roles carry no passwords (`--no-role-passwords`) |
+| 1 | Start an empty TimescaleDB and `docker compose up db-migrate`: the schema sequence creates the roles (passwords from the environment) and base schema |
+| 2 | Apply `<prefix>/globals/<stamp>.sql` with `psql`: it recreates the runtime roles (`tenant_reader_*`, `tenant_sqlproxy_*`); `role … already exists` errors for the service roles are expected. Roles carry no passwords (`--no-role-passwords`) |
 | 3 | `docker compose run --rm --entrypoint db-restore.sh db-backup industryflow latest` |
 | 4 | `docker compose run --rm --entrypoint db-restore.sh db-backup mlflow latest` |
-| 5 | Verify row counts and recent timestamps per tenant before cutover |
+| 5 | `docker compose up db-migrate`: the restored ledger is the backup's; scripts newer than the backup are applied ([ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md) dec 5) |
+| 6 | Verify row counts and recent timestamps per tenant before cutover |
 
 ### Cold layer
 
