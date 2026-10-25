@@ -1,0 +1,80 @@
+/*
+ * SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+/* Experiments page. Scoped to .xp-*: a page stylesheet never defines a shared class. */
+
+.xp { max-width: 1240px; display: flex; flex-direction: column; gap: 32px; }
+.xp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.xp-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.xp-state { display: flex; align-items: center; gap: 10px; padding: 40px 0; color: var(--muted); margin: 0; }
+.xp-state-bad { flex-direction: column; align-items: flex-start; color: #ef7a64; }
+.xp-state-bad p { margin: 0; }
+.xp-dim { color: var(--muted); }
+
+.xp-body { display: grid; grid-template-columns: minmax(180px, 230px) minmax(0, 1fr); gap: 28px; align-items: start; }
+
+/* the experiment list: the selected one carries the gold mark, the one accent on the page */
+.xp-list { display: flex; flex-direction: column; gap: 2px; position: sticky; top: calc(var(--topbar-h) + 16px); }
+.xp-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; padding: 10px 12px 10px 14px; border: 0; border-left: 2px solid transparent;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0; background: none; color: var(--text-soft); cursor: pointer;
+  font: inherit;
+}
+.xp-item:hover { background: var(--panel-2); }
+.xp-item:focus-visible { outline: none; box-shadow: var(--ring); }
+.xp-item[aria-current='true'] { border-left-color: var(--gold); background: var(--panel); color: var(--text); }
+.xp-item-name { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.xp-item-when { font-size: 12.5px; color: var(--muted); }
+
+.xp-runs { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.xp-runs-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.xp-title { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 24px; overflow-wrap: anywhere; }
+.xp-facts { margin: 0; color: var(--muted); font-size: 14px; }
+
+.xp-table-wrap { overflow-x: auto; }
+.xp-num { text-align: right; white-space: nowrap; }
+.xp-table th.xp-num .xp-sort { justify-content: flex-end; width: 100%; }
+.xp-sort {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none;
+  color: inherit; font: inherit; cursor: pointer;
+}
+.xp-sort:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 3px; }
+.xp-table th[aria-sort='ascending'] .xp-sort::after { content: '\2191'; }
+.xp-table th[aria-sort='descending'] .xp-sort::after { content: '\2193'; }
+
+.xp-run {
+  display: block; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 0; border: 0; background: none; color: var(--text); font: inherit; font-weight: 500;
+  cursor: pointer; text-align: left;
+}
+.xp-run:hover { color: var(--signal); }
+.xp-run:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 3px; }
+.xp-row-open td { border-bottom-color: transparent; }
+.xp-status { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.xp-model {
+  display: block; max-width: 26ch; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px; color: var(--signal); text-decoration: none;
+}
+.xp-when { white-space: nowrap; }
+.xp-model:hover { text-decoration: underline; }
+
+.xp-detail-row td { background: var(--panel); }
+.xp-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 32px; padding: 4px 0 8px; }
+.xp-detail-h { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.xp-kv { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.xp-kv div { display: flex; justify-content: space-between; gap: 16px; }
+.xp-kv dt { color: var(--text-soft); overflow-wrap: anywhere; }
+.xp-kv dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.xp-runid { grid-column: 1 / -1; margin: 4px 0 0; color: var(--faint); font-size: 12px; word-break: break-all; }
+
+@media (max-width: 860px) {
+  .xp-body { grid-template-columns: 1fr; gap: 20px; }
+  .xp-list { position: static; flex-direction: row; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
+  .xp-item { border-left: 0; border-bottom: 2px solid transparent; border-radius: var(--r-sm) var(--r-sm) 0 0; flex-shrink: 0; }
+  .xp-item[aria-current='true'] { border-bottom-color: var(--gold); }
+}

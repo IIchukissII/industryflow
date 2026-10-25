@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0013 — Experiment-tracking and model-registry multi-tenancy
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-17
+- **Date:** 2026-06-27; changed 2026-10-25
 - **Parent:** ADR-0001
 - **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (tracking from notebooks, dec 9), [ADR-0012](ADR-0012-notebook-credential-delivery.md) (the capability model applied here), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (tenant-scoped API and UI), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (the gateway that realises this record)
 
@@ -49,10 +49,10 @@ containment at operational cost, not a boundary mediation lacks.
 **Positive**
 - Authoring environments log runs and register models within their own tenant.
 - Tracking and artifact credentials never reach untrusted environments.
+- The product shows a tenant its experiments and runs read-only; the tracking server's own UI stays internal.
 
 **Negative**
 - The boundary rests on the gateway being correct; a bug there is a cross-tenant leak.
-- The product UI browses registered models but has no view of experiments and runs.
 
 ## Deferred
 

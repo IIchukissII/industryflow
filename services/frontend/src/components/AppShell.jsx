@@ -24,6 +24,7 @@ const NAV = [
     items: [
       { href: '/equipment', label: 'Equipment', icon: 'box' },
       { href: '/notebooks', label: 'Notebooks', icon: 'activity' },
+      { href: '/experiments', label: 'Experiments', icon: 'flask' },
     ],
   },
   {
