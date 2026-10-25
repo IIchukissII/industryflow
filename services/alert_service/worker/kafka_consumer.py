@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 HANDLED = "handled"          # processed, or dead-lettered: its offset may be committed
 RETRY_BATCH = "retry_batch"  # not handled: rewind to the last commit and try again later
 
+# Names this worker in the dead letters it writes, as spark-streaming names itself in its own.
+DEAD_LETTER_CONSUMER = "alert-service-detector"
+
 
 def _is_recoverable_commit_error(exc: BaseException) -> bool:
     """A commit that failed because the group moved under us (rebalance, fenced generation) or
@@ -227,9 +230,11 @@ class AlertKafkaConsumer:
         try:
             await self.producer.send_and_wait(
                 self._dlq_topic,
+                # The envelope both dead-letter producers write (docs/operations/dead-letters.md).
                 value=json.dumps({
                     "original": original,
-                    "error": reason,
+                    "reason": reason,
+                    "consumer": DEAD_LETTER_CONSUMER,
                     "topic": message.topic,
                     "partition": message.partition,
                     "offset": message.offset,

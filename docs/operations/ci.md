@@ -30,7 +30,7 @@ The GitHub Actions workflows, their gate jobs, and the required checks on `main`
 | `cold-layer-integration-gate` | `cold-layer-integration.yml` | Cold layer integration |
 | `tracking-gateway-integration-gate` | `tracking-gateway-integration.yml` | Tracking gateway proofs; upload path's serving half (register and deploy in the real ml_service) |
 | `model-artifact-roundtrip-gate` | `model-artifact-roundtrip.yml` | Parity, model artifact round-trip |
-| `config-guards-gate` | `config-guards.yml` | Silent-omission list guards (`tests/config_guards`); object-store principals against a real MinIO (unfiltered) |
+| `config-guards-gate` | `config-guards.yml` | Silent-omission list guards (`tests/config_guards`); object-store principals against a real MinIO; platform alert rules under the pinned `promtool` and `amtool` (unfiltered) |
 
 ## Changing the list
 

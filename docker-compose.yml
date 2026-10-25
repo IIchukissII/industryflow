@@ -1142,12 +1142,37 @@ services:
       - '--web.enable-lifecycle'
     volumes:
       - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      # The platform alert rules, one source with the chart (ADR-0016 dec 1).
+      - ./infrastructure/prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     networks:
       - industryflow-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Alertmanager - routes the platform alerts Prometheus fires (ADR-0016 dec 4). Ships with no
+  # receiver: alerts are visible in its UI and sent nowhere until the operator configures one
+  # (ALERTMANAGER_CONFIG, docs/operations/monitoring.md#alert-delivery).
+  alertmanager:
+    image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+    container_name: industryflow-alertmanager
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - ${ALERTMANAGER_CONFIG:-./infrastructure/alertmanager/alertmanager.yml}:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -1486,6 +1511,8 @@ volumes:
   notebook-hub-data:
     driver: local
   grafana-data:
+    driver: local
+  alertmanager-data:
     driver: local
   prometheus-data:
     driver: local

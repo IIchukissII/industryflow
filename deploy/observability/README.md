@@ -60,8 +60,9 @@ observability:
 |---|---|---|
 | ServiceMonitor per app | each `apps.<name>` with `enabled` and `metrics: true`: `api-gateway`, `ml-service-api`, `ingestion-service`, `spark-streaming`, `spark-aggregations` (Spark on `metricsPort` `4040`, paths `/metrics/prometheus` and `/metrics/executors/prometheus`) | `observability-servicemonitors.yaml` |
 | ServiceMonitor per exporter | each enabled exporter, port `metrics` | `observability-servicemonitors.yaml` |
+| Target label `platform="industryflow"` | relabeling on every ServiceMonitor endpoint; every platform rule selects on it | `observability-servicemonitors.yaml` |
 | Exporters | `postgres-exporter` (`9187`), `redis-exporter` (`9121`), `kafka-exporter` (`9308`) | `observability-exporters.yaml` |
-| PrometheusRule `<fullname>-platform` | group `industryflow.platform` | `observability-prometheusrules.yaml` |
+| PrometheusRule `<fullname>-platform` | group `industryflow.platform` from `files/prometheus-rules.yml` (symlink to `infrastructure/prometheus/rules/platform.yml`, the file Compose loads); group `industryflow.kubernetes` | `observability-prometheusrules.yaml` |
 | Dashboard ConfigMaps | each `files/grafana/*.json` (symlink to `infrastructure/grafana/provisioning/`) | `observability-dashboards.yaml` |
 
 `postgres-exporter` connects as `metrics_user` (`pg_monitor`) with `METRICS_DB_PASSWORD` from its
@@ -71,15 +72,18 @@ kube-state-metrics and cAdvisor come from the backend, not the chart.
 
 ## Platform alert rules
 
+Group `industryflow.platform`: [`infrastructure/prometheus/rules/platform.yml`](../../infrastructure/prometheus/rules/platform.yml)
+(`IndustryFlowTargetDown`, `IndustryFlowPostgresDown`, `IndustryFlowRedisDown`,
+`IndustryFlowKafkaConsumerLag`, `IndustryFlowDeadLetteredReadings`), the same rules and thresholds
+as Compose. Tune them in that file, or add a PrometheusRule of your own. Unit tests:
+`infrastructure/prometheus/rules/tests/platform_test.yml` (`promtool test rules`).
+
+Group `industryflow.kubernetes`, on kube-state-metrics series:
+
 | Alert | Expression | `for` | Severity |
 |---|---|---|---|
-| `IndustryFlowTargetDown` | `up{job=~".*industryflow.*"} == 0` | `targetDownFor` | critical |
-| `IndustryFlowPostgresDown` | `pg_up == 0` | `targetDownFor` | critical |
-| `IndustryFlowRedisDown` | `redis_up == 0` | `targetDownFor` | warning |
-| `IndustryFlowKafkaConsumerLag` | `kafka_consumergroup_lag > kafkaConsumerLagThreshold` | `kafkaConsumerLagFor` | warning |
-| `IndustryFlowDeadLetteredReadings` | `increase(kafka_topic_partition_current_offset{topic=~".+\\.dlq"}[deadLetterWindow]) > 0`, summed by topic | none | warning |
 | `IndustryFlowDeviceCrlStale` | `time() - kube_cronjob_status_last_successful_time{cronjob="<fullname>-device-crl-check"} > ingress.mtls.crlCheck.alertAfterSeconds`; rendered only when `ingress.enabled`, `ingress.mtls.enabled` and `ingress.mtls.crlCheck.enabled` | none | critical |
 | `IndustryFlowDeviceCertExpiring` | `time() - kube_cronjob_status_last_successful_time{cronjob="<fullname>-device-cert-check"} > ingress.mtls.certCheck.alertAfterSeconds`; rendered only when `ingress.enabled`, `ingress.mtls.enabled` and `ingress.mtls.certCheck.enabled` | none | warning |
 
-Dead letters: [ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md). Device CRL:
+Dead letters: [dead-letter handling](../../docs/operations/dead-letters.md). Device CRL:
 [device mTLS](../../docs/operations/device-mtls.md#kubernetes).

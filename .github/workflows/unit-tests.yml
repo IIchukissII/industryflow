@@ -39,6 +39,8 @@ jobs:
               - 'deploy/helm/**'
               - 'scripts/device-ca.sh'
               - 'scripts/tests/test_device_ca.py'
+              - 'scripts/dead-letters.sh'
+              - 'scripts/tests/test_dead_letters.py'
               # The user CLIs are tested in services/api_gateway/tests/test_user_scripts.py.
               - 'scripts/manage_users.py'
               - 'scripts/seed_users.py'
@@ -90,6 +92,8 @@ jobs:
           - { service: python_client,       path: clients/python/tests, install: "pip install -e 'clients/python[dev,cold]'" }
           # The device CA's issue/renew/revoke/revoke-tenant and register, against a throwaway CA and the runner's openssl.
           - { service: device_ca,           path: scripts/tests/test_device_ca.py, install: "pip install pytest==9.1.1" }
+          # Dead-letter inspection and replay, against stand-in Kafka console tools.
+          - { service: dead_letters,        path: scripts/tests/test_dead_letters.py, install: "pip install pytest==9.1.1" }
           # The shared contracts package itself. The repository-wide guards that every service takes
           # its tenant names and window contract from it live in tests/config_guards.
           - { service: contracts,           path: libs/industryflow_contracts/tests, install: "pip install './libs/industryflow_contracts[dev]'" }

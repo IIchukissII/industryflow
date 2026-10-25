@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Platform alert rules (ADR-0016 dec 1, 4). One source: Compose's Prometheus loads this file; the
+# chart renders its groups into the PrometheusRule. Built on series that always exist (`up` and the
+# exporters' own), and every selector carries platform="industryflow", the target label both
+# deployment shapes attach to every scrape, so a shared Prometheus never alerts on another stack.
+# Operational and aggregate only (ADR-0016 dec 5): no tenant value or alert content.
+groups:
+  - name: industryflow.platform
+    rules:
+      - alert: IndustryFlowTargetDown
+        expr: up{platform="industryflow"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scrape target down"
+          description: "{{ $labels.job }}/{{ $labels.instance }} has been unreachable for 5m."
+      - alert: IndustryFlowPostgresDown
+        expr: pg_up{platform="industryflow"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "TimescaleDB exporter reports the database down"
+          description: "pg_up == 0 (postgres-exporter cannot reach TimescaleDB)."
+      - alert: IndustryFlowRedisDown
+        expr: redis_up{platform="industryflow"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis is down"
+          description: "redis_up == 0 (redis-exporter cannot reach Redis)."
+      - alert: IndustryFlowKafkaConsumerLag
+        expr: kafka_consumergroup_lag{platform="industryflow"} > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer lag is high"
+          description: "Consumer group {{ $labels.consumergroup }} lag on {{ $labels.topic }} exceeds 1000."
+      # ADR-0005: an unprocessable reading is dead-lettered, never dropped; a dead letter nobody looks
+      # at is a drop with extra steps. A dead-letter topic's offset counts its letters. A topic is
+      # created by its first letter, so its series starts above zero, which increase() cannot see:
+      # the second term raises a dead-letter series that did not exist one window ago.
+      - alert: IndustryFlowDeadLetteredReadings
+        expr: |
+          sum by (topic) (increase(kafka_topic_partition_current_offset{platform="industryflow", topic=~".+\\.dlq"}[15m])) > 0
+          or
+          sum by (topic) (
+            kafka_topic_partition_current_offset{platform="industryflow", topic=~".+\\.dlq"}
+            unless kafka_topic_partition_current_offset{platform="industryflow", topic=~".+\\.dlq"} offset 15m
+          ) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Readings were dead-lettered"
+          description: "Letters reached {{ $labels.topic }} in the last 15m. They raised no alert and were not written: docs/operations/dead-letters.md."

@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# promtool test rules infrastructure/prometheus/rules/tests/platform_test.yml
+rule_files:
+  - ../platform.yml
+
+evaluation_interval: 1m
+
+tests:
+  # A letter on an existing dead-letter topic raises it; the source topic and another stack do not.
+  - interval: 1m
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{platform="industryflow", topic="sensor-data-raw.measurements.dlq", partition="0"}'
+        values: '3x20 4x20'
+      - series: 'kafka_topic_partition_current_offset{platform="industryflow", topic="sensor-data-raw", partition="0"}'
+        values: '0+100x40'
+      - series: 'kafka_topic_partition_current_offset{platform="other", topic="orders.dlq", partition="0"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 19m
+        alertname: IndustryFlowDeadLetteredReadings
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: IndustryFlowDeadLetteredReadings
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              topic: sensor-data-raw.measurements.dlq
+            exp_annotations:
+              summary: "Readings were dead-lettered"
+              description: "Letters reached sensor-data-raw.measurements.dlq in the last 15m. They raised no alert and were not written: docs/operations/dead-letters.md."
+      # The window has passed with no new letter: it clears.
+      - eval_time: 39m
+        alertname: IndustryFlowDeadLetteredReadings
+        exp_alerts: []
+
+  # A topic created by its first letter starts at 1; that first letter still raises it.
+  - interval: 1m
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{platform="industryflow", topic="sensor-data-raw.dlq", partition="0"}'
+        values: '_x20 1x30'
+    alert_rule_test:
+      - eval_time: 22m
+        alertname: IndustryFlowDeadLetteredReadings
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              topic: sensor-data-raw.dlq
+            exp_annotations:
+              summary: "Readings were dead-lettered"
+              description: "Letters reached sensor-data-raw.dlq in the last 15m. They raised no alert and were not written: docs/operations/dead-letters.md."
+      - eval_time: 45m
+        alertname: IndustryFlowDeadLetteredReadings
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'up{platform="industryflow", job="api-gateway", instance="api-gateway:8000"}'
+        values: '1x5 0x10'
+      - series: 'up{platform="other", job="x", instance="x:1"}'
+        values: '0x15'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: IndustryFlowTargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              platform: industryflow
+              job: api-gateway
+              instance: api-gateway:8000
+            exp_annotations:
+              summary: "Scrape target down"
+              description: "api-gateway/api-gateway:8000 has been unreachable for 5m."
