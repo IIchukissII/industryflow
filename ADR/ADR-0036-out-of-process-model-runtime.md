@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR-0036 — Out-of-process model runtime for frameworks the serving image does not carry
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-25
 - **Parent:** [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md)
 - **Related:** [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (dec 7: the boundary

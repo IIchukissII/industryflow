@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0028 — Declared score semantics and the model-adapter contract
 
 - **Status:** Accepted
-- **Date:** 2026-07-14; changed 2026-10-17
+- **Date:** 2026-07-14; changed 2026-10-25
 - **Parent:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (its deferred model-adapter contract)
-- **Related:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the gate that refuses what the environment cannot honour), [ADR-0008](ADR-0008-extension-and-plugin-interface.md) (in-process default), [ADR-0021](ADR-0021-model-drift-monitoring.md) (alerts on these scores), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (uploads declare semantics)
+- **Related:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the gate that refuses what the environment cannot honour), [ADR-0008](ADR-0008-extension-and-plugin-interface.md) (in-process default), [ADR-0021](ADR-0021-model-drift-monitoring.md) (alerts on these scores), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (uploads declare semantics), [ADR-0036](ADR-0036-out-of-process-model-runtime.md) (the out-of-process runtime)
 
 ## Context
 
@@ -36,8 +36,8 @@ operators label. The framework set is open, while the serving image is one pinne
    operator can ask what a deployment accepts before training.
 6. **In-process remains the default, and autoencoders are served inside it.** A reconstructing
    scikit-learn estimator needs no new dependency, image or serving path.
-7. **Frameworks the image does not carry are refused by ADR-0027's gate; the out-of-process serving
-   boundary is its own record.**
+7. **Frameworks the image does not carry are refused by ADR-0027's gate unless an out-of-process runtime
+   serves them (ADR-0036).**
 
 ## Alternatives
 
@@ -68,7 +68,6 @@ operators label. The framework set is open, while the serving image is one pinne
 
 | Open question | Settled by |
 |---|---|
-| The out-of-process serving boundary (decision 7) | Its own record, when torch or GPU serving is required |
 | Where the reconstruction-error scale lives in the schema | A schema decision; today it is supplied at registration |
 
 ## References
