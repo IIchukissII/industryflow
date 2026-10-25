@@ -217,7 +217,7 @@ def _profile(scores):
 
 
 def test_a_reference_whose_predictions_are_not_detector_scores_is_refused(client):
-    """ADR-0021 dec 4: the prediction column is a baseline only on the detector's scale. A
+    """ADR-0021 dec 1: the prediction column is a baseline only on the detector's scale. A
     column of labels is refused at registration, before anything is stored."""
     r = client.post("/api/models", json=_body(mlflow_run_id="run-mine",
                                               reference_profile=_profile([1, -1, 1, 1])))

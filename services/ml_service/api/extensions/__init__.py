@@ -116,7 +116,7 @@ class DetectorContext:
 
 # The scale every detector's score is declared on (ADR-0028 dec 1): bounded, 0 normal, 1 anomalous.
 # One place, because more than the detectors hold numbers to it — a drift reference profile's
-# prediction column must be on the same scale as the scores it will be compared with (ADR-0021 dec 4).
+# prediction column must be on the same scale as the scores it will be compared with (ADR-0021 dec 1).
 SCORE_RANGE = (0.0, 1.0)
 
 

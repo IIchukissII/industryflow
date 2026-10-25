@@ -74,7 +74,7 @@ async def _current_predictions(
         return None, "the reference profile captured no prediction scores"
     refusal = prediction_column_refusal(profile)
     if refusal:
-        # Not a baseline, so nothing is scored against it (ADR-0021 dec 4).
+        # Not a baseline, so nothing is scored against it (ADR-0021 dec 1).
         return None, refusal
 
     repository = request.app.state.ml_repository
