@@ -45,15 +45,20 @@ groups:
       # ADR-0005: an unprocessable reading is dead-lettered, never dropped; a dead letter nobody looks
       # at is a drop with extra steps. A dead-letter topic's offset counts its letters. A topic is
       # created by its first letter, so its series starts above zero, which increase() cannot see:
-      # the second term raises a dead-letter series that did not exist one window ago.
+      # the second term raises a dead-letter series that did not exist one window ago, but only while
+      # Kafka was already being watched then, so a Prometheus that has just started (or a relabelled
+      # series) does not raise letters it has merely not seen before.
       - alert: IndustryFlowDeadLetteredReadings
         expr: |
           sum by (topic) (increase(kafka_topic_partition_current_offset{platform="industryflow", topic=~".+\\.dlq"}[15m])) > 0
           or
-          sum by (topic) (
-            kafka_topic_partition_current_offset{platform="industryflow", topic=~".+\\.dlq"}
-            unless kafka_topic_partition_current_offset{platform="industryflow", topic=~".+\\.dlq"} offset 15m
-          ) > 0
+          (
+            sum by (topic) (
+              kafka_topic_partition_current_offset{platform="industryflow", topic=~".+\\.dlq"}
+              unless kafka_topic_partition_current_offset{platform="industryflow", topic=~".+\\.dlq"} offset 15m
+            ) > 0
+            and on () count(kafka_brokers{platform="industryflow"} offset 15m) > 0
+          )
         labels:
           severity: warning
         annotations:
