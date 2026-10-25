@@ -27,13 +27,17 @@
 #   crl                                   re-sign the intermediate's CRL (routine; no root key) and
 #                                           write the signed issued register beside it
 #   root-crl                              re-sign the root's CRL (offline-root ceremony only)
-#   check [crl] [chain]                   fail if a published CRL is close to expiry
+#   check [crl] [chain]                   fail if a published CRL or a CA certificate of the chain
+#                                           is close to expiry
+#   check-certs [register] [crl] [chain]  fail if a device's newest unrevoked certificate is close
+#                                           to expiry (renewal owed)
 #   chain                                 print the verify chain path (root+intermediate)
 #
 # CRL freshness (ADR-0007 dec 8): the edge refuses EVERY device once a CRL it holds expires, so
 # each CRL is re-signed well inside its validity. The intermediate's CRL is re-signed routinely
 # (`crl`, CRL_DAYS); the root's only at the root ceremony (`root-crl`, ROOT_CRL_DAYS), so the
-# root key can stay offline. `check` raises either one before it expires.
+# root key can stay offline. `check` raises either one, or a CA certificate of the chain, before it
+# expires. `check-certs` raises a device certificate whose renewal is owed (ADR-0007 dec 10).
 #
 # Output (git-ignored — holds private keys): deploy/device-ca/
 set -e
@@ -50,6 +54,8 @@ CRL_DAYS="${CRL_DAYS:-7}"
 ROOT_CRL_DAYS="${ROOT_CRL_DAYS:-365}"
 CRL_WARN_DAYS="${CRL_WARN_DAYS:-3}"
 ROOT_CRL_WARN_DAYS="${ROOT_CRL_WARN_DAYS:-30}"
+CERT_WARN_DAYS="${CERT_WARN_DAYS:-14}"
+CA_CERT_WARN_DAYS="${CA_CERT_WARN_DAYS:-90}"
 SAN_PREFIX="industryflow:tenant"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -315,6 +321,17 @@ cmd_check() {
     [ "$sub" = "$iss" ] && root_subject="$sub"
   done
   now=$(date -u +%s); rc=0
+  # A CA certificate that expires refuses every device as surely as an expired CRL does (dec 10).
+  for c in "$tmp"/cert*.pem; do
+    sub=$(openssl x509 -in "$c" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')
+    end=$(openssl x509 -in "$c" -noout -enddate | sed 's/^notAfter=//')
+    left=$(( ($(epoch "$end") - now) / 86400 ))
+    if [ "$left" -lt "$CA_CERT_WARN_DAYS" ]; then
+      echo "STALE: CA certificate $sub expires in ${left}d ($end), warn at ${CA_CERT_WARN_DAYS}d" >&2; rc=1
+    else
+      echo "ok: CA certificate $sub expires in ${left}d ($end)"
+    fi
+  done
   for f in "$tmp"/crl*.pem; do
     [ -f "$f" ] || die "no CRL found in $bundle"
     iss=$(openssl crl -in "$f" -noout -issuer -nameopt RFC2253 | sed 's/^issuer=//')
@@ -330,6 +347,75 @@ cmd_check() {
   return $rc
 }
 
+cmd_check_certs() {
+  # Fails (non-zero) when a device's newest unrevoked certificate is inside its warning window
+  # (ADR-0007 dec 10): renewal is owed before then. Reads only public files: the register (its
+  # signature verified against the issuing intermediate), the CRL bundle and the chain. A device
+  # whose certificates have all expired is reported but does not fail: the edge already refuses
+  # it, and revoking it is what decommissions it.
+  reg="${1:-$CA/crl/issued.tsv}"; bundle="${2:-$CA/crl/device-ca.crl}"; chain="${3:-$CA/ca-chain.crt}"
+  for f in "$reg" "$reg.sig" "$bundle" "$chain"; do [ -f "$f" ] || die "missing $f"; done
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+  awk -v d="$tmp" '/BEGIN X509 CRL/{n++} n{print > (d "/crl" n ".pem")}' "$bundle"
+  awk -v d="$tmp" '/BEGIN CERTIFICATE/{n++} n{print > (d "/cert" n ".pem")}' "$chain"
+  int=""
+  for c in "$tmp"/cert*.pem; do
+    sub=$(openssl x509 -in "$c" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')
+    iss=$(openssl x509 -in "$c" -noout -issuer -nameopt RFC2253 | sed 's/^issuer=//')
+    if [ "$sub" != "$iss" ]; then
+      [ -z "$int" ] || die "the chain holds more than one issuing intermediate"
+      int="$c"; int_subject="$sub"
+    fi
+  done
+  [ -n "$int" ] || die "no issuing intermediate in $chain"
+  openssl x509 -in "$int" -noout -pubkey > "$tmp/int.pub"
+  openssl dgst -sha256 -verify "$tmp/int.pub" -signature "$reg.sig" "$reg" >/dev/null 2>&1 \
+    || die "the issued register's signature does not verify against the issuing intermediate"
+  crl=""
+  for f in "$tmp"/crl*.pem; do
+    [ -f "$f" ] || die "no CRL found in $bundle"
+    iss=$(openssl crl -in "$f" -noout -issuer -nameopt RFC2253 | sed 's/^issuer=//')
+    [ "$iss" = "$int_subject" ] && crl="$f"
+  done
+  [ -n "$crl" ] || die "no CRL of the issuing intermediate in $bundle"
+  openssl crl -in "$crl" -noout -CAfile "$int" >/dev/null 2>&1 \
+    || die "the intermediate's CRL does not verify against the issuing intermediate"
+  crlnum=$(openssl crl -in "$crl" -noout -crlnumber | sed 's/^crlNumber=//')
+  named=$(awk -F '\t' '$1 == "crl_number" { print $2 }' "$reg")
+  [ "$named" = "$crlnum" ] \
+    || die "the issued register names CRL $named, the published CRL is $crlnum: republish both together"
+  openssl crl -in "$crl" -noout -text | awk '/Serial Number:/ { print $3 }' > "$tmp/revoked"
+  # Newest unrevoked notAfter per device, as YYYYMMDDHHMMSS (index.txt keeps UTCTime or
+  # GeneralizedTime; RFC 5280 puts UTCTime years 50-99 in the 1900s).
+  awk -F '\t' '
+    function norm(s) { s = toupper(s); sub(/^0+/, "", s); return s }
+    FILENAME == ARGV[1] { revoked[norm($1)] = 1; next }
+    /^#/ || $1 == "crl_number" || NF != 4 { next }
+    norm($1) in revoked { next }
+    {
+      t = $2; sub(/Z$/, "", t)
+      if (length(t) == 12) t = (substr(t, 1, 2) < 50 ? "20" : "19") t
+      k = $3 "/" $4
+      if (!(k in latest) || t > latest[k]) latest[k] = t
+    }
+    END { for (k in latest) print latest[k] "\t" k }
+  ' "$tmp/revoked" "$reg" | sort > "$tmp/latest"
+  warn=$CERT_WARN_DAYS; now=$(date -u +%s); rc=0; ok=0
+  while IFS="$(printf '\t')" read -r t dev; do
+    t=$(echo "$t" | sed 's/^\(....\)\(..\)\(..\)\(..\)\(..\)\(..\)$/\1-\2-\3 \4:\5:\6/')
+    secs=$(( $(date -u -d "$t" +%s) - now )); left=$(( secs / 86400 ))
+    if [ "$secs" -le 0 ]; then
+      echo "expired: device $dev ($t UTC); revoke it if it is decommissioned"
+    elif [ "$left" -lt "$warn" ]; then
+      echo "EXPIRING: device $dev certificate expires in ${left}d ($t UTC), warn at ${warn}d; renew it" >&2; rc=1
+    else
+      ok=$((ok + 1))
+    fi
+  done < "$tmp/latest"
+  echo "ok: $ok device(s) valid beyond ${warn}d"
+  return $rc
+}
+
 cmd_chain() { echo "$CA/ca-chain.crt"; }
 
 sub="${1:-}"; shift 2>/dev/null || true
@@ -341,6 +427,7 @@ case "$sub" in
   crl)    cmd_crl ;;
   root-crl) cmd_root_crl ;;
   check)  cmd_check "$@" ;;
+  check-certs) cmd_check_certs "$@" ;;
   chain)  cmd_chain ;;
-  *) echo "usage: device-ca.sh {init|issue <uuid> <device_id> [csr]|revoke <uuid> <device_id>|revoke-tenant <uuid>|crl|root-crl|check [crl] [chain]|chain}" >&2; exit 1 ;;
+  *) echo "usage: device-ca.sh {init|issue <uuid> <device_id> [csr]|revoke <uuid> <device_id>|revoke-tenant <uuid>|crl|root-crl|check [crl] [chain]|check-certs [register] [crl] [chain]|chain}" >&2; exit 1 ;;
 esac

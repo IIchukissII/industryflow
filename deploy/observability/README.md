@@ -79,6 +79,7 @@ kube-state-metrics and cAdvisor come from the backend, not the chart.
 | `IndustryFlowKafkaConsumerLag` | `kafka_consumergroup_lag > kafkaConsumerLagThreshold` | `kafkaConsumerLagFor` | warning |
 | `IndustryFlowDeadLetteredReadings` | `increase(kafka_topic_partition_current_offset{topic=~".+\\.dlq"}[deadLetterWindow]) > 0`, summed by topic | none | warning |
 | `IndustryFlowDeviceCrlStale` | `time() - kube_cronjob_status_last_successful_time{cronjob="<fullname>-device-crl-check"} > ingress.mtls.crlCheck.alertAfterSeconds`; rendered only when `ingress.enabled`, `ingress.mtls.enabled` and `ingress.mtls.crlCheck.enabled` | none | critical |
+| `IndustryFlowDeviceCertExpiring` | `time() - kube_cronjob_status_last_successful_time{cronjob="<fullname>-device-cert-check"} > ingress.mtls.certCheck.alertAfterSeconds`; rendered only when `ingress.enabled`, `ingress.mtls.enabled` and `ingress.mtls.certCheck.enabled` | none | warning |
 
 Dead letters: [ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md). Device CRL:
 [device mTLS](../../docs/operations/device-mtls.md#kubernetes).

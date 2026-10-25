@@ -25,7 +25,8 @@ Kubernetes packaging for IndustryFlow ([ADR-0009](../../../ADR/ADR-0009-kubernet
 | `job-minio-init.yaml` | post-install/upgrade Job running `files/minio-init.sh` | `infra.minio.inCluster` |
 | `cronjob-db-backup.yaml` | Logical DB backup CronJob | `backup.enabled` |
 | `cronjob-cold-export.yaml` | Cold-layer export CronJob | `coldExport.enabled` |
-| `cronjob-device-crl-check.yaml` | Device CRL age check CronJob | `ingress.enabled`, `ingress.mtls.enabled`, `ingress.mtls.crlCheck.enabled` |
+| `cronjob-device-crl-check.yaml` | Device CRL and CA certificate expiry check CronJob | `ingress.enabled`, `ingress.mtls.enabled`, `ingress.mtls.crlCheck.enabled` |
+| `cronjob-device-cert-check.yaml` | Device certificate expiry check CronJob | `ingress.enabled`, `ingress.mtls.enabled`, `ingress.mtls.certCheck.enabled` |
 | `ingress.yaml` | HTTPS Ingress; device mTLS Ingress | `ingress.enabled`; mTLS also `ingress.mtls.enabled` |
 | `networkpolicy.yaml` | NetworkPolicies | `networkPolicy.enabled` |
 | `notebook-hub.yaml` | Hub, configurable-http-proxy, SSO proxy, RBAC, notebooks Ingress | `notebookHub.enabled` |
