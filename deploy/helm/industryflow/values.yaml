@@ -662,13 +662,24 @@ ingress:
     # is checked at the edge (ADR-0007 dec 6). The tenant-delete job reads issued.tsv and
     # issued.tsv.sig from it too, to verify a deleted tenant's devices are revoked (ADR-0033 dec 4). The CRL is refreshed out of band; the issuing key
     # does not live in the cluster (ADR-0007 dec 8). This job only watches the CRL's age, and
-    # fails, raising IndustryFlowDeviceCrlStale, while either CRL is within its warning window.
+    # fails, raising IndustryFlowDeviceCrlStale, while either CRL or a CA certificate of the chain
+    # is within its warning window (dec 10).
     crlCheck:
       enabled: true
       schedule: "17 */6 * * *"
       warnDays: 3
       rootWarnDays: 30
+      caCertWarnDays: 90
       # No successful check for this long raises the alert (two missed 6-hourly runs).
+      alertAfterSeconds: 46800
+      image: alpine/openssl:3.5.9@sha256:e8a2319d15637db5296c0ff540bb028cfabc480b22fcdd4a020582393d32673f
+    # Fails, raising IndustryFlowDeviceCertExpiring (warning: one device, not the fleet), while a
+    # device's newest unrevoked certificate is within warnDays of expiry: renewal is owed
+    # (ADR-0007 dec 10). Reads issued.tsv and issued.tsv.sig from the device-CA Secret.
+    certCheck:
+      enabled: true
+      schedule: "47 */6 * * *"
+      warnDays: 14
       alertAfterSeconds: 46800
       image: alpine/openssl:3.5.9@sha256:e8a2319d15637db5296c0ff540bb028cfabc480b22fcdd4a020582393d32673f
 

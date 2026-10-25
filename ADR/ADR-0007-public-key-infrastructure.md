@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0007 — Device certificate authority
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-10-23
+- **Date:** 2026-06-26; changed 2026-10-25
 - **Parent:** ADR-0001
 - **Related:** ADR-0002 (device mTLS), ADR-0003 (vouched tenant), ADR-0004 (server cert), ADR-0009 (secrets), ADR-0033 (dec 4: a deleted tenant's devices revoked)
 
@@ -36,6 +36,12 @@ sees. A revoked device must lose access at once, and an expired revocation list 
    issuing key.** It names that list and holds no key, so a verifier with only public files can check
    that every unexpired certificate of a tenant is revoked. A tenant is revoked as a whole by one
    operator command at the authority.
+10. **Every approaching certificate expiry is raised in advance, graded by what it refuses.** A CA
+   certificate of the chain refuses every device and is raised like an expiring list; a device whose
+   newest unrevoked certificate nears expiry is raised, at lower severity, as a renewal owed. The
+   watch reads only public files and trusts the register only when its signature verifies and it
+   names the current list. A device whose certificates have all expired is reported, not raised: the
+   verifier already refuses it, and revocation is what decommissions it.
 
 ## Alternatives
 
@@ -52,18 +58,24 @@ sees. A revoked device must lose access at once, and an expired revocation list 
 | 9 | Proof of revocation from the list alone | A list names what was revoked, never what was issued, so a missed certificate is invisible |
 | 9 | An unsigned register with a published digest | Whoever can replace the register can replace its digest |
 | 9 | A register that only grows at issuance | Drifts from the list it is checked against; one written with each list names it |
+| 10 | Raising every issued certificate that nears expiry | A device renewed in time would be raised for a certificate it no longer uses |
+| 10 | One severity for every expiry | One device's renewal would be raised like a fleet outage, or a fleet outage like one renewal |
+| 10 | Raising an expired device until it is revoked | A device retired without revocation would be raised forever, though the verifier already refuses it |
+| 10 | Reading expiry from the authority's own database | It lives beside the issuing key, which a cluster never holds (dec 8) |
 
 ## Consequences
 
 **Positive**
 - A device credential cannot be copied or its tenant spoofed; an intermediate compromise is recoverable;
   revocation is immediate, and list expiry never stops ingestion unannounced.
+- No CA or device certificate expires unannounced.
 
 **Negative**
 - Operating a CA is ongoing work, and the tenant guarantee rests on the enrollment step.
 - Issued identities, though no keys, are published beside the list.
 - Revocation is an availability dependency; a device that fails to renew loses access; one
   intermediate's compromise spans tenants.
+- The expiry watch is only as current as the register last published beside the list.
 
 ## Deferred
 

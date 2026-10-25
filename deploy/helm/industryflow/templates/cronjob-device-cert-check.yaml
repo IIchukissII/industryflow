@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if and .Values.ingress.enabled .Values.ingress.mtls.enabled .Values.ingress.mtls.certCheck.enabled }}
+{{- $c := .Values.ingress.mtls.certCheck }}
+{{- /*
+  Device-certificate expiry watch (ADR-0007 dec 10). A device whose certificate expires is refused
+  at ingestion. This job fails while a device's newest unrevoked certificate is inside its warning
+  window, and the IndustryFlowDeviceCertExpiring rule raises the failure. It reads only public files
+  from the device-CA Secret: the chain, the CRL and the signed issued register; it holds no key.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "industryflow.fullname" . }}-device-cert-check
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+data:
+  device-ca.sh: |-
+{{ .Files.Get "files/device-ca.sh" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "industryflow.fullname" . }}-device-cert-check
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: device-cert-check
+    app.kubernetes.io/component: pki
+spec:
+  schedule: {{ $c.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: device-cert-check
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            seccompProfile:
+              type: RuntimeDefault
+          {{- end }}
+          containers:
+            - name: device-cert-check
+              image: {{ $c.image | quote }}
+              command: ["sh", "/opt/device-ca/device-ca.sh", "check-certs", "/ca/issued.tsv", "/ca/ca.crl", "/ca/ca.crt"]
+              env:
+                - name: CERT_WARN_DAYS
+                  value: {{ $c.warnDays | quote }}
+              {{- if .Values.securityContext.enabled }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              {{- end }}
+              resources:
+                requests: { cpu: 10m, memory: 16Mi }
+                limits: { cpu: 100m, memory: 64Mi }
+              volumeMounts:
+                - { name: device-ca, mountPath: /ca, readOnly: true }
+                - { name: script, mountPath: /opt/device-ca, readOnly: true }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: device-ca
+              secret:
+                secretName: {{ .Values.ingress.mtls.caSecret }}
+            - name: script
+              configMap:
+                name: {{ include "industryflow.fullname" . }}-device-cert-check
+            - name: tmp
+              emptyDir: {}
+{{- end }}

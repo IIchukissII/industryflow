@@ -63,15 +63,26 @@ spec:
             summary: "Readings were dead-lettered"
             description: "{{`{{ $value | humanize }}`}} message(s) reached {{`{{ $labels.topic }}`}} in the last {{ $pr.deadLetterWindow }}. Inspect them there; they raised no alert."
         {{- if and .Values.ingress.enabled .Values.ingress.mtls.enabled .Values.ingress.mtls.crlCheck.enabled }}
-        # ADR-0007 dec 8: an expired device CRL makes the edge refuse every device. Raised from the
-        # device-crl-check job no longer succeeding (kube-state-metrics), well before the CRL
-        # expires. Keyed on the last SUCCESS, so it clears on the first good run after a refresh.
+        # ADR-0007 dec 8, 10: an expired device CRL or CA certificate makes the edge refuse every
+        # device. Raised from the device-crl-check job no longer succeeding (kube-state-metrics),
+        # well before either expires. Keyed on the last SUCCESS, so it clears on the first good run after a refresh.
         - alert: IndustryFlowDeviceCrlStale
           expr: time() - kube_cronjob_status_last_successful_time{cronjob="{{ include "industryflow.fullname" . }}-device-crl-check"} > {{ .Values.ingress.mtls.crlCheck.alertAfterSeconds }}
           labels:
             severity: critical
           annotations:
-            summary: "Device CRL is close to expiry"
-            description: "Refresh the CRL in the {{ .Values.ingress.mtls.caSecret }} Secret (docs/operations/device-mtls.md). Once it expires, every device is refused at ingestion."
+            summary: "Device CRL or CA certificate is close to expiry"
+            description: "The device-crl-check job log names it. Refresh the CRL in the {{ .Values.ingress.mtls.caSecret }} Secret, or replace the CA certificate (docs/operations/device-mtls.md). Once either expires, every device is refused at ingestion."
+        {{- end }}
+        {{- if and .Values.ingress.enabled .Values.ingress.mtls.enabled .Values.ingress.mtls.certCheck.enabled }}
+        # ADR-0007 dec 10: a device whose newest unrevoked certificate nears expiry owes a renewal.
+        # One device, not the fleet, so a warning; keyed on the last success like the CRL rule.
+        - alert: IndustryFlowDeviceCertExpiring
+          expr: time() - kube_cronjob_status_last_successful_time{cronjob="{{ include "industryflow.fullname" . }}-device-cert-check"} > {{ .Values.ingress.mtls.certCheck.alertAfterSeconds }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "A device certificate is close to expiry"
+            description: "The device-cert-check job log names the device. Renew it (docs/operations/device-mtls.md) and republish the CRL and register to the {{ .Values.ingress.mtls.caSecret }} Secret; an expired certificate is refused at ingestion."
         {{- end }}
 {{- end }}

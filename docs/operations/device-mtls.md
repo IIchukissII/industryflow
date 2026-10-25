@@ -50,7 +50,8 @@ All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 | Revoke every device of a deleted tenant and refresh the CRL | `scripts/device-ca.sh revoke-tenant <company-uuid>` |
 | Re-sign the intermediate's CRL and the issued register | `scripts/device-ca.sh crl` |
 | Re-sign the root's CRL (needs the offline root key) | `scripts/device-ca.sh root-crl` |
-| Check both CRLs; non-zero inside the warning window | `scripts/device-ca.sh check` |
+| Check both CRLs and both CA certificates; non-zero inside a warning window | `scripts/device-ca.sh check` |
+| Check every device's newest unrevoked certificate; non-zero inside the warning window | `scripts/device-ca.sh check-certs` |
 | Print the verify-chain path | `scripts/device-ca.sh chain` |
 
 | File | Content |
@@ -70,6 +71,8 @@ All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 | `INT_DAYS` / `ROOT_DAYS` | `1825` / `3650` | Intermediate / root validity |
 | `CRL_DAYS` / `CRL_WARN_DAYS` | `7` / `3` | Intermediate CRL validity / warning window |
 | `ROOT_CRL_DAYS` / `ROOT_CRL_WARN_DAYS` | `365` / `30` | Root CRL validity / warning window |
+| `CA_CERT_WARN_DAYS` | `90` | Warning window for the intermediate and root certificates (`check`) |
+| `CERT_WARN_DAYS` | `14` | Warning window for a device's newest unrevoked certificate (`check-certs`) |
 
 ## Enrollment
 
@@ -78,6 +81,26 @@ All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 | Tenant binding | Fixed at issuance by the operator; the device cannot choose its tenant |
 | Real devices | Key generated on the device or secure element; only the CSR reaches the CA |
 | Renewal | Issuing again adds a new serial and moves `current.*`; nothing is overwritten |
+
+## Expiry watch
+
+Every approaching expiry is raised in advance, graded by what it refuses ([ADR-0007](../../ADR/ADR-0007-public-key-infrastructure.md) dec 10).
+
+| Expiring | Refuses | Raised by | Severity |
+|---|---|---|---|
+| A CRL or a CA certificate of the chain | Every device | `check` | Critical |
+| A device's newest unrevoked certificate | That device | `check-certs` | Warning |
+
+`check-certs` reads only public files: `issued.tsv`, its signature, the CRL bundle and the chain.
+
+| Case | Result |
+|---|---|
+| Register signature does not verify against the intermediate | Error |
+| Register names a CRL number other than the published intermediate CRL's | Error: republish both together |
+| Device renewed (a newer unrevoked certificate is valid beyond the window) | Not raised |
+| Device revoked | Not raised |
+| Every certificate of a device expired | Printed as `expired:`; not raised. Revoke it if it is decommissioned |
+| Newest unrevoked certificate inside `CERT_WARN_DAYS` | `EXPIRING:` line naming tenant and device; non-zero exit |
 | Same `device_id`, two tenants | Two separate devices |
 
 Reference producer against the edge: [getting started, step 5](../getting-started.md#5-stream-test-data).
@@ -132,8 +155,9 @@ point; the edge holds the CRL locally ([ADR-0007](../../ADR/ADR-0007-public-key-
 
 `device-crl-refresh` runs `device-ca.sh crl` every `DEVICE_CRL_REFRESH_SECONDS` (default `86400`),
 with no network, as `DEVICE_CA_UID`:`DEVICE_CA_GID` (default `1000:1000`, the CA directory's owner).
-Its healthcheck runs `device-ca.sh check` hourly; `docker compose ps` shows it **unhealthy** when
-either CRL is inside its warning window.
+After each re-sign it logs `device-ca.sh check-certs`. Its healthcheck runs `check` and `check-certs`
+hourly; `docker compose ps` shows it **unhealthy** when a CRL, a CA certificate or a device certificate
+is inside its warning window. `docker logs industryflow-device-crl-refresh` names the device.
 
 ### Kubernetes
 
@@ -154,8 +178,11 @@ kubectl -n <namespace> create secret generic industryflow-device-ca \
 |---|---|---|
 | `ingress.mtls.caSecret` | `industryflow-device-ca` | Secret with `ca.crt`, `ca.crl`, `issued.tsv` and `issued.tsv.sig`; without `ca.crl` revocation is not checked and the CRL check fails; without the register no tenant deletion completes |
 | `ingress.mtls.crlCheck.schedule` | `17 */6 * * *` | `device-crl-check` CronJob checking the Secret's CRL |
-| `ingress.mtls.crlCheck.warnDays` / `rootWarnDays` | `3` / `30` | Warning windows |
+| `ingress.mtls.crlCheck.warnDays` / `rootWarnDays` / `caCertWarnDays` | `3` / `30` / `90` | Warning windows: intermediate CRL / root CRL / CA certificates |
 | `ingress.mtls.crlCheck.alertAfterSeconds` | `46800` | No successful check for this long fires `IndustryFlowDeviceCrlStale` (needs `observability.prometheusRules.enabled` and kube-state-metrics) |
+| `ingress.mtls.certCheck.schedule` | `47 */6 * * *` | `device-cert-check` CronJob running `check-certs` on the Secret's register |
+| `ingress.mtls.certCheck.warnDays` | `14` | Device-certificate warning window |
+| `ingress.mtls.certCheck.alertAfterSeconds` | `46800` | No successful check for this long fires `IndustryFlowDeviceCertExpiring` (warning) |
 
 ## Troubleshooting
 
@@ -163,6 +190,8 @@ kubectl -n <namespace> create secret generic industryflow-device-ca \
 |---|---|---|
 | Every device refused | A CRL expired | `device-ca.sh crl` (and `root-crl` if the root CRL expired); on Kubernetes republish the Secret |
 | `device-ca.sh check` warns on the root CRL far ahead of the yearly ceremony | Root CRL signed with a shorter validity than `ROOT_CRL_DAYS` | `scripts/device-ca.sh root-crl`, then `docker compose up -d device-crl-refresh ingestion-edge` |
+| `device-crl-refresh` unhealthy, CRLs fresh | A device certificate or a CA certificate is inside its warning window | Renew the device named in the log (`issue` with its CSR); for a CA certificate, the root ceremony |
+| `check-certs` fails: register names CRL X, published CRL is Y | The CRL and the register were published separately | Publish `ca.crl`, `issued.tsv` and `issued.tsv.sig` together |
 | `device-crl-refresh` exits: device CA not initialized | No `deploy/device-ca/intermediate` | `scripts/device-ca.sh init` |
 | A deletion waits on `device_certificates` | The tenant's devices are not revoked, or the CRL and register were not republished since the request | `scripts/device-ca.sh revoke-tenant <company-uuid>`; on Kubernetes republish the Secret |
 | `tenant-delete` fails: `No such file` for `issued.tsv` | CA files from before the register | `scripts/device-ca.sh crl`; on Kubernetes republish the Secret |
