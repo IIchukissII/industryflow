@@ -49,6 +49,8 @@ jobs:
               - 'services/api_gateway/routers/alert_rules.py'
               - 'services/api_gateway/routers/alerts_history.py'
               - 'services/alert_service/worker/repository.py'
+              # The engine tests' stand-in for that SQL; test_alert_dedup_hypertable.py holds it to the hypertable.
+              - 'services/alert_service/tests/fake_alert_store.py'
               - 'services/alert_service/worker/tenant_status_publisher.py'
               - 'services/spark_jobs/reading_guard.py'
               - 'libs/industryflow_contracts/**'
