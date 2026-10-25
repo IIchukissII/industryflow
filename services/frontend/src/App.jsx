@@ -17,6 +17,7 @@ const Equipment = lazy(() => import('./pages/Equipment'));
 const Settings = lazy(() => import('./pages/Settings'));
 const MLModels = lazy(() => import('./pages/MLModels'));
 const Notebooks = lazy(() => import('./pages/Notebooks'));
+const Experiments = lazy(() => import('./pages/Experiments'));
 const Help = lazy(() => import('./pages/Help'));
 const Login = lazy(() => import('./pages/Login'));
 
@@ -80,6 +81,11 @@ function App() {
         <Route path="/notebooks" element={
           <ProtectedRoute user={user}>
             <Notebooks user={user} />
+          </ProtectedRoute>
+        } />
+        <Route path="/experiments" element={
+          <ProtectedRoute user={user}>
+            <Experiments user={user} />
           </ProtectedRoute>
         } />
         <Route path="/help" element={
