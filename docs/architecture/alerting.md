@@ -91,8 +91,12 @@ hypertable ([data and storage](data-and-storage.md)).
 | Exact replay | `alert_id` derived from key and event time; `ON CONFLICT DO NOTHING` |
 | ML event time | Newest reading in the snapshot |
 | In-memory cache | `ALERT_DEDUP_CACHE_MAX` entries in front of the query |
+| Hypertable chunks | The window check reaches across a chunk boundary; the primary key is per chunk and includes the event time, so an exact replay meets its row in the same chunk |
 
-Code: `services/alert_service/worker/repository.py`.
+Code: `services/alert_service/worker/repository.py`. Live proofs on the alerts hypertable:
+`infrastructure/timescaledb/tests/test_alert_dedup_hypertable.py` (window, replay, out-of-order and
+scope cases at a chunk boundary; concurrent writers across existing and new chunks; the engine
+tests' `FakeAlertStore` held to the same outcomes) and `test_alert_dedup_live.py`.
 
 ## ML snapshot
 
