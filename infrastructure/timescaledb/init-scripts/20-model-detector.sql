@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Model Detector Migration (ADR-0010 dec 6, ADR-0028 dec 1-2)
 -- Version: 1.0
 -- Date: October 13, 2026

@@ -59,6 +59,8 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       {{- end }}
+      initContainers:
+        {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" . "user" "notebook_sql_proxy" "workload" "notebook-sql-proxy" "passwordKey" "NOTEBOOK_SQL_PROXY_DB_PASSWORD") | nindent 8 }}
       containers:
         - name: sql-proxy
           image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.sqlProxy.image "tag" .Values.image.tag "digest" .Values.notebookHub.sqlProxy.digest) | quote }}
@@ -118,13 +120,14 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.notebookHub.sqlProxy.resources | nindent 12 }}
-      {{- if .Values.tls.db.enabled }}
       volumes:
+        {{- include "industryflow.schemaReadyVolumes" . | nindent 8 }}
+        {{- if .Values.tls.db.enabled }}
         - name: db-ca
           secret:
             secretName: {{ .Values.tls.db.secretName | quote }}
             items:
               - key: ca.crt
                 path: ca.crt
-      {{- end }}
+        {{- end }}
 {{- end }}

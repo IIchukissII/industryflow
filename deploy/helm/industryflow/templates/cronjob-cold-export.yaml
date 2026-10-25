@@ -47,6 +47,8 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           {{- end }}
+          initContainers:
+            {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" . "user" "cold_export_user" "workload" "cold-export" "passwordKey" "COLD_EXPORT_DB_PASSWORD") | nindent 12 }}
           containers:
             - name: cold-export
               image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.coldExport.image "tag" .Values.image.tag "digest" .Values.coldExport.digest) | quote }}
@@ -116,8 +118,8 @@ spec:
                   readOnly: true
                 {{- end }}
               {{- end }}
-          {{- if or .Values.securityContext.enabled .Values.tls.db.enabled }}
           volumes:
+            {{- include "industryflow.schemaReadyVolumes" . | nindent 12 }}
             {{- if .Values.securityContext.enabled }}
             - name: tmp
               emptyDir: {}
@@ -130,5 +132,4 @@ spec:
                   - key: ca.crt
                     path: ca.crt
             {{- end }}
-          {{- end }}
 {{- end }}

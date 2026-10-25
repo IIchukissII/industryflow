@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Data and storage
 
 Where tenant data lives: PostgreSQL + TimescaleDB with one schema per tenant, and the cold layer in
-the object store. Scripts, roles and grants: [init scripts](../../infrastructure/timescaledb/init-scripts/README.md).
+the object store. Scripts, roles and grants: [schema scripts](../../infrastructure/timescaledb/init-scripts/README.md).
 
 | Decision | ADR |
 |---|---|

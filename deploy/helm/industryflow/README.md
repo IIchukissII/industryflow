@@ -15,7 +15,8 @@ Kubernetes packaging for IndustryFlow ([ADR-0009](../../../ADR/ADR-0009-kubernet
 | `configmap.yaml` | Shared non-secret config from `config` | always |
 | `secret.yaml` | One scoped Secret per workload, `<release>-<workload>-secrets` | `secrets.create`, no `existingSecret` |
 | `infra-timescaledb.yaml` | TimescaleDB StatefulSet + Service | `infra.timescaledb.inCluster` |
-| `configmap-db-init.yaml` | `files/db-init` scripts, mounted at `/docker-entrypoint-initdb.d` | `infra.timescaledb.inCluster` |
+| `configmap-db-migrations.yaml` | `files/db-migrations` scripts and `files/migrate.sh`, for the runner and the `schema-ready` init containers | always |
+| `job-db-migrate.yaml` | `<release>-db-migrate-<revision>` Job applying the schema sequence ([ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md)) | always |
 | `configmap-pg-hba.yaml` | Hardened `pg_hba.conf` + `postgresql.conf` (`files/db-config`) | `infra.timescaledb.inCluster` |
 | `db-tls-certificate.yaml` | cert-manager issuers, internal CA, DB server cert | `tls.db.certManager.enabled` |
 | `infra-kafka.yaml` | ZooKeeper + Kafka StatefulSets | `infra.zookeeper` / `infra.kafka.inCluster` |
@@ -42,7 +43,8 @@ Kubernetes packaging for IndustryFlow ([ADR-0009](../../../ADR/ADR-0009-kubernet
 
 | Symlink | Target |
 |---|---|
-| `files/db-init` | `infrastructure/timescaledb/init-scripts` |
+| `files/db-migrations` | `infrastructure/timescaledb/init-scripts` |
+| `files/migrate.sh` | `infrastructure/timescaledb/migrate.sh` |
 | `files/db-config` | `infrastructure/timescaledb/config` |
 | `files/minio-init.sh` | `infrastructure/minio/minio-init.sh` |
 | `files/device-ca.sh` | `scripts/device-ca.sh` |
@@ -94,11 +96,11 @@ digest from GHCR over the registry API (`GITHUB_TOKEN` or `gh auth token` for pr
 | Item | Keys | Requirement |
 |---|---|---|
 | Secrets | `secrets.data`, `secrets.create`, `secrets.existingSecret` | Replace every `CHANGE_ME` from a secrets backend, or `secrets.create=false` + `existingSecret` (every workload then references that one Secret). Rendering fails on a placeholder while `secrets.failOnPlaceholders=true` |
-| DB roles | `secrets.data.*_DB_PASSWORD`, `config.*_DB_USER` | Each service connects as its own role; the init scripts create the roles from these passwords |
+| DB roles | `secrets.data.*_DB_PASSWORD`, `config.*_DB_USER` | Each service connects as its own role; the `db-migrate` Job creates the roles from these passwords |
 | Images | `values-digests.yaml` | Install with the generated overlay; never `latest` |
 | Ingress TLS | `ingress.tls.secretName` | Public certificate Secret ([ADR-0004](../../../ADR/ADR-0004-api-authentication-sessions-and-transport.md)) |
 | DB TLS | `tls.db.*` | Secret or cert-manager ([database TLS](../../../docs/operations/tls.md#helm)) |
-| DB init | `infra.timescaledb.inCluster` | In-cluster: scripts run on a fresh data volume. External: run [the init scripts](../../../infrastructure/timescaledb/init-scripts/README.md) yourself before first use |
+| DB schema | `dbMigrations.*` | The `db-migrate` Job applies [the schema sequence](../../../infrastructure/timescaledb/init-scripts/README.md) to the in-cluster or external database on every install and upgrade; each database client's `schema-ready` init container waits up to `dbMigrations.waitSeconds` for a current ledger |
 | Spark checkpoints | `apps.spark-*.persistence` | Default is a ReadWriteOnce PVC; needs a default StorageClass or `storageClass` |
 | Object-store principals | `secrets.data.*_ACCESS_KEY` / `*_SECRET_KEY` | One pair per consumer, access keys distinct from the root's. External store: create equivalent principals; the policy table in `infrastructure/minio/minio-init.sh` is the reference |
 | Device mTLS | `ingress.mtls.*` | Device CA Secret with `ca.crt` and `ca.crl` ([device mTLS](../../../docs/operations/device-mtls.md#kubernetes)) |

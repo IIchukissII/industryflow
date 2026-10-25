@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: migration
+
 -- Migration: read-only monitoring role for the postgres-exporter (existing deployments).
 -- Granted the built-in pg_monitor role (pg_stat_* etc.) — never the superuser. The password
 -- is set from METRICS_DB_PASSWORD at init; for an existing cluster set it once:

@@ -80,11 +80,10 @@ stringData:
 {{- end -}}
 
 {{/*
-The per-service role passwords the in-cluster TimescaleDB consumes at first init (00-create-roles.sh
-and 13-notebook-sql-proxy-role.sh create one role from each). ONE list for both consumers: the
-timescaledb scoped Secret carries exactly these keys and the StatefulSet passes exactly these into
-the container, so a role cannot be put in one and forgotten in the other (it would be created with
-no password). Returned space-separated; callers `splitList " "` it.
+The per-service role passwords the migration runner's role scripts set (00-create-roles.sh and
+13-notebook-sql-proxy-role.sh create one role from each). ONE list for both consumers: the db-migrate
+scoped Secret carries exactly these keys and the Job passes exactly these into the container, so a
+role cannot be put in one and forgotten in the other (it would be created with no password). Returned space-separated; callers `splitList " "` it.
 */}}
 {{- define "industryflow.timescaledbRoleKeys" -}}
 {{- $keys := list "API_GATEWAY_DB_PASSWORD" "SPARK_STREAMING_DB_PASSWORD" "ALERT_SERVICE_DB_PASSWORD" "ML_SERVICE_DB_PASSWORD" "MLFLOW_DB_PASSWORD" "METRICS_DB_PASSWORD" -}}
@@ -191,4 +190,75 @@ principal is never half-wired. Each is created only where its consumer is deploy
 {{- if .Values.coldExport.enabled }}{{ $keys = concat $keys (list "COLD_STORE_ACCESS_KEY" "COLD_STORE_SECRET_KEY" "COLD_READ_ACCESS_KEY" "COLD_READ_SECRET_KEY") }}{{ end -}}
 {{- if and .Values.coldExport.enabled .Values.tenantDelete.enabled }}{{ $keys = concat $keys (list "TENANT_DELETE_COLD_ACCESS_KEY" "TENANT_DELETE_COLD_SECRET_KEY") }}{{ end -}}
 {{- join " " $keys -}}
+{{- end -}}
+
+{{/*
+Schema-ready gate (ADR-0034 dec 10): an init container that holds a database client until the
+ledger shows every platform script applied (`migrate.sh verify --wait`, read-only, as the client's
+own role). Kubernetes has no start order across workloads, so this is how a service never starts
+against a database the ledger shows behind. A client of the tracking database (database "mlflow")
+cannot read the platform ledger; it waits for its own login instead, which exists only once the
+runner has created its database and role. Call with a dict: ctx, user, workload (whose scoped
+Secret holds the password), passwordKey, and optionally database. Pair with schemaReadyVolumes.
+*/}}
+{{- define "industryflow.schemaReadyInitContainer" -}}
+{{- $ctx := .ctx -}}
+{{- $m := $ctx.Values.dbMigrations -}}
+{{- $db := .database | default $ctx.Values.infra.timescaledb.database -}}
+- name: schema-ready
+  image: {{ $ctx.Values.infra.timescaledb.image | quote }}
+  {{- if eq $db "mlflow" }}
+  command: ["sh", "-c", "until psql -X -qtA -c 'SELECT 1' >/dev/null; do echo 'waiting for the tracking database'; sleep 5; done"]
+  {{- else }}
+  command: ["sh", "/opt/db-migrations/migrate.sh", "verify", "--wait"]
+  {{- end }}
+  env:
+    - { name: PGHOST, value: {{ include "industryflow.dbHost" $ctx | quote }} }
+    - { name: PGPORT, value: {{ $ctx.Values.infra.timescaledb.port | quote }} }
+    - { name: PGDATABASE, value: {{ $db | quote }} }
+    - { name: PGUSER, value: {{ .user | quote }} }
+    - name: PGPASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "industryflow.workloadSecretName" (dict "ctx" $ctx "workload" .workload) }}
+          key: {{ .passwordKey }}
+    {{- if $ctx.Values.tls.db.enabled }}
+    - { name: PGSSLMODE, value: {{ $ctx.Values.tls.db.sslmode | quote }} }
+    - { name: PGSSLROOTCERT, value: /opt/schema-ready-ca/ca.crt }
+    {{- end }}
+    - { name: MIGRATIONS_DIR, value: /opt/db-migrations }
+    - { name: MIGRATE_WAIT_SECONDS, value: {{ $m.waitSeconds | quote }} }
+    - { name: TMPDIR, value: /tmp }
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: {{ $ctx.Values.tls.db.postgresUser }}
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { cpu: 100m, memory: 64Mi }
+  volumeMounts:
+    - { name: schema-ready-scripts, mountPath: /opt/db-migrations, readOnly: true }
+    - { name: schema-ready-tmp, mountPath: /tmp }
+    {{- if $ctx.Values.tls.db.enabled }}
+    - { name: schema-ready-ca, mountPath: /opt/schema-ready-ca, readOnly: true }
+    {{- end }}
+{{- end -}}
+
+{{/* The volumes schemaReadyInitContainer mounts. Call with the root context. */}}
+{{- define "industryflow.schemaReadyVolumes" -}}
+- name: schema-ready-scripts
+  configMap:
+    name: {{ include "industryflow.fullname" . }}-db-migrations
+- name: schema-ready-tmp
+  emptyDir: {}
+{{- if .Values.tls.db.enabled }}
+- name: schema-ready-ca
+  secret:
+    secretName: {{ .Values.tls.db.secretName | quote }}
+    items:
+      - { key: ca.crt, path: ca.crt }
+{{- end }}
 {{- end -}}

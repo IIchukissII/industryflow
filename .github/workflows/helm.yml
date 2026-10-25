@@ -29,6 +29,7 @@ jobs:
               # tests/config_guards checks this list covers every symlink target.
               - 'infrastructure/timescaledb/config/**'
               - 'infrastructure/timescaledb/init-scripts/**'
+              - 'infrastructure/timescaledb/migrate.sh'
               - 'infrastructure/grafana/**'
               - 'scripts/device-ca.sh'
               - 'infrastructure/minio/**'

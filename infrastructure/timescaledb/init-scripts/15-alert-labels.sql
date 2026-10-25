@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Alert Labels Migration (ADR-0022)
 -- Version: 1.0
 -- Date: July 5, 2026

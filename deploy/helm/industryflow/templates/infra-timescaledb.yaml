@@ -38,9 +38,6 @@ spec:
         app.kubernetes.io/name: timescaledb
         app.kubernetes.io/instance: {{ .Release.Name }}
       annotations:
-        # Roll the pod when the init scripts change. (NB: the entrypoint only re-runs them on
-        # an EMPTY data volume; on an existing volume this restart is a no-op for init.)
-        checksum/db-init: {{ include (print $.Template.BasePath "/configmap-db-init.yaml") . | sha256sum }}
         checksum/pg-hba: {{ include (print $.Template.BasePath "/configmap-pg-hba.yaml") . | sha256sum }}
     spec:
       {{- if .Values.tls.db.enabled }}
@@ -110,16 +107,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "timescaledb") }}
                   key: DB_PASSWORD
-            {{- /* Per-service role passwords consumed by the init scripts at first init — the same
-                   list the timescaledb Secret carries (industryflow.timescaledbRoleKeys). */}}
-            {{- $tsSecret := include "industryflow.workloadSecretName" (dict "ctx" . "workload" "timescaledb") }}
-            {{- range $key := splitList " " (include "industryflow.timescaledbRoleKeys" .) }}
-            - name: {{ $key }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $tsSecret }}
-                  key: {{ $key }}
-            {{- end }}
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
@@ -133,9 +120,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
-            - name: db-init
-              mountPath: /docker-entrypoint-initdb.d
-              readOnly: true
             - name: pg-hba
               mountPath: /etc/postgresql/pg_hba.conf
               subPath: pg_hba.conf
@@ -154,12 +138,6 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
-        - name: db-init
-          configMap:
-            name: {{ include "industryflow.fullname" . }}-db-init
-            # Executable so the postgres entrypoint runs 00-create-roles.sh as a subprocess
-            # (rather than sourcing it), matching the compose bind-mount behaviour.
-            defaultMode: 0755
         - name: pg-hba
           configMap:
             name: {{ include "industryflow.fullname" . }}-pg-hba

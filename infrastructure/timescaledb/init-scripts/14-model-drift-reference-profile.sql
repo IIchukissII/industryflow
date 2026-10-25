@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: definition
+
 -- Model Drift Reference-Profile Migration (ADR-0021)
 -- Version: 1.0
 -- Date: July 4, 2026

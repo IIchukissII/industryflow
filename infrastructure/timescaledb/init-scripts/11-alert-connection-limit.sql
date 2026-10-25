@@ -2,6 +2,8 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- migration-kind: migration
+
 -- Migration: raise alert_service_user's connection limit (existing deployments).
 --
 -- (Sized when a separate alert HTTP API shared this role; retired by ADR-0031. The limit stays as headroom.)
