@@ -69,7 +69,10 @@ jobs:
         run: cp .env.example .env
 
       - name: Start TimescaleDB + Redis and apply the schema sequence (incl. the notebook_sql_proxy role)
-        run: docker compose up -d --wait timescaledb db-migrate redis
+        # `up --wait` returns once a one-shot has started; the runner is run to completion.
+        run: |
+          docker compose up -d --wait timescaledb redis
+          docker compose run --rm db-migrate
 
       - name: Build + start the SQL proxy (notebooks profile, port published for CI)
         run: |

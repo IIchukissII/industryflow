@@ -100,11 +100,14 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/prev" "$PREV"
           cp .env "$RUNNER_TEMP/prev/.env"
           prev() { docker compose -p "$(basename "$PWD")" --project-directory "$RUNNER_TEMP/prev" -f "$RUNNER_TEMP/prev/docker-compose.yml" "$@"; }
-          services=timescaledb
-          prev config --services | grep -qx db-migrate && services="timescaledb db-migrate"
-          echo "previous release $PREV brings up: $services"
-          prev up -d --wait --wait-timeout 300 $services
-          if [ "$services" = timescaledb ]; then
+          runner=no
+          prev config --services | grep -qx db-migrate && runner=yes
+          echo "previous release $PREV has the migration runner: $runner"
+          prev up -d --wait --wait-timeout 300 timescaledb
+          if [ "$runner" = yes ]; then
+            # `up --wait` returns once a one-shot has started, not finished; run it to completion.
+            prev run --rm db-migrate
+          else
             # Under the init hook the server is "ready" on its socket while the scripts still run,
             # then restarts; the scripts are done once the hook says so.
             for i in $(seq 1 90); do

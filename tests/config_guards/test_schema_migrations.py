@@ -137,3 +137,14 @@ def test_the_chart_runs_the_sequence_on_every_revision(toggle):
     for _, pod in _pods(docs):
         for c in pod.get("containers", []):
             assert not [m for m in c.get("volumeMounts", []) if m["mountPath"] == "/docker-entrypoint-initdb.d"]
+
+
+def test_no_workflow_waits_for_the_runner_with_up_wait():
+    # `docker compose up --wait` returns once a one-shot has started, not once it has finished, so a
+    # step that lists db-migrate there races the schema it then uses. Run it with `run --rm`.
+    racing = []
+    for wf in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        for line in wf.read_text().splitlines():
+            if "up " in line and "--wait" in line and re.search(r"\bdb-migrate\b", line):
+                racing.append(f"{wf.name}: {line.strip()}")
+    assert not racing, "steps that race the migration runner:\n" + "\n".join(racing)
