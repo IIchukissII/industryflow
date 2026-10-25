@@ -30,6 +30,7 @@ jobs:
               - 'infrastructure/timescaledb/config/**'
               - 'infrastructure/timescaledb/init-scripts/**'
               - 'infrastructure/timescaledb/migrate.sh'
+              - 'infrastructure/prometheus/rules/**'
               - 'infrastructure/grafana/**'
               - 'scripts/device-ca.sh'
               - 'infrastructure/minio/**'

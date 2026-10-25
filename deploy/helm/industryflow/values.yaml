@@ -461,12 +461,8 @@ observability:
   prometheusRules:
     enabled: false
     labels: {}
-    # Tunable thresholds for the platform alert rules.
-    targetDownFor: 5m
-    kafkaConsumerLagThreshold: 1000
-    kafkaConsumerLagFor: 10m
-    # Any reading dead-lettered within this window raises IndustryFlowDeadLetteredReadings.
-    deadLetterWindow: 15m
+    # The platform rules and their thresholds are infrastructure/prometheus/rules/platform.yml, the
+    # file Compose loads too. Tune them there, or add a PrometheusRule of your own beside this one.
   dashboards:
     # ConfigMaps labelled for the Grafana sidecar; harmless (just ConfigMaps) without it.
     enabled: true

@@ -15,7 +15,8 @@ Host ports bind to `127.0.0.1`.
 
 | Name | Role | Port | Config |
 |---|---|---|---|
-| `prometheus` | Metrics store, 15 s scrape and evaluation interval | `${PROMETHEUS_PORT:-9090}` | `infrastructure/prometheus/prometheus.yml` |
+| `prometheus` | Metrics store, 15 s scrape and evaluation interval; evaluates the platform alert rules | `${PROMETHEUS_PORT:-9090}` | `infrastructure/prometheus/prometheus.yml`, `infrastructure/prometheus/rules/` |
+| `alertmanager` | Groups and routes firing alerts; no receiver as shipped | `${ALERTMANAGER_PORT:-9093}` | `${ALERTMANAGER_CONFIG:-infrastructure/alertmanager/alertmanager.yml}` |
 | `grafana` | Dashboards | `${GRAFANA_PORT:-3000}` (`.env.example`: `3001`) | `infrastructure/grafana/provisioning/` |
 | `loki` | Log store | `3100` | `infrastructure/loki/loki-config.yml` |
 | `promtail` | Ships container and `/var/log` logs to Loki | none (`9080` internal) | `infrastructure/promtail/promtail-config.yml` |
@@ -28,11 +29,14 @@ Host ports bind to `127.0.0.1`.
 | Volume | Holds |
 |---|---|
 | `prometheus-data` | TSDB, retention `30d` (`--storage.tsdb.retention.time` in `docker-compose.yml`) |
+| `alertmanager-data` | Silences and notification log |
 | `grafana-data` | Grafana state |
 | `loki-data` | Chunks, index, compactor |
 | `promtail-positions` | Read positions; a recreated `promtail` resumes instead of re-sending history Loki rejects as too old |
 
 ## Prometheus scrape jobs
+
+Every target carries the label `platform="industryflow"`, which every platform alert rule selects on.
 
 | Job | Target | Path |
 |---|---|---|
@@ -50,6 +54,37 @@ Host ports bind to `127.0.0.1`.
 | `spark-master` | `spark-master:8080` | `/metrics/master/prometheus` |
 | `loki` | `loki:3100` | `/metrics`; `up{job="loki"}` is Loki's health signal (distroless image, no container healthcheck) |
 | `promtail` | `promtail:9080` | `/metrics` |
+| `alertmanager` | `alertmanager:9093` | `/metrics` |
+
+## Alerts
+
+Prometheus evaluates [`infrastructure/prometheus/rules/platform.yml`](../../infrastructure/prometheus/rules/platform.yml),
+the same file the chart renders into its PrometheusRule ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 1).
+
+| Alert | Fires when | Handling |
+|---|---|---|
+| `IndustryFlowTargetDown` | A scrape target is down for 5m | `docker compose ps`; the service's logs |
+| `IndustryFlowPostgresDown` | `postgres-exporter` cannot reach TimescaleDB for 5m | `docker compose logs timescaledb` |
+| `IndustryFlowRedisDown` | `redis-exporter` cannot reach Redis for 5m | `docker compose logs redis` |
+| `IndustryFlowKafkaConsumerLag` | A consumer group lags more than 1000 for 10m | The consumer's logs |
+| `IndustryFlowDeadLetteredReadings` | A letter reached a `*.dlq` topic in the last 15m | [Dead-letter handling](dead-letters.md) |
+
+| Where to see firing alerts | Address |
+|---|---|
+| Prometheus | `http://localhost:<PROMETHEUS_PORT>/alerts` |
+| Alertmanager | `http://localhost:<ALERTMANAGER_PORT>` |
+
+### Alert delivery
+
+The shipped `infrastructure/alertmanager/alertmanager.yml` routes every alert to a receiver with no
+integration: nothing is sent.
+
+| Step | Action |
+|---|---|
+| 1 | Copy `infrastructure/alertmanager/alertmanager.yml` outside the repository and add an integration to receiver `operator` (`email_configs`, `webhook_configs`, …; [Alertmanager configuration](https://prometheus.io/docs/alerting/latest/configuration/)) |
+| 2 | Set `ALERTMANAGER_CONFIG=<path>` in `.env` |
+| 3 | `docker compose up -d alertmanager` |
+| 4 | Check: `docker compose exec alertmanager amtool check-config /etc/alertmanager/alertmanager.yml` |
 
 ## Grafana
 
@@ -98,7 +133,7 @@ health reaches Grafana as `postgres-exporter` metrics.
 | Host memory used % | `100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)` |
 | DB connections | `pg_stat_database_numbackends{datname="industryflow"}` |
 | Consumer lag | `sum by (consumergroup, topic) (kafka_consumergroup_lag)` |
-| Dead-lettered readings | `sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".+\\.dlq"}[15m]))` |
+| Dead-lettered readings | `sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".+\\.dlq"}[15m]))` ([dead-letter handling](dead-letters.md)) |
 
 ## Logs
 

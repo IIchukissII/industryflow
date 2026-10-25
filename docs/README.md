@@ -37,6 +37,7 @@ Index of every page under `docs/` and of the component READMEs. Decisions live i
 | [device mTLS](operations/device-mtls.md) | Device CA, device certificates, CRL |
 | [extensions](operations/extensions.md) | Plugin contracts for feature transforms and detectors |
 | [monitoring](operations/monitoring.md) | Compose metrics, logs, dashboards; kill-switch runbook |
+| [dead letters](operations/dead-letters.md) | Dead-letter inspection, triage and replay |
 | [backup and recovery](operations/backup-and-recovery.md) | Backups and restore |
 | [high availability](operations/high-availability.md) | Disruption budgets, autoscaling, stateful backends |
 | [capacity](operations/capacity.md) | Measured ingest capacity on one host, load-test tools |

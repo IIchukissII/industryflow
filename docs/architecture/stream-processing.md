@@ -40,8 +40,9 @@ device ──mTLS──▶ ingestion-edge ─▶ ingestion-service ─▶ Kafka 
 | `<KAFKA_TOPIC_SENSOR_DATA>.dlq` | `alert-service-detector` | Operators | `KAFKA_TOPIC_DLQ` ([alerting](alerting.md)) |
 | `tenant-status` | `alert-service-detector`: every registered tenant's status every `TENANT_STATUS_PUBLISH_SECONDS` (10 s) | `ingestion-service`, outside any group, from `latest`; a status unheard for 60 s is forgotten | `KAFKA_TOPIC_TENANT_STATUS` ([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) dec 3; message in `libs/industryflow_contracts/industryflow_contracts/tenant_status.py`) |
 
-A growing `*.dlq` topic fires the Helm rule `IndustryFlowDeadLetteredReadings`
-([platform alert rules](../../deploy/observability/README.md#platform-alert-rules)).
+A letter on a `*.dlq` topic fires `IndustryFlowDeadLetteredReadings` on Compose and Kubernetes
+([monitoring](../operations/monitoring.md#alerts)); inspection and replay:
+[dead-letter handling](../operations/dead-letters.md).
 
 ## Unwritable readings
 

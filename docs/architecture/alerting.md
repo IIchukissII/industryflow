@@ -74,7 +74,7 @@ hypertable ([data and storage](data-and-storage.md)).
 
 | Cause | Handling |
 |---|---|
-| Bad reading (not JSON; missing `company_id`, `sensor_id` or numeric `value`; non-UUID id; unparseable time) | Dead-lettered to `KAFKA_TOPIC_DLQ` with the error; batch commits |
+| Bad reading (not JSON; missing `company_id`, `sensor_id` or numeric `value`; non-UUID id; unparseable time) | Dead-lettered to `KAFKA_TOPIC_DLQ` with the reason ([dead letters](../operations/dead-letters.md)); batch commits |
 | Dependency down (database, pool, network) | Never dead-lettered; batch rewound to the last commit and retried with backoff `KAFKA_RETRY_BACKOFF_SECONDS` doubling to `KAFKA_MAX_BACKOFF_SECONDS` |
 | Other error | Retried `KAFKA_MAX_RETRIES` times, then dead-lettered |
 | Commit lost to a rebalance | Rewound; batch redelivered |
