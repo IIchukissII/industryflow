@@ -223,7 +223,7 @@ def _outlier_result(raw: float, threshold: float) -> DetectionResult:
 @register_detector(
     "autoencoder",
     semantics=RECONSTRUCTION_ERROR,
-    handles_flavors=["mlflow.sklearn", "mlflow.pyfunc"],
+    handles_flavors=["mlflow.sklearn"],
 )
 async def autoencoder_detector(features, model, threshold, ctx) -> DetectionResult:
     """Score an autoencoder by how badly it reconstructs its input.

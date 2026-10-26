@@ -13,11 +13,9 @@ fact). It is a separate *process* rather than a function call for three reasons,
   * **an unknown artifact's load path is not a thing to run in the API.** It executes library code
     chosen by a stranger's manifest. Structure was refused earlier, so this is not the last line of
     defence — but a process boundary is cheap and the alternative is trusting that it never was.
-  * **it can be given its own environment.** ADR-0030 dec 4 refuses object-serialisation on the
-    upload path and deliberately leaves the notebook path alone; MLflow's loader falls back to
-    deserialising objects unless told otherwise, and that switch is process-wide. Set here, it binds
-    the upload path only — set for the life of the service, it would silently change the rule for
-    kernels too, which no decision made (the service scopes it to each uploaded load instead).
+  * **it starts with deserialisation already off.** MLflow's loader deserialises objects unless told
+    otherwise; the probe's environment says so before any import, as the service does for its own
+    life (ADR-0037 dec 3).
   * **it can fail without taking the service with it.** A load that segfaults, hangs, or exhausts
     memory is a refusal, not an outage.
 

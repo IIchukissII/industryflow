@@ -48,20 +48,20 @@ Registration accepts only the admitted location under the caller's tenant; a mod
 and an artifact is refused. The check runs at registration, deployment and every load (warm-cache
 hits included).
 
-The author-code check (`skops_trust.refuse_author_code`) runs at registration (422), deployment (409)
-and every load. It reads the manifest only and imports nothing it names:
+The author-code check (`skops_trust.refuse_author_code`) runs for every model, uploaded or kernel-authored
+([ADR-0037](../../ADR/ADR-0037-no-author-code-on-the-serving-side.md)), at registration (422), deployment
+(409) and every load. It reads the manifest only and imports nothing it names:
 
 | Refused | Detail |
 |---|---|
 | `code` in any flavor | Directory on the import path |
-| Loader other than `mlflow.sklearn` or `mlflow.xgboost` | Deny by default (`UPLOADED_LOADERS`), checked by name |
+| Loader other than `mlflow.sklearn` or `mlflow.xgboost` | Deny by default (`PLATFORM_LOADERS`), checked by name |
 | `mlflow.sklearn` not in skops format | Object deserialisation |
 | xgboost `model_class` outside xgboost's model classes | Class the artifact names |
 | A `data` path outside the model directory | Checked at load |
 
-An uploaded load runs with MLflow's pickle switch (`MLFLOW_ALLOW_PICKLE_DESERIALIZATION`) off: in the
-probe process for its whole life, in the serving process for the duration of the load, exclusive of
-kernel-model loads, which read the switch as configured.
+MLflow's pickle switch (`MLFLOW_ALLOW_PICKLE_DESERIALIZATION`) is off in the serving process and the
+probe process for their whole life, set by the process itself; a deployment setting cannot turn it on.
 
 The compatibility gate decides a flavor by name: in the gate's flavor map or claimed by a loaded
 detector, never by importing the module the manifest names.

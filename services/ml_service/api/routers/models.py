@@ -279,32 +279,39 @@ async def _admit_address_or_refuse(
         ) from exc
 
 
-async def _refuse_author_code_or_reject(artifact_uri: str, *, on_refused: int) -> None:
-    """Refuse an uploaded model whose load would run code its author chose (ADR-0030 dec 4).
+async def _refuse_author_code_or_reject(
+    mlflow_run_id: Optional[str], artifact_uri: Optional[str], *, on_refused: int,
+) -> None:
+    """Refuse a model whose load would run code its author chose, whatever its provenance (ADR-0037).
 
     Asked at registration and at deployment, before the compatibility gate reads the artifact and
     before the load probe runs, and again by every load. It reads the manifest only and imports
     nothing it names, so it runs here, in the serving process.
     """
+    model_uri = artifact_uri
     try:
-        flavors = await asyncio.to_thread(skops_trust.read_flavors, artifact_uri)
+        model_uri = await asyncio.to_thread(
+            model_loader.model_uri_for, mlflow_run_id=mlflow_run_id, artifact_uri=artifact_uri,
+        )
+        flavors = await asyncio.to_thread(skops_trust.read_flavors, model_uri)
     except Exception as exc:  # noqa: BLE001 — the store is outside our control; no verdict either way
-        logger.warning(f"Could not read the manifest of {artifact_uri}: {exc}")
+        logger.warning(f"Could not read the manifest of {model_uri}: {exc}")
         raise HTTPException(
             status_code=503,
             detail=(
-                "Could not read the uploaded model's manifest, so it cannot be established that "
+                "Could not read the model's manifest, so it cannot be established that "
                 "loading it runs no code its author supplied. This is transient — retry."
             ),
         ) from exc
     try:
         skops_trust.refuse_author_code(flavors)
     except skops_trust.UnsafeArtifact as exc:
-        logger.warning(f"Refusing uploaded model at {artifact_uri}: {exc}")
+        logger.warning(f"Refusing model at {model_uri}: {exc}")
         raise HTTPException(status_code=on_refused, detail={
             "message": (
-                "Loading this model would run code its author chose, which an uploaded model may "
-                "never do (ADR-0030 dec 4)."
+                "Loading this model would run code its author chose, which no model served here may "
+                "do (ADR-0037). Log it in a data-only format: scikit-learn as skops, xgboost as its "
+                "native booster."
             ),
             "reason": str(exc),
         }) from exc
@@ -459,8 +466,9 @@ async def create_model(
         company_id, payload.get("mlflow_run_id"), payload.get("artifact_uri"), on_refused=422,
     )
 
-    if provenance == uploaded_model.PROVENANCE_UPLOADED:
-        await _refuse_author_code_or_reject(payload["artifact_uri"], on_refused=422)
+    await _refuse_author_code_or_reject(
+        payload.get("mlflow_run_id"), payload.get("artifact_uri"), on_refused=422,
+    )
 
     compatibility = await _evaluate_or_reject(
         payload.get("mlflow_run_id"),
@@ -685,12 +693,13 @@ async def deploy_model(
                 "detector": detector,
             })
 
+        await _refuse_author_code_or_reject(
+            model_data.get("mlflow_run_id"), model_data.get("artifact_uri"), on_refused=409,
+        )
         uploaded = uploaded_model.provenance_of(
             mlflow_run_id=model_data.get("mlflow_run_id"),
             artifact_uri=model_data.get("artifact_uri"),
         ) == uploaded_model.PROVENANCE_UPLOADED
-        if uploaded:
-            await _refuse_author_code_or_reject(model_data["artifact_uri"], on_refused=409)
 
         compatibility = await _evaluate_or_reject(
             model_data.get("mlflow_run_id"),
