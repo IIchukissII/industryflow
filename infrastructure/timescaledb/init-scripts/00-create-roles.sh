@@ -121,8 +121,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     -- PUBLIC SCHEMA PERMISSIONS
     -- =============================================================================
     
-    -- API Gateway needs CREATE on public to create the (runtime) user table
-    GRANT CREATE ON SCHEMA public TO api_gateway_user;
+    -- No application role creates objects in public; the user table is defined by 29-user-table.sql.
     GRANT USAGE ON SCHEMA public TO api_gateway_user;
 
     -- Other roles need USAGE on the public schema
@@ -133,13 +132,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     GRANT USAGE ON SCHEMA public TO cold_export_user;
     GRANT USAGE ON SCHEMA public TO tenant_delete_user;
     GRANT USAGE ON SCHEMA public TO notebook_hub_reclaim_user;
-
-    -- public."user" is created at runtime by api_gateway_user (fastapi-users), so it
-    -- does NOT exist yet at init time. Granting SELECT on it directly here would abort
-    -- init (relation does not exist). Instead grant it via default privileges so the
-    -- reader roles automatically receive SELECT when api_gateway_user creates the table.
-    ALTER DEFAULT PRIVILEGES FOR ROLE api_gateway_user IN SCHEMA public
-        GRANT SELECT ON TABLES TO alert_service_user, ml_service_user;
 
     -- SELECT on public.companies is granted in 01-init-schema.sql, after that table is
     -- created (this roles script runs before it).

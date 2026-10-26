@@ -75,6 +75,7 @@ every script once. Every script is idempotent.
 | `26-company-deletion-job.sql` | `company_deletion_required_stores()`, `pending_company_deletions()`, `company_deletion_user_ids()`, `record_company_deletion_step()`, `complete_company_deletion()` (drops the tenant's schema, roles, users and export rows; tombstone); EXECUTE for `tenant_delete_user` only | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 | `27-notebook-volume-reclaim.sql` | `pending_notebook_volume_reclaims()` (pending deletions whose volumes are not recorded, with their users), `record_notebook_volumes_reclaimed()` (records `notebook_volumes` only); EXECUTE for `notebook_hub_reclaim_user` only | [ADR-0020](../../../ADR/ADR-0020-notebook-per-user-persistence.md) |
 | `28-schema-ledger-read.sql` | `SELECT` on `public.schema_ledger` for the service roles (the `schema-ready` check) | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
+| `29-user-table.sql` | `public."user"` (owner: database owner; DML for `api_gateway_user`, `SELECT` for `alert_service_user`, `ml_service_user`); `CREATE` on `public` revoked from `api_gateway_user` and `PUBLIC` | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
 
 `create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22 and 23.
 The per-tenant definitions also apply themselves to every existing tenant schema (ADR-0034 dec 3).

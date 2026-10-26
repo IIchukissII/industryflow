@@ -16,7 +16,7 @@
 -- =============================================================================
 
 -- Every pending deletion whose volumes are not yet recorded, with the tenant's users (the hub's
--- user names). The user table is created at runtime by the gateway, so it may not exist yet.
+-- user names). The user table is created by a later script (29), so it may not exist yet.
 CREATE OR REPLACE FUNCTION public.pending_notebook_volume_reclaims()
 RETURNS TABLE (company_id UUID, user_ids UUID[])
 LANGUAGE plpgsql STABLE
