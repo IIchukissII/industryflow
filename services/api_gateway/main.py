@@ -15,7 +15,7 @@ from routers import (
     training_data, alerts_history, companies,
     equipment, alert_rules, auth_tokens, auth_verify, user_admin
 )
-from database import AsyncSessionLocal, close_engine, create_user_table
+from database import AsyncSessionLocal, close_engine
 from sqlalchemy import text
 from messaging.redis_client import redis_client
 from messaging.cache_updater import update_redis_cache
@@ -34,11 +34,6 @@ async def lifespan(_app: FastAPI):
     """Manage application lifespan events."""
     # Startup
     await redis_client.connect()
-
-    # Initialize user authentication table
-    await create_user_table()
-    print("✅ User authentication table initialized")
-
 
     cache_task = asyncio.create_task(update_redis_cache())
 
