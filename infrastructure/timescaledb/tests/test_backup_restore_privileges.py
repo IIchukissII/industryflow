@@ -160,11 +160,10 @@ def stack():
     sensor_id = cur.fetchone()[0]
     cur.execute(f'INSERT INTO "{schema}".sensor_measurements (time, sensor_id, equipment_id, site_id, value) '
                 f"VALUES (now(), %s, %s, 'site', 1.0)", (sensor_id, equipment_id))
-    # A table owned by a non-superuser, as the gateway's runtime public."user" is: its owner and the
-    # default privileges FOR ROLE api_gateway_user that grant it on must both survive.
-    cur.execute('SET ROLE "api_gateway_user"')
+    # A table owned by a non-superuser, as public."user" was before 29-user-table.sql: its owner must
+    # survive. (No application role may create in public, so the superuser hands it over.)
     cur.execute(f"CREATE TABLE public.{GATEWAY_TABLE} (id INT)")
-    cur.execute("RESET ROLE")
+    cur.execute(f'ALTER TABLE public.{GATEWAY_TABLE} OWNER TO "api_gateway_user"')
 
     for target in (*RESTORED.values(), REFUSED):
         _drop_database(acur, target)
@@ -276,12 +275,11 @@ def test_default_privileges_still_grant_future_tables(stack):
         # A table added to the tenant schema later is readable by the tenant's reader ...
         cur.execute(f'CREATE TABLE "{schema}".added_after_restore (id INT)')
         assert _can(cur, reader, f'SELECT count(*) FROM "{schema}".added_after_restore') == [(0,)]
-        # ... and a table the gateway creates in public is readable by the alert and ML services.
-        cur.execute('SET ROLE "api_gateway_user"')
-        cur.execute("CREATE TABLE public.added_after_restore (id INT)")
-        cur.execute("RESET ROLE")
+        # ... and the user table keeps its readers and its writer.
         for role in ("alert_service_user", "ml_service_user"):
-            assert _can(cur, role, "SELECT count(*) FROM public.added_after_restore") == [(0,)], role
+            assert _can(cur, role, 'SELECT count(*) FROM public."user"')[0][0] >= 0, role
+        cur.execute("""SELECT has_table_privilege('api_gateway_user', 'public."user"', 'INSERT, UPDATE, DELETE')""")
+        assert cur.fetchone() == (True,)
     finally:
         conn.close()
 

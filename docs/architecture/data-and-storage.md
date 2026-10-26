@@ -56,7 +56,7 @@ executors with `--py-files`.
 | Table | Content |
 |---|---|
 | `companies` | `company_id` → `schema_name` registry |
-| `user` | Platform users (fastapi-users, `services/api_gateway/models/user.py`) |
+| `user` | Platform users (fastapi-users; `29-user-table.sql`, mapped by `services/api_gateway/models/user.py`) |
 | `platform_config` | Platform switches (`stateful_features_enabled`, [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) |
 | `cold_export_drops` | Committed cold-export drops |
 
