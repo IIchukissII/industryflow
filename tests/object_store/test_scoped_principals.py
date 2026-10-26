@@ -55,6 +55,7 @@ PRINCIPALS = {
     "tracking-gateway": ("TRACKING_STORE", "t-gateway"),
     "model-read": ("MODEL_READ", "t-serving"),
     "db-backup": ("BACKUP_STORE", "t-backup"),
+    "backup-read": ("BACKUP_READ", "t-backup-reader"),
     "cold-export-rw": ("COLD_STORE", "t-cold-writer"),
     "cold-broker-ro": ("COLD_READ", "t-cold-reader"),
     "tenant-delete-cold": ("TENANT_DELETE_COLD", "t-cold-deleter"),
@@ -142,15 +143,17 @@ ALLOWED = {
     "tracking-gateway": [("put", f"{ART}/_upload-staging/tenant_aaaa/u2/m"), ("get", UPLOADED),
                          ("delete", f"{ART}/_upload-staging/tenant_aaaa/u2/m")],
     "model-read": [("get", UPLOADED), ("list", f"{ART}/tenant_aaaa/uploads/u1/")],
-    # The backup job also mirrors the cold bucket into its own under cold/ (written here, read with
-    # the cold read principal, below): put, list and head the mirror's keys.
+    # The backup job also mirrors the cold and artifact buckets into its own under cold/ and models/
+    # (written here, read with backup-read, below): put, list and head the mirror's keys.
     "db-backup": [("put", f"{BAK}/timescaledb/b.dump"), ("list", f"{BAK}/timescaledb/"),
                   ("get", f"{BAK}/timescaledb/a.dump"), ("delete", f"{BAK}/timescaledb/b.dump"),
                   ("put", f"{BAK}/cold/tenant_aaaa/year=2026/p.parquet"), ("list", f"{BAK}/cold/"),
                   ("get", f"{BAK}/cold/tenant_aaaa/year=2026/p.parquet")],
     "cold-export-rw": [("put", f"{COLD}/tenant_aaaa/year=2026/q.parquet"), ("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"),
                        ("list", f"{COLD}/tenant_aaaa/")],
-    # Also the backup job's cold mirror source: it lists the whole bucket, then reads each object.
+    # The backup job's mirror sources (ADR-0038 dec 3): lists each whole bucket, then reads each object.
+    "backup-read": [("get", TRACKED), ("get", UPLOADED), ("list", f"{ART}/"),
+                    ("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("list", f"{COLD}/")],
     "cold-broker-ro": [("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("list", f"{COLD}/tenant_aaaa/"),
                        ("list", f"{COLD}/")],
     # Lists a tenant's prefix and removes what is under it, nothing more.
@@ -167,9 +170,13 @@ REFUSED = {
     # Serving reads admitted uploads and nothing else: not tracked runs, not other buckets, no write.
     "model-read": [("put", f"{ART}/tenant_aaaa/uploads/u1/evil"), ("delete", UPLOADED), ("get", TRACKED),
                    ("list", f"{ART}/"), ("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet")],
-    # The mirror must read the cold bucket with the cold read principal; the backup one cannot.
+    # The mirrors read with backup-read; the backup principal cannot read either source.
     "db-backup": [("get", TRACKED), ("put", f"{ART}/x"), ("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet")],
     "cold-export-rw": [("delete", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("get", TRACKED)],
+    # Reads its sources and nothing else: no write, no delete, not the backups themselves.
+    "backup-read": [("put", f"{ART}/tenant_aaaa/x"), ("delete", TRACKED), ("put", f"{COLD}/tenant_aaaa/x"),
+                    ("delete", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("get", f"{BAK}/timescaledb/a.dump"),
+                    ("list", f"{BAK}/"), ("put", f"{BAK}/x"), ("get", f"{CP}/state/0")],
     "cold-broker-ro": [("put", f"{COLD}/tenant_aaaa/x"), ("delete", f"{COLD}/tenant_aaaa/year=2026/p.parquet"),
                        ("get", TRACKED)],
     # Never reads or writes history, and deletes only under tenant prefixes of the cold bucket.

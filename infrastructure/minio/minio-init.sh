@@ -17,6 +17,7 @@
 #   tracking-gateway   artifact               read/write/delete           the tracking gateway (ADR-0019, ADR-0030 dec 2)
 #   model-read         artifact, tenant_*/uploads/*  read only            ml_service loading admitted uploads (ADR-0030)
 #   db-backup          backup                 read/write/delete           the backup job (dump, prune, restore)
+#   backup-read        artifact, cold         read only                   the backup job's object mirrors (ADR-0032 dec 5)
 #   cold-export-rw     cold                   read/write                  the cold-layer exporter (ADR-0025 dec 11)
 #   cold-broker-ro     cold                   read only                   the cold-store broker (ADR-0025 dec 5)
 #   tenant-delete-cold cold, tenant_*         list/delete, no read/write  the tenant-delete job (ADR-0025 dec 14)
@@ -88,6 +89,19 @@ delete_policy() {  # list and delete under one key pattern, no read or write: it
 ]}
 EOF
 }
+buckets_read_policy() {  # get/list on each bucket named, whole buckets only
+  resources=""; objects=""
+  for b in "$@"; do
+    resources="$resources${resources:+, }\"arn:aws:s3:::$b\""
+    objects="$objects${objects:+, }\"arn:aws:s3:::$b/*\""
+  done
+  cat <<EOF
+{"Version": "2012-10-17", "Statement": [
+  {"Effect": "Allow", "Action": ["s3:GetBucketLocation", "s3:ListBucket"], "Resource": [$resources]},
+  {"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": [$objects]}
+]}
+EOF
+}
 read_policy() {  # get/list on one bucket, or only under one key pattern of it when $2 is given
   if [ -z "${2:-}" ]; then
     list='"Resource": ["arn:aws:s3:::'"$1"'"]'
@@ -134,6 +148,8 @@ principal mlflow-artifacts MLFLOW_STORE_ACCESS_KEY MLFLOW_STORE_SECRET_KEY "${AR
 principal tracking-gateway TRACKING_STORE_ACCESS_KEY TRACKING_STORE_SECRET_KEY "${ARTIFACT_BUCKET:-}" rw_policy "${ARTIFACT_BUCKET:-}"
 principal model-read MODEL_READ_ACCESS_KEY MODEL_READ_SECRET_KEY "${ARTIFACT_BUCKET:-}" read_policy "${ARTIFACT_BUCKET:-}" "tenant_*/uploads/*"
 principal db-backup BACKUP_STORE_ACCESS_KEY BACKUP_STORE_SECRET_KEY "${BACKUP_BUCKET:-}" rw_policy "${BACKUP_BUCKET:-}"
+# The backup job reads what it mirrors with a principal no other workload holds (ADR-0032 dec 5).
+principal backup-read BACKUP_READ_ACCESS_KEY BACKUP_READ_SECRET_KEY "${ARTIFACT_BUCKET:-}" buckets_read_policy ${ARTIFACT_BUCKET:-} ${COLD_STORE_BUCKET:-}
 # The cold policies keep the names deployments already carry, so a re-run converges in place.
 principal cold-export-rw COLD_STORE_ACCESS_KEY COLD_STORE_SECRET_KEY "${COLD_STORE_BUCKET:-}" write_policy "${COLD_STORE_BUCKET:-}"
 principal cold-broker-ro COLD_READ_ACCESS_KEY COLD_READ_SECRET_KEY "${COLD_STORE_BUCKET:-}" read_policy "${COLD_STORE_BUCKET:-}"

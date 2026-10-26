@@ -25,8 +25,11 @@ def _repo(ref: str) -> str:
 
 def _compose_images() -> dict[str, str]:
     services = load_yaml("docker-compose.yml")["services"]
-    # A service that is built here carries its own `image:` name for the build result, not a pull.
-    return {n: s["image"] for n, s in services.items() if "image" in s and "build" not in s}
+    # A service that is built here carries its own `image:` name for the build result, not a pull; so
+    # does a service that runs an image another service builds.
+    built = {s["image"] for s in services.values() if "image" in s and "build" in s}
+    return {n: s["image"] for n, s in services.items()
+            if "image" in s and "build" not in s and s["image"] not in built}
 
 
 def _helm_images() -> dict[str, str]:

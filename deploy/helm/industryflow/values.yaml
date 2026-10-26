@@ -386,11 +386,16 @@ backup:
     prefix: timescaledb
   # Mirror the cold-layer bucket (ADR-0025) into the backup target under this prefix. After the
   # cold export drops a day from the database the cold bucket is the only copy of that raw history,
-  # so a database dump alone no longer backs it up. Incremental and append-only (nothing is deleted
-  # from the mirror). Applies when coldExport is enabled; reads with the read-only cold principal.
+  # so a database dump alone no longer backs it up. Incremental; an object gone from the source leaves
+  # the mirror one retention period later (ADR-0032 dec 4). Applies when coldExport is enabled.
   cold:
     enabled: true
     prefix: cold
+  # Mirror the model-artifact bucket (notebookHub.trackingGateway.artifactBucket) the same way, the
+  # upload staging area left out (ADR-0038 dec 1-2). Both mirrors read with BACKUP_READ_*.
+  models:
+    enabled: true
+    prefix: models
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }
@@ -624,6 +629,9 @@ secrets:
     # The backup CronJob: read/write/delete on the backup bucket only.
     BACKUP_STORE_ACCESS_KEY: "CHANGE_ME"
     BACKUP_STORE_SECRET_KEY: "CHANGE_ME"
+    # The backup CronJob's mirrors: read-only on the artifact and cold buckets, no other holder.
+    BACKUP_READ_ACCESS_KEY: "CHANGE_ME"
+    BACKUP_READ_SECRET_KEY: "CHANGE_ME"
     # Spark's S3A checkpoint when scaled out (config.CHECKPOINT_LOCATION): the checkpoint bucket only.
     SPARK_CHECKPOINT_ACCESS_KEY: "CHANGE_ME"
     SPARK_CHECKPOINT_SECRET_KEY: "CHANGE_ME"
