@@ -179,10 +179,10 @@ kubectl -n <namespace> create secret generic industryflow-device-ca \
 | `ingress.mtls.caSecret` | `industryflow-device-ca` | Secret with `ca.crt`, `ca.crl`, `issued.tsv` and `issued.tsv.sig`; without `ca.crl` revocation is not checked and the CRL check fails; without the register no tenant deletion completes |
 | `ingress.mtls.crlCheck.schedule` | `17 */6 * * *` | `device-crl-check` CronJob checking the Secret's CRL |
 | `ingress.mtls.crlCheck.warnDays` / `rootWarnDays` / `caCertWarnDays` | `3` / `30` / `90` | Warning windows: intermediate CRL / root CRL / CA certificates |
-| `ingress.mtls.crlCheck.alertAfterSeconds` | `46800` | No successful check for this long fires `IndustryFlowDeviceCrlStale` (needs `observability.prometheusRules.enabled` and kube-state-metrics) |
+| `ingress.mtls.crlCheck.alertAfterSeconds` | `46800` | No successful check for this long (since creation, before the first success) fires `IndustryFlowDeviceCrlStale` (needs `observability.prometheusRules.enabled` and kube-state-metrics) |
 | `ingress.mtls.certCheck.schedule` | `47 */6 * * *` | `device-cert-check` CronJob running `check-certs` on the Secret's register |
 | `ingress.mtls.certCheck.warnDays` | `14` | Device-certificate warning window |
-| `ingress.mtls.certCheck.alertAfterSeconds` | `46800` | No successful check for this long fires `IndustryFlowDeviceCertExpiring` (warning) |
+| `ingress.mtls.certCheck.alertAfterSeconds` | `46800` | No successful check for this long (since creation, before the first success) fires `IndustryFlowDeviceCertExpiring` (warning) |
 
 ## Troubleshooting
 

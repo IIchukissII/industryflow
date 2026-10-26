@@ -86,6 +86,23 @@ jobs:
         run: |
           docker run --rm --network none -v "$PWD/infrastructure/prometheus:/p:ro" -w /p/rules/tests \
             --entrypoint promtool "$PROMETHEUS_IMAGE" test rules platform_test.yml
+      # The chart's own group (industryflow.kubernetes) exists only in the template: render it with every
+      # device check enabled and run its unit tests against what the chart actually ships.
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+      - run: pip install pyyaml==6.0.3
+      - name: Chart rule unit tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/k8s"
+          helm template if deploy/helm/industryflow --set secrets.failOnPlaceholders=false \
+            --set observability.prometheusRules.enabled=true --set ingress.enabled=true \
+            --set ingress.mtls.enabled=true --set ingress.mtls.crlCheck.enabled=true \
+            --set ingress.mtls.certCheck.enabled=true -s templates/observability-prometheusrules.yaml \
+          | python3 -c 'import sys, yaml; groups = yaml.safe_load(sys.stdin)["spec"]["groups"]; print(yaml.safe_dump({"groups": [g for g in groups if g["name"] == "industryflow.kubernetes"]}))' \
+          > "$RUNNER_TEMP/k8s/kubernetes-rules.yml"
+          docker run --rm --network none -v "$PWD/deploy/observability/tests:/t:ro" -v "$RUNNER_TEMP/k8s:/k8s:ro" \
+            -w /t --entrypoint promtool "$PROMETHEUS_IMAGE" test rules kubernetes_rules_test.yml
       - name: Compose's Prometheus config, rules included
         run: |
           docker run --rm --network none \
