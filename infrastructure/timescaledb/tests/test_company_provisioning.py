@@ -157,10 +157,14 @@ def test_only_the_gateway_role_may_call(db):
 
 
 def test_a_function_planted_in_public_stops_provisioning(db):
-    # api_gateway_user may create in public; an overload there would run with the definer's rights.
+    # No application role may create in public (29-user-table.sql); an object a role owns there, as
+    # one left by an older install would be, would still run with the definer's rights as an overload.
     cur, _ = db
-    _as(cur, "api_gateway_user",
-        "CREATE FUNCTION public.create_base_tables(p VARCHAR) RETURNS void LANGUAGE sql AS 'SELECT 1'")
+    with pytest.raises(errors.InsufficientPrivilege):
+        _as(cur, "api_gateway_user",
+            "CREATE FUNCTION public.create_base_tables(p VARCHAR) RETURNS void LANGUAGE sql AS 'SELECT 1'")
+    cur.execute("CREATE FUNCTION public.create_base_tables(p VARCHAR) RETURNS void LANGUAGE sql AS 'SELECT 1'")
+    cur.execute("ALTER FUNCTION public.create_base_tables(VARCHAR) OWNER TO api_gateway_user")
     try:
         with pytest.raises(errors.InsufficientPrivilege, match="untrusted owner"):
             _as(cur, "api_gateway_user", "SELECT * FROM public.provision_company(%s, true)", (f"x-{uuid.uuid4()}",))
