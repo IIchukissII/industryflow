@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# promtool test rules, against the chart's industryflow.kubernetes group rendered by the alert-rules
+# CI job (release `if`, every device check enabled) to /k8s/kubernetes-rules.yml.
+rule_files:
+  - /k8s/kubernetes-rules.yml
+
+evaluation_interval: 10m
+
+tests:
+  # A check that has never succeeded has no last-success series; it is measured from creation.
+  - interval: 10m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="if", cronjob="if-industryflow-device-cert-check"}'
+        values: '0x100'
+      - series: 'kube_cronjob_created{namespace="if", cronjob="if-industryflow-device-crl-check"}'
+        values: '0x100'
+    alert_rule_test:
+      - eval_time: 12h
+        alertname: IndustryFlowDeviceCertExpiring
+        exp_alerts: []
+      - eval_time: 14h
+        alertname: IndustryFlowDeviceCertExpiring
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: if, cronjob: if-industryflow-device-cert-check}
+            exp_annotations:
+              description: "The device-cert-check job log names the device. Renew it (docs/operations/device-mtls.md) and republish the CRL and register to the industryflow-device-ca Secret; an expired certificate is refused at ingestion."
+              summary: "A device certificate is close to expiry"
+      - eval_time: 14h
+        alertname: IndustryFlowDeviceCrlStale
+        exp_alerts:
+          - exp_labels: {severity: critical, namespace: if, cronjob: if-industryflow-device-crl-check}
+            exp_annotations:
+              description: "The device-crl-check job log names it. Refresh the CRL in the industryflow-device-ca Secret, or replace the CA certificate (docs/operations/device-mtls.md). Once either expires, every device is refused at ingestion."
+              summary: "Device CRL or CA certificate is close to expiry"
+
+  # A recent success keeps it quiet however old the job is; a success that goes stale raises it.
+  - interval: 10m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="if", cronjob="if-industryflow-device-cert-check"}'
+        values: '0x200'
+      # Succeeds every 6h (at 0h, 6h, 12h), then stops.
+      - series: 'kube_cronjob_status_last_successful_time{namespace="if", cronjob="if-industryflow-device-cert-check"}'
+        values: '0x35 21600x36 43200x128'
+    alert_rule_test:
+      - eval_time: 14h
+        alertname: IndustryFlowDeviceCertExpiring
+        exp_alerts: []
+      - eval_time: 26h
+        alertname: IndustryFlowDeviceCertExpiring
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: if, cronjob: if-industryflow-device-cert-check}
+            exp_annotations:
+              description: "The device-cert-check job log names the device. Renew it (docs/operations/device-mtls.md) and republish the CRL and register to the industryflow-device-ca Secret; an expired certificate is refused at ingestion."
+              summary: "A device certificate is close to expiry"
