@@ -30,7 +30,7 @@ REAL = _registry(**{
     "anomaly_probability|mlflow.sklearn": ["classifier"],
     "anomaly_probability|mlflow.xgboost": ["classifier"],
     "outlier_score|mlflow.sklearn": ["isolation_forest"],
-    "reconstruction_error|mlflow.pyfunc": ["autoencoder"],
+    "reconstruction_error|mlflow.xgboost": ["autoencoder"],
 })
 
 

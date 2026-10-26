@@ -99,18 +99,17 @@ def test_being_unable_to_start_the_check_is_a_refusal(monkeypatch):
     assert r.stage == "invoke"
 
 
-# --- the worker's environment refuses object-deserialisation, and only the worker's -------------
+# --- the worker's environment refuses object-deserialisation ------------------------------------
 
 def test_the_worker_is_told_not_to_deserialise_author_objects():
     env = load_probe._worker_env()
     assert env["MLFLOW_ALLOW_PICKLE_DESERIALIZATION"] == "false"
 
 
-def test_that_switch_is_not_set_on_this_process():
-    """It is process-wide, so setting it in the service would silently bind the notebook path too —
-    a refusal ADR-0030 dec 4 deliberately did not decide for kernels."""
-    load_probe._worker_env()
-    assert "MLFLOW_ALLOW_PICKLE_DESERIALIZATION" not in os.environ
+def test_the_worker_is_told_so_even_where_this_process_was_configured_otherwise(monkeypatch):
+    """The worker's own environment carries the refusal (ADR-0037 dec 3), whatever this one holds."""
+    monkeypatch.setenv("MLFLOW_ALLOW_PICKLE_DESERIALIZATION", "true")
+    assert load_probe._worker_env()["MLFLOW_ALLOW_PICKLE_DESERIALIZATION"] == "false"
 
 
 def test_the_worker_reaches_the_same_object_store(monkeypatch):

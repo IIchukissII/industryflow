@@ -94,7 +94,7 @@ Stateful transforms read their baseline window from `params.granularity` (defaul
 | `sklearn` | anomaly probability (compatibility name) | `mlflow.sklearn`, `mlflow.xgboost` | Estimator capability, `predict_proba` first |
 | `direct` | direct 0–1 score | `mlflow.sklearn`, `mlflow.xgboost` | Model output; outside 0–1 is refused |
 | `outlier` | outlier score | `mlflow.sklearn` | `decision_function` |
-| `autoencoder` | reconstruction error | `mlflow.sklearn`, `mlflow.pyfunc` | Reconstruction distance |
+| `autoencoder` | reconstruction error | `mlflow.sklearn` | Reconstruction distance |
 
 Every detector runs in-process. Frameworks the serving image does not carry (torch, GPU) are refused at
 the gate; serving them in a separate runtime from an ONNX export is accepted but not built
@@ -122,6 +122,11 @@ the gate; serving them in a separate runtime from an ONNX export is accepted but
 
 Kernel-trained tree-based sklearn models need the skops grant at log time:
 `mlflow.sklearn.log_model(model, name="model", skops_trusted_types=industryflow.SKOPS_TRUSTED_TYPES)`.
+
+A served model, kernel-authored or uploaded, loads through `mlflow.sklearn` (skops) or `mlflow.xgboost`
+(native booster) only; a pickle, a custom `mlflow.pyfunc` model or shipped code is refused at
+registration (422), deployment (409) and every load
+([ADR-0037](../../ADR/ADR-0037-no-author-code-on-the-serving-side.md)).
 
 ## Drift (`POST /api/drift/evaluate`)
 

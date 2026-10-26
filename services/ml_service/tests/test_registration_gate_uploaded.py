@@ -76,6 +76,8 @@ def client(monkeypatch):
     # The address checks have their own suite (test_model_admission); here the run is the caller's
     # and the bucket is the one the artifact names.
     monkeypatch.setattr(config.config, "UPLOAD_ARTIFACT_BUCKET", "mlflow")
+    # A run's model is addressed through the tracking store; no store here (ADR-0037 reads its manifest).
+    monkeypatch.setattr(model_loader, "resolve_model_uri", lambda run_id: f"runs:/{run_id}/model")
     monkeypatch.setattr(model_loader, "_run_owned_by", lambda run_id, company_id: True)
     c = TestClient(app)
     c.repo = repo

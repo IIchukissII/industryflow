@@ -3,20 +3,21 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-An uploaded model runs no code its author chose — at registration, at deployment and on every load
-(ADR-0030 dec 4), and the serving process never imports a module an artifact names.
+No model runs code its author chose, uploaded or kernel-authored — at registration, at deployment and
+on every load (ADR-0030 dec 4, ADR-0037), and the serving process never imports a module an artifact
+names.
 
 Each proof uses a real artifact directory whose manifest was edited the way an uploader could edit
 it, and a tripwire that records whether the author's choice ran:
 
   * a loader module that is importable here and writes a marker file when imported;
-  * a statsmodels-flavor artifact whose pickle writes a marker file when unpickled.
+  * a statsmodels-flavor artifact whose pickle writes a marker file when unpickled;
+  * a custom pyfunc — what a notebook gets from `mlflow.pyfunc.log_model` — whose pickled python
+    model writes a marker file when unpickled.
 """
 import os
 import pickle
 import sys
-import threading
-import time
 import uuid
 
 import numpy as np
@@ -110,6 +111,25 @@ def statsmodels_model(tmp_path):
     mlflow.statsmodels.save_model(results, path)
     with open(os.path.join(path, "MLmodel")) as fh:
         data = yaml.safe_load(fh)["flavors"]["statsmodels"]["data"]
+    marker = tmp_path / "unpickled"
+    with open(os.path.join(path, data), "wb") as fh:
+        pickle.dump(_Unpickled(str(marker)), fh)
+    return path, marker
+
+
+@pytest.fixture
+def custom_pyfunc_model(tmp_path):
+    """A real custom-pyfunc artifact whose pickled python model is replaced by one that creates a marker."""
+    import mlflow.pyfunc
+
+    class Doubler(mlflow.pyfunc.PythonModel):
+        def predict(self, context, model_input):
+            return model_input * 2
+
+    path = str(tmp_path / "custom")
+    mlflow.pyfunc.save_model(path, python_model=Doubler())
+    with open(os.path.join(path, "MLmodel")) as fh:
+        data = yaml.safe_load(fh)["flavors"]["python_function"]["python_model"]
     marker = tmp_path / "unpickled"
     with open(os.path.join(path, data), "wb") as fh:
         pickle.dump(_Unpickled(str(marker)), fh)
@@ -217,7 +237,7 @@ def test_registration_refuses_an_upload_naming_its_own_loader_without_importing_
     assert not marker.exists(), "registration imported a module the artifact named"
     assert TRIPWIRE not in sys.modules
     assert r.status_code == 422, r.text
-    assert "ADR-0030 dec 4" in str(r.json()["detail"]), "refused, but not by the author-code check"
+    assert "ADR-0037" in str(r.json()["detail"]), "refused, but not by the author-code check"
     assert client.repo.created == []
 
 
@@ -225,7 +245,7 @@ def test_registration_refuses_a_statsmodels_upload(client, statsmodels_model):
     path, marker = statsmodels_model
     r = _register(client, path)
     assert r.status_code == 422, r.text
-    assert "ADR-0030 dec 4" in str(r.json()["detail"])
+    assert "ADR-0037" in str(r.json()["detail"])
     assert not marker.exists()
     assert client.repo.created == []
 
@@ -243,10 +263,23 @@ def test_deployment_refuses_an_upload_naming_its_own_loader_before_the_probe(cli
                        "detector": "outlier"}
     r = client.post("/api/models/m1/deploy", json={"model_id": "m1", "environment": "production"})
     assert r.status_code == 409, r.text
-    assert "ADR-0030 dec 4" in str(r.json()["detail"])
+    assert "ADR-0037" in str(r.json()["detail"])
     assert not marker.exists(), "deployment imported a module the artifact named"
     assert probed == []
     assert client.repo.status_updates == []
+
+
+def test_registration_refuses_a_kernel_authored_custom_pyfunc(client, custom_pyfunc_model, monkeypatch):
+    """A notebook's run is no exemption (ADR-0037 dec 2): the run's model is read like an upload."""
+    path, marker = custom_pyfunc_model
+    monkeypatch.setattr(model_loader, "model_uri_for", lambda **kw: path)
+    r = client.post("/api/models", json={
+        "model_name": "m", "model_version": "1", "model_type": "outlier", "mlflow_run_id": "run1",
+    })
+    assert r.status_code == 422, r.text
+    assert "ADR-0037" in str(r.json()["detail"])
+    assert not marker.exists()
+    assert client.repo.created == []
 
 
 def test_a_safe_upload_still_registers(client, tmp_path):
@@ -267,30 +300,44 @@ def _refused(load):
     return False
 
 
-def test_loading_a_statsmodels_upload_never_unpickles_it(statsmodels_model):
+PROVENANCES = pytest.mark.parametrize("provenance", ["uploaded", "kernel"])
+
+
+@PROVENANCES
+def test_loading_a_statsmodels_model_never_unpickles_it(statsmodels_model, provenance):
     path, marker = statsmodels_model
-    refused = _refused(lambda: skops_trust.load_pyfunc(path, "uploaded"))
-    assert not marker.exists(), "an uploaded model's pickle was deserialised in the serving process"
+    refused = _refused(lambda: skops_trust.load_pyfunc(path, provenance))
+    assert not marker.exists(), "a model's pickle was deserialised in the serving process"
     assert refused
 
 
-def test_loading_an_upload_naming_its_own_loader_never_imports_it(tripwire_model):
+@PROVENANCES
+def test_loading_a_custom_pyfunc_never_unpickles_it(custom_pyfunc_model, provenance, monkeypatch):
+    path, marker = custom_pyfunc_model
+    # Even where a deployment configured the switch on, nothing here loads with it on (ADR-0037 dec 3).
+    monkeypatch.setenv(SWITCH, "true")
+    refused = _refused(lambda: skops_trust.load_pyfunc(path, provenance))
+    assert not marker.exists(), "a custom pyfunc's pickled model was deserialised in the serving process"
+    assert refused
+
+
+@PROVENANCES
+def test_loading_a_model_naming_its_own_loader_never_imports_it(tripwire_model, provenance):
     path, marker = tripwire_model
-    refused = _refused(lambda: skops_trust.load_pyfunc(path, "uploaded"))
+    refused = _refused(lambda: skops_trust.load_pyfunc(path, provenance))
     assert not marker.exists(), "loading imported a module the artifact named"
     assert refused
 
 
 # --- the pickle switch, in the serving process ---------------------------------------------------
 
-def _record_switch(monkeypatch, delay=0.0):
+def _record_switch(monkeypatch):
     import mlflow.pyfunc
 
     seen = []
 
     def load_model(uri, *a, **kw):
         seen.append(os.environ.get(SWITCH))
-        time.sleep(delay)
         return object()
 
     monkeypatch.setattr(mlflow.pyfunc, "load_model", load_model)
@@ -310,53 +357,29 @@ def xgboost_upload(tmp_path):
     return str(path)
 
 
+def test_the_switch_is_off_once_the_load_module_is_imported():
+    """The process property, not a per-load toggle: importing the load path turns it off."""
+    import subprocess
+
+    api = os.path.join(os.path.dirname(__file__), "..", "api")
+    out = subprocess.run(
+        [sys.executable, "-c", f"import os, skops_trust; print(os.environ[{SWITCH!r}])"],
+        cwd=api, env={**os.environ, SWITCH: "true", "PYTHONPATH": api},
+        capture_output=True, text=True, check=True,
+    )
+    assert out.stdout.strip() == "false"
+
+
+@PROVENANCES
 @pytest.mark.parametrize("configured", [None, "true"])
-def test_the_switch_is_off_for_an_uploaded_load_and_restored_after(monkeypatch, xgboost_upload, configured):
+def test_every_load_sees_the_switch_off(monkeypatch, xgboost_upload, provenance, configured):
     if configured is None:
         monkeypatch.delenv(SWITCH, raising=False)
     else:
         monkeypatch.setenv(SWITCH, configured)
     seen = _record_switch(monkeypatch)
-    skops_trust.load_pyfunc(xgboost_upload, "uploaded")
+    skops_trust.load_pyfunc(xgboost_upload, provenance)
     assert seen == ["false"]
-    assert os.environ.get(SWITCH) == configured
-
-
-def test_a_kernel_load_reads_the_switch_as_configured(monkeypatch, xgboost_upload):
-    monkeypatch.setenv(SWITCH, "true")
-    seen = _record_switch(monkeypatch)
-    skops_trust.load_pyfunc(xgboost_upload, "kernel")
-    assert seen == ["true"]
-
-
-def test_an_uploaded_load_never_turns_the_switch_off_under_a_kernel_load(monkeypatch, xgboost_upload):
-    """Both run on worker threads in one process. A kernel load in flight while an upload loads must
-    still read the switch as configured, before and after the upload takes it."""
-    monkeypatch.setenv(SWITCH, "true")
-    import mlflow.pyfunc
-
-    seen = {"kernel": [], "upload": []}
-    kernel_started = threading.Event()
-
-    def load_model(uri, *a, **kw):
-        if threading.current_thread().name == "kernel":
-            kernel_started.set()
-            seen["kernel"].append(os.environ.get(SWITCH))
-            time.sleep(0.3)
-            seen["kernel"].append(os.environ.get(SWITCH))
-        else:
-            seen["upload"].append(os.environ.get(SWITCH))
-        return object()
-
-    monkeypatch.setattr(mlflow.pyfunc, "load_model", load_model)
-    kernel = threading.Thread(name="kernel", target=skops_trust.load_pyfunc, args=(xgboost_upload, "kernel"))
-    kernel.start()
-    kernel_started.wait(5)
-    skops_trust.load_pyfunc(xgboost_upload, "uploaded")
-    kernel.join(5)
-    assert seen["kernel"] == ["true", "true"]
-    assert seen["upload"] == ["false"]
-    assert os.environ.get(SWITCH) == "true"
 
 
 def test_an_upload_naming_a_file_outside_itself_is_refused(tmp_path):
