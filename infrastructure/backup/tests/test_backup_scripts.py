@@ -243,8 +243,8 @@ MANIFEST = "tenant_x/year=2026/month=01/day=01/_manifest.json"
 
 
 def _mirror(env, **extra):
-    e = dict(env["env"], COLD_SOURCE_BUCKET="industryflow-cold", COLD_SOURCE_ENDPOINT_URL=COLD,
-             COLD_SOURCE_ACCESS_KEY_ID="cold-reader", COLD_SOURCE_SECRET_ACCESS_KEY="cold-read-secret", **extra)
+    e = dict(env["env"], COLD_SOURCE_BUCKET="industryflow-cold", SOURCE_ENDPOINT_URL=COLD,
+             SOURCE_ACCESS_KEY_ID="cold-reader", SOURCE_SECRET_ACCESS_KEY="cold-read-secret", **extra)
     return subprocess.run(["bash", "-c", f'source {SCRIPTS / "db-backup.sh"}; mirror_cold_bucket'],
                           env=e, capture_output=True, text=True)
 
@@ -299,17 +299,17 @@ def test_an_object_gone_from_the_source_leaves_the_mirror_after_one_retention(en
     # does not outlive the backup's retention (ADR-0033 dec 4).
     _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
     _put(env, COLD, "industryflow-cold", LATE, b"PAR1-late")
-    assert _mirror(env, COLD_MIRROR_NOW=str(T0)).returncode == 0
+    assert _mirror(env, MIRROR_NOW=str(T0)).returncode == 0
     (_store(env, COLD) / "industryflow-cold" / PART).unlink()
 
-    r = _mirror(env, COLD_MIRROR_NOW=str(T0 + DAY), COLD_MIRROR_RETAIN_DAYS="14")
+    r = _mirror(env, MIRROR_NOW=str(T0 + DAY), MIRROR_RETAIN_DAYS="14")
     assert r.returncode == 0, r.stdout + r.stderr
     assert _mirrored(env, PART).exists() and _absent(env) == {PART: str(T0 + DAY)}
 
-    r = _mirror(env, COLD_MIRROR_NOW=str(T0 + DAY + 14 * DAY - 1), COLD_MIRROR_RETAIN_DAYS="14")
+    r = _mirror(env, MIRROR_NOW=str(T0 + DAY + 14 * DAY - 1), MIRROR_RETAIN_DAYS="14")
     assert r.returncode == 0 and _mirrored(env, PART).exists()
 
-    r = _mirror(env, COLD_MIRROR_NOW=str(T0 + DAY + 14 * DAY), COLD_MIRROR_RETAIN_DAYS="14")
+    r = _mirror(env, MIRROR_NOW=str(T0 + DAY + 14 * DAY), MIRROR_RETAIN_DAYS="14")
     assert r.returncode == 0, r.stdout + r.stderr
     assert not _mirrored(env, PART).exists() and _absent(env) == {}
     assert _mirrored(env, LATE).read_bytes() == b"PAR1-late"  # what the source still holds stays
@@ -318,20 +318,20 @@ def test_an_object_gone_from_the_source_leaves_the_mirror_after_one_retention(en
 def test_an_object_back_in_the_source_stops_ageing(env):
     _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
     _put(env, COLD, "industryflow-cold", LATE, b"PAR1-late")
-    assert _mirror(env, COLD_MIRROR_NOW=str(T0)).returncode == 0
+    assert _mirror(env, MIRROR_NOW=str(T0)).returncode == 0
     (_store(env, COLD) / "industryflow-cold" / PART).unlink()
-    assert _mirror(env, COLD_MIRROR_NOW=str(T0 + DAY)).returncode == 0
+    assert _mirror(env, MIRROR_NOW=str(T0 + DAY)).returncode == 0
     _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
-    assert _mirror(env, COLD_MIRROR_NOW=str(T0 + 30 * DAY)).returncode == 0
+    assert _mirror(env, MIRROR_NOW=str(T0 + 30 * DAY)).returncode == 0
     assert _mirrored(env, PART).exists() and _absent(env) == {}
 
 
 def test_an_empty_source_beside_a_populated_mirror_ages_nothing(env):
     # A wrong bucket or credential lists nothing; ageing on that would empty the backup.
     _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
-    assert _mirror(env, COLD_MIRROR_NOW=str(T0)).returncode == 0
+    assert _mirror(env, MIRROR_NOW=str(T0)).returncode == 0
     (_store(env, COLD) / "industryflow-cold" / PART).unlink()
-    r = _mirror(env, COLD_MIRROR_NOW=str(T0 + 365 * DAY))
+    r = _mirror(env, MIRROR_NOW=str(T0 + 365 * DAY))
     assert r.returncode == 0 and "ageing skipped" in r.stdout
     assert _mirrored(env, PART).exists()
 
@@ -345,8 +345,63 @@ def test_a_short_copy_fails_the_backup(env):
 
 def test_the_backup_run_mirrors_the_cold_bucket(env):
     _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
-    e = dict(env["env"], COLD_SOURCE_BUCKET="industryflow-cold", COLD_SOURCE_ENDPOINT_URL=COLD, DATABASES="industryflow")
+    e = dict(env["env"], COLD_SOURCE_BUCKET="industryflow-cold", SOURCE_ENDPOINT_URL=COLD, DATABASES="industryflow")
     r = subprocess.run(["bash", str(SCRIPTS / "db-backup.sh")], env=e, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert _mirrored(env, PART).exists()
     assert list((_store(env, env["env"]["S3_ENDPOINT_URL"]) / "backups" / "timescaledb" / "industryflow").glob("*.dump"))
+
+
+# --- the model-artifact mirror (ADR-0038 dec 1-3) ---------------------------------------------------
+
+ART = "http://art-store:9000"
+MODEL = "tenant_x/7/abc/artifacts/model/model.skops"
+UPLOAD = "tenant_x/uploads/u1/model.skops"
+STAGED = "_upload-staging/tenant_x/u2/model.skops"
+
+
+def _model_mirror(env, **extra):
+    e = dict(env["env"], MODEL_SOURCE_BUCKET="mlflow", SOURCE_ENDPOINT_URL=ART,
+             SOURCE_ACCESS_KEY_ID="backup-reader", SOURCE_SECRET_ACCESS_KEY="backup-read-secret", **extra)
+    return subprocess.run(["bash", "-c", f'source {SCRIPTS / "db-backup.sh"}; mirror_model_bucket'],
+                          env=e, capture_output=True, text=True)
+
+
+def _model_mirrored(env, key):
+    return _store(env, env["env"]["S3_ENDPOINT_URL"]) / "backups" / "models" / key
+
+
+def test_models_and_admitted_uploads_are_mirrored_but_not_the_staging_area(env):
+    for key in (MODEL, UPLOAD, STAGED):
+        _put(env, ART, "mlflow", key, b"skops")
+    r = _model_mirror(env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _model_mirrored(env, MODEL).read_bytes() == b"skops"
+    assert _model_mirrored(env, UPLOAD).exists()
+    assert not _model_mirrored(env, STAGED).exists()
+    calls = _calls(env)
+    assert {c["key_id"] for c in calls if c["endpoint"] == "art-store_9000"} == {"backup-reader"}
+    assert {c["key_id"] for c in calls if c["endpoint"] == "backup-store_9000"} == {"backup-writer"}
+
+
+def test_a_deleted_model_leaves_the_mirror_after_one_retention(env):
+    _put(env, ART, "mlflow", MODEL, b"skops")
+    _put(env, ART, "mlflow", UPLOAD, b"skops")
+    assert _model_mirror(env, MIRROR_NOW=str(T0)).returncode == 0
+    (_store(env, ART) / "mlflow" / MODEL).unlink()
+    assert _model_mirror(env, MIRROR_NOW=str(T0 + DAY)).returncode == 0
+    assert _model_mirrored(env, MODEL).exists()
+    r = _model_mirror(env, MIRROR_NOW=str(T0 + 15 * DAY), MIRROR_RETAIN_DAYS="14")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not _model_mirrored(env, MODEL).exists() and _model_mirrored(env, UPLOAD).exists()
+
+
+def test_the_backup_run_mirrors_models_and_cold_into_separate_prefixes(env):
+    _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
+    _put(env, COLD, "mlflow", MODEL, b"skops")
+    e = dict(env["env"], COLD_SOURCE_BUCKET="industryflow-cold", MODEL_SOURCE_BUCKET="mlflow",
+             SOURCE_ENDPOINT_URL=COLD, DATABASES="industryflow")
+    r = subprocess.run(["bash", str(SCRIPTS / "db-backup.sh")], env=e, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _mirrored(env, PART).exists() and _model_mirrored(env, MODEL).exists()
+    assert not _mirrored(env, MODEL).exists()

@@ -5,8 +5,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Backup and disaster recovery
 
-What the backup job copies, where to, and how to restore it. Store classification, the failure-domain
-rule and restore rehearsal: [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md).
+What the backup jobs copy, where to, and how to restore it. Store classification, the failure-domain
+rule and restore rehearsal: [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md); models and
+notebooks: [ADR-0038](../../ADR/ADR-0038-model-and-notebook-backup.md).
 
 ## Coverage
 
@@ -16,8 +17,10 @@ rule and restore rehearsal: [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-re
 | Tracking database (`mlflow`) | Yes | `pg_dump -Fc -Z6`, scheduled |
 | Cluster globals (roles) | Yes | `pg_dumpall --globals-only --no-role-passwords` |
 | Cold layer ([ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md)) | Yes | Object mirror, same run |
-| Model artifacts (object store) | No | — |
-| Notebook volumes ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-persistence.md)) | No | — |
+| Model artifacts (artifact bucket, upload staging excluded) | Yes | Object mirror, same run |
+| Notebook work volumes ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-persistence.md)), Compose | Yes | `notebook-backup`: one archive per volume |
+| Notebook work volumes, Kubernetes | No | The cluster's volume snapshots ([ADR-0038](../../ADR/ADR-0038-model-and-notebook-backup.md) dec 6); not built while the hub has no cluster |
+| Notebook hub database | No | Derivable: users and servers return from the platform session |
 | Continuous WAL archiving / point-in-time recovery | No | Deferred in [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) |
 
 The recovery point of the databases is the schedule interval. The default target is the deployment's
@@ -34,6 +37,8 @@ Image `infrastructure/backup/` (`postgres:15-alpine` + `aws-cli`, uid 10001), en
 | Database dump | `s3://<bucket>/<prefix>/<db>/<stamp>.dump` |
 | Globals | `s3://<bucket>/<prefix>/globals/<stamp>.sql` |
 | Cold mirror | `s3://<bucket>/<cold-prefix>/<source key>` |
+| Model mirror | `s3://<bucket>/<model-prefix>/<source key>` |
+| Notebook archive | `s3://<bucket>/<notebook-prefix>/<volume>/<stamp>.tar.gz` |
 
 `<stamp>` is UTC `YYYYMMDDTHHMMSSZ`; lexical order is chronological. Dumps and globals are pruned to
 the newest `RETAIN_PER_DB` per prefix. The bucket is created if absent.
@@ -47,22 +52,49 @@ the newest `RETAIN_PER_DB` per prefix. The bucket is created if absent.
 | `DATABASES` | `industryflow mlflow` | Databases to dump |
 | `RETAIN_PER_DB` | `14` | Copies kept per database |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | required | Backup principal |
+| `SOURCE_ENDPOINT_URL` | `S3_ENDPOINT_URL` | Endpoint of the mirrored buckets |
+| `SOURCE_ACCESS_KEY_ID` / `SOURCE_SECRET_ACCESS_KEY` | the `AWS_*` pair | Read-only `backup-read` principal |
+| `MIRROR_RETAIN_DAYS` | `RETAIN_PER_DB` | Days an object gone from a source stays in its mirror |
 | `COLD_SOURCE_BUCKET` | unset (mirror skipped) | Cold bucket to mirror |
-| `COLD_SOURCE_ENDPOINT_URL` | `S3_ENDPOINT_URL` | Cold bucket endpoint |
-| `COLD_SOURCE_ACCESS_KEY_ID` / `COLD_SOURCE_SECRET_ACCESS_KEY` | the `AWS_*` pair | Read-only cold principal |
-| `COLD_BACKUP_PREFIX` | `cold` | Mirror prefix in `S3_BUCKET` |
-| `COLD_MIRROR_RETAIN_DAYS` | `RETAIN_PER_DB` | Days an object gone from the source stays in the mirror |
+| `COLD_SOURCE_ENDPOINT_URL` | `SOURCE_ENDPOINT_URL` | Cold bucket endpoint |
+| `COLD_BACKUP_PREFIX` | `cold` | Cold mirror prefix in `S3_BUCKET` |
+| `MODEL_SOURCE_BUCKET` | unset (mirror skipped) | Artifact bucket to mirror |
+| `MODEL_BACKUP_PREFIX` | `models` | Model mirror prefix in `S3_BUCKET` |
+| `MODEL_SOURCE_EXCLUDE_PREFIX` | `_upload-staging/` | Key prefix left out of the model mirror |
 
-### Cold mirror
+### Object mirrors (cold layer, model artifacts)
 
 | Property | Behaviour |
 |---|---|
-| Incremental | An object is copied when the mirror lacks it or holds a different size; every `_manifest.json` is re-copied each run |
-| Ageing | An object the source no longer holds stays for `COLD_MIRROR_RETAIN_DAYS` after it was first seen missing, then is deleted ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 4); first-missing times in `<cold-prefix>/_absent.tsv` |
-| Empty source | When the source lists nothing but the mirror holds objects, ageing is skipped for that run |
+| Incremental | An object is copied when the mirror lacks it or holds a different size; every cold `_manifest.json` is re-copied each run |
+| Ageing | An object a source no longer holds stays for `MIRROR_RETAIN_DAYS` after it was first seen missing, then is deleted ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 4); first-missing times in `<prefix>/_absent.tsv` |
+| Empty source | When a source lists nothing but its mirror holds objects, ageing is skipped for that run |
 | Verified | Each copied object's size is read back; a mismatch fails the run |
-| Principals | Source read with the read-only cold principal (`COLD_READ_ACCESS_KEY`); mirror written with the backup principal, which cannot read the cold bucket |
+| Principals | Sources read with `backup-read` (get/list on the artifact and cold buckets, held by the backup job only); mirrors written with the backup principal, which cannot read either source |
+| Staging | The model mirror leaves out `MODEL_SOURCE_EXCLUDE_PREFIX` (unadmitted uploads, which expire) |
 | Cross-store | Objects stream through the job, so source and target may be different stores |
+
+### Notebook archives (Compose)
+
+Service `notebook-backup` (same image, entrypoint `notebook-backup.sh`, `backup` profile).
+
+| Property | Behaviour |
+|---|---|
+| Volumes | Every Docker volume whose name starts with the fixed part of `NOTEBOOK_VOLUME_TEMPLATE` (default `industryflow-nb-{username}`, the hub's) |
+| Read | Through the Docker Engine API: a container created from `NOTEBOOK_HELPER_IMAGE`, never started, no network, read-only root, the volume mounted read-only; its mount fetched as a tar, gzip'd; the container removed |
+| Verified | Archive tested (`gzip -t`, `tar -t`); uploaded size read back |
+| Retention | Newest `RETAIN_PER_VOLUME` archives per volume; a volume that no longer exists loses its archives `MIRROR_RETAIN_DAYS` after its newest |
+| Consistency | Crash-consistent: a volume in use is archived as it is |
+| Holds | The Docker socket (docker group via `DOCKER_GID`) and the backup principal; no database or source-bucket credential |
+
+| Name | Default | Meaning |
+|---|---|---|
+| `S3_BUCKET`, `S3_ENDPOINT_URL`, `AWS_*` | as the backup job | Target and backup principal |
+| `NOTEBOOK_HELPER_IMAGE` | required (`industryflow-db-backup` in Compose) | Image the reading containers are created from |
+| `NOTEBOOK_VOLUME_TEMPLATE` | `industryflow-nb-{username}` | The hub's volume name |
+| `NOTEBOOK_BACKUP_PREFIX` | `notebooks` | Key prefix in `S3_BUCKET` |
+| `RETAIN_PER_VOLUME` | `RETAIN_PER_DB`, else `14` | Archives kept per volume |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | Engine API socket |
 
 ### Object-store principal
 
@@ -85,9 +117,10 @@ CronJob `<release>-db-backup` (`templates/cronjob-db-backup.yaml`).
 | `backup.s3.endpoint` | `""` (in-cluster MinIO) | `S3_ENDPOINT_URL` |
 | `backup.s3.bucket` / `region` / `prefix` | `industryflow-backups` / `us-east-1` / `timescaledb` | Target |
 | `backup.cold.enabled` / `prefix` | `true` / `cold` | Cold mirror, only when `coldExport.enabled`; source is `coldExport.store.*` |
+| `backup.models.enabled` / `prefix` | `true` / `models` | Model mirror of `notebookHub.trackingGateway.artifactBucket`, staging (`uploadStaging.prefix`) excluded |
 
 Credentials come from the `db-backup` workload Secret: `DB_USER`, `DB_PASSWORD`,
-`BACKUP_STORE_ACCESS_KEY`, `BACKUP_STORE_SECRET_KEY`, `COLD_READ_ACCESS_KEY`, `COLD_READ_SECRET_KEY`.
+`BACKUP_STORE_ACCESS_KEY`, `BACKUP_STORE_SECRET_KEY`, `BACKUP_READ_ACCESS_KEY`, `BACKUP_READ_SECRET_KEY`.
 
 ```bash
 kubectl -n <namespace> create job --from=cronjob/<release>-db-backup db-backup-manual-1
@@ -110,14 +143,19 @@ job variable named in *Meaning*.
 | `BACKUP_DATABASES` | `industryflow mlflow` | `DATABASES` |
 | `BACKUP_RETAIN_PER_DB` | `14` | `RETAIN_PER_DB` |
 | `COLD_STORE_BUCKET` | `industryflow-cold` | `COLD_SOURCE_BUCKET` |
-| `COLD_READ_ACCESS_KEY` / `COLD_READ_SECRET_KEY` | — | Cold source keys; must be set, the backup keys cannot read the cold bucket |
+| `BACKUP_READ_ACCESS_KEY` / `BACKUP_READ_SECRET_KEY` | — | `SOURCE_ACCESS_KEY_ID` / `SOURCE_SECRET_ACCESS_KEY`; must be set, the backup keys cannot read either source |
 | `BACKUP_COLD_PREFIX` | `cold` | `COLD_BACKUP_PREFIX` |
+| `BACKUP_MODEL_PREFIX` | `models` | `MODEL_BACKUP_PREFIX` (source bucket `mlflow`) |
+| `UPLOAD_STAGING_PREFIX` | `_upload-staging/` | `MODEL_SOURCE_EXCLUDE_PREFIX` |
+| `BACKUP_NOTEBOOK_PREFIX` | `notebooks` | `notebook-backup`: `NOTEBOOK_BACKUP_PREFIX` |
+| `DOCKER_GID` | `999` | `notebook-backup`: the host's docker group |
 
 | Task | Command |
 |---|---|
 | One backup run | `docker compose run --rm db-backup` |
-| Without the cold mirror | `docker compose run --rm -e COLD_SOURCE_BUCKET= db-backup` |
-| Daily from host cron | `0 2 * * *  cd <install-dir> && docker compose run --rm db-backup` |
+| Notebook archives | `docker compose --profile backup run --rm notebook-backup` (after `db-backup` has built the image) |
+| Without the cold or model mirror | `docker compose run --rm -e COLD_SOURCE_BUCKET= -e MODEL_SOURCE_BUCKET= db-backup` |
+| Daily from host cron | `0 2 * * *  cd <install-dir> && docker compose run --rm db-backup && docker compose --profile backup run --rm notebook-backup` |
 
 ### Off-site target
 
@@ -187,6 +225,34 @@ aws s3 sync s3://<backup-bucket>/cold/ s3://<cold-bucket>/
 ```
 
 Manifests return with their parts, so readers see the same verified days.
+
+### Model artifacts
+
+With the tracking gateway stopped, copy the mirror back with the same keys:
+
+```bash
+aws s3 sync s3://<backup-bucket>/models/ s3://<artifact-bucket>/ --exclude '_absent.tsv'
+```
+
+Rehearsal: sync into a scratch bucket and compare `aws s3 ls --recursive` listings (key, size) with the
+source.
+
+### Notebook volumes (Compose)
+
+`notebook-restore.sh <volume> [<stamp>|latest] [--target <volume>]` creates the target volume, writes the
+archive into it through the Engine API (owners and modes as archived), reads it back and fails on any
+difference from the archive. An existing target is refused.
+
+```bash
+# Rehearsal into a scratch volume (a name outside the work-volume prefix), then remove it
+docker compose --profile backup run --rm --entrypoint notebook-restore.sh notebook-backup \
+  industryflow-nb-<user> latest --target rehearsal-industryflow-nb-<user>
+docker volume rm rehearsal-industryflow-nb-<user>
+
+# Real restore: the user's server stopped and the volume removed first
+docker compose --profile backup run --rm --entrypoint notebook-restore.sh notebook-backup \
+  industryflow-nb-<user> latest
+```
 
 ## Related
 

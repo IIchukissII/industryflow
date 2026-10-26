@@ -114,7 +114,8 @@ Only the MinIO server and the `minio-init` Job hold `MINIO_ACCESS_KEY`/`MINIO_SE
 | `MLFLOW_STORE_*` | MLflow server, read-only on the artifact bucket |
 | `TRACKING_STORE_*` | Notebook tracking gateway |
 | `MODEL_READ_*` | ml-service-api, read-only on admitted uploads ([ADR-0030](../../../ADR/ADR-0030-externally-authored-model-admission.md)) |
-| `BACKUP_STORE_*` | db-backup CronJob |
+| `BACKUP_STORE_*` | db-backup CronJob (writes the backup bucket) |
+| `BACKUP_READ_*` | db-backup CronJob, read-only on the artifact and cold buckets it mirrors ([ADR-0038](../../../ADR/ADR-0038-model-and-notebook-backup.md)) |
 | `SPARK_CHECKPOINT_*` | Spark jobs with an S3A checkpoint |
 | `COLD_STORE_*` | cold-export CronJob (write) |
 | `COLD_READ_*` | Notebook cold-store broker (read) |

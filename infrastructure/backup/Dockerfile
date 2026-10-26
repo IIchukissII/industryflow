@@ -4,17 +4,19 @@
 
 # IndustryFlow database-backup image (tier-1 DR).
 # postgres:15-alpine ships pg_dump/pg_dumpall/pg_restore matching the pg15 server; aws-cli
-# (alpine community) speaks S3 to MinIO or any S3-compatible / off-site bucket.
+# (alpine community) speaks S3 to MinIO or any S3-compatible / off-site bucket. curl and jq speak the
+# Docker Engine API for the notebook-volume archives (notebook-backup.sh), with no Docker CLI.
 FROM postgres:15-alpine
 
 # gosu (a Go binary the postgres base ships for its entrypoint's privilege drop) is unused
 # here — we run the backup script directly, not the postgres entrypoint — and it carries a
 # Go-stdlib CRITICAL (CVE-2025-68121). Remove it so the image has no vulnerable Go binary.
-RUN apk add --no-cache aws-cli bash \
+RUN apk add --no-cache aws-cli bash curl jq \
  && rm -f /usr/local/bin/gosu
 
-COPY db-backup.sh db-restore.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/db-backup.sh /usr/local/bin/db-restore.sh
+COPY db-backup.sh db-restore.sh notebook-backup.sh notebook-restore.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/db-backup.sh /usr/local/bin/db-restore.sh \
+             /usr/local/bin/notebook-backup.sh /usr/local/bin/notebook-restore.sh
 
 # Run as a non-root user (uid 10001) with a writable home (aws-cli/mktemp). pg_dump connects
 # over TCP, so no local DB privileges are needed.
