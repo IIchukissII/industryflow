@@ -76,12 +76,12 @@ Three separate roots of trust; never describe them as one.
 
 | Term | Meaning | ADR |
 |---|---|---|
-| Model artifact path | Authoring kernel → tracking gateway → registry → `ml_service`. What crosses is a serialised model, not a pickle: sklearn as skops, xgboost as a native booster | ADR-0027, ADR-0019, ADR-0010 dec 6 |
+| Model artifact path | Authoring kernel → tracking gateway → registry → `ml_service`. What crosses is a serialised model, not a pickle: sklearn as skops, xgboost as a native booster; no load runs author code | ADR-0027, ADR-0019, ADR-0010 dec 6, ADR-0037 |
 | Train/serve parity | The artifact declares its requirements; the serving environment satisfies them or refuses the model. Per-library version constraints instantiate the rule and are a floor on divergence, not a pin | ADR-0027 dec 1, 3 |
 | Supported flavor set | What serving can honour: in-process flavors plus installed model adapters; closed and declared, while the authoring set is open. A model outside it is refused with a reason | ADR-0027 dec 2 |
 | Model adapter | A detector registered with the score semantics it implements and the artifact flavors it scores. In-process by default; a framework the image does not carry is refused at the gate | ADR-0028, ADR-0008 dec 3 |
 | Score semantics | What a model's output means: `anomaly_probability`, `outlier_score`, `reconstruction_error` or `direct_score`. Declared by the detector recorded at registration, never inferred from the output; a model whose semantics cannot be established is refused | ADR-0028 dec 1-2 |
-| Provenance | Where a model was authored: in the platform or outside it and uploaded. Derived from how the model arrived, never taken from the caller or synthesised; serving grants deserialisation trust by provenance | ADR-0030 dec 8, ADR-0027 dec 13 |
+| Provenance | Where a model was authored: in the platform or outside it and uploaded. Derived from how the model arrived, never taken from the caller or synthesised; serving grants typed-format trust by provenance, and executable deserialisation to none | ADR-0030 dec 8, ADR-0027 dec 13, ADR-0037 dec 4 |
 | Compatibility status | Whether serving still satisfies what a registered model declares; surfaced where models are looked at, never routed into the retrain recommendation | ADR-0027 dec 7-8 |
 
 ## Deployment
