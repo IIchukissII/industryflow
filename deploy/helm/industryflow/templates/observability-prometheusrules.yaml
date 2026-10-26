@@ -30,9 +30,10 @@ spec:
         {{- if $crl }}
         # ADR-0007 dec 8, 10: an expired device CRL or CA certificate makes the edge refuse every
         # device. Raised from the device-crl-check job no longer succeeding (kube-state-metrics),
-        # well before either expires. Keyed on the last SUCCESS, so it clears on the first good run after a refresh.
+        # well before either expires. Keyed on the last SUCCESS, so it clears on the first good run after a refresh;
+        # a job that has never succeeded has no such series and is measured from its creation instead.
         - alert: IndustryFlowDeviceCrlStale
-          expr: time() - kube_cronjob_status_last_successful_time{cronjob="{{ include "industryflow.fullname" . }}-device-crl-check"} > {{ .Values.ingress.mtls.crlCheck.alertAfterSeconds }}
+          expr: time() - (kube_cronjob_status_last_successful_time{cronjob="{{ include "industryflow.fullname" . }}-device-crl-check"} or on (namespace, cronjob) kube_cronjob_created{cronjob="{{ include "industryflow.fullname" . }}-device-crl-check"}) > {{ .Values.ingress.mtls.crlCheck.alertAfterSeconds }}
           labels:
             severity: critical
           annotations:
@@ -43,7 +44,7 @@ spec:
         # ADR-0007 dec 10: a device whose newest unrevoked certificate nears expiry owes a renewal.
         # One device, not the fleet, so a warning; keyed on the last success like the CRL rule.
         - alert: IndustryFlowDeviceCertExpiring
-          expr: time() - kube_cronjob_status_last_successful_time{cronjob="{{ include "industryflow.fullname" . }}-device-cert-check"} > {{ .Values.ingress.mtls.certCheck.alertAfterSeconds }}
+          expr: time() - (kube_cronjob_status_last_successful_time{cronjob="{{ include "industryflow.fullname" . }}-device-cert-check"} or on (namespace, cronjob) kube_cronjob_created{cronjob="{{ include "industryflow.fullname" . }}-device-cert-check"}) > {{ .Values.ingress.mtls.certCheck.alertAfterSeconds }}
           labels:
             severity: warning
           annotations:

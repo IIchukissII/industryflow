@@ -82,8 +82,8 @@ Group `industryflow.kubernetes`, on kube-state-metrics series:
 
 | Alert | Expression | `for` | Severity |
 |---|---|---|---|
-| `IndustryFlowDeviceCrlStale` | `time() - kube_cronjob_status_last_successful_time{cronjob="<fullname>-device-crl-check"} > ingress.mtls.crlCheck.alertAfterSeconds`; rendered only when `ingress.enabled`, `ingress.mtls.enabled` and `ingress.mtls.crlCheck.enabled` | none | critical |
-| `IndustryFlowDeviceCertExpiring` | `time() - kube_cronjob_status_last_successful_time{cronjob="<fullname>-device-cert-check"} > ingress.mtls.certCheck.alertAfterSeconds`; rendered only when `ingress.enabled`, `ingress.mtls.enabled` and `ingress.mtls.certCheck.enabled` | none | warning |
+| `IndustryFlowDeviceCrlStale` | `time() - (kube_cronjob_status_last_successful_time{cronjob="<fullname>-device-crl-check"} or on (namespace, cronjob) kube_cronjob_created{…}) > ingress.mtls.crlCheck.alertAfterSeconds`; rendered only when `ingress.enabled`, `ingress.mtls.enabled` and `ingress.mtls.crlCheck.enabled` | none | critical |
+| `IndustryFlowDeviceCertExpiring` | `time() - (kube_cronjob_status_last_successful_time{cronjob="<fullname>-device-cert-check"} or on (namespace, cronjob) kube_cronjob_created{…}) > ingress.mtls.certCheck.alertAfterSeconds`; rendered only when `ingress.enabled`, `ingress.mtls.enabled` and `ingress.mtls.certCheck.enabled` | none | warning |
 
 Dead letters: [dead-letter handling](../../docs/operations/dead-letters.md). Device CRL:
 [device mTLS](../../docs/operations/device-mtls.md#kubernetes).
