@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# IndustryFlow logical database backup (tier-1 DR), plus the cold-layer mirror.
+# IndustryFlow logical database backup (tier-1 DR), plus the object-store mirrors (cold layer, models).
 #
 # Dumps each application database with pg_dump custom format (-Fc, compressed, supports
 # selective/parallel restore) plus the cluster globals (roles), and uploads them to an
@@ -20,6 +20,11 @@
 # it (ADR-0033 dec 4). When each mirrored object went missing is kept beside the mirror, in
 # <COLD_BACKUP_PREFIX>/_absent.tsv.
 #
+# Model artifacts (the tracking artifact bucket) are mirrored the same way, under their own prefix
+# (ADR-0032 dec 8): they exist nowhere else either. The upload staging area is left out; it holds
+# unadmitted bytes that expire on their own (ADR-0030 dec 10). Both sources are read with one
+# read-only backup principal that no other workload holds (ADR-0032 dec 5).
+#
 # This is the baseline; recovery granularity is the backup interval (RPO = schedule period).
 # Continuous WAL archiving for true PITR (pgBackRest) is the documented tier-2 upgrade — see
 # docs/operations/backup-and-recovery.md.
@@ -34,14 +39,18 @@
 #   AWS_DEFAULT_REGION                                  (default: us-east-1)
 #   S3_PREFIX        key prefix within the bucket        (default: "timescaledb")
 #   RETAIN_PER_DB    copies to keep per database         (default: 14)
-# Cold-layer mirror (skipped when COLD_SOURCE_BUCKET is unset):
-#   COLD_SOURCE_BUCKET              the cold bucket to mirror
-#   COLD_SOURCE_ENDPOINT_URL        its S3 endpoint     (default: S3_ENDPOINT_URL)
-#   COLD_SOURCE_ACCESS_KEY_ID COLD_SOURCE_SECRET_ACCESS_KEY
-#                                   a read-only principal for it (default: the backup credentials)
-#   COLD_BACKUP_PREFIX              key prefix of the mirror in S3_BUCKET (default: "cold")
-#   COLD_MIRROR_RETAIN_DAYS         how long an object gone from the source stays mirrored
+# Object-store mirrors:
+#   SOURCE_ENDPOINT_URL             the mirrored buckets' S3 endpoint (default: S3_ENDPOINT_URL)
+#   SOURCE_ACCESS_KEY_ID SOURCE_SECRET_ACCESS_KEY
+#                                   the read-only backup principal (default: the backup credentials)
+#   MIRROR_RETAIN_DAYS              how long an object gone from a source stays mirrored
 #                                   (default: RETAIN_PER_DB, the dumps' retention at a daily schedule)
+#   COLD_SOURCE_BUCKET              the cold bucket (mirror skipped when unset)
+#   COLD_SOURCE_ENDPOINT_URL        its endpoint, when not SOURCE_ENDPOINT_URL
+#   COLD_BACKUP_PREFIX              its mirror's key prefix in S3_BUCKET (default: "cold")
+#   MODEL_SOURCE_BUCKET             the tracking artifact bucket (mirror skipped when unset)
+#   MODEL_BACKUP_PREFIX             its mirror's key prefix in S3_BUCKET (default: "models")
+#   MODEL_SOURCE_EXCLUDE_PREFIX     a key prefix left out of the model mirror (default: "_upload-staging/")
 
 set -euo pipefail
 
@@ -51,9 +60,10 @@ log() { echo "[db-backup $(date -u +%H:%M:%S)] $*"; }
 # so each side gets its own endpoint and credentials, passed in the environment of the one command
 # (never on argv).
 _src_aws() {
-  AWS_ACCESS_KEY_ID="${COLD_SOURCE_ACCESS_KEY_ID:-$AWS_ACCESS_KEY_ID}" \
-  AWS_SECRET_ACCESS_KEY="${COLD_SOURCE_SECRET_ACCESS_KEY:-$AWS_SECRET_ACCESS_KEY}" \
-    aws ${COLD_SOURCE_ENDPOINT_URL:+--endpoint-url "$COLD_SOURCE_ENDPOINT_URL"} "$@"
+  local endpoint="${SOURCE_ENDPOINT_URL:-${S3_ENDPOINT_URL:-}}"
+  AWS_ACCESS_KEY_ID="${SOURCE_ACCESS_KEY_ID:-$AWS_ACCESS_KEY_ID}" \
+  AWS_SECRET_ACCESS_KEY="${SOURCE_SECRET_ACCESS_KEY:-$AWS_SECRET_ACCESS_KEY}" \
+    aws ${endpoint:+--endpoint-url "$endpoint"} "$@"
 }
 
 _dst_aws() {
@@ -68,16 +78,19 @@ _list_sizes() {
   [ "$out" = "None" ] || printf '%s\n' "$out" | grep -v '^$' || true
 }
 
-mirror_cold_bucket() {
-  : "${COLD_SOURCE_BUCKET:?COLD_SOURCE_BUCKET required}"
+# mirror_bucket <label> <source bucket> <mirror prefix> <exclude prefix> <always re-copied glob>
+# Copies what the mirror lacks or holds at a different size; keys matching the glob are re-copied
+# every run (rewritten in place at the same size, e.g. a manifest); keys under the exclude prefix are
+# not mirrored. Then ages out what the source no longer holds.
+mirror_bucket() {
+  local label="$1" source="$2" prefix="$3" exclude="$4" recopy="$5"
   : "${S3_BUCKET:?S3_BUCKET required}"
-  COLD_SOURCE_ENDPOINT_URL="${COLD_SOURCE_ENDPOINT_URL:-${S3_ENDPOINT_URL:-}}"
-  local prefix="${COLD_BACKUP_PREFIX:-cold}"
   local work copied=0 kept=0
   work="$(mktemp -d)"
 
-  log "mirroring cold bucket s3://${COLD_SOURCE_BUCKET} -> s3://${S3_BUCKET}/${prefix}/"
-  _list_sizes _src_aws "$COLD_SOURCE_BUCKET" "" > "${work}/source"
+  log "mirroring ${label} bucket s3://${source} -> s3://${S3_BUCKET}/${prefix}/"
+  _list_sizes _src_aws "$source" "" | awk -F'\t' -v x="$exclude" 'x == "" || index($1, x) != 1' \
+    > "${work}/source"
   _list_sizes _dst_aws "$S3_BUCKET" "${prefix}/" > "${work}/mirror"
 
   local key size have
@@ -85,39 +98,53 @@ mirror_cold_bucket() {
   while IFS=$'\t' read -r key size <&3; do
     [ -n "$key" ] || continue
     have="$(awk -F'\t' -v k="${prefix}/${key}" '$1 == k { print $2 }' "${work}/mirror")"
-    # Parquet parts are immutable once listed; a manifest is rewritten when a day gains a part.
-    if [ "$have" = "$size" ] && [[ "$key" != */_manifest.json ]]; then
+    # shellcheck disable=SC2053  # the glob is a pattern
+    if [ "$have" = "$size" ] && { [ -z "$recopy" ] || [[ "$key" != $recopy ]]; }; then
       kept=$((kept + 1))
       continue
     fi
     # Streamed through this job, so source and target may be different stores.
-    _src_aws s3 cp "s3://${COLD_SOURCE_BUCKET}/${key}" - --only-show-errors \
+    _src_aws s3 cp "s3://${source}/${key}" - --only-show-errors \
       | _dst_aws s3 cp - "s3://${S3_BUCKET}/${prefix}/${key}" --expected-size "$size" --only-show-errors
     have="$(_dst_aws s3api head-object --bucket "$S3_BUCKET" --key "${prefix}/${key}" \
               --query ContentLength --output text)"
     if [ "$have" != "$size" ]; then
-      log "cold mirror FAILED: ${key} is ${size} bytes at the source but ${have} in the mirror"
+      log "${label} mirror FAILED: ${key} is ${size} bytes at the source but ${have} in the mirror"
       rm -rf "$work"
       return 1
     fi
     copied=$((copied + 1))
   done 3< "${work}/source"
-  age_out_cold_mirror "$work" "$prefix" || { rm -rf "$work"; return 1; }
+  age_out_mirror "$work" "$prefix" "$label" || { rm -rf "$work"; return 1; }
   rm -rf "$work"
-  log "  cold mirror: ${copied} object(s) copied, ${kept} already mirrored"
+  log "  ${label} mirror: ${copied} object(s) copied, ${kept} already mirrored"
 }
 
-# Remove from the mirror what the source has not held for COLD_MIRROR_RETAIN_DAYS (ADR-0032 dec 4).
-# $1 holds the run's listings (source, mirror); $2 is the mirror's prefix. COLD_MIRROR_NOW (epoch
-# seconds) stands in for the clock in tests.
-age_out_cold_mirror() {
-  local work="$1" prefix="$2" state_key="${2}/_absent.tsv"
-  local retain_days="${COLD_MIRROR_RETAIN_DAYS:-${RETAIN_PER_DB:-14}}" now expired=0 key
-  now="${COLD_MIRROR_NOW:-$(date -u +%s)}"
+mirror_cold_bucket() {
+  : "${COLD_SOURCE_BUCKET:?COLD_SOURCE_BUCKET required}"
+  local SOURCE_ENDPOINT_URL="${COLD_SOURCE_ENDPOINT_URL:-${SOURCE_ENDPOINT_URL:-}}"
+  # Parquet parts are immutable once listed; a manifest is rewritten when a day gains a part.
+  mirror_bucket cold "$COLD_SOURCE_BUCKET" "${COLD_BACKUP_PREFIX:-cold}" "" "*/_manifest.json"
+}
+
+mirror_model_bucket() {
+  : "${MODEL_SOURCE_BUCKET:?MODEL_SOURCE_BUCKET required}"
+  # A logged model's files are written once.
+  mirror_bucket model "$MODEL_SOURCE_BUCKET" "${MODEL_BACKUP_PREFIX:-models}" \
+    "${MODEL_SOURCE_EXCLUDE_PREFIX-_upload-staging/}" ""
+}
+
+# Remove from the mirror what the source has not held for MIRROR_RETAIN_DAYS (ADR-0032 dec 4).
+# $1 holds the run's listings (source, mirror); $2 is the mirror's prefix, $3 its label. MIRROR_NOW
+# (epoch seconds) stands in for the clock in tests.
+age_out_mirror() {
+  local work="$1" prefix="$2" label="$3" state_key="${2}/_absent.tsv"
+  local retain_days="${MIRROR_RETAIN_DAYS:-${RETAIN_PER_DB:-14}}" now expired=0 key
+  now="${MIRROR_NOW:-$(date -u +%s)}"
   if ! [ -s "${work}/source" ] && grep -qv "^${state_key}"$'\t' "${work}/mirror" 2>/dev/null; then
     # An empty source beside a populated mirror is far likelier a wrong bucket or credential than a
-    # cold layer that lost everything; ageing on it would empty the backup one retention later.
-    log "  cold mirror: the source lists nothing but the mirror holds objects; ageing skipped"
+    # source that lost everything; ageing on it would empty the backup one retention later.
+    log "  ${label} mirror: the source lists nothing but the mirror holds objects; ageing skipped"
     return 0
   fi
   _dst_aws s3 cp "s3://${S3_BUCKET}/${state_key}" "${work}/absent" --only-show-errors 2>/dev/null \
@@ -141,7 +168,7 @@ age_out_cold_mirror() {
     expired=$((expired + 1))
   done 4< "${work}/expired"
   _dst_aws s3 cp "${work}/absent.next" "s3://${S3_BUCKET}/${state_key}" --only-show-errors
-  log "  cold mirror: ${expired} object(s) gone from the source for ${retain_days} days removed, $(wc -l < "${work}/absent.next") ageing"
+  log "  ${label} mirror: ${expired} object(s) gone from the source for ${retain_days} days removed, $(wc -l < "${work}/absent.next") ageing"
 }
 
 prune() {
@@ -221,6 +248,11 @@ main() {
     mirror_cold_bucket
   else
     log "COLD_SOURCE_BUCKET unset — cold-layer mirror skipped"
+  fi
+  if [ -n "${MODEL_SOURCE_BUCKET:-}" ]; then
+    mirror_model_bucket
+  else
+    log "MODEL_SOURCE_BUCKET unset — model-artifact mirror skipped"
   fi
   log "backup run ${STAMP} complete"
 }

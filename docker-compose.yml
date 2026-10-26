@@ -323,6 +323,8 @@ services:
       MODEL_READ_SECRET_KEY: ${MODEL_READ_SECRET_KEY}
       BACKUP_STORE_ACCESS_KEY: ${BACKUP_STORE_ACCESS_KEY}
       BACKUP_STORE_SECRET_KEY: ${BACKUP_STORE_SECRET_KEY}
+      BACKUP_READ_ACCESS_KEY: ${BACKUP_READ_ACCESS_KEY}
+      BACKUP_READ_SECRET_KEY: ${BACKUP_READ_SECRET_KEY}
       # Profile-scoped consumers (notebooks, cold-export): provisioned when their keys are set.
       TRACKING_STORE_ACCESS_KEY: ${TRACKING_STORE_ACCESS_KEY:-}
       TRACKING_STORE_SECRET_KEY: ${TRACKING_STORE_SECRET_KEY:-}
@@ -1339,6 +1341,8 @@ services:
     build:
       context: ./infrastructure/backup
       dockerfile: Dockerfile
+    # Named, so notebook-backup runs the same image and creates its reading containers from it.
+    image: industryflow-db-backup
     container_name: industryflow-db-backup
     profiles: ["backup"]
     environment:
@@ -1358,19 +1362,55 @@ services:
       S3_PREFIX: ${BACKUP_S3_PREFIX:-timescaledb}
       DATABASES: ${BACKUP_DATABASES:-industryflow mlflow}
       RETAIN_PER_DB: ${BACKUP_RETAIN_PER_DB:-14}
-      # Cold-layer mirror (ADR-0025): the cold bucket is the only copy of raw history older than the
-      # export horizon. Read with the read-only cold principal (minio-init.sh cold-broker-ro); the
-      # backup principal above cannot read the cold bucket.
+      # Object mirrors (ADR-0032 dec 4, 8): the cold bucket holds the only copy of raw history older
+      # than the export horizon, the artifact bucket the only copy of every model. Both are read with
+      # the backup's own read-only principal (minio-init.sh backup-read); the backup principal above
+      # cannot read either.
+      SOURCE_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
+      SOURCE_ACCESS_KEY_ID: ${BACKUP_READ_ACCESS_KEY}
+      SOURCE_SECRET_ACCESS_KEY: ${BACKUP_READ_SECRET_KEY}
       COLD_SOURCE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
-      COLD_SOURCE_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
-      COLD_SOURCE_ACCESS_KEY_ID: ${COLD_READ_ACCESS_KEY:-}
-      COLD_SOURCE_SECRET_ACCESS_KEY: ${COLD_READ_SECRET_KEY:-}
       COLD_BACKUP_PREFIX: ${BACKUP_COLD_PREFIX:-cold}
+      MODEL_SOURCE_BUCKET: mlflow
+      MODEL_BACKUP_PREFIX: ${BACKUP_MODEL_PREFIX:-models}
+      MODEL_SOURCE_EXCLUDE_PREFIX: ${UPLOAD_STAGING_PREFIX:-_upload-staging/}
     depends_on:
       minio-init:
         condition: service_completed_successfully
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
+    networks:
+      - industryflow-network
+    restart: "no"
+
+  # Authored-notebook archives (ADR-0038 dec 4-5): each per-user work volume, read through the Docker
+  # Engine API (never-started, networkless containers mounting it read-only), into the backup bucket.
+  # Holds the Docker socket and the backup principal only — no database or source-bucket credential.
+  #   one-off:   docker compose --profile backup run --rm notebook-backup
+  #   restore:   docker compose --profile backup run --rm --entrypoint notebook-restore.sh notebook-backup <volume> latest --target <volume>
+  notebook-backup:
+    image: industryflow-db-backup
+    container_name: industryflow-notebook-backup
+    profiles: ["backup"]
+    entrypoint: ["notebook-backup.sh"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${BACKUP_STORE_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_STORE_SECRET_KEY}
+      AWS_DEFAULT_REGION: ${BACKUP_S3_REGION:-us-east-1}
+      S3_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
+      S3_BUCKET: ${BACKUP_S3_BUCKET:-industryflow-backups}
+      NOTEBOOK_BACKUP_PREFIX: ${BACKUP_NOTEBOOK_PREFIX:-notebooks}
+      RETAIN_PER_VOLUME: ${BACKUP_RETAIN_PER_DB:-14}
+      NOTEBOOK_HELPER_IMAGE: industryflow-db-backup
+    # The Docker socket without root, as the hub reaches it (DOCKER_GID in .env). The volume names
+    # are the script's default, which is the hub's (NOTEBOOK_VOLUME_TEMPLATE).
+    group_add:
+      - "${DOCKER_GID:-999}"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - industryflow-network
     restart: "no"

@@ -187,6 +187,7 @@ principal is never half-wired. Each is created only where its consumer is deploy
 {{- if (index .Values.apps "ml-service-api").enabled }}{{ $keys = concat $keys (list "MODEL_READ_ACCESS_KEY" "MODEL_READ_SECRET_KEY") }}{{ end -}}
 {{- if .Values.notebookHub.enabled }}{{ $keys = concat $keys (list "TRACKING_STORE_ACCESS_KEY" "TRACKING_STORE_SECRET_KEY") }}{{ end -}}
 {{- if and .Values.backup.enabled (not .Values.backup.s3.endpoint) }}{{ $keys = concat $keys (list "BACKUP_STORE_ACCESS_KEY" "BACKUP_STORE_SECRET_KEY") }}{{ end -}}
+{{- if .Values.backup.enabled }}{{ $keys = concat $keys (list "BACKUP_READ_ACCESS_KEY" "BACKUP_READ_SECRET_KEY") }}{{ end -}}
 {{- if .Values.coldExport.enabled }}{{ $keys = concat $keys (list "COLD_STORE_ACCESS_KEY" "COLD_STORE_SECRET_KEY" "COLD_READ_ACCESS_KEY" "COLD_READ_SECRET_KEY") }}{{ end -}}
 {{- if and .Values.coldExport.enabled .Values.tenantDelete.enabled }}{{ $keys = concat $keys (list "TENANT_DELETE_COLD_ACCESS_KEY" "TENANT_DELETE_COLD_SECRET_KEY") }}{{ end -}}
 {{- join " " $keys -}}
