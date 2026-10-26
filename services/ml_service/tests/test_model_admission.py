@@ -153,6 +153,8 @@ def client(monkeypatch, owned_runs):
     monkeypatch.setattr(model_compat, "evaluate_run", compatible)
     # The manifest read by the author-code check (its own suite: test_upload_author_code).
     monkeypatch.setattr(skops_trust, "read_flavors", lambda uri: SAFE_FLAVORS)
+    # A run's model is addressed through the tracking store; no store here (ADR-0037 reads its manifest).
+    monkeypatch.setattr(model_loader, "resolve_model_uri", lambda run_id: f"runs:/{run_id}/model")
     c = TestClient(app)
     c.repo = app.state.ml_repository
     return c

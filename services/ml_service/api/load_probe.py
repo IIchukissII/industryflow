@@ -16,11 +16,9 @@ resembles **where it was made**. Its value is that it turns the one thing still 
 evidence, instead of accepting a stranger's word for both halves. Dropping it to a version
 comparison would leave assertions checked against assertions, which ADR-0027 dec 5 rejects.
 
-This module decides; ``load_probe_worker`` observes, in a process of its own. The split is not
-ceremony: the worker's environment refuses object-deserialisation for its whole life, and that switch
-is process-wide — set for the life of the service it would silently bind the notebook path too, which
-ADR-0030 dec 4 deliberately did not decide. (The service turns it off only for the duration of an
-uploaded load, under ``skops_trust._PICKLE_SWITCH``.)
+This module decides; ``load_probe_worker`` observes, in a process of its own, so an artifact that
+crashes or hangs its loader takes down the probe rather than the service. Both processes keep
+object-deserialisation off for their whole life (ADR-0037 dec 3).
 
 **A probe that could not run is not a probe that passed.** Every failure mode here — crash, timeout,
 unreadable output — resolves to a refusal, because the gate's question is "has this been shown to
@@ -78,10 +76,8 @@ _PROBE_ENV = (
 
 def _worker_env() -> dict:
     env = {name: os.environ[name] for name in _PROBE_ENV if name in os.environ}
-    # ADR-0030 dec 4, the half a structural check cannot reach: MLflow will deserialise author
-    # objects unless told not to, and it defaults to yes. Bound to this process so the upload path
-    # gets the refusal and the notebook path keeps its deferral — the audience distinction, honoured
-    # one layer down.
+    # The half a structural check cannot reach: MLflow deserialises author objects unless told not to,
+    # and it defaults to yes. Off before the worker imports anything (ADR-0037 dec 3).
     env["MLFLOW_ALLOW_PICKLE_DESERIALIZATION"] = "false"
     return env
 

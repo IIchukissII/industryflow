@@ -181,7 +181,8 @@ def test_what_an_upload_may_be_is_admitted(flavors):
     skops_trust.refuse_author_code(flavors)
 
 
-def test_an_upload_with_author_code_is_refused_before_anything_is_imported(tmp_path):
+@pytest.mark.parametrize("provenance", ["uploaded", "kernel"])
+def test_a_model_with_author_code_is_refused_before_anything_is_imported(tmp_path, provenance):
     """End to end on a real artifact directory: the manifest asks for code on the path, and the
     loader never gets as far as MLflow's."""
     import mlflow.sklearn
@@ -197,8 +198,7 @@ def test_an_upload_with_author_code_is_refused_before_anything_is_imported(tmp_p
     with open(os.path.join(path, "MLmodel"), "w") as fh:
         yaml.safe_dump(manifest, fh)
     with pytest.raises(skops_trust.UnsafeArtifact):
-        skops_trust.load_pyfunc(path, "uploaded")
-    skops_trust.load_pyfunc(path, "kernel")   # the kernel path is not this rule's to change
+        skops_trust.load_pyfunc(path, provenance)   # no provenance is exempt (ADR-0037 dec 2)
 
 
 # --- the run's model is found however many models the experiment holds -----------------------------
