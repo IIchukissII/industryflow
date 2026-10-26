@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0027 — The model artifact declares; the serving environment satisfies or refuses
 
 - **Status:** Accepted
-- **Date:** 2026-07-14; changed 2026-10-17
+- **Date:** 2026-07-14; changed 2026-10-26
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (its deferred supply chain, for the artifact path only)
-- **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (in-process registry), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (model-adapter contract), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (the test is the gate), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (retrain lane), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (provenance)
+- **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (in-process registry), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (model-adapter contract), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (the test is the gate), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (retrain lane), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (provenance), [ADR-0037](ADR-0037-no-author-code-on-the-serving-side.md) (no load runs author code)
 
 ## Context
 
@@ -77,7 +77,6 @@ pinned stack.
 
 | Open question | Settled by |
 |---|---|
-| Refusing executable serialisation for kernel-authored artifacts | Its own record |
 | Admitting uploaded tree-based models without trusting their object data | Its own record, when needed |
 | A complete, explicit requirement set logged by the kernel | A missed library the declarative check does not cover |
 | A reconciler re-checking deployed models after a rebuild | First stale verdict that matters |

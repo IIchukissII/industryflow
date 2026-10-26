@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0030 — Admission of externally-authored models
 
 - **Status:** Accepted
-- **Date:** 2026-07-16; changed 2026-10-25
+- **Date:** 2026-07-16; changed 2026-10-26
 - **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the artifact declares; the serving environment satisfies or refuses)
-- **Related:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (sole writer of the artifact store), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (declared semantics), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability audiences), [ADR-0035](ADR-0035-drift-baseline-derived-scores.md) (the declared baseline, dec 8), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the public edge)
+- **Related:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (sole writer of the artifact store), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (declared semantics), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability audiences), [ADR-0035](ADR-0035-drift-baseline-derived-scores.md) (the declared baseline, dec 8), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the public edge), [ADR-0037](ADR-0037-no-author-code-on-the-serving-side.md) (dec 4's rule for every provenance)
 
 ## Context
 
