@@ -244,10 +244,10 @@ archive into it through the Engine API (owners and modes as archived), reads it 
 difference from the archive. An existing target is refused.
 
 ```bash
-# Rehearsal into a scratch volume, then remove it
+# Rehearsal into a scratch volume (a name outside the work-volume prefix), then remove it
 docker compose --profile backup run --rm --entrypoint notebook-restore.sh notebook-backup \
-  industryflow-nb-<user> latest --target industryflow-nb-<user>-rehearsal
-docker volume rm industryflow-nb-<user>-rehearsal
+  industryflow-nb-<user> latest --target rehearsal-industryflow-nb-<user>
+docker volume rm rehearsal-industryflow-nb-<user>
 
 # Real restore: the user's server stopped and the volume removed first
 docker compose --profile backup run --rm --entrypoint notebook-restore.sh notebook-backup \
