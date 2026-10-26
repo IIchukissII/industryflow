@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0032 — Backup and disaster recovery for every durable store
 
 - **Status:** Accepted
-- **Date:** 2026-10-24
+- **Date:** 2026-10-24; changed 2026-10-26
 - **Parent:** ADR-0001
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a backup holds every tenant), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability store, dec 7), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (notebook volumes), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (cold layer, the only copy of raw history; dec 13 its mirror), [ADR-0029](ADR-0029-spark-major-upgrade-checkpoint-cutover.md) (checkpoints), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (forward-only migrations)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a backup holds every tenant), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability store, dec 7), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (notebook volumes), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (cold layer, the only copy of raw history; dec 13 its mirror), [ADR-0029](ADR-0029-spark-major-upgrade-checkpoint-cutover.md) (checkpoints), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (forward-only migrations), [ADR-0038](ADR-0038-model-and-notebook-backup.md) (model and notebook mechanism)
 
 ## Context
 
@@ -63,7 +63,6 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 |---|---|
 | Objectives, schedules, off-site target and retention per store, including the cold mirror | Operations configuration |
 | Continuous archiving and point-in-time recovery for the database | Maintainer |
-| Backup mechanism and cadence for model artifacts and authored notebooks | Maintainer |
 | Encryption and key management at rest beyond the target's own | Maintainer |
 | Tenant-granular restore | Maintainer |
 | Per-tenant backup keys destroyed on delete, beside expiry | Jointly with ADR-0033, with the encryption question above |
