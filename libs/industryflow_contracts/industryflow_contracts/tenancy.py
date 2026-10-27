@@ -11,6 +11,7 @@ UUID raises ``ValueError`` before it can become a schema, a role, a key prefix o
 result is a name the system constructed, safe to emit as an identifier (quoted where SQL takes
 it) or as a path segment. This module is the only place the mapping exists (dec 5); no service
 re-derives it (dec 7), and a repository test fails on any service source that builds one inline.
+The test of whether a name or key belongs to a tenant lives here too (ADR-0039), under the same check.
 
 The tenant is spelled two ways, and they are kept as distinct functions because they are not
 interchangeable:
@@ -122,6 +123,66 @@ def cold_object_prefix(company_id) -> str:
     ownership by prefix must append ``/`` itself so ``tenant_<a>`` never matches a longer sibling.
     """
     return f"{_PREFIX}{canonical_company_id(company_id)}"
+
+
+def cold_key_prefix(company_id) -> str:
+    """The tenant's cold-archive key prefix with its separator, ``tenant_<uuid>/``: what a reader tests
+    ownership against, so ``tenant_<a>`` never matches a longer sibling."""
+    return cold_object_prefix(company_id) + "/"
+
+
+# --------------------------------------------------------------------------- ownership (ADR-0039)
+#
+# Whether a name or an object-store key belongs to a tenant is decided here and nowhere else. Each
+# function takes a prefix one of the builders above returned; the mediators and read paths call these
+# rather than testing a prefix themselves (ADR-0039 dec 1).
+
+def qualify_name(prefix: str, name: str) -> str:
+    """Place a caller's plain name under a tenant name prefix (idempotent: an owned name is returned
+    unchanged)."""
+    return name if name.startswith(prefix) else f"{prefix}{name}"
+
+
+def owned_name(prefix: str, qualified) -> str | None:
+    """The plain name under a tenant name prefix, or ``None`` if the name is not that tenant's (the
+    caller drops it, never leaks it)."""
+    if not isinstance(qualified, str) or not qualified or not qualified.startswith(prefix):
+        return None
+    return qualified[len(prefix):]
+
+
+def is_plain_key(key: str) -> bool:
+    """Whether a key means only what it spells: no empty, ``.`` or ``..`` segment and no backslash
+    (ADR-0039 dec 2). A prefix test on any other key proves nothing: a store, proxy or client that
+    normalises it can land under another tenant's prefix."""
+    return "\\" not in key and all(seg not in ("", ".", "..") for seg in key.split("/"))
+
+
+def owns_key(prefix: str, key, *, encoded: bool = False) -> bool:
+    """Whether an object-store key is a plain key under a tenant key prefix.
+
+    ``encoded`` for a key still in its URI-encoded form, which is refused if it carries an escape:
+    decoded, it could spell a segment the plain test never saw (ADR-0039 dec 3).
+    """
+    if not isinstance(key, str):
+        return False
+    key = key.lstrip("/")
+    if not key or (encoded and "%" in key):
+        return False
+    return is_plain_key(key) and key.startswith(prefix)
+
+
+def scope_key(prefix: str, path) -> str:
+    """Place a caller's path under a tenant key prefix (idempotent), or ``ValueError`` for a path that
+    is not plain (ADR-0039 dec 4): prefixing it would not keep it inside the tenant.
+
+    A trailing ``/`` (a listing prefix) is allowed; every other segment must be plain. An empty path
+    is the prefix itself.
+    """
+    path = (path or "").lstrip("/")
+    if path and not is_plain_key(path.rstrip("/")):
+        raise ValueError("path is not a plain key")
+    return path if path.startswith(prefix) else f"{prefix}{path}"
 
 
 def company_id_from_schema(name: str) -> str:

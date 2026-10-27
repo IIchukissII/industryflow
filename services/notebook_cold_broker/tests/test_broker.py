@@ -10,7 +10,9 @@ store, no Redis and no S3.
 import json
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
+from industryflow_contracts import tenancy
 
 import broker  # noqa: E402
 
@@ -111,6 +113,19 @@ def test_dotdot_path_rejected():
     r = _client(m, FakeColdStore()).get("/cold/files", params={"path": "../tenant_other"},
                                         headers=_auth(tok))
     assert r.status_code == 400
+
+
+@pytest.mark.parametrize("path", ["year=2026/./x.parquet", "year=2026//x.parquet", "year=2026\\..\\x"])
+def test_a_path_that_is_not_plain_is_rejected(path):
+    # The broker held only '..' before ADR-0039; the tracking side refused these all along.
+    m = {}; tok = _handle(m); cold = FakeColdStore()
+    c = _client(m, cold)
+    assert c.get("/cold/files", params={"path": path}, headers=_auth(tok)).status_code == 400
+    # On the URL path the HTTP layer may normalise a segment away first; whatever reaches the store
+    # is refused or plain, never signed as spelled.
+    r = c.get(f"/cold/object/{path}", headers=_auth(tok), follow_redirects=False)
+    assert r.status_code in (307, 400)
+    assert all(tenancy.is_plain_key(key) for key in cold.presigned)
 
 
 def test_read_only_no_write_verbs():

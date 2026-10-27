@@ -96,3 +96,67 @@ def test_only_a_name_the_mapping_builds_is_taken_for_a_tenant_schema(name):
 def test_the_catalog_pattern_selects_tenant_schemas_literally():
     # `_` is a LIKE wildcard; escaped, the pattern cannot also match e.g. `tenantX...`.
     assert tenancy.SCHEMA_LIKE == r"tenant\_%"
+
+
+# --------------------------------------------------------------------------- ownership (ADR-0039)
+
+NAMES = tenancy.mlflow_name_prefix(CID)
+KEYS = tenancy.mlflow_artifact_prefix(CID)
+OTHER = "0b2f503a-6e59-4f4f-b0cd-b82547a20cf2"
+
+
+def test_cold_key_prefix_is_the_archive_prefix_with_its_separator():
+    assert tenancy.cold_key_prefix(CID) == tenancy.cold_object_prefix(CID) + "/"
+
+
+def test_a_name_is_qualified_once_and_stripped_only_for_its_tenant():
+    assert tenancy.qualify_name(NAMES, "churn") == NAMES + "churn"
+    assert tenancy.qualify_name(NAMES, NAMES + "churn") == NAMES + "churn"
+    assert tenancy.owned_name(NAMES, NAMES + "churn") == "churn"
+    for foreign in (tenancy.mlflow_name_prefix(OTHER) + "churn", "churn", "", None):
+        assert tenancy.owned_name(NAMES, foreign) is None
+
+
+@pytest.mark.parametrize("key", [
+    "a/b", "a/b.parquet", "year=2026/month=10/day=27/part-0.parquet", "a/.hidden", "a/b..c",
+])
+def test_a_plain_key_means_what_it_spells(key):
+    assert tenancy.is_plain_key(key)
+
+
+@pytest.mark.parametrize("key", [
+    "", "a//b", "a/./b", "./a", "a/..", "../a", "a/../b", "a/", "a\\..\\b", "a\\b",
+])
+def test_a_key_a_reader_could_normalise_is_not_plain(key):
+    assert not tenancy.is_plain_key(key)
+
+
+def test_only_a_plain_key_under_the_prefix_is_owned():
+    assert tenancy.owns_key(KEYS, KEYS + "run/model.skops")
+    assert tenancy.owns_key(KEYS, "/" + KEYS + "run/model.skops")
+    for key in (KEYS + "../" + tenancy.mlflow_artifact_prefix(OTHER) + "x", KEYS + "./x", KEYS + "a//x",
+                KEYS + "a\\x", tenancy.mlflow_artifact_prefix(OTHER) + "x", "", None):
+        assert not tenancy.owns_key(KEYS, key), key
+
+
+def test_an_encoded_key_with_an_escape_is_refused():
+    # Decoded, %2e%2e is `..`: the plain test never saw it.
+    assert tenancy.owns_key(KEYS, KEYS + "a%2e%2e/x")
+    assert not tenancy.owns_key(KEYS, KEYS + "a%2e%2e/x", encoded=True)
+    assert tenancy.owns_key(KEYS, KEYS + "a/x", encoded=True)
+
+
+def test_a_path_is_placed_under_the_prefix_only_when_plain():
+    assert tenancy.scope_key(KEYS, "run/x") == KEYS + "run/x"
+    assert tenancy.scope_key(KEYS, "/run/x") == KEYS + "run/x"
+    assert tenancy.scope_key(KEYS, KEYS + "run/x") == KEYS + "run/x"
+    assert tenancy.scope_key(KEYS, "") == KEYS
+    assert tenancy.scope_key(KEYS, "year=2026/") == KEYS + "year=2026/"  # a listing prefix
+    for path in ("../x", "a/../b", "a/./b", "a//b", "a\\b"):
+        with pytest.raises(ValueError):
+            tenancy.scope_key(KEYS, path)
+
+
+def test_what_scope_key_places_owns_key_accepts():
+    for path in ("run/x", "a/b/c.parquet", KEYS + "y"):
+        assert tenancy.owns_key(KEYS, tenancy.scope_key(KEYS, path))

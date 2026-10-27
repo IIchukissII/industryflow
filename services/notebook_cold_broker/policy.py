@@ -80,32 +80,20 @@ async def resolve_cold_binding(
     return ColdBinding(user=record.get("user", ""), company_id=company_id)
 
 
-def tenant_prefix(company_id: str) -> str:
-    """The tenant's cold-store key prefix, e.g. ``tenant_<uuid>/`` (UUID-validated).
+# The tenant's cold-store key prefix, ``tenant_<uuid>/`` (UUID-validated): the exporter's write
+# prefix plus the separator, so a sibling ``tenant_<other>`` can never pass a prefix test against it.
+tenant_prefix = tenancy.cold_key_prefix
 
-    The exporter's write prefix (the shared ``cold_object_prefix``) plus the separator, so a
-    sibling ``tenant_<other>`` can never pass a prefix test against it.
-    """
-    return tenancy.cold_object_prefix(company_id) + "/"
 
+# The ownership test itself is the shared one (ADR-0039); these bind it to the caller's tenant.
 
 def owns_key(company_id: str, key: str) -> bool:
-    """Whether an object-store key is under the caller's tenant prefix — checked before the broker
-    signs a pre-signed URL for it, so a tenant can never address another's Parquet."""
-    key = (key or "").lstrip("/")
-    return bool(key) and key.startswith(tenant_prefix(company_id))
+    """Whether an object-store key is a plain key under the caller's tenant prefix — checked before
+    the broker signs a pre-signed URL for it, so a tenant can never address another's Parquet."""
+    return tenancy.owns_key(tenant_prefix(company_id), key)
 
 
 def scope_key(company_id: str, path: str) -> str:
-    """Place a kernel-relative path under the tenant prefix (idempotent).
-
-    A path already inside the tenant prefix is returned unchanged; anything else is prepended.
-    Because the tenant prefix ends in ``/`` and is derived from a validated UUID, a sibling prefix
-    (``tenant_<other>``) can never be mistaken for the caller's, and ``..`` segments are rejected
-    so a crafted path cannot walk out of the prefix.
-    """
-    path = (path or "").lstrip("/")
-    if ".." in path.split("/"):
-        raise ValueError("path may not contain '..' segments")
-    prefix = tenant_prefix(company_id)
-    return path if path.startswith(prefix) else f"{prefix}{path}"
+    """Place a kernel-relative path under the tenant prefix (idempotent), or ValueError for a path
+    that is not plain (ADR-0039 dec 2, 4): an empty, ``.`` or ``..`` segment or a backslash."""
+    return tenancy.scope_key(tenant_prefix(company_id), path)
