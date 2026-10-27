@@ -31,6 +31,7 @@ from typing import Awaitable, Callable, Optional, Protocol
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from industryflow_contracts import tenancy
 
 import policy
 
@@ -125,7 +126,7 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
                     kw["ContinuationToken"] = token
                 resp = s3.list_objects_v2(**kw)
                 for obj in resp.get("Contents", []):
-                    rel = obj["Key"][len(prefix):]
+                    rel = tenancy.owned_name(prefix, obj["Key"])
                     if rel:
                         out.append({"path": rel, "size": obj["Size"]})
                 if not resp.get("IsTruncated"):

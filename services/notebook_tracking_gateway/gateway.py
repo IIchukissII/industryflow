@@ -240,7 +240,8 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
 
         token = policy.tenant_token(binding.company_id)
         prefix = staging.staging_prefix(token, upload_id)
-        keys = artifacts.list_keys(prefix)
+        # Only keys under the listed prefix are members; the shared test decides it (ADR-0039).
+        keys = [key for key in artifacts.list_keys(prefix) if tenancy.owned_name(prefix, key)]
         if not keys:
             raise HTTPException(status_code=404, detail="nothing staged for this upload")
 
@@ -274,7 +275,7 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
             )
         manifest_text = manifest[0].decode("utf-8", "replace") if manifest else None
 
-        heads = [(key[len(prefix):], (reads[key] or (b"", ""))[0][:_HEAD_BYTES]) for key in keys]
+        heads = [(tenancy.owned_name(prefix, key), (reads[key] or (b"", ""))[0][:_HEAD_BYTES]) for key in keys]
         verdict = admission.evaluate(manifest_text, heads)
 
         if verdict.refused:
@@ -284,7 +285,7 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
         artifact_prefix = policy.artifact_prefix(binding.company_id)
         admitted = []
         for key in keys:
-            member = key[len(prefix):]
+            member = tenancy.owned_name(prefix, key)
             dst = staging.admitted_key(artifact_prefix, upload_id, member)
             read = reads[key]
             if read is None or not artifacts.copy(key, dst, read[1]):
@@ -560,9 +561,11 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
                     kw["ContinuationToken"] = token
                 resp = s3.list_objects_v2(**kw)
                 for cp in resp.get("CommonPrefixes", []):
-                    out.append({"path": cp["Prefix"][len(prefix):].rstrip("/"), "is_dir": True, "file_size": None})
+                    rel = tenancy.owned_name(prefix, cp["Prefix"])
+                    if rel:
+                        out.append({"path": rel.rstrip("/"), "is_dir": True, "file_size": None})
                 for obj in resp.get("Contents", []):
-                    rel = obj["Key"][len(prefix):]
+                    rel = tenancy.owned_name(prefix, obj["Key"])
                     if rel:
                         out.append({"path": rel, "is_dir": False, "file_size": obj["Size"]})
                 if not resp.get("IsTruncated"):

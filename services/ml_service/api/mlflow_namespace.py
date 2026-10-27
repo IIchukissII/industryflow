@@ -35,12 +35,9 @@ def is_safe_name(name: str) -> bool:
     return bool(name) and not any(c in name for c in "'\"%")
 
 
-def strip_owned(prefix: str, qualified: str) -> Optional[str]:
-    """Strip the tenant prefix off a qualified name, or ``None`` if it is not the tenant's (so the
-    caller drops it rather than leaking another tenant's model)."""
-    if not qualified or not qualified.startswith(prefix):
-        return None
-    return qualified[len(prefix):]
+# Strip the tenant prefix off a qualified name, or ``None`` if it is not the tenant's (so the caller
+# drops it rather than leaking another tenant's model): the shared ownership test (ADR-0039).
+strip_owned = tenancy.owned_name
 
 
 def pick_latest(versions: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
