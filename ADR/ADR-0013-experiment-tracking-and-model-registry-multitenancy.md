@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0013 — Experiment-tracking and model-registry multi-tenancy
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-25
+- **Date:** 2026-06-27; changed 2026-10-27
 - **Parent:** ADR-0001
 - **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (tracking from notebooks, dec 9), [ADR-0012](ADR-0012-notebook-credential-delivery.md) (the capability model applied here), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (tenant-scoped API and UI), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (the gateway that realises this record)
 
@@ -59,7 +59,6 @@ containment at operational cost, not a boundary mediation lacks.
 | Open question | Settled by |
 |---|---|
 | Trigger and mechanism for physical separation (decision 5) | A tenant's scale or compliance, or a mediation failure |
-| Product view of experiments and runs | Maintainer, with the frontend analytics pages |
 | Tracking data recorded outside any tenant namespace: attribute or retire | Maintainer |
 | Per-tenant retention and quota for runs, versions and artifacts | First tenant whose usage needs bounding |
 
@@ -67,3 +66,4 @@ containment at operational cost, not a boundary mediation lacks.
 
 - [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): gateway naming, artifact locations.
 - `services/notebook_tracking_gateway/`: decisions 2 and 3.
+- `services/ml_service/api/routers/experiments.py`, `services/frontend/src/pages/Experiments.jsx`: decision 4.
