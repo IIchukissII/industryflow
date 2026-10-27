@@ -3,14 +3,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-No service or script re-derives what this package defines (ADR-0003 dec 5, 7; ADR-0006 dec 7).
+No service or script re-derives what this package defines (ADR-0003 dec 5, 7; ADR-0006 dec 7; ADR-0039).
 
 The tenant mapping was once copied into thirteen modules across nine images, each held equal to the
 others by nothing. A copy that drifts addresses another schema, another role, another tenant's
 objects — and every test of the copy still passes. This reads every service's source and the
 repository's operator scripts, and fails on any string literal that spells a tenant name (``tenant_…`` in a schema, role, prefix or LIKE
 pattern) and on any restatement of the window contract (an aggregation table name, or a table keyed
-by the granularities). Docstrings and comments may describe the names; code may not build them.
+by the granularities), and on a test of tenant ownership done in place (a value tested against, or
+sliced by, a tenant prefix) instead of through the package's. Docstrings and comments may describe the
+names; code may not build them.
 
 Both sides: the same scan must find the definitions in this package, or it is proving nothing; and a
 script that cannot import the package is an explicit, justified exception whose own pattern is held
@@ -83,9 +85,33 @@ def _string_literals(tree):
             yield node
 
 
+def _prefix_like(node) -> bool:
+    """A value that reads as a tenant prefix: a name, attribute or call whose name ends in ``prefix``.
+    An upper-case constant (``_SUSPENDED_PREFIX``) names a store-key namespace, not a tenant."""
+    if isinstance(node, ast.Call):
+        node = node.func
+    name = node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else ""
+    return name.lower().endswith("prefix") and not name.isupper()
+
+
+def _ownership_tests(tree):
+    """Every ``x.startswith(<prefix>)`` and ``x[len(<prefix>):]``: ownership decided in place (ADR-0039)."""
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "startswith" and len(node.args) == 1 and _prefix_like(node.args[0])):
+            yield node
+        elif (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)
+                and isinstance(node.slice.lower, ast.Call) and isinstance(node.slice.lower.func, ast.Name)
+                and node.slice.lower.func.id == "len" and len(node.slice.lower.args) == 1
+                and _prefix_like(node.slice.lower.args[0])):
+            yield node
+
+
 def violations(path: Path):
     tree = ast.parse(path.read_text(), filename=str(path))
     found = []
+    for node in _ownership_tests(tree):
+        found.append(f"{path}:{node.lineno}: tests tenant ownership in place")
     for node in _string_literals(tree):
         if TENANT_NAME.search(node.value):
             found.append(f"{path}:{node.lineno}: builds a tenant name inline: {node.value!r}")
@@ -111,8 +137,8 @@ def test_no_service_or_script_builds_a_tenant_name_or_restates_the_window_contra
     found = [v for path in [*_service_sources(), *_script_sources()]
              if path.relative_to(REPO).as_posix() not in EXCEPTIONS for v in violations(path)]
     assert not found, (
-        "These build a name or value that industryflow_contracts defines (ADR-0003 dec 5, 7; "
-        "ADR-0006 dec 7). Import it from the package instead:\n  " + "\n  ".join(found)
+        "These build a name or value, or test ownership, that industryflow_contracts defines "
+        "(ADR-0003 dec 5, 7; ADR-0006 dec 7; ADR-0039). Use the package instead:\n  " + "\n  ".join(found)
     )
 
 
@@ -155,7 +181,9 @@ def test_the_artifact_migration_reads_mlflow_names_as_the_package_spells_them():
 def test_the_scan_finds_the_definitions_it_forbids_elsewhere():
     """The detector run on the package itself: it must flag the tenant names and the window table,
     or a service copy would pass it just as silently."""
-    assert any("builds a tenant name" in v for v in violations(PACKAGE / "tenancy.py"))
+    found = violations(PACKAGE / "tenancy.py")
+    assert any("builds a tenant name" in v for v in found)
+    assert any("tests tenant ownership" in v for v in found)
     found = violations(PACKAGE / "windows.py")
     assert any("restates an aggregation table" in v for v in found)
     assert any("window table keyed by granularity" in v for v in found)
@@ -206,6 +234,10 @@ def test_a_reintroduced_copy_is_caught(tmp_path):
         "pattern": "P = r'^(tenant_[0-9a-f]{8}_[0-9a-f]{4})'\n",
         "table": "T = {'1min': 'sensor_aggregations_1min'}\n",
         "widths": "W = {'1min': 60, '5min': 300, '1hour': 3600}\n",
+        "owns": "def f(c, key):\n    return key.startswith(tenant_prefix(c))\n",
+        "owns-local": "def f(prefix, key):\n    return bool(key) and key.startswith(prefix)\n",
+        "owns-library": "def f(c, k):\n    return k.startswith(tenancy.mlflow_artifact_prefix(c))\n",
+        "strip": "def f(prefix, name):\n    return name[len(prefix):]\n",
     }
     for name, src in copies.items():
         path = tmp_path / f"{name}.py"
@@ -214,3 +246,6 @@ def test_a_reintroduced_copy_is_caught(tmp_path):
     described = tmp_path / "described.py"
     described.write_text('"""Routes to ``tenant_<uuid>.sensor_measurements``."""\n# tenant_<uuid>\n')
     assert not violations(described), "a docstring or comment that describes a name is not a copy"
+    store_key = tmp_path / "store_key.py"
+    store_key.write_text("def f(key):\n    return key.startswith(_SUSPENDED_PREFIX)\n")
+    assert not violations(store_key), "a store-key namespace constant is not a tenant prefix"

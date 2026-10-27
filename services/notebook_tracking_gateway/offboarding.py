@@ -92,7 +92,7 @@ async def _experiments(upstream, prefix: str) -> list:
         if token:
             body["page_token"] = token
         data = await _call(upstream, "POST", "experiments/search", body)
-        found += [e for e in data.get("experiments", []) if e.get("name", "").startswith(prefix)]
+        found += [e for e in data.get("experiments", []) if tenancy.owned_name(prefix, e.get("name")) is not None]
         token = data.get("next_page_token")
         if not token:
             return found
@@ -105,7 +105,7 @@ async def _registered_models(upstream, prefix: str) -> list:
         if token:
             params["page_token"] = token
         data = await _call(upstream, "GET", "registered-models/search", params)
-        found += [m["name"] for m in data.get("registered_models", []) if m.get("name", "").startswith(prefix)]
+        found += [m["name"] for m in data.get("registered_models", []) if tenancy.owned_name(prefix, m.get("name")) is not None]
         token = data.get("next_page_token")
         if not token:
             return found

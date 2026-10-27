@@ -136,28 +136,23 @@ tenant_prefix = tenancy.mlflow_name_prefix
 
 # --------------------------------------------------------------------------- names
 
-def qualify_name(company_id: str, name: str) -> str:
-    """Map a kernel-supplied experiment/model name into the tenant namespace.
+# The ownership test itself is the shared one (ADR-0039); these bind it to the caller's tenant.
 
-    Idempotent: a name already in the tenant's namespace is returned unchanged, so re-qualifying a
-    value the gateway emitted is safe.
-    """
-    prefix = tenant_prefix(company_id)
-    return name if name.startswith(prefix) else f"{prefix}{name}"
+def qualify_name(company_id: str, name: str) -> str:
+    """Map a kernel-supplied experiment/model name into the tenant namespace (idempotent, so
+    re-qualifying a value the gateway emitted is safe)."""
+    return tenancy.qualify_name(tenant_prefix(company_id), name)
 
 
 def owns_name(company_id: str, qualified: str) -> bool:
     """Whether a qualified name belongs to the caller's tenant."""
-    return bool(qualified) and qualified.startswith(tenant_prefix(company_id))
+    return tenancy.owned_name(tenant_prefix(company_id), qualified) is not None
 
 
 def unqualify_name(company_id: str, qualified: str) -> Optional[str]:
     """Strip the tenant prefix for a response, or None if the name is not the caller's tenant's
     (so the gateway drops, never leaks, another tenant's entry)."""
-    prefix = tenant_prefix(company_id)
-    if not qualified or not qualified.startswith(prefix):
-        return None
-    return qualified[len(prefix):]
+    return tenancy.owned_name(tenant_prefix(company_id), qualified)
 
 
 # --------------------------------------------------------------------------- artifacts
@@ -167,19 +162,10 @@ def unqualify_name(company_id: str, qualified: str) -> Optional[str]:
 artifact_prefix = tenancy.mlflow_artifact_prefix
 
 
-def is_plain_key(key: str) -> bool:
-    """Whether a key means only what it spells: no empty, ``.`` or ``..`` segment and no backslash. A
-    prefix test on any other key proves nothing — a reader that normalises it can land under another
-    tenant's prefix."""
-    return "\\" not in key and all(seg not in ("", ".", "..") for seg in key.split("/"))
-
-
 def owns_artifact_key(company_id: str, key: str) -> bool:
     """Whether an artifact URI's key is under the caller's tenant prefix (a model version's source,
-    which a trusted reader later resolves itself). The key is still URI-encoded, so a percent-escape
-    is refused too: decoded, it could spell a segment the plain-key test never saw."""
-    key = (key or "").lstrip("/")
-    return "%" not in key and is_plain_key(key) and key.startswith(artifact_prefix(company_id))
+    which a trusted reader later resolves itself). The key is still URI-encoded (ADR-0039 dec 3)."""
+    return tenancy.owns_key(artifact_prefix(company_id), key, encoded=True)
 
 
 def experiment_artifact_location(company_id: str, nonce: str) -> str:
@@ -205,8 +191,7 @@ def is_upload_reserved(company_id: str, scoped_key: str) -> bool:
     root's name is reserved too, inside a tenant's prefix, so no kernel path can pass for it.
     """
     key = (scoped_key or "").lstrip("/")
-    prefix = artifact_prefix(company_id)
-    relative = key[len(prefix):] if key.startswith(prefix) else key
+    relative = tenancy.owned_name(artifact_prefix(company_id), key) or key
     first = relative.split("/", 1)[0]
     return first in (staging.ADMITTED_ROOT.rstrip("/"), staging.STAGING_ROOT.rstrip("/"))
 
@@ -217,16 +202,9 @@ def store_key(handle: str) -> str:
 
 
 def scope_artifact_key(company_id: str, key: str) -> str:
-    """Place a kernel-relative artifact path under the tenant prefix (idempotent).
-
-    Raises ValueError for a key that is not plain (``is_plain_key``): prefixing it would not keep it
-    inside the tenant.
-    """
-    key = (key or "").lstrip("/")
-    if key and not is_plain_key(key.rstrip("/")):
-        raise ValueError("artifact path is not a plain key")
-    prefix = artifact_prefix(company_id)
-    return key if key.startswith(prefix) else f"{prefix}{key}"
+    """Place a kernel-relative artifact path under the tenant prefix (idempotent), or ValueError for
+    a path that is not plain (ADR-0039 dec 4)."""
+    return tenancy.scope_key(artifact_prefix(company_id), key)
 
 
 # --------------------------------------------------------------------------- MLflow REST map
