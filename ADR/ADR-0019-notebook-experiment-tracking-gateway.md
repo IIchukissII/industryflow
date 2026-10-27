@@ -6,12 +6,13 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0019 — Notebook experiment-tracking gateway and the tracking capability
 
 - **Status:** Accepted
-- **Date:** 2026-06-28; changed 2026-10-17
+- **Date:** 2026-06-28; changed 2026-10-27
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (the
   gateway this makes concrete), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md)
   (handles and audiences), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md)
-  (the tracking gate), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (hub identity)
+  (the tracking gate), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (hub identity),
+  [ADR-0039](ADR-0039-one-tenant-ownership-test.md) (the one implementation of decision 5's test)
 
 ## Context
 
@@ -38,7 +39,8 @@ of the kernel. Artifacts are large, metadata calls small.
    addresses, each for one object, one verb and a few minutes.** Listing and deleting move no bytes
    and are done by the gateway; the deployed object store pre-signs, so no byte-proxying path exists.
 7. **The tracking server is unmodified and its UI stays internal.** Tenants browse models, experiments
-   and runs through the platform's session-scoped read paths, which apply decision 5's rule themselves.
+   and runs through the platform's session-scoped read paths, which apply decision 5's rule through
+   the same shared implementation as the gateway (ADR-0039).
 8. **The capability store holds tracking handles, never store secrets.**
 9. **ADR-0011's tracking gate is lifted for the authoring profile.** An authoring kernel logs runs,
    reads its runs and registers model versions within its tenant only.
@@ -74,7 +76,6 @@ of the kernel. Artifacts are large, metadata calls small.
 |---|---|
 | A byte-proxying fallback | First supported object store that cannot pre-sign per object |
 | A per-tenant artifact bucket on top of the prefix | ADR-0013 dec 5's move to physical separation |
-| One shared implementation of the namespace rule | First divergence between gateway and read paths |
 | Attribution or retirement of pre-namespace data | Operator task (ADR-0013) |
 | Per-tenant retention and quota | Deployment configuration (ADR-0013) |
 
