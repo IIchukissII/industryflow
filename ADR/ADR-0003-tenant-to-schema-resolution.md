@@ -6,10 +6,11 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0003 — Tenant-to-schema resolution: verified identity, validated mapping, one implementation
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-10-17
+- **Date:** 2026-06-26; changed 2026-10-27
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0002](ADR-0002-ingestion-authentication-and-device-identity.md) (verified tenant
-  on ingestion), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the tenant claim)
+  on ingestion), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the tenant claim),
+  [ADR-0039](ADR-0039-one-tenant-ownership-test.md) (the ownership test the library holds)
 
 ## Context
 
@@ -30,9 +31,10 @@ vector; pooled connections outlive requests; a rule implemented per service drif
 6. **The search path is scoped to the request's transaction.** It is discarded when the transaction
    ends, so tenant-scoped queries run inside one and no pooled connection keeps a tenant's path.
 7. **Tenant resolution is one shared library every deployable is built with.** It holds every name
-   derived from a tenant identifier (schema, roles, registry and object-store namespaces); a check
-   refuses a service that derives a name itself, a build that omits the library, and a database copy
-   of the names that differs.
+   derived from a tenant identifier (schema, roles, registry and object-store namespaces) and the
+   test of whether a name or key belongs to a tenant (ADR-0039); a check refuses a service that
+   derives a name itself, a build that omits the library, and a database copy of the names that
+   differs.
 
 ## Alternatives
 
