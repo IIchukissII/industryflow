@@ -2,10 +2,10 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Unit tests for the drift reference-profile builder (ADR-0021 decision 4).
+"""The drift baseline's format (ADR-0035): a supplied feature sample, scores the platform derives.
 
-Pure python/numpy — no DB, no MLflow, no evidently. The profile is an evidently-consumable
-capped sample; the live drift score against it is exercised in test_drift_score.py.
+Pure python/numpy — no DB, no MLflow, no evidently. The live drift score against it is exercised in
+test_drift_score.py.
 """
 import json
 import os
@@ -15,7 +15,18 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
-from drift import build_reference_profile, REFERENCE_PROFILE_VERSION  # noqa: E402
+from drift import (  # noqa: E402
+    REFERENCE_PROFILE_VERSION,
+    accepted_sample,
+    baseline_state,
+    build_reference_profile,
+    refused_baseline,
+    sample_refusal,
+    sample_rows,
+    supplied_scores_refusal,
+    with_derived_scores,
+    without_prediction_baseline,
+)
 from drift.reference_profile import (  # noqa: E402
     DEFAULT_PREDICTION_COLUMN,
     _sample_indices,
@@ -51,13 +62,18 @@ def test_no_downsampling_below_cap():
     assert list(idx) == list(range(100))
 
 
-def test_prediction_column_is_stored_when_given():
-    prof = build_reference_profile(
-        {"a": [1.0, 2.0, 3.0]},
-        prediction_scores=[0.1, 0.9, 0.5],
-    )
+def test_derived_scores_are_stored_as_the_prediction_column():
+    prof = with_derived_scores(build_reference_profile({"a": [1.0, 2.0, 3.0]}), [0.1, 0.9], derived_at="t")
     assert prof["prediction_column"] == DEFAULT_PREDICTION_COLUMN
-    assert prof["sample"][DEFAULT_PREDICTION_COLUMN] == [0.1, 0.9, 0.5]
+    assert prof["sample"][DEFAULT_PREDICTION_COLUMN] == [0.1, 0.9]
+    assert prof["prediction_baseline"] == {"origin": "derived", "derived_at": "t"}
+    assert prediction_column_refusal(prof) is None
+
+
+def test_the_builder_offers_no_score_column():
+    # ADR-0035 dec 2: the supplier provides the sample only.
+    with pytest.raises(TypeError):
+        build_reference_profile({"a": [1.0]}, prediction_scores=[0.5])
 
 
 def test_nan_and_inf_become_null_for_json():
@@ -69,11 +85,6 @@ def test_nan_and_inf_become_null_for_json():
 def test_mismatched_column_lengths_raise():
     with pytest.raises(ValueError):
         build_reference_profile({"a": [1.0, 2.0], "b": [3.0]})
-
-
-def test_prediction_length_mismatch_raises():
-    with pytest.raises(ValueError):
-        build_reference_profile({"a": [1.0, 2.0, 3.0]}, prediction_scores=[0.1, 0.2])
 
 
 def test_empty_input_raises():
@@ -103,14 +114,14 @@ def test_profile_is_json_round_trippable():
     [0.1, 1.7, 0.5],           # a raw output past the bounded scale
     [0.1, float("nan"), 0.5],  # not a score at all
 ])
-def test_scores_off_the_declared_scale_are_refused_at_capture(scores):
+def test_derived_scores_off_the_declared_scale_are_refused(scores):
     with pytest.raises(ValueError, match="not detector scores"):
-        build_reference_profile({"a": [1.0, 2.0, 3.0]}, prediction_scores=scores)
+        with_derived_scores(build_reference_profile({"a": [1.0, 2.0, 3.0]}), scores, derived_at="t")
 
 
 def test_the_scale_bounds_are_the_detector_contracts():
     low, high = SCORE_RANGE
-    prof = build_reference_profile({"a": [1.0, 2.0]}, prediction_scores=[low, high])
+    prof = with_derived_scores(build_reference_profile({"a": [1.0, 2.0]}), [low, high], derived_at="t")
     assert prediction_column_refusal(prof) is None
 
 
@@ -136,3 +147,91 @@ def test_a_named_prediction_column_with_no_values_is_not_a_baseline():
 
 def test_a_profile_without_a_prediction_column_needs_none():
     assert prediction_column_refusal(build_reference_profile({"a": [1.0, 2.0]})) is None
+
+
+# --- what registration accepts (ADR-0035 dec 2, 4) ------------------------------------------------
+
+def _sample(**cols):
+    return build_reference_profile(cols or {"temp": [1.0, 2.0, 3.0], "load": [4.0, None, 6.0]})
+
+
+def test_a_sample_of_the_configurations_inputs_is_accepted():
+    assert sample_refusal(_sample(), ["load", "temp"]) is None
+
+
+@pytest.mark.parametrize("base, why", [
+    (["temp"], "not the feature configuration's inputs"),
+    (["temp", "load", "rpm"], "not the feature configuration's inputs"),
+    ([], "no feature configuration"),
+])
+def test_a_sample_that_is_not_the_bound_inputs_is_refused(base, why):
+    assert why in sample_refusal(_sample(), base)
+
+
+@pytest.mark.parametrize("mutate, why", [
+    (lambda p: p.update(schema_version=1), "schema_version"),
+    (lambda p: p["sample"].update(temp=[1.0, "x", 3.0]), "not a number"),
+    (lambda p: p["sample"].update(temp=[1.0, True, 3.0]), "not a number"),
+    (lambda p: p["sample"].update(temp=[1.0, 2.0]), "differ in length"),
+    (lambda p: p["sample"].update(temp=[]), "no values"),
+    (lambda p: p.pop("sample"), "no columns and values"),
+])
+def test_a_malformed_sample_is_refused(mutate, why):
+    prof = _sample()
+    mutate(prof)
+    assert why in sample_refusal(prof, ["temp", "load"])
+
+
+def test_a_sample_carrying_scores_is_not_accepted():
+    prof = with_derived_scores(_sample(), [0.1], derived_at="t")
+    assert "derives them" in supplied_scores_refusal(prof)
+    assert supplied_scores_refusal(_sample()) is None
+
+
+def test_an_accepted_sample_keeps_only_its_own_fields():
+    prof = _sample()
+    prof["extra"] = "x" * 10
+    kept = accepted_sample(prof)
+    assert "extra" not in kept and kept["columns"] == ["temp", "load"] and kept["n_samples"] == 3
+
+
+def test_rows_with_a_missing_value_are_not_scored():
+    assert sample_rows(_sample()) == [{"temp": 1.0, "load": 4.0}, {"temp": 3.0, "load": 6.0}]
+
+
+def test_the_baseline_says_what_monitoring_can_do():
+    assert baseline_state(None)["data_drift"] is False
+    assert baseline_state(refused_baseline("why"))["reason"] == "why"
+    assert baseline_state(_sample())["prediction"] is None and baseline_state(_sample())["data_drift"]
+    derived = with_derived_scores(_sample(), [0.2], derived_at="t")
+    assert baseline_state(derived)["prediction"] == "derived"
+    assert baseline_state(without_prediction_baseline(derived, "cannot"))["reason"] == "cannot"
+    assert DEFAULT_PREDICTION_COLUMN not in without_prediction_baseline(derived, "x")["sample"]
+    legacy = _sample()
+    legacy["prediction_column"] = DEFAULT_PREDICTION_COLUMN
+    legacy["sample"][DEFAULT_PREDICTION_COLUMN] = [0.1, 0.2, 0.3]
+    assert baseline_state(legacy)["prediction"] == "supplied"
+
+
+# --- the notebook client's copy of the format (ADR-0040 dec 4) -----------------------------------
+
+def _client_drift():
+    import importlib.util
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "clients", "python", "industryflow", "drift.py")
+    spec = importlib.util.spec_from_file_location("client_drift", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("data, cap", [
+    ({"temp": [1.0, float("nan"), 3.0], "load": [4.0, 5.0, float("inf")]}, 5000),
+    ({"x": [float(v) for v in range(10_001)]}, 777),
+])
+def test_the_notebook_client_builds_the_same_sample(data, cap):
+    # Two copies drift silently: a client sample the service reads differently is a baseline nobody
+    # can trust, and a refusal at promotion the notebook author cannot explain.
+    client = _client_drift()
+    assert client.feature_sample(data, max_sample_rows=cap) == build_reference_profile(data, max_sample_rows=cap)
+    assert client.FEATURE_SAMPLE_ARTIFACT == __import__("drift").FEATURE_SAMPLE_ARTIFACT
+    assert client.REFERENCE_PROFILE_VERSION == REFERENCE_PROFILE_VERSION

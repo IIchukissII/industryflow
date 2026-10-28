@@ -121,8 +121,22 @@ function normalizePlatform(m) {
     // before ADR-0027), which is not the same as "fine".
     compatibility: m.compatibility_status || null,
     compatibilityDetail: m.compatibility_detail || null,
+    // What the drift baseline lets monitoring do, and why not where it cannot (ADR-0035 dec 4).
+    baseline: m.baseline || null,
     raw: m,
   };
+}
+
+// The drift baseline's state, in words (ADR-0035): what monitoring this model gets, and why not more.
+function baselineText(b) {
+  if (!b) return null;
+  if (!b.data_drift) return { tone: 'warn', head: 'Not monitored for drift', note: b.reason };
+  if (b.prediction === 'derived') {
+    return { tone: 'ok', head: 'Data and prediction drift',
+      note: `Prediction scores derived from the feature sample when it was deployed${b.derived_at ? ` (${fmtDate(Date.parse(b.derived_at))})` : ''}.` };
+  }
+  if (b.prediction === 'supplied') return { tone: 'ok', head: 'Data and prediction drift', note: b.reason };
+  return { tone: 'neutral', head: 'Data drift only', note: b.reason };
 }
 
 // The three verdicts (ADR-0027 dec 7), mapped onto the reserved status palette. `compatible` carries
@@ -449,6 +463,7 @@ function MLModels() {
             setModels((ms) => ms.map((m) => (m.key === selected.key ? { ...m, description: desc } : m)));
             setSelected((s) => ({ ...s, description: desc }));
           }}
+          onPromoted={load}
           onStatusChanged={(status) => {
             setModels((ms) => ms.map((m) => (m.key === selected.key ? { ...m, status } : m)));
             setSelected((s) => ({ ...s, status }));
@@ -481,13 +496,15 @@ async function deployRefusal(res) {
 
 // Rendered with `key={row.key}` (see the render site), so opening a different model remounts the
 // drawer — draft/editing/saveErr initialise fresh from the new row, no reset effect required.
-function ModelDrawer({ row, detail, writable, retrainRecommended, onClose, onSaved, onStatusChanged }) {
+function ModelDrawer({ row, detail, writable, retrainRecommended, onClose, onSaved, onStatusChanged, onPromoted }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(row.description || '');
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const [statusErr, setStatusErr] = useState(null);
+  const [promoting, setPromoting] = useState(null); // the version being promoted
+  const [promoted, setPromoted] = useState(null); // { version, baseline } once one is
 
   // Esc closes the drawer.
   useEffect(() => {
@@ -657,6 +674,7 @@ function ModelDrawer({ row, detail, writable, retrainRecommended, onClose, onSav
               demand (ADR-0021). Heavy compute, so it's never auto-run: the operator asks for it. An
               uploaded model without a declared baseline honestly reports "unavailable" here rather
               than a fake zero — which is ADR-0030 dec 8's "visibly un-monitorable" in the flesh. */}
+          {row.registry === 'platform' && <BaselineBlock baseline={row.baseline} />}
           {row.registry === 'platform' && <DriftPanel row={row} />}
 
           {/* Source lineage. */}
@@ -677,7 +695,7 @@ function ModelDrawer({ row, detail, writable, retrainRecommended, onClose, onSav
                 <p className="mdl-desc faint">No versions.</p>
               ) : (
                 <table className="data-table mdl-versions">
-                  <thead><tr><th>Version</th><th>Stage</th><th>Status</th><th>Created</th></tr></thead>
+                  <thead><tr><th>Version</th><th>Stage</th><th>Status</th><th>Created</th>{writable && <th aria-label="Actions" />}</tr></thead>
                   <tbody>
                     {versions.map((v) => {
                       const t = statusTone(v.current_stage);
@@ -687,11 +705,32 @@ function ModelDrawer({ row, detail, writable, retrainRecommended, onClose, onSav
                           <td><span className="mdl-stage">{t.dot && <span className={`sdot ${t.dot}`} />}{stageLabel(v.current_stage)}</span></td>
                           <td className="mdl-dim">{v.status ? stageLabel(v.status.toLowerCase()) : '—'}</td>
                           <td className="mono mdl-dim">{fmtDate(v.creation_timestamp)}</td>
+                          {writable && (
+                            <td>
+                              <button type="button" className="mdl-link" onClick={() => { setPromoted(null); setPromoting(v.version); }}>
+                                Promote
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+              )}
+              {promoting && (
+                <PromotePanel
+                  name={row.name}
+                  version={promoting}
+                  onCancel={() => setPromoting(null)}
+                  onDone={(result) => { setPromoting(null); setPromoted({ version: promoting, baseline: result.baseline }); onPromoted?.(); }}
+                />
+              )}
+              {promoted && (
+                <p className="mdl-desc mdl-promoted" role="status">
+                  v{promoted.version} is a platform model now; deploy it from its own entry to serve it.
+                  {baselineText(promoted.baseline) && ` ${baselineText(promoted.baseline).head}: ${baselineText(promoted.baseline).note || 'ready'}`}
+                </p>
               )}
             </section>
           )}
@@ -722,6 +761,111 @@ function ModelDrawer({ row, detail, writable, retrainRecommended, onClose, onSav
           )}
         </div>
       </aside>
+    </div>
+  );
+}
+
+// The drift baseline (ADR-0035): what monitoring this model gets, and why not more. Stated, never
+// hidden: a model without one is visibly un-monitorable (ADR-0030 dec 8).
+function BaselineBlock({ baseline }) {
+  const t = baselineText(baseline);
+  if (!t) return null;
+  return (
+    <section className="mdl-block">
+      <span className="eyebrow">Drift baseline</span>
+      <p className="mdl-baseline-head">
+        <span className={`sdot${t.tone === 'ok' ? ' ok' : t.tone === 'warn' ? ' pending' : ''}`} />
+        {t.head}
+      </p>
+      {t.note && <p className="mdl-desc">{t.note}</p>}
+    </section>
+  );
+}
+
+// Promotion makes a notebook-registered version a platform model (ADR-0040): the user binds its inputs
+// and chooses the detector that declares what its output means; the run's feature sample comes along.
+function PromotePanel({ name, version, onCancel, onDone }) {
+  const [opts, setOpts] = useState(null); // { configs, equipment, detectors } or 'error'
+  const [form, setForm] = useState({ feature_config_id: '', equipment_id: '', detector: '' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [c, e, k] = await Promise.all([
+          authFetch('/api/feature-configs'), authFetch('/api/equipment'), authFetch('/api/ml/capabilities'),
+        ]);
+        if (!c.ok || !e.ok || !k.ok) throw new Error();
+        const [configs, equipment, caps] = await Promise.all([c.json(), e.json(), k.json()]);
+        setOpts({ configs: configs.configs || [], equipment: equipment || [], detectors: caps.detectors || [] });
+      } catch {
+        setOpts('error');
+      }
+    })();
+  }, []);
+
+  const submit = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await authFetch(`/api/registered-models/${encodeURIComponent(name)}/versions/${version}/promote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feature_config_id: form.feature_config_id,
+          equipment_id: form.equipment_id || null,
+          detector: form.detector || null,
+        }),
+      });
+      if (res.ok) onDone(await res.json());
+      else setErr(await deployRefusal(res));
+    } catch {
+      setErr('The model service could not be reached. Nothing was promoted; try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (opts === null) return <p className="mdl-desc faint">Loading feature configs, equipment and detectors</p>;
+  if (opts === 'error') return <p className="mdl-err" role="alert">The promotion options did not load. Close and try again.</p>;
+  return (
+    <div className="mdl-promote" role="group" aria-label={`Promote v${version}`}>
+      <p className="mdl-desc">
+        Promote v{version} to a platform model. Its run&apos;s feature sample becomes its drift baseline when its
+        columns are the feature config&apos;s base sensors.
+      </p>
+      <label className="mdl-status-ctl">
+        <span className="mdl-status-label">Feature config</span>
+        <select className="mdl-select" aria-label="Feature config" value={form.feature_config_id}
+          onChange={(e) => setForm({ ...form, feature_config_id: e.target.value })}>
+          <option value="">Choose one</option>
+          {opts.configs.map((fc) => <option key={fc.id} value={fc.id}>{fc.name} ({(fc.base_sensors || []).join(', ')})</option>)}
+        </select>
+      </label>
+      <label className="mdl-status-ctl">
+        <span className="mdl-status-label">Equipment</span>
+        <select className="mdl-select" aria-label="Equipment" value={form.equipment_id}
+          onChange={(e) => setForm({ ...form, equipment_id: e.target.value })}>
+          <option value="">None (no drift window)</option>
+          {opts.equipment.map((eq) => <option key={eq.equipment_id} value={eq.equipment_id}>{eq.name}</option>)}
+        </select>
+      </label>
+      <label className="mdl-status-ctl">
+        <span className="mdl-status-label">Detector</span>
+        <select className="mdl-select" aria-label="Detector" value={form.detector}
+          onChange={(e) => setForm({ ...form, detector: e.target.value })}>
+          <option value="">sklearn (the default)</option>
+          {opts.detectors.map((d) => <option key={d.name} value={d.name}>{d.name} · {(d.semantics || '').replace(/_/g, ' ')}</option>)}
+        </select>
+      </label>
+      {err && <p className="mdl-err" role="alert">{err}</p>}
+      <div className="mdl-edit-actions">
+        <button type="button" className="btn" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={submit} disabled={busy || !form.feature_config_id}>
+          {busy ? 'Promoting' : `Promote v${version}`}
+        </button>
+      </div>
     </div>
   );
 }

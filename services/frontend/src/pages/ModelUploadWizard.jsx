@@ -63,9 +63,12 @@ function ModelUploadWizard({ onClose, onRegistered }) {
   const [dragOver, setDragOver] = useState(false);
   const [meta, setMeta] = useState({
     name: '', version: '1', type: '', equipment: '', semantics: '', description: '', featureConfig: '',
+    equipmentId: '',
   });
   const [caps, setCaps] = useState(null); // fetched capabilities, or 'error'
   const [featureConfigs, setFeatureConfigs] = useState(null); // the tenant's feature configs, or 'error'
+  const [equipmentList, setEquipmentList] = useState(null); // the tenant's equipment, or 'error'
+  const [sample, setSample] = useState(null); // { name, profile } or { name, error }: the feature sample
   const [status, setStatus] = useState({}); // stage.key -> 'run' | 'ok' | 'fail'
   const [transferred, setTransferred] = useState(0);
   const [failure, setFailure] = useState(null); // { stage, msg, refusal }
@@ -108,6 +111,29 @@ function ModelUploadWizard({ onClose, onRegistered }) {
     })();
   }, []);
 
+  // The equipment whose sensors drift monitoring reads the model's inputs from (ADR-0035 dec 4).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch('/api/equipment');
+        if (!res.ok) throw new Error();
+        setEquipmentList(await res.json());
+      } catch {
+        setEquipmentList('error');
+      }
+    })();
+  }, []);
+
+  // A feature sample is read here only to send it: the platform judges it (ADR-0035 dec 4, 6).
+  const readSample = useCallback(async (file) => {
+    if (!file) { setSample(null); return; }
+    try {
+      setSample({ name: file.name, profile: JSON.parse(await file.text()) });
+    } catch {
+      setSample({ name: file.name, error: 'This file is not JSON. Choose the sample industryflow.feature_sample wrote.' });
+    }
+  }, []);
+
   // The semantics the deployment has a detector for — declaring one it can't score would only earn a
   // refusal at registration, so offer the set that can pass.
   const semanticsOptions = useMemo(() => {
@@ -118,7 +144,7 @@ function ModelUploadWizard({ onClose, onRegistered }) {
 
   const hasManifest = files.some((f) => memberName(f) === MANIFEST_NAME);
   const canSubmit = files.length > 0 && hasManifest && meta.name.trim() && meta.type.trim()
-    && meta.description.trim() && meta.semantics;
+    && meta.description.trim() && meta.semantics && !sample?.error;
 
   const addFiles = useCallback((incoming) => {
     setFiles((prev) => {
@@ -202,6 +228,8 @@ function ModelUploadWizard({ onClose, onRegistered }) {
           description: meta.description.trim(),
           equipment_type: meta.equipment.trim() || null,
           feature_config_id: meta.featureConfig || null,
+          equipment_id: (meta.featureConfig && meta.equipmentId) || null,
+          reference_profile: (meta.featureConfig && sample?.profile) || null,
           artifact_uri: committed.artifact_uri,
           score_semantics: meta.semantics,
         }),
@@ -215,7 +243,7 @@ function ModelUploadWizard({ onClose, onRegistered }) {
       const running = STAGES.map((s) => s.key).find((k) => status[k] === 'run') || 'mint';
       fail(running, 'A step could not be reached, so the upload stopped. Check your connection and try again.');
     }
-  }, [files, meta, status]);
+  }, [files, meta, status, sample]);
 
   return (
     <div className="uw-scrim" onClick={phase === 'running' ? undefined : onClose}>
@@ -353,7 +381,11 @@ function ModelUploadWizard({ onClose, onRegistered }) {
                         key={fc.id}
                         type="button"
                         className={`uw-sem-opt${meta.featureConfig === fc.id ? ' on' : ''}`}
-                        onClick={() => setMeta({ ...meta, featureConfig: meta.featureConfig === fc.id ? '' : fc.id })}
+                        onClick={() => {
+                          // The sample is checked against the chosen config; a different choice drops it.
+                          setSample(null);
+                          setMeta({ ...meta, featureConfig: meta.featureConfig === fc.id ? '' : fc.id, equipmentId: '' });
+                        }}
                         aria-pressed={meta.featureConfig === fc.id}
                       >
                         <span className="uw-fc-name">{fc.name} <span className="uw-fc-eq mono">{fc.equipment_type}</span></span>
@@ -369,6 +401,39 @@ function ModelUploadWizard({ onClose, onRegistered }) {
                 </>
               )}
             </div>
+
+            {meta.featureConfig && (
+              <div className="uw-sem">
+                <span className="uw-label">Drift baseline <span className="uw-opt">optional</span></span>
+                <p className="uw-desc">
+                  A feature sample of what the model learned from, written by
+                  <span className="mono"> industryflow.feature_sample</span>, with the feature config&apos;s base sensors
+                  as its columns, and the equipment whose sensors drift monitoring reads. The platform derives the
+                  prediction scores itself when the model is deployed.
+                </p>
+                <div className="uw-grid">
+                  <label className="uw-field">
+                    <span className="uw-label">Equipment</span>
+                    <select className="uw-input" aria-label="Equipment" value={meta.equipmentId}
+                      onChange={(e) => setMeta({ ...meta, equipmentId: e.target.value })}
+                      disabled={!Array.isArray(equipmentList)}>
+                      <option value="">{equipmentList === 'error' ? 'The equipment list did not load' : 'None'}</option>
+                      {Array.isArray(equipmentList) && equipmentList.map((eq) => (
+                        <option key={eq.equipment_id} value={eq.equipment_id}>{eq.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="uw-field">
+                    <span className="uw-label">Feature sample (JSON)</span>
+                    <input className="uw-input" type="file" accept=".json,application/json" aria-label="Feature sample"
+                      onChange={(e) => readSample(e.target.files?.[0])} />
+                  </label>
+                </div>
+                {sample?.error && (
+                  <p className="uw-warn"><Icon name="alert" size={13} color="var(--warn)" /> {sample.error}</p>
+                )}
+              </div>
+            )}
 
             <div className="uw-actions">
               <button type="button" className="btn" onClick={onClose}>Cancel</button>
@@ -436,6 +501,12 @@ function ModelUploadWizard({ onClose, onRegistered }) {
                 <p className="uw-warn uw-warn-block uw-done-warn">
                   <Icon name="alert" size={13} color="var(--warn)" />
                   <span>It has no feature config, so it can't be scored. Register it again as a new version with one.</span>
+                </p>
+              )}
+              {result.baseline && !result.baseline.data_drift && meta.featureConfig && (
+                <p className="uw-warn uw-warn-block uw-done-warn">
+                  <Icon name="alert" size={13} color="var(--warn)" />
+                  <span>Not monitored for drift: {result.baseline.reason}</span>
                 </p>
               )}
               <div className="uw-actions center">

@@ -42,7 +42,7 @@ const SECTIONS = [
       { term: 'Reading your data', def: 'Inside a notebook, the built-in industryflow client reads your organization’s data with no credentials to manage. You can also run SQL; the connection is read-only and limited to your organization.' },
       { term: 'Tracking experiments', def: 'Log runs, parameters and metrics with the standard MLflow client. It is already set up for your organization, so you only see your own experiments. Experiments lists them with each run\'s parameters and metrics, and the model a run became.' },
       { term: 'Registering models', def: 'Register a trained model to publish it. It appears on the Models page under the name you gave it.' },
-      { term: 'The Models page', def: 'Your registry. Select a model to see its description, metrics and version history. Engineers and admins can also upload a model trained elsewhere and promote a model to production.' },
+      { term: 'The Models page', def: 'Your registry. Select a model to see its description, metrics, version history and drift baseline. Engineers and admins can promote a notebook version to a platform model, upload a model trained elsewhere, and deploy a model to production.' },
     ],
   },
   {

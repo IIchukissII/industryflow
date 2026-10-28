@@ -11,7 +11,8 @@ model's stored reference profile with evidently, and returns the drift scores. T
 service owns the decision (applies each rule's threshold and fires the statistical alert);
 this endpoint owns the ML math and the tenant data path.
 
-A model with no reference profile returns status "unavailable" — honest, not a fake zero.
+A model with no accepted feature sample returns status "unavailable" with the reason — honest, not a
+fake zero. The baseline's prediction scores are derived at the deployment gate (ADR-0035 dec 2).
 
 Prediction drift (ADR-0021 dec 1) needs the model's scores over the CURRENT window, which nothing
 stores: the endpoint produces them by scoring a sample of the window's rows the way ``/predict``
@@ -28,8 +29,10 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, ConfigDict
 
+from baseline_gate import score_rows
 from drift import (
-    align_readings, compute_drift, prediction_column_refusal, DEFAULT_DRIFT_SHARE_THRESHOLD, MIN_ROWS,
+    align_readings, baseline_state, compute_drift, prediction_column_refusal, DEFAULT_DRIFT_SHARE_THRESHOLD,
+    MIN_ROWS,
 )
 from extensions import DetectorContext, UninterpretableModel
 from feature_engineering import FeatureEngineeringEngine
@@ -56,22 +59,13 @@ def _even_sample(n: int, k: int) -> List[int]:
     return np.linspace(0, n - 1, k).astype(int).tolist()
 
 
-def _score_rows(rows, model, detector, ctx) -> List[float]:
-    """Score engineered rows through the detector. Run in a worker thread with its own loop: a
-    detector is async by contract but does its model work synchronously, and hundreds of them must
-    not hold the service's event loop."""
-    async def run():
-        return [(await detector(features, model, 0.5, ctx)).score for features in rows]
-    return asyncio.run(run())
-
-
 async def _current_predictions(
     request: Request, company_id: str, model: Dict[str, Any], readings: List[Dict[str, Any]],
 ):
     """The model's 0-1 scores over a sample of the current window, or ``(None, reason)``."""
     profile = model.get("reference_profile") or {}
     if not profile.get("prediction_column"):
-        return None, "the reference profile captured no prediction scores"
+        return None, baseline_state(profile)["reason"] or "the baseline holds no prediction scores"
     refusal = prediction_column_refusal(profile)
     if refusal:
         # Not a baseline, so nothing is scored against it (ADR-0021 dec 1).
@@ -121,7 +115,7 @@ async def _current_predictions(
         reconstruction_scale=training_metrics.get("reconstruction_scale"),
     )
     try:
-        scores = await asyncio.to_thread(_score_rows, rows, loaded, detector, ctx)
+        scores = await asyncio.to_thread(score_rows, rows, loaded, detector, ctx)
     except UninterpretableModel as exc:
         return None, f"the model's output cannot be interpreted: {exc}"
     return scores, None
@@ -165,12 +159,12 @@ async def evaluate_drift(request_data: DriftEvaluateRequest, request: Request):
         raise HTTPException(status_code=404, detail="Model not found")
 
     reference_profile = model.get("reference_profile")
-    if not reference_profile:
-        # No baseline captured (model predates ADR-0021 or was registered without one).
+    if not reference_profile or reference_profile.get("refused"):
+        # No baseline: none was supplied, or the sample was not accepted (ADR-0035 dec 4).
         return {
             "model_id": request_data.model_id,
             "status": "unavailable",
-            "reason": "model has no reference profile; retrain to enable drift monitoring",
+            "reason": baseline_state(reference_profile)["reason"],
         }
 
     sensor_ids = model.get("sensor_ids") or []
@@ -219,6 +213,7 @@ async def evaluate_drift(request_data: DriftEvaluateRequest, request: Request):
 
     result["model_id"] = request_data.model_id
     result["window_minutes"] = request_data.window_minutes
+    result["baseline"] = baseline_state(reference_profile)
     if result.get("prediction_drift") is None and prediction_reason and not result.get("prediction_drift_reason"):
         result["prediction_drift_reason"] = prediction_reason
     logger.info(

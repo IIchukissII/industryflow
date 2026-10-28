@@ -10,9 +10,19 @@ FastAPI/DB so they are unit-testable in isolation.
 """
 
 from .reference_profile import (
+    FEATURE_SAMPLE_ARTIFACT,
+    MAX_SAMPLE_BYTES,
     REFERENCE_PROFILE_VERSION,
+    accepted_sample,
+    baseline_state,
     build_reference_profile,
     prediction_column_refusal,
+    refused_baseline,
+    sample_refusal,
+    sample_rows,
+    supplied_scores_refusal,
+    with_derived_scores,
+    without_prediction_baseline,
 )
 from .score import (
     DEFAULT_DRIFT_SHARE_THRESHOLD,
@@ -22,9 +32,19 @@ from .score import (
 )
 
 __all__ = [
+    "FEATURE_SAMPLE_ARTIFACT",
+    "MAX_SAMPLE_BYTES",
     "REFERENCE_PROFILE_VERSION",
+    "accepted_sample",
+    "baseline_state",
     "build_reference_profile",
     "prediction_column_refusal",
+    "refused_baseline",
+    "sample_refusal",
+    "sample_rows",
+    "supplied_scores_refusal",
+    "with_derived_scores",
+    "without_prediction_baseline",
     "DEFAULT_DRIFT_SHARE_THRESHOLD",
     "MIN_ROWS",
     "align_readings",

@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
 import extensions.builtins_detectors  # noqa: F401,E402  (registers the built-ins)
-from drift import align_readings, build_reference_profile, compute_drift  # noqa: E402
+from drift import align_readings, build_reference_profile, compute_drift, with_derived_scores  # noqa: E402
 from routers import drift as drift_router  # noqa: E402
 
 CID = str(uuid.uuid4())
@@ -64,8 +64,8 @@ def test_unaligned_columns_are_refused_rather_than_guessed_at():
 
 def test_current_predictions_are_their_own_sample():
     rng = np.random.default_rng(0)
-    prof = build_reference_profile({"a": rng.normal(size=N).tolist()},
-                                   prediction_scores=rng.uniform(0, 0.2, size=N).tolist())
+    prof = with_derived_scores(build_reference_profile({"a": rng.normal(size=N).tolist()}),
+                               rng.uniform(0, 0.2, size=N).tolist(), derived_at="t")
     res = compute_drift(prof, {"a": rng.normal(size=N).tolist()},
                         current_predictions=rng.uniform(0.7, 1.0, size=120).tolist())
     assert res["prediction_drift"]["drifted"] is True
@@ -104,8 +104,9 @@ def _fleet(rng):
 def _model(rng, prediction=True):
     profile = build_reference_profile(
         {"a": rng.normal(size=N).tolist(), "b": rng.normal(5, 2, size=N).tolist()},
-        prediction_scores=rng.uniform(0, 0.2, size=N).tolist() if prediction else None,
     )
+    if prediction:
+        profile = with_derived_scores(profile, rng.uniform(0, 0.2, size=N).tolist(), derived_at="t")
     return {"model_id": "m1", "reference_profile": profile, "sensor_ids": [str(uuid.uuid4())],
             "feature_config_id": "fc1", "detector": "direct", "mlflow_run_id": "run-1",
             "equipment_id": str(uuid.uuid4())}
@@ -171,7 +172,7 @@ def test_without_a_prediction_baseline_it_says_why(evaluate):
     rng = np.random.default_rng(3)
     res = evaluate(_model(rng, prediction=False), _fleet(rng))
     assert res["prediction_drift"] is None
-    assert "captured no prediction scores" in res["prediction_drift_reason"]
+    assert "derived when the model is deployed" in res["prediction_drift_reason"]
 
 
 def test_a_model_nothing_can_interpret_still_reports_data_drift(evaluate):
@@ -192,7 +193,7 @@ def test_a_reference_of_labels_is_not_a_prediction_baseline(evaluate, monkeypatc
     model = _model(rng)
     model["reference_profile"]["sample"]["prediction_score"] = rng.choice([-1.0, 1.0], size=N).tolist()
     scored = []
-    monkeypatch.setattr(drift_router, "_score_rows", lambda *a: scored.append(a) or [])
+    monkeypatch.setattr(drift_router, "score_rows", lambda *a: scored.append(a) or [])
     res = evaluate(model, _fleet(rng))
     assert res["status"] == "ok", res
     assert res["data_drift"]["n_columns"] == 2
@@ -203,8 +204,8 @@ def test_a_reference_of_labels_is_not_a_prediction_baseline(evaluate, monkeypatc
 
 def test_compute_refuses_prediction_drift_on_an_off_scale_reference():
     rng = np.random.default_rng(7)
-    prof = build_reference_profile({"a": rng.normal(size=N).tolist()},
-                                   prediction_scores=rng.uniform(0, 0.2, size=N).tolist())
+    prof = with_derived_scores(build_reference_profile({"a": rng.normal(size=N).tolist()}),
+                               rng.uniform(0, 0.2, size=N).tolist(), derived_at="t")
     prof["sample"]["prediction_score"] = (rng.uniform(0, 0.2, size=N) * 40).tolist()
     res = compute_drift(prof, {"a": rng.normal(size=N).tolist()},
                         current_predictions=rng.uniform(0, 0.2, size=120).tolist())

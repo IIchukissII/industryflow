@@ -183,12 +183,16 @@ def compute_drift(
             f"current-window columns must be row-aligned, saw lengths {sorted(lengths)}"
         )
 
-    ref_df = pd.DataFrame(reference_profile.get("sample", {}))
+    sample = reference_profile.get("sample", {})
+    pred_col = reference_profile.get("prediction_column")
+    # The derived scores are their own sample (one per complete row), so they need not be as long as
+    # the feature columns: each side is its own frame.
+    ref_df = pd.DataFrame({c: sample[c] for c in reference_profile.get("columns", []) if c in sample})
+    ref_pred = pd.DataFrame({pred_col: sample[pred_col]}) if pred_col and pred_col in sample else None
     cur_df = pd.DataFrame(current)
 
     feature_cols = [c for c in reference_profile.get("columns", []) if c in cur_df.columns]
     unmatched = [c for c in reference_profile.get("columns", []) if c not in cur_df.columns]
-    pred_col = reference_profile.get("prediction_column")
 
     base = {
         "schema_version": version,
@@ -224,9 +228,9 @@ def compute_drift(
         pred_df = pd.DataFrame({pred_col: list(current_predictions)}) if pred_col else None
     else:
         pred_df = cur_df if pred_col and pred_col in cur_df.columns else None
-    if (pred_col and pred_df is not None and pred_col in ref_df.columns
-            and len(pred_df) >= MIN_ROWS):
-        _, _, pred_per_col = _run_report(ref_df, pred_df, [pred_col])
+    if (pred_col and pred_df is not None and ref_pred is not None
+            and len(pred_df) >= MIN_ROWS and len(ref_pred) >= MIN_ROWS):
+        _, _, pred_per_col = _run_report(ref_pred, pred_df, [pred_col])
         pc = pred_per_col.get(pred_col, {})
         prediction_drift = {
             "column": pred_col,

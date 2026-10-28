@@ -16,14 +16,15 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
-from drift import build_reference_profile, compute_drift, MIN_ROWS  # noqa: E402
+from drift import build_reference_profile, compute_drift, with_derived_scores, MIN_ROWS  # noqa: E402
 from drift.score import _is_drifted  # noqa: E402
 
 N = 500  # comfortably above MIN_ROWS for stable statistics
 
 
 def _profile(cols, prediction=None):
-    return build_reference_profile(cols, prediction_scores=prediction)
+    profile = build_reference_profile(cols)
+    return with_derived_scores(profile, prediction, derived_at="t") if prediction is not None else profile
 
 
 def test_identical_distribution_reports_low_share():
@@ -109,3 +110,16 @@ def test_is_drifted_direction_by_method():
     assert _is_drifted("Wasserstein distance (normed)", 0.30, 0.1) is True
     assert _is_drifted("Wasserstein distance (normed)", 0.05, 0.1) is False
     assert _is_drifted("K-S p_value", None, 0.05) is None
+
+
+def test_derived_scores_shorter_than_the_sample_still_compare():
+    # A null in the sample drops its row from scoring, so the derived scores are fewer than the feature
+    # values. Both drifts must still be computed, not the whole evaluation lost as "unavailable".
+    rng = np.random.default_rng(11)
+    a = rng.normal(size=N).tolist()
+    a[3] = None
+    prof = _profile({"a": a}, prediction=rng.uniform(0, 0.2, size=N - 1).tolist())
+    res = compute_drift(prof, {"a": rng.normal(size=N).tolist()},
+                        current_predictions=rng.uniform(0.7, 1.0, size=N).tolist())
+    assert res["status"] == "ok", res
+    assert res["prediction_drift"]["drifted"] is True

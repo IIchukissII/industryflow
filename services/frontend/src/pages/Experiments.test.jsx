@@ -70,10 +70,10 @@ describe('Experiments', () => {
     const list = screen.getByRole('navigation', { name: 'Experiments' });
     expect(within(list).getAllByRole('button').map((b) => b.textContent)).toEqual(['pump anomaly2 hours ago', 'older1 day ago']);
     expect(within(list).getByRole('button', { name: /pump anomaly/ })).toHaveAttribute('aria-current', 'true');
-    // The name is a path segment, encoded.
-    expect(calls).toContain('/api/experiments/pump%20anomaly/runs');
-
     const table = await screen.findByRole('table');
+    // The name is a path segment, encoded. Asserted once the runs table is shown: the fetch runs in an
+    // effect, after the heading has rendered.
+    expect(calls).toContain('/api/experiments/pump%20anomaly/runs');
     expect(within(table).getAllByRole('columnheader').map((h) => h.textContent))
       .toEqual(['Run', 'Status', 'Started', 'Duration', 'auc', 'f1']);
     const rows = within(table).getAllByRole('row').slice(1);
