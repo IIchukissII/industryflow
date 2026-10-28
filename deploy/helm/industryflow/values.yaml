@@ -376,6 +376,7 @@ backup:
   digest: ""
   schedule: "0 2 * * *"        # daily 02:00 UTC
   retainPerDatabase: 14        # copies kept per database (≈ days at a daily schedule)
+  intervalDays: 1              # days between runs of `schedule`; dates the tenant-delete record's backup expiry
   databases: "industryflow mlflow"
   s3:
     # Defaults to the in-cluster MinIO. For genuine disaster recovery point this at an
