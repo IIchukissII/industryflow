@@ -1492,7 +1492,8 @@ services:
       TENANT_DELETE_DEVICE_CA_REGISTER: /etc/industryflow/device-ca/crl/issued.tsv
       # The deployment's own retentions, from the same variables kafka and db-backup read.
       TENANT_DELETE_BROKER_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS:-168}
-      TENANT_DELETE_BACKUP_RETENTION_DAYS: ${BACKUP_RETAIN_PER_DB:-14}
+      TENANT_DELETE_BACKUP_COPIES: ${BACKUP_RETAIN_PER_DB:-14}
+      TENANT_DELETE_BACKUP_INTERVAL_DAYS: ${BACKUP_INTERVAL_DAYS:-1}
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
       # The chain and the CRL directory only; the keys stay outside the container.

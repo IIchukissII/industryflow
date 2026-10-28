@@ -136,5 +136,16 @@ def load_config() -> DeleteConfig:
         tracking=tracking,
         device_ca=device_ca,
         broker_retention=timedelta(hours=_positive("TENANT_DELETE_BROKER_RETENTION_HOURS")),
-        backup_retention=timedelta(days=_positive("TENANT_DELETE_BACKUP_RETENTION_DAYS")),
+        backup_retention=_backup_retention(),
     )
+
+
+def _backup_retention() -> timedelta:
+    """The longest a backup still holds a deleted tenant. A dump keeps it until the dumps after the
+    deletion have displaced it, one per run; a mirrored object or a notebook archive stays its mirror
+    retention after the first run that finds it gone, which is up to one run after the deletion."""
+    copies = _positive("TENANT_DELETE_BACKUP_COPIES")
+    interval = _positive("TENANT_DELETE_BACKUP_INTERVAL_DAYS")
+    mirror = _positive("TENANT_DELETE_MIRROR_RETAIN_DAYS") if os.getenv("TENANT_DELETE_MIRROR_RETAIN_DAYS") \
+        else copies
+    return timedelta(days=max(copies * interval, mirror + interval))
