@@ -113,6 +113,7 @@ CronJob `<release>-db-backup` (`templates/cronjob-db-backup.yaml`).
 | `backup.enabled` | `true` | CronJob rendered |
 | `backup.schedule` | `0 2 * * *` | Cron schedule (UTC) |
 | `backup.retainPerDatabase` | `14` | `RETAIN_PER_DB` |
+| `backup.intervalDays` | `1` | Days between runs of `backup.schedule`; the tenant-delete record's backup expiry |
 | `backup.databases` | `industryflow mlflow` | `DATABASES` |
 | `backup.s3.endpoint` | `""` (in-cluster MinIO) | `S3_ENDPOINT_URL` |
 | `backup.s3.bucket` / `region` / `prefix` | `industryflow-backups` / `us-east-1` / `timescaledb` | Target |
@@ -142,6 +143,7 @@ job variable named in *Meaning*.
 | `BACKUP_S3_REGION` | `us-east-1` | `AWS_DEFAULT_REGION` |
 | `BACKUP_DATABASES` | `industryflow mlflow` | `DATABASES` |
 | `BACKUP_RETAIN_PER_DB` | `14` | `RETAIN_PER_DB` |
+| `BACKUP_INTERVAL_DAYS` | `1` | Days between backup runs; the tenant-delete record's backup expiry |
 | `COLD_STORE_BUCKET` | `industryflow-cold` | `COLD_SOURCE_BUCKET` |
 | `BACKUP_READ_ACCESS_KEY` / `BACKUP_READ_SECRET_KEY` | — | `SOURCE_ACCESS_KEY_ID` / `SOURCE_SECRET_ACCESS_KEY`; must be set, the backup keys cannot read either source |
 | `BACKUP_COLD_PREFIX` | `cold` | `COLD_BACKUP_PREFIX` |

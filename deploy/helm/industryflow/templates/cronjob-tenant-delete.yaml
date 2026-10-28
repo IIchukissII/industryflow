@@ -117,8 +117,10 @@ spec:
                 # The deployment's own retentions, from the values the broker and db-backup use.
                 - name: TENANT_DELETE_BROKER_RETENTION_HOURS
                   value: {{ .Values.infra.kafka.retentionHours | quote }}
-                - name: TENANT_DELETE_BACKUP_RETENTION_DAYS
+                - name: TENANT_DELETE_BACKUP_COPIES
                   value: {{ .Values.backup.retainPerDatabase | quote }}
+                - name: TENANT_DELETE_BACKUP_INTERVAL_DAYS
+                  value: {{ .Values.backup.intervalDays | quote }}
                 {{- if .Values.tls.db.enabled }}
                 # TLS to the DB (ADR-0017); libpq reads sslmode/sslrootcert directly.
                 - name: DB_SSLMODE
