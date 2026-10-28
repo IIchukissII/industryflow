@@ -6,13 +6,14 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0035 — Drift baseline: a supplied feature sample, scores derived by the platform
 
 - **Status:** Accepted
-- **Date:** 2026-10-25
+- **Date:** 2026-10-25; changed 2026-10-28
 - **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring.md)
 - **Related:** [ADR-0021](ADR-0021-model-drift-monitoring.md) (dec 4: the baseline decision this
   replaces), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (the declared detector that
   scores), [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (dec 6: the deployment gate),
   [ADR-0030](ADR-0030-externally-authored-model-admission.md) (dec 7: uploads scored at that gate; dec 8:
-  a declared baseline or visibly un-monitorable)
+  a declared baseline or visibly un-monitorable), [ADR-0040](ADR-0040-notebook-model-promotion.md)
+  (dec 4: how a notebook supplies its sample)
 
 ## Context
 
@@ -85,7 +86,6 @@ judges any other model declaratively, without loading it (ADR-0027 dec 6).
 
 | Open question | Settled by |
 |---|---|
-| How the notebook or training flow emits a feature sample | First notebook-trained model needing drift, or a training service |
 | Whether a drift signal carries its score semantics | ADR-0028's semantics vocabulary, when drift compares across models |
 | A size bound on the sample | First sample too large to score at the gate |
 
