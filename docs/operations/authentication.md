@@ -50,7 +50,7 @@ handshake. A token in the URL is not accepted.
 
 | Token | Form | Lifetime | Carried as |
 |---|---|---|---|
-| Access | JWT, HS256, signed with `JWT_SECRET_KEY`; claims `company_id`, `role`, `sid`, `iat` | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `if_access` cookie or `Authorization: Bearer` |
+| Access | JWT, HS256, signed with `JWT_SECRET_KEY`; claims `company_id`, `role`, `iat`, and `sid` when issued with a refresh session | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `if_access` cookie or `Authorization: Bearer` |
 | Refresh | Opaque random string in Redis, bound to a session id and a fingerprint of the password hash | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | `if_refresh` cookie or the `/auth/refresh` body |
 
 Downstream services read the tenant from the `company_id` claim
