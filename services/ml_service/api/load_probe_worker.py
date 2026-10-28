@@ -64,20 +64,21 @@ def _synthetic_frame(signature):
     return pd.DataFrame(row)
 
 
-def probe(model_uri: str) -> dict:
+def _probe(model_uri: str):
+    """``(report, loaded model)``; the model is None unless the load succeeded."""
     from mlflow.models import Model
 
     try:
         meta = Model.load(model_uri)
     except Exception as exc:  # noqa: BLE001 — any failure here is "we could not read it"
-        return {"ok": False, "stage": "manifest", "error": f"{type(exc).__name__}: {exc}"}
+        return {"ok": False, "stage": "manifest", "error": f"{type(exc).__name__}: {exc}"}, None
 
     if meta.signature is None:
         # dec 7 scores it "against its declared signature". Without one there is nothing to build an
         # input from, so the check cannot run — and a check that cannot run is not a pass.
         return {"ok": False, "stage": "signature",
                 "error": "the artifact declares no input signature, so nothing can establish that "
-                         "this environment is able to score it"}
+                         "this environment is able to score it"}, None
 
     # Only uploaded artifacts are probed, and they get no trust grant (ADR-0027 dec 13): a skops file
     # that needs a type outside skops' defaults (every tree-based sklearn model) is refused here.
@@ -91,32 +92,75 @@ def probe(model_uri: str) -> dict:
         if isinstance(exc, skops_trust.UnsafeArtifact):
             return {"ok": False, "stage": "trust",
                     "error": "loading this model would run code its author chose, which an uploaded "
-                             f"model may never do (ADR-0030 dec 4): {exc}"}
+                             f"model may never do (ADR-0030 dec 4): {exc}"}, None
         if skops_trust.is_untrusted_types_error(exc):
             return {"ok": False, "stage": "trust",
                     "error": "the model deserialises into types this platform trusts only for models "
                              "trained in its own kernels, never for uploaded ones (ADR-0027 dec 13, "
-                             f"ADR-0030 dec 4): {exc}"}
-        return {"ok": False, "stage": "load", "error": f"{type(exc).__name__}: {exc}"}
+                             f"ADR-0030 dec 4): {exc}"}, None
+        return {"ok": False, "stage": "load", "error": f"{type(exc).__name__}: {exc}"}, None
 
     try:
         frame = _synthetic_frame(meta.signature)
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "stage": "signature", "error": f"{type(exc).__name__}: {exc}"}
+        return {"ok": False, "stage": "signature", "error": f"{type(exc).__name__}: {exc}"}, None
 
     try:
         prediction = model.predict(frame)
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "stage": "score", "error": f"{type(exc).__name__}: {exc}"}
+        return {"ok": False, "stage": "score", "error": f"{type(exc).__name__}: {exc}"}, None
 
-    return {"ok": True, "stage": "score", "output_type": type(prediction).__name__}
+    return {"ok": True, "stage": "score", "output_type": type(prediction).__name__}, model
+
+
+def probe(model_uri: str) -> dict:
+    """What loading and scoring ``model_uri`` here showed."""
+    return _probe(model_uri)[0]
+
+
+def score_sample(model, sample: dict) -> dict:
+    """The detector's scores on engineered sample rows, in this load (ADR-0035 dec 2), or why not.
+
+    The detector is the platform's or an operator extension's, loaded as the service loads it; the rows
+    were engineered by the service from the model's feature configuration.
+    """
+    import asyncio
+    import os
+
+    import numpy as np
+
+    import extensions
+
+    try:
+        extensions.load_extension_modules(
+            [m for m in os.environ.get("EXTENSION_MODULES", "").split(",") if m.strip()])
+        detector = extensions.get_detector(sample.get("detector") or "")
+        if detector is None:
+            return {"sample_error": f"no detector named {sample.get('detector')!r} is loaded"}
+        ctx = extensions.DetectorContext(**(sample.get("context") or {}))
+        rows = [np.asarray(r, dtype="float64").reshape(1, -1) for r in sample.get("rows") or []]
+
+        async def run():
+            return [(await detector(row, model, 0.5, ctx)).score for row in rows]
+
+        return {"scores": [float(v) for v in asyncio.run(run())]}
+    except Exception as exc:  # noqa: BLE001 — the reason is reported, the verdict on the load stands
+        return {"sample_error": f"{type(exc).__name__}: {exc}"}
 
 
 def main() -> int:
     if len(sys.argv) != 2:
         print(json.dumps({"ok": False, "stage": "invoke", "error": "expected one model URI"}))
         return 2
-    print(json.dumps(probe(sys.argv[1])))
+    raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+    try:
+        sample = json.loads(raw) if raw.strip() else None
+    except ValueError:
+        sample = None
+    result, model = _probe(sys.argv[1])
+    if result["ok"] and sample:
+        result.update(score_sample(model, sample))
+    print(json.dumps(result))
     return 0
 
 

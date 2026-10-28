@@ -21,19 +21,22 @@ helpers (``tenant_prefix`` / ``strip_owned`` / ``pick_latest`` / ``shape_summary
 tenant rule and are unit-tested without a live MLflow.
 """
 import asyncio
+import json
 import logging
 import os
+import tempfile
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from mlflow.tracking import MlflowClient
 from mlflow.exceptions import MlflowException
 
 import auth
+import drift
 from mlflow_namespace import is_safe_name, pick_latest, shape_summary, tenant_prefix
-from routers.models import get_company_id_dependency
+from routers.models import ModelCreateRequest, get_company_id_dependency, register_model
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +77,39 @@ def _run_metrics(client: MlflowClient, run_id: Optional[str]) -> Dict[str, float
 
 class DescriptionUpdate(BaseModel):
     description: str
+
+
+class PromoteRequest(BaseModel):
+    """What the promoting user decides (ADR-0040 dec 3): the model's inputs and what its output means."""
+    model_config = ConfigDict(protected_namespaces=())
+
+    feature_config_id: str
+    equipment_id: Optional[str] = None
+    detector: Optional[str] = None
+    model_type: str = "anomaly_detection"
+
+
+def _read_sample(client: MlflowClient, run_id: str) -> Optional[Dict[str, Any]]:
+    """The feature sample the run logged (ADR-0040 dec 4): the parsed JSON, None when it logged none,
+    or ``{"refused": reason}`` when it cannot be read as one. Its size is checked before it is read."""
+    folder, _, _ = drift.FEATURE_SAMPLE_ARTIFACT.rpartition("/")
+    entry = next((a for a in client.list_artifacts(run_id, folder)
+                  if a.path == drift.FEATURE_SAMPLE_ARTIFACT and not a.is_dir), None)
+    if entry is None:
+        return None
+    if entry.file_size is None or entry.file_size > drift.MAX_SAMPLE_BYTES:
+        return {"refused": (f"the run's feature sample is {entry.file_size} bytes; samples over "
+                            f"{drift.MAX_SAMPLE_BYTES} bytes are not read")}
+    with tempfile.TemporaryDirectory(prefix="sample-") as tmp:
+        local = client.download_artifacts(run_id, drift.FEATURE_SAMPLE_ARTIFACT, tmp)
+        if os.path.getsize(local) > drift.MAX_SAMPLE_BYTES:
+            return {"refused": "the run's feature sample is larger than it was listed"}
+        try:
+            with open(local, encoding="utf-8") as fh:
+                sample = json.load(fh)
+        except (ValueError, UnicodeDecodeError) as exc:
+            return {"refused": f"the run's feature sample is not JSON: {exc}"}
+    return sample if isinstance(sample, dict) else {"refused": "the run's feature sample is not an object"}
 
 
 @router.get("")
@@ -190,3 +226,67 @@ async def update_registered_model_description(
     except MlflowException:
         raise HTTPException(status_code=404, detail="Model not found")
     return {"name": name, "description": body.description}
+
+
+@router.post("/{name}/versions/{version}/promote", status_code=201,
+             dependencies=[Depends(auth.require_writer)])
+async def promote_model_version(
+    name: str,
+    version: str,
+    body: PromoteRequest,
+    request: Request,
+    company_id: str = Depends(get_company_id_dependency),
+):
+    """Make a notebook-registered version a platform model (ADR-0040): the registration gate, on the
+    version's run, with the sample the run logged and the inputs and detector the user chose."""
+    _reject_unsafe_name(name)
+    if not version.isdigit():
+        raise HTTPException(status_code=400, detail="invalid model version")
+    qualified = tenant_prefix(company_id) + name
+
+    def _work() -> Optional[Dict[str, Any]]:
+        client = _client()
+        try:
+            mv = client.get_model_version(qualified, version)
+        except MlflowException:
+            return None
+        if not mv.run_id:
+            return {"run_id": None}
+        run = client.get_run(mv.run_id)
+        model = client.get_registered_model(qualified)
+        return {
+            "run_id": mv.run_id,
+            "experiment_id": run.info.experiment_id,
+            "metrics": dict(run.data.metrics),
+            "description": mv.description or model.description or None,
+            "sample": _read_sample(client, mv.run_id),
+        }
+
+    try:
+        found = await asyncio.to_thread(_work)
+    except MlflowException as e:
+        logger.warning("promotion read failed: %s", e)
+        raise HTTPException(status_code=502, detail="MLflow registry unavailable")
+    if found is None:
+        raise HTTPException(status_code=404, detail="Model version not found")
+    if not found["run_id"]:
+        raise HTTPException(status_code=422, detail=(
+            "This version records no run, so nothing establishes where it came from (ADR-0030 dec 8)."
+        ))
+
+    # The same shape a registration request has, so the gate and the write path see one form.
+    payload = ModelCreateRequest(
+        model_name=name,
+        model_version=version,
+        model_type=body.model_type,
+        description=found["description"],
+        mlflow_run_id=found["run_id"],
+        mlflow_experiment_id=found["experiment_id"],
+        training_metrics=found["metrics"] or None,
+        feature_config_id=body.feature_config_id,
+        equipment_id=body.equipment_id,
+        detector=body.detector,
+    ).model_dump()
+    # The sample is the run's, read as data (ADR-0040 dec 4); the request model does not shape it.
+    payload["reference_profile"] = found["sample"]
+    return await register_model(payload, company_id, request.app.state.ml_repository)

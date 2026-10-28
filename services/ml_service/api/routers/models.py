@@ -17,6 +17,7 @@ import json
 import asyncpg
 
 import auth
+import baseline_gate
 import config
 import extensions
 import load_probe
@@ -25,7 +26,8 @@ import model_loader
 import skops_trust
 import upload_capability
 import uploaded_model
-from drift.reference_profile import prediction_column_refusal
+import drift
+from .inference import detector_for, load_model_or_refuse
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +89,9 @@ class ModelMetadata(BaseModel):
     # None means "predates the distinction", which is not "unknown origin": no model registered
     # before that migration can be an upload, because there was no way to upload one.
     provenance: Optional[str] = None
+    # What the model's drift baseline lets monitoring do, and why not where it cannot (ADR-0035 dec 4,
+    # ADR-0030 dec 8: visibly un-monitorable).
+    baseline: Optional[Dict[str, Any]] = None
     created_at: datetime
     deployed_at: Optional[datetime] = None
 
@@ -426,9 +431,52 @@ async def create_model(
     (below), because this verdict expires: the serving image can be rebuilt underneath a model that
     is sitting unpromoted.
     """
-    repository = request.app.state.ml_repository
+    return await register_model(model_data.model_dump(), company_id, request.app.state.ml_repository)
 
-    payload = model_data.model_dump()
+
+async def _bind_inputs_and_baseline(payload: Dict[str, Any], company_id: str, repository) -> Dict[str, Any]:
+    """Bind the model's inputs and accept or refuse its feature sample; returns the baseline's state.
+
+    The feature configuration must exist in the tenant. Bound to an equipment, the model reads its
+    drift window from that equipment's sensors of the configuration's inputs, which must all exist. A
+    sample is a baseline only when its columns are those inputs and it carries no scores (ADR-0035
+    dec 2, 4); otherwise the model is registered without one and says why.
+    """
+    feature_config = None
+    if payload.get("feature_config_id"):
+        feature_config = await repository.get_feature_config_by_id(
+            company_id=company_id, config_id=payload["feature_config_id"],
+        )
+        if not feature_config:
+            raise HTTPException(status_code=422, detail=(
+                f"Feature config {payload['feature_config_id']} does not exist in your organization."
+            ))
+    base_sensors = [str(n) for n in (feature_config or {}).get("base_sensors") or []]
+
+    if feature_config and payload.get("equipment_id") and not payload.get("sensor_ids"):
+        found = await repository.sensor_ids_by_name(company_id, payload["equipment_id"], base_sensors)
+        missing = sorted(set(base_sensors) - set(found))
+        if missing:
+            raise HTTPException(status_code=422, detail=(
+                f"Equipment {payload['equipment_id']} has no sensor named {', '.join(missing)}, so the "
+                f"model's inputs cannot be read from it."
+            ))
+        payload["sensor_ids"] = [found[n] for n in base_sensors]
+
+    profile = payload.get("reference_profile")
+    if isinstance(profile, dict) and profile.get("refused"):
+        # Already judged unreadable on its way here (a promotion's sample artifact, ADR-0040 dec 4).
+        payload["reference_profile"] = drift.refused_baseline(str(profile["refused"]))
+    elif profile:
+        reason = (drift.supplied_scores_refusal(profile) if isinstance(profile, dict) else None) \
+            or drift.sample_refusal(profile, base_sensors)
+        payload["reference_profile"] = drift.refused_baseline(reason) if reason else drift.accepted_sample(profile)
+    return drift.baseline_state(payload.get("reference_profile"))
+
+
+async def register_model(payload: Dict[str, Any], company_id: str, repository) -> Dict[str, Any]:
+    """The registration gate (ADR-0027 dec 5), for every path that creates a platform model: the
+    registration request and the promotion of a notebook-registered version (ADR-0040 dec 2)."""
 
     # Read where it came from; never ask (ADR-0030 dec 8).
     provenance = uploaded_model.provenance_of(
@@ -450,18 +498,6 @@ async def create_model(
             ),
         )
 
-    # A reference profile's prediction column is a baseline only if it holds the declared detector's
-    # scores on their scale (ADR-0021 dec 1). One that does not would raise prediction drift on
-    # a model that has not moved, so it is refused here rather than stored and found out later.
-    if payload.get("reference_profile"):
-        refusal = prediction_column_refusal(payload["reference_profile"])
-        if refusal:
-            raise HTTPException(status_code=422, detail={
-                "message": refusal,
-                "hint": ("capture the training window's scores as the model's detector produces "
-                         "them (what /api/inference/predict returns), or omit prediction_scores"),
-            })
-
     await _admit_address_or_refuse(
         company_id, payload.get("mlflow_run_id"), payload.get("artifact_uri"), on_refused=422,
     )
@@ -473,7 +509,7 @@ async def create_model(
     compatibility = await _evaluate_or_reject(
         payload.get("mlflow_run_id"),
         on_incompatible=422,
-        model_label=model_data.model_name,
+        model_label=payload["model_name"],
         artifact_uri=payload.get("artifact_uri"),
     )
     if compatibility:
@@ -493,7 +529,7 @@ async def create_model(
             detectors_for=extensions.detectors_for,
         )
         if verdict.refused:
-            logger.warning(f"Refusing uploaded model '{model_data.model_name}': {verdict.reason}")
+            logger.warning(f"Refusing uploaded model '{payload['model_name']}': {verdict.reason}")
             raise HTTPException(status_code=422, detail={
                 "message": verdict.reason,
                 "declared_semantics": payload.get("score_semantics"),
@@ -515,7 +551,7 @@ async def create_model(
             detector = payload["detector"]
         payload["detector"] = detector
         logger.info(
-            f"Uploaded model '{model_data.model_name}' declares '{payload.get('score_semantics')}'; "
+            f"Uploaded model '{payload['model_name']}' declares '{payload.get('score_semantics')}'; "
             f"scored here by '{detector}'"
         )
     else:
@@ -526,6 +562,8 @@ async def create_model(
     # Judged, not stored: the detector recorded above IS the declaration, and remains the authority
     # on what an output means (ADR-0028 dec 1). A second copy could only drift from it.
     payload.pop("score_semantics", None)
+
+    baseline = await _bind_inputs_and_baseline(payload, company_id, repository)
 
     # Create model in database
     try:
@@ -539,7 +577,7 @@ async def create_model(
         raise HTTPException(
             status_code=409,
             detail=(
-                f"A model named '{model_data.model_name}' version {model_data.model_version} is "
+                f"A model named '{payload['model_name']}' version {payload['model_version']} is "
                 f"already registered. Register a new version rather than replacing one: a model "
                 f"version is a record of what was served, and overwriting it would erase that."
             ),
@@ -548,12 +586,13 @@ async def create_model(
     if not model_id:
         raise HTTPException(status_code=500, detail="Failed to create model")
 
-    logger.info(f"Model registered: {model_id} - {model_data.model_name}")
+    logger.info(f"Model registered: {model_id} - {payload['model_name']}")
 
     return {
         "status": "success",
         "model_id": str(model_id),
-        "model_name": model_data.model_name,
+        "model_name": payload["model_name"],
+        "baseline": baseline,
         "created_at": datetime.now().isoformat()
     }
 
@@ -592,6 +631,7 @@ async def list_models(
             except:
                 data['hyperparameters'] = None
 
+        data['baseline'] = drift.baseline_state(data.pop('baseline_summary', None))
         models.append(ModelMetadata(**data))
 
     return ModelListResponse(total=len(models), models=models)
@@ -627,6 +667,8 @@ async def get_model(
         except:
             model_data['hyperparameters'] = None
     
+    model_data.pop('baseline_summary', None)
+    model_data['baseline'] = drift.baseline_state(model_data.get('reference_profile'))
     return model_data
 
 
@@ -728,8 +770,16 @@ async def deploy_model(
         # Here rather than at registration because this is where the answer has to be true: the
         # verdict expires, and this is the gate that already knows that. It EXTENDS this gate rather
         # than adding a third — a parallel path would be a second answer to a settled question.
+        # ADR-0035 dec 2, 3: the baseline's prediction scores are derived here, at every deployment, by
+        # the gate's own load: the probe's for an upload, serving's for any other model.
+        sample_plan = await baseline_gate.plan(request.app.state, repository, company_id, model_data)
+        derived_profile = None
+
         if uploaded:
-            result = await load_probe.probe(model_data["artifact_uri"])
+            result = await load_probe.probe(model_data["artifact_uri"],
+                                            sample_plan.for_probe() if sample_plan else None)
+            if sample_plan:
+                derived_profile = sample_plan.finish(result.scores, result.sample_error)
             if result.refused:
                 logger.warning(f"Refusing to deploy uploaded model '{model_label}': {result.error}")
                 raise HTTPException(status_code=409, detail={
@@ -743,6 +793,22 @@ async def deploy_model(
                     "error": result.error,
                 })
             logger.info(f"Uploaded model '{model_label}' loaded and scored in this environment")
+        elif sample_plan:
+            try:
+                loaded = await load_model_or_refuse(company_id, model_data)
+            except HTTPException as exc:
+                if exc.status_code == 503:
+                    raise
+                # It cannot be loaded here, so it cannot serve here.
+                raise HTTPException(status_code=409, detail=exc.detail) from exc
+            _, detector_fn = detector_for(model_data)
+            derived_profile = await baseline_gate.score_in_process(sample_plan, loaded, detector_fn)
+
+        if derived_profile is not None:
+            await repository.update_model_reference_profile(
+                company_id=company_id, model_id=model_id, profile=derived_profile,
+            )
+            logger.info(f"Model '{model_label}' baseline: {drift.baseline_state(derived_profile)}")
 
     # Update status
     success = await repository.update_model_status(

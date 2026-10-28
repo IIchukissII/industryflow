@@ -28,6 +28,7 @@ vi.mock('../services/http', () => ({
   default: (path, init = {}) => {
     if (path === '/api/ml/capabilities') return respond(CAPS);
     if (path === '/api/feature-configs') return respond({ total: featureConfigs.length, configs: featureConfigs });
+    if (path === '/api/equipment') return respond([{ equipment_id: 'eq-1', name: 'Pump 7' }]);
     if (path === '/api/models/upload-capability') return respond({ capability: 'cap-token' }, 201);
     if (path === '/api/models' && init.method === 'POST') {
       registrations.push(JSON.parse(init.body));
@@ -93,5 +94,29 @@ describe('model upload wizard registration', () => {
     expect(body.description).toBe('Flags bearing wear from vibration.');
     expect(body.feature_config_id).toBeNull();
     expect(await screen.findByText(/It has no feature config, so it can't be scored/)).toBeInTheDocument();
+  });
+
+  test('sends the feature sample and the equipment drift reads from', async () => {
+    await declare();
+    fireEvent.click(await screen.findByRole('button', { name: /pump-vibration/ }));
+    fireEvent.change(await screen.findByLabelText('Equipment'), { target: { value: 'eq-1' } });
+    const sample = { schema_version: 2, columns: ['vib_x', 'vib_y'], sample: { vib_x: [1], vib_y: [2] } };
+    fireEvent.change(screen.getByLabelText('Feature sample'), {
+      target: { files: [new File([JSON.stringify(sample)], 'feature_sample.json', { type: 'application/json' })] },
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Upload & register/ })).toBeEnabled());
+    const body = await register();
+    expect(body.equipment_id).toBe('eq-1');
+    expect(body.reference_profile).toEqual(sample);
+  });
+
+  test('a sample that is not JSON blocks registration and says why', async () => {
+    await declare();
+    fireEvent.click(await screen.findByRole('button', { name: /pump-vibration/ }));
+    fireEvent.change(await screen.findByLabelText('Feature sample'), {
+      target: { files: [new File(['not json'], 'x.json')] },
+    });
+    expect(await screen.findByText(/This file is not JSON/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Upload & register/ })).toBeDisabled();
   });
 });

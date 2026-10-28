@@ -2,25 +2,28 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The reference-profile format (ADR-0035).
+"""The drift baseline's format (ADR-0035).
 
-A profile snapshots the distribution of each input feature over the training window. It is supplied
-in the registration request; the platform builds no feature reference itself (``build_reference_profile``
-is the format's reference implementation for a training flow to call). ADR-0035 has the platform derive
-the prediction scores at the deployment gate; until that is built, a supplied score column is accepted
-and held to the declared scale. Drift is measured as the divergence
-of a recent window from this baseline, computed by `evidently` in the drift endpoint (ADR-0021 dec 3).
+A baseline has two halves of different origin. The **feature sample** comes from whoever trained the
+model, because only they hold what it learned from: a capped, deterministically down-sampled sample of
+the training window's columns, in the registration request or, for a notebook-trained model, as a data
+artifact of its run (ADR-0040 dec 4). ``build_reference_profile`` is the format's reference
+implementation; the notebook client carries a copy held equal by test. The **prediction scores** come
+from the platform alone: the deployment gate scores the sample through the model's declared detector in
+the serving image (ADR-0035 dec 2) and records them with ``with_derived_scores``. A score column supplied
+with a sample is refused.
 
-`evidently` measures drift between a *reference dataset* and a *current dataset*, so the
-profile stores a **capped, deterministically down-sampled reference sample** of the
-training-window columns — compact enough for JSONB, large enough for the statistical
-tests, and tenant-scoped (it is the tenant's own training data, stored with the tenant's
-own model). Optionally it carries the model's own training-window output scores as a
-`prediction_column`, so prediction drift falls out of the same reference/current
-comparison as data drift.
+`evidently` measures drift between a reference and a current dataset, so the sample is stored as
+columns of values, compact enough for JSONB. Numeric features only.
 
-A model with no reference profile reports "drift unavailable" until retrained with one.
-Numeric features only in v1 (sensor streams are numeric).
+The profile also says what state its baseline is in, so a model that cannot be monitored says why
+(ADR-0035 dec 4, 5; ADR-0030 dec 8):
+
+* ``refused``: the sample was not accepted at registration; the model has no baseline;
+* ``prediction_baseline.origin == "derived"``: scores derived at the last deployment;
+* ``prediction_baseline.origin is None``: data drift only, ``reason`` says why;
+* a ``prediction_column`` and no ``prediction_baseline``: scores supplied before ADR-0035, kept until
+  the model's next deployment (ADR-0035 dec 7).
 """
 
 from __future__ import annotations
@@ -42,8 +45,14 @@ REFERENCE_PROFILE_VERSION = 2
 # the JSONB payload bounded regardless of training-window size.
 DEFAULT_MAX_SAMPLE_ROWS = 5000
 
-# Default name for the model's own output-score column when prediction drift is captured.
+# The column the derived scores are stored under.
 DEFAULT_PREDICTION_COLUMN = "prediction_score"
+
+# Where a notebook-trained model's feature sample lives in its run (ADR-0040 dec 4); the notebook client
+# writes the same name. Read at promotion only up to the size bound: 5000 rows of a few dozen inputs
+# is well under it, and a larger file is refused unread.
+FEATURE_SAMPLE_ARTIFACT = "industryflow/feature_sample.json"
+MAX_SAMPLE_BYTES = 16 * 1024 * 1024
 
 
 def _sample_indices(n_rows: int, max_rows: int) -> np.ndarray:
@@ -102,36 +111,23 @@ def prediction_column_refusal(profile: Mapping[str, Any]) -> Optional[str]:
 def build_reference_profile(
     data: Mapping[str, Iterable[float]],
     *,
-    prediction_scores: Optional[Iterable[float]] = None,
-    prediction_column: str = DEFAULT_PREDICTION_COLUMN,
     max_sample_rows: int = DEFAULT_MAX_SAMPLE_ROWS,
 ) -> Dict[str, Any]:
-    """Build the drift reference profile from training-window columns.
+    """Build a feature sample from training-window columns.
 
     Args:
-        data: mapping feature name -> the feature's training-window values. All columns
-            must share the same length (row-aligned). A caller holding a pandas DataFrame
-            passes ``df.to_dict("list")``; keeping the input a plain mapping avoids a
-            pandas dependency in the capture path.
-        prediction_scores: optional per-row model output scores over the training window;
-            stored as ``prediction_column`` so the endpoint can measure prediction drift. They
-            must be the model's 0-1 anomaly scores as its detector produces them (what
-            ``/api/inference/predict`` returns): the endpoint scores the current window that way,
-            and two different quantities would differ without anything having drifted. Values
-            off that scale, or not finite, are refused (ADR-0021 dec 1).
-        prediction_column: name for the prediction column (default ``prediction_score``).
-        max_sample_rows: cap on stored rows (default 5000); larger windows are evenly
-            down-sampled.
+        data: mapping feature name -> the feature's training-window values, row-aligned. Its names are
+            the inputs of the feature configuration the model will be bound to (ADR-0035 dec 4). A
+            caller holding a pandas DataFrame passes ``df.to_dict("list")``.
+        max_sample_rows: cap on stored rows (default 5000); larger windows are evenly down-sampled.
 
     Returns:
-        JSON-serializable profile:
-        ``{schema_version, method, columns, prediction_column, n_training_rows,
-        n_samples, sample: {col: [values...]}}``.
+        JSON-serializable ``{schema_version, method, columns, prediction_column, n_training_rows,
+        n_samples, sample: {col: [values...]}}``; ``prediction_column`` is ``None`` until the platform
+        derives scores.
 
     Raises:
-        ValueError: if ``data`` is empty, columns differ in length, or
-            ``prediction_scores`` length does not match the feature rows or holds a value that
-            is not a finite score on the detector's declared scale.
+        ValueError: if ``data`` is empty or its columns differ in length.
     """
     if not data:
         raise ValueError("cannot build a reference profile from no features")
@@ -148,33 +144,154 @@ def build_reference_profile(
     if n_rows == 0:
         raise ValueError("feature columns are empty")
 
-    pred_list: Optional[List[float]] = None
-    if prediction_scores is not None:
-        pred_list = list(prediction_scores)
-        if len(pred_list) != n_rows:
-            raise ValueError(
-                f"prediction_scores length {len(pred_list)} != feature rows {n_rows}"
-            )
-        reason = _score_refusal(pred_list)
-        if reason:
-            raise ValueError(f"prediction_scores are not detector scores: {reason}")
-
     idx = _sample_indices(n_rows, max_sample_rows)
-
-    sample: Dict[str, List[Optional[float]]] = {
-        name: _clean_column(materialized[name], idx) for name in columns
-    }
-    stored_prediction_column: Optional[str] = None
-    if pred_list is not None:
-        sample[prediction_column] = _clean_column(pred_list, idx)
-        stored_prediction_column = prediction_column
-
     return {
         "schema_version": REFERENCE_PROFILE_VERSION,
         "method": "evidently_sample",
         "columns": columns,
-        "prediction_column": stored_prediction_column,
+        "prediction_column": None,
         "n_training_rows": n_rows,
         "n_samples": int(idx.size),
+        "sample": {name: _clean_column(materialized[name], idx) for name in columns},
+    }
+
+
+# --- what the platform accepts and records (ADR-0035) ----------------------------------------------
+
+def supplied_scores_refusal(profile: Mapping[str, Any]) -> Optional[str]:
+    """Why a sample offered at registration carries scores the platform must derive itself, or ``None``.
+
+    ADR-0035 dec 2: a score column supplied with the sample is not accepted. The platform can check only
+    that a supplied score is in range, which cannot tell the declared detector's scores from another
+    quantity on the same scale.
+    """
+    if profile.get("prediction_column") or profile.get("prediction_baseline"):
+        return ("the sample carries prediction scores; the platform derives them from the sample "
+                "through the model's detector when it is deployed (ADR-0035 dec 2)")
+    return None
+
+
+def sample_refusal(profile: Any, base_sensors: Sequence[str]) -> Optional[str]:
+    """Why ``profile`` is not a feature sample for a model bound to ``base_sensors``, or ``None``.
+
+    ADR-0035 dec 4: its columns are exactly the inputs of the bound feature configuration. Each column
+    holds the same number of values, every value a finite number or null.
+    """
+    if not isinstance(profile, Mapping):
+        return "the sample is not an object"
+    if profile.get("schema_version") != REFERENCE_PROFILE_VERSION:
+        return (f"the sample's schema_version is {profile.get('schema_version')!r}, "
+                f"not {REFERENCE_PROFILE_VERSION}")
+    columns, sample = profile.get("columns"), profile.get("sample")
+    if not isinstance(columns, list) or not isinstance(sample, Mapping):
+        return "the sample has no columns and values"
+    if not base_sensors:
+        return "the model is bound to no feature configuration with base sensors, so a sample matches nothing"
+    if sorted(map(str, columns)) != sorted(base_sensors) or len(set(columns)) != len(columns):
+        return (f"the sample's columns {sorted(map(str, columns))} are not the feature "
+                f"configuration's inputs {sorted(base_sensors)}")
+    lengths = set()
+    for name in columns:
+        values = sample.get(name)
+        if not isinstance(values, list) or not values:
+            return f"the sample holds no values for {name!r}"
+        for v in values:
+            if v is None:
+                continue
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+                return f"the sample's column {name!r} holds {v!r}, which is not a number"
+        lengths.add(len(values))
+    if len(lengths) != 1:
+        return f"the sample's columns differ in length: {sorted(lengths)}"
+    return None
+
+
+def accepted_sample(profile: Mapping[str, Any]) -> Dict[str, Any]:
+    """The sample as stored: its own fields, nothing a supplier added beside them."""
+    columns = list(profile["columns"])
+    sample = {c: list(profile["sample"][c]) for c in columns}
+    n = len(sample[columns[0]])
+    n_training = profile.get("n_training_rows")
+    if isinstance(n_training, bool) or not isinstance(n_training, int) or n_training < n:
+        n_training = n
+    return {
+        "schema_version": REFERENCE_PROFILE_VERSION,
+        "method": "evidently_sample",
+        "columns": columns,
+        "prediction_column": None,
+        "n_training_rows": n_training,
+        "n_samples": n,
         "sample": sample,
     }
+
+
+def refused_baseline(reason: str) -> Dict[str, Any]:
+    """What a model whose sample was not accepted stores: no baseline, and why (ADR-0035 dec 4)."""
+    return {"schema_version": REFERENCE_PROFILE_VERSION, "refused": reason}
+
+
+def sample_rows(profile: Mapping[str, Any]) -> List[Dict[str, float]]:
+    """The sample's rows, each a mapping of input to value; a row with a missing value is skipped,
+    because a fill value would be a reading nobody took."""
+    columns = list(profile.get("columns") or [])
+    sample = profile.get("sample") or {}
+    if not columns:
+        return []
+    n = len(sample.get(columns[0]) or [])
+    rows = []
+    for i in range(n):
+        row = {c: sample[c][i] for c in columns}
+        if all(v is not None for v in row.values()):
+            rows.append({c: float(v) for c, v in row.items()})
+    return rows
+
+
+def _features_only(profile: Mapping[str, Any]) -> Dict[str, Any]:
+    out = {k: v for k, v in profile.items() if k not in ("prediction_baseline",)}
+    pred = profile.get("prediction_column")
+    out["sample"] = {k: v for k, v in (profile.get("sample") or {}).items() if k != pred}
+    out["prediction_column"] = None
+    return out
+
+
+def with_derived_scores(profile: Mapping[str, Any], scores: Sequence[float], *, derived_at: str) -> Dict[str, Any]:
+    """The profile with the scores the deployment gate derived from its sample (ADR-0035 dec 2, 3).
+
+    The scores are their own sample of the detector's output on the sample's complete rows, so they
+    need not match a column's length. Raises ValueError for values off the declared scale.
+    """
+    reason = _score_refusal(list(scores))
+    if reason:
+        raise ValueError(f"derived scores are not detector scores: {reason}")
+    out = _features_only(profile)
+    out["prediction_column"] = DEFAULT_PREDICTION_COLUMN
+    out["sample"][DEFAULT_PREDICTION_COLUMN] = [float(v) for v in scores]
+    out["prediction_baseline"] = {"origin": "derived", "derived_at": derived_at}
+    return out
+
+
+def without_prediction_baseline(profile: Mapping[str, Any], reason: str) -> Dict[str, Any]:
+    """The profile with no prediction baseline, saying why; data drift still runs (ADR-0035 dec 5)."""
+    out = _features_only(profile)
+    out["prediction_baseline"] = {"origin": None, "reason": reason}
+    return out
+
+
+def baseline_state(profile: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """What a model's baseline lets drift monitoring do, and why not where it cannot."""
+    if not profile:
+        return {"data_drift": False, "prediction": None,
+                "reason": "no feature sample was supplied, so the model cannot be monitored for drift"}
+    if profile.get("refused"):
+        return {"data_drift": False, "prediction": None, "reason": profile["refused"]}
+    pb = profile.get("prediction_baseline")
+    if isinstance(pb, Mapping):
+        if pb.get("origin") == "derived":
+            return {"data_drift": True, "prediction": "derived", "derived_at": pb.get("derived_at"),
+                    "reason": None}
+        return {"data_drift": True, "prediction": None, "reason": pb.get("reason")}
+    if profile.get("prediction_column"):
+        return {"data_drift": True, "prediction": "supplied",
+                "reason": "scores supplied before ADR-0035; derived at the model's next deployment"}
+    return {"data_drift": True, "prediction": None,
+            "reason": "prediction scores are derived when the model is deployed"}

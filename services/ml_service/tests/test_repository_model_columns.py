@@ -188,7 +188,9 @@ def test_every_column_the_write_path_names_exists():
 def test_every_column_the_reads_select_exists():
     cols = _ml_models_columns()
     for i, selected in enumerate(_full_surface_selects(_source())):
-        names = set(re.findall(r"\b([a-z_]+)\b", selected))
+        # A string literal and an `AS` alias name no column: `reference_profile - 'sample' AS x` reads one.
+        expr = re.sub(r"\bAS\s+[a-z_]+", "", re.sub(r"'[^']*'", "", selected))
+        names = set(re.findall(r"\b([a-z_]+)\b", expr))
         assert names <= cols, f"SELECT list #{i + 1} names {sorted(names - cols)}, which do not exist"
 
 

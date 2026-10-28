@@ -16,14 +16,15 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
-from drift import build_reference_profile, compute_drift, MIN_ROWS  # noqa: E402
+from drift import build_reference_profile, compute_drift, with_derived_scores, MIN_ROWS  # noqa: E402
 from drift.score import _is_drifted  # noqa: E402
 
 N = 500  # comfortably above MIN_ROWS for stable statistics
 
 
 def _profile(cols, prediction=None):
-    return build_reference_profile(cols, prediction_scores=prediction)
+    profile = build_reference_profile(cols)
+    return with_derived_scores(profile, prediction, derived_at="t") if prediction is not None else profile
 
 
 def test_identical_distribution_reports_low_share():

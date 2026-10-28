@@ -34,6 +34,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ class ProbeResult:
     ok: bool
     stage: str = ""
     error: str = ""
+    # The detector's scores on the model's feature sample, when one was given (ADR-0035 dec 2), or why
+    # the detector could not score it. Neither decides whether the model may deploy.
+    scores: Optional[List[float]] = None
+    sample_error: str = ""
 
     @property
     def refused(self) -> bool:
@@ -71,6 +76,8 @@ _PROBE_ENV = (
     "MLFLOW_S3_ENDPOINT_URL", "MLFLOW_S3_IGNORE_TLS",
     # trust roots for that TLS connection
     "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
+    # the operator's detector extensions, to score a feature sample as serving would (ADR-0035 dec 2)
+    "EXTENSION_MODULES",
 )
 
 
@@ -82,10 +89,11 @@ def _worker_env() -> dict:
     return env
 
 
-def _run(model_uri: str) -> ProbeResult:
+def _run(model_uri: str, sample: Optional[dict] = None) -> ProbeResult:
     try:
         proc = subprocess.run(
             [sys.executable, str(_WORKER), model_uri],
+            input=json.dumps(sample) if sample else "",
             capture_output=True, text=True, timeout=PROBE_TIMEOUT_SECONDS,
             env=_worker_env(), cwd=str(_WORKER.parent),
         )
@@ -109,10 +117,14 @@ def _run(model_uri: str) -> ProbeResult:
         return ProbeResult(False, "crash",
                            f"the check ended without a verdict (exit {proc.returncode}): {tail[0]}")
 
+    scores = payload.get("scores")
     return ProbeResult(bool(payload.get("ok")), str(payload.get("stage", "")),
-                       str(payload.get("error", "")))
+                       str(payload.get("error", "")),
+                       scores=[float(v) for v in scores] if isinstance(scores, list) else None,
+                       sample_error=str(payload.get("sample_error", "")))
 
 
-async def probe(model_uri: str) -> ProbeResult:
-    """Load and score ``model_uri`` in an isolated copy of this environment, off the event loop."""
-    return await asyncio.to_thread(_run, model_uri)
+async def probe(model_uri: str, sample: Optional[dict] = None) -> ProbeResult:
+    """Load and score ``model_uri`` in an isolated copy of this environment, off the event loop; with
+    ``sample`` (engineered rows, the detector and its context), also score those rows in that load."""
+    return await asyncio.to_thread(_run, model_uri, sample)
