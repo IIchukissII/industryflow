@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0032 — Backup and disaster recovery for every durable store
 
 - **Status:** Accepted
-- **Date:** 2026-10-24; changed 2026-10-26
+- **Date:** 2026-10-24; changed 2026-10-28
 - **Parent:** ADR-0001
 - **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a backup holds every tenant), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability store, dec 7), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (notebook volumes), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (cold layer, the only copy of raw history; dec 13 its mirror), [ADR-0029](ADR-0029-spark-major-upgrade-checkpoint-cutover.md) (checkpoints), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (forward-only migrations), [ADR-0038](ADR-0038-model-and-notebook-backup.md) (model and notebook mechanism)
 
@@ -29,8 +29,9 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
    separate failure domain for as long as the cold layer keeps them. An object the cold layer no longer
    holds leaves the copy once one backup retention period has passed, so an accidental deletion stays
    recoverable that long and a deleted tenant's history does not outlive it.
-5. **A backup is held to the standard of the most privileged store it contains.** A write-only backup
-   principal writes it; no capability, kernel, tenant session or tenant-facing plane can read it.
+5. **A backup is held to the standard of the most privileged store it contains.** A principal confined
+   to the backup target and held only by the backup and restore jobs writes it; no capability, kernel,
+   tenant session or tenant-facing plane can read it.
 6. **A restore is proven by doing it.** Restores are rehearsed on a schedule against a scratch target and
    compared with the source; an unexercised backup counts toward no recovery objective.
 7. **A schema rollback is a restore.** Migrations are forward-only, so a backup precedes every upgrade and
@@ -46,6 +47,7 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 | 2 | One recovery objective for the whole platform | Over-protects derivable state or under-protects the only copy of raw history |
 | 3 | Rely on the object store's own replication | In-cluster replication shares the failure domain and copies deletions; managed cross-region versioned replication is one way to meet decision 3 |
 | 4 | Keep the cold copy append-only | A deleted tenant's raw history would never leave it (ADR-0033 dec 4) |
+| 5 | A write-only backup principal | Pruning, ageing out and verifying a copy read and delete in the target |
 
 ## Consequences
 
