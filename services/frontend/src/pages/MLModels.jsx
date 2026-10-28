@@ -105,7 +105,7 @@ function normalizePlatform(m) {
     registry: 'platform',
     provenance,
     origin: originOf('platform', provenance),
-    version: m.version ? `v${m.version}` : '—',
+    version: (m.version || m.model_version) ? `v${m.version || m.model_version}` : '—',
     status: m.status || 'unknown',
     updated: updated ? Date.parse(updated) : null,
     description: m.description || '',
