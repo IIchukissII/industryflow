@@ -15,14 +15,12 @@ from routers import (
     training_data, alerts_history, companies,
     equipment, alert_rules, auth_tokens, auth_verify, user_admin
 )
-from database import AsyncSessionLocal, close_engine
-from sqlalchemy import text
+from database import close_engine
 from messaging.redis_client import redis_client
 from messaging.cache_updater import update_redis_cache
 
 # Authentication imports
-from users import auth_backend, fastapi_users, current_active_user, ACCESS_COOKIE
-from models.user import User
+from users import auth_backend, fastapi_users, ACCESS_COOKIE
 
 import asyncio
 
@@ -150,24 +148,6 @@ async def root():
             "equipment": "/api/equipment"
         }
     }
-
-
-# Custom endpoint to list users (for the admin panel).
-# Authenticated and tenant-scoped: a caller sees only their own company's users,
-# unless they are a superuser (ADR-0004 decisions 4 and 5).
-@app.get("/api/users", tags=["users"])
-async def list_all_users(current_user: User = Depends(current_active_user)):
-    """List users in the caller's company (all companies if superuser)."""
-    columns = 'SELECT id, email, company_id, role, is_active, is_superuser, is_verified FROM public."user"'
-    async with AsyncSessionLocal() as session:
-        if current_user.is_superuser:
-            result = await session.execute(text(f"{columns} ORDER BY email"))
-        else:
-            result = await session.execute(
-                text(f"{columns} WHERE company_id = :company_id ORDER BY email"),
-                {"company_id": current_user.company_id},
-            )
-        return [dict(row) for row in result.mappings().all()]
 
 
 if __name__ == "__main__":

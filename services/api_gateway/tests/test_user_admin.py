@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from fastapi_users import exceptions
 
 import main
+from routers import user_admin
 from users import current_active_user, get_user_manager
 
 TENANT_A = uuid.uuid4()
@@ -85,6 +86,7 @@ def test_public_registration_is_gone(client):
 
 
 def test_user_admin_routes_require_a_session(client):
+    assert client.get("/api/users").status_code == 401
     assert client.post("/api/users", json={}).status_code == 401
     assert client.patch(f"/api/users/{uuid.uuid4()}", json={}).status_code == 401
     assert client.patch("/users/me", json={}).status_code == 401
@@ -104,6 +106,33 @@ def test_self_update_changes_own_email(world, client):
     world.caller = world.member_a
     r = client.patch("/users/me", json={"email": "new@example.com"})
     assert r.status_code == 200 and world.member_a.email == "new@example.com"
+
+
+@pytest.mark.parametrize("role", ["observer", "engineer"])
+def test_non_admin_cannot_list_users(world, client, role):
+    world.member_a.role = role
+    world.caller = world.member_a
+    assert client.get("/api/users").status_code == 403
+
+
+def test_admin_lists_only_own_tenant(world, client, monkeypatch):
+    seen = {}
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def execute(self, statement, params=None):
+            seen["sql"], seen["params"] = str(statement), params
+            return SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: []))
+
+    monkeypatch.setattr(user_admin, "AsyncSessionLocal", Session)
+    assert client.get("/api/users").status_code == 200
+    assert "WHERE company_id = :company_id" in seen["sql"]
+    assert seen["params"] == {"company_id": TENANT_A}
 
 
 def test_non_admin_cannot_create_users(world, client):

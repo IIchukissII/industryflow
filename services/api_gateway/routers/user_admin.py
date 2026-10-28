@@ -14,7 +14,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi_users import exceptions
+from sqlalchemy import text
 
+from database import AsyncSessionLocal
 from dependencies import require_role
 from models.user import User
 from schemas import AdminUserCreate, AdminUserUpdate, UserCreate, UserRead, UserSelfUpdate
@@ -59,6 +61,21 @@ def _refuse_superuser_only(admin: User, fields: dict) -> None:
     """Moving a user between companies and granting superuser are superuser-only."""
     if not admin.is_superuser and ("company_id" in fields or "is_superuser" in fields):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser privileges required")
+
+
+@router.get("/api/users")
+async def list_users(admin: User = Depends(require_role("admin"))):
+    """Users of the admin's company (every company for a superuser)."""
+    columns = 'SELECT id, email, company_id, role, is_active, is_superuser, is_verified FROM public."user"'
+    async with AsyncSessionLocal() as session:
+        if admin.is_superuser:
+            result = await session.execute(text(f"{columns} ORDER BY email"))
+        else:
+            result = await session.execute(
+                text(f"{columns} WHERE company_id = :company_id ORDER BY email"),
+                {"company_id": admin.company_id},
+            )
+        return [dict(row) for row in result.mappings().all()]
 
 
 @router.post("/api/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
