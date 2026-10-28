@@ -31,12 +31,13 @@ the test.
 2. **A key from a caller is tested only once it is plain: no empty, `.` or `..` segment, no
    backslash and no control character.** Such a key is refused, never normalised; normalising would be
    a second interpretation that the store, a proxy or a client can disagree with, and a line-based
-   reader of a listing splits a key holding a control character into another key.
+   reader of a listing splits a key holding a control character into another key. A separator leading
+   a caller's path is path syntax, not a segment of the key.
 3. **A key still in its encoded form is refused if it carries an escape.** Decoded, it could spell a
    segment the plain test never saw.
 4. **A caller's path is placed under its tenant's prefix by the same implementation, and only a plain
-   path is placed.** Placing and testing are one rule, so a path the implementation places is one it
-   would also accept.
+   path is placed.** Placing and testing are one rule, so a key the implementation places is one it
+   would also accept; a listing prefix is placed by the same rule and keeps its trailing separator.
 5. **The rule holds for every object store a tenant reaches through a mediator, whatever the plane.**
    Keys a trusted writer assembles from typed parts are not caller input and are not tested.
 
