@@ -173,7 +173,7 @@ version.
 | Response | Cause |
 |---|---|
 | 201 | Registered; `baseline` states what drift monitoring it gets |
-| 404 | No such version in the caller's tenant |
+| 404 | No such version in the caller's tenant, or its run is not one of the tenant's |
 | 409 | That name and version is already a platform model |
 | 422 | The registration gate refused it, an unknown feature config, or a base sensor missing on the equipment |
 

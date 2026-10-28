@@ -434,7 +434,8 @@ async def create_model(
     return await register_model(model_data.model_dump(), company_id, request.app.state.ml_repository)
 
 
-async def _bind_inputs_and_baseline(payload: Dict[str, Any], company_id: str, repository) -> Dict[str, Any]:
+async def _bind_inputs_and_baseline(payload: Dict[str, Any], company_id: str, repository,
+                                    sample_refusal: Optional[str] = None) -> Dict[str, Any]:
     """Bind the model's inputs and accept or refuse its feature sample; returns the baseline's state.
 
     The feature configuration must exist in the tenant. Bound to an equipment, the model reads its
@@ -464,9 +465,9 @@ async def _bind_inputs_and_baseline(payload: Dict[str, Any], company_id: str, re
         payload["sensor_ids"] = [found[n] for n in base_sensors]
 
     profile = payload.get("reference_profile")
-    if isinstance(profile, dict) and profile.get("refused"):
-        # Already judged unreadable on its way here (a promotion's sample artifact, ADR-0040 dec 4).
-        payload["reference_profile"] = drift.refused_baseline(str(profile["refused"]))
+    if sample_refusal:
+        # What a promotion found unreadable in the run's sample artifact (ADR-0040 dec 4).
+        payload["reference_profile"] = drift.refused_baseline(sample_refusal)
     elif profile:
         reason = (drift.supplied_scores_refusal(profile) if isinstance(profile, dict) else None) \
             or drift.sample_refusal(profile, base_sensors)
@@ -474,7 +475,8 @@ async def _bind_inputs_and_baseline(payload: Dict[str, Any], company_id: str, re
     return drift.baseline_state(payload.get("reference_profile"))
 
 
-async def register_model(payload: Dict[str, Any], company_id: str, repository) -> Dict[str, Any]:
+async def register_model(payload: Dict[str, Any], company_id: str, repository, *,
+                         sample_refusal: Optional[str] = None) -> Dict[str, Any]:
     """The registration gate (ADR-0027 dec 5), for every path that creates a platform model: the
     registration request and the promotion of a notebook-registered version (ADR-0040 dec 2)."""
 
@@ -563,7 +565,7 @@ async def register_model(payload: Dict[str, Any], company_id: str, repository) -
     # on what an output means (ADR-0028 dec 1). A second copy could only drift from it.
     payload.pop("score_semantics", None)
 
-    baseline = await _bind_inputs_and_baseline(payload, company_id, repository)
+    baseline = await _bind_inputs_and_baseline(payload, company_id, repository, sample_refusal)
 
     # Create model in database
     try:
@@ -793,6 +795,8 @@ async def deploy_model(
                     "error": result.error,
                 })
             logger.info(f"Uploaded model '{model_label}' loaded and scored in this environment")
+        elif sample_plan and sample_plan.reason:
+            derived_profile = sample_plan.finish(None, None)
         elif sample_plan:
             try:
                 loaded = await load_model_or_refuse(company_id, model_data)
@@ -801,6 +805,12 @@ async def deploy_model(
                     raise
                 # It cannot be loaded here, so it cannot serve here.
                 raise HTTPException(status_code=409, detail=exc.detail) from exc
+            except Exception as exc:  # noqa: BLE001 — any load failure is the same answer
+                logger.warning(f"Refusing to deploy '{model_label}': it does not load here: {exc}")
+                raise HTTPException(status_code=409, detail={
+                    "message": "This model does not load in this serving environment, so it will not be deployed.",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }) from exc
             _, detector_fn = detector_for(model_data)
             derived_profile = await baseline_gate.score_in_process(sample_plan, loaded, detector_fn)
 

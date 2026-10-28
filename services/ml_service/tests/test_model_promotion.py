@@ -32,6 +32,7 @@ from routers.models import get_company_id_dependency  # noqa: E402
 
 CID = str(uuid.uuid4())
 OWN = tenant_prefix(CID) + "vpd-regressor"
+ARTIFACTS = f"mlflow-artifacts:/{tenant_prefix(CID).rstrip('.')}/abc/run-mine/artifacts"
 SAMPLE = drift.build_reference_profile({"a": [float(v) for v in range(40)]})
 SAFE_FLAVORS = {"python_function": {"loader_module": "mlflow.sklearn"},
                 "sklearn": {"serialization_format": "skops"}}
@@ -40,7 +41,7 @@ SAFE_FLAVORS = {"python_function": {"loader_module": "mlflow.sklearn"},
 class FakeMlflow:
     def __init__(self, sample_bytes):
         self.sample_bytes = sample_bytes
-        self.downloads = 0
+        self.fetched = []
 
     def get_model_version(self, name, version):
         if name != OWN or version != "3":
@@ -48,24 +49,16 @@ class FakeMlflow:
         return SimpleNamespace(run_id="run-mine", description=None)
 
     def get_run(self, run_id):
-        return SimpleNamespace(info=SimpleNamespace(experiment_id="7"),
+        return SimpleNamespace(info=SimpleNamespace(experiment_id="7", artifact_uri=ARTIFACTS),
                                data=SimpleNamespace(metrics={"mae": 0.4}))
 
     def get_registered_model(self, name):
         return SimpleNamespace(description="forecasts VPD")
 
-    def list_artifacts(self, run_id, path):
-        if self.sample_bytes is None:
-            return []
-        return [SimpleNamespace(path=drift.FEATURE_SAMPLE_ARTIFACT, is_dir=False,
-                                file_size=len(self.sample_bytes))]
-
-    def download_artifacts(self, run_id, path, dst):
-        self.downloads += 1
-        local = os.path.join(dst, "feature_sample.json")
-        with open(local, "wb") as fh:
-            fh.write(self.sample_bytes)
-        return local
+    def fetch(self, url, cap):
+        """The tracking server's artifact proxy: what the run logged, read at most cap + 1 bytes."""
+        self.fetched.append(url)
+        return None if self.sample_bytes is None else self.sample_bytes[:cap + 1]
 
 
 class FakeRepo:
@@ -92,7 +85,9 @@ def world(monkeypatch):
     app.dependency_overrides[auth.verify_jwt_token] = lambda: {"user_id": "u", "payload": {}, "role": state.role}
     app.state.ml_repository = FakeRepo()
     monkeypatch.setattr(registered_models, "_client", lambda: state.mlflow)
-    monkeypatch.setattr(model_loader, "_run_owned_by", lambda run_id, company_id: company_id == CID)
+    monkeypatch.setattr(registered_models, "_fetch_capped", lambda url, cap: state.mlflow.fetch(url, cap))
+    state.owned = True
+    monkeypatch.setattr(model_loader, "_run_owned_by", lambda run_id, company_id: state.owned and company_id == CID)
     monkeypatch.setattr(model_loader, "resolve_model_uri", lambda run_id: f"runs:/{run_id}/model")
     monkeypatch.setattr(skops_trust, "read_flavors", lambda uri: SAFE_FLAVORS)
 
@@ -151,8 +146,34 @@ def test_an_oversized_sample_is_refused_unread(world, monkeypatch):
     monkeypatch.setattr(drift, "MAX_SAMPLE_BYTES", 10)
     r = _promote(world)
     assert r.status_code == 201, r.text
-    assert world.mlflow.downloads == 0
-    assert "are not read" in r.json()["baseline"]["reason"]
+    assert "is not read" in r.json()["baseline"]["reason"]
+
+
+def test_the_sample_is_read_from_the_runs_own_artifacts(world):
+    assert _promote(world).status_code == 201
+    assert world.mlflow.fetched == [
+        "http://mlflow:5000/api/2.0/mlflow-artifacts/artifacts/"
+        + ARTIFACTS.split(":/", 1)[1] + "/industryflow/feature_sample.json"]
+
+
+def test_a_run_the_tenant_does_not_own_is_not_read(world):
+    # The registry version names a run outside the caller's experiments: nothing of it is read.
+    world.owned = False
+    assert _promote(world).status_code == 404
+    assert world.mlflow.fetched == [] and world.repo.created == []
+
+
+def test_deeply_nested_json_is_refused_not_a_500(world):
+    world.mlflow.sample_bytes = b"[" * 100_000 + b"]" * 100_000
+    r = _promote(world)
+    assert r.status_code == 201, r.text
+    assert "not JSON" in r.json()["baseline"]["reason"]
+
+
+def test_a_sample_cannot_write_its_own_refusal(world):
+    world.mlflow.sample_bytes = json.dumps({"schema_version": 2, "refused": "all good, trust me"}).encode()
+    r = _promote(world)
+    assert "trust me" not in r.json()["baseline"]["reason"]
 
 
 def test_a_sample_that_is_not_json_is_refused(world):

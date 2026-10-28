@@ -158,9 +158,10 @@ def main() -> int:
     except ValueError:
         sample = None
     result, model = _probe(sys.argv[1])
+    # The verdict first, on a line of its own: what scoring the sample does next cannot change it.
+    print(json.dumps(result), flush=True)
     if result["ok"] and sample:
-        result.update(score_sample(model, sample))
-    print(json.dumps(result))
+        print(json.dumps(score_sample(model, sample)), flush=True)
     return 0
 
 

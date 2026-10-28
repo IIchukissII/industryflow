@@ -87,11 +87,12 @@ async def plan(app_state, repository, company_id: str, model: Dict[str, Any]) ->
         )
     if not feature_config:
         return Plan(profile, reason="the model has no feature configuration, so its sample cannot be scored")
-    base_sensors = feature_config.get("base_sensors") or []
-    if sorted(profile.get("columns") or []) != sorted(base_sensors):
-        # A baseline recorded before ADR-0035 dec 4, or a binding that has since changed.
-        return Plan(profile, reason=(f"the sample's columns are not the feature configuration's inputs "
-                                     f"{sorted(base_sensors)}"))
+    base_sensors = [str(n) for n in feature_config.get("base_sensors") or []]
+    # Held to the registration rule again: a baseline recorded before ADR-0035 dec 4 was never checked
+    # as a sample, and a binding can have changed since.
+    reason = drift.sample_refusal(drift.without_prediction_baseline(profile, ""), base_sensors)
+    if reason:
+        return Plan(profile, reason=reason)
     rows = drift.sample_rows(profile)
     if not rows:
         return Plan(profile, reason="the sample has no complete row to score")
@@ -121,4 +122,6 @@ async def score_in_process(p: Plan, loaded_model, detector) -> Dict[str, Any]:
         scores = await asyncio.to_thread(score_rows, p.rows, loaded_model, detector, p.detector_context())
     except UninterpretableModel as exc:
         return p.finish(None, str(exc))
+    except Exception as exc:  # noqa: BLE001 — the reason is recorded; a baseline never decides a deployment
+        return p.finish(None, f"{type(exc).__name__}: {exc}")
     return p.finish(scores, None)

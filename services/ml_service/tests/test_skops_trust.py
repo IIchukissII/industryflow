@@ -251,7 +251,9 @@ def _probe_with_sample(path, sample):
         [sys.executable, str(load_probe._WORKER), path], input=json.dumps(sample),
         capture_output=True, text=True, timeout=120, env=load_probe._worker_env(), cwd=str(API),
     )
-    return json.loads(proc.stdout.strip().splitlines()[-1])
+    verdict, *rest = [json.loads(line) for line in proc.stdout.strip().splitlines()]
+    assert "ok" in verdict, "the verdict is printed before the sample is scored"
+    return {**verdict, **(rest[0] if rest else {})}
 
 
 def test_the_probe_scores_a_feature_sample_in_its_own_load(tmp_path):

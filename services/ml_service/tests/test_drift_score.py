@@ -110,3 +110,16 @@ def test_is_drifted_direction_by_method():
     assert _is_drifted("Wasserstein distance (normed)", 0.30, 0.1) is True
     assert _is_drifted("Wasserstein distance (normed)", 0.05, 0.1) is False
     assert _is_drifted("K-S p_value", None, 0.05) is None
+
+
+def test_derived_scores_shorter_than_the_sample_still_compare():
+    # A null in the sample drops its row from scoring, so the derived scores are fewer than the feature
+    # values. Both drifts must still be computed, not the whole evaluation lost as "unavailable".
+    rng = np.random.default_rng(11)
+    a = rng.normal(size=N).tolist()
+    a[3] = None
+    prof = _profile({"a": a}, prediction=rng.uniform(0, 0.2, size=N - 1).tolist())
+    res = compute_drift(prof, {"a": rng.normal(size=N).tolist()},
+                        current_predictions=rng.uniform(0.7, 1.0, size=N).tolist())
+    assert res["status"] == "ok", res
+    assert res["prediction_drift"]["drifted"] is True

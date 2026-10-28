@@ -434,3 +434,35 @@ def test_an_upload_the_probe_refuses_records_no_baseline(client, monkeypatch):
     row = _kernel_row(mlflow_run_id=None, artifact_uri=ADMITTED, provenance="uploaded")
     assert _deploy(client, row).status_code == 409
     assert client.repo.profiles == [] and client.repo.status_updates == []
+
+
+def test_any_scoring_failure_leaves_data_drift_only(client, monkeypatch):
+    def wrong_width(_):
+        raise ValueError("X has 1 features, but the model expects 4")
+
+    _scoring(monkeypatch, wrong_width)
+    assert _deploy(client, _kernel_row()).status_code == 200
+    assert "expects 4" in client.repo.profiles[-1]["prediction_baseline"]["reason"]
+
+
+def test_a_load_that_fails_outright_is_a_refusal_not_a_500(client, monkeypatch):
+    async def broken(company_id, model):
+        raise OSError("object store reset the connection")
+
+    monkeypatch.setattr(models_router, "load_model_or_refuse", broken)
+    r = _deploy(client, _kernel_row())
+    assert r.status_code == 409 and "object store" in r.json()["detail"]["error"]
+
+
+def test_a_stored_sample_that_is_not_one_is_not_loaded_for(client, monkeypatch):
+    # A baseline recorded before ADR-0035 dec 4 was never held to the sample rule.
+    loads = []
+
+    async def load(company_id, model):
+        loads.append(model)
+
+    monkeypatch.setattr(models_router, "load_model_or_refuse", load)
+    legacy = {**SAMPLE, "sample": {"a": [1.0, "x"]}}
+    assert _deploy(client, _kernel_row(reference_profile=legacy)).status_code == 200
+    assert loads == []
+    assert "not a number" in client.repo.profiles[-1]["prediction_baseline"]["reason"]

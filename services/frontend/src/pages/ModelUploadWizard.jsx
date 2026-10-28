@@ -381,7 +381,11 @@ function ModelUploadWizard({ onClose, onRegistered }) {
                         key={fc.id}
                         type="button"
                         className={`uw-sem-opt${meta.featureConfig === fc.id ? ' on' : ''}`}
-                        onClick={() => setMeta({ ...meta, featureConfig: meta.featureConfig === fc.id ? '' : fc.id })}
+                        onClick={() => {
+                          // The sample is checked against the chosen config; a different choice drops it.
+                          setSample(null);
+                          setMeta({ ...meta, featureConfig: meta.featureConfig === fc.id ? '' : fc.id, equipmentId: '' });
+                        }}
                         aria-pressed={meta.featureConfig === fc.id}
                       >
                         <span className="uw-fc-name">{fc.name} <span className="uw-fc-eq mono">{fc.equipment_type}</span></span>

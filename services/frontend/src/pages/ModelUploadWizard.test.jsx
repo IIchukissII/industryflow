@@ -119,4 +119,13 @@ describe('model upload wizard registration', () => {
     expect(await screen.findByText(/This file is not JSON/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Upload & register/ })).toBeDisabled();
   });
+
+  test('deselecting the feature config drops the sample and its error', async () => {
+    await declare();
+    fireEvent.click(await screen.findByRole('button', { name: /pump-vibration/ }));
+    fireEvent.change(await screen.findByLabelText('Feature sample'), { target: { files: [new File(['x'], 'x.json')] } });
+    await screen.findByText(/This file is not JSON/);
+    fireEvent.click(screen.getByRole('button', { name: /pump-vibration/ }));
+    expect(screen.getByRole('button', { name: /Upload & register/ })).toBeEnabled();
+  });
 });

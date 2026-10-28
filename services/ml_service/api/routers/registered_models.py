@@ -24,8 +24,10 @@ import asyncio
 import json
 import logging
 import os
-import tempfile
-from typing import Any, Dict, List, Optional
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
@@ -35,6 +37,7 @@ from mlflow.exceptions import MlflowException
 
 import auth
 import drift
+import model_loader
 from mlflow_namespace import is_safe_name, pick_latest, shape_summary, tenant_prefix
 from routers.models import ModelCreateRequest, get_company_id_dependency, register_model
 
@@ -89,27 +92,38 @@ class PromoteRequest(BaseModel):
     model_type: str = "anomaly_detection"
 
 
-def _read_sample(client: MlflowClient, run_id: str) -> Optional[Dict[str, Any]]:
-    """The feature sample the run logged (ADR-0040 dec 4): the parsed JSON, None when it logged none,
-    or ``{"refused": reason}`` when it cannot be read as one. Its size is checked before it is read."""
-    folder, _, _ = drift.FEATURE_SAMPLE_ARTIFACT.rpartition("/")
-    entry = next((a for a in client.list_artifacts(run_id, folder)
-                  if a.path == drift.FEATURE_SAMPLE_ARTIFACT and not a.is_dir), None)
-    if entry is None:
-        return None
-    if entry.file_size is None or entry.file_size > drift.MAX_SAMPLE_BYTES:
-        return {"refused": (f"the run's feature sample is {entry.file_size} bytes; samples over "
-                            f"{drift.MAX_SAMPLE_BYTES} bytes are not read")}
-    with tempfile.TemporaryDirectory(prefix="sample-") as tmp:
-        local = client.download_artifacts(run_id, drift.FEATURE_SAMPLE_ARTIFACT, tmp)
-        if os.path.getsize(local) > drift.MAX_SAMPLE_BYTES:
-            return {"refused": "the run's feature sample is larger than it was listed"}
-        try:
-            with open(local, encoding="utf-8") as fh:
-                sample = json.load(fh)
-        except (ValueError, UnicodeDecodeError) as exc:
-            return {"refused": f"the run's feature sample is not JSON: {exc}"}
-    return sample if isinstance(sample, dict) else {"refused": "the run's feature sample is not an object"}
+def _fetch_capped(url: str, cap: int) -> Optional[bytes]:
+    """The object at ``url`` on the tracking server, or None if there is none; at most ``cap + 1``
+    bytes are read, so an object larger than the cap is never held whole."""
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310 — the platform's own tracking server
+            return resp.read(cap + 1)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
+def _read_sample(run_artifact_uri: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """The feature sample the run logged (ADR-0040 dec 4), as ``(sample, None)``; ``(None, None)`` when
+    it logged none; ``(None, reason)`` when what it logged cannot be read as one. Read through the
+    tracking server's artifact proxy, within the size bound."""
+    parsed = urllib.parse.urlparse(run_artifact_uri or "")
+    if parsed.scheme != "mlflow-artifacts":
+        return None, "the run's artifacts are not stored where the platform reads a sample from"
+    path = urllib.parse.quote(f"{parsed.path.strip('/')}/{drift.FEATURE_SAMPLE_ARTIFACT}")
+    body = _fetch_capped(f"{MLFLOW_TRACKING_URI}/api/2.0/mlflow-artifacts/artifacts/{path}", drift.MAX_SAMPLE_BYTES)
+    if body is None:
+        return None, None
+    if len(body) > drift.MAX_SAMPLE_BYTES:
+        return None, f"the run's feature sample is larger than {drift.MAX_SAMPLE_BYTES} bytes and is not read"
+    try:
+        sample = json.loads(body)
+    except (ValueError, UnicodeDecodeError, RecursionError) as exc:
+        return None, f"the run's feature sample is not JSON: {type(exc).__name__}"
+    if not isinstance(sample, dict):
+        return None, "the run's feature sample is not an object"
+    return sample, None
 
 
 @router.get("")
@@ -252,19 +266,25 @@ async def promote_model_version(
             return None
         if not mv.run_id:
             return {"run_id": None}
+        # The run is held to the tenant before anything of it is read (ADR-0039).
+        model_loader.check_admissible(company_id=company_id, mlflow_run_id=mv.run_id, artifact_uri=None)
         run = client.get_run(mv.run_id)
         model = client.get_registered_model(qualified)
+        sample, refusal = _read_sample(run.info.artifact_uri)
         return {
             "run_id": mv.run_id,
             "experiment_id": run.info.experiment_id,
             "metrics": dict(run.data.metrics),
             "description": mv.description or model.description or None,
-            "sample": _read_sample(client, mv.run_id),
+            "sample": sample,
+            "sample_refusal": refusal,
         }
 
     try:
         found = await asyncio.to_thread(_work)
-    except MlflowException as e:
+    except model_loader.ModelNotAdmissible:
+        found = None
+    except (MlflowException, model_loader.TrackingStoreUnavailable, OSError) as e:
         logger.warning("promotion read failed: %s", e)
         raise HTTPException(status_code=502, detail="MLflow registry unavailable")
     if found is None:
@@ -289,4 +309,5 @@ async def promote_model_version(
     ).model_dump()
     # The sample is the run's, read as data (ADR-0040 dec 4); the request model does not shape it.
     payload["reference_profile"] = found["sample"]
-    return await register_model(payload, company_id, request.app.state.ml_repository)
+    return await register_model(payload, company_id, request.app.state.ml_repository,
+                                sample_refusal=found["sample_refusal"])

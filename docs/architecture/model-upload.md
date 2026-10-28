@@ -75,6 +75,8 @@ interpreter settings and the object-store credential.
 |---|---|---|
 | `PUBLIC_BASE_URL` (Compose; `ml-service-api`, tracking gateway) | empty | Public edge origin. Set: pre-signed PUTs are signed for the edge (`TRACKING_S3_PRESIGN_ENDPOINT_URL`) and advertised as the upload endpoint (`UPLOAD_GATEWAY_URL`). Empty: interior endpoint only; the wizard reports browser upload as not configured |
 | `UPLOAD_ARTIFACT_BUCKET` (`ml-service-api`) | `mlflow` (Compose) | Unset: no uploaded model can be registered or served |
+| `UPLOAD_PROBE_TIMEOUT_SECONDS` (`ml-service-api`) | `120` | Load-and-score probe at deploy; longer is a refusal, stage `timeout` |
+| `UPLOAD_PROBE_SAMPLE_TIMEOUT_SECONDS` (`ml-service-api`) | `300` | Scoring the feature sample after the probe's verdict; longer leaves the model without prediction drift, not refused |
 | `UPLOAD_STAGING_EXPIRE_DAYS` (`minio-init`); Helm `notebookHub.trackingGateway.uploadStaging.expireDays` | 1 | Lifecycle expiry for staged, never-committed uploads. With bucket lifecycle managed elsewhere, the expiry must be set there |
 
 Pre-signed URL lifetime: [tracking gateway settings](../../services/notebook_tracking_gateway/README.md#settings).
