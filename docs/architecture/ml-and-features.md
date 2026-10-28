@@ -62,6 +62,7 @@ has role `engineer` or `admin`, or is a superuser, else **403**
 | POST | `/api/models/upload-capability` | writer | Demand-mint an upload capability handle ([model upload](model-upload.md)) |
 | GET | `/api/registered-models`, `/api/registered-models/{name}` | token | Tenant-scoped MLflow registry read |
 | PATCH | `/api/registered-models/{name}` | writer | Edit the description |
+| POST | `/api/registered-models/{name}/versions/{version}/promote` | writer | Make a notebook-registered version a platform model ([promotion](#promotion)) |
 | GET | `/api/experiments`, `/api/experiments/{name}/runs` | token | Tenant-scoped experiment read |
 | GET | `/api/ml/capabilities` | none | Servable flavors and detectors, discovered from the registry |
 | POST | `/api/inference/predict` | token or internal | Score a reading |
@@ -105,7 +106,8 @@ the gate; serving them in a separate runtime from an ONNX export is accepted but
 | Column | Meaning |
 |---|---|
 | `feature_config_id` | Feature config for inference |
-| `reference_profile` (JSONB) | Drift baseline; absent → drift unavailable |
+| `reference_profile` (JSONB) | Drift baseline: the feature sample, the derived scores, and the baseline's state ([drift](#drift-post-apidriftevaluate)) |
+| `sensor_ids` | The equipment's sensors of the feature config's base sensors, resolved at registration; drift reads its window from them |
 | `compatibility_status`, `compatibility_detail`, `compatibility_checked_at` | Training vs serving environment verdict, set at registration and deployment; null = never evaluated |
 | `provenance`, `artifact_uri` | Kernel-trained (by run) or uploaded (by admitted location) |
 | `detector` | Detector for serving |
@@ -132,12 +134,47 @@ registration (422), deployment (409) and every load
 
 | Item | Detail |
 |---|---|
-| Baseline | `ml_models.reference_profile`, supplied in the registration request (format: `drift/reference_profile.py`); no notebook-side helper emits it ([ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md)) |
-| Current window | Trailing window of the tenant's data, aligned to instants where every compared sensor reported |
+| Feature sample | Supplied at registration: `reference_profile` in `POST /api/models` (the upload wizard's sample file), or the run's `industryflow/feature_sample.json` at promotion; format `drift/reference_profile.py` |
+| Accepted when | Its columns are exactly the bound feature config's base sensors and it carries no scores; otherwise the model registers without a baseline and `baseline.reason` says why ([ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md)) |
+| Prediction scores | Derived at every deployment to `production`/`active`: each complete sample row through the feature config and the model's detector, in the probe's load for an upload and serving's load otherwise |
+| Detector cannot score the sample | Deployment proceeds; data drift only, with the reason |
+| Current window | Trailing window of the model's `sensor_ids`, aligned to instants where every compared sensor reported |
 | Engine | `evidently` |
-| Output | Data drift (drifted-feature share) and prediction drift; `prediction_drift_reason` when prediction drift cannot be computed |
-| Prediction column | Supplied with the sample; must hold 0–1 detector scores, anything else is refused at registration |
-| Not built ([ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md)) | Scores derived from the sample through the declared detector at the deployment gate; the sample checked against the bound feature configuration; a sample in the upload wizard |
+| Output | Data drift (drifted-feature share), prediction drift, `prediction_drift_reason` when prediction drift cannot be computed, `baseline` |
 | Caller | `alert-service-detector` `statistical` rules ([alerting](alerting.md)) |
+
+`baseline` on `GET /api/models`, `GET /api/models/{id}`, registration and promotion:
+
+| Field | Meaning |
+|---|---|
+| `data_drift` | `false`: no accepted sample, not monitored |
+| `prediction` | `derived` (scores from the last deployment), `supplied` (scores from before ADR-0035, replaced at the next deployment) or `null` |
+| `reason` | Why monitoring is less than data and prediction drift |
+
+## Promotion
+
+`POST /api/registered-models/{name}/versions/{version}/promote` registers a notebook-registered version as
+a platform model ([ADR-0040](../../ADR/ADR-0040-notebook-model-promotion.md)). The Models page offers it per
+version.
+
+| Body field | Default | Meaning |
+|---|---|---|
+| `feature_config_id` | required | The model's inputs |
+| `equipment_id` | none | Equipment whose sensors drift reads; every base sensor must exist on it |
+| `detector` | `sklearn` | What the output means ([ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md)) |
+| `model_type` | `anomaly_detection` | Free-text type |
+
+| Taken from the registry | Into |
+|---|---|
+| Version's run | `mlflow_run_id` (provenance `kernel`), `mlflow_experiment_id`, run metrics as `training_metrics` |
+| Version or model description | `description` |
+| Run artifact `industryflow/feature_sample.json`, at most 16 MiB | `reference_profile` |
+
+| Response | Cause |
+|---|---|
+| 201 | Registered; `baseline` states what drift monitoring it gets |
+| 404 | No such version in the caller's tenant, or its run is not one of the tenant's |
+| 409 | That name and version is already a platform model |
+| 422 | The registration gate refused it, an unknown feature config, or a base sensor missing on the equipment |
 
 Model training is manual, in notebooks ([notebooks](notebooks.md)); no training service exists.

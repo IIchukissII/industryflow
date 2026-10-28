@@ -145,3 +145,34 @@ def test_the_worker_refuses_being_called_without_a_uri():
     proc = subprocess.run([sys.executable, str(load_probe._WORKER)],
                           capture_output=True, text=True, timeout=60)
     assert json.loads(proc.stdout.strip())["ok"] is False
+
+
+# --- the sample never decides the verdict (ADR-0035 dec 5) ----------------------------------------
+
+def test_a_sample_that_stalls_after_a_good_load_is_not_a_refusal(monkeypatch):
+    def stall(*a, **kw):
+        raise subprocess.TimeoutExpired(cmd="worker", timeout=1,
+                                        output=b'{"ok": true, "stage": "score"}\n')
+    monkeypatch.setattr(load_probe.subprocess, "run", stall)
+    result = load_probe._run("models:/m", {"detector": "sklearn", "rows": [[1.0]]})
+    assert result.ok and result.scores is None
+    assert "did not finish" in result.sample_error
+
+
+def test_a_crash_while_scoring_after_a_good_load_is_not_a_refusal(monkeypatch):
+    _run_returns(monkeypatch, stdout='{"ok": true, "stage": "score"}\n', returncode=-9, stderr="Killed")
+    result = load_probe._run("models:/m", {"detector": "sklearn", "rows": [[1.0]]})
+    assert result.ok and "ended without a result" in result.sample_error
+
+
+def test_a_stall_before_any_verdict_is_still_a_refusal(monkeypatch):
+    def stall(*a, **kw):
+        raise subprocess.TimeoutExpired(cmd="worker", timeout=1, output=b"")
+    monkeypatch.setattr(load_probe.subprocess, "run", stall)
+    result = load_probe._run("models:/m", {"detector": "sklearn", "rows": [[1.0]]})
+    assert result.refused and result.stage == "timeout"
+
+
+def test_the_sample_line_carries_the_scores(monkeypatch):
+    _run_returns(monkeypatch, stdout='{"ok": true, "stage": "score"}\n{"scores": [0.1, 0.2]}\n')
+    assert load_probe._run("models:/m", {"rows": [[1.0], [2.0]]}).scores == [0.1, 0.2]

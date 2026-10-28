@@ -54,7 +54,7 @@ The hub sends `Content-Security-Policy: frame-ancestors 'self'`.
 | `notebook-sql-proxy` | SQL proxy (Postgres wire) | 6432 | [SQL proxy](../../services/notebook_sql_proxy/README.md) |
 | `notebook-tracking-gateway` | Tracking gateway (MLflow, per-route tenant rules); upload stage and commit | 5050 | [tracking gateway](../../services/notebook_tracking_gateway/README.md) |
 | `notebook-cold-broker` | Cold-store broker: pre-signed GETs for the tenant's cold prefix | 5060 | `services/notebook_cold_broker/` |
-| Python client | `IndustryFlowClient`, `IndustryFlowSQL`, `IndustryFlowCold`, `SKOPS_TRUSTED_TYPES` | | [Python client](../../clients/python/README.md) |
+| Python client | `IndustryFlowClient`, `IndustryFlowSQL`, `IndustryFlowCold`, `SKOPS_TRUSTED_TYPES`, `log_feature_sample` | | [Python client](../../clients/python/README.md) |
 
 ## Profiles
 
@@ -109,6 +109,16 @@ raise.
 | Tracking | Tracking gateway | [endpoints and rules](../../services/notebook_tracking_gateway/README.md#endpoints) |
 | Cold history | Cold-store broker | [cold layer](data-and-storage.md#cold-layer) |
 | Model upload | `ml-service-api`, tracking gateway | [model upload](model-upload.md) |
+
+A model a kernel registers is not served until a user with a writing role promotes a version from the
+Models page ([promotion](ml-and-features.md#promotion)). Its drift baseline is the feature sample logged
+in the same run:
+
+```python
+with mlflow.start_run():
+    mlflow.sklearn.log_model(model, name="model", registered_model_name="vpd-regressor")
+    industryflow.log_feature_sample(train[["temp", "humidity"]])  # columns = the feature config's base sensors
+```
 
 Experiments recorded at `mlflow-artifacts:/<id>` (created before the tracking gateway set the
 location) are rewritten by:

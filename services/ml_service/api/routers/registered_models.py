@@ -21,19 +21,25 @@ helpers (``tenant_prefix`` / ``strip_owned`` / ``pick_latest`` / ``shape_summary
 tenant rule and are unit-tested without a live MLflow.
 """
 import asyncio
+import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from mlflow.tracking import MlflowClient
 from mlflow.exceptions import MlflowException
 
 import auth
+import drift
+import model_loader
 from mlflow_namespace import is_safe_name, pick_latest, shape_summary, tenant_prefix
-from routers.models import get_company_id_dependency
+from routers.models import ModelCreateRequest, get_company_id_dependency, register_model
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +80,50 @@ def _run_metrics(client: MlflowClient, run_id: Optional[str]) -> Dict[str, float
 
 class DescriptionUpdate(BaseModel):
     description: str
+
+
+class PromoteRequest(BaseModel):
+    """What the promoting user decides (ADR-0040 dec 3): the model's inputs and what its output means."""
+    model_config = ConfigDict(protected_namespaces=())
+
+    feature_config_id: str
+    equipment_id: Optional[str] = None
+    detector: Optional[str] = None
+    model_type: str = "anomaly_detection"
+
+
+def _fetch_capped(url: str, cap: int) -> Optional[bytes]:
+    """The object at ``url`` on the tracking server, or None if there is none; at most ``cap + 1``
+    bytes are read, so an object larger than the cap is never held whole."""
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310 — the platform's own tracking server
+            return resp.read(cap + 1)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
+def _read_sample(run_artifact_uri: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """The feature sample the run logged (ADR-0040 dec 4), as ``(sample, None)``; ``(None, None)`` when
+    it logged none; ``(None, reason)`` when what it logged cannot be read as one. Read through the
+    tracking server's artifact proxy, within the size bound."""
+    parsed = urllib.parse.urlparse(run_artifact_uri or "")
+    if parsed.scheme != "mlflow-artifacts":
+        return None, "the run's artifacts are not stored where the platform reads a sample from"
+    path = urllib.parse.quote(f"{parsed.path.strip('/')}/{drift.FEATURE_SAMPLE_ARTIFACT}")
+    body = _fetch_capped(f"{MLFLOW_TRACKING_URI}/api/2.0/mlflow-artifacts/artifacts/{path}", drift.MAX_SAMPLE_BYTES)
+    if body is None:
+        return None, None
+    if len(body) > drift.MAX_SAMPLE_BYTES:
+        return None, f"the run's feature sample is larger than {drift.MAX_SAMPLE_BYTES} bytes and is not read"
+    try:
+        sample = json.loads(body)
+    except (ValueError, UnicodeDecodeError, RecursionError) as exc:
+        return None, f"the run's feature sample is not JSON: {type(exc).__name__}"
+    if not isinstance(sample, dict):
+        return None, "the run's feature sample is not an object"
+    return sample, None
 
 
 @router.get("")
@@ -190,3 +240,74 @@ async def update_registered_model_description(
     except MlflowException:
         raise HTTPException(status_code=404, detail="Model not found")
     return {"name": name, "description": body.description}
+
+
+@router.post("/{name}/versions/{version}/promote", status_code=201,
+             dependencies=[Depends(auth.require_writer)])
+async def promote_model_version(
+    name: str,
+    version: str,
+    body: PromoteRequest,
+    request: Request,
+    company_id: str = Depends(get_company_id_dependency),
+):
+    """Make a notebook-registered version a platform model (ADR-0040): the registration gate, on the
+    version's run, with the sample the run logged and the inputs and detector the user chose."""
+    _reject_unsafe_name(name)
+    if not version.isdigit():
+        raise HTTPException(status_code=400, detail="invalid model version")
+    qualified = tenant_prefix(company_id) + name
+
+    def _work() -> Optional[Dict[str, Any]]:
+        client = _client()
+        try:
+            mv = client.get_model_version(qualified, version)
+        except MlflowException:
+            return None
+        if not mv.run_id:
+            return {"run_id": None}
+        # The run is held to the tenant before anything of it is read (ADR-0039).
+        model_loader.check_admissible(company_id=company_id, mlflow_run_id=mv.run_id, artifact_uri=None)
+        run = client.get_run(mv.run_id)
+        model = client.get_registered_model(qualified)
+        sample, refusal = _read_sample(run.info.artifact_uri)
+        return {
+            "run_id": mv.run_id,
+            "experiment_id": run.info.experiment_id,
+            "metrics": dict(run.data.metrics),
+            "description": mv.description or model.description or None,
+            "sample": sample,
+            "sample_refusal": refusal,
+        }
+
+    try:
+        found = await asyncio.to_thread(_work)
+    except model_loader.ModelNotAdmissible:
+        found = None
+    except (MlflowException, model_loader.TrackingStoreUnavailable, OSError) as e:
+        logger.warning("promotion read failed: %s", e)
+        raise HTTPException(status_code=502, detail="MLflow registry unavailable")
+    if found is None:
+        raise HTTPException(status_code=404, detail="Model version not found")
+    if not found["run_id"]:
+        raise HTTPException(status_code=422, detail=(
+            "This version records no run, so nothing establishes where it came from (ADR-0030 dec 8)."
+        ))
+
+    # The same shape a registration request has, so the gate and the write path see one form.
+    payload = ModelCreateRequest(
+        model_name=name,
+        model_version=version,
+        model_type=body.model_type,
+        description=found["description"],
+        mlflow_run_id=found["run_id"],
+        mlflow_experiment_id=found["experiment_id"],
+        training_metrics=found["metrics"] or None,
+        feature_config_id=body.feature_config_id,
+        equipment_id=body.equipment_id,
+        detector=body.detector,
+    ).model_dump()
+    # The sample is the run's, read as data (ADR-0040 dec 4); the request model does not shape it.
+    payload["reference_profile"] = found["sample"]
+    return await register_model(payload, company_id, request.app.state.ml_repository,
+                                sample_refusal=found["sample_refusal"])

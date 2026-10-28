@@ -61,6 +61,9 @@ def _format_model_row(row: dict, company_id: str) -> Dict[str, Any]:
         'training_start_date': row.get('training_start_date'),
         'training_end_date': row.get('training_end_date'),
         'reference_profile': json.loads(row['reference_profile']) if isinstance(row.get('reference_profile'), str) else row.get('reference_profile'),
+        # The baseline without its sample: what the list read carries to say whether a model can be
+        # monitored (ADR-0035 dec 4), without moving every model's sample.
+        'baseline_summary': json.loads(row['baseline_summary']) if isinstance(row.get('baseline_summary'), str) else row.get('baseline_summary'),
         # ADR-0027. Absent from the list query's older callers, hence .get() — and None is a real
         # verdict ("never evaluated"), not a formatting artefact.
         'compatibility_status': row.get('compatibility_status'),
@@ -134,7 +137,8 @@ class MLRepository:
                     training_samples, training_start_date, training_end_date,
                     compatibility_status, compatibility_detail, compatibility_checked_at,
                     provenance, artifact_uri, detector,
-                    status, deployed_at, deprecated_at, created_at, updated_at
+                    status, deployed_at, deprecated_at, created_at, updated_at,
+                    reference_profile - 'sample' AS baseline_summary
                 FROM ml_models
             """
 
@@ -346,6 +350,38 @@ class MLRepository:
             )
 
             return result == "UPDATE 1"
+
+    async def update_model_reference_profile(
+        self,
+        company_id: str,
+        model_id: str,
+        profile: Dict[str, Any],
+    ) -> bool:
+        """Record the baseline the deployment gate derived (ADR-0035 dec 2, 3)."""
+
+        async with tenant_connection(self.pool, company_id) as conn:
+            result = await conn.execute(
+                "UPDATE ml_models SET reference_profile = $1 WHERE model_id = $2",
+                json.dumps(profile),
+                model_id,
+            )
+            return result == "UPDATE 1"
+
+    async def sensor_ids_by_name(
+        self,
+        company_id: str,
+        equipment_id: str,
+        names: List[str],
+    ) -> Dict[str, str]:
+        """The equipment's sensors with these names, name -> sensor_id; a name it lacks is absent."""
+
+        async with tenant_connection(self.pool, company_id) as conn:
+            rows = await conn.fetch(
+                "SELECT sensor_name, sensor_id FROM sensors WHERE equipment_id = $1 AND sensor_name = ANY($2::text[])",
+                equipment_id,
+                names,
+            )
+            return {r["sensor_name"]: str(r["sensor_id"]) for r in rows}
 
     async def update_model_compatibility(
         self,

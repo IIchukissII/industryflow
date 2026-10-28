@@ -22,7 +22,7 @@ session ─▶ ml-service-api              POST /api/models/upload-capability   
 client  ─▶ notebook-tracking-gateway   stage: one pre-signed PUT URL per file
 client  ─▶ object store                PUT into _upload-staging/<tenant>/<upload id>/
 client  ─▶ notebook-tracking-gateway   commit: judge each file's head; admit → copy to tenant_<uuid>/uploads/<upload id>/, refuse → delete
-client  ─▶ ml-service-api              POST /api/models (admitted artifact_uri, declared semantics, feature config)
+client  ─▶ ml-service-api              POST /api/models (admitted artifact_uri, declared semantics, feature config, equipment, feature sample)
 client  ─▶ ml-service-api              POST /api/models/{model_id}/deploy (load-and-score probe)
 alert worker ─▶ ml-service-api         POST /api/inference/predict (loaded from the admitted location)
 ```
@@ -75,6 +75,8 @@ interpreter settings and the object-store credential.
 |---|---|---|
 | `PUBLIC_BASE_URL` (Compose; `ml-service-api`, tracking gateway) | empty | Public edge origin. Set: pre-signed PUTs are signed for the edge (`TRACKING_S3_PRESIGN_ENDPOINT_URL`) and advertised as the upload endpoint (`UPLOAD_GATEWAY_URL`). Empty: interior endpoint only; the wizard reports browser upload as not configured |
 | `UPLOAD_ARTIFACT_BUCKET` (`ml-service-api`) | `mlflow` (Compose) | Unset: no uploaded model can be registered or served |
+| `UPLOAD_PROBE_TIMEOUT_SECONDS` (`ml-service-api`) | `120` | Load-and-score probe at deploy; longer is a refusal, stage `timeout` |
+| `UPLOAD_PROBE_SAMPLE_TIMEOUT_SECONDS` (`ml-service-api`) | `300` | Scoring the feature sample after the probe's verdict; longer leaves the model without prediction drift, not refused |
 | `UPLOAD_STAGING_EXPIRE_DAYS` (`minio-init`); Helm `notebookHub.trackingGateway.uploadStaging.expireDays` | 1 | Lifecycle expiry for staged, never-committed uploads. With bucket lifecycle managed elsewhere, the expiry must be set there |
 
 Pre-signed URL lifetime: [tracking gateway settings](../../services/notebook_tracking_gateway/README.md#settings).
@@ -89,6 +91,7 @@ Pre-signed URL lifetime: [tracking gateway settings](../../services/notebook_tra
 | Declared output semantics from the vocabulary in `GET /api/ml/capabilities` | register (422) |
 | Complete declared requirements | register (422) or deploy (409) |
 | A feature config (wizard field) | Stored, but not scorable; register a new version with one |
+| A feature sample and equipment (wizard fields, with a feature config) | Registered without a drift baseline; `baseline.reason` says why ([drift](ml-and-features.md#drift-post-apidriftevaluate)) |
 
 ## Refusals
 
@@ -119,6 +122,5 @@ Pre-signed URL lifetime: [tracking gateway settings](../../services/notebook_tra
 |---|---|
 | Torch and other flavors outside the supported set | Refused with a reason ([ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) dec 7) |
 | Uploaded tree-based sklearn models | Refused at deploy, stage `trust` ([ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) dec 13) |
-| Drift baseline for uploaded models | Not built ([ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md)) |
 | Attestation of origin | Not built |
 | Resumable or multipart transfer | Not built ([ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md) dec 10) |

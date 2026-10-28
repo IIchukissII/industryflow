@@ -20,6 +20,7 @@ profiles: [notebooks](../../docs/architecture/notebooks.md#kernel-environment). 
 | `IndustryFlowSQL`, `sql_query` | Read-only tenant SQL | SQL proxy, handle as the Postgres password | authoring |
 | `IndustryFlowCold`, `cold_read_all` | Cold-layer Parquet history | Cold-store broker, pre-signed object-store reads ([ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md)) | authoring |
 | `SKOPS_TRUSTED_TYPES` | Types to pass to `mlflow.sklearn.log_model` for tree-based models ([ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md)) | — | authoring |
+| `log_feature_sample`, `feature_sample` | The drift baseline's feature sample: logged into the active run as `industryflow/feature_sample.json`, or returned as a dict for the upload wizard ([ADR-0040](../../ADR/ADR-0040-notebook-model-promotion.md)) | MLflow run artifact | authoring |
 
 ## Read API
 

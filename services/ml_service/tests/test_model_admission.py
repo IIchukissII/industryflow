@@ -110,6 +110,7 @@ class FakeRepo:
         self.created = []
         self.row = row
         self.status_updates = []
+        self.profiles = []
 
     async def create_model(self, company_id, model_data):
         self.created.append((company_id, model_data))
@@ -118,7 +119,19 @@ class FakeRepo:
     async def get_model_by_id(self, company_id, model_id):
         return self.row
 
+    async def get_feature_config_by_id(self, company_id, config_id):
+        return {"id": config_id, "base_sensors": ["a"],
+                "transformations": [{"name": "a", "type": "identity", "sensor": "a"}]} \
+            if config_id == "fc1" else None
+
+    async def sensor_ids_by_name(self, company_id, equipment_id, names):
+        return {"a": "11111111-1111-1111-1111-111111111111"} if "a" in names else {}
+
     async def update_model_compatibility(self, **kw):
+        return True
+
+    async def update_model_reference_profile(self, company_id, model_id, profile):
+        self.profiles.append(profile)
         return True
 
     async def update_model_status(self, company_id, model_id, status):
@@ -218,21 +231,43 @@ def _profile(scores):
             "n_samples": len(scores), "sample": {"a": [1.0] * len(scores), "prediction_score": scores}}
 
 
-def test_a_reference_whose_predictions_are_not_detector_scores_is_refused(client):
-    """ADR-0021 dec 1: the prediction column is a baseline only on the detector's scale. A
-    column of labels is refused at registration, before anything is stored."""
-    r = client.post("/api/models", json=_body(mlflow_run_id="run-mine",
-                                              reference_profile=_profile([1, -1, 1, 1])))
-    assert r.status_code == 422, r.text
-    assert "declared scale" in r.json()["detail"]["message"]
-    assert client.repo.created == []
-
-
-def test_a_reference_of_detector_scores_is_registered(client):
-    r = client.post("/api/models", json=_body(mlflow_run_id="run-mine",
+def test_a_sample_carrying_scores_registers_the_model_without_a_baseline(client):
+    """ADR-0035 dec 2, 4: a supplied score column is not accepted, and a baseline is monitoring, not
+    admission — the model is registered, visibly without one."""
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-mine", feature_config_id="fc1",
                                               reference_profile=_profile([0.1, 0.0, 1.0, 0.4])))
     assert r.status_code == 201, r.text
-    assert client.repo.created[0][1]["reference_profile"]["prediction_column"] == "prediction_score"
+    assert "derives them" in r.json()["baseline"]["reason"]
+    assert "refused" in client.repo.created[0][1]["reference_profile"]
+
+
+def test_a_sample_of_the_bound_inputs_is_the_baseline(client):
+    sample = _profile([0.1, 0.0, 1.0, 0.4])
+    sample.update(prediction_column=None)
+    del sample["sample"]["prediction_score"]
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-mine", feature_config_id="fc1",
+                                              equipment_id="22222222-2222-2222-2222-222222222222",
+                                              reference_profile=sample))
+    assert r.status_code == 201, r.text
+    stored = client.repo.created[0][1]
+    assert stored["reference_profile"]["columns"] == ["a"] and "refused" not in stored["reference_profile"]
+    assert stored["sensor_ids"] == ["11111111-1111-1111-1111-111111111111"]
+    assert r.json()["baseline"]["data_drift"] is True
+
+
+def test_a_sample_of_other_inputs_registers_the_model_without_a_baseline(client):
+    sample = {"schema_version": 2, "method": "evidently_sample", "columns": ["b"], "prediction_column": None,
+              "n_training_rows": 2, "n_samples": 2, "sample": {"b": [1.0, 2.0]}}
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-mine", feature_config_id="fc1",
+                                              reference_profile=sample))
+    assert r.status_code == 201, r.text
+    assert "not the feature configuration's inputs" in r.json()["baseline"]["reason"]
+
+
+def test_an_unknown_feature_configuration_is_refused(client):
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-mine", feature_config_id="nope"))
+    assert r.status_code == 422, r.text
+    assert client.repo.created == []
 
 
 def test_a_tracking_store_that_does_not_answer_is_transient_not_a_verdict(client, monkeypatch):
@@ -269,7 +304,7 @@ def _deploy(client, row):
 def test_a_row_carrying_a_staged_artifact_is_not_deployed_or_probed(client, monkeypatch):
     probed = []
 
-    async def probe(uri):
+    async def probe(uri, sample=None):
         probed.append(uri)
         return load_probe.ProbeResult(True, "score")
 
@@ -289,7 +324,7 @@ def test_a_row_carrying_another_tenants_run_is_not_deployed(client):
 
 
 def test_a_row_of_ones_own_is_deployed(client, monkeypatch):
-    async def probe(uri):
+    async def probe(uri, sample=None):
         return load_probe.ProbeResult(True, "score")
 
     monkeypatch.setattr(load_probe, "probe", probe)
@@ -304,3 +339,130 @@ def test_undeploying_is_never_blocked_by_the_address(client):
     client.repo.row = {"model_name": "m", "mlflow_run_id": "run-theirs"}
     r = client.post("/api/models/m1/deploy", json={"model_id": "m1", "environment": "deprecated"})
     assert r.status_code == 200, r.text
+
+
+# --- the deployment gate derives the baseline's scores (ADR-0035 dec 2, 3, 5) ----------------------
+
+from drift import build_reference_profile, refused_baseline  # noqa: E402
+from extensions import DetectionResult, UninterpretableModel  # noqa: E402
+import routers.models as models_router  # noqa: E402
+
+SAMPLE = build_reference_profile({"a": [float(v) for v in range(40)]})
+
+
+def _kernel_row(**over):
+    row = {"model_name": "m", "mlflow_run_id": "run-mine", "detector": "sklearn", "feature_config_id": "fc1",
+           "reference_profile": SAMPLE}
+    row.update(over)
+    return row
+
+
+def _scoring(monkeypatch, fn):
+    """The detector the record names, replaced by ``fn`` (row -> score), and a loaded model stub."""
+    async def detector(features, model, threshold, ctx):
+        return DetectionResult(score=fn(features), is_anomaly=False)
+
+    async def load(company_id, model):
+        return object()
+
+    monkeypatch.setattr(models_router, "detector_for", lambda model: ("sklearn", detector))
+    monkeypatch.setattr(models_router, "load_model_or_refuse", load)
+
+
+def test_a_kernel_models_sample_is_scored_by_its_detector_at_deployment(client, monkeypatch):
+    _scoring(monkeypatch, lambda f: float(f[0, 0]) / 100)
+    assert _deploy(client, _kernel_row()).status_code == 200
+    stored = client.repo.profiles[-1]
+    assert stored["prediction_baseline"]["origin"] == "derived"
+    assert stored["sample"]["prediction_score"] == [v / 100 for v in range(40)]
+    assert client.repo.status_updates == ["production"]
+
+
+def test_a_detector_that_cannot_score_the_sample_leaves_data_drift_only(client, monkeypatch):
+    def refuse(_):
+        raise UninterpretableModel("no declared semantics")
+
+    _scoring(monkeypatch, refuse)
+    assert _deploy(client, _kernel_row()).status_code == 200
+    stored = client.repo.profiles[-1]
+    assert stored["prediction_baseline"]["origin"] is None
+    assert "no declared semantics" in stored["prediction_baseline"]["reason"]
+    assert "prediction_score" not in stored["sample"]
+
+
+def test_a_kernel_model_the_gate_cannot_load_is_not_deployed(client, monkeypatch):
+    from fastapi import HTTPException
+
+    async def unloadable(company_id, model):
+        raise HTTPException(status_code=422, detail="not yours")
+
+    monkeypatch.setattr(models_router, "load_model_or_refuse", unloadable)
+    assert _deploy(client, _kernel_row()).status_code == 409
+    assert client.repo.status_updates == [] and client.repo.profiles == []
+
+
+def test_a_refused_sample_is_not_scored(client, monkeypatch):
+    loads = []
+
+    async def load(company_id, model):
+        loads.append(model)
+
+    monkeypatch.setattr(models_router, "load_model_or_refuse", load)
+    assert _deploy(client, _kernel_row(reference_profile=refused_baseline("why"))).status_code == 200
+    assert loads == [] and client.repo.profiles == []
+
+
+def test_an_uploads_sample_is_scored_in_the_probes_own_load(client, monkeypatch):
+    seen = []
+
+    async def probe(uri, sample=None):
+        seen.append(sample)
+        return load_probe.ProbeResult(True, "score", scores=[0.25] * len(sample["rows"]))
+
+    monkeypatch.setattr(load_probe, "probe", probe)
+    row = _kernel_row(mlflow_run_id=None, artifact_uri=ADMITTED, provenance="uploaded")
+    assert _deploy(client, row).status_code == 200
+    assert seen[0]["detector"] == "sklearn" and seen[0]["rows"][3] == [3.0]
+    assert client.repo.profiles[-1]["sample"]["prediction_score"] == [0.25] * 40
+
+
+def test_an_upload_the_probe_refuses_records_no_baseline(client, monkeypatch):
+    async def probe(uri, sample=None):
+        return load_probe.ProbeResult(False, "load", "broken")
+
+    monkeypatch.setattr(load_probe, "probe", probe)
+    row = _kernel_row(mlflow_run_id=None, artifact_uri=ADMITTED, provenance="uploaded")
+    assert _deploy(client, row).status_code == 409
+    assert client.repo.profiles == [] and client.repo.status_updates == []
+
+
+def test_any_scoring_failure_leaves_data_drift_only(client, monkeypatch):
+    def wrong_width(_):
+        raise ValueError("X has 1 features, but the model expects 4")
+
+    _scoring(monkeypatch, wrong_width)
+    assert _deploy(client, _kernel_row()).status_code == 200
+    assert "expects 4" in client.repo.profiles[-1]["prediction_baseline"]["reason"]
+
+
+def test_a_load_that_fails_outright_is_a_refusal_not_a_500(client, monkeypatch):
+    async def broken(company_id, model):
+        raise OSError("object store reset the connection")
+
+    monkeypatch.setattr(models_router, "load_model_or_refuse", broken)
+    r = _deploy(client, _kernel_row())
+    assert r.status_code == 409 and "object store" in r.json()["detail"]["error"]
+
+
+def test_a_stored_sample_that_is_not_one_is_not_loaded_for(client, monkeypatch):
+    # A baseline recorded before ADR-0035 dec 4 was never held to the sample rule.
+    loads = []
+
+    async def load(company_id, model):
+        loads.append(model)
+
+    monkeypatch.setattr(models_router, "load_model_or_refuse", load)
+    legacy = {**SAMPLE, "sample": {"a": [1.0, "x"]}}
+    assert _deploy(client, _kernel_row(reference_profile=legacy)).status_code == 200
+    assert loads == []
+    assert "not a number" in client.repo.profiles[-1]["prediction_baseline"]["reason"]

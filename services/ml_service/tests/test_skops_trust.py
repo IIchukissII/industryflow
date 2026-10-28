@@ -246,6 +246,34 @@ def test_the_probe_scores_an_uploaded_model_that_needs_no_grant(tmp_path):
     assert verdict["ok"] is True, verdict
 
 
+def _probe_with_sample(path, sample):
+    proc = subprocess.run(
+        [sys.executable, str(load_probe._WORKER), path], input=json.dumps(sample),
+        capture_output=True, text=True, timeout=120, env=load_probe._worker_env(), cwd=str(API),
+    )
+    verdict, *rest = [json.loads(line) for line in proc.stdout.strip().splitlines()]
+    assert "ok" in verdict, "the verdict is printed before the sample is scored"
+    return {**verdict, **(rest[0] if rest else {})}
+
+
+def test_the_probe_scores_a_feature_sample_in_its_own_load(tmp_path):
+    # ADR-0035 dec 2: an upload's baseline scores come from the probe's load, through the detector.
+    from sklearn.linear_model import LogisticRegression
+
+    model = LogisticRegression().fit(X, (Y > Y.mean()).astype(int))
+    rows = X[:5].tolist()
+    verdict = _probe_with_sample(_save(tmp_path, "logit", model),
+                                 {"detector": "sklearn", "context": {}, "rows": rows})
+    assert verdict["ok"] is True, verdict
+    assert np.allclose(verdict["scores"], model.predict_proba(X[:5])[:, 1])
+
+
+def test_a_detector_that_cannot_score_the_sample_does_not_fail_the_probe(tmp_path):
+    verdict = _probe_with_sample(_save(tmp_path, "lin", LinearRegression().fit(X, Y)),
+                                 {"detector": "sklearn", "context": {}, "rows": X[:2].tolist()})
+    assert verdict["ok"] is True and "UninterpretableModel" in verdict["sample_error"], verdict
+
+
 def _schema(kind):
     from mlflow.types import ColSpec, Schema, TensorSpec
     cols = lambda t: Schema([ColSpec(t, f"c{i}") for i in range(4)])  # noqa: E731

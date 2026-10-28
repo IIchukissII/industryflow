@@ -34,12 +34,15 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
 # A load and one row. Generous enough for a large artifact to come off the object store, short enough
 # that a hanging load is a refusal rather than a stuck deployment.
 PROBE_TIMEOUT_SECONDS = int(os.getenv("UPLOAD_PROBE_TIMEOUT_SECONDS", "120"))
+# Scoring a feature sample row by row comes after the verdict, on a budget of its own.
+SAMPLE_TIMEOUT_SECONDS = int(os.getenv("UPLOAD_PROBE_SAMPLE_TIMEOUT_SECONDS", "300"))
 
 _WORKER = Path(__file__).with_name("load_probe_worker.py")
 
@@ -51,6 +54,10 @@ class ProbeResult:
     ok: bool
     stage: str = ""
     error: str = ""
+    # The detector's scores on the model's feature sample, when one was given (ADR-0035 dec 2), or why
+    # the detector could not score it. Neither decides whether the model may deploy.
+    scores: Optional[List[float]] = None
+    sample_error: str = ""
 
     @property
     def refused(self) -> bool:
@@ -71,6 +78,8 @@ _PROBE_ENV = (
     "MLFLOW_S3_ENDPOINT_URL", "MLFLOW_S3_IGNORE_TLS",
     # trust roots for that TLS connection
     "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
+    # the operator's detector extensions, to score a feature sample as serving would (ADR-0035 dec 2)
+    "EXTENSION_MODULES",
 )
 
 
@@ -82,37 +91,70 @@ def _worker_env() -> dict:
     return env
 
 
-def _run(model_uri: str) -> ProbeResult:
+def _lines(out) -> list:
+    """The worker's JSON lines. A timeout hands back partial output, as bytes whatever the mode."""
+    if isinstance(out, bytes):
+        out = out.decode("utf-8", "replace")
+    parsed = []
+    for line in (out or "").strip().splitlines():
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            parsed.append(value)
+    return parsed
+
+
+def _result(lines: list, stalled: str) -> Optional[ProbeResult]:
+    """The verdict the worker printed, with its sample's outcome; None if it printed no verdict.
+
+    The verdict comes first and the sample is scored after it, so a load that was shown to work stays
+    a pass when scoring the sample then stalls or dies (ADR-0035 dec 5: a baseline never decides the
+    deployment). ``stalled`` says what happened to the sample if no line reports it.
+    """
+    verdict = next((v for v in lines if "ok" in v), None)
+    if verdict is None:
+        return None
+    scored = next((v for v in lines if "scores" in v or "sample_error" in v), {})
+    scores = scored.get("scores")
+    return ProbeResult(bool(verdict.get("ok")), str(verdict.get("stage", "")), str(verdict.get("error", "")),
+                       scores=[float(v) for v in scores] if isinstance(scores, list) else None,
+                       sample_error=str(scored.get("sample_error", "")) or (stalled if not scored else ""))
+
+
+def _run(model_uri: str, sample: Optional[dict] = None) -> ProbeResult:
+    budget = PROBE_TIMEOUT_SECONDS + (SAMPLE_TIMEOUT_SECONDS if sample else 0)
     try:
         proc = subprocess.run(
             [sys.executable, str(_WORKER), model_uri],
-            capture_output=True, text=True, timeout=PROBE_TIMEOUT_SECONDS,
+            input=json.dumps(sample) if sample else "",
+            capture_output=True, text=True, timeout=budget,
             env=_worker_env(), cwd=str(_WORKER.parent),
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        result = _result(_lines(exc.stdout), f"scoring the feature sample did not finish within {budget}s")
+        if result is not None:
+            return result
         return ProbeResult(False, "timeout",
                            f"loading and scoring this artifact did not finish within "
                            f"{PROBE_TIMEOUT_SECONDS}s, so it has not been shown to work here")
     except OSError as exc:
         return ProbeResult(False, "invoke", f"could not run the check: {exc}")
 
-    line = (proc.stdout or "").strip().splitlines()
-    try:
-        payload = json.loads(line[-1]) if line else {}
-    except ValueError:
-        payload = {}
-    if not payload:
+    tail = (proc.stderr or "").strip().splitlines()[-1:] or ["no output"]
+    result = _result(_lines(proc.stdout), f"scoring the feature sample ended without a result "
+                                          f"(exit {proc.returncode}): {tail[0]}")
+    if result is None:
         # It died in a way it could not report — a segfault, an OOM kill, an import that took the
         # interpreter down. That is exactly the class of failure the process boundary exists to
         # survive, and it is a refusal.
-        tail = (proc.stderr or "").strip().splitlines()[-1:] or ["no output"]
         return ProbeResult(False, "crash",
                            f"the check ended without a verdict (exit {proc.returncode}): {tail[0]}")
-
-    return ProbeResult(bool(payload.get("ok")), str(payload.get("stage", "")),
-                       str(payload.get("error", "")))
+    return result
 
 
-async def probe(model_uri: str) -> ProbeResult:
-    """Load and score ``model_uri`` in an isolated copy of this environment, off the event loop."""
-    return await asyncio.to_thread(_run, model_uri)
+async def probe(model_uri: str, sample: Optional[dict] = None) -> ProbeResult:
+    """Load and score ``model_uri`` in an isolated copy of this environment, off the event loop; with
+    ``sample`` (engineered rows, the detector and its context), also score those rows in that load."""
+    return await asyncio.to_thread(_run, model_uri, sample)

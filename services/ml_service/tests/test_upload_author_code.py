@@ -261,7 +261,7 @@ def test_deployment_refuses_an_upload_naming_its_own_loader_before_the_probe(cli
     path, marker = tripwire_model
     probed = []
 
-    async def probe(uri):
+    async def probe(uri, sample=None):
         probed.append(uri)
         return load_probe.ProbeResult(True, "score")
 
