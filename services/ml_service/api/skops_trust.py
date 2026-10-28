@@ -161,6 +161,49 @@ def refuse_author_code(flavors: dict) -> None:
             raise UnsafeArtifact(f"the artifact asks to construct {model_class!r}, not an xgboost model")
 
 
+def _load_local_xgboost(local: str) -> Any:
+    """An xgboost model, built from the checked top-level manifest alone.
+
+    MLflow's xgboost loader re-reads the flavor from an MLmodel beside the pyfunc `data` file, and
+    `data` may name a subdirectory: a second manifest there would choose the class to construct and
+    the file to read, unchecked. Here the class is one of `_XGBOOST_MODEL_CLASSES`, the file is the
+    flavor's `data` inside the model, and no other manifest is read.
+    """
+    import importlib
+
+    from mlflow.models import Model
+    from mlflow.pyfunc import PyFuncModel
+    from mlflow.xgboost import _XGBModelWrapper
+
+    meta = Model.load(os.path.join(local, "MLmodel"))
+    py = meta.flavors.get("python_function") or {}
+    if py.get("loader_module") != "mlflow.xgboost":
+        raise UnsafeArtifact(f"the artifact's loader {py.get('loader_module')!r} is not one this module reads")
+    if py.get("predict_fn", "predict") != "predict":
+        raise ValueError(f"unsupported pyfunc predict_fn {py.get('predict_fn')!r}")
+    conf = meta.flavors.get("xgboost")
+    if not isinstance(conf, dict):
+        raise UnsafeArtifact("an xgboost-loaded model has no xgboost flavor")
+    model_class = conf.get("model_class", "xgboost.core.Booster")
+    if model_class not in _XGBOOST_MODEL_CLASSES:
+        raise UnsafeArtifact(f"the artifact asks to construct {model_class!r}, not an xgboost model")
+
+    root = os.path.realpath(local)
+    path = os.path.realpath(os.path.join(root, str(conf.get("data") or "")))
+    if os.path.commonpath([root, path]) != root or not os.path.isfile(path):
+        raise ValueError("the model's serialized file is missing or outside the model directory")
+
+    module, _, name = model_class.rpartition(".")
+    model = getattr(importlib.import_module(module), name)()
+    model.load_model(path)
+    return PyFuncModel(
+        model_meta=meta,
+        model_impl=_XGBModelWrapper(model),
+        predict_fn="predict",
+        model_id=meta.model_id,
+    )
+
+
 def read_flavors(model_uri: str) -> dict:
     """The flavors an artifact's manifest declares. Reads the MLmodel file only; imports and loads
     nothing it names."""
@@ -202,13 +245,13 @@ def load_pyfunc(model_uri: str, provenance: Optional[str]) -> Any:
     `refuse_author_code`: the manifest that was checked is the manifest that is loaded, rather than a
     second fetch of something that may have changed in between. A skops sklearn model is deserialised
     by `_load_local_skops` under its provenance's grant; the trust list in its MLmodel is never read.
-    Any other admitted loader goes through MLflow's pyfunc loader with the pickle switch off. Both read
-    eagerly, so the local copy is not needed once the load returns.
+    An xgboost model is read by `_load_local_xgboost`. MLflow's pyfunc loader is never called: its
+    flavor loaders read further manifests the check above never saw. Both read eagerly, so the local
+    copy is not needed once the load returns.
 
     This is the one load path for serving and for the deployment gate's probe alike, so what is
     served is loaded the way the probe proved.
     """
-    import mlflow
     import mlflow.artifacts
     from mlflow.models import Model
 
@@ -217,10 +260,10 @@ def load_pyfunc(model_uri: str, provenance: Optional[str]) -> Any:
         flavors = Model.load(os.path.join(local, "MLmodel")).flavors
         refuse_author_code(flavors)
         _refuse_paths_outside(local, flavors)
+        executable_deserialisation_off()
         if is_skops_sklearn(flavors):
             return _load_local_skops(local, provenance)
-        executable_deserialisation_off()
-        return mlflow.pyfunc.load_model(local)
+        return _load_local_xgboost(local)
 
 
 def is_untrusted_types_error(exc: BaseException) -> bool:
