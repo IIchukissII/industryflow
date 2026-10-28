@@ -167,6 +167,54 @@ def test_an_upload_that_needs_no_grant_still_loads(tmp_path):
     assert np.allclose(skops_trust.load_pyfunc(path, UPLOADED).predict(X), model.predict(X))
 
 
+# --- xgboost: read from the checked manifest alone (ADR-0037) -----------------------------------
+
+def _save_xgb(tmp_path, name="xgb"):
+    import mlflow.xgboost
+    import xgboost
+
+    model = xgboost.XGBRegressor(n_estimators=5, max_depth=2).fit(X, Y)
+    path = str(tmp_path / name)
+    mlflow.xgboost.save_model(model, path, signature=infer_signature(X, model.predict(X)))
+    return model, path
+
+
+def test_an_xgboost_model_loads_and_scores_identically(tmp_path):
+    model, path = _save_xgb(tmp_path)
+    assert np.allclose(skops_trust.load_pyfunc(path, UPLOADED).predict(X), model.predict(X))
+
+
+def test_a_nested_manifest_cannot_choose_what_is_constructed(tmp_path, monkeypatch):
+    # MLflow's xgboost loader reads the MLmodel beside the pyfunc `data` file. Pointing `data` into a
+    # subdirectory with its own MLmodel used to let that unchecked manifest name the class to build.
+    model, path = _save_xgb(tmp_path)
+    data = Model.load(path).flavors["xgboost"]["data"]
+    inner = Path(path) / "inner"
+    inner.mkdir()
+    (inner / data).write_bytes((Path(path) / data).read_bytes())
+    (inner / "MLmodel").write_text(f"flavors:\n  xgboost:\n    data: {data}\n    model_class: marker.Marker\n")
+    (tmp_path / "marker.py").write_text(
+        "import pathlib\nclass Marker:\n    def __init__(self):\n"
+        f"        pathlib.Path({str(tmp_path / 'constructed')!r}).touch()\n"
+        "    def load_model(self, path):\n        pass\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    _tamper(path, data=f"inner/{data}")
+
+    loaded = skops_trust.load_pyfunc(path, KERNEL)
+    assert not (tmp_path / "constructed").exists()
+    assert np.allclose(loaded.predict(X), model.predict(X))
+
+
+def test_an_xgboost_artifact_cannot_point_outside_itself(tmp_path):
+    _, path = _save_xgb(tmp_path)
+    meta = Model.load(path)
+    meta.flavors["xgboost"]["data"] = "../../etc/passwd"
+    meta.save(str(Path(path) / "MLmodel"))
+    with pytest.raises(ValueError, match="outside the model directory"):
+        skops_trust.load_pyfunc(path, UPLOADED)
+
+
 # --- the deployment gate's probe ----------------------------------------------------------------
 
 def test_the_probe_refuses_an_uploaded_tree_model_with_a_trust_reason(forest):

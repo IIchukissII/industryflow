@@ -178,8 +178,18 @@ def register_detector(
     ``semantics`` declares what the model's output MEANS — it is not derivable from the output (see
     UninterpretableModel). ``handles_flavors`` names the MLflow artifact flavors this detector can
     score (e.g. ``mlflow.sklearn``); empty means "makes no claim", which the capabilities view reports
-    honestly rather than reading as "handles everything".
+    honestly rather than reading as "handles everything". A claim is limited to the platform's
+    data-only loaders (ADR-0037 dec 5): any other flavor would register models every load refuses.
     """
+    from skops_trust import PLATFORM_LOADERS
+
+    unservable = sorted(set(handles_flavors or []) - PLATFORM_LOADERS)
+    if unservable:
+        raise ValueError(
+            f"anomaly detector '{name}' claims {', '.join(unservable)}, which no data-only platform "
+            f"loader serves ({', '.join(sorted(PLATFORM_LOADERS))})"
+        )
+
     def decorator(fn: DetectorFn) -> DetectorFn:
         existing = _DETECTORS.get(name)
         if existing is not None and existing is not fn:

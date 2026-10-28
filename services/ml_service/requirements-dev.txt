@@ -42,6 +42,7 @@ prometheus-client==0.26.0
 # The role guard (test_write_roles.py) enumerates the routes of the real app, so it imports `main`,
 # which instruments it; same pin as serving.
 prometheus-fastapi-instrumentator==8.1.0
-# The serializer and the estimator library the skops trust tests load (ADR-0027 dec 13); same pins as serving.
+# The serializer and the estimator libraries the model-load tests use (ADR-0027 dec 13, ADR-0037); same pins as serving.
 scikit-learn==1.9.1
 skops==0.16.0
+xgboost==3.4.1
