@@ -185,6 +185,13 @@ def test_a_flavor_a_loaded_detector_claims_is_in_the_supported_set(monkeypatch):
     assert model_compat.evaluate("x").flavor_supported is True
 
 
+@pytest.mark.parametrize("flavor", ["mlflow.catboost", "mlflow.pyfunc", "mlflow.statsmodels"])
+def test_a_detector_cannot_claim_a_flavor_no_data_only_loader_serves(flavor):
+    with pytest.raises(ValueError, match="no data-only platform loader serves"):
+        extensions.register_detector("claims-too-much", handles_flavors=[flavor])
+    assert extensions.get_detector("claims-too-much") is None
+
+
 # --- at the wire --------------------------------------------------------------------------------
 
 class FakeRepo:
@@ -332,15 +339,13 @@ def test_loading_a_model_naming_its_own_loader_never_imports_it(tripwire_model, 
 # --- the pickle switch, in the serving process ---------------------------------------------------
 
 def _record_switch(monkeypatch):
-    import mlflow.pyfunc
-
     seen = []
 
-    def load_model(uri, *a, **kw):
+    def load_model(local, *a, **kw):
         seen.append(os.environ.get(SWITCH))
         return object()
 
-    monkeypatch.setattr(mlflow.pyfunc, "load_model", load_model)
+    monkeypatch.setattr(skops_trust, "_load_local_xgboost", load_model)
     return seen
 
 
