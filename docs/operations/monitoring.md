@@ -17,7 +17,7 @@ Host ports bind to `127.0.0.1`.
 |---|---|---|---|
 | `prometheus` | Metrics store, 15 s scrape and evaluation interval; evaluates the platform alert rules | `${PROMETHEUS_PORT:-9090}` | `infrastructure/prometheus/prometheus.yml`, `infrastructure/prometheus/rules/` |
 | `alertmanager` | Groups and routes firing alerts; no receiver as shipped | `${ALERTMANAGER_PORT:-9093}` | `${ALERTMANAGER_CONFIG:-infrastructure/alertmanager/alertmanager.yml}` |
-| `grafana` | Dashboards | `${GRAFANA_PORT:-3000}` (`.env.example`: `3001`) | `infrastructure/grafana/provisioning/` |
+| `grafana` | Dashboards | `${GRAFANA_PORT:-3001}` | `infrastructure/grafana/provisioning/` |
 | `loki` | Log store | `3100` | `infrastructure/loki/loki-config.yml` |
 | `promtail` | Ships container and `/var/log` logs to Loki | none (`9080` internal) | `infrastructure/promtail/promtail-config.yml` |
 | `cadvisor` | Container CPU, memory, network | `8080` | flags in `docker-compose.yml` |
@@ -170,7 +170,7 @@ health reaches Grafana as `postgres-exporter` metrics.
 
 | Plane | Where |
 |---|---|
-| Platform rules, Compose | None: `prometheus.yml` has no `rule_files` and no Alertmanager target |
+| Platform rules, Compose | `infrastructure/prometheus/rules/`, evaluated by `prometheus`, routed by `alertmanager` (no receiver as shipped) |
 | Platform rules, Kubernetes | Helm `PrometheusRule` ([platform alert rules](../../deploy/observability/README.md#platform-alert-rules)) |
 | Tenant sensor and streaming alerts | `alert-service-detector`, tenant-isolated, never this stack ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 5) |
 
