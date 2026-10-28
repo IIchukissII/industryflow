@@ -169,7 +169,7 @@ jobs:
               smoke: "python -c \"import numpy, pandas, pyarrow.parquet, sklearn, mlflow, industryflow; print('authoring kernel ok', numpy.__version__)\"" }
           - { name: notebook-analytics,     context: clients/python,            file: services/notebook_hub/Dockerfile.analytics, security_refresh: true,
               smoke: "python -c \"import numpy, pandas, industryflow; print('analytics kernel ok', numpy.__version__)\"" }
-          - { name: db-backup,              context: infrastructure/backup,     file: infrastructure/backup/Dockerfile,
+          - { name: db-backup,              context: infrastructure/backup,     file: infrastructure/backup/Dockerfile, security_refresh: true,
               smoke: "bash -n /usr/local/bin/db-backup.sh && bash -n /usr/local/bin/db-restore.sh && pg_dump --version && pg_restore --version && psql --version && aws --version" }
           # pyarrow is the cold layer's Parquet writer, and pyarrow-vs-numpy is a compiled ABI pair:
           # pyarrow 14 imports fine until numpy 2 arrives, then dies (#209). An import is the whole test.
