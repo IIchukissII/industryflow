@@ -20,7 +20,13 @@ RUN npm run build
 # needs no root and no NET_BIND_SERVICE. apk/copy/chown need root; we drop back to 101 at the end.
 FROM nginxinc/nginx-unprivileged:1.31-alpine
 USER root
-RUN apk add --no-cache openssl
+# SECURITY_REFRESH is a cache epoch the workflow advances daily (.github/workflows/images.yml): the base
+# tag floats within 1.31 and the build cache would otherwise replay a layer holding a package with a
+# fixed CVE. Upgrading the base's packages takes those fixes too.
+ARG SECURITY_REFRESH=unset
+RUN echo "security refresh: ${SECURITY_REFRESH}" \
+ && apk upgrade --no-cache \
+ && apk add --no-cache openssl
 # The edge config is a TEMPLATE: 10-edge-config.sh renders it into conf.d at start from the
 # EDGE_* upstreams the deployment passes (compose: service names; Helm: the release's Service
 # FQDNs), and refuses to start without them. It is kept out of /etc/nginx/templates so the stock

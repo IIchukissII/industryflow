@@ -76,4 +76,10 @@ describe('models page', () => {
     expect(await screen.findByText('Not monitored for drift')).toBeInTheDocument();
     expect(screen.getByText('the sample carries prediction scores')).toBeInTheDocument();
   });
+
+  test('a platform model shows the version it was registered under', async () => {
+    page();
+    const row = (await screen.findByText('bearing-wear')).closest('tr');
+    expect(row).toHaveTextContent('v1');
+  });
 });
