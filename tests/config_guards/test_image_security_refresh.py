@@ -6,7 +6,7 @@
 Every image that takes security fixes at build time re-runs that build daily, and only those do.
 
 Three kinds of layer pick their security fixes up at build: `apt-get upgrade` (the Spark images patch
-their pinned Ubuntu), `apk upgrade` (the backup image patches its Alpine base) and pip (every Python
+their pinned Ubuntu), `apk upgrade` (the backup and frontend images patch their Alpine bases) and pip (every Python
 image upgrades the base's pip, whose vendored certifi is scanned, and resolves its unpinned transitive
 dependencies). The persistent build cache replays
 either layer verbatim, so its patch level freezes at the last cache write and the Trivy gate goes red

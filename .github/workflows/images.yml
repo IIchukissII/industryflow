@@ -120,7 +120,7 @@ jobs:
           - { name: ingestion-service,      context: services/ingestion_service, file: services/ingestion_service/Dockerfile, security_refresh: true,
               smoke: "env INGESTION_SERVICE_PORT=8003 KAFKA_BOOTSTRAP_SERVERS=x:9092 KAFKA_TOPIC_SENSOR_DATA=x DEVICE_IDENTITY_HEADERS=x-client python -c \"import main; print('ingestion serves', main.app.title)\"" }
           # No `smoke`: the edge has its own smoke step below (nginx -t per deployment + behaviour).
-          - { name: frontend,               context: services/frontend,        file: services/frontend/Dockerfile }
+          - { name: frontend,               context: services/frontend,        file: services/frontend/Dockerfile, security_refresh: true }
           # numpy/sklearn/xgboost are C-extension stacks: an ABI mismatch is invisible to a resolve and
           # fatal on import (this is the pyarrow-14-under-numpy-2 break, #209).
           - { name: ml-service-api,         context: services/ml_service,       file: services/ml_service/api/Dockerfile, security_refresh: true,
