@@ -136,7 +136,7 @@ job variable named in *Meaning*.
 |---|---|---|
 | `DB_USER` / `DB_PASSWORD` | — | `PGUSER` / `PGPASSWORD` |
 | `BACKUP_STORE_ACCESS_KEY` / `BACKUP_STORE_SECRET_KEY` | — | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` |
-| `MINIO_ENDPOINT` | `http://minio:9000` | `S3_ENDPOINT_URL` and `COLD_SOURCE_ENDPOINT_URL` |
+| `MINIO_ENDPOINT` | `http://minio:9000` | `S3_ENDPOINT_URL` and `SOURCE_ENDPOINT_URL` (the cold mirror's source unless `COLD_SOURCE_ENDPOINT_URL` is set) |
 | `BACKUP_S3_BUCKET` | `industryflow-backups` | `S3_BUCKET` |
 | `BACKUP_S3_PREFIX` | `timescaledb` | `S3_PREFIX` |
 | `BACKUP_S3_REGION` | `us-east-1` | `AWS_DEFAULT_REGION` |
@@ -241,7 +241,7 @@ source.
 
 `notebook-restore.sh <volume> [<stamp>|latest] [--target <volume>]` creates the target volume, writes the
 archive into it through the Engine API (owners and modes as archived), reads it back and fails on any
-difference from the archive. An existing target is refused.
+difference from the archive in an entry's name, mode, owner or size. An existing target is refused.
 
 ```bash
 # Rehearsal into a scratch volume (a name outside the work-volume prefix), then remove it
