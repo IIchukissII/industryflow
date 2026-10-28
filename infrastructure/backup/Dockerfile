@@ -11,7 +11,13 @@ FROM postgres:15-alpine
 # gosu (a Go binary the postgres base ships for its entrypoint's privilege drop) is unused
 # here — we run the backup script directly, not the postgres entrypoint — and it carries a
 # Go-stdlib CRITICAL (CVE-2025-68121). Remove it so the image has no vulnerable Go binary.
-RUN apk add --no-cache aws-cli bash curl jq \
+# SECURITY_REFRESH is a cache epoch the workflow advances daily (.github/workflows/images.yml): the base
+# and the packages below are unpinned, and the persistent build cache would otherwise replay a layer
+# holding a package with a fixed CVE. Upgrading the base's packages takes those fixes too.
+ARG SECURITY_REFRESH=unset
+RUN echo "security refresh: ${SECURITY_REFRESH}" \
+ && apk upgrade --no-cache \
+ && apk add --no-cache aws-cli bash curl jq \
  && rm -f /usr/local/bin/gosu
 
 COPY db-backup.sh db-restore.sh notebook-backup.sh notebook-restore.sh /usr/local/bin/
