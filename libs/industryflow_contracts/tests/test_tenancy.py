@@ -126,6 +126,7 @@ def test_a_plain_key_means_what_it_spells(key):
 
 @pytest.mark.parametrize("key", [
     "", "a//b", "a/./b", "./a", "a/..", "../a", "a/../b", "a/", "a\\..\\b", "a\\b",
+    "a\tb", "a\nb", "a\rb", "a\x00b", "a\x7fb", "a\x85b",
 ])
 def test_a_key_a_reader_could_normalise_is_not_plain(key):
     assert not tenancy.is_plain_key(key)

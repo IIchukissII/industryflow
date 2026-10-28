@@ -405,3 +405,17 @@ def test_the_backup_run_mirrors_models_and_cold_into_separate_prefixes(env):
     assert r.returncode == 0, r.stdout + r.stderr
     assert _mirrored(env, PART).exists() and _model_mirrored(env, MODEL).exists()
     assert not _mirrored(env, MODEL).exists()
+
+
+@pytest.mark.parametrize("bad", ["tenant_x/a\tb", "tenant_x/a\nb"])
+def test_a_key_with_a_control_character_fails_the_run_but_not_the_other_objects(env, bad):
+    # A tab or newline in a key used to split the text listing into another key: the copy failed and
+    # the job aborted, so no tenant's models were mirrored and nothing aged out.
+    _put(env, COLD, "mlflow", MODEL, b"skops")
+    _put(env, COLD, "mlflow", bad, b"odd")
+    e = dict(env["env"], MODEL_SOURCE_BUCKET="mlflow", SOURCE_ENDPOINT_URL=COLD, DATABASES="industryflow")
+    r = subprocess.run(["bash", str(SCRIPTS / "db-backup.sh")], env=e, capture_output=True, text=True)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert _model_mirrored(env, MODEL).read_bytes() == b"skops"
+    assert json.dumps(bad) in r.stdout and "INCOMPLETE: 1 object(s) not mirrored" in r.stdout
+    assert not (_store(env, env["env"]["S3_ENDPOINT_URL"]) / "backups" / "models" / "tenant_x" / "a").exists()

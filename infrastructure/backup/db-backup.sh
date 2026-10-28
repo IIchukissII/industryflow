@@ -71,12 +71,21 @@ _dst_aws() {
 }
 
 # "<key>\t<size>" for every object under a bucket/prefix (the CLI paginates); nothing if empty.
+# The listing is read as JSON: a key may hold a tab or a newline, which would split a text listing
+# into a different key. Such keys cannot travel through the line-based steps below, so they are left
+# out here and, when $4 names a file, written to it JSON-encoded for the caller to report.
 _list_sizes() {
-  local side="$1" bucket="$2" prefix="$3" out
+  local side="$1" bucket="$2" prefix="$3" unsafe="${4:-/dev/null}" out
   out="$("$side" s3api list-objects-v2 --bucket "$bucket" ${prefix:+--prefix "$prefix"} \
-           --query 'Contents[].[Key,Size]' --output text)"
-  [ "$out" = "None" ] || printf '%s\n' "$out" | grep -v '^$' || true
+           --query 'Contents[].[Key,Size]' --output json)"
+  printf '%s' "$out" | jq -r '(. // [])[] | select(.[0] | test("\\p{Cc}") | not)
+                               | "\(.[0])\t\(.[1])"'
+  printf '%s' "$out" | jq -c '(. // [])[] | select(.[0] | test("\\p{Cc}")) | .[0]' \
+    > "$unsafe"
 }
+
+# Objects a mirror could not copy because of their key; main fails the run when any were found.
+UNMIRRORED=0
 
 # mirror_bucket <label> <source bucket> <mirror prefix> <exclude prefix> <always re-copied glob>
 # Copies what the mirror lacks or holds at a different size; keys matching the glob are re-copied
@@ -89,8 +98,8 @@ mirror_bucket() {
   work="$(mktemp -d)"
 
   log "mirroring ${label} bucket s3://${source} -> s3://${S3_BUCKET}/${prefix}/"
-  _list_sizes _src_aws "$source" "" | awk -F'\t' -v x="$exclude" 'x == "" || index($1, x) != 1' \
-    > "${work}/source"
+  _list_sizes _src_aws "$source" "" "${work}/unsafe" \
+    | awk -F'\t' -v x="$exclude" 'x == "" || index($1, x) != 1' > "${work}/source"
   _list_sizes _dst_aws "$S3_BUCKET" "${prefix}/" > "${work}/mirror"
 
   local key size have
@@ -116,6 +125,12 @@ mirror_bucket() {
     copied=$((copied + 1))
   done 3< "${work}/source"
   age_out_mirror "$work" "$prefix" "$label" || { rm -rf "$work"; return 1; }
+  local unsafe=0
+  while IFS= read -r key <&5; do
+    log "${label} mirror: NOT mirrored, the key holds a control character: ${key}"
+    unsafe=$((unsafe + 1))
+  done 5< "${work}/unsafe"
+  UNMIRRORED=$((UNMIRRORED + unsafe))
   rm -rf "$work"
   log "  ${label} mirror: ${copied} object(s) copied, ${kept} already mirrored"
 }
@@ -253,6 +268,10 @@ main() {
     mirror_model_bucket
   else
     log "MODEL_SOURCE_BUCKET unset — model-artifact mirror skipped"
+  fi
+  if [ "$UNMIRRORED" -gt 0 ]; then
+    log "backup run ${STAMP} INCOMPLETE: ${UNMIRRORED} object(s) not mirrored, see above"
+    exit 1
   fi
   log "backup run ${STAMP} complete"
 }

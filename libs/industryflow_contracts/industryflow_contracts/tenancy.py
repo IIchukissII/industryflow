@@ -32,6 +32,7 @@ Standard library only: this is imported by every service image and shipped to Sp
 """
 from __future__ import annotations
 
+import unicodedata
 import uuid
 
 # The literal every tenant name starts with.
@@ -152,10 +153,12 @@ def owned_name(prefix: str, qualified) -> str | None:
 
 
 def is_plain_key(key: str) -> bool:
-    """Whether a key means only what it spells: no empty, ``.`` or ``..`` segment and no backslash
-    (ADR-0039 dec 2). A prefix test on any other key proves nothing: a store, proxy or client that
-    normalises it can land under another tenant's prefix."""
-    return "\\" not in key and all(seg not in ("", ".", "..") for seg in key.split("/"))
+    """Whether a key means only what it spells: no empty, ``.`` or ``..`` segment, no backslash and
+    no control character (ADR-0039 dec 2). A prefix test on any other key proves nothing: a store,
+    proxy or client that normalises it can land under another tenant's prefix, and a line-based
+    reader splits a key holding a tab or newline into another key."""
+    return ("\\" not in key and not any(unicodedata.category(c) == "Cc" for c in key)
+            and all(seg not in ("", ".", "..") for seg in key.split("/")))
 
 
 def owns_key(prefix: str, key, *, encoded: bool = False) -> bool:

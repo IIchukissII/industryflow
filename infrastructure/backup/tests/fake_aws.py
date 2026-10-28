@@ -41,7 +41,10 @@ def main(argv):
         keys = sorted(str(p.relative_to(bucket)) for p in bucket.rglob("*") if p.is_file()) \
             if bucket.exists() else []
         keys = [k for k in keys if k.startswith(prefix)]
-        if not keys:
+        if opt("--output") == "json":
+            # The CLI prints null for a query over an empty listing.
+            print(json.dumps([[k, (bucket / k).stat().st_size] for k in keys] or None))
+        elif not keys:
             print("None")
         elif query == "Contents[].[Key,Size]":
             for k in keys:
