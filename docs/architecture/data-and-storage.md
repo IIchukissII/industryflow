@@ -59,6 +59,9 @@ executors with `--py-files`.
 | `user` | Platform users (fastapi-users; `29-user-table.sql`, mapped by `services/api_gateway/models/user.py`) |
 | `platform_config` | Platform switches (`stateful_features_enabled`, [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) |
 | `cold_export_drops` | Committed cold-export drops |
+| `company_lifecycle_events`, `company_deletions`, `company_deletion_steps` | Tenant lifecycle record and deletion progress ([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md); `25-company-deletion.sql`) |
+| `capability_use_events` | Capability-use record, append-only, outlives tenants ([ADR-0042](../../ADR/ADR-0042-capability-use-audit.md); [record](notebooks.md#capability-use-record)) |
+| `schema_ledger` | Applied schema scripts and digests (`migrate.sh`, [ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md)) |
 
 Per tenant schema, created by `create_tenant_schema()`:
 
@@ -73,9 +76,9 @@ Per tenant schema, created by `create_tenant_schema()`:
 | `alert_rules` | | | | |
 | `alerts` | `triggered_at`, 7 d | | | 90 d |
 | `alert_labels` | | | | |
-| `ml_models` | | `UNIQUE (model_name, model_version)` | | |
+| `ml_models` | | `UNIQUE (model_name, model_version)`; `feature_config_id` → `feature_engineering_configs` `ON DELETE RESTRICT` | | |
 | `model_predictions` | `timestamp`, 7 d | | `model_id`, 30 d | 180 d |
-| `feature_engineering_configs` | | | | |
+| `feature_engineering_configs` | | A config a model binds keeps `base_sensors`, `transformations` ([ADR-0041](../../ADR/ADR-0041-bound-feature-configuration.md)) | | |
 
 `sensors` naming columns:
 
