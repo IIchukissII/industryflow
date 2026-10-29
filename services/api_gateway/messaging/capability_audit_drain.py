@@ -15,14 +15,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 import os
 import socket
+import uuid
 from typing import Any, Iterable, List, Sequence, Tuple
 
 from industryflow_contracts import capability_audit as audit
 from prometheus_client import Counter, Gauge
 from sqlalchemy import text
-from sqlalchemy.exc import DataError, IntegrityError
+from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, StatementError
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +55,24 @@ EXPIRE = text("SELECT public.expire_capability_use(:days)")
 Entry = Tuple[str, Any]
 
 
+def _row_fault(exc: BaseException) -> bool:
+    """A failure caused by what one row holds: the database refused the value, or the driver could
+    not bind it. An unreachable or failing database is not one, and its rows are kept for redelivery."""
+    if isinstance(exc, (DataError, IntegrityError)):
+        return True
+    return isinstance(exc, StatementError) and not isinstance(exc, DBAPIError)
+
+
+def _uuid(value):
+    return uuid.UUID(value) if value is not None else None
+
+
 def _params(stream_id: str, event: dict) -> dict:
-    return {"stream_id": stream_id, "kind": event["kind"], "plane": event["plane"], "at": event["at"],
-            "company_id": event["company_id"], "user_id": event["user"], "audience": event["audience"],
-            "handle_id": event["handle_id"], "digest": event["digest"], "reason": event["reason"],
+    # asyncpg binds a cast parameter as that type: a timestamptz takes a datetime, not its text.
+    return {"stream_id": stream_id, "kind": event["kind"], "plane": event["plane"],
+            "at": datetime.fromisoformat(event["at"]),
+            "company_id": _uuid(event["company_id"]), "user_id": event["user"], "audience": event["audience"],
+            "handle_id": _uuid(event["handle_id"]), "digest": event["digest"], "reason": event["reason"],
             "detail": event["detail"]}
 
 
@@ -82,13 +98,17 @@ async def write_batch(engine, entries: Sequence[Entry]) -> List[str]:
             for row in rows:
                 await conn.execute(RECORD, row)
         EVENTS.labels("written").inc(len(rows))
-    except (DataError, IntegrityError):
+    except StatementError as batch_exc:
+        if not _row_fault(batch_exc):
+            raise
         for row in rows:
             try:
                 async with engine.begin() as conn:
                     await conn.execute(RECORD, row)
                 EVENTS.labels("written").inc()
-            except (DataError, IntegrityError) as exc:
+            except StatementError as exc:
+                if not _row_fault(exc):
+                    raise
                 EVENTS.labels("refused").inc()
                 logger.error("capability audit: the record refused stream entry %s: %s",
                              row["stream_id"], exc.orig if hasattr(exc, "orig") else exc)
