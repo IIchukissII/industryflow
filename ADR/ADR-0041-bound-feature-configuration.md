@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0041 — A model's feature configuration is fixed once bound
 
 - **Status:** Accepted
-- **Date:** 2026-10-29
+- **Date:** 2026-10-29; changed 2026-10-29
 - **Parent:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (one computation of a
   feature for training and serving)
 - **Related:** [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (dec 1: the output
@@ -36,8 +36,9 @@ at registration (ADR-0028).
 3. **The refusal is the database's, and the API reports it with the models that bind the
    configuration.** Every writer of the shared record meets the same rule, and a check made only before
    the write could be raced.
-4. **A configuration no model binds stays fully editable and deletable.** Removing its last model frees
-   it.
+4. **A configuration no model binds stays fully editable and deletable; one a model binds stays fixed
+   while the model is on record, retired or not.** A retired model can be deployed again and must then
+   read the inputs it was trained on, so retiring it frees nothing.
 
 ## Alternatives
 
@@ -50,6 +51,7 @@ at registration (ADR-0028).
 | 2 | Deleting a bound configuration and unbinding its models | Leaves deployed models unservable with no decision by whoever deployed them |
 | 2 | Freezing every field of a bound configuration | Name, description and equipment type change no computation |
 | 3 | A check in the API alone | Races a concurrent bind, and every other writer of the record skips it |
+| 4 | Freeing a configuration when its last model is retired | A retired model can be deployed again, onto inputs that have changed |
 
 ## Consequences
 
@@ -61,7 +63,7 @@ at registration (ADR-0028).
 
 **Negative**
 - Changing the inputs of a deployed model means a new configuration and a new registration.
-- Unused bound configurations accumulate until their models are removed.
+- A configuration once bound is kept, unchanged, for as long as its models are on record.
 
 ## Deferred
 

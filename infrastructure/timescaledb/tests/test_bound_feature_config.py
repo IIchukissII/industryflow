@@ -154,7 +154,9 @@ def test_an_unbound_configuration_is_edited_and_deleted(cur):
     assert cur.rowcount == 1
 
 
-def test_removing_the_last_model_frees_the_configuration(cur):
+def test_a_configuration_whose_models_are_gone_is_free(cur):
+    # Only a tenant's deletion removes model rows in the product (models are retired, ADR-0041 dec 4);
+    # the rule itself frees a configuration no row binds.
     config_id = _config(cur)
     model_id = _model(cur, config_id)
     cur.execute("DELETE FROM ml_models WHERE model_id = %s", (model_id,))
@@ -168,6 +170,15 @@ def test_the_services_query_names_the_binding_models(cur):
     model_id = _model(cur, config_id)
     cur.execute(_repository_sql("BOUND_MODELS_SELECT").replace("$1", "%s"), (config_id,))
     assert [r[0] for r in cur.fetchall()] == [model_id]
+
+
+def test_the_services_bind_lock_reads_the_configuration_as_its_role(cur):
+    # The insert's lock (ADR-0041 dec 3) as the ML service runs it: FOR SHARE needs that role's UPDATE
+    # privilege, and the row it returns is what the registration's check is compared with.
+    config_id = _config(cur, sensors=("temp_1", "flow_1"))
+    cur.execute(_repository_sql("BOUND_CONFIG_LOCK").replace("$1", "%s"), (config_id,))
+    base_sensors, transformations = cur.fetchone()
+    assert base_sensors == ["temp_1", "flow_1"] and transformations[0]["name"] == "temp_1_raw"
 
 
 def test_the_migration_function_is_idempotent(tenant):
