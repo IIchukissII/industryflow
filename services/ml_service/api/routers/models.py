@@ -8,7 +8,7 @@ Endpoints for model registry and management from industryflow database
 """
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 import asyncio
 import logging
@@ -27,6 +27,7 @@ import skops_trust
 import upload_capability
 import uploaded_model
 import drift
+from repository import FeatureConfigChanged
 from .inference import detector_for, load_model_or_refuse
 
 logger = logging.getLogger(__name__)
@@ -435,8 +436,9 @@ async def create_model(
 
 
 async def _bind_inputs_and_baseline(payload: Dict[str, Any], company_id: str, repository,
-                                    sample_refusal: Optional[str] = None) -> Dict[str, Any]:
-    """Bind the model's inputs and accept or refuse its feature sample; returns the baseline's state.
+                                    sample_refusal: Optional[str] = None) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Bind the model's inputs and accept or refuse its feature sample; returns the baseline's state
+    and the configuration's inputs as checked, which the insert holds the configuration to (ADR-0041).
 
     The feature configuration must exist in the tenant. Bound to an equipment, the model reads its
     drift window from that equipment's sensors of the configuration's inputs, which must all exist. A
@@ -472,7 +474,9 @@ async def _bind_inputs_and_baseline(payload: Dict[str, Any], company_id: str, re
         reason = (drift.supplied_scores_refusal(profile) if isinstance(profile, dict) else None) \
             or drift.sample_refusal(profile, base_sensors)
         payload["reference_profile"] = drift.refused_baseline(reason) if reason else drift.accepted_sample(profile)
-    return drift.baseline_state(payload.get("reference_profile"))
+    bound_inputs = ({k: feature_config.get(k) for k in ("base_sensors", "transformations")}
+                    if feature_config else None)
+    return drift.baseline_state(payload.get("reference_profile")), bound_inputs
 
 
 async def register_model(payload: Dict[str, Any], company_id: str, repository, *,
@@ -565,14 +569,22 @@ async def register_model(payload: Dict[str, Any], company_id: str, repository, *
     # on what an output means (ADR-0028 dec 1). A second copy could only drift from it.
     payload.pop("score_semantics", None)
 
-    baseline = await _bind_inputs_and_baseline(payload, company_id, repository, sample_refusal)
+    baseline, bound_inputs = await _bind_inputs_and_baseline(payload, company_id, repository, sample_refusal)
 
     # Create model in database
     try:
         model_id = await repository.create_model(
             company_id=company_id,
-            model_data=payload
+            model_data=payload,
+            bound_inputs=bound_inputs,
         )
+    except FeatureConfigChanged:
+        # Its inputs changed between the checks above and the bind (ADR-0041 dec 3): what was checked
+        # is not what the model would be bound to.
+        raise HTTPException(status_code=409, detail=(
+            f"Feature config {payload['feature_config_id']} changed while the model was being "
+            f"registered; register it again."
+        ))
     except asyncpg.UniqueViolationError:
         # Already registered under this name and version. A 409 says what happened; the 500 this
         # used to return told the caller to retry something that can never succeed.

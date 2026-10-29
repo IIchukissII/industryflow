@@ -200,7 +200,7 @@ class FakeRepo:
         self.row = None
         self.status_updates = []
 
-    async def create_model(self, company_id, model_data):
+    async def create_model(self, company_id, model_data, bound_inputs=None):
         self.created.append(model_data)
         return uuid.uuid4()
 
