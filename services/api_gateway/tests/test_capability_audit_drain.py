@@ -132,3 +132,11 @@ async def test_expiry_asks_the_database_for_the_configured_period():
 
     assert await drain.expire(ExpiringEngine(), days=400) == 3
     assert calls == [("SELECT public.expire_capability_use(:days)", {"days": 400})]
+
+
+def test_a_read_blocks_well_inside_the_clients_read_timeout():
+    # Found on the box: redis-py 8 times reads out after 5 s, so a 5 s block failed every idle pass.
+    import redis.asyncio as aioredis
+    assert drain.block_ms(aioredis.from_url("redis://redis:6379/0")) == 2500
+    assert drain.block_ms(aioredis.from_url("redis://redis:6379/0", socket_timeout=30)) == drain.BLOCK_MS
+    assert drain.block_ms(object()) == drain.BLOCK_MS
