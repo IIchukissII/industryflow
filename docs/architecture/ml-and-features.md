@@ -49,7 +49,7 @@ has role `engineer` or `admin`, or is a superuser, else **403**
 | GET | `/api/feature-configs` | token | List |
 | POST | `/api/feature-configs` | writer | Create |
 | GET | `/api/feature-configs/{config_id}` | token | Read |
-| PUT, DELETE | `/api/feature-configs/{config_id}` | writer | Replace, delete |
+| PUT, DELETE | `/api/feature-configs/{config_id}` | writer | Replace, delete; a config a model binds keeps `base_sensors` and `transformations` and is not deleted: **409** naming the models ([ADR-0041](../../ADR/ADR-0041-bound-feature-configuration.md)) |
 | GET | `/api/feature-configs/equipment/{equipment_type}` | token | By equipment type |
 | GET | `/api/models` | token | List |
 | POST | `/api/models` | writer | Register |

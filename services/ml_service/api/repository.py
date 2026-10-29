@@ -680,3 +680,19 @@ class MLRepository:
             )
 
             return result == "DELETE 1"
+
+    async def models_bound_to_feature_config(
+        self,
+        company_id: str,
+        config_id: str
+    ) -> List[Dict[str, Any]]:
+        """The models a feature config is bound by (ADR-0041): what keeps it fixed."""
+
+        async with tenant_connection(self.pool, company_id) as conn:
+
+            rows = await conn.fetch(
+                "SELECT id, model_name FROM ml_models WHERE feature_config_id = $1 ORDER BY model_name",
+                config_id
+            )
+
+            return [{"id": str(r["id"]), "model_name": r["model_name"]} for r in rows]
