@@ -42,6 +42,8 @@ cluster-bound part (``build_app``/``main``), validated against a real stack (iss
 """
 from __future__ import annotations
 
+import logging
+
 import hmac
 import os
 import uuid
@@ -119,7 +121,7 @@ class CapabilityStore(Protocol):
 _PLANE = "tracking_gateway"
 
 
-async def record_resolution(store: CapabilityStore, handle: str, outcome: policy.Outcome) -> None:
+async def record_resolution(store: CapabilityStore, handle: str, outcome: policy.Outcome, *, source: Optional[str] = None) -> None:
     """Record a presented handle's outcome here (ADR-0042 dec 1, 5): its first use by this plane
     once, and every refusal — a refusal by the presented value's digest, never the value (dec 2). An
     entry minted before the record existed has no identifier and no first use."""
@@ -133,11 +135,17 @@ async def record_resolution(store: CapabilityStore, handle: str, outcome: policy
         keys, args = audit.first_use_script_args(fields)
         await store.eval(audit.FIRST_USE_SCRIPT, len(keys), *keys, *args)
         return
-    await store.xadd(**audit.append_args(audit.event(
-        audit.REFUSED, plane=_PLANE, reason=reason, digest=audit.presented_digest(handle),
-        user=facts.get("user"), company_id=facts.get("company_id"), audience=facts.get("audience"),
-        handle_id=facts.get("handle_id"),
-    )))
+    # A value that named no entry is recorded by digest once per window, a real entry's refusal every
+    # time and without a digest (ADR-0042 dec 2, 8).
+    how, *call = audit.refusal(plane=_PLANE, handle=handle, reason=reason, facts=facts, source=source)
+    if how == "once":
+        keys, args = call
+        if await store.eval(audit.UNKNOWN_REFUSAL_SCRIPT, len(keys), *keys, *args) == -1:
+            logging.getLogger(__name__).warning(
+                "capability audit: %s presented more unknown handles than are recorded; the rest of "
+                "this minute is not recorded (ADR-0042 dec 9)", source)
+    else:
+        await store.xadd(**call[0])
 
 
 async def consume_upload_handle(store: CapabilityStore, handle: str, binding: policy.TrackingBinding) -> bool:
@@ -159,17 +167,18 @@ def build_app(capabilities: CapabilityStore, upstream: Upstream, artifacts: Arti
               bucket: str = "", *, operator_token: Optional[str] = None) -> FastAPI:
     app = FastAPI(title="IndustryFlow notebook tracking gateway")
 
-    async def resolve(handle: str, resolver) -> Optional[policy.TrackingBinding]:
+    async def resolve(handle: str, resolver, request: Request) -> Optional[policy.TrackingBinding]:
         outcome = await resolver(capabilities.get, handle)
         # A presented handle's outcome is recorded (ADR-0042 dec 1); a request with no bearer
         # presented no capability.
         if handle:
-            await record_resolution(capabilities, handle, outcome)
+            await record_resolution(capabilities, handle, outcome,
+                                    source=request.client.host if request.client else None)
         return outcome[0]
 
     async def tenant(request: Request) -> policy.TrackingBinding:
         """Resolve the bearer capability to a tenant, or 401 (ADR-0019 dec 1, 4)."""
-        binding = await resolve(_bearer(request), policy.resolve_tracking_outcome)
+        binding = await resolve(_bearer(request), policy.resolve_tracking_outcome, request)
         if binding is None:
             raise HTTPException(status_code=401, detail="tracking capability refused")
         return binding
@@ -239,7 +248,7 @@ def build_app(capabilities: CapabilityStore, upstream: Upstream, artifacts: Arti
         structural refusal below, a kernel logging a model does not.
         """
         handle = _bearer(request)
-        binding = await resolve(handle, policy.resolve_upload_outcome)
+        binding = await resolve(handle, policy.resolve_upload_outcome, request)
         if binding is None:
             raise HTTPException(status_code=401, detail="upload capability refused")
         request.state.upload_handle = handle

@@ -27,6 +27,18 @@ class AuditScripts:
             if removed == 1:
                 self.stream.append(_pairs(args[1:]))
             return removed
+        if script == audit.UNKNOWN_REFUSAL_SCRIPT:
+            marker, counter = keys[0], keys[1]
+            if marker in self.markers:
+                return 0
+            self.counts = getattr(self, "counts", {})
+            self.counts[counter] = self.counts.get(counter, 0) + 1
+            limit = int(args[1])
+            if self.counts[counter] > limit:
+                return -1 if self.counts[counter] == limit + 1 else -2
+            self.markers.add(marker)
+            self.stream.append(_pairs(args[4:]))
+            return 1
         if script == audit.FIRST_USE_SCRIPT:
             if keys[0] in self.markers:
                 return 0

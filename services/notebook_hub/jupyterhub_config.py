@@ -207,13 +207,18 @@ async def revoke_server_capabilities(spawner):
     else an ordinary stop (the user, the culler, a logout, a failed spawn)."""
     reason = getattr(spawner, "_stop_reason", None) or cap.REASON_SERVER_STOPPED
     spawner._stop_reason = None
-    auth_state = await spawner.user.get_auth_state() or {}
+    # The tenant the server was started for (bind_identity_and_profile); the login's current one only
+    # for a server this hub process did not start, since a changed identity may already have replaced it.
+    company_id = getattr(spawner, "_audit_company_id", None)
+    if company_id is None:
+        company_id = (await spawner.user.get_auth_state() or {}).get("company_id")
+    spawner._audit_company_id = None
     store = _capability_store()
 
     def stop():
         revoked = cap.revoke_server(store, spawner.user.name, spawner.name, reason=reason)
         cap.record_environment_stopped(
-            store, user=spawner.user.name, company_id=auth_state.get("company_id"),
+            store, user=spawner.user.name, company_id=company_id,
             server_name=spawner.name, reason=reason,
         )
         return revoked
@@ -367,6 +372,8 @@ async def bind_identity_and_profile(spawner):
         cap.record_environment_started, store, user=who.user, company_id=who.company_id,
         server_name=spawner.name, profile=profile,
     )
+    # Its stop is recorded under the tenant it was started for: by then the login may be another's.
+    spawner._audit_company_id = who.company_id
 
     # Durable per-user work storage (ADR-0020) — authoring only; operators (analytics) author
     # nothing. work/ persists across the ephemeral container; the capabilities minted above are

@@ -434,6 +434,17 @@ def test_a_stop_for_a_changed_identity_records_that_reason():
     assert spawner._stop_reason is None
 
 
+def test_a_stop_is_recorded_under_the_tenant_the_server_was_started_for():
+    # A changed identity's new login can replace the auth state before a slow stop's hook runs.
+    cfg, ns, store = _hub()
+    old, new = str(uuid.uuid4()), str(uuid.uuid4())
+    spawner = _Spawner(_User("u-1", old))
+    _spawn(ns, spawner)
+    spawner.user._state["company_id"] = new
+    asyncio.run(cfg.Spawner.post_stop_hook(spawner))
+    assert store.events("environment_stopped")[0]["company_id"] == old
+
+
 def test_token_authenticated_api_calls_are_not_judged_by_headers_they_never_carry():
     ok, handler = _refresh(_User("u-1", str(uuid.uuid4())), {"Authorization": "token abc"})
     assert ok is True and handler.stopped == []

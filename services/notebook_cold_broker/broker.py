@@ -65,7 +65,8 @@ def build_app(store: CapabilityStore, cold: ColdStore) -> FastAPI:
         handle = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
         binding, reason, facts = await policy.resolve_cold_outcome(store.get, handle)
         if handle:
-            await policy.record_resolution(store, handle, binding, reason, facts)
+            await policy.record_resolution(store, handle, binding, reason, facts,
+                                           source=request.client.host if request.client else None)
         if binding is None:
             raise HTTPException(status_code=401, detail="cold capability refused")
         return binding

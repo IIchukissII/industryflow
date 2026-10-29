@@ -59,6 +59,8 @@ async def serve_connection(
     handle: str,
     store: CapabilityStore,
     backend_factory: Callable[[SqlBinding], Backend],
+    *,
+    source: Optional[str] = None,
 ) -> bool:
     """Authorize a kernel connection and, if valid, bind it to its tenant and relay.
 
@@ -70,12 +72,12 @@ async def serve_connection(
     store that cannot answer the lookup does. The session's opening and closing are recorded too.
     """
     binding, reason, facts = await resolve_sql_outcome(store.get, handle)
-    await record_resolution(store, handle, binding, reason, facts)
+    await record_resolution(store, handle, binding, reason, facts, source=source)
     if binding is None:
         # deny: absent/expired/revoked/wrong-audience handle (ADR-0015). Never the handle itself.
         log.info("capability refused: reason=%s user=%s company_id=%s handle_id=%s digest=%s",
                  reason, facts.get("user"), facts.get("company_id"), facts.get("handle_id"),
-                 audit.presented_digest(handle) if handle else None)
+                 None if facts.get("handle_id") else audit.presented_digest(handle))
         return False
 
     # Why the session ended, when the re-check ended it rather than either side closing.

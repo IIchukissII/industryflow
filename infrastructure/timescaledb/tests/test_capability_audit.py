@@ -129,3 +129,54 @@ def test_the_reader_scopes_to_one_tenant(cur):
     cur.execute(select, {"company_id": mine, "handle_id": None, "since": None, "before_id": None, "limit": 10})
     rows = cur.fetchall()
     assert len(rows) == 1 and str(rows[0][4]) == mine
+
+
+def test_retention_removes_only_what_is_older_than_its_period_and_never_under_the_floor(cur):
+    old, new = _row(), _row()
+    _record(cur, old)
+    _record(cur, new)
+    cur.execute("RESET ROLE")
+    cur.execute("UPDATE public.capability_use_events SET recorded_at = now() - interval '400 days' "
+                "WHERE stream_id = %s", (old["stream_id"],))
+    cur.execute("SET ROLE api_gateway_user")
+    cur.execute(_named(_source_constant(DRAIN, "EXPIRE")), {"days": 365})
+    assert cur.fetchone()[0] >= 1
+    cur.execute("SELECT stream_id FROM public.capability_use_events WHERE stream_id IN (%s, %s)",
+                (old["stream_id"], new["stream_id"]))
+    assert [r[0] for r in cur.fetchall()] == [new["stream_id"]]
+    with pytest.raises(errors.InvalidParameterValue):
+        cur.execute(_named(_source_constant(DRAIN, "EXPIRE")), {"days": 7})
+
+
+def test_the_roles_a_kernels_sql_session_runs_as_cannot_read_the_record():
+    # The record names every tenant's users and handles (ADR-0042 dec 6): a kernel's SQL session runs
+    # as its tenant's proxy login and reader role, and neither reads it.
+    try:
+        conn = _connect()
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"no database reachable: {e}")
+    conn.autocommit = True
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM pg_proc WHERE proname = 'record_capability_use'")
+    if c.fetchone() is None:
+        pytest.skip("init scripts not applied")
+    company_id = uuid.uuid4()
+    c.execute("SELECT create_tenant_schema(%s, %s)", (str(company_id), f"test-{company_id}"))
+    schema = c.fetchone()[0]
+    suffix = str(company_id).replace("-", "_")
+    try:
+        c.execute("SELECT rolname FROM pg_roles WHERE rolname IN (%s, %s)",
+                  (f"tenant_reader_{suffix}", f"tenant_sqlproxy_{suffix}"))
+        roles = [r[0] for r in c.fetchall()]
+        assert f"tenant_reader_{suffix}" in roles
+        for role in roles:
+            c.execute(f'SET ROLE "{role}"')
+            with pytest.raises(errors.InsufficientPrivilege):
+                c.execute("SELECT 1 FROM public.capability_use_events LIMIT 1")
+            c.execute("RESET ROLE")
+    finally:
+        c.execute("RESET ROLE")
+        c.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        c.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
+        c.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
+        conn.close()

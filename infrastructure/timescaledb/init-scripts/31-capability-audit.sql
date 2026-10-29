@@ -69,9 +69,36 @@ $$;
 COMMENT ON FUNCTION public.record_capability_use(TEXT, TEXT, TEXT, TIMESTAMPTZ, UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT) IS
     'Appends one capability-use event (SECURITY DEFINER); true when new, false for a redelivered stream entry';
 
+-- Retention (ADR-0042 dec 10): rows older than the configured period leave the record, never sooner
+-- than the floor below, whoever calls it. The floor outlasts the suspension a tenant's deletion waits
+-- for (ADR-0033 dec 7), so a suspended tenant's record is complete when its deletion is decided.
+CREATE OR REPLACE FUNCTION public.expire_capability_use(p_older_than_days INTEGER)
+RETURNS BIGINT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+    v_removed BIGINT;
+BEGIN
+    PERFORM public.company_provisioning_guard();
+    IF p_older_than_days IS NULL OR p_older_than_days < 30 THEN
+        RAISE EXCEPTION 'the capability-use record is kept for at least 30 days, not %', p_older_than_days
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    DELETE FROM public.capability_use_events
+    WHERE recorded_at < now() - make_interval(days => p_older_than_days);
+    GET DIAGNOSTICS v_removed = ROW_COUNT;
+    RETURN v_removed;
+END;
+$$;
+
+COMMENT ON FUNCTION public.expire_capability_use(INTEGER) IS
+    'Removes capability-use rows older than the period, never fewer than 30 days (SECURITY DEFINER)';
+
 -- =============================================================================
--- PRIVILEGES: the gateway writes only through the function and reads for the record's readers
--- (dec 6). No role updates or deletes a row.
+-- PRIVILEGES: the gateway writes and expires only through the functions and reads for the record's
+-- readers (dec 6). No role updates or deletes a row directly.
 -- =============================================================================
 
 REVOKE ALL ON public.capability_use_events FROM PUBLIC;
@@ -81,3 +108,6 @@ GRANT SELECT ON public.capability_use_events TO api_gateway_user;
 REVOKE ALL ON FUNCTION public.record_capability_use(TEXT, TEXT, TEXT, TIMESTAMPTZ, UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.record_capability_use(TEXT, TEXT, TEXT, TIMESTAMPTZ, UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT)
     TO api_gateway_user;
+
+REVOKE ALL ON FUNCTION public.expire_capability_use(INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.expire_capability_use(INTEGER) TO api_gateway_user;

@@ -158,7 +158,7 @@ def test_every_part_of_a_day_is_listed_and_readable():
 
 # --- the capability-use record (ADR-0042) ------------------------------------------------------
 
-def test_first_use_is_recorded_once_and_every_refusal_by_digest():
+def test_first_use_is_recorded_once_and_an_unknown_value_once_by_digest():
     hid = str(uuid.uuid4())
     m = {"nbcap:secret-ok": json.dumps({"user": "u", "company_id": CID, "audience": "cold",
                                         "handle_id": hid}),
@@ -174,10 +174,12 @@ def test_first_use_is_recorded_once_and_every_refusal_by_digest():
     assert (first["plane"], first["handle_id"], first["company_id"], first["user"], first["audience"]) == (
         "cold_broker", hid, CID, "u", "cold")
     refusals = store.events("refused")
-    assert [e["reason"] for e in refusals] == ["wrong_audience", "no_entry", "no_entry"]
+    # An unknown value once per window by its digest; a real entry's refusal every time, without one
+    # (ADR-0042 dec 2, 8).
+    assert [e["reason"] for e in refusals] == ["wrong_audience", "no_entry"]
     assert (refusals[0]["company_id"], refusals[0]["audience"]) == (CID, "sql")
-    assert refusals[1]["company_id"] is None
-    assert refusals[1]["digest"] == refusals[2]["digest"] != refusals[0]["digest"]
+    assert refusals[1]["company_id"] is None and refusals[1]["digest"] is not None
+    assert refusals[0]["digest"] is None
     assert not any("secret-" in v for e in store.stream for v in e.values())
 
 

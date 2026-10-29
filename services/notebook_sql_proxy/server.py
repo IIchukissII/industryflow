@@ -577,7 +577,9 @@ async def handle_client(
     def factory(binding: SqlBinding):
         return backend_factory(binding, reader, writer)
 
-    served = await serve_connection(handle, store, factory)
+    peer = writer.get_extra_info("peername")
+    served = await serve_connection(handle, store, factory,
+                                    source=peer[0] if isinstance(peer, (tuple, list)) and peer else None)
     if not served:
         await reject_client(writer, "capability handle refused")
 

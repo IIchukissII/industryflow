@@ -22,6 +22,7 @@ from typing import Any, Iterable, List, Sequence, Tuple
 from industryflow_contracts import capability_audit as audit
 from prometheus_client import Counter, Gauge
 from sqlalchemy import text
+from sqlalchemy.exc import DataError, IntegrityError
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,10 @@ BATCH = 500
 BLOCK_MS = 5000
 CLAIM_IDLE_MS = 60_000
 RETRY_SECONDS = 5
+# Retention (dec 10): how often the record is expired, and the period it keeps, from the environment;
+# the database refuses a period under its floor.
+EXPIRE_EVERY_SECONDS = 3600
+RETENTION_DAYS = int(os.environ.get("CAPABILITY_AUDIT_RETENTION_DAYS", "365"))
 
 EVENTS = Counter("capability_audit_events_total", "Capability-use stream entries the writer handled",
                  ["result"])
@@ -40,6 +45,8 @@ RECORD = text(
     "SELECT public.record_capability_use(:stream_id, :kind, :plane, CAST(:at AS timestamptz), "
     "CAST(:company_id AS uuid), :user_id, :audience, CAST(:handle_id AS uuid), :digest, :reason, :detail)"
 )
+
+EXPIRE = text("SELECT public.expire_capability_use(:days)")
 
 Entry = Tuple[str, Any]
 
@@ -52,8 +59,12 @@ def _params(stream_id: str, event: dict) -> dict:
 
 
 async def write_batch(engine, entries: Sequence[Entry]) -> List[str]:
-    """Write ``entries`` in one transaction; return every id to acknowledge, the unreadable included.
-    Raises when the database refused the batch: nothing is acknowledged and it is delivered again."""
+    """Write ``entries``; return every id to acknowledge, the unreadable and the refused included.
+
+    The batch is one transaction. When the database refuses it for what a row holds, each row is
+    written alone, and a row the database refuses by itself is counted, logged and acknowledged: one
+    value the contract let through must not hold back the record behind it. Any other failure (the
+    database unreachable) raises: nothing is acknowledged and the batch is delivered again."""
     rows, ack = [], []
     for stream_id, fields in entries:
         try:
@@ -62,11 +73,23 @@ async def write_batch(engine, entries: Sequence[Entry]) -> List[str]:
             EVENTS.labels("unreadable").inc()
             logger.warning("capability audit: unreadable stream entry %s skipped: %s", stream_id, exc)
         ack.append(stream_id)
-    if rows:
+    if not rows:
+        return ack
+    try:
         async with engine.begin() as conn:
             for row in rows:
                 await conn.execute(RECORD, row)
         EVENTS.labels("written").inc(len(rows))
+    except (DataError, IntegrityError):
+        for row in rows:
+            try:
+                async with engine.begin() as conn:
+                    await conn.execute(RECORD, row)
+                EVENTS.labels("written").inc()
+            except (DataError, IntegrityError) as exc:
+                EVENTS.labels("refused").inc()
+                logger.error("capability audit: the record refused stream entry %s: %s",
+                             row["stream_id"], exc.orig if hasattr(exc, "orig") else exc)
     return ack
 
 
@@ -98,12 +121,9 @@ async def _ensure_group(redis) -> None:
 
 
 async def _observe_backlog(redis) -> None:
-    for group in await redis.xinfo_groups(audit.STREAM_KEY):
-        name = group.get("name")
-        name = name.decode() if isinstance(name, bytes) else name
-        if name == GROUP:
-            lag = group.get("lag") or 0
-            BACKLOG.set(int(lag) + int(group.get("pending") or 0))
+    # Written entries are deleted, so the stream's length is what is not yet in the record, read or
+    # not; unlike the group's lag, it is known after a trim too.
+    BACKLOG.set(int(await redis.xlen(audit.STREAM_KEY)))
 
 
 async def drain_once(redis, engine, consumer: str, *, block_ms: int = BLOCK_MS) -> int:
@@ -118,14 +138,27 @@ async def drain_once(redis, engine, consumer: str, *, block_ms: int = BLOCK_MS) 
         return 0
     ack = await write_batch(engine, entries)
     if ack:
+        # Acknowledged, then removed: the stream keeps only the backlog (dec 7), not a copy of the record.
         await redis.xack(audit.STREAM_KEY, GROUP, *ack)
+        await redis.xdel(audit.STREAM_KEY, *ack)
     return len(ack)
+
+
+async def expire(engine, days: int = RETENTION_DAYS) -> int:
+    """Remove what the record keeps no longer (dec 10); every replica may run it, and it is idempotent."""
+    async with engine.begin() as conn:
+        removed = (await conn.execute(EXPIRE, {"days": days})).scalar() or 0
+    if removed:
+        logger.info("capability audit: %d records older than %d days expired", removed, days)
+    return int(removed)
 
 
 async def run(redis, engine) -> None:
     """The gateway's background writer, one consumer per process."""
     consumer = f"{socket.gethostname()}-{os.getpid()}"
     logger.info("capability audit writer started as %s", consumer)
+    next_expiry = 0.0
+    loop = asyncio.get_running_loop()
     while True:
         try:
             await _ensure_group(redis)
@@ -134,6 +167,11 @@ async def run(redis, engine) -> None:
                 # backlog it is building (dec 7).
                 await _observe_backlog(redis)
                 await drain_once(redis, engine, consumer)
+                if loop.time() >= next_expiry:
+                    # Scheduled before the attempt: an expiry the database refuses is retried in an
+                    # hour, not on every pass of the writer.
+                    next_expiry = loop.time() + EXPIRE_EVERY_SECONDS
+                    await expire(engine)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - the record waits in the stream; retry after a pause

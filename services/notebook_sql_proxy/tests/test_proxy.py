@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import binding as b  # noqa: E402
 import proxy  # noqa: E402
 from capability_audit_fake import AuditScripts  # noqa: E402
+from industryflow_contracts import capability_audit as audit  # noqa: E402
 
 
 class FakeAsyncStore(AuditScripts):
@@ -186,7 +187,7 @@ async def test_first_use_is_recorded_once_per_handle_and_sessions_each_time():
 
 
 @pytest.mark.asyncio
-async def test_every_refusal_is_recorded_by_digest_never_by_handle():
+async def test_refusals_are_recorded_and_an_unknown_value_once_never_by_handle():
     cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
     store = FakeAsyncStore({
         f"{b._KEY_PREFIX}secret-api": _sql_record(cid, hid, audience="api"),
@@ -196,12 +197,14 @@ async def test_every_refusal_is_recorded_by_digest_never_by_handle():
         assert await proxy.serve_connection(handle, store, lambda binding: FakeBackend()) is False
 
     refusals = store.events("refused")
-    assert [e["reason"] for e in refusals] == ["wrong_audience", "no_entry", "no_entry", "malformed_entry"]
+    # An unknown value is recorded once per window by its digest; a real entry's refusal names the
+    # entry and carries no digest (ADR-0042 dec 2, 8).
+    assert [e["reason"] for e in refusals] == ["wrong_audience", "no_entry", "malformed_entry"]
     assert all(e["plane"] == "sql_proxy" for e in refusals)
-    # The entry's facts are carried where there is an entry, never the handle.
     assert (refusals[0]["company_id"], refusals[0]["handle_id"], refusals[0]["audience"]) == (cid, hid, "api")
+    assert refusals[0]["digest"] is None
     assert refusals[1]["company_id"] is None and refusals[1]["handle_id"] is None
-    assert refusals[1]["digest"] == refusals[2]["digest"] != refusals[0]["digest"]
+    assert refusals[1]["digest"] == audit.presented_digest("secret-missing") != refusals[2]["digest"]
     assert store.events("first_use") == [] and store.events("sql_session_opened") == []
     assert _no_secret_in(store, "secret-api", "secret-missing", "secret-bad")
 

@@ -89,3 +89,61 @@ def test_a_plain_append_is_bounded():
     r.xadd(**audit.append_args(audit.event(audit.REFUSED, plane="cold_broker", digest="0" * 16,
                                            reason="no_entry")))
     assert audit.decode(r.xrange(audit.STREAM_KEY)[0][1])["reason"] == "no_entry"
+
+
+def test_a_nul_in_a_name_is_replaced_not_refused():
+    fields = audit.event(audit.REFUSED, plane="sql_proxy", user="ali\x00ce", digest="0" * 16)
+    assert "\x00" not in fields["user"]
+    assert "\x00" not in audit.decode({**fields, "detail": "a\x00b"})["detail"]
+
+
+@pytest.mark.parametrize("digest", ["ab", "0" * 64, "G" * 16])
+def test_only_a_presented_digest_is_a_digest(digest):
+    with pytest.raises(ValueError):
+        audit.event(audit.REFUSED, plane="cold_broker", digest=digest)
+    with pytest.raises(ValueError):
+        audit.decode({"kind": "refused", "plane": "cold_broker", "at": "2026-10-29T00:00:00+00:00",
+                      "digest": digest})
+
+
+def test_an_unknown_value_is_recorded_once_per_window_a_real_entrys_refusal_every_time():
+    r = fakeredis.FakeRedis()
+    once = r.register_script(audit.UNKNOWN_REFUSAL_SCRIPT)
+    for _ in range(3):
+        how, keys, args = audit.refusal(plane="api_gateway", handle="random-1", reason="no_entry",
+                                        facts={}, source="10.0.0.9")
+        assert how == "once"
+        once(keys=keys, args=args)
+    how, keys, args = audit.refusal(plane="api_gateway", handle="random-2", reason="no_entry", facts={},
+                                    source="10.0.0.9")
+    once(keys=keys, args=args)
+    for _ in range(2):
+        how, kwargs = audit.refusal(plane="api_gateway", handle="real", reason="wrong_audience",
+                                    facts={"handle_id": HID, "company_id": CID, "audience": "sql"},
+                                    source="10.0.0.9")
+        assert how == "append"
+        r.xadd(**kwargs)
+    events = [audit.decode(f) for _, f in r.xrange(audit.STREAM_KEY)]
+    unknown = [e for e in events if e["digest"]]
+    assert len(unknown) == 2 and {e["digest"] for e in unknown} == {
+        audit.presented_digest("random-1"), audit.presented_digest("random-2")}
+    named = [e for e in events if e["handle_id"]]
+    assert len(named) == 2 and all(e["digest"] is None for e in named)
+    assert 0 < r.ttl(audit.unknown_refusal_key(audit.presented_digest("random-1"), "api_gateway")) <= 3600
+
+
+def test_a_flood_of_distinct_values_from_one_source_is_recorded_up_to_its_limit():
+    r = fakeredis.FakeRedis()
+    once = r.register_script(audit.UNKNOWN_REFUSAL_SCRIPT)
+    results = []
+    for i in range(audit.SOURCE_LIMIT + 5):
+        _how, keys, args = audit.refusal(plane="sql_proxy", handle=f"random-{i}", reason="no_entry",
+                                         facts={}, source="10.0.0.9")
+        results.append(once(keys=keys, args=args))
+    assert results.count(1) == audit.SOURCE_LIMIT and results.count(-1) == 1 and results.count(-2) == 4
+    # Another source, and another plane, have limits of their own.
+    _how, keys, args = audit.refusal(plane="sql_proxy", handle="random-x", reason="no_entry", facts={},
+                                     source="10.0.0.10")
+    assert once(keys=keys, args=args) == 1
+    assert r.xlen(audit.STREAM_KEY) == audit.SOURCE_LIMIT + 1
+    assert audit.decode(r.xrange(audit.STREAM_KEY)[0][1])["detail"] == "source=10.0.0.9"

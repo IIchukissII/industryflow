@@ -97,7 +97,7 @@ gateway's writer (`services/api_gateway/messaging/capability_audit_drain.py`, co
 |---|---|---|
 | `minted` | hub, ml-service (upload) | With the mint, in one transaction |
 | `first_use` | each plane that redeems a handle | Its first use of the handle (marker `nbcap-audit-seen:<plane>:<handle_id>`, 7 days) |
-| `refused` | each plane that redeems a handle | Every presented handle it refuses; an unknown one by a 16-hex digest |
+| `refused` | each plane that redeems a handle | A refusal naming a real entry: every time, by `handle_id`. A value naming none: once per plane and digest per hour (`nbcap-audit-refused:`), at most 60 per plane and source address per minute (`nbcap-audit-source:`), `detail` = `source=<address>` |
 | `revoked` | hub, API gateway (logout), tenant delete | With the removal, only if it removed a live entry |
 | `consumed` | tracking gateway (upload) | With the claim of a single-use upload handle |
 | `environment_started`, `environment_stopped` | hub | Server spawn and stop |
@@ -106,17 +106,21 @@ gateway's writer (`services/api_gateway/messaging/capability_audit_drain.py`, co
 | Column | Meaning |
 |---|---|
 | `handle_id` | Non-secret identifier bound into the handle's entry at mint; a handle minted before the record has none |
-| `digest` | First 16 hex of SHA-256 of a presented handle with no entry |
+| `digest` | First 16 hex of SHA-256 of a presented value that named no entry; absent otherwise |
 | `reason`, `detail` | Why it was refused, revoked or closed; the server or session |
 
 | Read | Who |
 |---|---|
 | `GET /api/capability-use?company_id=&handle_id=&since=&before_id=&limit=` | Superuser: any tenant or all; tenant `admin`: their own tenant only |
 
+| Setting (API gateway) | Default | Meaning |
+|---|---|---|
+| `CAPABILITY_AUDIT_RETENTION_DAYS` | `365` | Rows older are expired hourly by `expire_capability_use()`; the database refuses fewer than 30 |
+
 | Metric / alert | Meaning |
 |---|---|
-| `capability_audit_backlog` | Events in the stream not yet written |
-| `capability_audit_events_total{result}` | `written`, `unreadable` (skipped), `retry` |
+| `capability_audit_backlog` | Events in the stream not yet written (written ones are deleted from it) |
+| `capability_audit_events_total{result}` | `written`, `unreadable` (skipped), `refused` (by the database, skipped), `retry` |
 | `IndustryFlowCapabilityAuditBacklog` | Backlog above 1000 for 15m ([monitoring](../operations/monitoring.md)) |
 
 ## Kernel environment

@@ -167,7 +167,8 @@ async def resolve_tenant_context(
     # A presented handle's outcome is recorded (ADR-0042 dec 1); a request with neither a session
     # nor a handle presented no capability.
     if handle:
-        await record_resolution(_capability_store(), handle, binding, reason, facts)
+        await record_resolution(_capability_store(), handle, binding, reason, facts,
+                                source=request.client.host if getattr(request, "client", None) else None)
     if binding is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

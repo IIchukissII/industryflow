@@ -25,6 +25,8 @@ SQL/tracking planes; the tenancy module documents why the two spellings are dist
 """
 from __future__ import annotations
 
+import logging
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -121,9 +123,9 @@ def _entry_facts(record: dict) -> Dict[str, str]:
 
 
 async def record_resolution(store, handle: str, binding: Optional[ColdBinding],
-                            reason: Optional[str], facts: Dict[str, str]) -> None:
+                            reason: Optional[str], facts: Dict[str, str], *, source: Optional[str] = None) -> None:
     """Record a presented handle's outcome at the broker (ADR-0042 dec 1, 5): its first use here
-    once, and every refusal. An entry minted before the record existed has no identifier and no
+    once, and its refusals (dec 8). An entry minted before the record existed has no identifier and no
     first use. ``store`` is the capability store (redis.asyncio)."""
     if binding is not None:
         if binding.handle_id is None:
@@ -134,11 +136,17 @@ async def record_resolution(store, handle: str, binding: Optional[ColdBinding],
         keys, args = audit.first_use_script_args(fields)
         await store.eval(audit.FIRST_USE_SCRIPT, len(keys), *keys, *args)
         return
-    await store.xadd(**audit.append_args(audit.event(
-        audit.REFUSED, plane=PLANE, reason=reason, digest=audit.presented_digest(handle),
-        user=facts.get("user"), company_id=facts.get("company_id"), audience=facts.get("audience"),
-        handle_id=facts.get("handle_id"),
-    )))
+    # A value that named no entry is recorded by digest once per window, a real entry's refusal every
+    # time and without a digest (ADR-0042 dec 2, 8).
+    how, *call = audit.refusal(plane=PLANE, handle=handle, reason=reason, facts=facts, source=source)
+    if how == "once":
+        keys, args = call
+        if await store.eval(audit.UNKNOWN_REFUSAL_SCRIPT, len(keys), *keys, *args) == -1:
+            logging.getLogger(__name__).warning(
+                "capability audit: %s presented more unknown handles than are recorded; the rest of "
+                "this minute is not recorded (ADR-0042 dec 9)", source)
+    else:
+        await store.xadd(**call[0])
 
 
 # The tenant's cold-store key prefix, ``tenant_<uuid>/`` (UUID-validated): the exporter's write

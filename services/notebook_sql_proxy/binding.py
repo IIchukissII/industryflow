@@ -28,6 +28,8 @@ outcome and each session's opening and closing are recorded into the capability-
 """
 from __future__ import annotations
 
+import logging
+
 import base64
 import hashlib
 import hmac
@@ -131,7 +133,7 @@ def _entry_facts(record: dict) -> Dict[str, str]:
 
 
 async def record_resolution(store, handle: str, binding: Optional[SqlBinding],
-                            reason: Optional[str], facts: Dict[str, str]) -> None:
+                            reason: Optional[str], facts: Dict[str, str], *, source: Optional[str] = None) -> None:
     """Record a presented handle's outcome at the proxy (ADR-0042 dec 1, 5): its first use here once,
     and every refusal. An entry minted before the record existed has no identifier and no first use."""
     if binding is not None:
@@ -143,13 +145,17 @@ async def record_resolution(store, handle: str, binding: Optional[SqlBinding],
         keys, args = audit.first_use_script_args(fields)
         await store.eval(audit.FIRST_USE_SCRIPT, len(keys), *keys, *args)
         return
-    await store.xadd(**audit.append_args(audit.event(
-        audit.REFUSED, plane=PLANE, reason=reason,
-        # An empty password presented no value to correlate.
-        digest=audit.presented_digest(handle) if handle else None,
-        user=facts.get("user"), company_id=facts.get("company_id"), audience=facts.get("audience"),
-        handle_id=facts.get("handle_id"),
-    )))
+    # A value that named no entry is recorded by digest once per window, a real entry's refusal every
+    # time and without a digest (ADR-0042 dec 2, 8).
+    how, *call = audit.refusal(plane=PLANE, handle=handle, reason=reason, facts=facts, source=source)
+    if how == "once":
+        keys, args = call
+        if await store.eval(audit.UNKNOWN_REFUSAL_SCRIPT, len(keys), *keys, *args) == -1:
+            logging.getLogger(__name__).warning(
+                "capability audit: %s presented more unknown handles than are recorded; the rest of "
+                "this minute is not recorded (ADR-0042 dec 9)", source)
+    else:
+        await store.xadd(**call[0])
 
 
 async def record_session(store, kind: str, binding: SqlBinding, *, reason: Optional[str] = None,

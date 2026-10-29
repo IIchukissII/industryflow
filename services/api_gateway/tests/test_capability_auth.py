@@ -9,6 +9,7 @@ import uuid
 import pytest
 
 from capability_audit_fake import AuditScripts
+from industryflow_contracts import capability_audit as audit
 
 
 class FakeAsyncStore:
@@ -215,7 +216,7 @@ async def test_a_revocation_is_recorded_with_the_handles_identifier_never_the_ha
 
 
 @pytest.mark.asyncio
-async def test_first_use_is_recorded_once_and_a_refusal_every_time():
+async def test_first_use_is_recorded_once_and_an_unknown_value_once_per_window():
     from capability_auth import AUDIENCE_API, record_resolution, resolve_capability_outcome
 
     redis = FakeRedis()
@@ -227,10 +228,12 @@ async def test_first_use_is_recorded_once_and_a_refusal_every_time():
         await record_resolution(redis, handle, *outcome)
 
     assert [e["handle_id"] for e in redis.events("first_use")] == [hid]
-    assert [e["reason"] for e in redis.events("refused")] == ["wrong_audience", "no_entry", "no_entry"]
-    refusals = redis.events("refused")
-    assert refusals[0]["company_id"] == cid and refusals[1]["company_id"] is None
-    assert refusals[1]["digest"] == refusals[2]["digest"] != refusals[0]["digest"]
+    # A real entry's refusal names it, with no digest; an unknown value is recorded once per window
+    # by its digest (ADR-0042 dec 2, 8).
+    assert [e["reason"] for e in redis.events("refused")] == ["wrong_audience", "no_entry"]
+    named, unknown = redis.events("refused")
+    assert named["company_id"] == cid and named["handle_id"] is not None and named["digest"] is None
+    assert unknown["company_id"] is None and unknown["digest"] == audit.presented_digest("nope")
 
 
 @pytest.mark.asyncio

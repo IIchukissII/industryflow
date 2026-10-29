@@ -134,7 +134,7 @@ def test_an_entry_minted_before_the_record_is_served_and_has_no_first_use():
     assert caps.events() == []
 
 
-def test_an_unknown_handle_is_refused_by_its_digest_never_the_handle():
+def test_an_unknown_handle_is_recorded_once_by_its_digest_never_the_handle():
     caps = Capabilities()
     c = _client(caps)
     secret = "kernel-secret-" + uuid.uuid4().hex
@@ -142,7 +142,8 @@ def test_an_unknown_handle_is_refused_by_its_digest_never_the_handle():
     assert _track(c, secret).status_code == 401
 
     refusals = caps.events(audit.REFUSED)
-    assert len(refusals) == 2, "every refusal is recorded, not only the first"
+    # Anyone can present an unknown value, so it is recorded once per window (ADR-0042 dec 8).
+    assert len(refusals) == 1, "a repeated unknown value is not recorded again in its window"
     for r in refusals:
         assert r["reason"] == "no_entry" and r["plane"] == "tracking_gateway"
         assert r["digest"] == audit.presented_digest(secret)

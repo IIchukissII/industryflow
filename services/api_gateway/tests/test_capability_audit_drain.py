@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 import pytest
 import pytest_asyncio
 from industryflow_contracts import capability_audit as audit
+from sqlalchemy.exc import DataError
 
 from messaging import capability_audit_drain as drain
 
@@ -22,8 +23,11 @@ fakeredis = pytest.importorskip("fakeredis")
 
 
 class Engine:
-    def __init__(self, fail=False):
-        self.rows, self.fail = [], fail
+    """Commits a transaction's rows unless asked to fail it; ``poison`` stream ids make the database
+    refuse any transaction that holds them, as a CHECK or a NUL would."""
+
+    def __init__(self, fail=False, poison=()):
+        self.rows, self.fail, self.poison = [], fail, set(poison)
 
     @asynccontextmanager
     async def begin(self):
@@ -36,7 +40,9 @@ class Engine:
 
         yield Conn()
         if self.fail:
-            raise RuntimeError("database refused the batch")
+            raise RuntimeError("database unreachable")
+        if any(p["stream_id"] in self.poison for p in pending):
+            raise DataError("SELECT public.record_capability_use(...)", {}, Exception("refused"))
         self.rows += pending
 
 
@@ -60,6 +66,8 @@ async def test_entries_are_written_then_acknowledged(redis):
     assert await drain.drain_once(redis, engine, "c1", block_ms=10) == 3
     assert [r["stream_id"] for r in engine.rows] == ids
     assert (await redis.xpending(audit.STREAM_KEY, drain.GROUP))["pending"] == 0
+    # Written means gone from the stream: it holds the backlog only.
+    assert await redis.xlen(audit.STREAM_KEY) == 0
     await drain._observe_backlog(redis)
     assert drain.BACKLOG._value.get() == 0
 
@@ -84,3 +92,43 @@ async def test_a_refused_batch_is_not_acknowledged_and_comes_back(redis, monkeyp
     engine = Engine()
     assert await drain.drain_once(redis, engine, "c2", block_ms=10) == 1
     assert [r["stream_id"] for r in engine.rows] == [sid]
+
+
+@pytest.mark.asyncio
+async def test_a_row_the_database_refuses_does_not_hold_back_the_rest(redis):
+    ids = [await redis.xadd(**audit.append_args(_event())) for _ in range(5)]
+    engine = Engine(poison={ids[2]})
+    before = drain.EVENTS.labels("refused")._value.get()
+    assert await drain.drain_once(redis, engine, "c1", block_ms=10) == 5
+    assert [r["stream_id"] for r in engine.rows] == ids[:2] + ids[3:]
+    assert drain.EVENTS.labels("refused")._value.get() == before + 1
+    assert (await redis.xpending(audit.STREAM_KEY, drain.GROUP))["pending"] == 0
+
+
+@pytest.mark.asyncio
+async def test_the_backlog_is_what_waits_in_the_stream(redis):
+    for _ in range(3):
+        await redis.xadd(**audit.append_args(_event()))
+    await drain._observe_backlog(redis)
+    assert drain.BACKLOG._value.get() == 3
+
+
+@pytest.mark.asyncio
+async def test_expiry_asks_the_database_for_the_configured_period():
+    calls = []
+
+    class Result:
+        def scalar(self):
+            return 3
+
+    class ExpiringEngine:
+        @asynccontextmanager
+        async def begin(self):
+            class Conn:
+                async def execute(_self, statement, params):
+                    calls.append((str(statement), params))
+                    return Result()
+            yield Conn()
+
+    assert await drain.expire(ExpiringEngine(), days=400) == 3
+    assert calls == [("SELECT public.expire_capability_use(:days)", {"days": 400})]

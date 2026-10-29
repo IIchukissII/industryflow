@@ -20,6 +20,7 @@ Standard library only: this is imported by every service image.
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
@@ -28,14 +29,50 @@ from . import tenancy
 
 # The stream, in the capability store (ADR-0015 dec 7).
 STREAM_KEY = "nbcap-audit"
-# Bound on undrained events (dec 7): approximately trimmed by every append. Far above what one drain
-# interval sees; an append past it drops the oldest, and the writer's lag metric shows the backlog first.
-STREAM_MAXLEN = 200_000
+# Bound on undrained events (dec 7): approximately trimmed by every append. The writer deletes what it
+# has written, so the stream holds only the backlog; far above what one drain interval sees, and an
+# append past it drops the oldest, which the backlog alert shows first.
+STREAM_MAXLEN = 100_000
 
 # Marks a handle's first use by a plane. Outlives any handle (the longest-lived is refreshed while its
 # server runs); a handle used again after its marker expired is recorded once more, never missed.
 FIRST_USE_PREFIX = "nbcap-audit-seen:"
 FIRST_USE_MARKER_TTL_SECONDS = 7 * 24 * 3600
+
+# A presented value with no entry is recorded once per plane and digest per window (dec 8): anyone can
+# present one, and a repeat says nothing the first did not. A refusal naming a real entry is recorded
+# every time; only a real handle can cause one.
+UNKNOWN_REFUSAL_PREFIX = "nbcap-audit-refused:"
+UNKNOWN_REFUSAL_WINDOW_SECONDS = 3600
+# And at most this many distinct unknown values per plane and source address per minute (dec 9): a
+# flood of distinct random values is the one thing the per-digest window does not bound. Requests are
+# not throttled; only what is recorded of them is.
+SOURCE_LIMIT_PREFIX = "nbcap-audit-source:"
+SOURCE_LIMIT = 60
+SOURCE_WINDOW_SECONDS = 60
+
+# KEYS[1] the per-digest marker, KEYS[2] the per-source counter, KEYS[3] the stream; ARGV[1] the digest
+# window, ARGV[2] the source limit, ARGV[3] the source window, ARGV[4] the stream bound, then the event's
+# pairs. Returns 1 when recorded, 0 for a repeat in its window, -1 the first time a source exceeds its
+# limit in a window (the plane logs it once), -2 for every later one.
+UNKNOWN_REFUSAL_SCRIPT = """
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return 0
+end
+local n = redis.call('INCR', KEYS[2])
+if n == 1 then
+  redis.call('EXPIRE', KEYS[2], ARGV[3])
+end
+if n > tonumber(ARGV[2]) then
+  if n == tonumber(ARGV[2]) + 1 then
+    return -1
+  end
+  return -2
+end
+redis.call('SET', KEYS[1], '1', 'EX', ARGV[1])
+redis.call('XADD', KEYS[3], 'MAXLEN', '~', ARGV[4], '*', unpack(ARGV, 5))
+return 1
+"""
 
 MINTED = "minted"
 FIRST_USE = "first_use"
@@ -58,10 +95,12 @@ AUDIENCES = ("api", "sql", "tracking", "cold", "upload")
 # 16 hex characters: enough to correlate repeated refusals of one presented value, far too few to
 # search the handle space with.
 _DIGEST_HEX = 16
+_DIGEST = re.compile(r"^[0-9a-f]{16}$")
 _MAX_DETAIL = 512
 
-# KEYS[1] the first-use marker, KEYS[2] the stream; ARGV[1] marker TTL, ARGV[2] stream bound, then the
-# event's field/value pairs. The event is appended only when the marker was absent, atomically.
+# KEYS[1] a marker, KEYS[2] the stream; ARGV[1] marker TTL, ARGV[2] stream bound, then the event's
+# field/value pairs. The event is appended only when the marker was absent, atomically: a first use
+# (dec 5), or the first refusal of an unknown value in its window (dec 8).
 FIRST_USE_SCRIPT = """
 if redis.call('SET', KEYS[1], '1', 'NX', 'EX', ARGV[1]) then
   redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[2], '*', unpack(ARGV, 3))
@@ -97,6 +136,34 @@ def first_use_key(handle_id: str, plane: str) -> str:
     return f"{FIRST_USE_PREFIX}{plane}:{handle_id}"
 
 
+def unknown_refusal_key(digest: str, plane: str) -> str:
+    return f"{UNKNOWN_REFUSAL_PREFIX}{plane}:{digest}"
+
+
+def source_limit_key(plane: str, source: str) -> str:
+    return f"{SOURCE_LIMIT_PREFIX}{plane}:{source}"
+
+
+def refusal(*, plane: str, handle: Any, reason: str, facts: Mapping[str, str],
+            source: Optional[str]) -> tuple:
+    """How a plane records a refused presented handle (dec 1, 2, 8, 9): ``("once", keys, args)`` for
+    ``UNKNOWN_REFUSAL_SCRIPT`` when the value named no entry (by digest, once per window, within the
+    source's limit), else ``("append", xadd_kwargs)`` for a plain append that names the entry and
+    carries no digest. ``source`` is the address the value came from, as the plane sees it."""
+    if facts.get("handle_id") is None:
+        digest = presented_digest(handle)
+        fields = event(REFUSED, plane=plane, reason=reason, digest=digest, user=facts.get("user"),
+                       company_id=facts.get("company_id"), audience=facts.get("audience"),
+                       detail=f"source={source}" if source else None)
+        keys = [unknown_refusal_key(digest, plane), source_limit_key(plane, source or "unknown"), STREAM_KEY]
+        return "once", keys, [str(UNKNOWN_REFUSAL_WINDOW_SECONDS), str(SOURCE_LIMIT),
+                              str(SOURCE_WINDOW_SECONDS), str(STREAM_MAXLEN), *flat(fields)]
+    fields = event(REFUSED, plane=plane, reason=reason, user=facts.get("user"),
+                   company_id=facts.get("company_id"), audience=facts.get("audience"),
+                   handle_id=facts["handle_id"])
+    return ("append", append_args(fields))
+
+
 def event(kind: str, *, plane: str, user: Optional[str] = None, company_id: Optional[str] = None,
           audience: Optional[str] = None, handle_id: Optional[str] = None,
           digest: Optional[str] = None, reason: Optional[str] = None,
@@ -115,11 +182,19 @@ def event(kind: str, *, plane: str, user: Optional[str] = None, company_id: Opti
         fields["company_id"] = tenancy.canonical_company_id(company_id)
     if handle_id is not None:
         fields["handle_id"] = str(uuid.UUID(str(handle_id)))
+    if digest is not None and not _DIGEST.match(str(digest)):
+        raise ValueError("a digest is presented_digest()'s 16 hex characters")
     for name, value in (("user", user), ("audience", audience), ("digest", digest),
                         ("reason", reason), ("detail", detail)):
         if value is not None:
-            fields[name] = str(value)[:_MAX_DETAIL]
+            fields[name] = _text(value)
     return fields
+
+
+def _text(value: Any) -> str:
+    """A text column's value: bounded, and without the NUL the database's text type refuses, so a
+    name a client chose can neither fail the request that records it nor stall the writer."""
+    return str(value).replace("\x00", "\ufffd")[:_MAX_DETAIL]
 
 
 def flat(fields: Mapping[str, str]) -> List[str]:
@@ -166,11 +241,14 @@ def decode(raw: Mapping[Any, Any]) -> Dict[str, Optional[str]]:
         raise ValueError("event time has no zone")
     out: Dict[str, Optional[str]] = {"kind": kind, "plane": plane, "at": at.isoformat()}
     for name in ("user", "company_id", "audience", "handle_id", "digest", "reason", "detail"):
-        out[name] = fields.get(name)
+        value = fields.get(name)
+        out[name] = _text(value) if value is not None and name in ("user", "reason", "detail") else value
     if out["company_id"] is not None:
         out["company_id"] = tenancy.canonical_company_id(out["company_id"])
     if out["handle_id"] is not None:
         out["handle_id"] = str(uuid.UUID(out["handle_id"]))
     if out["audience"] is not None and out["audience"] not in AUDIENCES:
         raise ValueError(f"unknown audience {out['audience']!r}")
+    if out["digest"] is not None and not _DIGEST.match(out["digest"]):
+        raise ValueError("not a presented-handle digest")
     return out
