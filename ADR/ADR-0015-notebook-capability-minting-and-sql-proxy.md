@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0015 — Notebook capability minting and the SQL access proxy
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-17
+- **Date:** 2026-06-27; changed 2026-10-29
 - **Parent:** ADR-0001
-- **Related:** [ADR-0012](ADR-0012-notebook-credential-delivery.md) (the properties realised here), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (per-tenant read-only role), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (the identity minted against; chained sign-out), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (session end revokes capabilities), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (planes added since)
+- **Related:** [ADR-0012](ADR-0012-notebook-credential-delivery.md) (the properties realised here), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (per-tenant read-only role), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (the identity minted against; chained sign-out), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (session end revokes capabilities), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (planes added since), [ADR-0042](ADR-0042-capability-use-audit.md) (the capability-use record)
 
 ## Context
 
@@ -76,7 +76,7 @@ is one the client can widen again.
 
 | Open question | Settled by |
 |---|---|
-| Capability-use audit: which handle accessed which tenant, where recorded | Maintainer, with ADR-0011's execution audit |
+| None | — |
 
 ## References
 
