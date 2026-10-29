@@ -9,7 +9,8 @@ A notebook reads long-horizon history from the cold layer through this broker. T
 NO durable object-store credential (ADR-0012 dec 2, ADR-0015 dec 7) — only its per-session *cold*
 capability handle. The broker:
 
-  1. authenticates the bearer, resolving it to one tenant (``policy.resolve_cold_binding``);
+  1. authenticates the bearer, resolving it to one tenant (``policy.resolve_cold_outcome``), and
+     records the outcome into the capability-use record (ADR-0042);
   2. confines every object-store key to that tenant's ``tenant_<uuid>/`` prefix
      (``policy.scope_key`` / ``policy.owns_key``) — a tenant can never address another's Parquet;
   3. lists the tenant's objects, and for each returns a **short-TTL, per-object, read-only
@@ -27,7 +28,7 @@ the live adapters (aioredis, boto3 pre-signing) are the cluster-bound part (``ma
 from __future__ import annotations
 
 import os
-from typing import Awaitable, Callable, Optional, Protocol
+from typing import Optional, Protocol
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -43,17 +44,28 @@ class ColdStore(Protocol):
     def list_files(self, prefix: str) -> list: ...  # [{"path","size"}], path relative to prefix
 
 
-StoreGet = Callable[[str], Awaitable[Optional[object]]]
+class CapabilityStore(Protocol):
+    """The capability store (redis.asyncio): the handle lookup, and the record's appends (ADR-0042)."""
+
+    async def get(self, key: str) -> Optional[object]: ...
+    async def eval(self, script: str, numkeys: int, *keys_and_args: object) -> object: ...
+    async def xadd(self, name: str, fields: dict, **kwargs: object) -> object: ...
 
 
-def build_app(store_get: StoreGet, cold: ColdStore) -> FastAPI:
+def build_app(store: CapabilityStore, cold: ColdStore) -> FastAPI:
     app = FastAPI(title="IndustryFlow notebook cold-store broker")
 
     async def tenant(request: Request) -> policy.ColdBinding:
-        """Resolve the bearer cold capability to a tenant, or 401 (ADR-0025 dec 5)."""
+        """Resolve the bearer cold capability to a tenant, or 401 (ADR-0025 dec 5).
+
+        A presented handle's outcome is recorded before anything is served (ADR-0042 dec 1, 5); a
+        record that cannot be written fails the request, as a store that cannot answer the lookup
+        does. A request presenting no bearer presented no capability and is not recorded."""
         auth = request.headers.get("authorization", "")
         handle = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
-        binding = await policy.resolve_cold_binding(store_get, handle)
+        binding, reason, facts = await policy.resolve_cold_outcome(store.get, handle)
+        if handle:
+            await policy.record_resolution(store, handle, binding, reason, facts)
         if binding is None:
             raise HTTPException(status_code=401, detail="cold capability refused")
         return binding
@@ -134,7 +146,7 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
                 token = resp.get("NextContinuationToken")
             return out
 
-    app = build_app(store.get, _S3ColdStore())
+    app = build_app(store, _S3ColdStore())
     uvicorn.run(app, host=os.environ.get("COLD_BROKER_HOST", "0.0.0.0"),
                 port=int(os.environ.get("COLD_BROKER_PORT", "5060")))
 

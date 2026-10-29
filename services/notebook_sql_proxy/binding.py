@@ -22,7 +22,9 @@ Its password is ``HMAC-SHA256(tenant key, tenant)``: the key exists only in the 
 holds only the SCRAM verifier the proxy enrols (``enrol_statement``), and nothing is stored.
 
 The store key/record shape is the contract shared with the minter
-(services/notebook_hub/capabilities.py); this is the SQL verifier's copy.
+(services/notebook_hub/capabilities.py); this is the SQL verifier's copy. Each presented handle's
+outcome and each session's opening and closing are recorded into the capability-use record
+(ADR-0042), by ``record_resolution`` and ``record_session``.
 """
 from __future__ import annotations
 
@@ -31,12 +33,16 @@ import hashlib
 import hmac
 import json
 import re
+import uuid
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Dict, Optional, Tuple
 
+from industryflow_contracts import capability_audit as audit
 from industryflow_contracts import tenancy
 
 AUDIENCE_SQL = "sql"
+# This plane's name in the capability-use record (ADR-0042).
+PLANE = "sql_proxy"
 _KEY_PREFIX = "nbcap:"
 # Present while the handle's company is suspended (ADR-0033 dec 3): its handles do not resolve.
 # Written and removed by the platform API with the company's active flag; shared contract
@@ -49,6 +55,9 @@ class SqlBinding:
     user: str
     company_id: str
     read_only: bool = True
+    # The non-secret identifier the minter bound into the entry (ADR-0042 dec 2); None for an entry
+    # minted before the record existed.
+    handle_id: Optional[str] = None
 
 
 async def resolve_sql_binding(
@@ -61,33 +70,96 @@ async def resolve_sql_binding(
     an object, or whose tenant is missing or not a UUID, denies rather than raising — and so does
     a handle whose tenant is suspended.
     """
+    binding, _reason, _facts = await resolve_sql_outcome(aget, handle)
+    return binding
+
+
+async def resolve_sql_outcome(
+    aget: Callable[[str], Awaitable[Optional[object]]], handle: str
+) -> Tuple[Optional[SqlBinding], Optional[str], Dict[str, str]]:
+    """``resolve_sql_binding``, also saying why it denied and what the entry named, for the record
+    (ADR-0042 dec 1): ``(binding, refusal reason, entry facts)``; the binding is None exactly when a
+    reason is given. Facts are what a record may carry, never the handle."""
     if not handle:
-        return None
+        return None, "no_handle", {}
     raw = await aget(f"{_KEY_PREFIX}{handle}")
     if raw is None:
-        return None
+        return None, "no_entry", {}
     if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode()
     try:
         record = json.loads(raw)
     except (ValueError, TypeError):
-        return None
+        return None, "malformed_entry", {}
     if not isinstance(record, dict):
-        return None
+        return None, "malformed_entry", {}
+    facts = _entry_facts(record)
     if record.get("audience") != AUDIENCE_SQL:
-        return None
+        return None, "wrong_audience", facts
     try:
         # Canonical, or deny: the tenant becomes a role name and a schema name below.
         company_id = tenancy.canonical_company_id(record.get("company_id") or "")
     except ValueError:
-        return None
+        return None, "malformed_entry", facts
     if await aget(f"{_SUSPENDED_PREFIX}{company_id}") is not None:
-        return None
+        return None, "tenant_suspended", facts
     return SqlBinding(
         user=str(record.get("user", "")),
         company_id=company_id,
         read_only=bool(record.get("read_only", True)),
-    )
+        handle_id=facts.get("handle_id"),
+    ), None, facts
+
+
+def _entry_facts(record: dict) -> Dict[str, str]:
+    """What an entry says that a record may carry: user, tenant and audience when well-formed, and
+    the handle's non-secret identifier."""
+    facts: Dict[str, str] = {}
+    try:
+        facts["company_id"] = tenancy.canonical_company_id(record.get("company_id") or "")
+    except ValueError:
+        pass
+    try:
+        facts["handle_id"] = str(uuid.UUID(str(record.get("handle_id") or "")))
+    except ValueError:
+        pass
+    if isinstance(record.get("user"), str):
+        facts["user"] = record["user"]
+    if record.get("audience") in audit.AUDIENCES:
+        facts["audience"] = record["audience"]
+    return facts
+
+
+async def record_resolution(store, handle: str, binding: Optional[SqlBinding],
+                            reason: Optional[str], facts: Dict[str, str]) -> None:
+    """Record a presented handle's outcome at the proxy (ADR-0042 dec 1, 5): its first use here once,
+    and every refusal. An entry minted before the record existed has no identifier and no first use."""
+    if binding is not None:
+        if binding.handle_id is None:
+            return
+        fields = audit.event(audit.FIRST_USE, plane=PLANE, user=binding.user,
+                             company_id=binding.company_id, audience=AUDIENCE_SQL,
+                             handle_id=binding.handle_id)
+        keys, args = audit.first_use_script_args(fields)
+        await store.eval(audit.FIRST_USE_SCRIPT, len(keys), *keys, *args)
+        return
+    await store.xadd(**audit.append_args(audit.event(
+        audit.REFUSED, plane=PLANE, reason=reason,
+        # An empty password presented no value to correlate.
+        digest=audit.presented_digest(handle) if handle else None,
+        user=facts.get("user"), company_id=facts.get("company_id"), audience=facts.get("audience"),
+        handle_id=facts.get("handle_id"),
+    )))
+
+
+async def record_session(store, kind: str, binding: SqlBinding, *, reason: Optional[str] = None,
+                         detail: Optional[str] = None) -> None:
+    """Record an SQL session's opening or closing (ADR-0042 dec 1). Its statements are not recorded:
+    the proxy relays them unread."""
+    await store.xadd(**audit.append_args(audit.event(
+        kind, plane=PLANE, user=binding.user, company_id=binding.company_id, audience=AUDIENCE_SQL,
+        handle_id=binding.handle_id, reason=reason, detail=detail,
+    )))
 
 
 # The tenant's role names, from the one tenant-naming module (ADR-0003 dec 5, 7), UUID-validated there.

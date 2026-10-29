@@ -24,6 +24,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import binding as b  # noqa: E402
 import server  # noqa: E402
 import wire  # noqa: E402
+from capability_audit_fake import AuditScripts  # noqa: E402
+
+
+class _Store(AuditScripts):
+    """The capability store: a handle lookup over a dict, and the record's appends."""
+
+    def __init__(self, mapping=None):
+        self.mapping = mapping or {}
+
+    async def get(self, key):
+        return self.mapping.get(key)
 
 
 def test_ssl_context_disable_is_none():
@@ -181,18 +192,18 @@ async def test_handle_client_rejects_invalid_handle_without_backend():
     reader.feed_data(wire.build_password_message("not-minted"))
     reader.feed_eof()
 
-    async def store_get(_key):
-        return None  # nothing minted → deny
-
+    store = _Store()  # nothing minted → deny
     opened = []
 
     def backend_factory(binding, r, w):
         opened.append(binding)
         return object()
 
-    await server.handle_client(reader, writer, store_get, backend_factory)
+    await server.handle_client(reader, writer, store, backend_factory)
 
     assert opened == []  # the privileged backend is never opened for a refused handle
+    [refused] = store.events("refused")
+    assert refused["reason"] == "no_entry" and "not-minted" not in refused.values()
     # The kernel received a FATAL ErrorResponse. Skip the AuthenticationCleartextPassword we sent.
     _t, _p, rest = _read_one(transport.buffer)
     type_byte, payload, _ = wire.split_message(rest)
@@ -212,8 +223,7 @@ async def test_handle_client_authorizes_valid_handle_and_builds_backend():
         {"user": "alice", "company_id": cid, "audience": "sql", "read_only": True}
     )
 
-    async def store_get(key):
-        return record if key == f"{b._KEY_PREFIX}good" else None
+    store = _Store({f"{b._KEY_PREFIX}good": record})
 
     built = {}
 
@@ -237,8 +247,9 @@ async def test_handle_client_authorizes_valid_handle_and_builds_backend():
         assert r is reader and w is writer  # client streams threaded through to the backend
         return _FakeBackend(binding)
 
-    await server.handle_client(reader, writer, store_get, backend_factory)
+    await server.handle_client(reader, writer, store, backend_factory)
 
+    assert [e["kind"] for e in store.events()] == ["sql_session_opened", "sql_session_closed"]
     assert built["connected"] and built["relayed"] and built["closed"]
     assert built["binding"].company_id == cid
     # The tenant's read-only role was assumed before any relay.
