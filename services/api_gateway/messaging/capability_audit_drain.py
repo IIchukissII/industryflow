@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 GROUP = "capability-audit-writer"
 BATCH = 500
+# The longest a read waits for new entries. It must end well inside the client's own read timeout
+# (redis-py's default is 5 s), or the wait itself fails as a timeout: ``block_ms`` takes half of it.
 BLOCK_MS = 5000
 CLAIM_IDLE_MS = 60_000
 RETRY_SECONDS = 5
@@ -126,6 +128,15 @@ async def _observe_backlog(redis) -> None:
     BACKLOG.set(int(await redis.xlen(audit.STREAM_KEY)))
 
 
+def block_ms(redis) -> int:
+    """How long a read may block on this client: ``BLOCK_MS``, or half the client's read timeout."""
+    kwargs = getattr(getattr(redis, "connection_pool", None), "connection_kwargs", None) or {}
+    timeout = kwargs.get("socket_timeout") or kwargs.get("orig_socket_timeout")
+    if not timeout:
+        return BLOCK_MS
+    return max(100, min(BLOCK_MS, int(float(timeout) * 500)))
+
+
 async def drain_once(redis, engine, consumer: str, *, block_ms: int = BLOCK_MS) -> int:
     """One pass: claim what a dead consumer left pending, then read new entries; return how many were
     acknowledged."""
@@ -159,6 +170,7 @@ async def run(redis, engine) -> None:
     logger.info("capability audit writer started as %s", consumer)
     next_expiry = 0.0
     loop = asyncio.get_running_loop()
+    wait = block_ms(redis)
     while True:
         try:
             await _ensure_group(redis)
@@ -166,7 +178,7 @@ async def run(redis, engine) -> None:
                 # Observed before the write, so a writer the database keeps refusing still reports the
                 # backlog it is building (dec 7).
                 await _observe_backlog(redis)
-                await drain_once(redis, engine, consumer)
+                await drain_once(redis, engine, consumer, block_ms=wait)
                 if loop.time() >= next_expiry:
                     # Scheduled before the attempt: an expiry the database refuses is retried in an
                     # hour, not on every pass of the writer.
