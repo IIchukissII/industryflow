@@ -6,10 +6,10 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0020 — Notebook per-user work persistence
 
 - **Status:** Accepted
-- **Date:** 2026-06-28; changed 2026-10-24
+- **Date:** 2026-06-28; changed 2026-10-29
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md)
 - **Related:** [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner parity), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion, dec 6),
-  [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (ephemeral capabilities)
+  [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (ephemeral capabilities), [ADR-0042](ADR-0042-capability-use-audit.md) (the capability-use record)
 
 ## Context
 
@@ -73,7 +73,6 @@ credentials, make compute long-lived or cross tenants.
 |---|---|
 | Reclaiming the volume of a user removed without deleting the tenant | First storage pressure |
 | A size cap on Docker-host volumes | First volume that fills its host |
-| An execution audit trail | ADR-0011's deferral |
 
 ## References
 
