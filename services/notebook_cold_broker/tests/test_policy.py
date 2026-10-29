@@ -93,3 +93,35 @@ def test_a_suspended_tenants_handle_is_denied():
 def test_a_handle_with_a_malformed_tenant_is_denied():
     store = {"nbcap:h": json.dumps({"user": "u", "company_id": "not-a-uuid", "audience": "cold"})}
     assert _resolve(store, "h") is None
+
+
+@pytest.mark.parametrize("raw", ["[]", "null", '"cold"', "42"])
+def test_an_entry_that_is_not_an_object_denies_rather_than_raising(raw):
+    assert _resolve({"nbcap:h": raw}, "h") is None
+
+
+def test_the_bound_tenant_is_canonicalised():
+    rec = {"user": "u", "company_id": CID.upper(), "audience": "cold"}
+    assert _resolve({"nbcap:h": json.dumps(rec)}, "h").company_id == CID
+
+
+def test_the_outcome_says_why_it_denied_and_what_the_entry_named():
+    # ADR-0042 dec 1: the reason and the entry's non-secret facts feed the record.
+    hid = str(uuid.uuid4())
+    entry = {"user": "u", "company_id": CID, "audience": "cold", "handle_id": hid}
+    mapping = {"nbcap:ok": json.dumps(entry), "nbcap:sql": json.dumps({**entry, "audience": "sql"}),
+               "nbcap:bad": "not json", "nbcap:old": json.dumps({**entry, "handle_id": None})}
+
+    def outcome(handle):
+        return asyncio.run(policy.resolve_cold_outcome(_get(mapping), handle))
+
+    binding, reason, facts = outcome("ok")
+    assert reason is None and binding.handle_id == hid and facts["company_id"] == CID
+    assert outcome("old")[0].handle_id is None  # minted before the record existed
+    assert outcome("")[1] == "no_handle"
+    assert outcome("missing")[1:] == ("no_entry", {})
+    assert outcome("bad")[1:] == ("malformed_entry", {})
+    assert outcome("sql")[1:] == ("wrong_audience", {"company_id": CID, "handle_id": hid, "user": "u",
+                                                     "audience": "sql"})
+    mapping[f"nbcap-suspended:{CID}"] = "1"
+    assert outcome("ok")[1] == "tenant_suspended"

@@ -12,7 +12,8 @@ handle in place of a password. This module:
      reads the handle (``read_startup`` / ``authenticate_client`` — pure protocol over the
      streams, unit-tested). A CancelRequest arriving instead is routed to ``CancelRegistry``.
   2. Hands the handle to ``proxy.serve_connection``, which resolves it to a tenant and, only if
-     valid, opens the backend and assumes the tenant's read-only role (``binding.py`` policy).
+     valid, opens the backend and assumes the tenant's read-only role (``binding.py`` policy),
+     recording the outcome and the session into the capability-use record (ADR-0042).
   3. ``PostgresBackend`` opens the upstream connection as **the tenant's own login**
      (``tenant_sqlproxy_<uuid>``, SCRAM — the ADR-0017 method), enrolling that login's verifier
      first if the database does not yet accept it, runs the ``SET ROLE`` setup, completes the
@@ -548,14 +549,16 @@ async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> N
 async def handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
-    store_get,
+    store,
     backend_factory,
     cancels: Optional[CancelRegistry] = None,
 ) -> None:
     """Authenticate one kernel and, if its handle is valid, bind it to its tenant and relay.
 
-    A CancelRequest is answered the way Postgres answers one: forwarded if it names a live session
-    with the right key, and the connection closed with no reply either way.
+    ``store`` is the capability store (``proxy.CapabilityStore``): the handle is resolved against it
+    and the outcome recorded into it (ADR-0042). A CancelRequest is answered the way Postgres
+    answers one: forwarded if it names a live session with the right key, and the connection closed
+    with no reply either way; it presents no capability and is not recorded.
     """
     try:
         startup = await read_startup(reader, writer)
@@ -574,7 +577,9 @@ async def handle_client(
     def factory(binding: SqlBinding):
         return backend_factory(binding, reader, writer)
 
-    served = await serve_connection(handle, store_get, factory)
+    peer = writer.get_extra_info("peername")
+    served = await serve_connection(handle, store, factory,
+                                    source=peer[0] if isinstance(peer, (tuple, list)) and peer else None)
     if not served:
         await reject_client(writer, "capability handle refused")
 
@@ -623,7 +628,7 @@ async def main() -> None:  # pragma: no cover - cluster-bound entry point
         )
 
     async def on_connect(reader, writer):
-        await handle_client(reader, writer, store.get, backend_factory, cancels)
+        await handle_client(reader, writer, store, backend_factory, cancels)
 
     server = await asyncio.start_server(on_connect, listen_host, listen_port)
     async with server:

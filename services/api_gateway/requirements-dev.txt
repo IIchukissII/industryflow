@@ -13,3 +13,6 @@ pytest-asyncio==1.4.0
 httpx2==2.16.0
 # Reads docker-compose.yml and the Helm values in the deployment guards (test_db_connection_budget.py).
 pyyaml==6.0.3
+# A real stream and consumer group for the capability-audit writer's tests (test_capability_audit_drain.py).
+fakeredis==2.40.0
+lupa==2.8

@@ -28,10 +28,11 @@ unit-testable on dicts and strings.
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Dict, Optional, Tuple
 
-from industryflow_contracts import tenancy
+from industryflow_contracts import capability_audit, tenancy
 
 import staging
 
@@ -58,44 +59,87 @@ class TrackingBinding:
     user: str
     company_id: str
     audience: str = AUDIENCE_TRACKING
+    # The non-secret identifier the minter bound into the entry (ADR-0042 dec 2); None for an entry
+    # minted before the record existed.
+    handle_id: Optional[str] = None
 
 
-async def _resolve_binding(
+# A resolution's outcome, for the record (ADR-0042 dec 1): the binding, or None and why it was
+# refused, and what the entry named. The binding is None exactly when a reason is given.
+Outcome = Tuple[Optional[TrackingBinding], Optional[str], Dict[str, str]]
+
+
+async def _resolve_outcome(
     aget: Callable[[str], Awaitable[Optional[object]]], handle: str, expected_audience: str
-) -> Optional[TrackingBinding]:
-    """Resolve a handle of exactly one audience to its tenant, or None to deny.
+) -> Outcome:
+    """Resolve a handle of exactly one audience to its tenant, or refuse, saying why.
 
-    None means the gateway refuses. Absent/expired/revoked/malformed all deny (ADR-0015 dec 1-2),
+    A refusal means the gateway refuses. Absent/expired/revoked/malformed all deny (ADR-0015 dec 1-2),
     and the audience must match exactly — possession of one plane's handle never yields another's
     (dec 3). The audience is compared, never defaulted: a record with no audience denies. A handle
     whose tenant is suspended denies.
     """
     if not handle:
-        return None
+        return None, "no_handle", {}
     raw = await aget(f"{_KEY_PREFIX}{handle}")
     if raw is None:
-        return None
+        return None, "no_entry", {}
     if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode()
     try:
         record = json.loads(raw)
     except (ValueError, TypeError):
-        return None
+        return None, "malformed_entry", {}
     if not isinstance(record, dict):
-        return None
+        return None, "malformed_entry", {}
+    facts = entry_facts(record)
     if record.get("audience") != expected_audience:
-        return None
+        return None, "wrong_audience", facts
     try:
         # Canonical, or deny: the tenant becomes every namespace below, and a malformed one must be
         # a refusal rather than a 500 from the first place it is used.
         company_id = tenancy.canonical_company_id(record.get("company_id") or "")
     except ValueError:
-        return None
+        return None, "malformed_entry", facts
     if await aget(f"{_SUSPENDED_PREFIX}{company_id}") is not None:
-        return None
+        return None, "tenant_suspended", facts
     return TrackingBinding(
-        user=record.get("user", ""), company_id=company_id, audience=expected_audience
-    )
+        user=record.get("user", ""), company_id=company_id, audience=expected_audience,
+        handle_id=facts.get("handle_id"),
+    ), None, facts
+
+
+def entry_facts(record: dict) -> Dict[str, str]:
+    """What an entry says that a record may carry (ADR-0042 dec 2): user, tenant and audience when
+    well-formed, and the handle's non-secret identifier — never the handle."""
+    facts: Dict[str, str] = {}
+    try:
+        facts["company_id"] = tenancy.canonical_company_id(record.get("company_id") or "")
+    except ValueError:
+        pass
+    try:
+        facts["handle_id"] = str(uuid.UUID(str(record.get("handle_id") or "")))
+    except ValueError:
+        pass
+    if isinstance(record.get("user"), str):
+        facts["user"] = record["user"]
+    if record.get("audience") in capability_audit.AUDIENCES:
+        facts["audience"] = record["audience"]
+    return facts
+
+
+async def resolve_tracking_outcome(
+    aget: Callable[[str], Awaitable[Optional[object]]], handle: str
+) -> Outcome:
+    """``resolve_tracking_binding``, also saying why it refused and what the entry named."""
+    return await _resolve_outcome(aget, handle, AUDIENCE_TRACKING)
+
+
+async def resolve_upload_outcome(
+    aget: Callable[[str], Awaitable[Optional[object]]], handle: str
+) -> Outcome:
+    """``resolve_upload_binding``, also saying why it refused and what the entry named."""
+    return await _resolve_outcome(aget, handle, AUDIENCE_UPLOAD)
 
 
 async def resolve_tracking_binding(
@@ -106,7 +150,7 @@ async def resolve_tracking_binding(
     An upload handle never resolves here: the tracking plane is the kernel's, and an uploader must
     not reach it by holding the wrong ticket.
     """
-    return await _resolve_binding(aget, handle, AUDIENCE_TRACKING)
+    return (await resolve_tracking_outcome(aget, handle))[0]
 
 
 async def resolve_upload_binding(
@@ -116,7 +160,7 @@ async def resolve_upload_binding(
 
     A tracking handle never resolves here — which is the point: see AUDIENCE_UPLOAD above.
     """
-    return await _resolve_binding(aget, handle, AUDIENCE_UPLOAD)
+    return (await resolve_upload_outcome(aget, handle))[0]
 
 
 # The tenant's names come from the one tenant-naming module the serving side also uses (ADR-0003

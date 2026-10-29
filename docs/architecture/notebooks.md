@@ -85,6 +85,44 @@ Either image falls back to `NOTEBOOK_IMAGE`. Hub settings:
 | Hub request after `NOTEBOOK_AUTH_REFRESH_SECONDS`, and before a spawn | Hub login compared with the forwarded identity (identity headers without the proxy secret count as none): a different user ends the login; the same user with another tenant or role ends it and stops their servers |
 | Open SQL session | Re-checked every `SQL_PROXY_REVALIDATE_SECONDS`; closed once the handle is revoked |
 
+## Capability-use record
+
+[ADR-0042](../../ADR/ADR-0042-capability-use-audit.md). Planes append events to the stream
+`nbcap-audit` in the capability store, atomically with the store change they describe; the API
+gateway's writer (`services/api_gateway/messaging/capability_audit_drain.py`, consumer group
+`capability-audit-writer`) drains it into `public.capability_use_events` through
+`record_capability_use()`. Contract: `libs/industryflow_contracts/industryflow_contracts/capability_audit.py`.
+
+| Event | Recorded by | When |
+|---|---|---|
+| `minted` | hub, ml-service (upload) | With the mint, in one transaction |
+| `first_use` | each plane that redeems a handle | Its first use of the handle (marker `nbcap-audit-seen:<plane>:<handle_id>`, 7 days) |
+| `refused` | each plane that redeems a handle | A refusal naming a real entry: every time, by `handle_id`. A value naming none: once per plane and digest per hour (`nbcap-audit-refused:`), at most 60 per plane and source address per minute (`nbcap-audit-source:`), `detail` = `source=<address>` |
+| `revoked` | hub, API gateway (logout), tenant delete | With the removal, only if it removed a live entry |
+| `consumed` | tracking gateway (upload) | With the claim of a single-use upload handle |
+| `environment_started`, `environment_stopped` | hub | Server spawn and stop |
+| `sql_session_opened`, `sql_session_closed` | SQL proxy | Session start and end; statements are not recorded |
+
+| Column | Meaning |
+|---|---|
+| `handle_id` | Non-secret identifier bound into the handle's entry at mint; a handle minted before the record has none |
+| `digest` | First 16 hex of SHA-256 of a presented value that named no entry; absent otherwise |
+| `reason`, `detail` | Why it was refused, revoked or closed; the server or session |
+
+| Read | Who |
+|---|---|
+| `GET /api/capability-use?company_id=&handle_id=&since=&before_id=&limit=` | Superuser: any tenant or all; tenant `admin`: their own tenant only |
+
+| Setting (API gateway) | Default | Meaning |
+|---|---|---|
+| `CAPABILITY_AUDIT_RETENTION_DAYS` | `365` | Rows older are expired hourly by `expire_capability_use()`; the database refuses fewer than 30 |
+
+| Metric / alert | Meaning |
+|---|---|
+| `capability_audit_backlog` | Events in the stream not yet written (written ones are deleted from it) |
+| `capability_audit_events_total{result}` | `written`, `unreadable` (skipped), `refused` (by the database, skipped), `retry` |
+| `IndustryFlowCapabilityAuditBacklog` | Backlog above 1000 for 15m ([monitoring](../operations/monitoring.md)) |
+
 ## Kernel environment
 
 | Name | Profile | Meaning |

@@ -15,7 +15,8 @@ requires-python = ">=3.9"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest==9.1.1"]
+# fakeredis with lupa runs the capability-audit first-use script in a real Lua interpreter.
+dev = ["pytest==9.1.1", "fakeredis[lua]==2.40.0", "lupa==2.8", "redis==8.1.0"]
 
 [tool.setuptools]
 packages = ["industryflow_contracts"]

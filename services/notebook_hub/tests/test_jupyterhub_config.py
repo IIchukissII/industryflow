@@ -130,6 +130,7 @@ def test_hub_migrates_its_own_state_db(profile):
 # --------------------------------------------------------------------------------------------------
 
 import asyncio  # noqa: E402
+import json  # noqa: E402
 import logging  # noqa: E402
 import uuid  # noqa: E402
 
@@ -277,6 +278,80 @@ def test_a_store_outage_does_not_stop_servers():
 
 
 # --------------------------------------------------------------------------------------------------
+# The capability-use record (ADR-0042): the hub records each mint with it, each revocation, and the
+# start and stop of the environment — through the real config's hooks, never with a handle in it.
+# --------------------------------------------------------------------------------------------------
+
+def _kinds(store):
+    return [e["kind"] for e in store.events()]
+
+
+def test_a_spawn_records_each_mint_and_the_environment_started():
+    _, ns, store = _hub()
+    cid = str(uuid.uuid4())
+    spawner = _Spawner(_User("u-1", cid))
+    _spawn(ns, spawner)
+    minted = store.events("minted")
+    assert {e["audience"] for e in minted} == {"api", "sql"}
+    assert store.transactions == len(minted)  # each mint one transaction with its record
+    (started,) = store.events("environment_started")
+    assert (started["user"], started["company_id"], started["plane"]) == ("u-1", cid, "hub")
+    assert started["detail"] == "server= profile=authoring"
+    assert _kinds(store)[-1] == "environment_started"
+    handles = [v for k, v in spawner.environment.items() if k.endswith("_CAPABILITY")]
+    assert handles and all(h not in json.dumps(store.stream) for h in handles)
+
+
+def test_stopping_a_server_records_its_revocations_and_the_environment_stopped():
+    cfg, ns, store = _hub()
+    cid = str(uuid.uuid4())
+    spawner = _Spawner(_User("u-1", cid))
+    _spawn(ns, spawner)
+    ids = {e["handle_id"] for e in store.events("minted")}
+    asyncio.run(cfg.Spawner.post_stop_hook(spawner))
+    revoked = store.events("revoked")
+    assert {e["handle_id"] for e in revoked} == ids
+    assert {e["reason"] for e in revoked} == {"server_stopped"}
+    (stopped,) = store.events("environment_stopped")
+    assert (stopped["user"], stopped["company_id"], stopped["reason"]) == ("u-1", cid, "server_stopped")
+    assert _kinds(store)[-1] == "environment_stopped"
+
+    asyncio.run(cfg.Spawner.post_stop_hook(spawner))  # a second stop revokes nothing more
+    assert len(store.events("revoked")) == len(ids)
+
+
+def test_a_respawn_records_what_it_revoked_as_respawn():
+    _, ns, store = _hub()
+    spawner = _Spawner(_User("u-1", str(uuid.uuid4())))
+    _spawn(ns, spawner)
+    first = {e["handle_id"] for e in store.events("minted")}
+    _spawn(ns, spawner)  # no stop in between
+    revoked = store.events("revoked")
+    assert {e["handle_id"] for e in revoked} == first
+    assert {e["reason"] for e in revoked} == {"respawn"}
+
+
+def test_a_server_stopped_because_its_handles_were_revoked_elsewhere_records_why():
+    import capabilities as cap
+
+    cfg, ns, store = _hub()
+    spawner = _Spawner(_User("u-1", str(uuid.uuid4())))
+    _spawn(ns, spawner)
+    live = ns["with_capability_lifecycle"](_BaseSpawner)(spawner)
+    cap.revoke_user(store, "u-1")  # the platform's logout
+    asyncio.run(live.poll_and_notify())
+    asyncio.run(cfg.Spawner.post_stop_hook(live))  # the hub's User.stop, once poll reports it stopped
+    (stopped,) = store.events("environment_stopped")
+    assert stopped["reason"] == "capabilities_revoked"
+    # Recorded revoked once, by whoever removed them, not again by the stop.
+    assert {e["reason"] for e in store.events("revoked")} == {"user_signed_out"}
+
+    asyncio.run(live.start())
+    asyncio.run(cfg.Spawner.post_stop_hook(live))  # a later ordinary stop is not mislabelled
+    assert store.events("environment_stopped")[-1]["reason"] == "server_stopped"
+
+
+# --------------------------------------------------------------------------------------------------
 # Hub session re-checked against the platform identity (ADR-0014)
 # --------------------------------------------------------------------------------------------------
 
@@ -344,6 +419,30 @@ def test_same_user_with_another_tenant_or_role_ends_login_and_stops_servers(over
         headers["X-IF-Role"] = over["role"]
     ok, handler = _refresh(user, headers)
     assert ok is False and handler.stopped == [("u-1", "")]
+    # Its stop is recorded as caused by the changed identity (ADR-0042 dec 1).
+    assert user.spawners[""]._stop_reason == "identity_changed"
+
+
+def test_a_stop_for_a_changed_identity_records_that_reason():
+    cfg, ns, store = _hub()
+    spawner = _Spawner(_User("u-1", str(uuid.uuid4())))
+    _spawn(ns, spawner)
+    spawner._stop_reason = "identity_changed"  # what refresh_user leaves before stopping it
+    asyncio.run(cfg.Spawner.post_stop_hook(spawner))
+    assert {e["reason"] for e in store.events("revoked")} == {"identity_changed"}
+    assert store.events("environment_stopped")[0]["reason"] == "identity_changed"
+    assert spawner._stop_reason is None
+
+
+def test_a_stop_is_recorded_under_the_tenant_the_server_was_started_for():
+    # A changed identity's new login can replace the auth state before a slow stop's hook runs.
+    cfg, ns, store = _hub()
+    old, new = str(uuid.uuid4()), str(uuid.uuid4())
+    spawner = _Spawner(_User("u-1", old))
+    _spawn(ns, spawner)
+    spawner.user._state["company_id"] = new
+    asyncio.run(cfg.Spawner.post_stop_hook(spawner))
+    assert store.events("environment_stopped")[0]["company_id"] == old
 
 
 def test_token_authenticated_api_calls_are_not_judged_by_headers_they_never_carry():

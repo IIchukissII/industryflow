@@ -21,6 +21,12 @@ per-user index in the same store, so that it can:
   * let the platform **revoke all of a user's handles at logout** (``revoke_user``; the data API's
     copy of that rule is services/api_gateway/capability_auth.py).
 
+Record (ADR-0042). Every entry carries a non-secret ``handle_id`` bound at mint (dec 2). A mint and
+its ``minted`` event are one transaction, and a revocation is recorded by the contract's
+delete-and-record script only when it removed a live entry (dec 3); the start and stop of the
+environment the handles were minted for are recorded too (dec 1). The handle itself never enters an
+event.
+
 This module is the store-agnostic logic, tested against a fake store. The store is the platform
 shared key-value store (Redis) in production; ``RedisCapabilityStore`` is a thin adapter. The
 kernel never receives a database password — only these handles (dec 5, ADR-0012 dec 2).
@@ -29,8 +35,11 @@ from __future__ import annotations
 
 import json
 import secrets
+import uuid
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Protocol
+from typing import Dict, List, Mapping, Optional, Protocol, Tuple
+
+from industryflow_contracts import capability_audit as audit
 
 # Audiences (ADR-0015 dec 3). A handle resolves only for the audience it was minted for.
 AUDIENCE_API = "api"  # the tenant-scoped data API (ADR-0011 dec 4)
@@ -55,17 +64,34 @@ _USER_INDEX_PREFIX = "nbcap-user:"
 # contract with every verifier (services/api_gateway/capability_auth.py).
 _SUSPENDED_PREFIX = "nbcap-suspended:"
 
+# The plane the hub records as (ADR-0042 dec 1).
+PLANE = "hub"
+# Why a handle was revoked, or an environment stopped (ADR-0042 dec 1).
+REASON_SERVER_STOPPED = "server_stopped"
+REASON_RESPAWN = "respawn"
+REASON_USER_SIGNED_OUT = "user_signed_out"
+REASON_IDENTITY_CHANGED = "identity_changed"
+# The handles were revoked elsewhere (the platform's logout), so the hub stopped the server.
+REASON_CAPABILITIES_REVOKED = "capabilities_revoked"
+REASON_REVOKED = "revoked"
+
 
 class CapabilityStore(Protocol):
     """The slice of the shared store the capability logic needs."""
 
-    def set(self, key: str, value: str, ttl_seconds: int) -> None: ...
     def get(self, key: str) -> Optional[str]: ...
     def delete(self, *keys: str) -> None: ...
     def expire(self, key: str, ttl_seconds: int) -> bool: ...   # False if the key does not exist
-    def index_set(self, key: str, field: str, value: str, ttl_seconds: int) -> None: ...
     def index_items(self, key: str) -> Dict[str, str]: ...
     def index_remove(self, key: str, *fields: str) -> None: ...
+    # The only write of an entry. One transaction: the entry, its index field (``(key, field,
+    # value)``, if given) and ``event`` appended to the record's stream (ADR-0042 dec 3).
+    def set_recorded(self, key: str, value: str, ttl_seconds: int, event: Mapping[str, str],
+                     index: Optional[Tuple[str, str, str]] = None) -> None: ...
+    # Runs one of the record contract's scripts (``capability_audit``); returns its integer reply.
+    def eval(self, script: str, keys: List[str], args: List[str]) -> int: ...
+    # A plain bounded append of ``event`` to the record's stream.
+    def append(self, event: Mapping[str, str]) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -119,11 +145,20 @@ def mint(
 
     handle = secrets.token_urlsafe(32)
     read_only = audience in _READ_ONLY_AUDIENCES
-    record = {"user": user, "company_id": company_id, "audience": audience, "read_only": read_only}
-    # Index first: a handle that exists but is not indexed is one no lifecycle event can revoke.
-    if server_name is not None:
-        store.index_set(_user_index(user), handle, server_name, ttl_seconds)
-    store.set(_key(handle), json.dumps(record), ttl_seconds)
+    # The record's name for this handle (ADR-0042 dec 2): bound into the entry, never derived from it.
+    handle_id = audit.new_handle_id()
+    record = {"user": user, "company_id": company_id, "audience": audience, "read_only": read_only,
+              "handle_id": handle_id}
+    # Built before anything is written: a tenant the record cannot name is refused here (ValueError),
+    # not minted unrecorded.
+    event = audit.event(
+        audit.MINTED, plane=PLANE, user=user, company_id=company_id, audience=audience,
+        handle_id=handle_id, detail=None if server_name is None else f"server={server_name}",
+    )
+    # The entry, its index field and its record in one transaction (ADR-0042 dec 3): a handle that is
+    # not indexed is one no lifecycle event can revoke, and one unrecorded is one no record shows.
+    index = (_user_index(user), handle, server_name) if server_name is not None else None
+    store.set_recorded(_key(handle), json.dumps(record), ttl_seconds, event, index=index)
     return handle
 
 
@@ -158,35 +193,103 @@ def resolve(store: CapabilityStore, handle: str, *, expected_audience: str) -> O
     )
 
 
-def revoke(store: CapabilityStore, handle: str) -> None:
-    """Revoke a handle by deleting its entry (ADR-0015 dec 2) — effective on next use."""
-    store.delete(_key(handle))
+def revoke(store: CapabilityStore, handle: str, *, reason: str = REASON_REVOKED) -> int:
+    """Revoke a handle by deleting its entry (ADR-0015 dec 2) — effective on next use.
+
+    Recorded atomically with the deletion, and only if it removed a live entry (ADR-0042 dec 3).
+    Returns how many entries were removed (0 or 1).
+    """
+    return _revoke_recorded(store, handle, reason)
+
+
+def _entry_facts(raw: Optional[str]) -> Dict[str, str]:
+    """What an entry says that a record may carry: user, tenant and audience when well-formed, and
+    the handle's non-secret identifier — absent from an entry minted before the record existed."""
+    try:
+        record = json.loads(raw) if raw is not None else None
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(record, dict):
+        return {}
+    facts: Dict[str, str] = {}
+    for name in ("company_id", "handle_id"):
+        try:
+            facts[name] = str(uuid.UUID(str(record.get(name) or "")))
+        except ValueError:
+            pass
+    if isinstance(record.get("user"), str) and record["user"]:
+        facts["user"] = record["user"]
+    if record.get("audience") in audit.AUDIENCES:
+        facts["audience"] = record["audience"]
+    return facts
+
+
+def _revoke_recorded(store: CapabilityStore, handle: str, reason: str,
+                     user: Optional[str] = None) -> int:
+    # The entry is read first for what the record may carry; the deletion and its record are then
+    # one script, so an entry that expired in between is recorded as nothing (ADR-0042 dec 3).
+    key = _key(handle)
+    facts = _entry_facts(store.get(key))
+    fields = audit.event(
+        audit.REVOKED, plane=PLANE, reason=reason, user=facts.get("user", user),
+        company_id=facts.get("company_id"), audience=facts.get("audience"),
+        handle_id=facts.get("handle_id"),
+    )
+    keys, args = audit.delete_recorded_args(key, fields)
+    return int(store.eval(audit.DELETE_RECORDED_SCRIPT, keys, args))
 
 
 def _server_handles(store: CapabilityStore, user: str, server_name: str) -> list:
     return [h for h, s in store.index_items(_user_index(user)).items() if s == server_name]
 
 
-def revoke_server(store: CapabilityStore, user: str, server_name: str) -> int:
+def revoke_server(store: CapabilityStore, user: str, server_name: str, *,
+                  reason: str = REASON_SERVER_STOPPED) -> int:
     """Revoke every handle minted for one of a user's servers. Returns how many were indexed.
 
     Called when the server stops and before a respawn mints its replacements: a handle outlives
-    the environment it was minted for only until this runs, never until it expires.
+    the environment it was minted for only until this runs, never until it expires. Each live one
+    is recorded as revoked for ``reason`` (ADR-0042 dec 1).
     """
     handles = _server_handles(store, user, server_name)
-    _delete_handles(store, handles)
+    for handle in handles:
+        _revoke_recorded(store, handle, reason, user)
     if handles:
         store.index_remove(_user_index(user), *handles)
     return len(handles)
 
 
-def revoke_user(store: CapabilityStore, user: str) -> int:
+def revoke_user(store: CapabilityStore, user: str, *, reason: str = REASON_USER_SIGNED_OUT) -> int:
     """Revoke every handle minted for any of a user's servers (platform logout)."""
     index = _user_index(user)
     handles = list(store.index_items(index))
-    _delete_handles(store, handles)
+    for handle in handles:
+        _revoke_recorded(store, handle, reason, user)
     store.delete(index)
     return len(handles)
+
+
+def _tenant_or_none(company_id) -> Optional[str]:
+    try:
+        return str(uuid.UUID(str(company_id or "")))
+    except ValueError:
+        return None
+
+
+def record_environment_started(store: CapabilityStore, *, user: str, company_id: str,
+                               server_name: str, profile: Optional[str] = None) -> None:
+    """Record that an environment was spawned for a user in a tenant (ADR-0042 dec 1)."""
+    detail = f"server={server_name}" + (f" profile={profile}" if profile else "")
+    store.append(audit.event(audit.ENVIRONMENT_STARTED, plane=PLANE, user=user,
+                             company_id=_tenant_or_none(company_id), detail=detail))
+
+
+def record_environment_stopped(store: CapabilityStore, *, user: str, company_id: Optional[str],
+                               server_name: str, reason: str) -> None:
+    """Record that a user's environment stopped, and why (ADR-0042 dec 1)."""
+    store.append(audit.event(audit.ENVIRONMENT_STOPPED, plane=PLANE, user=user,
+                             company_id=_tenant_or_none(company_id), reason=reason,
+                             detail=f"server={server_name}"))
 
 
 def refresh_server(store: CapabilityStore, user: str, server_name: str, ttl_seconds: int) -> int:
@@ -208,24 +311,15 @@ def refresh_server(store: CapabilityStore, user: str, server_name: str, ttl_seco
     return len(live)
 
 
-def _delete_handles(store: CapabilityStore, handles: Iterable[str]) -> None:
-    keys = [_key(h) for h in handles]
-    if keys:
-        store.delete(*keys)
-
-
 class RedisCapabilityStore:
     """Redis-backed store (ADR-0015 dec 7).
 
     Holds only capability handles, their bindings and the per-user index of them — never a database
-    or object-store secret.
+    or object-store secret — and the capability-use record's stream (ADR-0042 dec 3).
     """
 
     def __init__(self, client):
         self._client = client
-
-    def set(self, key: str, value: str, ttl_seconds: int) -> None:
-        self._client.set(key, value, ex=ttl_seconds)
 
     def get(self, key: str) -> Optional[str]:
         value = self._client.get(key)
@@ -240,12 +334,6 @@ class RedisCapabilityStore:
     def expire(self, key: str, ttl_seconds: int) -> bool:
         return bool(self._client.expire(key, ttl_seconds))
 
-    def index_set(self, key: str, field: str, value: str, ttl_seconds: int) -> None:
-        pipe = self._client.pipeline()
-        pipe.hset(key, field, value)
-        pipe.expire(key, ttl_seconds)
-        pipe.execute()
-
     def index_items(self, key: str) -> Dict[str, str]:
         raw = self._client.hgetall(key) or {}
 
@@ -257,3 +345,21 @@ class RedisCapabilityStore:
     def index_remove(self, key: str, *fields: str) -> None:
         if fields:
             self._client.hdel(key, *fields)
+
+    def set_recorded(self, key: str, value: str, ttl_seconds: int, event: Mapping[str, str],
+                     index: Optional[Tuple[str, str, str]] = None) -> None:
+        # MULTI/EXEC: the entry, its index and its record land together or not at all.
+        pipe = self._client.pipeline(transaction=True)
+        if index is not None:
+            index_key, field, index_value = index
+            pipe.hset(index_key, field, index_value)
+            pipe.expire(index_key, ttl_seconds)
+        pipe.set(key, value, ex=ttl_seconds)
+        pipe.xadd(**audit.append_args(event))
+        pipe.execute()
+
+    def eval(self, script: str, keys: List[str], args: List[str]) -> int:
+        return int(self._client.eval(script, len(keys), *keys, *args))
+
+    def append(self, event: Mapping[str, str]) -> None:
+        self._client.xadd(**audit.append_args(event))

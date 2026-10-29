@@ -15,6 +15,7 @@ import logging
 import json
 
 import asyncpg
+from industryflow_contracts import capability_audit as audit
 
 import auth
 import baseline_gate
@@ -397,16 +398,20 @@ async def mint_upload_capability(
     if await store.get(upload_capability.suspended_key(record["company_id"])) is not None:
         raise HTTPException(status_code=403, detail="This company is suspended.")
 
-    # Index first: a handle that exists but is not indexed is one ending the user's sessions cannot
-    # revoke. The index lives as long as its newest handle.
+    # The index, the entry and the mint's record in one MULTI (ADR-0042 dec 3): a handle that is not
+    # indexed is one ending the user's sessions cannot revoke, and one unrecorded is one no record
+    # shows. The index lives as long as its newest handle.
     index = upload_capability.user_index_key(record["user"])
-    await store.sadd(index, handle)
-    await store.expire(index, upload_capability.DEFAULT_TTL_SECONDS)
-    await store.set(
+    pipe = store.pipeline(transaction=True)
+    pipe.sadd(index, handle)
+    pipe.expire(index, upload_capability.DEFAULT_TTL_SECONDS)
+    pipe.set(
         upload_capability.store_key(handle),
         json.dumps(record),
         ex=upload_capability.DEFAULT_TTL_SECONDS,
     )
+    pipe.xadd(**audit.append_args(upload_capability.minted_event(record)))
+    await pipe.execute()
 
     logger.info(f"Minted an upload capability for {user} (tenant {company_id})")
     return {
