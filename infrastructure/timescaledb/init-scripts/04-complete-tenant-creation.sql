@@ -69,6 +69,9 @@ BEGIN
     PERFORM add_compatibility_columns_to_ml_models(v_schema_name);
     PERFORM add_provenance_columns_to_ml_models(v_schema_name);
     PERFORM add_detector_column_to_ml_models(v_schema_name);
+    -- ADR-0041: a model's feature configuration is fixed once bound (defined in 30-*, resolved at
+    -- call time).
+    PERFORM add_bound_feature_config_rules(v_schema_name);
     -- The sensor's optional human label (defined in 22-*, resolved at call time).
     PERFORM add_display_name_column_to_sensors(v_schema_name);
     -- The newest-reading-per-sensor index (defined in 23-*, resolved at call time).

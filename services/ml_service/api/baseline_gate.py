@@ -89,7 +89,7 @@ async def plan(app_state, repository, company_id: str, model: Dict[str, Any]) ->
         return Plan(profile, reason="the model has no feature configuration, so its sample cannot be scored")
     base_sensors = [str(n) for n in feature_config.get("base_sensors") or []]
     # Held to the registration rule again: a baseline recorded before ADR-0035 dec 4 was never checked
-    # as a sample, and a binding can have changed since.
+    # as a sample, and a configuration edited before ADR-0041 fixed it may no longer match.
     reason = drift.sample_refusal(drift.without_prediction_baseline(profile, ""), base_sensors)
     if reason:
         return Plan(profile, reason=reason)
