@@ -130,8 +130,10 @@ async def run(redis, engine) -> None:
         try:
             await _ensure_group(redis)
             while True:
-                await drain_once(redis, engine, consumer)
+                # Observed before the write, so a writer the database keeps refusing still reports the
+                # backlog it is building (dec 7).
                 await _observe_backlog(redis)
+                await drain_once(redis, engine, consumer)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - the record waits in the stream; retry after a pause
