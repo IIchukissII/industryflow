@@ -52,9 +52,10 @@ async def list_capability_use(
         # No company would mean no filter, which is every tenant's record.
         raise HTTPException(status_code=403, detail="User has no company association")
     rows = (await db.execute(text(CAPABILITY_USE_SELECT), {
-        "company_id": str(scope) if scope else None,
-        "handle_id": str(handle_id) if handle_id else None,
-        "since": since.isoformat() if since else None,
+        "company_id": UUID(str(scope)) if scope else None,
+        "handle_id": handle_id,
+        # A datetime, not its text: asyncpg binds the cast parameter as a timestamptz.
+        "since": since,
         "before_id": before_id,
         "limit": limit,
     })).mappings().all()

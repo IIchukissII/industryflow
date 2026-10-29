@@ -11,6 +11,7 @@ infrastructure/timescaledb/tests/test_capability_audit.py.
 """
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 import pytest
 import pytest_asyncio
@@ -36,6 +37,9 @@ class Engine:
         class Conn:
             async def execute(_self, statement, params):
                 assert "record_capability_use" in str(statement)
+                # What asyncpg will bind for each cast (found on the box: a str for timestamptz fails).
+                assert isinstance(params["at"], datetime) and params["at"].tzinfo is not None
+                assert all(params[k] is None or isinstance(params[k], uuid.UUID) for k in ("company_id", "handle_id"))
                 pending.append(params)
 
         yield Conn()
@@ -140,3 +144,10 @@ def test_a_read_blocks_well_inside_the_clients_read_timeout():
     assert drain.block_ms(aioredis.from_url("redis://redis:6379/0")) == 2500
     assert drain.block_ms(aioredis.from_url("redis://redis:6379/0", socket_timeout=30)) == drain.BLOCK_MS
     assert drain.block_ms(object()) == drain.BLOCK_MS
+
+
+def test_only_a_rows_own_fault_is_skipped():
+    from sqlalchemy.exc import OperationalError, StatementError
+    assert drain._row_fault(DataError("s", {}, Exception()))
+    assert drain._row_fault(StatementError("bind failed", "s", {}, TypeError("str for timestamptz")))
+    assert not drain._row_fault(OperationalError("s", {}, Exception("connection refused")))

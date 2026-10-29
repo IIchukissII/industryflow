@@ -30,7 +30,8 @@ async def _read(user, **kw):
     args = dict(company_id=None, handle_id=None, since=None, before_id=None, limit=100)
     args.update(kw)
     await capability_use.list_capability_use(user=user, db=db, **args)
-    return db.params["company_id"]
+    scope = db.params["company_id"]
+    return str(scope) if scope is not None else None
 
 
 @pytest.mark.asyncio
@@ -52,6 +53,17 @@ async def test_an_administrator_without_a_tenant_reads_nothing():
     with pytest.raises(HTTPException) as e:
         await _read(SimpleNamespace(is_superuser=False, company_id=None))
     assert e.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_since_is_bound_as_a_time_not_its_text():
+    from datetime import datetime, timezone
+    db = Db()
+    when = datetime(2026, 10, 29, tzinfo=timezone.utc)
+    await capability_use.list_capability_use(user=SimpleNamespace(is_superuser=True, company_id=None), db=db,
+                                             company_id=None, handle_id=None, since=when, before_id=None,
+                                             limit=10)
+    assert db.params["since"] is when
 
 
 def test_only_an_administrator_may_call_it():
