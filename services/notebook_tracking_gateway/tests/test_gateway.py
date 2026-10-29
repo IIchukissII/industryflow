@@ -17,19 +17,12 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import gateway  # noqa: E402
+from capability_audit_fake import Capabilities  # noqa: E402
 import policy  # noqa: E402
 
 CID = str(uuid.uuid4())
 OTHER = str(uuid.uuid4())
 HANDLE = "track-handle"
-
-
-class FakeStore:
-    def __init__(self, mapping):
-        self.mapping = mapping
-
-    async def get(self, key):
-        return self.mapping.get(key)
 
 
 class FakeUpstream:
@@ -67,16 +60,12 @@ class FakeStore_:
         self.deleted.append(key)
 
 
-async def _never_consumed(_key):
-    raise AssertionError("the tracking plane never consumes a handle")
-
-
 def _client(experiments=None):
-    store = FakeStore({f"{policy._KEY_PREFIX}{HANDLE}": json.dumps(
-        {"user": "ds", "company_id": CID, "audience": "tracking", "read_only": False})})
+    store = Capabilities({f"{policy._KEY_PREFIX}{HANDLE}": json.dumps(
+        {"user": "ds", "company_id": CID, "audience": "tracking", "read_only": False})}, consumable=False)
     up = FakeUpstream(experiments or {})
     art = FakeStore_()
-    app = gateway.build_app(store.get, up, art, store_consume=_never_consumed)
+    app = gateway.build_app(store, up, art)
     c = TestClient(app)
     c.up = up
     c.art = art

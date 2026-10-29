@@ -45,10 +45,11 @@ from __future__ import annotations
 import hmac
 import os
 import uuid
-from typing import Any, Awaitable, Callable, Optional, Protocol, Tuple
+from typing import Any, Optional, Protocol, Tuple
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from industryflow_contracts import capability_audit as audit
 from industryflow_contracts import tenancy
 
 import admission
@@ -104,19 +105,71 @@ class ArtifactStore(Protocol):
     def list_keys(self, prefix: str) -> list: ...                   # absolute keys under prefix
 
 
-StoreGet = Callable[[str], Awaitable[Optional[object]]]
-# Deletes a store key and reports how many were deleted: the atomic claim that consumes a handle.
-StoreConsume = Callable[[str], Awaitable[int]]
+class CapabilityStore(Protocol):
+    """The shared capability store (ADR-0015 dec 7), as redis-py's asyncio client answers. ``get``
+    resolves a handle; ``eval`` and ``xadd`` append to the capability-use record (ADR-0042 dec 3),
+    ``eval`` also running the atomic claim that consumes an upload handle."""
 
-def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
-              bucket: str = "", *, store_consume: StoreConsume, operator_token: Optional[str] = None) -> FastAPI:
+    async def get(self, key: str) -> Optional[object]: ...
+    async def eval(self, script: str, numkeys: int, *keys_and_args: str) -> Any: ...
+    async def xadd(self, name: str, fields: dict, maxlen: Optional[int] = None, approximate: bool = True) -> Any: ...
+
+
+# Who this gateway is in the capability-use record (ADR-0042 dec 1).
+_PLANE = "tracking_gateway"
+
+
+async def record_resolution(store: CapabilityStore, handle: str, outcome: policy.Outcome) -> None:
+    """Record a presented handle's outcome here (ADR-0042 dec 1, 5): its first use by this plane
+    once, and every refusal — a refusal by the presented value's digest, never the value (dec 2). An
+    entry minted before the record existed has no identifier and no first use."""
+    binding, reason, facts = outcome
+    if binding is not None:
+        if binding.handle_id is None:
+            return
+        fields = audit.event(audit.FIRST_USE, plane=_PLANE, user=binding.user,
+                             company_id=binding.company_id, audience=binding.audience,
+                             handle_id=binding.handle_id)
+        keys, args = audit.first_use_script_args(fields)
+        await store.eval(audit.FIRST_USE_SCRIPT, len(keys), *keys, *args)
+        return
+    await store.xadd(**audit.append_args(audit.event(
+        audit.REFUSED, plane=_PLANE, reason=reason, digest=audit.presented_digest(handle),
+        user=facts.get("user"), company_id=facts.get("company_id"), audience=facts.get("audience"),
+        handle_id=facts.get("handle_id"),
+    )))
+
+
+async def consume_upload_handle(store: CapabilityStore, handle: str, binding: policy.TrackingBinding) -> bool:
+    """The atomic claim that consumes an upload handle: True for exactly one caller. The consumption
+    is recorded in the same step, and only by the caller whose claim removed the entry (ADR-0042
+    dec 3)."""
+    fields = audit.event(audit.CONSUMED, plane=_PLANE, user=binding.user, company_id=binding.company_id,
+                         audience=binding.audience, handle_id=binding.handle_id)
+    keys, args = audit.delete_recorded_args(policy.store_key(handle), fields)
+    return int(await store.eval(audit.DELETE_RECORDED_SCRIPT, len(keys), *keys, *args)) == 1
+
+
+def _bearer(request: Request) -> str:
+    auth = request.headers.get("authorization", "")
+    return auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+
+
+def build_app(capabilities: CapabilityStore, upstream: Upstream, artifacts: ArtifactStore,
+              bucket: str = "", *, operator_token: Optional[str] = None) -> FastAPI:
     app = FastAPI(title="IndustryFlow notebook tracking gateway")
+
+    async def resolve(handle: str, resolver) -> Optional[policy.TrackingBinding]:
+        outcome = await resolver(capabilities.get, handle)
+        # A presented handle's outcome is recorded (ADR-0042 dec 1); a request with no bearer
+        # presented no capability.
+        if handle:
+            await record_resolution(capabilities, handle, outcome)
+        return outcome[0]
 
     async def tenant(request: Request) -> policy.TrackingBinding:
         """Resolve the bearer capability to a tenant, or 401 (ADR-0019 dec 1, 4)."""
-        auth = request.headers.get("authorization", "")
-        handle = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
-        binding = await policy.resolve_tracking_binding(store_get, handle)
+        binding = await resolve(_bearer(request), policy.resolve_tracking_outcome)
         if binding is None:
             raise HTTPException(status_code=401, detail="tracking capability refused")
         return binding
@@ -152,9 +205,9 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
 
     if operator_token:
         def operator(request: Request) -> None:
-            """The tenant-delete job's secret, or 401. No capability resolves here, whatever its audience."""
-            auth = request.headers.get("authorization", "")
-            presented = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+            """The tenant-delete job's secret, or 401. No capability resolves here, whatever its
+            audience, so nothing here is a capability's use and nothing is recorded (ADR-0042 dec 1)."""
+            presented = _bearer(request)
             if not hmac.compare_digest(presented.encode(), operator_token.encode()):
                 raise HTTPException(status_code=401, detail="operator credential refused")
 
@@ -185,9 +238,8 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
         holding two populations to different rules at one mediator: an uploaded artifact faces the
         structural refusal below, a kernel logging a model does not.
         """
-        auth = request.headers.get("authorization", "")
-        handle = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
-        binding = await policy.resolve_upload_binding(store_get, handle)
+        handle = _bearer(request)
+        binding = await resolve(handle, policy.resolve_upload_outcome)
         if binding is None:
             raise HTTPException(status_code=401, detail="upload capability refused")
         request.state.upload_handle = handle
@@ -247,8 +299,14 @@ def build_app(store_get: StoreGet, upstream: Upstream, artifacts: ArtifactStore,
 
         # The handle authorised one upload (ADR-0015 dec 4: a demand-minted handle's lifetime is
         # one operation). Claimed atomically before judging, so two commits cannot both proceed on it
-        # and it buys no further stage/commit cycle whatever the verdict.
-        if not await store_consume(policy.store_key(request.state.upload_handle)):
+        # and it buys no further stage/commit cycle whatever the verdict. The consumption is recorded
+        # with the claim (ADR-0042 dec 1, 3); the caller that lost the claim was refused.
+        handle = request.state.upload_handle
+        if not await consume_upload_handle(capabilities, handle, binding):
+            facts = {"user": binding.user, "company_id": binding.company_id, "audience": binding.audience,
+                     "handle_id": binding.handle_id}
+            await record_resolution(capabilities, handle,
+                                    (None, "already_consumed", {k: v for k, v in facts.items() if v}))
             raise HTTPException(status_code=401, detail="upload capability refused")
 
         def discard(*key_lists):
@@ -617,8 +675,7 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
 
     # Unset: the operator plane is not served at all, and a tenant deletion waits on this store.
     operator_token = os.environ.get("TRACKING_OPERATOR_TOKEN") or None
-    app = build_app(store.get, _HttpUpstream(), _S3Store(), bucket=bucket, store_consume=store.delete,
-                    operator_token=operator_token)
+    app = build_app(store, _HttpUpstream(), _S3Store(), bucket=bucket, operator_token=operator_token)
     uvicorn.run(app, host=os.environ.get("TRACKING_HOST", "0.0.0.0"), port=int(os.environ.get("TRACKING_PORT", "5050")))
 
 

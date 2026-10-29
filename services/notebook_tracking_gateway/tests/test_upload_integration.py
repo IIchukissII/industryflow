@@ -74,13 +74,15 @@ def _redis_client():
     return redis.Redis.from_url(os.getenv("TRACKING_REDIS_URL", "redis://redis:6379/0"))
 
 
-def _mint(rc, *, company_id, audience="upload", user="e2e-uploader"):
+def _mint(rc, *, company_id, audience="upload", user="e2e-uploader", handle_id=None):
     """Mint a handle straight into the store. The serving side's mint endpoint has its own tests;
     what is under test here is the gateway's half of the contract."""
     handle = "e2e-" + uuid.uuid4().hex
-    rc.set(f"{_KEY_PREFIX}{handle}", json.dumps(
-        {"user": user, "company_id": company_id, "audience": audience,
-         "read_only": audience != "upload"}), ex=300)
+    record = {"user": user, "company_id": company_id, "audience": audience,
+              "read_only": audience != "upload"}
+    if handle_id:
+        record["handle_id"] = handle_id
+    rc.set(f"{_KEY_PREFIX}{handle}", json.dumps(record), ex=300)
     return handle
 
 
@@ -162,6 +164,26 @@ def test_a_committed_upload_leaves_nothing_staged(stack):
     # ...and, asked with a fresh one, the staged bytes are not there any more.
     again = _commit(_mint(stack["rc"], company_id=stack["cid_a"]), body["upload_id"])
     assert again.status_code == 404, "an admitted artifact must not leave a second copy staged"
+
+
+def test_an_upload_is_recorded_in_the_capability_store(stack):
+    """ADR-0042 dec 1-3 on the real store and the real image: the handle's first use and its
+    consumption land in the record's stream by its identifier, and the handle itself never does."""
+    from industryflow_contracts import capability_audit as audit
+
+    rc, handle_id = stack["rc"], str(uuid.uuid4())
+    handle = _mint(rc, company_id=stack["cid_a"], handle_id=handle_id)
+    r = _stage(handle, sorted(SAFE_BLOBS))
+    assert r.status_code == 200
+    _put(r.json()["urls"], SAFE_BLOBS)
+    assert _commit(handle, r.json()["upload_id"]).status_code == 200
+
+    raw = [fields for _id, fields in rc.xrange(audit.STREAM_KEY)]
+    assert not any(handle.encode() in v for f in raw for v in f.values()), "a bearer handle entered the record"
+    mine = [e for e in map(audit.decode, raw) if e["handle_id"] == handle_id]
+    assert [e["kind"] for e in mine] == [audit.FIRST_USE, audit.CONSUMED]
+    assert {(e["plane"], e["audience"], e["company_id"]) for e in mine} == \
+        {("tracking_gateway", "upload", stack["cid_a"])}
 
 
 def test_bytes_re_put_after_judgement_are_not_what_is_admitted(stack):
