@@ -14,6 +14,11 @@ from typing import List, Dict, Any, Optional
 
 from industryflow_contracts import tenancy
 
+
+# The models a feature config is bound by (ADR-0041). A constant so the database proof runs this exact
+# text (infrastructure/timescaledb/tests/test_bound_feature_config.py).
+BOUND_MODELS_SELECT = "SELECT model_id, model_name FROM ml_models WHERE feature_config_id = $1 ORDER BY model_name"
+
 logger = logging.getLogger(__name__)
 
 
@@ -680,3 +685,16 @@ class MLRepository:
             )
 
             return result == "DELETE 1"
+
+    async def models_bound_to_feature_config(
+        self,
+        company_id: str,
+        config_id: str
+    ) -> List[Dict[str, Any]]:
+        """The models a feature config is bound by (ADR-0041): what keeps it fixed."""
+
+        async with tenant_connection(self.pool, company_id) as conn:
+
+            rows = await conn.fetch(BOUND_MODELS_SELECT, config_id)
+
+            return [{"model_id": str(r["model_id"]), "model_name": r["model_name"]} for r in rows]

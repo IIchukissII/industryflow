@@ -12,6 +12,8 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
 
+import asyncpg
+
 import auth
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,18 @@ router = APIRouter(prefix="/api/feature-configs", tags=["Feature Engineering"])
 # The caller's tenant, read from the verified token's company_id claim (ADR-0003 dec 1, 2); there is
 # no tenant-schema scan to fall back to.
 get_company_id_dependency = auth.get_company_id
+
+
+async def _bound_refusal(request: Request, company_id: str, config_id: str) -> HTTPException:
+    """The database refused a change to a configuration a model binds (ADR-0041 dec 2-3): say which."""
+    models = await request.app.state.ml_repository.models_bound_to_feature_config(
+        company_id=company_id, config_id=config_id,
+    )
+    names = ", ".join(f"{m['model_name']} ({m['model_id']})" for m in models) or "a model"
+    return HTTPException(status_code=409, detail=(
+        f"Feature config {config_id} is bound by {names}. A bound configuration keeps its sensors and "
+        f"transforms and is not deleted; create a new configuration and register a model with it."
+    ))
 
 
 # ============================================================================
@@ -188,7 +202,8 @@ async def update_feature_config(
     company_id: str = Depends(get_company_id_dependency)
 ):
     """
-    Update a feature engineering configuration
+    Update a feature engineering configuration; a bound one only in name, description and equipment
+    type (ADR-0041 dec 2)
     """
     try:
         # company_id from dependency
@@ -214,6 +229,8 @@ async def update_feature_config(
 
     except HTTPException:
         raise
+    except asyncpg.RestrictViolationError:
+        raise await _bound_refusal(request, company_id, config_id)
     except Exception as e:
         logger.error(f"Error updating feature config {config_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -226,9 +243,7 @@ async def delete_feature_config(
     company_id: str = Depends(get_company_id_dependency)
 ):
     """
-    Delete a feature engineering configuration
-
-    Note: This will set feature_config_id to NULL for any models using this config.
+    Delete a feature engineering configuration no model binds (ADR-0041 dec 2, 4)
     """
     try:
         # company_id from dependency
@@ -249,6 +264,8 @@ async def delete_feature_config(
 
     except HTTPException:
         raise
+    except asyncpg.ForeignKeyViolationError:
+        raise await _bound_refusal(request, company_id, config_id)
     except Exception as e:
         logger.error(f"Error deleting feature config {config_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
