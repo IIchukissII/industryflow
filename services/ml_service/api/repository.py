@@ -17,9 +17,17 @@ from industryflow_contracts import tenancy
 
 # The models a feature config is bound by (ADR-0041). A constant so the database proof runs this exact
 # text (infrastructure/timescaledb/tests/test_bound_feature_config.py).
+# The configuration a registration binds, locked for the insert (ADR-0041 dec 3): an edit that committed
+# after the registration validated it is seen here and refused, and one that comes later waits.
+BOUND_CONFIG_LOCK = "SELECT base_sensors, transformations FROM feature_engineering_configs WHERE id = $1 FOR SHARE"
+
 BOUND_MODELS_SELECT = "SELECT model_id, model_name FROM ml_models WHERE feature_config_id = $1 ORDER BY model_name"
 
 logger = logging.getLogger(__name__)
+
+
+class FeatureConfigChanged(Exception):
+    """The feature configuration a registration validated changed before the model was bound to it."""
 
 
 def _format_feature_config_row(row: dict, company_id: str) -> Dict[str, Any]:
@@ -166,12 +174,29 @@ class MLRepository:
     async def create_model(
         self,
         company_id: str,
-        model_data: Dict[str, Any]
+        model_data: Dict[str, Any],
+        *,
+        bound_inputs: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
-        """Create a new model entry"""
+        """Create a new model entry.
+
+        ``bound_inputs`` is the feature configuration's ``base_sensors`` and ``transformations`` as the
+        registration validated them; the row is locked and compared in the insert's transaction, and
+        ``FeatureConfigChanged`` is raised when it no longer says that (ADR-0041 dec 3).
+        """
         schema_name = normalize_company_id_to_schema(company_id)
 
         async with tenant_connection(self.pool, company_id) as conn:
+
+            if bound_inputs is not None and model_data.get('feature_config_id'):
+                row = await conn.fetchrow(BOUND_CONFIG_LOCK, model_data['feature_config_id'])
+
+                def _value(v):
+                    return json.loads(v) if isinstance(v, str) else v
+
+                if row is None or {k: _value(row[k]) for k in ('base_sensors', 'transformations')} != {
+                        k: bound_inputs.get(k) for k in ('base_sensors', 'transformations')}:
+                    raise FeatureConfigChanged(model_data['feature_config_id'])
 
             # Build INSERT query dynamically based on provided fields
             # Note: company_id is NOT in table, it's implied by schema

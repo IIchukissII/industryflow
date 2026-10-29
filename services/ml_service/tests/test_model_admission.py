@@ -112,8 +112,12 @@ class FakeRepo:
         self.status_updates = []
         self.profiles = []
 
-    async def create_model(self, company_id, model_data):
+    async def create_model(self, company_id, model_data, bound_inputs=None):
         self.created.append((company_id, model_data))
+        self.bound_inputs = bound_inputs
+        if getattr(self, "config_changed", False):
+            from repository import FeatureConfigChanged
+            raise FeatureConfigChanged(model_data.get("feature_config_id"))
         return uuid.uuid4()
 
     async def get_model_by_id(self, company_id, model_id):
@@ -197,6 +201,18 @@ def test_scenario_b_another_tenants_run_cannot_be_registered(client):
     r = client.post("/api/models", json=_body(mlflow_run_id="run-theirs"))
     assert r.status_code == 422, r.text
     assert client.repo.created == []
+
+
+def test_the_bind_is_held_to_the_configuration_the_registration_checked(client):
+    # ADR-0041 dec 3: the insert compares the configuration with what was validated, and an edit in
+    # between is a 409, not a model bound to inputs nobody checked.
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-mine", feature_config_id="fc1"))
+    assert r.status_code == 201, r.text
+    assert client.repo.bound_inputs == {"base_sensors": ["a"],
+                                        "transformations": [{"name": "a", "type": "identity", "sensor": "a"}]}
+    client.repo.config_changed = True
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-mine", feature_config_id="fc1"))
+    assert r.status_code == 409 and "changed while the model was being registered" in r.json()["detail"]
 
 
 def test_a_run_that_does_not_exist_is_refused_the_same_way(client):
