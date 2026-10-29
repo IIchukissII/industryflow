@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0011 — Embedded notebooks for analytics and experimentation
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-17
+- **Date:** 2026-06-27; changed 2026-10-29
 - **Parent:** ADR-0001
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the trusted-code isolation this record excepts), [ADR-0012](ADR-0012-notebook-credential-delivery.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (credential delivery, SQL proxy), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) and [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (tracking), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (hub sign-on), [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner portability), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (persistence)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the trusted-code isolation this record excepts), [ADR-0012](ADR-0012-notebook-credential-delivery.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (credential delivery, SQL proxy), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) and [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (tracking), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (hub sign-on), [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner portability), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (persistence), [ADR-0042](ADR-0042-capability-use-audit.md) (the capability-use record)
 
 ## Context
 
@@ -73,7 +73,7 @@ service role could re-scope itself to another tenant.
 | Open question | Settled by |
 |---|---|
 | Image contents, in-environment package installation, publication of curated notebooks | Maintainer, before curated content ships |
-| Notebook versioning and an execution audit (who ran what against which tenant) | Maintainer, with the capability-use audit (ADR-0015) |
+| Notebook versioning and a record of which code a kernel ran | ADR-0042's deferral |
 
 ## References
 

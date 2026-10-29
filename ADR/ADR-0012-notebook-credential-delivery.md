@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0012 — Per-session credential delivery for notebook environments
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-17
+- **Date:** 2026-06-27; changed 2026-10-29
 - **Parent:** ADR-0001
-- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (the kernel invariants delivered here), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the session a capability must not impersonate), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability form, minting, SQL proxy), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) and [ADR-0030](ADR-0030-externally-authored-model-admission.md) (writing planes)
+- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (the kernel invariants delivered here), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the session a capability must not impersonate), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability form, minting, SQL proxy), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) and [ADR-0030](ADR-0030-externally-authored-model-admission.md) (writing planes), [ADR-0042](ADR-0042-capability-use-audit.md) (the capability-use record)
 
 ## Context
 
@@ -63,7 +63,6 @@ request to the caller's tenant (ADR-0003).
 
 | Open question | Settled by |
 |---|---|
-| Audit record of which capability accessed which tenant's data | Maintainer, with ADR-0011's execution audit |
 | A query-over-HTTP data service in addition (dec 4 alternatives) | First workload that needs it |
 
 ## References
