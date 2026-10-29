@@ -52,6 +52,10 @@ judges any other model declaratively, without loading it (ADR-0027 dec 6).
 7. **A baseline recorded before this decision keeps its supplied scores until the model is next
    deployed, and is marked as supplied until then.** Its stored sample is enough to derive scores at that
    deployment; nothing is refused retroactively (ADR-0027 dec 10).
+8. **A sample is bounded in rows, by one bound on every registration path; a longer one is evenly
+   down-sampled when accepted.** The bound is what the deployment gate scores and the store holds, so a
+   path that skipped it would make the gate's cost the supplier's choice. What the platform reads from a
+   store to obtain a sample is bounded in size, and a larger one is not read.
 
 ## Alternatives
 
@@ -69,6 +73,8 @@ judges any other model declaratively, without loading it (ADR-0027 dec 6).
 | 4 | Refusing the model when its sample does not match its feature configuration | A baseline is monitoring, not admission; ADR-0030 dec 8 already names the un-monitorable state |
 | 4 | Matching sample columns to the feature configuration only at deployment | The supplier would learn of a wrong sample only when deploying |
 | 7 | Discarding supplied scores at once | Every monitored model would go dark until redeployed |
+| 8 | Refusing a sample longer than the bound | An evenly down-sampled sample still represents the data, and the model would go unmonitored for its length alone |
+| 8 | A bound only where the notebook client builds the sample | A direct registration or an upload would decide the gate's scoring cost |
 
 ## Consequences
 
@@ -87,7 +93,6 @@ judges any other model declaratively, without loading it (ADR-0027 dec 6).
 | Open question | Settled by |
 |---|---|
 | Whether a drift signal carries its score semantics | ADR-0028's semantics vocabulary, when drift compares across models |
-| A size bound on the sample | First sample too large to score at the gate |
 
 ## References
 

@@ -134,7 +134,7 @@ registration (422), deployment (409) and every load
 
 | Item | Detail |
 |---|---|
-| Feature sample | Supplied at registration: `reference_profile` in `POST /api/models` (the upload wizard's sample file), or the run's `industryflow/feature_sample.json` at promotion; format `drift/reference_profile.py` |
+| Feature sample | Supplied at registration: `reference_profile` in `POST /api/models` (the upload wizard's sample file), or the run's `industryflow/feature_sample.json` at promotion; format and row bound (`DEFAULT_MAX_SAMPLE_ROWS`, a longer sample evenly down-sampled on every path, [ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md) dec 8) `drift/reference_profile.py` |
 | Accepted when | Its columns are exactly the bound feature config's base sensors and it carries no scores; otherwise the model registers without a baseline and `baseline.reason` says why ([ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md)) |
 | Prediction scores | Derived at every deployment to `production`/`active`: each complete sample row through the feature config and the model's detector, in the probe's load for an upload and serving's load otherwise |
 | Detector cannot score the sample | Deployment proceeds; data drift only, with the reason |
@@ -168,7 +168,7 @@ version.
 |---|---|
 | Version's run | `mlflow_run_id` (provenance `kernel`), `mlflow_experiment_id`, run metrics as `training_metrics` |
 | Version or model description | `description` |
-| Run artifact `industryflow/feature_sample.json`, at most 16 MiB | `reference_profile` |
+| Run artifact `industryflow/feature_sample.json`, at most `MAX_SAMPLE_BYTES` (`drift/reference_profile.py`) | `reference_profile` |
 
 | Response | Cause |
 |---|---|

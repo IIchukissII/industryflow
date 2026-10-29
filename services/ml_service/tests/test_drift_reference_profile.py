@@ -28,6 +28,7 @@ from drift import (  # noqa: E402
     without_prediction_baseline,
 )
 from drift.reference_profile import (  # noqa: E402
+    DEFAULT_MAX_SAMPLE_ROWS,
     DEFAULT_PREDICTION_COLUMN,
     _sample_indices,
     prediction_column_refusal,
@@ -195,6 +196,19 @@ def test_an_accepted_sample_keeps_only_its_own_fields():
     assert "extra" not in kept and kept["columns"] == ["temp", "load"] and kept["n_samples"] == 3
 
 
+def test_an_accepted_sample_is_bounded_in_rows_on_every_path():
+    # ADR-0035 dec 8: a direct registration or an upload is held to the cap the notebook client builds to.
+    n = DEFAULT_MAX_SAMPLE_ROWS * 2 + 1
+    prof = _sample()
+    prof["sample"] = {"temp": [float(i) for i in range(n)], "load": [float(-i) for i in range(n)]}
+    prof["n_training_rows"] = 3
+    kept = accepted_sample(prof)
+    assert kept["n_samples"] == DEFAULT_MAX_SAMPLE_ROWS == len(kept["sample"]["temp"])
+    assert kept["n_training_rows"] == n
+    assert kept["sample"]["temp"][0] == 0.0 and kept["sample"]["temp"][-1] == float(n - 1)
+    assert all(t == -l for t, l in zip(kept["sample"]["temp"], kept["sample"]["load"]))
+
+
 def test_rows_with_a_missing_value_are_not_scored():
     assert sample_rows(_sample()) == [{"temp": 1.0, "load": 4.0}, {"temp": 3.0, "load": 6.0}]
 
@@ -235,3 +249,4 @@ def test_the_notebook_client_builds_the_same_sample(data, cap):
     assert client.feature_sample(data, max_sample_rows=cap) == build_reference_profile(data, max_sample_rows=cap)
     assert client.FEATURE_SAMPLE_ARTIFACT == __import__("drift").FEATURE_SAMPLE_ARTIFACT
     assert client.REFERENCE_PROFILE_VERSION == REFERENCE_PROFILE_VERSION
+    assert client.DEFAULT_MAX_SAMPLE_ROWS == DEFAULT_MAX_SAMPLE_ROWS

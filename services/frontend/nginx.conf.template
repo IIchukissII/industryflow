@@ -94,7 +94,9 @@ server {
     # the ML service, not the gateway. These more-specific prefixes win over the generic /api/
     # below, keeping the app same-origin (ADR-0004 / ADR-0009). The tracking gateway serves the
     # *kernel's* MLflow traffic (ADR-0019); these are the browser's tenant-scoped read-paths.
-    location /api/models             { proxy_pass http://$ml_service; }
+    # A registration carries its drift sample in the body: up to the row bound of ADR-0035 dec 8, the
+    # same size the service reads from a run (MAX_SAMPLE_BYTES, drift/reference_profile.py).
+    location /api/models             { client_max_body_size 16m; proxy_pass http://$ml_service; }
     location /api/registered-models  { proxy_pass http://$ml_service; }
     location /api/experiments        { proxy_pass http://$ml_service; }
     location /api/feature-configs    { proxy_pass http://$ml_service; }

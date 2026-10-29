@@ -378,6 +378,19 @@ def test_a_kernel_models_sample_is_scored_by_its_detector_at_deployment(client, 
     assert client.repo.status_updates == ["production"]
 
 
+def test_a_sample_stored_before_the_bound_is_scored_and_stored_at_it(client, monkeypatch):
+    # ADR-0035 dec 8: the gate scores at most the bound, whatever was accepted before it held.
+    from drift.reference_profile import DEFAULT_MAX_SAMPLE_ROWS
+    n = DEFAULT_MAX_SAMPLE_ROWS * 2
+    legacy = build_reference_profile({"a": [float(v) for v in range(n)]}, max_sample_rows=n)
+    scored = []
+    _scoring(monkeypatch, lambda f: scored.append(1) or 0.1)
+    assert _deploy(client, _kernel_row(reference_profile=legacy)).status_code == 200
+    stored = client.repo.profiles[-1]
+    assert len(scored) == DEFAULT_MAX_SAMPLE_ROWS == stored["n_samples"] == len(stored["sample"]["a"])
+    assert stored["n_training_rows"] == n
+
+
 def test_a_detector_that_cannot_score_the_sample_leaves_data_drift_only(client, monkeypatch):
     def refuse(_):
         raise UninterpretableModel("no declared semantics")
