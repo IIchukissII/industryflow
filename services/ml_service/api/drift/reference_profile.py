@@ -41,16 +41,17 @@ from extensions import SCORE_RANGE
 # consistent with ADR-0021's evidently choice).
 REFERENCE_PROFILE_VERSION = 2
 
-# Cap on stored reference rows. Evidently's tests are stable well below this; the cap keeps
-# the JSONB payload bounded regardless of training-window size.
+# Cap on stored reference rows (ADR-0035 dec 8), on every registration path. Evidently's tests are
+# stable well below this; the cap bounds the stored payload and the deployment gate's scoring of it
+# whatever the training-window size. The notebook client builds its sample to the same cap.
 DEFAULT_MAX_SAMPLE_ROWS = 5000
 
 # The column the derived scores are stored under.
 DEFAULT_PREDICTION_COLUMN = "prediction_score"
 
 # Where a notebook-trained model's feature sample lives in its run (ADR-0040 dec 4); the notebook client
-# writes the same name. Read at promotion only up to the size bound: 5000 rows of a few dozen inputs
-# is well under it, and a larger file is refused unread.
+# writes the same name. Read at promotion only up to this size bound (ADR-0035 dec 8): the row cap of a
+# few dozen inputs is well under it, and a larger file is refused unread.
 FEATURE_SAMPLE_ARTIFACT = "industryflow/feature_sample.json"
 MAX_SAMPLE_BYTES = 16 * 1024 * 1024
 
@@ -207,13 +208,17 @@ def sample_refusal(profile: Any, base_sensors: Sequence[str]) -> Optional[str]:
 
 
 def accepted_sample(profile: Mapping[str, Any]) -> Dict[str, Any]:
-    """The sample as stored: its own fields, nothing a supplier added beside them."""
+    """The sample as stored: its own fields, nothing a supplier added beside them, and at most
+    ``DEFAULT_MAX_SAMPLE_ROWS`` rows on every registration path (ADR-0035 dec 8), evenly down-sampled
+    as the notebook client does."""
     columns = list(profile["columns"])
-    sample = {c: list(profile["sample"][c]) for c in columns}
-    n = len(sample[columns[0]])
+    supplied = len(profile["sample"][columns[0]])
+    idx = _sample_indices(supplied, DEFAULT_MAX_SAMPLE_ROWS)
+    sample = {c: [profile["sample"][c][i] for i in idx] for c in columns}
+    n = len(idx)
     n_training = profile.get("n_training_rows")
-    if isinstance(n_training, bool) or not isinstance(n_training, int) or n_training < n:
-        n_training = n
+    if isinstance(n_training, bool) or not isinstance(n_training, int) or n_training < supplied:
+        n_training = supplied
     return {
         "schema_version": REFERENCE_PROFILE_VERSION,
         "method": "evidently_sample",
