@@ -664,7 +664,11 @@ ingress:
   tls:
     enabled: true
     secretName: industryflow-tls
-  annotations: {}
+  # The app's edge (the frontend's nginx) bounds request bodies per path: a model artifact streams
+  # through staging unbounded, a registration's drift sample up to its bound. The controller's 1m
+  # default would refuse both first, so it passes bodies through to that edge.
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
   # The mTLS device-ingestion path (ADR-0002 / ADR-0007), realized as a second Ingress.
   # The ingress-nginx controller verifies client certs against the device CA (a Secret with
   # ca.crt [+ ca.crl]) and passes the verified cert to ingestion-service as ssl-client-cert.

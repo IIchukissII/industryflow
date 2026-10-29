@@ -93,6 +93,9 @@ async def plan(app_state, repository, company_id: str, model: Dict[str, Any]) ->
     reason = drift.sample_refusal(drift.without_prediction_baseline(profile, ""), base_sensors)
     if reason:
         return Plan(profile, reason=reason)
+    # The bound is what the gate scores (ADR-0035 dec 8), including a sample accepted before it held;
+    # the profile stored after this deployment is the bounded one.
+    profile = drift.accepted_sample(profile)
     rows = drift.sample_rows(profile)
     if not rows:
         return Plan(profile, reason="the sample has no complete row to score")
