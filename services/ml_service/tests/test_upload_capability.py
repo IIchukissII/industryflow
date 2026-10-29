@@ -21,16 +21,21 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
 import upload_capability as uc  # noqa: E402
+from industryflow_contracts import capability_audit as audit  # noqa: E402
 
 CID = str(uuid.uuid4())
 
 
 class FakeStore:
+    """``mint``'s adapter: the entry and its event arrive in one call, as one transaction would."""
+
     def __init__(self):
         self.written = {}
+        self.events = []
 
-    def set(self, key, value, ttl_seconds):
+    def set(self, key, value, ttl_seconds, event):
         self.written[key] = (value, ttl_seconds)
+        self.events.append(dict(event))
 
 
 def _minted(store):
@@ -135,7 +140,35 @@ def test_the_record_holds_bound_facts_and_nothing_resembling_a_secret():
     s = FakeStore()
     uc.mint(s.set, user="alice", company_id=CID)
     _, rec, _ = _minted(s)
-    assert set(rec) == {"user", "company_id", "audience", "read_only"}
+    assert set(rec) == {"user", "company_id", "audience", "read_only", "handle_id"}
+
+
+# --- the mint is recorded with it (ADR-0042) ---------------------------------------------------
+
+def test_a_mint_binds_a_handle_id_and_writes_its_minted_event_with_it():
+    s = FakeStore()
+    handle = uc.mint(s.set, user="alice", company_id=CID.upper())
+    _, rec, _ = _minted(s)
+    assert str(uuid.UUID(rec["handle_id"])) == rec["handle_id"]
+    (event,) = [audit.decode(e) for e in s.events]
+    assert {k: event[k] for k in ("kind", "plane", "user", "company_id", "audience", "handle_id")} == {
+        "kind": "minted", "plane": "ml_service", "user": "alice", "company_id": CID,
+        "audience": "upload", "handle_id": rec["handle_id"]}
+    assert handle not in json.dumps(s.events)
+
+
+def test_every_mint_gets_its_own_handle_id():
+    s = FakeStore()
+    for _ in range(20):
+        uc.mint(s.set, user="alice", company_id=CID)
+    assert len({e["handle_id"] for e in s.events}) == 20
+
+
+def test_a_refused_mint_records_nothing():
+    s = FakeStore()
+    with pytest.raises(ValueError):
+        uc.mint(s.set, user="alice", company_id="tenant_x")
+    assert s.events == []
 
 
 # --- a suspended company is issued nothing (ADR-0033 dec 3) ------------------------------------
@@ -154,41 +187,72 @@ def _mint_route(store):
     return TestClient(app).post("/api/models/upload-capability")
 
 
-class FakeAsyncStore:
+class Store:
+    """The route's store: an async client on a real Redis protocol (fakeredis), read back through a
+    sync client on the same server. ``transactions`` is every pipeline the route executed:
+    (was it MULTI/EXEC, the commands it carried)."""
+
     def __init__(self, mapping=None):
-        self.kv = dict(mapping or {})
+        import fakeredis
 
-    async def get(self, key):
-        return self.kv.get(key)
+        server = fakeredis.FakeServer()
+        self.sync = fakeredis.FakeRedis(server=server, decode_responses=True)
+        for key, value in (mapping or {}).items():
+            self.sync.set(key, value)
+        self.client = fakeredis.aioredis.FakeRedis(server=server)
+        self.transactions = []
+        real = self.client.pipeline
 
-    async def set(self, key, value, ex=None):
-        self.kv[key] = value
+        def pipeline(transaction=True, shard_hint=None):
+            pipe = real(transaction=transaction, shard_hint=shard_hint)
+            execute = pipe.execute
 
-    async def sadd(self, key, *members):
-        self.kv.setdefault(key, set()).update(members)
+            async def recorded(*a, **k):
+                self.transactions.append((transaction, [str(c[0][0]).upper() for c in pipe.command_stack]))
+                return await execute(*a, **k)
 
-    async def expire(self, key, ttl):
-        self.kv.setdefault(f"ttl:{key}", ttl)
+            pipe.execute = recorded
+            return pipe
+
+        self.client.pipeline = pipeline
+
+    def events(self):
+        return [audit.decode(f) for _i, f in self.sync.xrange(audit.STREAM_KEY)]
 
 
 def test_the_route_mints_for_an_active_tenant():
-    store = FakeAsyncStore()
-    r = _mint_route(store)
+    store = Store()
+    r = _mint_route(store.client)
     assert r.status_code == 201, r.text
-    assert f"nbcap:{r.json()['capability']}" in store.kv
+    assert store.sync.get(f"nbcap:{r.json()['capability']}") is not None
 
 
 def test_the_route_indexes_the_handle_under_its_user():
     # Ending the user's sessions revokes it with their other capabilities (ADR-0004 dec 2).
-    store = FakeAsyncStore()
-    r = _mint_route(store)
-    assert store.kv[uc.user_index_key("user-1")] == {r.json()["capability"]}
-    assert store.kv[f"ttl:{uc.user_index_key('user-1')}"] == uc.DEFAULT_TTL_SECONDS
+    store = Store()
+    r = _mint_route(store.client)
+    assert store.sync.smembers(uc.user_index_key("user-1")) == {r.json()["capability"]}
+    assert 0 < store.sync.ttl(uc.user_index_key("user-1")) <= uc.DEFAULT_TTL_SECONDS
     assert uc.user_index_key("user-1") == "nbcap-upload-user:user-1"
 
 
+def test_the_route_writes_the_mint_and_its_record_in_one_transaction():
+    # ADR-0042 dec 3: the index, the entry and the minted event together or not at all.
+    store = Store()
+    r = _mint_route(store.client)
+    handle = r.json()["capability"]
+    assert store.transactions == [(True, ["SADD", "EXPIRE", "SET", "XADD"])]
+    entry = json.loads(store.sync.get(f"nbcap:{handle}"))
+    (event,) = store.events()
+    assert (event["kind"], event["plane"], event["audience"], event["user"], event["company_id"]) == (
+        "minted", "ml_service", "upload", "user-1", CID)
+    assert event["handle_id"] == entry["handle_id"]
+    assert handle not in json.dumps(store.sync.xrange(audit.STREAM_KEY))
+
+
 def test_the_route_refuses_a_suspended_tenant():
-    store = FakeAsyncStore({uc.suspended_key(CID): "1"})
-    r = _mint_route(store)
+    store = Store({uc.suspended_key(CID): "1"})
+    r = _mint_route(store.client)
     assert r.status_code == 403
-    assert not [k for k in store.kv if k.startswith("nbcap:") and not k.startswith("nbcap-suspended:")]
+    assert not [k for k in store.sync.keys() if k.startswith("nbcap:")]
+    assert store.events() == [] and store.transactions == []

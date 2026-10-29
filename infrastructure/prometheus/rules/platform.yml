@@ -48,6 +48,16 @@ groups:
       # the second term raises a dead-letter series that did not exist one window ago, but only while
       # Kafka was already being watched then, so a Prometheus that has just started (or a relabelled
       # series) does not raise letters it has merely not seen before.
+      - alert: IndustryFlowCapabilityAuditBacklog
+        # The capability-use record's writer is behind (ADR-0042 dec 7): events not yet written are
+        # lost if the capability store is. Every gateway replica reports the one consumer group.
+        expr: max(capability_audit_backlog{platform="industryflow"}) > 1000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Capability-use events are waiting to be recorded"
+          description: "{{ $value }} capability-use events are in the capability store and not yet in the record; check the API gateway's capability audit writer."
       - alert: IndustryFlowDeadLetteredReadings
         expr: |
           sum by (topic) (increase(kafka_topic_partition_current_offset{platform="industryflow", topic=~".+\\.dlq"}[15m])) > 0

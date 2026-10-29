@@ -74,7 +74,8 @@ kube-state-metrics and cAdvisor come from the backend, not the chart.
 
 Group `industryflow.platform`: [`infrastructure/prometheus/rules/platform.yml`](../../infrastructure/prometheus/rules/platform.yml)
 (`IndustryFlowTargetDown`, `IndustryFlowPostgresDown`, `IndustryFlowRedisDown`,
-`IndustryFlowKafkaConsumerLag`, `IndustryFlowDeadLetteredReadings`), the same rules and thresholds
+`IndustryFlowKafkaConsumerLag`, `IndustryFlowDeadLetteredReadings`,
+`IndustryFlowCapabilityAuditBacklog`), the same rules and thresholds
 as Compose. Tune them in that file, or add a PrometheusRule of your own. Unit tests:
 `infrastructure/prometheus/rules/tests/platform_test.yml` (`promtool test rules`).
 

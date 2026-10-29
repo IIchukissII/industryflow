@@ -14,6 +14,7 @@ serves the full reference at `/docs` and `/openapi.json`; ports: [components](..
 |---|---|---|---|
 | | `/auth/*`, `/users/me` | see page | [Authentication](../operations/authentication.md#endpoints) |
 | | `/api/users`, `/api/companies` | `admin` | [User management](../operations/user-management.md#tenant-scoping) |
+| GET | `/api/capability-use` | `admin` (own tenant), superuser (any) | [Capability-use record](../architecture/notebooks.md#capability-use-record) |
 | | `/api/alert-rules`, `/api/alerts` | session; writes `engineer`, `admin` | [Alerting](../architecture/alerting.md#endpoints) |
 | GET | `/api/measurements`, `/api/measurements/latest`, `/api/measurements/{sensor_id}` | session or `api` capability handle (read-only) | Raw readings |
 | GET | `/api/aggregations/{window}`, `/api/aggregations/{window}/latest`, `/api/aggregations/combined/{sensor_id}` | session or `api` capability handle | Aggregates (`1min`, `5min`, `1hour`); `start`, `end`, `order`, `limit` ≤ 1000 |

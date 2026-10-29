@@ -4,3 +4,7 @@
 
 -r requirements.txt
 pytest==9.1.1
+# A real store for the capability store's purge: the contract's Lua records each revocation
+# (test_capability_store.py).
+fakeredis==2.40.0
+lupa==2.8

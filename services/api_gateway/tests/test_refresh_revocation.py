@@ -15,6 +15,8 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+
+from capability_audit_fake import AuditScripts
 from fastapi.testclient import TestClient
 
 import main
@@ -25,7 +27,7 @@ from routers.auth_tokens import REFRESH_COOKIE
 from users import get_user_manager
 
 
-class FakeRedis:
+class FakeRedis(AuditScripts):
     def __init__(self):
         self.kv, self.sets, self.hashes = {}, {}, {}
 

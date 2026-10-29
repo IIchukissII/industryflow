@@ -259,10 +259,20 @@ def _connected_to(cancels, cfg):
     async def serve():
         reader, writer = await asyncio.open_connection(sock=proxy_sock)
 
-        async def no_store(_key):
-            return None
+        class NoStore:
+            """A cancel request never reaches the capability store: a lookup finds nothing, and
+            anything recorded would mean it did."""
 
-        await server.handle_client(reader, writer, no_store, lambda *a: None, cancels)
+            async def get(self, _key):
+                return None
+
+            async def eval(self, *_a):
+                raise AssertionError("a cancel request recorded a capability event")
+
+            async def xadd(self, **_kw):
+                raise AssertionError("a cancel request recorded a capability event")
+
+        await server.handle_client(reader, writer, NoStore(), lambda *a: None, cancels)
 
     asyncio.get_event_loop().create_task(serve())
     return kernel_sock

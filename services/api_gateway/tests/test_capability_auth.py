@@ -8,6 +8,9 @@ import uuid
 
 import pytest
 
+from capability_audit_fake import AuditScripts
+from industryflow_contracts import capability_audit as audit
+
 
 class FakeAsyncStore:
     def __init__(self, mapping=None):
@@ -81,7 +84,7 @@ async def test_a_malformed_store_entry_denies_rather_than_raising(raw):
 
 # --- platform logout revokes the user's notebook capabilities (ADR-0012 dec 6) --------------------
 
-class FakeRedis:
+class FakeRedis(AuditScripts):
     """Strings and hashes, async, decode_responses=True — as messaging.redis_client connects."""
 
     def __init__(self):
@@ -187,3 +190,59 @@ async def test_revoking_a_user_also_revokes_their_upload_handles():
     assert await revoke_user_capabilities(redis, "alice") == 2
     assert set(redis.strings) == {"nbcap:u2"}
     assert set(redis.sets) == {"nbcap-upload-user:bob"}
+
+
+# --- the capability-use record (ADR-0042) ------------------------------------------------------
+
+def _audited(company_id, handle_id, audience="api", user="alice"):
+    return json.dumps({"user": user, "company_id": company_id, "audience": audience, "read_only": True,
+                       "handle_id": handle_id})
+
+
+@pytest.mark.asyncio
+async def test_a_revocation_is_recorded_with_the_handles_identifier_never_the_handle():
+    from capability_auth import revoke_user_capabilities
+
+    redis = FakeRedis()
+    cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
+    redis.strings["nbcap:secret-a1"] = _audited(cid, hid)
+    redis.hashes["nbcap-user:alice"] = {"secret-a1": "", "expired-a2": ""}
+
+    assert await revoke_user_capabilities(redis, "alice") == 1
+    [event] = redis.events("revoked")
+    assert (event["handle_id"], event["company_id"], event["reason"]) == (hid, cid, "user_signed_out")
+    assert not any("secret-a1" in v for e in redis.stream for v in e.values())
+    assert len(redis.stream) == 1  # the handle that had already expired was revoked by no one
+
+
+@pytest.mark.asyncio
+async def test_first_use_is_recorded_once_and_an_unknown_value_once_per_window():
+    from capability_auth import AUDIENCE_API, record_resolution, resolve_capability_outcome
+
+    redis = FakeRedis()
+    cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
+    redis.strings["nbcap:h"] = _audited(cid, hid)
+    redis.strings["nbcap:s"] = _audited(cid, str(uuid.uuid4()), audience="sql")
+    for handle in ("h", "h", "s", "nope", "nope"):
+        outcome = await resolve_capability_outcome(redis.get, handle, expected_audience=AUDIENCE_API)
+        await record_resolution(redis, handle, *outcome)
+
+    assert [e["handle_id"] for e in redis.events("first_use")] == [hid]
+    # A real entry's refusal names it, with no digest; an unknown value is recorded once per window
+    # by its digest (ADR-0042 dec 2, 8).
+    assert [e["reason"] for e in redis.events("refused")] == ["wrong_audience", "no_entry"]
+    named, unknown = redis.events("refused")
+    assert named["company_id"] == cid and named["handle_id"] is not None and named["digest"] is None
+    assert unknown["company_id"] is None and unknown["digest"] == audit.presented_digest("nope")
+
+
+@pytest.mark.asyncio
+async def test_a_handle_minted_before_the_record_resolves_without_a_first_use():
+    from capability_auth import AUDIENCE_API, record_resolution, resolve_capability_outcome
+
+    redis = FakeRedis()
+    redis.strings["nbcap:old"] = _record(str(uuid.uuid4()))
+    outcome = await resolve_capability_outcome(redis.get, "old", expected_audience=AUDIENCE_API)
+    assert outcome[0] is not None
+    await record_resolution(redis, "old", *outcome)
+    assert redis.events() == []

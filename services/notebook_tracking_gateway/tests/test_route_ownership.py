@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import gateway  # noqa: E402
+from capability_audit_fake import Capabilities  # noqa: E402
 import policy  # noqa: E402
 import routes  # noqa: E402
 
@@ -51,11 +52,9 @@ class Upstream:
         return 200, {}
 
 
-class Store:
-    async def get(self, key):
-        if key == f"{policy._KEY_PREFIX}{HANDLE}":
-            return json.dumps({"user": "ds", "company_id": CID, "audience": "tracking"})
-        return None
+def Store():
+    return Capabilities({f"{policy._KEY_PREFIX}{HANDLE}": json.dumps(
+        {"user": "ds", "company_id": CID, "audience": "tracking"})}, consumable=False)
 
 
 class Art:
@@ -64,14 +63,10 @@ class Art:
     def delete(self, key): pass
 
 
-async def _never_consumed(_key):
-    raise AssertionError("the tracking plane never consumes a handle")
-
-
 @pytest.fixture
 def c():
     up = Upstream()
-    client = TestClient(gateway.build_app(Store().get, up, Art(), store_consume=_never_consumed))
+    client = TestClient(gateway.build_app(Store(), up, Art()))
     client.up = up
     return client
 

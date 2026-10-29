@@ -127,3 +127,28 @@ async def test_a_suspended_tenants_handle_is_denied():
     assert await b.resolve_sql_binding(store.get, "h") is not None
     store.mapping[f"nbcap-suspended:{cid}"] = "1"
     assert await b.resolve_sql_binding(store.get, "h") is None
+
+
+@pytest.mark.asyncio
+async def test_the_outcome_says_why_it_denied_and_what_the_entry_named():
+    # ADR-0042 dec 1: the reason and the entry's non-secret facts feed the record.
+    cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
+    entry = json.loads(_rec(cid))
+    store = FakeAsyncStore({
+        f"{b._KEY_PREFIX}ok": json.dumps({**entry, "handle_id": hid}),
+        f"{b._KEY_PREFIX}api": json.dumps({**entry, "audience": "api", "handle_id": hid}),
+        f"{b._KEY_PREFIX}list": "[]",
+        f"{b._KEY_PREFIX}notenant": json.dumps({**entry, "company_id": "x"}),
+    })
+    binding, reason, facts = await b.resolve_sql_outcome(store.get, "ok")
+    assert reason is None and binding.handle_id == hid and facts["company_id"] == cid
+    assert (await b.resolve_sql_outcome(store.get, ""))[1] == "no_handle"
+    assert (await b.resolve_sql_outcome(store.get, "missing"))[1:] == ("no_entry", {})
+    assert (await b.resolve_sql_outcome(store.get, "list"))[1:] == ("malformed_entry", {})
+    _, reason, facts = await b.resolve_sql_outcome(store.get, "api")
+    assert reason == "wrong_audience" and facts == {"company_id": cid, "handle_id": hid, "user": "u",
+                                                    "audience": "api"}
+    _, reason, facts = await b.resolve_sql_outcome(store.get, "notenant")
+    assert reason == "malformed_entry" and "company_id" not in facts
+    store.mapping[f"nbcap-suspended:{cid}"] = "1"
+    assert (await b.resolve_sql_outcome(store.get, "ok"))[1] == "tenant_suspended"

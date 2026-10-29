@@ -118,3 +118,28 @@ async def test_a_suspended_tenants_handle_is_denied(audience, resolve):
     assert await resolve(store.get, "h") is not None
     store.mapping[f"nbcap-suspended:{cid}"] = "1"
     assert await resolve(store.get, "h") is None
+
+
+@pytest.mark.asyncio
+async def test_a_binding_carries_the_entrys_handle_id_and_tolerates_none():
+    """The non-secret identifier the record names a handle by (ADR-0042 dec 2); entries minted before
+    it, or carrying something that is not one, resolve with none."""
+    cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
+    with_id = json.dumps({"user": "ds", "company_id": cid, "audience": "tracking", "handle_id": hid})
+    bad_id = json.dumps({"user": "ds", "company_id": cid, "audience": "tracking", "handle_id": "x"})
+    store = FakeAsyncStore({f"{p._KEY_PREFIX}a": with_id, f"{p._KEY_PREFIX}b": bad_id,
+                            f"{p._KEY_PREFIX}c": _rec(cid)})
+    assert (await p.resolve_tracking_binding(store.get, "a")).handle_id == hid
+    assert (await p.resolve_tracking_binding(store.get, "b")).handle_id is None
+    assert (await p.resolve_tracking_binding(store.get, "c")).handle_id is None
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_says_why():
+    cid = str(uuid.uuid4())
+    store = FakeAsyncStore({f"{p._KEY_PREFIX}up": _rec(cid, audience="upload"),
+                            f"{p._KEY_PREFIX}bad": "{not json",
+                            f"{p._KEY_PREFIX}tr": _rec(cid), f"nbcap-suspended:{cid}": "1"})
+    reasons = {h: (await p.resolve_tracking_outcome(store.get, h))[1] for h in ("", "missing", "bad", "up", "tr")}
+    assert reasons == {"": "no_handle", "missing": "no_entry", "bad": "malformed_entry",
+                       "up": "wrong_audience", "tr": "tenant_suspended"}

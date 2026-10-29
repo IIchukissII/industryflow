@@ -93,3 +93,34 @@ tests:
       - eval_time: 25m
         alertname: IndustryFlowDeadLetteredReadings
         exp_alerts: []
+
+  # The capability-use writer falls behind (ADR-0042 dec 7): raised after 15m above the bound, on the
+  # largest report of the replicas; a backlog that drains in time, or another stack's, does not.
+  - interval: 1m
+    input_series:
+      - series: 'capability_audit_backlog{platform="industryflow", instance="gw-1"}'
+        values: '0x5 5000x30'
+      - series: 'capability_audit_backlog{platform="industryflow", instance="gw-2"}'
+        values: '0x5 4800x30'
+      - series: 'capability_audit_backlog{platform="other", instance="x"}'
+        values: '9999x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: IndustryFlowCapabilityAuditBacklog
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: IndustryFlowCapabilityAuditBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Capability-use events are waiting to be recorded"
+              description: "5000 capability-use events are in the capability store and not yet in the record; check the API gateway's capability audit writer."
+  - interval: 1m
+    input_series:
+      - series: 'capability_audit_backlog{platform="industryflow", instance="gw-1"}'
+        values: '5000x10 0x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: IndustryFlowCapabilityAuditBacklog
+        exp_alerts: []

@@ -33,6 +33,11 @@ RUN echo "security refresh: ${SECURITY_REFRESH}" && pip install --no-cache-dir -
 COPY requirements.txt /opt/hub/
 RUN pip install --no-cache-dir -r /opt/hub/requirements.txt
 
+# The platform's shared contracts (libs/industryflow_contracts), supplied as the named build context
+# `contracts`: the capability-use record's event contract the minter appends to (ADR-0042).
+COPY --from=contracts . /tmp/industryflow-contracts
+RUN pip install --no-cache-dir /tmp/industryflow-contracts && rm -rf /tmp/industryflow-contracts
+
 # Config + the modules it imports (identity/capabilities mint per-session handles, ADR-0015), kept
 # out of the data volume's path so a rebuilt image always wins.
 COPY identity.py capabilities.py reclaim.py jupyterhub_config.py /opt/hub/

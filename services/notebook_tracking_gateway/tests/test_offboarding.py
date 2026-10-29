@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import gateway  # noqa: E402
+from capability_audit_fake import Capabilities  # noqa: E402
 from industryflow_contracts import tenancy  # noqa: E402
 
 CID = str(uuid.uuid4())
@@ -133,13 +134,7 @@ def _seed():
 
 
 def _client(ml, art, token=SECRET):
-    async def no_handles(_key):
-        return None
-
-    async def never(_key):
-        raise AssertionError("no handle is consumed here")
-
-    return TestClient(gateway.build_app(no_handles, ml, art, store_consume=never, operator_token=token))
+    return TestClient(gateway.build_app(Capabilities(consumable=False), ml, art, operator_token=token))
 
 
 def _empty(client, cid=CID, secret=SECRET):

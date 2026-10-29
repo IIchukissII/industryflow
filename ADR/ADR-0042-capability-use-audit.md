@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0042 — Capability use is recorded, by the planes that resolve it, into one durable record
 
 - **Status:** Accepted
-- **Date:** 2026-10-29
+- **Date:** 2026-10-29; changed 2026-10-29
 - **Parent:** [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (the capability and its
   store)
 - **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (dec 2: the
@@ -27,8 +27,8 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 
 ## Decision
 
-1. **A capability's life is recorded: its mint, its first use by each plane, every refusal, its
-   revocation or consumption, and the start and stop of the environment it was minted for.** Each record
+1. **A capability's life is recorded: its mint, its first use by each plane, its refusals (decision 8),
+   its revocation or consumption, and the start and stop of the environment it was minted for.** Each record
    names the user, the tenant, the audience, the plane and the time. A SQL session's opening and closing
    are recorded; statements are not, because the proxy relays them unread.
 2. **A handle appears in the record only as a non-secret identifier bound into its entry at mint.** The
@@ -48,6 +48,15 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
    their own.** The tenant filter is the caller's verified tenant (ADR-0003 dec 1).
 7. **A stream the writer has not drained is bounded and its lag is observable.** Losing the capability
    store loses only what was not yet drained, and the lag alert names that window.
+8. **A refusal naming a real entry is recorded every time; a presented value naming none, once per
+   plane and value in a window.** Only a real handle can cause the first, and its count is evidence;
+   anyone can present the second, and a repeat says nothing the first did not.
+9. **A plane records at most a bounded number of unknown values per source address in a window;
+   requests themselves are not throttled.** Distinct random values are the one flood the per-value
+   window does not bound, and they arrive past the edge as well as through it.
+10. **The record keeps rows for a configured period, never less than thirty days, and its writer
+    expires the rest.** The floor is the database's, whoever calls it, and outlasts the suspension that
+    precedes a tenant's deletion (ADR-0033 dec 7).
 
 ## Alternatives
 
@@ -64,6 +73,14 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 | 4 | Deleting a tenant's records with the tenant | The record is evidence of what reached the tenant's data |
 | 5 | Aggregating uses per time window | Buffered counts a crash loses, for no fact the first use lacks |
 | 6 | Only the platform operator reads it | A tenant cannot answer who reached its own data |
+| 8 | Recording every refusal of an unknown value | One row per request anyone can send: the record and the database grow at an attacker's rate |
+| 8 | Counting unknown-value refusals only | A counter names no value and no plane to correlate |
+| 8 | Recording a real entry's refusals once per window too | Their count is bounded by real handles and is part of what they show |
+| 9 | A request rate limit at the public edge | Kernels reach the planes inside the network, and it throttles use where only the record needed bounding |
+| 9 | Relying on the per-value window alone | Every random value is new to it |
+| 10 | No retention | The record grows without bound in the platform database |
+| 10 | Expiry by a separate operator job | A scheduler no deployment otherwise needs; the database's floor already bounds what any caller removes |
+| 10 | A retention period per tenant | A tenant would shorten the evidence of what reached its own data |
 
 ## Consequences
 
@@ -73,6 +90,9 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 
 **Negative**
 - Every capability mint, revocation and first use writes one more entry to the capability store.
+- Repeats of an unknown value within a window, and unknown values beyond a source's limit, are not in
+  the record.
+- A compromised writer can remove rows older than the floor.
 - Events not yet drained are lost with the capability store.
 - Every plane that resolves handles carries the recording rule, as it carries the resolution rule.
 
@@ -81,7 +101,6 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 | Open question | Settled by |
 |---|---|
 | Which code a kernel ran, and notebook versioning | Maintainer, when a record of executed code is required |
-| Retention period of the record | Operations configuration |
 | A SQL statement audit | A deployment whose compliance requires one |
 
 ## References

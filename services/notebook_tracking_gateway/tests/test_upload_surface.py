@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import gateway  # noqa: E402
+from capability_audit_fake import Capabilities  # noqa: E402
 import policy  # noqa: E402
 import staging  # noqa: E402
 
@@ -90,18 +91,14 @@ class FakeStore:
 
 
 def _client(store, **handles):
-    async def store_get(key):
-        return handles.get(key)
-
-    async def store_consume(key):
-        return int(handles.pop(key, None) is not None)
-
     class Upstream:
         async def call(self, method, endpoint, *, params, body):
             return 200, {}
 
-    return TestClient(gateway.build_app(store_get, Upstream(), store, bucket="mlflow",
-                                        store_consume=store_consume))
+    capabilities = Capabilities(handles)
+    client = TestClient(gateway.build_app(capabilities, Upstream(), store, bucket="mlflow"))
+    client.capabilities = capabilities
+    return client
 
 
 def _handle(audience, company_id):

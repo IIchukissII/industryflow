@@ -24,6 +24,7 @@ filtering is relied on.
 | Enrolment | When the database refuses a tenant login (never enrolled, or key rotated), the proxy opens a session as `notebook_sql_proxy`, calls `notebook_sql_proxy_enrol(<tenant>, <verifier>)`, closes it, retries once |
 | Revocation | Every `SQL_PROXY_REVALIDATE_SECONDS` each session re-resolves its handle; a handle that no longer resolves to the same binding, or a store that cannot answer, closes the session |
 | Cancellation | The kernel gets a proxy-issued `BackendKeyData`; a `CancelRequest` quoting it is forwarded to the upstream session over TLS. Keys are process-local: one replica |
+| Capability-use record ([ADR-0042](../../ADR/ADR-0042-capability-use-audit.md)) | Appended to the capability store's `nbcap-audit` stream: a handle's `first_use` (once per handle), every `refused` (with its reason and a short digest, never the handle), `sql_session_opened`, `sql_session_closed` (`client_closed`, `capability_revoked`, `recheck_failed`, `error`; duration in `detail`). Statements are not recorded. A first use or refusal that cannot be recorded refuses the connection. A refusal is also logged, without the handle |
 
 The roles and functions are created by
 [`13-notebook-sql-proxy-role.sh`](../../infrastructure/timescaledb/init-scripts/13-notebook-sql-proxy-role.sh).
@@ -32,8 +33,8 @@ The roles and functions are created by
 
 | File | Content |
 |---|---|
-| `binding.py` | Resolve a handle to its tenant (malformed entries deny); tenant login name, password, reader role; enrolment and per-connection setup statements |
-| `proxy.py` | Authorize, bind, relay with live re-check, against a `Backend` protocol; a denied handle opens no backend |
+| `binding.py` | Resolve a handle to its tenant and refusal reason (malformed entries deny); the capability-use events; tenant login name, password, reader role; enrolment and per-connection setup statements |
+| `proxy.py` | Authorize, record, bind, relay with live re-check, against a `Backend` protocol; a denied handle opens no backend |
 | `wire.py` | PostgreSQL v3 message codec, incl. `CancelRequest`, `BackendKeyData` |
 | `scram.py` | SCRAM-SHA-256 client ([ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md)), checked against the RFC 7677 vector; stored-verifier computation |
 | `server.py` | Kernel-facing handshake, `UpstreamConnection` (TLS `verify-full`, SCRAM, startup), enrolment, `CancelRegistry`, `PostgresBackend` |

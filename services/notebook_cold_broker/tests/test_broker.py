@@ -15,17 +15,21 @@ from fastapi.testclient import TestClient
 from industryflow_contracts import tenancy
 
 import broker  # noqa: E402
+from capability_audit_fake import AuditScripts
 
 CID = "0b2f503a-6e59-4f4f-b0cd-b82547a20cf2"
 PREFIX = f"tenant_{CID}/"
 
 
-class FakeStore:
+class FakeStore(AuditScripts):
     def __init__(self, mapping):
         self._m = mapping
 
     async def get(self, key):
         return self._m.get(key)
+
+    async def delete(self, *keys):
+        return sum(self._m.pop(k, None) is not None for k in keys)
 
 
 class FakeColdStore:
@@ -51,8 +55,8 @@ def _handle(mapping, audience="cold", cid=CID):
     return "tok"
 
 
-def _client(store_map, cold):
-    return TestClient(broker.build_app(FakeStore(store_map).get, cold))
+def _client(store_map, cold, store=None):
+    return TestClient(broker.build_app(store or FakeStore(store_map), cold))
 
 
 def _auth(tok):
@@ -150,3 +154,39 @@ def test_every_part_of_a_day_is_listed_and_readable():
               headers=_auth(tok), follow_redirects=False)
     assert r.status_code == 307
     assert cold.presigned == [PREFIX + "year=2026/month=07/day=06/measurements-0001.parquet"]
+
+
+# --- the capability-use record (ADR-0042) ------------------------------------------------------
+
+def test_first_use_is_recorded_once_and_an_unknown_value_once_by_digest():
+    hid = str(uuid.uuid4())
+    m = {"nbcap:secret-ok": json.dumps({"user": "u", "company_id": CID, "audience": "cold",
+                                        "handle_id": hid}),
+         "nbcap:secret-sql": json.dumps({"user": "u", "company_id": CID, "audience": "sql",
+                                         "handle_id": hid})}
+    store = FakeStore(m)
+    c = _client(m, FakeColdStore(), store)
+    for tok, status in (("secret-ok", 200), ("secret-ok", 200), ("secret-sql", 401),
+                        ("secret-gone", 401), ("secret-gone", 401)):
+        assert c.get("/cold/files", headers=_auth(tok)).status_code == status
+
+    [first] = store.events("first_use")
+    assert (first["plane"], first["handle_id"], first["company_id"], first["user"], first["audience"]) == (
+        "cold_broker", hid, CID, "u", "cold")
+    refusals = store.events("refused")
+    # An unknown value once per window by its digest; a real entry's refusal every time, without one
+    # (ADR-0042 dec 2, 8).
+    assert [e["reason"] for e in refusals] == ["wrong_audience", "no_entry"]
+    assert (refusals[0]["company_id"], refusals[0]["audience"]) == (CID, "sql")
+    assert refusals[1]["company_id"] is None and refusals[1]["digest"] is not None
+    assert refusals[0]["digest"] is None
+    assert not any("secret-" in v for e in store.stream for v in e.values())
+
+
+def test_a_request_without_a_bearer_and_an_old_handle_record_nothing():
+    m = {}; tok = _handle(m)  # minted before the record existed: no handle_id
+    store = FakeStore(m)
+    c = _client(m, FakeColdStore(), store)
+    assert c.get("/cold/files").status_code == 401
+    assert c.get("/cold/files", headers=_auth(tok)).status_code == 200
+    assert store.events() == []

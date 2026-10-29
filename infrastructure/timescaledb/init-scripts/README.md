@@ -77,6 +77,7 @@ every script once. Every script is idempotent.
 | `28-schema-ledger-read.sql` | `SELECT` on `public.schema_ledger` for the service roles (the `schema-ready` check) | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
 | `29-user-table.sql` | `public."user"` (owner: database owner; DML for `api_gateway_user`, `SELECT` for `alert_service_user`, `ml_service_user`); `CREATE` on `public` revoked from `api_gateway_user` and `PUBLIC` | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
 | `30-bound-feature-config.sql` | `add_bound_feature_config_rules()`: `ml_models.feature_config_id` `ON DELETE RESTRICT`; triggers refusing a change to a bound config's `base_sensors`/`transformations` and to a model's binding; backfill | [ADR-0041](../../../ADR/ADR-0041-bound-feature-configuration.md) |
+| `31-capability-audit.sql` | `public.capability_use_events`; `record_capability_use()` (writer), `expire_capability_use()` (retention, ≥ 30 days); `SELECT` and both functions for `api_gateway_user` only | [ADR-0042](../../../ADR/ADR-0042-capability-use-audit.md) |
 
 `create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22 and 23.
 The per-tenant definitions also apply themselves to every existing tenant schema (ADR-0034 dec 3).
