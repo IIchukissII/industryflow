@@ -13,11 +13,12 @@ from config import get_settings
 from routers import (
     health, measurements, aggregations, websocket, cache,
     training_data, alerts_history, companies,
-    equipment, alert_rules, auth_tokens, auth_verify, user_admin
+    equipment, alert_rules, auth_tokens, auth_verify, user_admin, capability_use
 )
-from database import close_engine
+from database import close_engine, engine
 from messaging.redis_client import redis_client
 from messaging.cache_updater import update_redis_cache
+from messaging import capability_audit_drain
 
 # Authentication imports
 from users import auth_backend, fastapi_users, ACCESS_COOKIE
@@ -34,15 +35,18 @@ async def lifespan(_app: FastAPI):
     await redis_client.connect()
 
     cache_task = asyncio.create_task(update_redis_cache())
+    # The one writer of the capability-use record (ADR-0042 dec 4); the store is the same Redis.
+    audit_task = asyncio.create_task(capability_audit_drain.run(redis_client.redis, engine))
 
     yield
 
     # Shutdown
-    cache_task.cancel()
-    try:
-        await cache_task
-    except asyncio.CancelledError:
-        pass
+    for task in (cache_task, audit_task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
     await redis_client.disconnect()
@@ -118,6 +122,7 @@ app.include_router(alert_rules.router)
 # Admin endpoints
 app.include_router(companies.router)
 app.include_router(equipment.router)
+app.include_router(capability_use.router)
 
 
 @app.get("/", tags=["Root"])

@@ -23,3 +23,5 @@ python-snappy==0.7.3
 
 # Prometheus metrics
 prometheus-fastapi-instrumentator==8.1.0
+# Imported directly by the capability-audit writer (messaging/capability_audit_drain.py).
+prometheus-client==0.26.0

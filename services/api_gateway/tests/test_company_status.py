@@ -16,6 +16,8 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+
+from capability_audit_fake import AuditScripts
 from fastapi import HTTPException
 from fastapi_users import BaseUserManager
 
@@ -156,7 +158,9 @@ async def test_a_capability_of_a_suspended_company_is_refused_by_the_data_api(co
     async def get(key):
         return record if key == "nbcap:h" else None
 
+    store = RecordingStore()
     monkeypatch.setattr(dependencies, "_capability_get", get)
+    monkeypatch.setattr(dependencies, "_capability_store", lambda: store)
     request = SimpleNamespace(headers={dependencies.CAPABILITY_HEADER: "h"})
     assert (await dependencies.resolve_tenant_context(request=request, user=None)).company_id == cid
     company_flags.inactive.add(cid)
@@ -164,6 +168,15 @@ async def test_a_capability_of_a_suspended_company_is_refused_by_the_data_api(co
     with pytest.raises(HTTPException) as e:
         await dependencies.resolve_tenant_context(request=request, user=None)
     assert e.value.status_code == 401
+    # The refusal is recorded with the tenant it named, never the handle (ADR-0042 dec 1-2).
+    [refused] = store.events("refused")
+    assert (refused["reason"], refused["company_id"], refused["plane"]) == ("tenant_inactive", cid, "api_gateway")
+    assert "h" not in store.stream[0].values()
+
+
+class RecordingStore(AuditScripts):
+    async def delete(self, *keys):
+        return 0
 
 
 @pytest.mark.asyncio

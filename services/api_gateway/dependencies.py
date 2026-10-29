@@ -10,7 +10,7 @@ from sqlalchemy import text
 from models.user import User
 from users import current_active_user, fastapi_users
 from database import AsyncSessionLocal
-from capability_auth import resolve_capability, AUDIENCE_API
+from capability_auth import AUDIENCE_API, record_resolution, resolve_capability_outcome
 import company_status
 from industryflow_contracts import tenancy
 import logging
@@ -137,6 +137,13 @@ async def _capability_get(key: str):
     return await redis_client.redis.get(key)
 
 
+def _capability_store():
+    """The shared store the capability-use record is appended to (isolated for tests)."""
+    from messaging.redis_client import redis_client
+
+    return redis_client.redis
+
+
 async def resolve_tenant_context(
     request: Request,
     user: Optional[User] = Depends(optional_active_user),
@@ -151,11 +158,16 @@ async def resolve_tenant_context(
         return TenantContext(company_id=str(user.company_id), user=str(user.id), read_only=False, source="session")
 
     handle = request.headers.get(CAPABILITY_HEADER, "")
-    binding = await resolve_capability(_capability_get, handle, expected_audience=AUDIENCE_API)
+    binding, reason, facts = await resolve_capability_outcome(
+        _capability_get, handle, expected_audience=AUDIENCE_API)
     # A suspended company's handles are refused here as its sessions are (ADR-0033 dec 3): by the
-    # store's suspension marker inside resolve_capability, and by the registry's flag here.
+    # store's suspension marker inside the resolution, and by the registry's flag here.
     if binding is not None and not await company_status.is_company_active(binding.company_id):
-        binding = None
+        binding, reason = None, "tenant_inactive"
+    # A presented handle's outcome is recorded (ADR-0042 dec 1); a request with neither a session
+    # nor a handle presented no capability.
+    if handle:
+        await record_resolution(_capability_store(), handle, binding, reason, facts)
     if binding is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
