@@ -165,6 +165,8 @@ class ProxyHeaderAuthenticator(Authenticator):
 async def _stop_active_servers(handler, user):
     for name, spawner in list(user.spawners.items()):
         if spawner.active and not spawner.pending:
+            # Why it stopped, for the record its post_stop_hook writes (ADR-0042 dec 1).
+            spawner._stop_reason = cap.REASON_IDENTITY_CHANGED
             await handler.stop_single_user(user, name)
 
 
@@ -200,10 +202,23 @@ def _capability_store():
 
 async def revoke_server_capabilities(spawner):
     """post_stop_hook: a stopped server's handles stop working now, not when they expire
-    (ADR-0012 dec 6, ADR-0015 dec 2)."""
-    revoked = await asyncio.to_thread(
-        cap.revoke_server, _capability_store(), spawner.user.name, spawner.name
-    )
+    (ADR-0012 dec 6, ADR-0015 dec 2). Each live one is recorded as revoked, and the environment as
+    stopped, with why (ADR-0042 dec 1): the reason a hub path that stopped it left on the spawner,
+    else an ordinary stop (the user, the culler, a logout, a failed spawn)."""
+    reason = getattr(spawner, "_stop_reason", None) or cap.REASON_SERVER_STOPPED
+    spawner._stop_reason = None
+    auth_state = await spawner.user.get_auth_state() or {}
+    store = _capability_store()
+
+    def stop():
+        revoked = cap.revoke_server(store, spawner.user.name, spawner.name, reason=reason)
+        cap.record_environment_stopped(
+            store, user=spawner.user.name, company_id=auth_state.get("company_id"),
+            server_name=spawner.name, reason=reason,
+        )
+        return revoked
+
+    revoked = await asyncio.to_thread(stop)
     spawner.log.info("revoked %d capability handle(s) of %s", revoked, spawner._log_name)
 
 
@@ -239,9 +254,12 @@ def with_capability_lifecycle(base):
 
     class CapabilityLifecycleSpawner(base):
         _capabilities_revoked = False
+        # Why the hub stopped this server, read by its post_stop_hook (ADR-0042 dec 1).
+        _stop_reason = None
 
         async def start(self):
             self._capabilities_revoked = False
+            self._stop_reason = None
             return await super().start()
 
         async def poll(self):
@@ -253,6 +271,7 @@ def with_capability_lifecycle(base):
             status = await super().poll_and_notify()
             if status is None and not await keep_capabilities_alive(self):
                 self.log.warning("capabilities of %s were revoked; stopping it", self._log_name)
+                self._stop_reason = cap.REASON_CAPABILITIES_REVOKED
                 await self.stop()
                 self._capabilities_revoked = True
             return status
@@ -309,7 +328,7 @@ async def bind_identity_and_profile(spawner):
     store = _capability_store()
     # A respawn replaces the environment, so it replaces the credentials: whatever an earlier run of
     # this server still holds (a stop the hub never saw, e.g. across a hub crash) is revoked first.
-    await asyncio.to_thread(cap.revoke_server, store, who.user, spawner.name)
+    await asyncio.to_thread(cap.revoke_server, store, who.user, spawner.name, reason=cap.REASON_RESPAWN)
 
     def mint(audience):
         return cap.mint(
@@ -342,6 +361,12 @@ async def bind_identity_and_profile(spawner):
     # the single-user environment. Identity-only; the capability above is what authorises it.
     if os.environ.get("INDUSTRYFLOW_API_URL"):
         spawner.environment["INDUSTRYFLOW_API_URL"] = os.environ["INDUSTRYFLOW_API_URL"]
+    # The environment its handles were minted for is recorded as started (ADR-0042 dec 1); a spawn
+    # that then fails is stopped by the hub, and its post_stop_hook records the stop.
+    await asyncio.to_thread(
+        cap.record_environment_started, store, user=who.user, company_id=who.company_id,
+        server_name=spawner.name, profile=profile,
+    )
 
     # Durable per-user work storage (ADR-0020) — authoring only; operators (analytics) author
     # nothing. work/ persists across the ephemeral container; the capabilities minted above are

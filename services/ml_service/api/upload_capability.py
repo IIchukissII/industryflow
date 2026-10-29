@@ -28,6 +28,9 @@ and never held. ADR-0015 dec 4 permits that only under conditions this module ex
 is the tenant namespace its mediator enforces, not read-only-ness — and a writing handle still
 reaches exactly one tenant.
 
+**Recorded** (ADR-0042): the entry carries a non-secret ``handle_id`` (dec 2), and the mint is written
+with its ``minted`` event in one transaction (dec 3); the handle itself never enters the record.
+
 The store adapter is the caller's (the shared key-value store in production). This module holds the
 rule; ``routers`` holds the wire.
 """
@@ -37,6 +40,8 @@ import json
 import secrets
 import uuid
 from typing import Any, Dict, Tuple
+
+from industryflow_contracts import capability_audit as audit
 
 # This plane's audience (ADR-0030 dec 3). It must never be one the spawner can mint: the spawner
 # mints what a kernel holds, and a kernel must not be able to reach the upload surface — the
@@ -53,6 +58,9 @@ DEFAULT_TTL_SECONDS = 600
 
 # High-entropy, opaque: the handle carries no authority by itself (ADR-0015 dec 1).
 _HANDLE_BYTES = 32
+
+# The plane this minter records as (ADR-0042 dec 1).
+PLANE = "ml_service"
 
 
 # Every upload handle is indexed under the user it was minted for (a set), so that ending the
@@ -103,17 +111,27 @@ def build_record(*, user: str, company_id: str) -> Tuple[str, Dict[str, Any]]:
         # ADR-0015 dec 1: a bound fact, per handle. This plane writes; its boundary is the
         # tenant namespace the mediator enforces.
         "read_only": False,
+        # The record's name for this handle (ADR-0042 dec 2): bound at mint, never derived from it.
+        "handle_id": audit.new_handle_id(),
     }
     return secrets.token_urlsafe(_HANDLE_BYTES), record
 
 
-def mint(store_set, *, user: str, company_id: str, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> str:
+def minted_event(record: Dict[str, Any]) -> Dict[str, str]:
+    """The ``minted`` event for a record ``build_record`` made, to be written with it (ADR-0042 dec 3).
+    Carries the record's facts and its ``handle_id``; the handle is not an input, so it cannot leak."""
+    return audit.event(audit.MINTED, plane=PLANE, user=record["user"], company_id=record["company_id"],
+                       audience=record["audience"], handle_id=record["handle_id"])
+
+
+def mint(store_write, *, user: str, company_id: str, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> str:
     """Mint an upload capability and record its binding; returns the opaque handle.
 
-    ``store_set(key, value, ttl_seconds)`` is the caller's store adapter.
+    ``store_write(key, value, ttl_seconds, event)`` is the caller's store adapter, which writes the
+    entry and appends ``event`` to the record's stream in one transaction (ADR-0042 dec 3).
     """
     if ttl_seconds <= 0:
         raise ValueError("an upload capability must expire")
     handle, record = build_record(user=user, company_id=company_id)
-    store_set(store_key(handle), json.dumps(record), ttl_seconds)
+    store_write(store_key(handle), json.dumps(record), ttl_seconds, minted_event(record))
     return handle

@@ -914,6 +914,8 @@ services:
     build:
       context: ./services/notebook_hub
       dockerfile: Dockerfile
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
     image: industryflow-notebook-hub
     container_name: industryflow-notebook-hub
     environment:
