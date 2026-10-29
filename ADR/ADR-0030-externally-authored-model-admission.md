@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0030 — Admission of externally-authored models
 
 - **Status:** Accepted
-- **Date:** 2026-07-16; changed 2026-10-28
+- **Date:** 2026-07-16; changed 2026-10-29
 - **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the artifact declares; the serving environment satisfies or refuses)
 - **Related:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (sole writer of the artifact store), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (declared semantics), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability audiences), [ADR-0035](ADR-0035-drift-baseline-derived-scores.md) (the declared baseline, dec 8), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the public edge), [ADR-0037](ADR-0037-no-author-code-on-the-serving-side.md) (dec 4's rule for every provenance), [ADR-0039](ADR-0039-one-tenant-ownership-test.md) (the one test of a tenant's upload area)
 
@@ -46,6 +46,10 @@ artifact that runs author code on load would grant code execution on the trusted
 10. **The upload plane is reachable through the one public edge, and bytes go client to store under a
     single-object presigned write scoped to a staging area outside every tenant namespace.** The edge
     serves plane and staging by sub-path on the app's own origin, so the store has no cross-origin policy.
+11. **Provenance adds no step to deploying an upload beyond the gates already decided.** A user with a
+    writing role deploys an upload that passes the deployment gate as they deploy any model (ADR-0004
+    dec 5); the gate's empirical check (dec 7), the no-author-code rule (ADR-0037 dec 1) and the
+    provenance checked at every load (dec 8) are where an upload's weaker origin is answered.
 
 ## Alternatives
 
@@ -69,6 +73,8 @@ artifact that runs author code on load would grant code execution on the trusted
 | 10 | Relay bytes through the mediator | Couples it to artifact size (ADR-0019 dec 6) |
 | 10 | Only an in-network client, the browser deferred | Re-opens decision 3, which already made the browser a client |
 | 10 | A cross-origin allowlist on the store for the app's origin | One origin through the edge needs no cross-origin exposure at all |
+| 11 | An administrator role or an explicit acknowledgement to deploy an upload | A second answer, by role, to a risk the gate and every load already answer by checking the artifact |
+| 11 | Uploads serving only in a restricted status until a further condition holds | A serving state with no defined exit, and a model that passed every gate kept from the use it was admitted for |
 
 ## Consequences
 
@@ -87,7 +93,6 @@ artifact that runs author code on load would grant code execution on the trusted
 |---|---|
 | Resumable or multipart transfer of a very large artifact | First upload one request cannot carry |
 | Attestation and signing of external artifacts | The supply-chain record |
-| Whether provenance constrains promotion | The maintainer, when uploads are promoted |
 
 ## References
 
