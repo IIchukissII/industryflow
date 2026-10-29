@@ -35,7 +35,7 @@ async def _bound_refusal(request: Request, company_id: str, config_id: str) -> H
     models = await request.app.state.ml_repository.models_bound_to_feature_config(
         company_id=company_id, config_id=config_id,
     )
-    names = ", ".join(f"{m['model_name']} ({m['id']})" for m in models) or "a model"
+    names = ", ".join(f"{m['model_name']} ({m['model_id']})" for m in models) or "a model"
     return HTTPException(status_code=409, detail=(
         f"Feature config {config_id} is bound by {names}. A bound configuration keeps its sensors and "
         f"transforms and is not deleted; create a new configuration and register a model with it."

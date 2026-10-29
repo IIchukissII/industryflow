@@ -24,7 +24,7 @@ from routers import feature_configs  # noqa: E402
 
 CID = "00000000-0000-4000-8000-0000000000c1"
 CONFIG_ID = "00000000-0000-4000-8000-000000000002"
-BOUND = [{"id": "00000000-0000-4000-8000-000000000001", "model_name": "pump-iforest"}]
+BOUND = [{"model_id": "00000000-0000-4000-8000-000000000001", "model_name": "pump-iforest"}]
 
 
 class Repo:
@@ -60,7 +60,7 @@ def test_a_refused_change_is_a_409_naming_the_binding_models(method, error):
     kwargs = {"json": {"base_sensors": ["temp_1", "flow_1"]}} if method == "put" else {}
     r = getattr(client, method)(f"/api/feature-configs/{CONFIG_ID}", **kwargs)
     assert r.status_code == 409
-    assert "pump-iforest" in r.json()["detail"] and BOUND[0]["id"] in r.json()["detail"]
+    assert "pump-iforest" in r.json()["detail"] and BOUND[0]["model_id"] in r.json()["detail"]
 
 
 def test_another_database_failure_is_not_reported_as_bound():

@@ -35,7 +35,7 @@ BEGIN
     END IF;
     -- A statement-fresh snapshot (READ COMMITTED): a bind that committed while this row lock was
     -- awaited is seen here, so the bind and the edit cannot both succeed.
-    EXECUTE format('SELECT string_agg(id::text, '', '' ORDER BY id) FROM %I.ml_models WHERE feature_config_id = $1',
+    EXECUTE format('SELECT string_agg(model_id::text, '', '' ORDER BY model_id) FROM %I.ml_models WHERE feature_config_id = $1',
                    TG_TABLE_SCHEMA)
         INTO bound_by USING OLD.id;
     IF bound_by IS NOT NULL THEN
@@ -58,7 +58,7 @@ AS $$
 BEGIN
     IF TG_OP = 'UPDATE' AND NEW.feature_config_id IS DISTINCT FROM OLD.feature_config_id THEN
         RAISE EXCEPTION 'model % is bound to feature configuration %; a binding is fixed at registration (ADR-0041 dec 1)',
-            OLD.id, OLD.feature_config_id
+            OLD.model_id, OLD.feature_config_id
             USING ERRCODE = 'restrict_violation';
     END IF;
     IF NEW.feature_config_id IS NOT NULL THEN
