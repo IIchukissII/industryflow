@@ -12,20 +12,24 @@ from _repo import ROOT, load_yaml
 
 from industryflow_contracts import testing
 
-HELPER = ROOT / "libs" / "industryflow_contracts" / "industryflow_contracts" / "testing.py"
 FAKE_CLIENT = re.compile(r"\bfakeredis\.(?:FakeRedis|FakeAsyncRedis|FakeStrictRedis|FakeServer|aioredis)\b")
 
 
+SKIP = {"node_modules", ".venv", "venv", "build", "site-packages", ".git"}
+
+
 def _tests():
-    for path in sorted(ROOT.rglob("test*.py")):
-        rel = path.relative_to(ROOT).as_posix()
-        if "/node_modules/" not in rel and not rel.startswith((".venv", "build/")):
-            yield rel, path.read_text(errors="ignore")
+    """Every test module and fixture file in the repository (not build output or installed copies)."""
+    for path in sorted(ROOT.rglob("*.py")):
+        rel = path.relative_to(ROOT)
+        if SKIP.intersection(rel.parts):
+            continue
+        if path.name.startswith("test_") or path.name == "conftest.py" or "tests" in rel.parts:
+            yield rel.as_posix(), path.read_text(errors="ignore")
 
 
 def test_no_test_builds_its_own_fake_store():
-    helper = HELPER.relative_to(ROOT).as_posix()
-    offenders = [rel for rel, src in _tests() if rel != helper and FAKE_CLIENT.search(src)]
+    offenders = [rel for rel, src in _tests() if FAKE_CLIENT.search(src)]
     assert not offenders, f"take the store from industryflow_contracts.testing: {offenders}"
 
 
