@@ -122,6 +122,7 @@ gateway's writer (`services/api_gateway/messaging/capability_audit_drain.py`, co
 | `capability_audit_backlog` | Events in the stream not yet written (written ones are deleted from it) |
 | `capability_audit_events_total{result}` | `written`, `unreadable` (skipped), `refused` (by the database, skipped), `retry` |
 | `IndustryFlowCapabilityAuditBacklog` | Backlog above 1000 for 15m ([monitoring](../operations/monitoring.md)) |
+| `IndustryFlowCapabilityEventsDropped` | An `unreadable` or `refused` event in 15m ([monitoring](../operations/monitoring.md)) |
 
 ## Kernel environment
 

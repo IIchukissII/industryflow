@@ -132,13 +132,15 @@ def test_the_writer_binds_every_column_the_record_holds(cur):
                               "0123456789abcdef", "x", "server=lab")
 
 
-def test_a_row_the_record_refuses_is_acknowledged_without_holding_back_the_batch(cur, monkeypatch):
+@pytest.mark.parametrize("refused", [{"audience": "admin"}, {"detail": "a\x00b"}],
+                         ids=["constraint (class 23)", "data (class 22)"])
+def test_a_row_the_record_refuses_is_acknowledged_without_holding_back_the_batch(cur, monkeypatch, refused):
     # The contract refuses every value the record would, so the refusal is made past it: the real
     # driver's error must classify as a row fault, or one row would stall the record behind it.
     good, bad = (_stream_id(), _event()), (_stream_id(), _event())
     params = drain._params
     monkeypatch.setattr(drain, "_params", lambda sid, event: {**params(sid, event),
-                                                              **({"audience": "admin"} if sid == bad[0] else {})})
+                                                              **(refused if sid == bad[0] else {})})
     assert sorted(_write(good, bad)) == sorted([good[0], bad[0]])
     assert _stored(cur, good[0], bad[0]) == [good[0]]
 

@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS public.capability_use_events (
 );
 CREATE INDEX IF NOT EXISTS idx_capability_use_events_company
     ON public.capability_use_events (company_id, at);
+-- A tenant's page, newest first, as the reader asks for it (ORDER BY event_id DESC under a tenant).
+CREATE INDEX IF NOT EXISTS idx_capability_use_events_company_event
+    ON public.capability_use_events (company_id, event_id);
 CREATE INDEX IF NOT EXISTS idx_capability_use_events_handle
     ON public.capability_use_events (handle_id) WHERE handle_id IS NOT NULL;
 

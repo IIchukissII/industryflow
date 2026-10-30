@@ -70,6 +70,15 @@ groups:
         annotations:
           summary: "Capability-use events are waiting to be recorded"
           description: "{{ $value }} capability-use events are in the capability store and not yet in the record; check the API gateway's capability audit writer."
+      - alert: IndustryFlowCapabilityEventsDropped
+        # The writer acknowledged events it could not record (ADR-0042 dec 7): an entry it could not
+        # read, or a row the database refused. Each is logged with its stream id; nothing else keeps it.
+        expr: sum(increase(capability_audit_events_total{platform="industryflow", result=~"unreadable|refused"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Capability-use events were dropped from the record"
+          description: "Capability-use events were acknowledged without being recorded in the last 15m; the API gateway's logs (capability audit) name each stream id."
       - alert: IndustryFlowDeadLetteredReadings
         expr: |
           sum by (topic) (increase(kafka_topic_partition_current_offset{platform="industryflow", topic=~".+\\.dlq"}[15m])) > 0
