@@ -78,6 +78,7 @@ every script once. Every script is idempotent.
 | `29-user-table.sql` | `public."user"` (owner: database owner; DML for `api_gateway_user`, `SELECT` for `alert_service_user`, `ml_service_user`); `CREATE` on `public` revoked from `api_gateway_user` and `PUBLIC` | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
 | `30-bound-feature-config.sql` | `add_bound_feature_config_rules()`: `ml_models.feature_config_id` `ON DELETE RESTRICT`; triggers refusing a change to a bound config's `base_sensors`/`transformations` and to a model's binding; backfill | [ADR-0041](../../../ADR/ADR-0041-bound-feature-configuration.md) |
 | `31-capability-audit.sql` | `public.capability_use_events`; `record_capability_use()` (writer), `expire_capability_use()` (retention, ≥ 30 days); `SELECT` and both functions for `api_gateway_user` only | [ADR-0042](../../../ADR/ADR-0042-capability-use-audit.md) |
+| `32-platform-switch-control.sql` | `public.platform_config_changes`; `set_platform_switch()` (the one writer of a platform switch, records each flip); `EXECUTE` and `SELECT` on both tables for `api_gateway_user` only | [ADR-0043](../../../ADR/ADR-0043-platform-switch-operator-control.md) |
 
 `create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22 and 23.
 The per-tenant definitions also apply themselves to every existing tenant schema (ADR-0034 dec 3).
@@ -86,7 +87,7 @@ The per-tenant definitions also apply themselves to every existing tenant schema
 
 | Role | Used by | Access | Connection limit |
 |---|---|---|---|
-| `api_gateway_user` | `api-gateway` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT` on `public.companies`; `EXECUTE` on `provision_company()`, `update_company()`, `end_suspended_tenant_sql_sessions()` | 50 |
+| `api_gateway_user` | `api-gateway` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT` on `public.companies`; `EXECUTE` on `provision_company()`, `update_company()`, `end_suspended_tenant_sql_sessions()`, `set_platform_switch()`; `SELECT` on `public.platform_config` and its record of changes | 50 |
 | `spark_streaming_user` | `spark-streaming`, `spark-aggregations` | `SELECT/INSERT/UPDATE` on tenant tables; `SELECT (schema_name, is_active)` on `public.companies` | 50 |
 | `alert_service_user` | `alert-service-detector` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT (schema_name, is_active)` on `public.companies` | 50 |
 | `tenant_delete_user` | `tenant-delete` | EXECUTE on the deletion functions of script 26; no table privilege | 2 |
