@@ -11,3 +11,6 @@ pytest==9.1.1
 psycopg2-binary==2.9.13
 asyncpg==0.32.0
 pytest-asyncio==1.4.0
+# The gateway's writer runs here itself (test_capability_audit.py), on the gateway's pins.
+sqlalchemy[asyncio]==2.0.55
+prometheus-client==0.26.0

@@ -10,14 +10,14 @@ Provisions a tenant through the real ``create_tenant_schema()`` and proves:
     ``sensor_name`` is unchanged,
   * the migration function is idempotent (re-applying it to a migrated schema is a no-op),
   * the api_gateway's alert-rule list and alert-history SELECTs, read from the gateway's source
-    and run here unchanged inside the tenant schema, return the names of what a rule or alert
+    and run on its driver as its role inside the tenant schema (service_sql.py), return the names of what a rule or alert
     points at, and NULL names (not a missing row) for a target that was deleted.
 
 The SELECTs are read from the source because the failure they guard is a query that succeeds and
 returns less. Requires a running database with the init scripts applied (the CI workflow stands
 one up via docker compose). When no database is reachable it skips.
 """
-import ast
+import dataclasses
 import os
 import uuid
 
@@ -25,21 +25,20 @@ import pytest
 
 psycopg2 = pytest.importorskip("psycopg2")
 
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-# The gateway modules whose SQL runs here. Each is in db-tenant-isolation.yml's path filter
-# (tests/config_guards/test_ci_path_filters.py checks it), so a change to them runs this proof.
+import service_sql  # noqa: E402
+
 GATEWAY_SOURCES = {
     "RULE_LIST_SELECT": "services/api_gateway/routers/alert_rules.py",
     "_ALERT_SELECT": "services/api_gateway/routers/alerts_history.py",
 }
 
 
-def _gateway_sql(name: str) -> str:
-    tree = ast.parse(open(os.path.join(_ROOT, GATEWAY_SOURCES[name])).read())
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
-            return ast.literal_eval(node.value)
-    raise AssertionError(f"{name} not found in {GATEWAY_SOURCES[name]}")
+def _gateway_rows(cur, name, order_by):
+    """The gateway's SELECT, on its driver, as its role, in the tenant's path, ordered for the test."""
+    stmt = service_sql.statement(GATEWAY_SOURCES[name], name)
+    stmt = dataclasses.replace(stmt, sql=f"{stmt.sql} ORDER BY {order_by}")
+    cur.execute("SHOW search_path")
+    return service_sql.run(stmt, {}, role="api_gateway_user", search_path=cur.fetchone()[0])
 
 
 def _connect():
@@ -133,9 +132,7 @@ def test_the_rule_list_names_its_targets_and_survives_a_deleted_one(targets):
             ('machine', NULL, %(eq)s, 'ml', %(model)s, 'high'),
             ('lost model', NULL, NULL, 'ml', %(gone)s, 'high')
     """, t)
-    cur.execute(_gateway_sql("RULE_LIST_SELECT") + " ORDER BY r.name")
-    cols = [d[0] for d in cur.description]
-    rows = {r["name"]: r for r in (dict(zip(cols, row)) for row in cur.fetchall())}
+    rows = {r["name"]: r for r in _gateway_rows(cur, "RULE_LIST_SELECT", "r.name")}
 
     assert len(rows) == 5  # a LEFT JOIN: a rule whose target is gone is still listed
     assert (rows["labelled"]["sensor_name"], rows["labelled"]["sensor_display_name"]) == ("temp_root_1", "Root zone")
@@ -156,9 +153,7 @@ def test_alert_history_carries_the_sensor_label_and_rule_name(targets):
         VALUES (NOW(), %s, %s, %s, 'threshold', 'low', 'warm'),
                (NOW(), %s, %s, NULL, 'threshold', 'low', 'orphan')
     """, (rule, t["labelled"], t["eq"], t["gone"], t["gone"]))
-    cur.execute(_gateway_sql("_ALERT_SELECT") + " ORDER BY a.message")
-    cols = [d[0] for d in cur.description]
-    rows = {r["message"]: r for r in (dict(zip(cols, row)) for row in cur.fetchall())}
+    rows = {r["message"]: r for r in _gateway_rows(cur, "_ALERT_SELECT", "a.message")}
 
     warm = rows["warm"]
     assert (warm["sensor_name"], warm["sensor_display_name"]) == ("temp_root_1", "Root zone")

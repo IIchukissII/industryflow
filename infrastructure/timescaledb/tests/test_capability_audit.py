@@ -10,44 +10,44 @@ API gateway's own role:
   * no runtime role inserts, updates or deletes a row directly,
   * the closed lists are the database's too: an unknown kind, plane, audience or a long digest is
     refused,
-  * the writer's statement and the reader's SELECT, read from the gateway's source and run here
-    unchanged, write and read the record.
+  * the gateway's writer itself (its decoding, binding and batch write) and the reader's SELECT run
+    on the gateway's driver with the types the gateway binds (service_sql.py), and a row the
+    database refuses is acknowledged without holding back its batch.
 
 Requires a running database with the init scripts applied (the CI workflow stands one up via docker
 compose). When no database is reachable it skips.
 """
-import ast
+import asyncio
+import importlib.util
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 psycopg2 = pytest.importorskip("psycopg2")
 from psycopg2 import errors  # noqa: E402
 
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+import service_sql  # noqa: E402
+
 # Watched by db-tenant-isolation.yml's path filter (tests/config_guards/test_ci_path_filters.py).
 DRAIN = "services/api_gateway/messaging/capability_audit_drain.py"
 READER = "services/api_gateway/routers/capability_use.py"
+ROLE = "api_gateway_user"
 
 
-def _source_constant(path, name):
-    tree = ast.parse(open(os.path.join(_ROOT, path)).read())
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
-            value = node.value
-            if isinstance(value, ast.Call):  # text("...") — the statement is its argument
-                value = value.args[0]
-            if isinstance(value, ast.JoinedStr):
-                raise AssertionError(f"{name} in {path} is an f-string")
-            return ast.literal_eval(value)
-    raise AssertionError(f"{name} not found in {path}")
+def _drain():
+    """The gateway's writer module itself: its statements and its parameter building run here."""
+    pytest.importorskip("sqlalchemy")
+    pytest.importorskip("prometheus_client")
+    pytest.importorskip("industryflow_contracts")
+    spec = importlib.util.spec_from_file_location("capability_audit_drain", os.path.join(service_sql.ROOT, DRAIN))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def _named(sql):
-    """SQLAlchemy ``:name`` parameters as psycopg2 ``%(name)s``."""
-    import re
-    return re.sub(r"(?<!:):([a-z_]+)", r"%(\1)s", sql)
+drain = None
 
 
 def _connect():
@@ -63,6 +63,7 @@ def _connect():
 
 @pytest.fixture
 def cur():
+    global drain
     try:
         conn = _connect()
     except Exception as e:  # noqa: BLE001 - any connection failure means "no DB here"
@@ -72,7 +73,8 @@ def cur():
     c.execute("SELECT 1 FROM pg_proc WHERE proname = 'record_capability_use'")
     if c.fetchone() is None:
         pytest.skip("record_capability_use() not present — init scripts not applied")
-    c.execute("SET ROLE api_gateway_user")
+    drain = drain or _drain()
+    c.execute(f"SET ROLE {ROLE}")
     try:
         yield c
     finally:
@@ -81,26 +83,64 @@ def cur():
         conn.close()
 
 
-def _row(**over):
-    row = {"stream_id": f"test-{uuid.uuid4()}", "kind": "minted", "plane": "hub",
-           "at": "2026-10-29T12:00:00+00:00", "company_id": str(uuid.uuid4()), "user_id": "alice",
-           "audience": "sql", "handle_id": str(uuid.uuid4()), "digest": None, "reason": None,
-           "detail": "server=lab"}
-    row.update(over)
-    return row
+def _event(**over):
+    from industryflow_contracts import capability_audit as audit
+    args = dict(kind="minted", plane="hub", company_id=str(uuid.uuid4()), user="alice", audience="sql",
+                handle_id=str(uuid.uuid4()), detail="server=lab")
+    args.update(over)
+    kind = args.pop("kind")
+    return audit.event(kind, **args)
 
 
-def _record(cur, row):
-    cur.execute(_named(_source_constant(DRAIN, "RECORD")), row)
-    return cur.fetchone()[0]
+def _stream_id():
+    return f"test-{uuid.uuid4()}"
+
+
+def _write(*entries):
+    """The writer's own batch write, on the gateway's driver and as its role: the stream fields as a
+    plane appended them, through the writer's decoding and parameter binding."""
+    async def go():
+        eng = service_sql.engine(ROLE)
+        try:
+            return await drain.write_batch(eng, list(entries))
+        finally:
+            await eng.dispose()
+    return asyncio.run(go())
+
+
+def _stored(cur, *stream_ids):
+    cur.execute("SELECT stream_id FROM public.capability_use_events WHERE stream_id = ANY(%s) ORDER BY stream_id",
+                (list(stream_ids),))
+    return [r[0] for r in cur.fetchall()]
 
 
 def test_the_writer_appends_once_per_stream_entry(cur):
-    row = _row()
-    assert _record(cur, row) is True
-    assert _record(cur, row) is False
-    cur.execute("SELECT count(*) FROM public.capability_use_events WHERE stream_id = %s", (row["stream_id"],))
+    entry = (_stream_id(), _event())
+    assert _write(entry) == [entry[0]]
+    assert _write(entry) == [entry[0]]
+    cur.execute("SELECT count(*) FROM public.capability_use_events WHERE stream_id = %s", (entry[0],))
     assert cur.fetchone()[0] == 1
+
+
+def test_the_writer_binds_every_column_the_record_holds(cur):
+    at = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
+    sid, fields = _stream_id(), _event(at=at, reason="x", digest="0123456789abcdef")
+    _write((sid, fields))
+    cur.execute("SELECT kind, plane, at, company_id::text, user_id, audience, handle_id::text, digest, reason, "
+                "detail FROM public.capability_use_events WHERE stream_id = %s", (sid,))
+    assert cur.fetchone() == ("minted", "hub", at, fields["company_id"], "alice", "sql", fields["handle_id"],
+                              "0123456789abcdef", "x", "server=lab")
+
+
+def test_a_row_the_record_refuses_is_acknowledged_without_holding_back_the_batch(cur, monkeypatch):
+    # The contract refuses every value the record would, so the refusal is made past it: the real
+    # driver's error must classify as a row fault, or one row would stall the record behind it.
+    good, bad = (_stream_id(), _event()), (_stream_id(), _event())
+    params = drain._params
+    monkeypatch.setattr(drain, "_params", lambda sid, event: {**params(sid, event),
+                                                              **({"audience": "admin"} if sid == bad[0] else {})})
+    assert sorted(_write(good, bad)) == sorted([good[0], bad[0]])
+    assert _stored(cur, good[0], bad[0]) == [good[0]]
 
 
 @pytest.mark.parametrize("sql", [
@@ -117,35 +157,58 @@ def test_no_runtime_role_changes_the_record_directly(cur, sql):
     {"kind": "used"}, {"plane": "kernel"}, {"audience": "admin"}, {"digest": "0" * 64},
 ])
 def test_the_closed_lists_hold_in_the_database(cur, over):
-    with pytest.raises(errors.CheckViolation):
-        _record(cur, _row(**over))
+    # Past the contract, which refuses these first: the writer's statement with the writer's binding.
+    event = drain.audit.decode(_event())
+    params = drain._params(_stream_id(), event)
+    params.update(over)
+    with pytest.raises(Exception) as refused:
+        service_sql.run(service_sql.statement(DRAIN, "RECORD"), params, role=ROLE)
+    assert service_sql.sqlstate(refused.value) == "23514"  # check_violation
 
 
-def test_the_reader_scopes_to_one_tenant(cur):
-    mine, theirs = str(uuid.uuid4()), str(uuid.uuid4())
-    _record(cur, _row(company_id=mine))
-    _record(cur, _row(company_id=theirs, kind="refused", digest="0123456789abcdef", handle_id=None))
-    select = _named(_source_constant(READER, "CAPABILITY_USE_SELECT"))
-    cur.execute(select, {"company_id": mine, "handle_id": None, "since": None, "before_id": None, "limit": 10})
-    rows = cur.fetchall()
-    assert len(rows) == 1 and str(rows[0][4]) == mine
+def _read(**over):
+    # The route's parameters, typed as FastAPI hands them over.
+    params = {"company_id": None, "handle_id": None, "since": None, "before_id": None, "limit": 10}
+    params.update(over)
+    return service_sql.run(service_sql.statement(READER, "CAPABILITY_USE_SELECT"), params, role=ROLE)
+
+
+def test_the_reader_scopes_to_one_tenant_and_filters_on_its_typed_parameters(cur):
+    mine, theirs = uuid.uuid4(), uuid.uuid4()
+    first, second = _stream_id(), _stream_id()
+    _write((first, _event(company_id=str(mine), at=datetime.now(timezone.utc) - timedelta(days=2))))
+    _write((second, _event(company_id=str(mine))))
+    _write((_stream_id(), _event(company_id=str(theirs), kind="refused", digest="0123456789abcdef",
+                                 handle_id=None)))
+    rows = _read(company_id=mine)
+    assert [r["company_id"] for r in rows] == [mine, mine]
+    assert [r["kind"] for r in _read(company_id=mine, since=datetime.now(timezone.utc) - timedelta(days=1))] \
+        == ["minted"]
+    newest = rows[0]["event_id"]
+    assert len(_read(company_id=mine, before_id=newest)) == 1
+    assert _read(company_id=mine, handle_id=rows[0]["handle_id"])[0]["event_id"] == newest
 
 
 def test_retention_removes_only_what_is_older_than_its_period_and_never_under_the_floor(cur):
-    old, new = _row(), _row()
-    _record(cur, old)
-    _record(cur, new)
+    old, new = (_stream_id(), _event()), (_stream_id(), _event())
+    _write(old, new)
     cur.execute("RESET ROLE")
     cur.execute("UPDATE public.capability_use_events SET recorded_at = now() - interval '400 days' "
-                "WHERE stream_id = %s", (old["stream_id"],))
-    cur.execute("SET ROLE api_gateway_user")
-    cur.execute(_named(_source_constant(DRAIN, "EXPIRE")), {"days": 365})
-    assert cur.fetchone()[0] >= 1
-    cur.execute("SELECT stream_id FROM public.capability_use_events WHERE stream_id IN (%s, %s)",
-                (old["stream_id"], new["stream_id"]))
-    assert [r[0] for r in cur.fetchall()] == [new["stream_id"]]
-    with pytest.raises(errors.InvalidParameterValue):
-        cur.execute(_named(_source_constant(DRAIN, "EXPIRE")), {"days": 7})
+                "WHERE stream_id = %s", (old[0],))
+    cur.execute(f"SET ROLE {ROLE}")
+
+    async def expire(days):
+        eng = service_sql.engine(ROLE)
+        try:
+            return await drain.expire(eng, days)
+        finally:
+            await eng.dispose()
+
+    assert asyncio.run(expire(365)) >= 1
+    assert _stored(cur, old[0], new[0]) == [new[0]]
+    with pytest.raises(Exception) as refused:
+        asyncio.run(expire(7))
+    assert service_sql.sqlstate(refused.value) == "22023"  # invalid_parameter_value
 
 
 def test_the_roles_a_kernels_sql_session_runs_as_cannot_read_the_record():

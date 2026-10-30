@@ -55,6 +55,26 @@ class Bucket(str, Enum):
 _BUCKET_INTERVAL = {"day": timedelta(days=1), "week": timedelta(days=7)}
 
 
+# The precision aggregation and its filters, run as written on the gateway's driver by
+# infrastructure/timescaledb/tests/test_alert_metrics_asyncpg.py.
+LABEL_METRICS_SELECT = """
+    SELECT
+        time_bucket(:interval, labeled_at) AS bucket,
+        count(*) FILTER (WHERE verdict = 'true_positive')  AS tp,
+        count(*) FILTER (WHERE verdict = 'false_positive') AS fp,
+        count(*) FILTER (WHERE verdict = 'unsure')         AS unsure
+    FROM alert_labels
+    WHERE {where}
+    GROUP BY bucket
+    ORDER BY bucket
+"""
+LABEL_METRICS_FILTERS = {
+    "days": "labeled_at >= NOW() - make_interval(days => :days)",
+    "model_id": "model_id = :model_id",
+    "rule_id": "rule_id = :rule_id",
+}
+
+
 def _precision(tp: int, fp: int) -> Optional[float]:
     """Precision = TP / (TP + FP), or None when nothing decisive was labelled.
 
@@ -326,26 +346,16 @@ async def alert_label_metrics(
     """
     days = max(1, min(days, 365))
 
-    where = ["labeled_at >= NOW() - make_interval(days => :days)"]
+    where = [LABEL_METRICS_FILTERS["days"]]
     params = {"days": days, "interval": _BUCKET_INTERVAL[bucket.value]}
     if model_id:
-        where.append("model_id = :model_id")
+        where.append(LABEL_METRICS_FILTERS["model_id"])
         params["model_id"] = model_id
     if rule_id:
-        where.append("rule_id = :rule_id")
+        where.append(LABEL_METRICS_FILTERS["rule_id"])
         params["rule_id"] = rule_id
 
-    query = f"""
-        SELECT
-            time_bucket(:interval, labeled_at) AS bucket,
-            count(*) FILTER (WHERE verdict = 'true_positive')  AS tp,
-            count(*) FILTER (WHERE verdict = 'false_positive') AS fp,
-            count(*) FILTER (WHERE verdict = 'unsure')         AS unsure
-        FROM alert_labels
-        WHERE {" AND ".join(where)}
-        GROUP BY bucket
-        ORDER BY bucket
-    """
+    query = LABEL_METRICS_SELECT.format(where=" AND ".join(where))
 
     rows = (await db.execute(text(query), params)).fetchall()
 
