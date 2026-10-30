@@ -6,9 +6,9 @@
 # local Spark — pyspark at the images' Spark version (scripts/check_spark_version_parity.py holds the
 # pin to the Dockerfiles' base), plus a JDK 17+ from the environment. No Kafka or database.
 # (tests/test_spark_service.py is a live-stack harness, run manually, not in CI.)
-pyspark==4.1.3
+pyspark==4.1.4
 # Imported by the job modules, not exercised: the newest pin with Python 3.14 wheels (CI's runtime).
 psycopg2-binary==2.9.13
-pytest==9.1.1
+pytest==9.2.0
 # The image-module guard reads the Helm values (the jobs' liveness command).
 pyyaml==6.0.3
