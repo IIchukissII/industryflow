@@ -11,7 +11,6 @@ clock (ADR-0033 dec 7). The job also carries out what earlier runs left requeste
 import time
 import uuid
 
-
 from harness import pretty
 
 DELETION_TIMEOUT = 1200
