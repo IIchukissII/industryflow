@@ -9,11 +9,22 @@
 #
 #   scripts/box-validate.sh <ssh-target> [compose-dir]      e.g. scripts/box-validate.sh me@box ~/industryflow
 #
-# Needs `gh` signed in with permission to post commit statuses. The environment must already run the
-# commit, deployed by upgrade from the last box-validated one; the suite checks what is deployed.
+# Needs `gh` signed in with permission to post commit statuses. The environment must run the commit,
+# deployed by scripts/box-deploy.sh as an upgrade from a box-validated commit; the first validation of
+# an environment, with none before it, is BOX_FIRST_VALIDATION=1.
 set -euo pipefail
 target="${1:?usage: box-validate.sh <ssh-target> [compose-dir]}"
 dir="${2:-industryflow}"
+
+# The upgrade's starting point was itself validated (ADR-0026 dec 8).
+from="$(ssh "$target" "sed -n 's/^from=//p' $dir/.box-deployed 2>/dev/null" || true)"
+if [ "${BOX_FIRST_VALIDATION:-0}" != 1 ]; then
+    [ -n "$from" ] || { echo "box-validate: the deployment records no commit it upgraded from" >&2; exit 1; }
+    prior="$(gh api "repos/{owner}/{repo}/commits/$from/statuses" \
+        --jq '[.[] | select(.context == "box-e2e")][0].state // "missing"')"
+    [ "$prior" = success ] || {
+        echo "box-validate: upgraded from $from, whose box-e2e is $prior; deploy from a validated commit" >&2; exit 1; }
+fi
 
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT

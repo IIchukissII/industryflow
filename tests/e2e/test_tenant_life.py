@@ -11,7 +11,7 @@ clock (ADR-0033 dec 7). The job also carries out what earlier runs left requeste
 import time
 import uuid
 
-from harness import pretty
+from harness import Secret, pretty
 
 DELETION_TIMEOUT = 1200
 
@@ -19,8 +19,9 @@ DELETION_TIMEOUT = 1200
 def test_a_tenant_is_provisioned_used_suspended_and_deleted_from_every_store(edge, root, env):
     run = uuid.uuid4().hex[:8]
     cid = root.post("/api/companies", json={"company_name": f"e2e-life-{run}"}).json()["company_id"]
-    email, password = f"e2e-life-{run}@example.com", f"E2e-{uuid.uuid4().hex}"
-    root.post("/api/users", json={"email": email, "password": password, "role": "admin", "company_id": cid})
+    email, password = f"e2e-life-{run}@example.com", Secret(f"E2e-{uuid.uuid4().hex}")
+    root.post("/api/users", json={"email": email, "password": password.reveal(), "role": "admin",
+                                  "company_id": cid})
     admin = edge.session(email, password)
     admin.get("/api/equipment")
 

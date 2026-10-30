@@ -27,10 +27,12 @@ import uuid
 
 import pytest
 
-from harness import Edge, Environment
+from harness import Edge, Environment, Secret
 
 REQUIRED = ("IF_E2E_EDGE", "IF_E2E_INGEST", "IF_E2E_CA", "IF_E2E_SUPERUSER_EMAIL",
             "IF_E2E_SUPERUSER_PASSWORD", "IF_E2E_COMPOSE_DIR", "IF_E2E_WORK", "IF_E2E_AUTHORING_IMAGE")
+# Read only where it is used, never part of what a fixture hands a test.
+SECRET = "IF_E2E_SUPERUSER_PASSWORD"
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -48,7 +50,7 @@ def settings():
     missing = [name for name in REQUIRED if not os.environ.get(name)]
     if missing:
         pytest.skip(f"no deployed stack to run against: {', '.join(missing)} unset")
-    return {name: os.environ[name] for name in REQUIRED}
+    return {name: os.environ[name] for name in REQUIRED if name != SECRET}
 
 
 @pytest.fixture(scope="session")
@@ -65,7 +67,7 @@ def env(settings):
 @pytest.fixture(scope="session")
 def root(edge, settings):
     """The run's platform superuser, signed in."""
-    return edge.session(settings["IF_E2E_SUPERUSER_EMAIL"], settings["IF_E2E_SUPERUSER_PASSWORD"])
+    return edge.session(settings["IF_E2E_SUPERUSER_EMAIL"], Secret(os.environ[SECRET]))
 
 
 @pytest.fixture(scope="session")
@@ -75,11 +77,12 @@ def tenant(edge, root, env):
     run = uuid.uuid4().hex[:8]
     company = root.post("/api/companies", json={"company_name": f"e2e-{run}"}).json()
     cid = company["company_id"]
-    password = f"E2e-{uuid.uuid4().hex}"
+    password = Secret(f"E2e-{uuid.uuid4().hex}")
     users = {}
     for role in ("admin", "engineer"):
         email = f"e2e-{run}-{role}@example.com"
-        root.post("/api/users", json={"email": email, "password": password, "role": role, "company_id": cid})
+        root.post("/api/users", json={"email": email, "password": password.reveal(), "role": role,
+                                      "company_id": cid})
         users[role] = edge.session(email, password)
     yield {"company_id": cid, "schema": company.get("schema_name"), "run": run, **users}
     root.put(f"/api/companies/{cid}", json={"is_active": False}, expect=(200, 400, 404))

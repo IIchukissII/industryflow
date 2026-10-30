@@ -55,8 +55,10 @@ release is cut only from such a commit.
 
 | Task | Command |
 |---|---|
-| Run the suite on the environment's host | `scripts/box-e2e.sh` (from the deployment's checkout) |
-| Run it over SSH and post the `box-e2e` commit status | `scripts/box-validate.sh <ssh-target> [compose-dir]` (needs `gh`) |
+| Deploy a commit by upgrade on the environment's host | `scripts/box-deploy.sh [ref]` (default `origin/main`; backup, build, schema, recreate; writes `.box-deployed`) |
+| Run the suite on the environment's host | `scripts/box-e2e.sh` (from the deployment's checkout; refuses local changes or a stack not deployed from `HEAD`) |
+| Run it over SSH and post the `box-e2e` commit status | `scripts/box-validate.sh <ssh-target> [compose-dir]` (needs `gh`; refuses an upgrade from a commit without `box-e2e` success) |
+| First validation of an environment | `BOX_FIRST_VALIDATION=1 scripts/box-validate.sh <ssh-target>` |
 | Run one journey | `scripts/box-e2e.sh -k <name>` (arguments go to pytest) |
 | Cut a release | `git tag v<version> <sha> && git push origin v<version>` |
 
@@ -67,8 +69,9 @@ release is cut only from such a commit.
 | Run's superuser | Created by `box-e2e.sh` in the oldest active tenant, removed on exit |
 | Run's tenant | Suspended with deletion requested at the end; the next run's deletion job removes it |
 | Skips | Failures (`IF_E2E_REQUIRE=1`) |
-| Release workflow | `release.yml`: refuses a tag whose commit is not on `main` or has no successful `box-e2e` status; publishes each image of `images.yml` from `:sha-<short>` under the tag, without rebuilding |
-| Precondition | The environment runs the commit under test, with the notebook authoring image and the device CA (`scripts/device-ca.sh init`) |
+| Release workflow | `release.yml`: refuses a tag whose commit is not on `main`, has no successful `box-e2e` status, or has no successful `Images` run on `main`; resolves every image of `images.yml` from `:sha-<short>` to its digest, then tags each digest with the version |
+| Precondition | The environment runs the commit under test (`scripts/box-deploy.sh`), with the notebook authoring image and the device CA (`scripts/device-ca.sh init`) |
+| Validated bytes | The environment builds its own images; a release publishes the main pipeline's build of the same commit ([ADR-0026](../../ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md) Consequences) |
 
 | Symptom | Cause | Fix |
 |---|---|---|

@@ -11,6 +11,7 @@ The handles are placed in the capability store as the hub's spawn mints them (AD
 edge mints a kernel's handle."""
 import json
 import secrets
+import time
 import uuid
 
 import pytest
@@ -18,6 +19,8 @@ import pytest
 from harness import eventually, pretty
 
 HEADER = "X-IF-Capability"
+# Longer than the writer's idle read plus one batch (capability_audit_drain.block_ms, BATCH).
+WRITER_SETTLE_SECONDS = 15
 LATEST = "/api/measurements/latest"
 
 
@@ -51,16 +54,18 @@ def test_a_handle_is_honoured_by_its_own_plane_and_its_first_use_recorded_once(e
     assert first[0]["company_id"] == tenant["company_id"]
 
 
-def test_a_kernel_repeating_a_refused_handle_leaves_one_row(edge, tenant, handles, env):
+def test_a_kernel_repeating_a_refused_handle_leaves_one_row(edge, tenant, handles):
     handle, hid = handles["sql"]
     for _ in range(40):
         assert edge.anonymous(LATEST, headers={HEADER: handle}).status_code == 401
-    refused = eventually(lambda: [e for e in _events(tenant, hid) if e["kind"] == "refused"],
-                         timeout=60, what="the refusal reaches the record")
+    eventually(lambda: [e for e in _events(tenant, hid) if e["kind"] == "refused"],
+               timeout=60, what="the refusal reaches the record")
+    # Counted only once the writer has had time to write everything appended: rows written late would
+    # otherwise pass for rows never appended.
+    time.sleep(WRITER_SETTLE_SECONDS)
+    refused = [e for e in _events(tenant, hid) if e["kind"] == "refused"]
     assert len(refused) == 1, pretty(refused)  # once per window, the rest counted (ADR-0042 dec 8)
     assert refused[0]["reason"] == "wrong_audience" and refused[0]["digest"] is None
-    eventually(lambda: env.redis("XLEN", "nbcap-audit") == "(integer) 0", timeout=60,
-               what="the writer drains the stream")
 
 
 def test_a_revoked_handle_is_refused_on_its_next_use(edge, handles, env):

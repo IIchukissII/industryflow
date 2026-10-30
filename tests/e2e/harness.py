@@ -16,6 +16,22 @@ import httpx
 OK = (200, 201, 202, 204)
 
 
+class Secret:
+    """A password the suite holds: its repr is redacted, so a failing test's printed arguments and
+    locals never show it."""
+
+    def __init__(self, value: str):
+        self._value = value
+
+    def reveal(self) -> str:
+        return self._value
+
+    def __repr__(self) -> str:
+        return "Secret(***)"
+
+    __str__ = __repr__
+
+
 class Session:
     """One user's bearer session at the edge. Each call names the statuses it expects and fails with
     the response body otherwise, so a journey's failure says what the stack answered."""
@@ -55,10 +71,10 @@ class Edge:
     def __exit__(self, *exc):
         self.client.close()
 
-    def login(self, email: str, password: str) -> httpx.Response:
-        return self.client.post("/auth/jwt/login", data={"username": email, "password": password})
+    def login(self, email: str, password: Secret) -> httpx.Response:
+        return self.client.post("/auth/jwt/login", data={"username": email, "password": password.reveal()})
 
-    def session(self, email: str, password: str) -> Session:
+    def session(self, email: str, password: Secret) -> Session:
         r = self.login(email, password)
         if r.status_code != 200:
             raise AssertionError(f"sign-in for {email} -> {r.status_code}: {r.text[:300]}")

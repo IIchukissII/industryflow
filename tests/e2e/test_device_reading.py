@@ -36,8 +36,10 @@ def test_the_edge_refuses_a_reading_without_a_device_certificate(settings, senso
     eid, sid = sensor
     try:
         r = send_reading(settings, None, reading(eid, sid, 1.0))
-    except httpx.HTTPError:
-        return  # refused in the handshake
+    except httpx.ConnectError as exc:
+        # Refused in the handshake: a TLS alert, not an edge that is down or unreachable.
+        assert "SSL" in repr(exc) or "certificate" in str(exc).lower(), repr(exc)
+        return
     assert r.status_code in (400, 401, 403, 495, 496), r.text[:200]
 
 
