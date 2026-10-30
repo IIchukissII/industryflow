@@ -73,7 +73,7 @@ kube-state-metrics and cAdvisor come from the backend, not the chart.
 ## Platform alert rules
 
 Group `industryflow.platform`: [`infrastructure/prometheus/rules/platform.yml`](../../infrastructure/prometheus/rules/platform.yml)
-(`IndustryFlowTargetDown`, `IndustryFlowPostgresDown`, `IndustryFlowRedisDown`,
+(`IndustryFlowTargetDown`, `IndustryFlowPostgresDown`, `IndustryFlowRedisDown`, `IndustryFlowRedisMemoryHigh`,
 `IndustryFlowKafkaConsumerLag`, `IndustryFlowDeadLetteredReadings`,
 `IndustryFlowCapabilityAuditBacklog`), the same rules and thresholds
 as Compose. Tune them in that file, or add a PrometheusRule of your own. Unit tests:
