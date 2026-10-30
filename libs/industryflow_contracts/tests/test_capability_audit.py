@@ -3,15 +3,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The capability-use event contract (ADR-0042): what a plane may append, what the writer reads, and
-the first-use script run by a real Lua interpreter (fakeredis with lupa)."""
+the store's scripts run by a real Lua interpreter: a real Redis in CI, fakeredis with lupa otherwise
+(industryflow_contracts.testing)."""
 import asyncio
 import uuid
 
 import pytest
 
 from industryflow_contracts import capability_audit as audit
-
-fakeredis = pytest.importorskip("fakeredis")
+from industryflow_contracts import testing
 
 CID = "00000000-0000-4000-8000-0000000000c1"
 HID = str(uuid.uuid4())
@@ -57,7 +57,7 @@ def test_a_presented_digest_is_short_and_stable():
 
 
 def test_first_use_is_recorded_once_per_handle_and_plane():
-    r = fakeredis.FakeRedis()
+    r = testing.sync_redis()
     script = r.register_script(audit.FIRST_USE_SCRIPT)
     for fields in (_first_use(), _first_use(), _first_use(plane="api_gateway", audience="api")):
         keys, args = audit.first_use_script_args(fields)
@@ -73,7 +73,7 @@ def test_first_use_script_args_need_a_first_use_with_a_handle():
 
 
 def test_a_removal_is_recorded_only_when_it_removed_the_entry():
-    r = fakeredis.FakeRedis()
+    r = testing.sync_redis()
     script = r.register_script(audit.DELETE_RECORDED_SCRIPT)
     r.set("nbcap:h", "{}")
     fields = audit.event(audit.REVOKED, plane="hub", handle_id=HID, reason="server_stopped")
@@ -86,7 +86,7 @@ def test_a_removal_is_recorded_only_when_it_removed_the_entry():
 
 
 def test_a_plain_append_is_bounded():
-    r = fakeredis.FakeRedis()
+    r = testing.sync_redis()
     r.xadd(**audit.append_args(audit.event(audit.REFUSED, plane="cold_broker", digest="0" * 16,
                                            reason="no_entry")))
     assert audit.decode(r.xrange(audit.STREAM_KEY)[0][1])["reason"] == "no_entry"
@@ -112,7 +112,7 @@ def _eval(r, script, keys, args):
 
 
 def test_an_unknown_value_is_recorded_once_per_window_by_digest():
-    r = fakeredis.FakeRedis()
+    r = testing.sync_redis()
     for handle in ("random-1", "random-1", "random-1", "random-2"):
         script, keys, args = audit.refusal(plane="api_gateway", handle=handle, reason="no_entry",
                                            facts={}, source="10.0.0.9")
@@ -134,7 +134,7 @@ def _refuse_real(r, reason="wrong_audience", plane="api_gateway"):
 
 
 def test_a_real_entrys_refusals_are_recorded_once_per_window_with_the_count_of_the_rest():
-    r = fakeredis.FakeRedis()
+    r = testing.sync_redis()
     # A kernel sending its own handle to the wrong plane, many times: one row, not one per request.
     assert [_refuse_real(r) for _ in range(500)] == [1] + [0] * 499
     # Another reason and another plane are windows of their own.
@@ -156,7 +156,7 @@ def test_a_real_entrys_refusals_are_recorded_once_per_window_with_the_count_of_t
 
 
 def test_a_sql_sessions_events_are_bounded_per_window_like_a_refusal():
-    r = fakeredis.FakeRedis()
+    r = testing.sync_redis()
     for _ in range(50):
         for kind in (audit.SQL_SESSION_OPENED, audit.SQL_SESSION_CLOSED):
             fields = audit.event(kind, plane="sql_proxy", user="alice", company_id=CID, audience="sql",
@@ -199,7 +199,7 @@ def test_no_edge_configured_believes_no_reported_address():
 
 
 def test_a_flood_of_distinct_values_from_one_source_is_recorded_up_to_its_limit():
-    r = fakeredis.FakeRedis()
+    r = testing.sync_redis()
     once = r.register_script(audit.UNKNOWN_REFUSAL_SCRIPT)
     results = []
     for i in range(audit.SOURCE_LIMIT + 5):

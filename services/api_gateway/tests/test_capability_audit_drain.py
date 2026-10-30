@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The capability-use record's one writer (ADR-0042 dec 4, 7), over a real stream and consumer group
-(fakeredis) and a recording engine: an entry is acknowledged only once its batch committed, an
+(a real Redis in CI, industryflow_contracts.testing) and a recording engine: an entry is acknowledged only once its batch committed, an
 unreadable one is skipped and acknowledged, and a failed batch is delivered again.
 
 The table and its writing function are proven against the real database in
@@ -16,11 +16,11 @@ from datetime import datetime
 import pytest
 import pytest_asyncio
 from industryflow_contracts import capability_audit as audit
+from industryflow_contracts import testing
 from sqlalchemy.exc import DBAPIError
 
 from messaging import capability_audit_drain as drain
 
-fakeredis = pytest.importorskip("fakeredis")
 asyncpg = pytest.importorskip("asyncpg")
 
 
@@ -75,10 +75,11 @@ def _event(**kw):
 
 @pytest_asyncio.fixture
 async def redis():
-    r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    r = await testing.async_redis(decode_responses=True)
     await drain._ensure_group(r)
     await drain._ensure_group(r)  # idempotent: BUSYGROUP is not an error
     yield r
+    await r.aclose()
 
 
 @pytest.mark.asyncio
@@ -171,6 +172,18 @@ async def test_expiry_asks_the_database_for_the_configured_period():
 
     assert await drain.expire(ExpiringEngine(), days=400) == 3
     assert calls == [("SELECT public.expire_capability_use(:days)", {"days": 400})]
+
+
+@pytest.mark.asyncio
+async def test_an_idle_read_ends_inside_the_clients_read_timeout_on_a_real_server(redis):
+    # The fake has no read timeout; on a real server a block as long as the client's timeout fails
+    # every idle pass (#501), and the writer's own block does not.
+    if not testing.is_real(redis):
+        pytest.skip("only a real server has a read timeout (CI runs one: IF_REQUIRE_REAL_REDIS)")
+    assert await drain.drain_once(redis, Engine(), "c1", block_ms=drain.block_ms(redis)) == 0
+    from redis.exceptions import TimeoutError as ReadTimeout
+    with pytest.raises(ReadTimeout):
+        await drain.drain_once(redis, Engine(), "c1", block_ms=drain.BLOCK_MS)
 
 
 def test_a_read_blocks_well_inside_the_clients_read_timeout():

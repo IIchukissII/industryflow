@@ -188,18 +188,16 @@ def _mint_route(store):
 
 
 class Store:
-    """The route's store: an async client on a real Redis protocol (fakeredis), read back through a
+    """The route's store: an async client on a real store (a real Redis in CI, industryflow_contracts.testing), read back through a
     sync client on the same server. ``transactions`` is every pipeline the route executed:
     (was it MULTI/EXEC, the commands it carried)."""
 
     def __init__(self, mapping=None):
-        import fakeredis
+        from industryflow_contracts import testing
 
-        server = fakeredis.FakeServer()
-        self.sync = fakeredis.FakeRedis(server=server, decode_responses=True)
+        self.sync, self.client = testing.redis_pair({"decode_responses": True})
         for key, value in (mapping or {}).items():
             self.sync.set(key, value)
-        self.client = fakeredis.aioredis.FakeRedis(server=server)
         self.transactions = []
         real = self.client.pipeline
 
