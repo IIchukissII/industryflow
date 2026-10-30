@@ -124,3 +124,32 @@ tests:
       - eval_time: 30m
         alertname: IndustryFlowCapabilityAuditBacklog
         exp_alerts: []
+  # The store near its limit raises it; one with no limit (0) and another stack's do not.
+  - interval: 1m
+    input_series:
+      - series: 'redis_memory_used_bytes{platform="industryflow", instance="redis-exporter:9121"}'
+        values: '100000000x5 230000000x20'
+      - series: 'redis_memory_max_bytes{platform="industryflow", instance="redis-exporter:9121"}'
+        values: '268435456x25'
+      - series: 'redis_memory_used_bytes{platform="industryflow", instance="external:9121"}'
+        values: '900000000x25'
+      - series: 'redis_memory_max_bytes{platform="industryflow", instance="external:9121"}'
+        values: '0x25'
+      - series: 'redis_memory_used_bytes{platform="other", instance="x"}'
+        values: '250000000x25'
+      - series: 'redis_memory_max_bytes{platform="other", instance="x"}'
+        values: '268435456x25'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: IndustryFlowRedisMemoryHigh
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: IndustryFlowRedisMemoryHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              platform: industryflow
+              instance: redis-exporter:9121
+            exp_annotations:
+              summary: "Redis is near its memory limit"
+              description: "Redis uses 85.68% of its memory limit; at the limit it refuses writes (it never evicts)."

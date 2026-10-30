@@ -66,6 +66,7 @@ the same file the chart renders into its PrometheusRule ([ADR-0016](../../ADR/AD
 | `IndustryFlowTargetDown` | A scrape target is down for 5m | `docker compose ps`; the service's logs |
 | `IndustryFlowPostgresDown` | `postgres-exporter` cannot reach TimescaleDB for 5m | `docker compose logs timescaledb` |
 | `IndustryFlowRedisDown` | `redis-exporter` cannot reach Redis for 5m | `docker compose logs redis` |
+| `IndustryFlowRedisMemoryHigh` | Redis above 80% of its `maxmemory` for 10m; it never evicts, so at the limit mints, sign-ins and cache writes fail | `redis-cli info memory`; `redis-cli --bigkeys`; the capability-use stream's backlog (`capability_audit_backlog`) |
 | `IndustryFlowKafkaConsumerLag` | A consumer group lags more than 1000 for 10m | The consumer's logs |
 | `IndustryFlowDeadLetteredReadings` | A letter reached a `*.dlq` topic in the last 15m | [Dead-letter handling](dead-letters.md) |
 | `IndustryFlowCapabilityAuditBacklog` | More than 1000 capability-use events wait to be recorded for 15m | The API gateway's logs (`capability audit writer`); [capability-use record](../architecture/notebooks.md#capability-use-record) |

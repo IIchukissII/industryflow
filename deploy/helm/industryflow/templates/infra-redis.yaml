@@ -41,7 +41,9 @@ spec:
       containers:
         - name: redis
           image: {{ .Values.infra.redis.image | quote }}
-          args: ["redis-server", "--appendonly", "yes"]
+          # Never evicts: a full store refuses writes (ADR-0015 dec 8).
+          args: ["redis-server", "--appendonly", "yes", "--maxmemory", {{ .Values.infra.redis.maxmemory | quote }},
+                 "--maxmemory-policy", "noeviction"]
           ports:
             - name: redis
               containerPort: 6379
@@ -55,7 +57,7 @@ spec:
               mountPath: /data
           resources:
             requests: { cpu: 50m, memory: 64Mi }
-            limits: { cpu: 250m, memory: 256Mi }
+            limits: { cpu: 250m, memory: 384Mi }
   volumeClaimTemplates:
     - metadata:
         name: data

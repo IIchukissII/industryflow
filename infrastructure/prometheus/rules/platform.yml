@@ -34,6 +34,18 @@ groups:
         annotations:
           summary: "Redis is down"
           description: "redis_up == 0 (redis-exporter cannot reach Redis)."
+      - alert: IndustryFlowRedisMemoryHigh
+        # The capability store never evicts (ADR-0015 dec 8): at its limit it refuses mints, sign-ins and
+        # cache writes, so it is watched before it gets there.
+        expr: |
+          redis_memory_used_bytes{platform="industryflow"}
+            / (redis_memory_max_bytes{platform="industryflow"} > 0) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis is near its memory limit"
+          description: "Redis uses {{ $value | humanizePercentage }} of its memory limit; at the limit it refuses writes (it never evicts)."
       - alert: IndustryFlowKafkaConsumerLag
         expr: kafka_consumergroup_lag{platform="industryflow"} > 1000
         for: 10m

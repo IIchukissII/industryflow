@@ -328,6 +328,11 @@ infra:
     image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     port: 6379
     storage: 2Gi
+    # Half the container's memory limit (384Mi): an append-only rewrite forks, and its copy-on-write
+    # pages and the client and AOF buffers are not counted in maxmemory, so a full store refuses writes
+    # before the pod is killed. It never evicts (ADR-0015 dec 8); an external Redis must be run with
+    # maxmemory-policy noeviction too.
+    maxmemory: 192mb
     external: { host: "", port: 6379 }
 
   minio:
