@@ -69,6 +69,7 @@ updates:
       - "/tests/object_store"
       - "/services/spark_jobs"
       - "/infrastructure/timescaledb/tests"
+      - "/tests/e2e"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 4
@@ -114,7 +115,7 @@ updates:
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "docker"
-    directories: ["/services/**", "/infrastructure/**"]
+    directories: ["/services/**", "/infrastructure/**", "/tests/e2e"]
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3

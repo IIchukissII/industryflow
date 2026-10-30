@@ -45,3 +45,36 @@ gh api -X PATCH repos/<owner>/<repo>/branches/main/protection/required_status_ch
   compose-smoke-gate db-tenant-isolation-gate cold-layer-integration-gate \
   tracking-gateway-integration-gate model-artifact-roundtrip-gate config-guards-gate)
 ```
+
+## Box validation and releases
+
+A commit on `main` is box-validated when the long-lived environment runs it, deployed by upgrade from
+the last box-validated commit, and the end-to-end suite passed there
+([ADR-0026](../../ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md) dec 8–10). A versioned
+release is cut only from such a commit.
+
+| Task | Command |
+|---|---|
+| Deploy a commit by upgrade on the environment's host | `scripts/box-deploy.sh [ref]` (default `origin/main`; backup, build, schema, recreate; writes `.box-deployed`) |
+| Run the suite on the environment's host | `scripts/box-e2e.sh` (from the deployment's checkout; refuses local changes or a stack not deployed from `HEAD`) |
+| Run it over SSH and post the `box-e2e` commit status | `scripts/box-validate.sh <ssh-target> [compose-dir]` (needs `gh`; refuses an upgrade from a commit without `box-e2e` success) |
+| First validation of an environment | `BOX_FIRST_VALIDATION=1 scripts/box-validate.sh <ssh-target>` |
+| Run one journey | `scripts/box-e2e.sh -k <name>` (arguments go to pytest) |
+| Cut a release | `git tag v<version> <sha> && git push origin v<version>` |
+
+| Item | Value |
+|---|---|
+| Suite | `tests/e2e/` (runner image `tests/e2e/Dockerfile`) |
+| Journeys | Capability use and its record; a device reading through the certificate edge; a model uploaded, registered on a bound configuration, deployed and scored by its rule; a tenant through deletion |
+| Run's superuser | Created by `box-e2e.sh` in the oldest active tenant, removed on exit |
+| Run's tenant | Suspended with deletion requested at the end; the next run's deletion job removes it |
+| Skips | Failures (`IF_E2E_REQUIRE=1`) |
+| Release workflow | `release.yml`: refuses a tag whose commit is not on `main`, has no successful `box-e2e` status, or has no successful `Images` run on `main`; resolves every image of `images.yml` from `:sha-<short>` to its digest, then tags each digest with the version |
+| Precondition | The environment runs the commit under test (`scripts/box-deploy.sh`), with the notebook authoring image and the device CA (`scripts/device-ca.sh init`) |
+| Validated bytes | The environment builds its own images; a release publishes the main pipeline's build of the same commit ([ADR-0026](../../ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md) Consequences) |
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `box-e2e: could not remove <email>` | The cleanup could not reach the database | `$RUN api-gateway python /scripts/manage_users.py delete --email <email> --yes` ([user management](user-management.md)) |
+| Device journey times out | Spark streaming not running | `docker compose up -d spark-master spark-worker spark-streaming` |
+| Release fails at `The commit is box-validated` | No `box-e2e` success on that commit | `scripts/box-validate.sh` after deploying it |
