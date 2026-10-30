@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The end-to-end suite's runner image (tests/e2e/Dockerfile); pins as the services take them.
+pytest==9.1.1
+httpx==0.28.1
