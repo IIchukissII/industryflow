@@ -77,6 +77,8 @@ repeatable.
 **Negative**
 - The whole-stack gate is the most expensive check and slows as the system grows.
 - A release waits for a run on the long-lived environment, which one host provides.
+- The environment builds the commit's images itself, so a release publishes the main pipeline's build
+  of the validated commit: the same sources and pins, not the same bytes.
 - The suite runs with a platform superuser and the environment's internals, so it runs only where both
   are the test environment's own.
 - Synthesised state covers schema upgrades, not accumulated data, and only the latest upgrade step.
@@ -89,12 +91,13 @@ repeatable.
 |---|---|
 | Upgrade paths for the database, tracking backend and capability store | The first upgrade failure in one of them |
 | Database major-version upgrades | Its own decision, when one is planned |
+| The long-lived environment running the published images | The first difference between its build and the published one that a run would have caught |
 
 ## References
 
 - `.github/workflows/compose-smoke.yml` (decisions 3–4)
 - `.github/workflows/images.yml` (decisions 5, 7)
 - `.github/workflows/release.yml` (decision 9)
-- `tests/e2e/` (decisions 8, 10)
+- `tests/e2e/`, `scripts/box-deploy.sh`, `scripts/box-e2e.sh`, `scripts/box-validate.sh` (decisions 8–10)
 - `infrastructure/timescaledb/tests/service_sql.py`, `libs/industryflow_contracts/industryflow_contracts/testing.py` (decision 11)
 - `.github/dependabot.yml` (decision 7)

@@ -1,0 +1,100 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# A versioned release (ADR-0026 dec 9): pushing a tag `v*` publishes every image under that version,
+# and only for a commit on main whose `box-e2e` status is success (scripts/box-validate.sh) and whose
+# image build on main passed its scan (images.yml pushes `:sha-<short>` before the scan gate, so the
+# tag existing proves nothing). Each image is resolved to its digest before any is tagged, and the
+# version names that digest: nothing is rebuilt, and nothing is half-released. The image list is read
+# from images.yml, so a new image is released with no edit here.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  REGISTRY: ghcr.io/iichukissii
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+      statuses: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: The commit is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: The commit is box-validated
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/statuses" \
+            --jq '[.[] | select(.context == "box-e2e")][0].state // "missing"')"
+          echo "box-e2e: $state"
+          if [ "$state" != success ]; then
+            echo "::error::$GITHUB_SHA has no successful box-e2e status; validate it first (scripts/box-validate.sh)"
+            exit 1
+          fi
+
+      - name: The commit's images were built and scanned on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          passed="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/images.yml/runs?head_sha=$GITHUB_SHA&event=push&status=success" \
+            --jq '.total_count')"
+          if [ "$passed" -lt 1 ]; then
+            echo "::error::no successful Images run on main for $GITHUB_SHA; its images were not all built and scanned"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: The images to release
+        id: images
+        run: |
+          pip install -q PyYAML==6.0.3
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import yaml
+          matrix = yaml.safe_load(open(".github/workflows/images.yml"))["jobs"]["build-scan"]["strategy"]["matrix"]["include"]
+          print("names=" + " ".join(sorted({entry["name"] for entry in matrix})))
+          PY
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve every image to its digest
+        env:
+          NAMES: ${{ steps.images.outputs.names }}
+        run: |
+          short="${GITHUB_SHA::7}"
+          : > digests
+          for name in $NAMES; do
+            digest="$(docker buildx imagetools inspect "$REGISTRY/industryflow-$name:sha-$short" --format '{{json .Manifest}}' | jq -r .digest)"
+            case "$digest" in sha256:*) ;; *) echo "::error::no digest for $name:sha-$short"; exit 1 ;; esac
+            echo "$name $digest" >> digests
+          done
+          cat digests
+
+      - name: Publish the validated images under the version
+        run: |
+          while read -r name digest; do
+            docker buildx imagetools create -t "$REGISTRY/industryflow-$name:$GITHUB_REF_NAME" "$REGISTRY/industryflow-$name@$digest"
+          done < digests

@@ -16,6 +16,8 @@ CLAUDE.md
 deploy/ca/
 deploy/certs/
 deploy/device-ca/
+# What scripts/box-deploy.sh deployed on this host (read by scripts/box-e2e.sh)
+.box-deployed
 venv/
 __pycache__/
 *.pyc
