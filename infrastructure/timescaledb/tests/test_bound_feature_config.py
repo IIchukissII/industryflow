@@ -11,14 +11,13 @@ role so the rule binds the writer that edits configurations:
   * deleting a bound configuration is refused and leaves the model bound,
   * a model's binding cannot be changed,
   * an unbound configuration, or one whose last model was removed, is edited and deleted freely,
-  * the ML service's query for the models that bind a config, read from its source and run here
-    unchanged, names them,
+  * the ML service's query for the models that bind a config, and its lock on the configuration a
+    registration binds, run on the service's driver (service_sql.py), name and read them,
   * re-applying the migration function is a no-op.
 
 Requires a running database with the init scripts applied (the CI workflow stands one up via docker
 compose). When no database is reachable it skips.
 """
-import ast
 import json
 import os
 import uuid
@@ -28,18 +27,9 @@ import pytest
 psycopg2 = pytest.importorskip("psycopg2")
 from psycopg2 import errors  # noqa: E402
 
+import service_sql  # noqa: E402
 
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-# Watched by db-tenant-isolation.yml's path filter (tests/config_guards/test_ci_path_filters.py).
 REPOSITORY = "services/ml_service/api/repository.py"
-
-
-def _repository_sql(name):
-    tree = ast.parse(open(os.path.join(_ROOT, REPOSITORY)).read())
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
-            return ast.literal_eval(node.value)
-    raise AssertionError(f"{name} not found in {REPOSITORY}")
 
 
 def _connect():
@@ -165,20 +155,31 @@ def test_a_configuration_whose_models_are_gone_is_free(cur):
     assert cur.rowcount == 1
 
 
+def _service(cur, name, config_id):
+    # On the ML service's driver, as its role, in the tenant's path; the id bound as the str the
+    # service's request models carry.
+    cur.execute("SHOW search_path")
+    return service_sql.run(service_sql.statement(REPOSITORY, name), (str(config_id),),
+                           role="ml_service_user", search_path=cur.fetchone()[0])
+
+
 def test_the_services_query_names_the_binding_models(cur):
     config_id = _config(cur)
     model_id = _model(cur, config_id)
-    cur.execute(_repository_sql("BOUND_MODELS_SELECT").replace("$1", "%s"), (config_id,))
-    assert [r[0] for r in cur.fetchall()] == [model_id]
+    assert [str(r["model_id"]) for r in _service(cur, "BOUND_MODELS_SELECT", config_id)] == [str(model_id)]
 
 
 def test_the_services_bind_lock_reads_the_configuration_as_its_role(cur):
     # The insert's lock (ADR-0041 dec 3) as the ML service runs it: FOR SHARE needs that role's UPDATE
     # privilege, and the row it returns is what the registration's check is compared with.
     config_id = _config(cur, sensors=("temp_1", "flow_1"))
-    cur.execute(_repository_sql("BOUND_CONFIG_LOCK").replace("$1", "%s"), (config_id,))
-    base_sensors, transformations = cur.fetchone()
-    assert base_sensors == ["temp_1", "flow_1"] and transformations[0]["name"] == "temp_1_raw"
+    [row] = _service(cur, "BOUND_CONFIG_LOCK", config_id)
+
+    def value(v):  # the service's own reading of a jsonb column (asyncpg returns its text)
+        return json.loads(v) if isinstance(v, str) else v
+
+    assert value(row["base_sensors"]) == ["temp_1", "flow_1"]
+    assert value(row["transformations"])[0]["name"] == "temp_1_raw"
 
 
 def test_the_migration_function_is_idempotent(tenant):

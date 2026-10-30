@@ -13,7 +13,6 @@ and checks the grant reaches nothing else of the registry.
 Requires a running database with the init scripts applied (db-tenant-isolation.yml stands one
 up); skips when none is reachable.
 """
-import ast
 import os
 import uuid
 
@@ -22,25 +21,21 @@ import pytest
 psycopg2 = pytest.importorskip("psycopg2")
 from psycopg2 import errors  # noqa: E402
 
+import service_sql  # noqa: E402
+
 WRITERS = ("spark_streaming_user", "alert_service_user")
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
-
-def _source_sql(path: str, name: str) -> str:
-    """A statement exactly as the writer's source holds it. Each source is in db-tenant-isolation.yml's
-    path filter, so a change to it runs this proof."""
-    for node in ast.parse(open(os.path.join(_ROOT, path)).read()).body:
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
-            return ast.literal_eval(node.value)
-    raise AssertionError(f"{name} not found in {path}")
-
-
-STREAM_READ = _source_sql("services/spark_jobs/reading_guard.py", "TENANT_STATUS_SELECT")
-# asyncpg's positional parameter, run here through psycopg2.
-ALERT_LISTING = _source_sql("services/alert_service/worker/repository.py", "TENANT_SCHEMAS_SELECT").replace("$1", "%s")
+# Each on the driver its writer runs it on (service_sql.DRIVERS).
+STREAM_READ = service_sql.statement("services/spark_jobs/reading_guard.py", "TENANT_STATUS_SELECT")
+ALERT_LISTING = service_sql.statement("services/alert_service/worker/repository.py", "TENANT_SCHEMAS_SELECT")
 # The alert worker's tenant-status publisher (services/alert_service/worker/tenant_status_publisher.py).
-STATUS_PUBLISH = _source_sql("services/alert_service/worker/tenant_status_publisher.py",
-                             "REGISTRY_STATUS_SELECT").replace("$1", "%s")
+STATUS_PUBLISH = service_sql.statement("services/alert_service/worker/tenant_status_publisher.py",
+                                       "REGISTRY_STATUS_SELECT")
+
+
+def _schema_like():
+    # The pattern both alert-worker statements are bound with, from the shared contract.
+    return pytest.importorskip("industryflow_contracts.tenancy").SCHEMA_LIKE
 
 
 def _connect():
@@ -89,35 +84,37 @@ def _suspend(cur, company_id, active):
     _as(cur, "api_gateway_user", "SELECT * FROM public.update_company(%s, NULL, %s)", (str(company_id), active))
 
 
+def _rows(stmt, role, *args):
+    return [tuple(r.values()) for r in service_sql.run(stmt, args, role=role)]
+
+
 @pytest.mark.parametrize("role", WRITERS)
 def test_a_writer_reads_whether_a_tenant_is_active(tenant, role):
     cur, company_id, schema = tenant
-    assert _as(cur, role, STREAM_READ, (schema,)) == [(True,)]
+    assert _rows(STREAM_READ, role, schema) == [(True,)]
     _suspend(cur, company_id, False)
     try:
-        assert _as(cur, role, STREAM_READ, (schema,)) == [(False,)]
+        assert _rows(STREAM_READ, role, schema) == [(False,)]
     finally:
         _suspend(cur, company_id, True)
 
 
 def test_the_alert_worker_lists_a_tenant_only_while_it_is_active(tenant):
     cur, company_id, schema = tenant
-    like = "tenant\\_%"
-    assert (schema,) in _as(cur, "alert_service_user", ALERT_LISTING, (like,))
+    assert (schema,) in _rows(ALERT_LISTING, "alert_service_user", _schema_like())
     _suspend(cur, company_id, False)
     try:
-        assert (schema,) not in _as(cur, "alert_service_user", ALERT_LISTING, (like,))
+        assert (schema,) not in _rows(ALERT_LISTING, "alert_service_user", _schema_like())
     finally:
         _suspend(cur, company_id, True)
 
 
 def test_the_status_publisher_reads_every_tenant_with_its_status(tenant):
     cur, company_id, schema = tenant
-    like = "tenant\\_%"
-    assert (schema, True) in _as(cur, "alert_service_user", STATUS_PUBLISH, (like,))
+    assert (schema, True) in _rows(STATUS_PUBLISH, "alert_service_user", _schema_like())
     _suspend(cur, company_id, False)
     try:
-        assert (schema, False) in _as(cur, "alert_service_user", STATUS_PUBLISH, (like,))
+        assert (schema, False) in _rows(STATUS_PUBLISH, "alert_service_user", _schema_like())
     finally:
         _suspend(cur, company_id, True)
 
