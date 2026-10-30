@@ -97,17 +97,19 @@ gateway's writer (`services/api_gateway/messaging/capability_audit_drain.py`, co
 |---|---|---|
 | `minted` | hub, ml-service (upload) | With the mint, in one transaction |
 | `first_use` | each plane that redeems a handle | Its first use of the handle (marker `nbcap-audit-seen:<plane>:<handle_id>`, 7 days) |
-| `refused` | each plane that redeems a handle | A refusal naming a real entry: every time, by `handle_id`. A value naming none: once per plane and digest per hour (`nbcap-audit-refused:`), at most 60 per plane and source address per minute (`nbcap-audit-source:`), `detail` = `source=<address>` |
+| `refused` | each plane that redeems a handle | A refusal naming a real entry: once per `handle_id`, plane and reason per 5 minutes (`nbcap-audit-repeat:`), the rest counted (`nbcap-audit-repeats:`, 7 days) into the next record's `suppressed`. A value naming none: once per plane and digest per hour (`nbcap-audit-refused:`), at most 60 per plane and source address per minute (`nbcap-audit-source:`), `detail` = `source=<address>` |
 | `revoked` | hub, API gateway (logout), tenant delete | With the removal, only if it removed a live entry |
 | `consumed` | tracking gateway (upload) | With the claim of a single-use upload handle |
 | `environment_started`, `environment_stopped` | hub | Server spawn and stop |
-| `sql_session_opened`, `sql_session_closed` | SQL proxy | Session start and end; statements are not recorded |
+| `sql_session_opened`, `sql_session_closed` | SQL proxy | Session start and end, once per `handle_id` and kind per 5 minutes, the rest counted like a refusal's; none for a handle with no `handle_id`; statements are not recorded |
 
 | Column | Meaning |
 |---|---|
 | `handle_id` | Non-secret identifier bound into the handle's entry at mint; a handle minted before the record has none |
 | `digest` | First 16 hex of SHA-256 of a presented value that named no entry; absent otherwise |
 | `reason`, `detail` | Why it was refused, revoked or closed; the server or session |
+| `suppressed` | How many of the same event the entry repeated, unrecorded, since its last record |
+| Source address | The client address the edge reported (`X-Real-IP`) when the peer is one of `EDGE_PROXY_PEERS`; the connecting peer otherwise |
 
 | Read | Who |
 |---|---|
@@ -116,6 +118,7 @@ gateway's writer (`services/api_gateway/messaging/capability_audit_drain.py`, co
 | Setting (API gateway) | Default | Meaning |
 |---|---|---|
 | `CAPABILITY_AUDIT_RETENTION_DAYS` | `365` | Rows older are expired hourly by `expire_capability_use()`; the database refuses fewer than 30 |
+| `EDGE_PROXY_PEERS` (also tracking gateway) | compose `frontend`; Helm empty | The edge's addresses, networks or host names; Helm: set to the ingress controller's pod network |
 
 | Metric / alert | Meaning |
 |---|---|

@@ -135,17 +135,13 @@ async def record_resolution(store: CapabilityStore, handle: str, outcome: policy
         keys, args = audit.first_use_script_args(fields)
         await store.eval(audit.FIRST_USE_SCRIPT, len(keys), *keys, *args)
         return
-    # A value that named no entry is recorded by digest once per window, a real entry's refusal every
-    # time and without a digest (ADR-0042 dec 2, 8).
-    how, *call = audit.refusal(plane=_PLANE, handle=handle, reason=reason, facts=facts, source=source)
-    if how == "once":
-        keys, args = call
-        if await store.eval(audit.UNKNOWN_REFUSAL_SCRIPT, len(keys), *keys, *args) == -1:
-            logging.getLogger(__name__).warning(
-                "capability audit: %s presented more unknown handles than are recorded; the rest of "
-                "this minute is not recorded (ADR-0042 dec 9)", source)
-    else:
-        await store.xadd(**call[0])
+    # A value that named no entry is recorded by digest once per window, a real entry's refusal once per
+    # window with the count of the rest, and without a digest (ADR-0042 dec 2, 8).
+    script, keys, args = audit.refusal(plane=_PLANE, handle=handle, reason=reason, facts=facts, source=source)
+    if await store.eval(script, len(keys), *keys, *args) == -1:
+        logging.getLogger(__name__).warning(
+            "capability audit: %s presented more unknown handles than are recorded; the rest of "
+            "this minute is not recorded (ADR-0042 dec 9)", source)
 
 
 async def consume_upload_handle(store: CapabilityStore, handle: str, binding: policy.TrackingBinding) -> bool:
@@ -164,16 +160,19 @@ def _bearer(request: Request) -> str:
 
 
 def build_app(capabilities: CapabilityStore, upstream: Upstream, artifacts: ArtifactStore,
-              bucket: str = "", *, operator_token: Optional[str] = None) -> FastAPI:
+              bucket: str = "", *, operator_token: Optional[str] = None,
+              edge: Optional[audit.EdgePeers] = None) -> FastAPI:
     app = FastAPI(title="IndustryFlow notebook tracking gateway")
+    # The edge relays uploads; only its reported client address is a refusal's source (ADR-0042 dec 9).
+    edge = edge or audit.EdgePeers("")
 
     async def resolve(handle: str, resolver, request: Request) -> Optional[policy.TrackingBinding]:
         outcome = await resolver(capabilities.get, handle)
         # A presented handle's outcome is recorded (ADR-0042 dec 1); a request with no bearer
         # presented no capability.
         if handle:
-            await record_resolution(capabilities, handle, outcome,
-                                    source=request.client.host if request.client else None)
+            await record_resolution(capabilities, handle, outcome, source=await audit.client_source(
+                request.client.host if request.client else None, request.headers.get("x-real-ip"), edge))
         return outcome[0]
 
     async def tenant(request: Request) -> policy.TrackingBinding:
@@ -684,7 +683,8 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
 
     # Unset: the operator plane is not served at all, and a tenant deletion waits on this store.
     operator_token = os.environ.get("TRACKING_OPERATOR_TOKEN") or None
-    app = build_app(store, _HttpUpstream(), _S3Store(), bucket=bucket, operator_token=operator_token)
+    app = build_app(store, _HttpUpstream(), _S3Store(), bucket=bucket, operator_token=operator_token,
+                    edge=audit.EdgePeers(os.environ.get("EDGE_PROXY_PEERS", "")))
     uvicorn.run(app, host=os.environ.get("TRACKING_HOST", "0.0.0.0"), port=int(os.environ.get("TRACKING_PORT", "5050")))
 
 

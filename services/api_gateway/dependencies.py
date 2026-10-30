@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import os
 from dataclasses import dataclass
 from typing import AsyncGenerator, Optional
 from fastapi import Depends, HTTPException, Request, status
@@ -12,6 +13,7 @@ from users import current_active_user, fastapi_users
 from database import AsyncSessionLocal
 from capability_auth import AUDIENCE_API, record_resolution, resolve_capability_outcome
 import company_status
+from industryflow_contracts import capability_audit as audit
 from industryflow_contracts import tenancy
 import logging
 
@@ -23,6 +25,9 @@ optional_active_user = fastapi_users.current_user(active=True, optional=True)
 
 # Header the notebook client sends the API-audience capability handle in (ADR-0015).
 CAPABILITY_HEADER = "X-IF-Capability"
+# The edge's addresses: the only peer whose reported client address a refusal's source takes
+# (ADR-0042 dec 9). A kernel reaches the gateway directly and names no source but its own.
+EDGE_PEERS = audit.EdgePeers(os.environ.get("EDGE_PROXY_PEERS", ""))
 
 async def get_current_user_with_company(
     current_user: User = Depends(current_active_user)
@@ -176,7 +181,9 @@ async def resolve_tenant_context(
     # nor a handle presented no capability.
     if handle:
         await record_resolution(_capability_store(), handle, binding, reason, facts,
-                                source=request.client.host if getattr(request, "client", None) else None)
+                                source=await audit.client_source(
+                                    request.client.host if getattr(request, "client", None) else None,
+                                    request.headers.get("x-real-ip"), EDGE_PEERS))
     if binding is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

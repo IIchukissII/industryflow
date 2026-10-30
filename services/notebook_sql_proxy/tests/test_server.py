@@ -220,7 +220,8 @@ async def test_handle_client_authorizes_valid_handle_and_builds_backend():
     reader.feed_eof()
 
     record = json.dumps(
-        {"user": "alice", "company_id": cid, "audience": "sql", "read_only": True}
+        {"user": "alice", "company_id": cid, "audience": "sql", "read_only": True,
+         "handle_id": str(uuid.uuid4())}
     )
 
     store = _Store({f"{b._KEY_PREFIX}good": record})
@@ -249,7 +250,7 @@ async def test_handle_client_authorizes_valid_handle_and_builds_backend():
 
     await server.handle_client(reader, writer, store, backend_factory)
 
-    assert [e["kind"] for e in store.events()] == ["sql_session_opened", "sql_session_closed"]
+    assert [e["kind"] for e in store.events()] == ["first_use", "sql_session_opened", "sql_session_closed"]
     assert built["connected"] and built["relayed"] and built["closed"]
     assert built["binding"].company_id == cid
     # The tenant's read-only role was assumed before any relay.

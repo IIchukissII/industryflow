@@ -536,6 +536,11 @@ config:
   API_GATEWAY_DB_MAX_OVERFLOW: "2"
   # The capability-use record's retention (ADR-0042 dec 10); the database refuses under 30 days.
   CAPABILITY_AUDIT_RETENTION_DAYS: "365"
+  # The ingress controller's addresses: networks, addresses or host names, comma-separated. A refusal's
+  # source is the client address the edge reports only from these peers (ADR-0042 dec 9); empty, every
+  # external request's source is the controller, and one client spends the record's budget for all.
+  # Set it to the controller's pod network. Read by the api-gateway and the tracking gateway.
+  EDGE_PROXY_PEERS: ""
   ENVIRONMENT: production
   # Extension plugin modules the ML service loads at startup (ADR-0008/0010); empty = built-ins.
   EXTENSION_MODULES: ""
