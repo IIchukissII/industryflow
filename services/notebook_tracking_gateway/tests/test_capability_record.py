@@ -10,8 +10,9 @@ refusal by the presented value's digest and never the value (dec 2), and an uplo
 consumption in the same atomic step as the claim that consumes it (dec 3). The operator plane is a
 shared secret, not a capability, and records nothing.
 
-Most of this runs on the dict fake (capability_audit_fake.py). The race runs on fakeredis, so the
-contract's real Lua decides which of two commits holding one handle wins.
+Most of this runs on the dict fake (capability_audit_fake.py). The race runs on a real store (a real
+Redis in CI, industryflow_contracts.testing), so the contract's real Lua decides which of two commits
+holding one handle wins.
 """
 import asyncio
 import hashlib
@@ -20,11 +21,11 @@ import os
 import sys
 import uuid
 
-import fakeredis
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 from industryflow_contracts import capability_audit as audit
+from industryflow_contracts import testing
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -212,7 +213,7 @@ def test_a_tracking_handle_at_the_upload_surface_is_refused_and_recorded():
 
 
 class _ClaimRace:
-    """fakeredis, holding every claim until two callers have reached it: both commits have resolved
+    """The store, holding every claim until two callers have reached it: both commits have resolved
     the handle before either consumes it, so only the claim can decide between them."""
 
     def __init__(self, redis):
@@ -233,7 +234,7 @@ class _ClaimRace:
 
 @pytest.mark.asyncio
 async def test_two_commits_on_one_handle_one_consumes_and_one_consumption_is_recorded():
-    redis = fakeredis.FakeAsyncRedis(decode_responses=True)
+    redis = await testing.async_redis(decode_responses=True)
     await redis.set(f"nbcap:{UP}", _entry("upload"))
     art = Artifacts()
     uid = staging.new_upload_id()

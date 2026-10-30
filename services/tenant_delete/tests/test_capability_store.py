@@ -6,8 +6,8 @@
 import json
 import uuid
 
-import fakeredis
 from industryflow_contracts import capability_audit as audit
+from industryflow_contracts import testing
 
 from tenant_delete.capability_store import CapabilityStore
 
@@ -18,9 +18,9 @@ HID_A, HID_INDEXED, HID_B = (str(uuid.uuid4()) for _ in range(3))
 
 
 def _store():
-    """A real store's semantics (fakeredis, with the contract's Lua), seeded with a tenant A to
+    """A real store (industryflow_contracts.testing: a real Redis in CI), seeded with a tenant A to
     delete beside a tenant B to keep."""
-    redis = fakeredis.FakeRedis()
+    redis = testing.sync_redis()
     kv = {
         "nbcap:h-a": json.dumps({"company_id": A, "user": U, "audience": "tracking", "handle_id": HID_A}),
         "nbcap:h-b": json.dumps({"company_id": B, "audience": "api", "handle_id": HID_B}),

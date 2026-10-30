@@ -13,20 +13,20 @@ import os
 import sys
 import uuid
 
-import fakeredis
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import capabilities as cap  # noqa: E402
 from industryflow_contracts import capability_audit as audit  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 CID = str(uuid.uuid4())
 
 
 @pytest.fixture
 def client():
-    return fakeredis.FakeRedis()
+    return testing.sync_redis()
 
 
 @pytest.fixture
