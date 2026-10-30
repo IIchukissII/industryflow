@@ -39,11 +39,13 @@ WRITES = [
 ]
 
 # Write routes outside the tenant-data writer gate, each with its own authorization:
-# authentication, self-service, user administration (admin) and tenant provisioning (superuser).
+# authentication, self-service, user administration (admin), tenant provisioning and platform switches
+# (superuser).
 OWN_AUTHORIZATION = {
     "/auth/jwt/login", "/auth/jwt/logout", "/auth/login", "/auth/refresh", "/auth/logout",
     "/users/me", "/api/users", "/api/users/{user_id}",
     "/api/companies", "/api/companies/{company_id}", "/api/companies/{company_id}/deletion",
+    "/api/platform/switches/{key}",
 }
 
 

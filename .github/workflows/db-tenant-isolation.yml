@@ -52,6 +52,7 @@ jobs:
               - 'services/ml_service/api/repository.py'
               - 'services/api_gateway/messaging/capability_audit_drain.py'
               - 'services/api_gateway/routers/capability_use.py'
+              - 'services/api_gateway/routers/platform_switches.py'
               # The engine tests' stand-in for that SQL; test_alert_dedup_hypertable.py holds it to the hypertable.
               - 'services/alert_service/tests/fake_alert_store.py'
               - 'services/alert_service/worker/tenant_status_publisher.py'
