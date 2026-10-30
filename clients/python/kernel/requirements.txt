@@ -26,7 +26,7 @@ statsmodels==0.15.0
 xgboost==3.4.1
 matplotlib==3.11.2
 plotly==7.1.0
-mlflow-skinny==3.17.1
+mlflow-skinny==3.17.2
 skops==0.16.0
 # The cold-layer client's Parquet engine (the `cold` extra). Built against numpy 2, like cold_export's.
 pyarrow==26.0.0
