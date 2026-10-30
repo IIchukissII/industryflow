@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0024 — Stateful-feature kill-switch
 
 - **Status:** Accepted
-- **Date:** 2026-07-06; changed 2026-10-17
+- **Date:** 2026-07-06; changed 2026-10-30
 - **Parent:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extends the transform contract)
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (shared schema), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (degraded serving is visible), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (the aggregate read guarded)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (shared schema), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (degraded serving is visible), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (the aggregate read guarded), [ADR-0043](ADR-0043-platform-switch-operator-control.md) (who flips it, and the record of flips)
 
 ## Context
 
@@ -21,8 +21,9 @@ it cannot know which transforms are stateful.
 
 1. **Transforms declare their class at registration.** An optional stateful flag, default false, is an
    additive extension-API change (ADR-0010 dec 3), and every statistic of a stateful type is stateful.
-2. **One global, live switch in the database's shared schema.** An operator flips it, the serving path
-   reads it with a short cache, and it is platform data, read schema-qualified (ADR-0003).
+2. **One global, live switch in the database's shared schema.** A platform superuser flips it
+   (ADR-0043), the serving path reads it with a short cache, and it is platform data, read
+   schema-qualified (ADR-0003).
 3. **Null-in-slot.** When off, each stateful slot takes its transform's neutral value (zero unless
    declared) without the transform being called, so vector shape is unchanged.
 4. **The switch is checked before the substrate call.** A disabled class issues no aggregate reads.
@@ -65,7 +66,6 @@ it cannot know which transforms are stateful.
 | Per-tenant scope | The first incident confined to one tenant |
 | Auto-trip with hysteresis | Repeated manual flips on the same signal |
 | Neutral value per statistic | Evidence that mean-valued slots at zero distort scores |
-| Authenticated operator endpoint | An access-control decision for writes on the inference service |
 
 ## References
 
