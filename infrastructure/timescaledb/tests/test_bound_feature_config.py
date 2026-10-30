@@ -166,7 +166,7 @@ def _service(cur, name, config_id):
 def test_the_services_query_names_the_binding_models(cur):
     config_id = _config(cur)
     model_id = _model(cur, config_id)
-    assert [str(r["model_id"]) for r in _service(cur, "BOUND_MODELS_SELECT", config_id)] == [model_id]
+    assert [str(r["model_id"]) for r in _service(cur, "BOUND_MODELS_SELECT", config_id)] == [str(model_id)]
 
 
 def test_the_services_bind_lock_reads_the_configuration_as_its_role(cur):
