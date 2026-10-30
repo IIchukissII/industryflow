@@ -185,13 +185,18 @@ and the transforms fall back to the same neutral value.
 
 | Task | Command / signal |
 |---|---|
-| Turn off (neutralize) | `UPDATE public.platform_config SET value = 'false'::jsonb, updated_at = NOW(), updated_by = '<operator>' WHERE key = 'stateful_features_enabled';` |
-| Turn back on | same statement with `'true'::jsonb` |
+| Who | A platform superuser ([ADR-0043](../../ADR/ADR-0043-platform-switch-operator-control.md)); no tenant role |
+| Turn off (neutralize) | `PUT /api/platform/switches/stateful_features_enabled` with `{"value": false}` |
+| Turn back on | same with `{"value": true}` |
+| State | `GET /api/platform/switches` |
+| Who flipped it, when | `GET /api/platform/switches/stateful_features_enabled/changes` (`public.platform_config_changes`, append-only) |
 | Takes effect | within `STATEFUL_SWITCH_CACHE_TTL` seconds (default `5`); no restart |
 | Confirm, response | `POST /api/inference/predict` returns `degraded: true` and `neutralized_features` |
 | Confirm, metric | `rate(ml_stateful_features_neutralized_total[5m])` > 0; `0` in normal operation |
 
 `ml_service_user` holds `SELECT` only on `public.platform_config`; the service never writes the flag.
+The gateway writes it only through `set_platform_switch()`, which records the flip; a flip to the
+current value is not recorded.
 No shipped rule alerts on the counter.
 
 ## Troubleshooting

@@ -56,6 +56,14 @@ def require_role(*allowed_roles: str):
     return role_checker
 
 
+async def require_superuser(current_user: User = Depends(current_active_user)) -> User:
+    """A platform superuser: cross-tenant and platform-wide authority (ADR-0004 dec 5). No tenant role
+    passes, an administrator included."""
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser privileges required")
+    return current_user
+
+
 # Roles that may change tenant data (equipment, sensors, alert rules, alert acknowledgement and
 # labels). observer is read-only (docs/operations/user-management.md).
 WRITER_ROLES = ("engineer", "admin")
