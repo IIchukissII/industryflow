@@ -8,8 +8,8 @@
 # This file is what CI installs for the unit-test job, so a runtime import missing here is a red
 # job, not a local inconvenience: every module the tests import needs its dependency listed.
 pytest==9.1.1
-pytest-asyncio==1.4.0
-fastapi==0.157.0
+pytest-asyncio==1.4.1
+fastapi==0.162.0
 httpx==0.28.1
 # admission.py parses the artifact manifest (safe_load only). Mirrors requirements.txt.
 PyYAML==6.0.3
