@@ -8,16 +8,18 @@ Whether a company is active, as authentication reads it (ADR-0004 dec 2, ADR-003
 A suspended (inactive) company's users are refused at authentication: every session-authenticated
 request, login, refresh, socket and capability-authenticated request checks the caller's company
 here. The registry is the source of truth; this keeps a short per-process cache of it so that the
-check is not a database round trip per request. COMPANY_STATUS_CACHE_SECONDS bounds how stale a
-replica's view may be; the replica that performs the transition forgets its entry at once, and the
-transition itself ends every session of the company (routers/companies.py), so the cache bounds
-only how long an already-issued access token is still honoured elsewhere.
+check is not a database round trip per request. A suspension is refused at once by every process:
+the transition writes the suspension marker into the shared capability store (``mark_suspended``),
+and every check reads it before the cache. COMPANY_STATUS_CACHE_SECONDS bounds only a change made
+outside the API, and a reactivation, which is refused for that long at most, never admitted early;
+with the store unreachable the check falls back to the cache and its bound.
 
 The capability planes outside this service do not read the registry. For them the transition also
 writes a suspension marker into the shared capability store (``mark_suspended``), which every
 verifier and minter of capability handles consults (capability_auth.SUSPENDED_PREFIX, the shared
 contract), so no handle for a suspended company resolves or is minted, at once and everywhere.
 """
+import logging
 import time
 from collections import OrderedDict
 from typing import Optional
@@ -27,6 +29,8 @@ from sqlalchemy import text
 
 from capability_auth import suspended_key
 from config import get_settings
+
+logger = logging.getLogger(__name__)
 
 # Bounded: least recently checked company evicted first, so it cannot grow with the tenant count.
 _CACHE_MAX_COMPANIES = 4096
@@ -58,14 +62,37 @@ def _canonical(company_id) -> Optional[str]:
         return None
 
 
+def _store():
+    # Imported lazily: the client connects at startup, and tests run without it.
+    from messaging.redis_client import redis_client
+
+    return redis_client.redis
+
+
+async def _marked_suspended(company_id: str) -> bool:
+    """Whether the shared store holds the company's suspension marker; False when the store cannot
+    be read, which leaves the decision to the registry and its cache."""
+    store = _store()
+    if store is None:
+        return False
+    try:
+        return bool(await store.exists(suspended_key(company_id)))
+    except Exception as exc:  # noqa: BLE001 - an unreachable store must not refuse every request
+        logger.warning("company status: suspension marker unreadable, using the registry: %s", exc)
+        return False
+
+
 async def is_company_active(company_id) -> bool:
-    """True if the company exists and is active; read through a cache of bounded staleness.
+    """True if the company exists and is active: not marked suspended in the shared store, and active
+    in the registry, read through a cache of bounded staleness.
 
     A malformed identifier is not active. A database error propagates: an unknown answer is not a
     yes, and the request fails rather than being admitted.
     """
     key = _canonical(company_id)
     if key is None:
+        return False
+    if await _marked_suspended(key):
         return False
     now = time.monotonic()
     cached = _cache.get(key)
