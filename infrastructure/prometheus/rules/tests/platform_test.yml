@@ -153,3 +153,26 @@ tests:
             exp_annotations:
               summary: "Redis is near its memory limit"
               description: "Redis uses 85.68% of its memory limit; at the limit it refuses writes (it never evicts)."
+  # A dropped event fires at once; written ones, retries and another stack's drops do not.
+  - interval: 1m
+    input_series:
+      - series: 'capability_audit_events_total{platform="industryflow", instance="gw-1", result="written"}'
+        values: '0+100x40'
+      - series: 'capability_audit_events_total{platform="industryflow", instance="gw-1", result="retry"}'
+        values: '0+1x40'
+      - series: 'capability_audit_events_total{platform="industryflow", instance="gw-1", result="refused"}'
+        values: '0x20 1x20'
+      - series: 'capability_audit_events_total{platform="other", instance="x", result="unreadable"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: IndustryFlowCapabilityEventsDropped
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: IndustryFlowCapabilityEventsDropped
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Capability-use events were dropped from the record"
+              description: "Capability-use events were acknowledged without being recorded in the last 15m; the API gateway's logs (capability audit) name each stream id."
