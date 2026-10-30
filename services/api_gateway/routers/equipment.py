@@ -9,8 +9,10 @@ NOTE: In v5.0, sensors have direct equipment_id - no junction table
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
+from uuid import UUID
 import logging
 from dependencies import get_db_with_tenant, get_current_user_with_company, get_writer_with_company
 from models.user import User
@@ -20,14 +22,15 @@ router = APIRouter(prefix="/api/equipment", tags=["equipment"])
 
 # Pydantic Models
 class EquipmentCreate(BaseModel):
-    equipment_id: str
+    equipment_id: UUID
     equipment_type: str
     name: str
     description: Optional[str] = None
     site_id: Optional[str] = None
     location: Optional[str] = None
     sensor_count: int = Field(gt=0)
-    expected_sensors: List[str] = Field(default_factory=list)
+    # Sensor ids (the column is uuid[]).
+    expected_sensors: List[UUID] = Field(default_factory=list)
     batch_timeout_seconds: int = Field(default=5, gt=0)
     require_complete_batch: bool = True
     min_sensors_for_partial: Optional[int] = None
@@ -36,7 +39,7 @@ class EquipmentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     sensor_count: Optional[int] = None
-    expected_sensors: Optional[List[str]] = None
+    expected_sensors: Optional[List[UUID]] = None
     batch_timeout_seconds: Optional[int] = None
     require_complete_batch: Optional[bool] = None
     min_sensors_for_partial: Optional[int] = None
@@ -57,7 +60,7 @@ def clean_display_name(value: Optional[str]) -> Optional[str]:
 
 
 class SensorCreate(BaseModel):
-    sensor_id: str
+    sensor_id: UUID
     # The machine key: feature configs, model features and rule patterns reference it.
     sensor_name: str
     # The label a person reads; optional, and never a substitute for the key.
@@ -115,6 +118,19 @@ async def get_equipment(
         raise HTTPException(status_code=404, detail="Equipment not found")
     return dict(row._mapping)
 
+def _refusal(exc: DBAPIError) -> Exception:
+    """A write the database refused, as the caller's error without the statement or the driver's text;
+    anything else (the database unreachable) stays a server error."""
+    code = getattr(getattr(exc, "orig", None), "sqlstate", None) or ""
+    if isinstance(exc, IntegrityError) or code.startswith("23"):
+        logger.info("equipment write refused by a constraint: %s", code)
+        return HTTPException(status_code=409, detail="It already exists, or it names something that does not")
+    if code.startswith("22"):
+        logger.info("equipment write refused for a value: %s", exc.orig)
+        return HTTPException(status_code=422, detail="A value is not valid for its field")
+    return exc
+
+
 @router.post("", status_code=201)
 async def create_equipment(
     equipment: EquipmentCreate,
@@ -150,9 +166,9 @@ async def create_equipment(
         row = result.fetchone()
         await db.commit()
         return dict(row._mapping)
-    except Exception as e:
+    except DBAPIError as exc:
         await db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _refusal(exc)
 
 @router.put("/{equipment_id}")
 async def update_equipment(
@@ -269,9 +285,9 @@ async def add_sensor(
         row = result.fetchone()
         await db.commit()
         return dict(row._mapping)
-    except Exception as e:
+    except DBAPIError as exc:
         await db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _refusal(exc)
 
 @router.patch("/{equipment_id}/sensors/{sensor_id}")
 async def update_sensor(
@@ -398,7 +414,6 @@ async def add_sensors_bulk(
             "message": f"Successfully added {len(inserted_sensors)} sensors",
             "sensors": inserted_sensors
         }
-    except Exception as e:
+    except DBAPIError as exc:
         await db.rollback()
-        logger.error(f"Error in bulk sensor insert: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to insert sensors: {str(e)}")
+        raise _refusal(exc)

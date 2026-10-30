@@ -19,6 +19,15 @@ from extensions import get_transform, is_stateful, neutral_value, TransformConte
 logger = logging.getLogger(__name__)
 
 
+
+class UnknownTransform(ValueError):
+    """A feature configuration names a transform type no registered transform implements."""
+
+    def __init__(self, types):
+        self.types = list(types)
+        super().__init__(f"the feature configuration names transform types this deployment does not have: "
+                         f"{', '.join(self.types)}")
+
 class FeatureEngineeringEngine:
     """
     Applies feature transformations based on database configuration
@@ -52,6 +61,11 @@ class FeatureEngineeringEngine:
         self.base_sensors = feature_config.get('base_sensors', [])
         self.transformations = feature_config.get('transformations', [])
         self.feature_names = [t['name'] for t in self.transformations]
+        # A type no registered transform implements has no value to compute: refused here, before any
+        # slot is filled, rather than scored on a substitute the model never saw.
+        unknown = sorted({str(t.get('type')) for t in self.transformations if get_transform(t.get('type')) is None})
+        if unknown:
+            raise UnknownTransform(unknown)
         self.baseline_provider = baseline_provider
         self.equipment_id = equipment_id
         self.company_id = company_id
@@ -122,9 +136,6 @@ class FeatureEngineeringEngine:
         """
         t_type = transformation['type']
         fn = get_transform(t_type)
-        if fn is None:
-            logger.warning(f"Unknown transformation type: {t_type}")
-            return 0.0
 
         if not stateful_enabled and is_stateful(t_type):
             if neutralized is not None:

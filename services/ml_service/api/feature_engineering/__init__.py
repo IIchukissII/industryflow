@@ -7,7 +7,7 @@ Feature Engineering Module
 Flexible, configuration-driven feature engineering for multiple equipment types
 """
 from .baseline_provider import AggregateBaselineProvider
-from .engine import FeatureEngineeringEngine
+from .engine import FeatureEngineeringEngine, UnknownTransform
 from .kill_switch import StatefulFeatureSwitch
 
-__all__ = ['AggregateBaselineProvider', 'FeatureEngineeringEngine', 'StatefulFeatureSwitch']
+__all__ = ['AggregateBaselineProvider', 'FeatureEngineeringEngine', 'StatefulFeatureSwitch', 'UnknownTransform']
