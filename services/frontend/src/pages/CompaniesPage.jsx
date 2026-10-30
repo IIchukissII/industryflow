@@ -5,8 +5,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
 import { companiesReading } from '../utils/reading-admin';
+import { errorText } from '../utils/errors';
 
-const detailOf = (error) => error.response?.data?.detail || error.message;
+const detailOf = errorText;
 
 function CompaniesPage({ nav }) {
   const [companies, setCompanies] = useState([]);

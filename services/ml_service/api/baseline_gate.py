@@ -26,7 +26,7 @@ import numpy as np
 
 import drift
 from extensions import DetectorContext, UninterpretableModel
-from feature_engineering import FeatureEngineeringEngine
+from feature_engineering import FeatureEngineeringEngine, UnknownTransform
 
 # The detector's threshold does not change its score; the gate asks only for the score.
 _THRESHOLD = 0.5
@@ -100,13 +100,16 @@ async def plan(app_state, repository, company_id: str, model: Dict[str, Any]) ->
     if not rows:
         return Plan(profile, reason="the sample has no complete row to score")
 
-    engine = FeatureEngineeringEngine(
-        feature_config=feature_config,
-        baseline_provider=getattr(app_state, "baseline_provider", None),
-        equipment_id=model.get("equipment_id"),
-        company_id=company_id,
-        kill_switch=getattr(app_state, "stateful_switch", None),
-    )
+    try:
+        engine = FeatureEngineeringEngine(
+            feature_config=feature_config,
+            baseline_provider=getattr(app_state, "baseline_provider", None),
+            equipment_id=model.get("equipment_id"),
+            company_id=company_id,
+            kill_switch=getattr(app_state, "stateful_switch", None),
+        )
+    except UnknownTransform as exc:
+        return Plan(profile, reason=f"the sample cannot be scored: {exc}")
     training_metrics = model.get("training_metrics") or {}
     return Plan(
         profile,

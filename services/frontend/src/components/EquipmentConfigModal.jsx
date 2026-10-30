@@ -8,6 +8,7 @@ import './EquipmentConfigModal.css';
 import { createEquipment, updateEquipment, getEquipmentSensors, removeSensorFromEquipment, addSensorToEquipment, updateSensor } from '../services/equipmentApi';
 import { sensorLabel } from '../utils/sensors';
 import api from '../services/api';
+import { errorText } from '../utils/errors';
 
 function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null }) {
   const [step, setStep] = useState(1); // 1: Basic Info, 2: Configure Sensors, 3: Review & Submit
@@ -154,7 +155,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
       setCurrentSensor({ ...currentSensor, position: 0 });
       setStep(2);
     } catch (err) {
-      setError(err.response?.data?.detail || err.message);
+      setError(errorText(err));
     } finally {
       setLoading(false);
     }
@@ -237,7 +238,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
       if (!window.confirm('Remove this sensor from database?')) return;
       removeSensorFromEquipment(createdEquipmentId, sensors[position].sensor_id)
         .then(() => loadExistingSensors(createdEquipmentId))
-        .catch(err => setError(err.response?.data?.detail || err.message));
+        .catch(err => setError(errorText(err)));
     } else {
       // Just remove from local array for new equipment
       const updatedSensors = [...sensors];
@@ -292,7 +293,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
       onSuccess();
       handleClose();
     } catch (err) {
-      setError(err.response?.data?.detail || err.message);
+      setError(errorText(err));
     } finally {
       setLoading(false);
     }
@@ -378,7 +379,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
                     name="equipment_id"
                     value={formData.equipment_id}
                     onChange={handleInputChange}
-                    placeholder="e.g., pump_001"
+                    placeholder="The UUID the device reports"
                     required
                     disabled={isEditMode}
                   />

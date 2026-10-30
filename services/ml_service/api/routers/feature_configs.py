@@ -7,7 +7,7 @@ Feature Engineering Configurations Router
 Endpoints for managing feature engineering configurations
 """
 from fastapi import APIRouter, HTTPException, Depends, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
@@ -15,6 +15,7 @@ import logging
 import asyncpg
 
 import auth
+from extensions import registered_transforms
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,21 @@ async def _bound_refusal(request: Request, company_id: str, config_id: str) -> H
 # Pydantic Models
 # ============================================================================
 
+def _known_transforms(transformations):
+    """Each transformation names itself and a type a registered transform implements (ADR-0010): a type
+    nothing implements would be scored as a substitute the model never saw."""
+    if transformations is None:
+        return transformations
+    known = set(registered_transforms())
+    for t in transformations:
+        if not isinstance(t.get("name"), str) or not t["name"]:
+            raise ValueError("every transformation needs a name")
+        if t.get("type") not in known:
+            raise ValueError(f"transformation {t.get('name')!r} has type {t.get('type')!r}; "
+                             f"the types are {', '.join(sorted(known))}")
+    return transformations
+
+
 class FeatureConfigCreate(BaseModel):
     """Request to create a feature engineering configuration"""
     equipment_type: str = Field(..., description="Equipment type (e.g., 'motor', 'pump', 'compressor')")
@@ -53,6 +69,11 @@ class FeatureConfigCreate(BaseModel):
     description: Optional[str] = Field(None, description="Configuration description")
     base_sensors: List[str] = Field(..., description="List of required base sensor names")
     transformations: List[Dict[str, Any]] = Field(..., description="List of transformation configurations")
+
+    @field_validator("transformations")
+    @classmethod
+    def check_transforms(cls, value):
+        return _known_transforms(value)
 
 
 class FeatureConfigUpdate(BaseModel):
@@ -62,6 +83,11 @@ class FeatureConfigUpdate(BaseModel):
     description: Optional[str] = Field(None, description="Configuration description")
     base_sensors: Optional[List[str]] = Field(None, description="List of required base sensor names")
     transformations: Optional[List[Dict[str, Any]]] = Field(None, description="List of transformation configurations")
+
+    @field_validator("transformations")
+    @classmethod
+    def check_transforms(cls, value):
+        return _known_transforms(value)
 
 
 class FeatureConfigResponse(BaseModel):
@@ -117,13 +143,13 @@ async def create_feature_config(
         return result
 
     except Exception as e:
-        logger.error(f"Error creating feature config: {e}")
+        logger.exception("Error creating feature config")
         if "unique_equipment_config" in str(e):
             raise HTTPException(
                 status_code=400,
                 detail=f"Feature config '{config.name}' already exists for equipment type '{config.equipment_type}'"
             )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="The feature configuration store could not be reached")
 
 
 @router.get("", response_model=FeatureConfigListResponse)
@@ -157,9 +183,9 @@ async def get_all_feature_configs(
             "configs": configs
         }
 
-    except Exception as e:
-        logger.error(f"Error fetching feature configs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Error fetching feature configs")
+        raise HTTPException(status_code=500, detail="The feature configuration store could not be reached")
 
 
 @router.get("/{config_id}", response_model=FeatureConfigResponse)
@@ -189,9 +215,9 @@ async def get_feature_config(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error fetching feature config {config_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception(f"Error fetching feature config {config_id}")
+        raise HTTPException(status_code=500, detail="The feature configuration store could not be reached")
 
 
 @router.put("/{config_id}", response_model=FeatureConfigResponse, dependencies=[Depends(auth.require_writer)])
@@ -231,9 +257,9 @@ async def update_feature_config(
         raise
     except asyncpg.RestrictViolationError:
         raise await _bound_refusal(request, company_id, config_id)
-    except Exception as e:
-        logger.error(f"Error updating feature config {config_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception(f"Error updating feature config {config_id}")
+        raise HTTPException(status_code=500, detail="The feature configuration store could not be reached")
 
 
 @router.delete("/{config_id}", status_code=204, dependencies=[Depends(auth.require_writer)])
@@ -266,9 +292,9 @@ async def delete_feature_config(
         raise
     except asyncpg.ForeignKeyViolationError:
         raise await _bound_refusal(request, company_id, config_id)
-    except Exception as e:
-        logger.error(f"Error deleting feature config {config_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception(f"Error deleting feature config {config_id}")
+        raise HTTPException(status_code=500, detail="The feature configuration store could not be reached")
 
 
 @router.get("/equipment/{equipment_type}", response_model=FeatureConfigListResponse)
@@ -296,6 +322,6 @@ async def get_configs_by_equipment_type(
             "configs": configs
         }
 
-    except Exception as e:
-        logger.error(f"Error fetching feature configs for {equipment_type}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception(f"Error fetching feature configs for {equipment_type}")
+        raise HTTPException(status_code=500, detail="The feature configuration store could not be reached")
