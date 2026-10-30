@@ -118,7 +118,7 @@ gateway's writer (`services/api_gateway/messaging/capability_audit_drain.py`, co
 | Setting (API gateway) | Default | Meaning |
 |---|---|---|
 | `CAPABILITY_AUDIT_RETENTION_DAYS` | `365` | Rows older are expired hourly by `expire_capability_use()`; the database refuses fewer than 30 |
-| `EDGE_PROXY_PEERS` (also tracking gateway) | compose `frontend`; Helm empty | The edge's addresses, networks or host names; Helm: set to the ingress controller's pod network |
+| `EDGE_PROXY_PEERS` (also tracking gateway) | compose `frontend`; Helm empty | The edge's addresses, networks or host names. Only addresses no kernel can hold: on Kubernetes not the pod network (kernel pods share it) and not a Service name (its ClusterIP is never the peer); empty is safe |
 
 | Metric / alert | Meaning |
 |---|---|

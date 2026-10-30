@@ -112,6 +112,7 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 |---|---|
 | Which code a kernel ran, and notebook versioning | Maintainer, when a record of executed code is required |
 | A SQL statement audit | A deployment whose compliance requires one |
+| Each external client its own source on Kubernetes, where the edge's pods share the network kernels run on | The first Kubernetes deployment of the platform |
 
 ## References
 
