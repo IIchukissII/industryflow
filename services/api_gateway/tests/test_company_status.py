@@ -27,6 +27,42 @@ import users
 from capability_auth import resolve_capability, suspended_key
 
 
+class Store:
+    """The shared capability store, as the status check reads it."""
+
+    def __init__(self, keys=(), fail=False):
+        self.keys, self.fail = set(keys), fail
+
+    async def exists(self, key):
+        if self.fail:
+            raise ConnectionError("store unreachable")
+        return int(key in self.keys)
+
+
+@pytest.mark.asyncio
+async def test_a_suspension_is_refused_at_once_by_every_process(company_flags, monkeypatch):
+    # Another worker cached the company as active; the suspension's marker, written by the worker that
+    # suspended it, refuses it here without waiting for the cache (ADR-0033 dec 3).
+    cid = str(uuid.uuid4())
+    store = Store()
+    monkeypatch.setattr(company_status, "_store", lambda: store)
+    assert await company_status.is_company_active(cid) is True
+    store.keys.add(suspended_key(cid))
+    assert await company_status.is_company_active(cid) is False
+    store.keys.clear()  # reactivated
+    assert await company_status.is_company_active(cid) is True
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_store_leaves_the_decision_to_the_registry(company_flags, monkeypatch):
+    cid = str(uuid.uuid4())
+    monkeypatch.setattr(company_status, "_store", lambda: Store(fail=True))
+    assert await company_status.is_company_active(cid) is True
+    company_flags.inactive.add(cid)
+    company_status.forget(cid)
+    assert await company_status.is_company_active(cid) is False
+
+
 @pytest.mark.asyncio
 async def test_the_flag_is_cached_within_its_staleness_bound(company_flags, monkeypatch):
     cid = str(uuid.uuid4())
