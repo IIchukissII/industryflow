@@ -5,7 +5,7 @@
 # Deps for the live end-to-end proof (test_cold_broker_integration.py): drive the running broker
 # over HTTP, mint capabilities in Redis, and seed the object store with boto3. Run inside the
 # compose network so the broker's pre-signed-URL host (minio:9000) resolves.
-pytest==9.1.1
+pytest==9.2.0
 requests==2.34.2
 redis==8.1.0
-boto3==1.43.116
+boto3==1.43.120
