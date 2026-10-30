@@ -62,6 +62,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 | Python style | `ruff` (`ruff.toml`), gated in CI ([CI](docs/operations/ci.md)) |
 | Architecture | Decisions are ADRs ([ADR-0000](ADR/ADR-0000-decision-records-and-source-of-truth.md)) |
 | Change | Tests and the affected docs in the same pull request |
+| Release | A `v*` tag on a box-validated commit of `main` ([box validation and releases](docs/operations/ci.md#box-validation-and-releases), [ADR-0026](ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md)) |
 
 ## License
 
