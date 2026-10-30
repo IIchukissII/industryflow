@@ -221,11 +221,14 @@ services:
     container_name: industryflow-redis
     ports:
       - "127.0.0.1:${REDIS_PORT}:6379"
+    # The capability store never evicts: it holds denials whose absence grants (a tenant's suspension, a
+    # session's end), so a full store refuses writes instead (ADR-0015 dec 8). Watched against the
+    # limit by IndustryFlowRedisMemoryHigh.
     command: >
       redis-server
       --appendonly yes
       --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy noeviction
     volumes:
       - redis-data:/data
     healthcheck:
