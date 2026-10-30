@@ -136,17 +136,13 @@ async def record_resolution(store, handle: str, binding: Optional[ColdBinding],
         keys, args = audit.first_use_script_args(fields)
         await store.eval(audit.FIRST_USE_SCRIPT, len(keys), *keys, *args)
         return
-    # A value that named no entry is recorded by digest once per window, a real entry's refusal every
-    # time and without a digest (ADR-0042 dec 2, 8).
-    how, *call = audit.refusal(plane=PLANE, handle=handle, reason=reason, facts=facts, source=source)
-    if how == "once":
-        keys, args = call
-        if await store.eval(audit.UNKNOWN_REFUSAL_SCRIPT, len(keys), *keys, *args) == -1:
-            logging.getLogger(__name__).warning(
-                "capability audit: %s presented more unknown handles than are recorded; the rest of "
-                "this minute is not recorded (ADR-0042 dec 9)", source)
-    else:
-        await store.xadd(**call[0])
+    # A value that named no entry is recorded by digest once per window, a real entry's refusal once per
+    # window with the count of the rest, and without a digest (ADR-0042 dec 2, 8).
+    script, keys, args = audit.refusal(plane=PLANE, handle=handle, reason=reason, facts=facts, source=source)
+    if await store.eval(script, len(keys), *keys, *args) == -1:
+        logging.getLogger(__name__).warning(
+            "capability audit: %s presented more unknown handles than are recorded; the rest of "
+            "this minute is not recorded (ADR-0042 dec 9)", source)
 
 
 # The tenant's cold-store key prefix, ``tenant_<uuid>/`` (UUID-validated): the exporter's write

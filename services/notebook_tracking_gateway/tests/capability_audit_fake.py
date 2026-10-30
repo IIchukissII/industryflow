@@ -4,7 +4,7 @@
 
 """The capability store and its capability-use record (ADR-0042) as a dict-backed fake.
 
-The fake interprets the contract's two scripts by name and refuses any other, so a plane that starts
+The fake interprets the contract's scripts by name and refuses any other, so a plane that starts
 evaluating a script nobody modelled fails here rather than passing on an invented answer. What the
 scripts really do is proven by running them in a Lua interpreter
 (libs/industryflow_contracts/tests/test_capability_audit.py, and test_capability_record.py here
@@ -45,6 +45,18 @@ class AuditScripts:
                 return 0
             self.markers.add(keys[0])
             self.stream.append(_pairs(args[2:]))
+            return 1
+        if script == audit.REPEAT_SCRIPT:
+            window, count = keys[0], keys[1]
+            self.counts = getattr(self, "counts", {})
+            if window in self.markers:
+                self.counts[count] = self.counts.get(count, 0) + 1
+                return 0
+            self.markers.add(window)
+            fields = _pairs(args[3:])
+            if self.counts.get(count):
+                fields["suppressed"] = str(self.counts.pop(count))
+            self.stream.append(fields)
             return 1
         raise AssertionError("a script the capability-audit fake does not model")
 

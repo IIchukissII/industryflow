@@ -45,6 +45,18 @@ class AuditScripts:
             self.markers.add(keys[0])
             self.stream.append(_pairs(args[2:]))
             return 1
+        if script == audit.REPEAT_SCRIPT:
+            window, count = keys[0], keys[1]
+            self.counts = getattr(self, "counts", {})
+            if window in self.markers:
+                self.counts[count] = self.counts.get(count, 0) + 1
+                return 0
+            self.markers.add(window)
+            fields = _pairs(args[3:])
+            if self.counts.get(count):
+                fields["suppressed"] = str(self.counts.pop(count))
+            self.stream.append(fields)
+            return 1
         raise AssertionError("a script the capability-audit fake does not model")
 
     async def xadd(self, name, fields, maxlen=None, approximate=True):

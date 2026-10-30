@@ -237,6 +237,28 @@ async def test_first_use_is_recorded_once_and_an_unknown_value_once_per_window()
 
 
 @pytest.mark.asyncio
+async def test_a_kernel_looping_its_own_handle_at_the_wrong_plane_is_one_record_and_a_count():
+    # A kernel holds real handles of every audience; sending its SQL handle here at request rate is
+    # recorded once per window, and the next record carries the count (ADR-0042 dec 8).
+    from capability_auth import AUDIENCE_API, record_resolution, resolve_capability_outcome
+
+    redis = FakeRedis()
+    cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
+    redis.strings["nbcap:s"] = _audited(cid, hid, audience="sql")
+
+    async def present():
+        outcome = await resolve_capability_outcome(redis.get, "s", expected_audience=AUDIENCE_API)
+        await record_resolution(redis, "s", *outcome, source="10.0.0.9")
+
+    for _ in range(200):
+        await present()
+    assert len(redis.events("refused")) == 1
+    redis.markers.clear()  # the window passes
+    await present()
+    assert [(e["handle_id"], e["suppressed"]) for e in redis.events("refused")] == [(hid, None), (hid, "199")]
+
+
+@pytest.mark.asyncio
 async def test_a_handle_minted_before_the_record_resolves_without_a_first_use():
     from capability_auth import AUDIENCE_API, record_resolution, resolve_capability_outcome
 
