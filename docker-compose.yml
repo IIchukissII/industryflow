@@ -103,7 +103,7 @@ services:
   # server on the old one while clients are handed the new CA. Then it publishes the staged CA to
   # db-ca, the clients' default CA mount, so verify-full works with or without TLS_CERT_DIR.
   db-cert-init:
-    image: alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+    image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
     container_name: industryflow-db-cert-init
     command:
       - sh
@@ -244,7 +244,7 @@ services:
   # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
   # CAP_CHOWN, and a no-op when the volume is already owned correctly.
   minio-data-owner:
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:3f349bd07076e8e4040dc5c32598b632268accba8ac7f460cb077670ee2e3407
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:a8a0480cb7356bf1c1f6e348b483a161c727a5c77ca574899e5a045686492bbe
     container_name: industryflow-minio-data-owner
     user: "0:0"
     network_mode: none
@@ -267,7 +267,7 @@ services:
   # a maintained third-party build of the same server (ADR-0025 dec 10, ADR-0009). Non-root (65532),
   # distroless: no curl, so the healthcheck speaks HTTP over bash's /dev/tcp.
   minio:
-    image: cgr.dev/chainguard/minio:latest@sha256:73297936408b731668ca0e835ac9add1a35cb6026a125c2f0cd476d9ef48222c
+    image: cgr.dev/chainguard/minio:latest@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82
     depends_on:
       minio-data-owner:
         condition: service_completed_successfully
@@ -298,7 +298,7 @@ services:
   # safe on every `up`; the services that need a bucket or principal gate on it completing.
   minio-init:
     # The -dev variant: the init script needs a shell, grep and mktemp, which the minimal one lacks.
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:3f349bd07076e8e4040dc5c32598b632268accba8ac7f460cb077670ee2e3407
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:a8a0480cb7356bf1c1f6e348b483a161c727a5c77ca574899e5a045686492bbe
     container_name: industryflow-minio-init
     depends_on:
       minio:
@@ -733,7 +733,7 @@ services:
   # nears expiry, or when a device's renewal is owed (ADR-0007 dec 10). It holds a signing key, so it
   # has no network at all and runs as the CA dir's owner (DEVICE_CA_UID/GID).
   device-crl-refresh:
-    image: alpine/openssl:3.5.9@sha256:e8a2319d15637db5296c0ff540bb028cfabc480b22fcdd4a020582393d32673f
+    image: alpine/openssl:3.5.9@sha256:1c361a204e9791bec6202bccbd1065eafaa65cb5a1a9a06ae000238569fba6a2
     container_name: industryflow-device-crl-refresh
     network_mode: none
     user: "${DEVICE_CA_UID:-1000}:${DEVICE_CA_GID:-1000}"
@@ -1250,7 +1250,7 @@ services:
 
   # Redis Exporter - Cache metrics
   redis-exporter:
-    image: oliver006/redis_exporter:v1.95.0@sha256:afb21407aba3df1b4010899f155fc6b1ba2026c97b725d72aca4019d772e7b6b
+    image: oliver006/redis_exporter:v1.96.0@sha256:3d57b9eb142a62ffc600063606a41cd471cd53d81bed10be5b56b3a8918f2c26
     container_name: industryflow-redis-exporter
     environment:
       REDIS_ADDR: "redis:6379"
@@ -1264,7 +1264,7 @@ services:
 
   # Kafka Exporter - Kafka metrics
   kafka-exporter:
-    image: danielqsj/kafka-exporter:v1.10.0@sha256:346a53c2489a3530790d01f7b96632496d0d58926662f4c35bb65f569db2ab42
+    image: danielqsj/kafka-exporter:v1.11.0@sha256:54d4296c5b8ce01232f6762e06cbc3eec25887c0b5c5940ccb9e891ac7fc51d8
     container_name: industryflow-kafka-exporter
     command:
       - '--kafka.server=kafka:29092'
@@ -1279,7 +1279,7 @@ services:
 
   # Grafana - Monitoring & Dashboards
   grafana:
-    image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+    image: grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
     container_name: industryflow-grafana
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
