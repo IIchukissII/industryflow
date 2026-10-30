@@ -9,6 +9,7 @@ import './Equipment.css';
 import { canWrite } from '../utils/roles';
 import { equipmentReading } from '../utils/reading';
 import { sensorLabel } from '../utils/sensors';
+import { errorText } from '../utils/errors';
 
 // "grow-cabinet" -> "Grow cabinet"
 const humanize = (t) => (t ? (t.charAt(0).toUpperCase() + t.slice(1)).replace(/[-_]+/g, ' ') : '');
@@ -105,7 +106,7 @@ function Equipment() {
       await deleteEquipment(equip.equipment_id);
       await fetchEquipment();
     } catch (err) {
-      alert('The machine could not be deleted: ' + (err.response?.data?.detail || err.message));
+      alert('The machine could not be deleted: ' + errorText(err));
     }
   };
 

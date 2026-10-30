@@ -185,6 +185,19 @@ def test_a_model_nothing_can_interpret_still_reports_data_drift(evaluate):
     assert "cannot be scored" in res["prediction_drift_reason"]
 
 
+def test_a_configuration_naming_an_unknown_transform_still_reports_data_drift(evaluate):
+    # Stored before such a configuration was refused at write: no prediction drift, the reason, and the
+    # data drift that reads only the sensors.
+    rng = np.random.default_rng(5)
+    stale = {"base_sensors": ["a", "b"], "transformations": [{"name": "a", "type": "raw", "sensor": "a"},
+                                                             {"name": "b", "type": "identity", "sensor": "b"}]}
+    res = evaluate(_model(rng), _fleet(rng), feature_config=stale)
+    assert res["status"] == "ok", res
+    assert res["data_drift"]["n_columns"] == 2
+    assert res["prediction_drift"] is None
+    assert "raw" in res["prediction_drift_reason"]
+
+
 def test_a_reference_of_labels_is_not_a_prediction_baseline(evaluate, monkeypatch):
     """A stored profile whose prediction column holds labels, not detector scores (ADR-0021
     dec 4): prediction drift is refused with the reason, nothing is scored against it, and data
@@ -218,3 +231,20 @@ def test_evidently_runs_off_the_event_loop(evaluate):
     rng = np.random.default_rng(5)
     evaluate(_model(rng), _fleet(rng))
     assert evaluate.threads["compute_on_loop"] is False
+
+
+def test_the_deploy_gate_says_why_a_sample_on_an_unknown_transform_is_not_scored():
+    import baseline_gate
+
+    class Repo:
+        async def get_feature_config_by_id(self, company_id, config_id):
+            return {"base_sensors": ["a", "b"],
+                    "transformations": [{"name": "a", "type": "raw", "sensor": "a"},
+                                        {"name": "b", "type": "identity", "sensor": "b"}]}
+
+    rng = np.random.default_rng(7)
+    model = {"reference_profile": build_reference_profile({"a": rng.normal(size=N).tolist(),
+                                                           "b": rng.normal(size=N).tolist()}),
+             "feature_config_id": "fc1", "equipment_id": str(uuid.uuid4())}
+    planned = asyncio.run(baseline_gate.plan(object(), Repo(), CID, model))
+    assert planned.rows == [] and "raw" in planned.reason

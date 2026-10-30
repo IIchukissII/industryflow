@@ -6,8 +6,9 @@ import { useState, useEffect, useCallback } from 'react';
 import Icon from '../components/Icon';
 import api from '../services/api';
 import { usersReading } from '../utils/reading-admin';
+import { errorText } from '../utils/errors';
 
-const detailOf = (error) => error.response?.data?.detail || error.message;
+const detailOf = errorText;
 const ROLE_LABEL = { observer: 'Observer', engineer: 'Engineer', admin: 'Admin' };
 const ROLE_SCOPE = {
   observer: 'Reads the company\'s data and changes nothing.',

@@ -7,14 +7,9 @@ import './Settings.css';
 import api from '../services/api';
 import { API_URL, WS_URL } from '../config';
 import { settingsReading } from '../utils/reading-settings';
+import { detailText } from '../utils/errors';
 
 // The gateway's 400 detail is a string, or fastapi-users' { code, reason } object.
-function detailText(detail) {
-  if (typeof detail === 'string') return detail;
-  if (detail && typeof detail.reason === 'string') return detail.reason;
-  return null;
-}
-
 function Fact({ label, children, mono }) {
   return (
     <div className="set-fact">

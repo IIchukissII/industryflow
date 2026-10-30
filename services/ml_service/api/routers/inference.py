@@ -25,7 +25,7 @@ import auth
 import model_cache
 import model_loader
 import uploaded_model
-from feature_engineering import FeatureEngineeringEngine
+from feature_engineering import FeatureEngineeringEngine, UnknownTransform
 from extensions import get_detector, DetectorContext, UninterpretableModel
 
 logger = logging.getLogger(__name__)
@@ -339,6 +339,9 @@ async def predict(
             neutralized_features=neutralized or None,
         )
 
+    except UnknownTransform as exc:
+        # The configuration cannot produce the input the model was bound to; no score is honest.
+        raise HTTPException(status_code=422, detail=str(exc))
     except HTTPException:
         # A refusal raised above (400/404/422/503) is already the answer. Re-wrapping it as a 500
         # would tell the caller the platform broke when it declined, and invite a retry that can
@@ -346,7 +349,4 @@ async def predict(
         raise
     except Exception as e:
         logger.error(f"Inference failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Inference failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail="Inference failed")
