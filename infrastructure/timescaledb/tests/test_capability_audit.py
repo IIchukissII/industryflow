@@ -124,12 +124,14 @@ def test_the_writer_appends_once_per_stream_entry(cur):
 
 def test_the_writer_binds_every_column_the_record_holds(cur):
     at = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
-    sid, fields = _stream_id(), _event(at=at, reason="x", digest="0123456789abcdef")
+    sid, fields = _stream_id(), _event(kind="refused", at=at, reason="x", digest="0123456789abcdef")
+    fields["suppressed"] = "499"  # as REPEAT_SCRIPT appends it (ADR-0042 dec 8)
     _write((sid, fields))
     cur.execute("SELECT kind, plane, at, company_id::text, user_id, audience, handle_id::text, digest, reason, "
-                "detail FROM public.capability_use_events WHERE stream_id = %s", (sid,))
-    assert cur.fetchone() == ("minted", "hub", at, fields["company_id"], "alice", "sql", fields["handle_id"],
-                              "0123456789abcdef", "x", "server=lab")
+                "detail, suppressed FROM public.capability_use_events WHERE stream_id = %s", (sid,))
+    assert cur.fetchone() == ("refused", "hub", at, fields["company_id"], "alice", "sql", fields["handle_id"],
+                              "0123456789abcdef", "x", "server=lab", 499)
+    assert _read(handle_id=uuid.UUID(fields["handle_id"]))[0]["suppressed"] == 499
 
 
 @pytest.mark.parametrize("refused", [{"audience": "admin"}, {"detail": "a\x00b"}],
@@ -156,7 +158,7 @@ def test_no_runtime_role_changes_the_record_directly(cur, sql):
 
 
 @pytest.mark.parametrize("over", [
-    {"kind": "used"}, {"plane": "kernel"}, {"audience": "admin"}, {"digest": "0" * 64},
+    {"kind": "used"}, {"plane": "kernel"}, {"audience": "admin"}, {"digest": "0" * 64}, {"suppressed": 0},
 ])
 def test_the_closed_lists_hold_in_the_database(cur, over):
     # Past the contract, which refuses these first: the writer's statement with the writer's binding.

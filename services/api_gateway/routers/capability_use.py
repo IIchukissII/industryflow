@@ -23,7 +23,8 @@ from models.user import User
 router = APIRouter(prefix="/api/capability-use", tags=["capability use"])
 
 CAPABILITY_USE_SELECT = (
-    "SELECT event_id, kind, plane, at, company_id, user_id, audience, handle_id, digest, reason, detail "
+    "SELECT event_id, kind, plane, at, company_id, user_id, audience, handle_id, digest, reason, detail, "
+    "suppressed "
     "FROM public.capability_use_events "
     "WHERE (CAST(:company_id AS uuid) IS NULL OR company_id = CAST(:company_id AS uuid)) "
     "AND (CAST(:handle_id AS uuid) IS NULL OR handle_id = CAST(:handle_id AS uuid)) "

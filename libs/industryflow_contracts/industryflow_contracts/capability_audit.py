@@ -19,7 +19,9 @@ Standard library only: this is imported by every service image.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import ipaddress
 import re
 import uuid
 from datetime import datetime, timezone
@@ -40,8 +42,7 @@ FIRST_USE_PREFIX = "nbcap-audit-seen:"
 FIRST_USE_MARKER_TTL_SECONDS = 7 * 24 * 3600
 
 # A presented value with no entry is recorded once per plane and digest per window (dec 8): anyone can
-# present one, and a repeat says nothing the first did not. A refusal naming a real entry is recorded
-# every time; only a real handle can cause one.
+# present one, and a repeat says nothing the first did not.
 UNKNOWN_REFUSAL_PREFIX = "nbcap-audit-refused:"
 UNKNOWN_REFUSAL_WINDOW_SECONDS = 3600
 # And at most this many distinct unknown values per plane and source address per minute (dec 9): a
@@ -74,6 +75,34 @@ redis.call('XADD', KEYS[3], 'MAXLEN', '~', ARGV[4], '*', unpack(ARGV, 5))
 return 1
 """
 
+# An event a real entry can repeat at will (a refusal, a SQL session opening or closing) is recorded once
+# per entry, plane and kind (a refusal's reason included) per window (dec 8): a kernel repeats them with
+# its own handles at request rate. Each one not recorded is counted, and the next recorded one carries
+# the count; the count outlives the window long enough for the next, and is lost only if none comes.
+REPEAT_PREFIX = "nbcap-audit-repeat:"
+REPEAT_COUNT_PREFIX = "nbcap-audit-repeats:"
+REPEAT_WINDOW_SECONDS = 300
+REPEAT_COUNT_TTL_SECONDS = 7 * 24 * 3600
+
+# KEYS[1] the window marker, KEYS[2] the count, KEYS[3] the stream; ARGV[1] the window, ARGV[2] the
+# count's lifetime, ARGV[3] the stream bound, then the event's pairs. Returns 1 when recorded (with the
+# count of those not recorded since the last, as ``suppressed``), 0 when counted instead.
+REPEAT_SCRIPT = """
+if redis.call('SET', KEYS[1], '1', 'NX', 'EX', ARGV[1]) then
+  local fields = {unpack(ARGV, 4)}
+  local n = redis.call('GETDEL', KEYS[2])
+  if n then
+    table.insert(fields, 'suppressed')
+    table.insert(fields, n)
+  end
+  redis.call('XADD', KEYS[3], 'MAXLEN', '~', ARGV[3], '*', unpack(fields))
+  return 1
+end
+redis.call('INCR', KEYS[2])
+redis.call('EXPIRE', KEYS[2], ARGV[2])
+return 0
+"""
+
 MINTED = "minted"
 FIRST_USE = "first_use"
 REFUSED = "refused"
@@ -85,6 +114,8 @@ SQL_SESSION_OPENED = "sql_session_opened"
 SQL_SESSION_CLOSED = "sql_session_closed"
 KINDS = (MINTED, FIRST_USE, REFUSED, REVOKED, CONSUMED, ENVIRONMENT_STARTED, ENVIRONMENT_STOPPED,
          SQL_SESSION_OPENED, SQL_SESSION_CLOSED)
+# What a real entry can repeat at will, recorded through REPEAT_SCRIPT (dec 8).
+REPEATABLE = (REFUSED, SQL_SESSION_OPENED, SQL_SESSION_CLOSED)
 
 # Who recorded it: the minters and the planes that resolve handles.
 PLANES = ("hub", "ml_service", "api_gateway", "sql_proxy", "tracking_gateway", "cold_broker",
@@ -144,24 +175,88 @@ def source_limit_key(plane: str, source: str) -> str:
     return f"{SOURCE_LIMIT_PREFIX}{plane}:{source}"
 
 
+def repeat_keys(fields: Mapping[str, str]) -> List[str]:
+    """``REPEAT_SCRIPT``'s keys for ``fields``: one window and one count per entry, plane and kind."""
+    what = f"{fields['handle_id']}:{fields['plane']}:{fields['kind']}:{fields.get('reason', '')}"
+    return [f"{REPEAT_PREFIX}{what}", f"{REPEAT_COUNT_PREFIX}{what}", STREAM_KEY]
+
+
+def repeat_script_args(fields: Mapping[str, str]) -> tuple:
+    """``(keys, args)`` for ``REPEAT_SCRIPT`` recording ``fields``: a real entry's refusal or SQL session
+    event (dec 8)."""
+    if fields.get("kind") not in REPEATABLE or "handle_id" not in fields:
+        raise ValueError("only a real entry's refusal or SQL session event is recorded per window")
+    return repeat_keys(fields), [str(REPEAT_WINDOW_SECONDS), str(REPEAT_COUNT_TTL_SECONDS),
+                                 str(STREAM_MAXLEN), *flat(fields)]
+
+
 def refusal(*, plane: str, handle: Any, reason: str, facts: Mapping[str, str],
             source: Optional[str]) -> tuple:
-    """How a plane records a refused presented handle (dec 1, 2, 8, 9): ``("once", keys, args)`` for
-    ``UNKNOWN_REFUSAL_SCRIPT`` when the value named no entry (by digest, once per window, within the
-    source's limit), else ``("append", xadd_kwargs)`` for a plain append that names the entry and
-    carries no digest. ``source`` is the address the value came from, as the plane sees it."""
+    """How a plane records a refused presented handle (dec 1, 2, 8, 9): ``(script, keys, args)`` to
+    evaluate. A value that named no entry goes by digest through ``UNKNOWN_REFUSAL_SCRIPT``, once per
+    window and within the source's limit, which returns -1 the first time the source exceeds it; one
+    that named an entry goes by its identifier, with no digest, through ``REPEAT_SCRIPT``. ``source`` is
+    the address the value came from (``client_source``)."""
     if facts.get("handle_id") is None:
         digest = presented_digest(handle)
         fields = event(REFUSED, plane=plane, reason=reason, digest=digest, user=facts.get("user"),
                        company_id=facts.get("company_id"), audience=facts.get("audience"),
                        detail=f"source={source}" if source else None)
         keys = [unknown_refusal_key(digest, plane), source_limit_key(plane, source or "unknown"), STREAM_KEY]
-        return "once", keys, [str(UNKNOWN_REFUSAL_WINDOW_SECONDS), str(SOURCE_LIMIT),
-                              str(SOURCE_WINDOW_SECONDS), str(STREAM_MAXLEN), *flat(fields)]
+        return UNKNOWN_REFUSAL_SCRIPT, keys, [str(UNKNOWN_REFUSAL_WINDOW_SECONDS), str(SOURCE_LIMIT),
+                                              str(SOURCE_WINDOW_SECONDS), str(STREAM_MAXLEN), *flat(fields)]
     fields = event(REFUSED, plane=plane, reason=reason, user=facts.get("user"),
                    company_id=facts.get("company_id"), audience=facts.get("audience"),
                    handle_id=facts["handle_id"])
-    return ("append", append_args(fields))
+    return (REPEAT_SCRIPT, *repeat_script_args(fields))
+
+
+class EdgePeers:
+    """The edge's own addresses (dec 9), from a comma-separated list of addresses, networks and host
+    names; names are re-resolved after ``ttl`` seconds, since the edge's address changes when it is
+    replaced. An empty list names no edge, and every request's source is then its connecting peer."""
+
+    def __init__(self, spec: Optional[str], ttl: float = 30.0):
+        self.networks, self.names = [], []
+        for item in (x.strip() for x in (spec or "").split(",")):
+            if not item:
+                continue
+            try:
+                self.networks.append(ipaddress.ip_network(item, strict=False))
+            except ValueError:
+                self.names.append(item)
+        self.ttl, self._resolved, self._at = ttl, frozenset(), None
+
+    async def _addresses(self) -> frozenset:
+        loop = asyncio.get_running_loop()
+        if self.names and (self._at is None or loop.time() - self._at >= self.ttl):
+            found = set()
+            for name in self.names:
+                try:
+                    for *_, sockaddr in await loop.getaddrinfo(name, None):
+                        found.add(ipaddress.ip_address(sockaddr[0]))
+                except OSError:
+                    continue  # an edge that is not up has no address to believe
+            self._resolved, self._at = frozenset(found), loop.time()
+        return self._resolved
+
+    async def contains(self, peer: Optional[str]) -> bool:
+        try:
+            address = ipaddress.ip_address(peer) if peer else None
+        except ValueError:
+            return False
+        if address is None:
+            return False
+        return any(address in n for n in self.networks) or address in await self._addresses()
+
+
+async def client_source(peer: Optional[str], reported: Optional[str], edge: EdgePeers) -> Optional[str]:
+    """A request's source (dec 9): the client address the edge reported when the connecting ``peer`` is
+    the edge, else the peer itself. A reported address from any other peer is ignored, so a caller that
+    reaches a plane directly cannot name its own source."""
+    if peer is not None and reported and await edge.contains(peer):
+        return reported.split(",")[0].strip()[:64] or peer
+    return peer
 
 
 def event(kind: str, *, plane: str, user: Optional[str] = None, company_id: Optional[str] = None,
@@ -251,4 +346,8 @@ def decode(raw: Mapping[Any, Any]) -> Dict[str, Optional[str]]:
         raise ValueError(f"unknown audience {out['audience']!r}")
     if out["digest"] is not None and not _DIGEST.match(out["digest"]):
         raise ValueError("not a presented-handle digest")
+    suppressed = fields.get("suppressed")
+    if suppressed is not None and not (re.fullmatch(r"[1-9][0-9]{0,9}", suppressed) and int(suppressed) < 2**31):
+        raise ValueError("a suppressed count is a positive integer")
+    out["suppressed"] = suppressed
     return out

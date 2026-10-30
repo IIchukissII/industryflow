@@ -135,7 +135,7 @@ def _entry_facts(record: dict) -> Dict[str, str]:
 async def record_resolution(store, handle: str, binding: Optional[SqlBinding],
                             reason: Optional[str], facts: Dict[str, str], *, source: Optional[str] = None) -> None:
     """Record a presented handle's outcome at the proxy (ADR-0042 dec 1, 5): its first use here once,
-    and every refusal. An entry minted before the record existed has no identifier and no first use."""
+    and its refusals. An entry minted before the record existed has no identifier and no first use."""
     if binding is not None:
         if binding.handle_id is None:
             return
@@ -145,27 +145,27 @@ async def record_resolution(store, handle: str, binding: Optional[SqlBinding],
         keys, args = audit.first_use_script_args(fields)
         await store.eval(audit.FIRST_USE_SCRIPT, len(keys), *keys, *args)
         return
-    # A value that named no entry is recorded by digest once per window, a real entry's refusal every
-    # time and without a digest (ADR-0042 dec 2, 8).
-    how, *call = audit.refusal(plane=PLANE, handle=handle, reason=reason, facts=facts, source=source)
-    if how == "once":
-        keys, args = call
-        if await store.eval(audit.UNKNOWN_REFUSAL_SCRIPT, len(keys), *keys, *args) == -1:
-            logging.getLogger(__name__).warning(
-                "capability audit: %s presented more unknown handles than are recorded; the rest of "
-                "this minute is not recorded (ADR-0042 dec 9)", source)
-    else:
-        await store.xadd(**call[0])
+    # A value that named no entry is recorded by digest once per window, a real entry's refusal once per
+    # window with the count of the rest, and without a digest (ADR-0042 dec 2, 8).
+    script, keys, args = audit.refusal(plane=PLANE, handle=handle, reason=reason, facts=facts, source=source)
+    if await store.eval(script, len(keys), *keys, *args) == -1:
+        logging.getLogger(__name__).warning(
+            "capability audit: %s presented more unknown handles than are recorded; the rest of "
+            "this minute is not recorded (ADR-0042 dec 9)", source)
 
 
 async def record_session(store, kind: str, binding: SqlBinding, *, reason: Optional[str] = None,
                          detail: Optional[str] = None) -> None:
-    """Record an SQL session's opening or closing (ADR-0042 dec 1). Its statements are not recorded:
-    the proxy relays them unread."""
-    await store.xadd(**audit.append_args(audit.event(
+    """Record an SQL session's opening or closing (ADR-0042 dec 1), once per handle and kind in a window
+    with the count of the rest (dec 8): a kernel can reconnect at will. Its statements are not recorded:
+    the proxy relays them unread. An entry minted before the record existed has no identifier."""
+    if binding.handle_id is None:
+        return
+    keys, args = audit.repeat_script_args(audit.event(
         kind, plane=PLANE, user=binding.user, company_id=binding.company_id, audience=AUDIENCE_SQL,
         handle_id=binding.handle_id, reason=reason, detail=detail,
-    )))
+    ))
+    await store.eval(audit.REPEAT_SCRIPT, len(keys), *keys, *args)
 
 
 # The tenant's role names, from the one tenant-naming module (ADR-0003 dec 5, 7), UUID-validated there.

@@ -78,6 +78,9 @@ spec:
               value: {{ .Values.notebookHub.trackingGateway.presignTtlSeconds | quote }}
             - name: TRACKING_MLFLOW_URL
               value: {{ include "industryflow.mlflowUri" . | quote }}
+            # The edge whose reported client address is believed (ADR-0042 dec 9); see config.
+            - name: EDGE_PROXY_PEERS
+              value: {{ .Values.config.EDGE_PROXY_PEERS | default "" | quote }}
             - name: TRACKING_REDIS_URL
               value: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
             - name: TRACKING_ARTIFACT_BUCKET

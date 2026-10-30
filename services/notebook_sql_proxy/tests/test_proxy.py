@@ -167,19 +167,24 @@ def _no_secret_in(store, *secrets):
 
 
 @pytest.mark.asyncio
-async def test_first_use_is_recorded_once_per_handle_and_sessions_each_time():
+async def test_first_use_is_recorded_once_per_handle_and_sessions_once_per_window_with_a_count():
     cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
     store = FakeAsyncStore({f"{b._KEY_PREFIX}secret-good": _sql_record(cid, hid)})
-    for _ in range(2):
+    for _ in range(3):
         assert await proxy.serve_connection("secret-good", store, lambda binding: _RelayUntil()) is True
 
     [first] = store.events("first_use")
     assert (first["plane"], first["handle_id"], first["company_id"], first["user"], first["audience"]) == (
         "sql_proxy", hid, cid, "alice", "sql")
+    # A kernel can reconnect at will: one opening and one closing per window, the rest counted
+    # (ADR-0042 dec 8), carried by the next window's record.
     opened, closed = store.events("sql_session_opened"), store.events("sql_session_closed")
-    assert len(opened) == len(closed) == 2
+    assert len(opened) == len(closed) == 1
     assert all(e["handle_id"] == hid and e["company_id"] == cid for e in opened + closed)
-    assert [e["reason"] for e in closed] == ["client_closed", "client_closed"]
+    assert [e["reason"] for e in closed] == ["client_closed"]
+    store.markers.clear()  # the window passes
+    assert await proxy.serve_connection("secret-good", store, lambda binding: _RelayUntil()) is True
+    assert [e["suppressed"] for e in store.events("sql_session_opened")] == [None, "2"]
     assert all(e["detail"].startswith("duration_seconds=") for e in closed)
     # Statements are not recorded: the setup statements and the kernel's are both absent.
     assert not any("SET ROLE" in v for e in store.stream for v in e.values())
@@ -280,12 +285,11 @@ async def test_a_backend_that_never_opened_records_no_session():
 
 
 @pytest.mark.asyncio
-async def test_a_handle_minted_before_the_record_has_no_first_use_but_its_session_is_recorded():
+async def test_a_handle_minted_before_the_record_has_no_first_use_and_no_session_record():
+    # Nothing identifies it to bound its sessions by (ADR-0042 dec 8); it is served all the same.
     store = FakeAsyncStore({f"{b._KEY_PREFIX}old": _sql_record(str(uuid.uuid4()))})
     assert await proxy.serve_connection("old", store, lambda binding: _RelayUntil()) is True
-    assert store.events("first_use") == []
-    assert [e["kind"] for e in store.events()] == ["sql_session_opened", "sql_session_closed"]
-    assert all(e["handle_id"] is None for e in store.events())
+    assert store.events() == []
 
 
 @pytest.mark.asyncio

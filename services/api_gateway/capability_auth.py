@@ -133,7 +133,7 @@ def _entry_facts(record: dict) -> Dict[str, str]:
 async def record_resolution(redis, handle: str, binding: Optional[CapabilityBinding],
                             reason: Optional[str], facts: Dict[str, str], *, source: Optional[str] = None) -> None:
     """Record a presented handle's outcome at this plane (ADR-0042 dec 1, 5): its first use here once,
-    and every refusal. An entry minted before the record existed has no identifier and no first use."""
+    and its refusals. An entry minted before the record existed has no identifier and no first use."""
     if binding is not None:
         if binding.handle_id is None:
             return
@@ -143,17 +143,13 @@ async def record_resolution(redis, handle: str, binding: Optional[CapabilityBind
         keys, args = audit.first_use_script_args(fields)
         await redis.eval(audit.FIRST_USE_SCRIPT, len(keys), *keys, *args)
         return
-    # A value that named no entry is recorded by digest once per window, a real entry's refusal every
-    # time and without a digest (ADR-0042 dec 2, 8).
-    how, *call = audit.refusal(plane="api_gateway", handle=handle, reason=reason, facts=facts, source=source)
-    if how == "once":
-        keys, args = call
-        if await redis.eval(audit.UNKNOWN_REFUSAL_SCRIPT, len(keys), *keys, *args) == -1:
-            logging.getLogger(__name__).warning(
-                "capability audit: %s presented more unknown handles than are recorded; the rest of "
-                "this minute is not recorded (ADR-0042 dec 9)", source)
-    else:
-        await redis.xadd(**call[0])
+    # A value that named no entry is recorded by digest once per window, a real entry's refusal once per
+    # window with the count of the rest, and without a digest (ADR-0042 dec 2, 8).
+    script, keys, args = audit.refusal(plane="api_gateway", handle=handle, reason=reason, facts=facts, source=source)
+    if await redis.eval(script, len(keys), *keys, *args) == -1:
+        logging.getLogger(__name__).warning(
+            "capability audit: %s presented more unknown handles than are recorded; the rest of "
+            "this minute is not recorded (ADR-0042 dec 9)", source)
 
 
 async def revoke_user_capabilities(redis, user_id: str) -> int:

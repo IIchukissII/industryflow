@@ -619,6 +619,8 @@ services:
       API_GATEWAY_DB_MAX_OVERFLOW: ${API_GATEWAY_DB_MAX_OVERFLOW:-2}
       # The capability-use record's retention (ADR-0042 dec 10); the database refuses under 30 days.
       CAPABILITY_AUDIT_RETENTION_DAYS: ${CAPABILITY_AUDIT_RETENTION_DAYS:-365}
+      # The edge, the one peer whose reported client address is believed (ADR-0042 dec 9).
+      EDGE_PROXY_PEERS: frontend
     depends_on:
       db-migrate:
         condition: service_completed_successfully
@@ -1050,6 +1052,8 @@ services:
       TRACKING_PORT: "5050"
       TRACKING_MLFLOW_URL: http://mlflow:5000
       TRACKING_REDIS_URL: redis://redis:6379/0
+      # The edge relays uploads; only its reported client address is believed (ADR-0042 dec 9).
+      EDGE_PROXY_PEERS: frontend
       TRACKING_ARTIFACT_BUCKET: mlflow
       TRACKING_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL:-http://minio:9000}
       # ADR-0030 dec 10: a pre-signed PUT is followed by the client, which may be a browser outside

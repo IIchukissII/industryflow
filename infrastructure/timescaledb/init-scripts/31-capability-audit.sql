@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS public.capability_use_events (
     reason TEXT,
     detail TEXT
 );
+-- How many of the same event a real entry repeated within the window before this one, unrecorded
+-- (ADR-0042 dec 8).
+ALTER TABLE public.capability_use_events
+    ADD COLUMN IF NOT EXISTS suppressed INTEGER CHECK (suppressed > 0);
 CREATE INDEX IF NOT EXISTS idx_capability_use_events_company
     ON public.capability_use_events (company_id, at);
 -- A tenant's page, newest first, as the reader asks for it (ORDER BY event_id DESC under a tenant).
@@ -47,9 +51,12 @@ CREATE INDEX IF NOT EXISTS idx_capability_use_events_handle
 COMMENT ON TABLE public.capability_use_events IS
     'Append-only record of capability use (ADR-0042); written only through record_capability_use()';
 
+-- The writer's earlier signature, without the count; one writer, one signature.
+DROP FUNCTION IF EXISTS public.record_capability_use(TEXT, TEXT, TEXT, TIMESTAMPTZ, UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT);
+
 CREATE OR REPLACE FUNCTION public.record_capability_use(
     p_stream_id TEXT, p_kind TEXT, p_plane TEXT, p_at TIMESTAMPTZ, p_company_id UUID, p_user_id TEXT,
-    p_audience TEXT, p_handle_id UUID, p_digest TEXT, p_reason TEXT, p_detail TEXT)
+    p_audience TEXT, p_handle_id UUID, p_digest TEXT, p_reason TEXT, p_detail TEXT, p_suppressed INTEGER)
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -60,16 +67,17 @@ DECLARE
 BEGIN
     PERFORM public.company_provisioning_guard();
     INSERT INTO public.capability_use_events (
-        stream_id, kind, plane, at, company_id, user_id, audience, handle_id, digest, reason, detail)
+        stream_id, kind, plane, at, company_id, user_id, audience, handle_id, digest, reason, detail,
+        suppressed)
     VALUES (p_stream_id, p_kind, p_plane, p_at, p_company_id, p_user_id, p_audience, p_handle_id,
-            p_digest, p_reason, p_detail)
+            p_digest, p_reason, p_detail, p_suppressed)
     ON CONFLICT (stream_id) DO NOTHING
     RETURNING event_id INTO v_id;
     RETURN v_id IS NOT NULL;
 END;
 $$;
 
-COMMENT ON FUNCTION public.record_capability_use(TEXT, TEXT, TEXT, TIMESTAMPTZ, UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT) IS
+COMMENT ON FUNCTION public.record_capability_use(TEXT, TEXT, TEXT, TIMESTAMPTZ, UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT, INTEGER) IS
     'Appends one capability-use event (SECURITY DEFINER); true when new, false for a redelivered stream entry';
 
 -- Retention (ADR-0042 dec 10): rows older than the configured period leave the record, never sooner
@@ -108,8 +116,8 @@ REVOKE ALL ON public.capability_use_events FROM PUBLIC;
 REVOKE ALL ON SEQUENCE public.capability_use_events_event_id_seq FROM PUBLIC;
 GRANT SELECT ON public.capability_use_events TO api_gateway_user;
 
-REVOKE ALL ON FUNCTION public.record_capability_use(TEXT, TEXT, TEXT, TIMESTAMPTZ, UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.record_capability_use(TEXT, TEXT, TEXT, TIMESTAMPTZ, UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT)
+REVOKE ALL ON FUNCTION public.record_capability_use(TEXT, TEXT, TEXT, TIMESTAMPTZ, UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.record_capability_use(TEXT, TEXT, TEXT, TIMESTAMPTZ, UUID, TEXT, TEXT, UUID, TEXT, TEXT, TEXT, INTEGER)
     TO api_gateway_user;
 
 REVOKE ALL ON FUNCTION public.expire_capability_use(INTEGER) FROM PUBLIC;

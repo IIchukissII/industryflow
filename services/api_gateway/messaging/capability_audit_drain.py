@@ -47,7 +47,8 @@ BACKLOG = Gauge("capability_audit_backlog",
 
 RECORD = text(
     "SELECT public.record_capability_use(:stream_id, :kind, :plane, CAST(:at AS timestamptz), "
-    "CAST(:company_id AS uuid), :user_id, :audience, CAST(:handle_id AS uuid), :digest, :reason, :detail)"
+    "CAST(:company_id AS uuid), :user_id, :audience, CAST(:handle_id AS uuid), :digest, :reason, :detail, "
+    "CAST(:suppressed AS integer))"
 )
 
 EXPIRE = text("SELECT public.expire_capability_use(:days)")
@@ -87,7 +88,8 @@ def _params(stream_id: str, event: dict) -> dict:
             "at": datetime.fromisoformat(event["at"]).astimezone(timezone.utc),
             "company_id": _uuid(event["company_id"]), "user_id": event["user"], "audience": event["audience"],
             "handle_id": _uuid(event["handle_id"]), "digest": event["digest"], "reason": event["reason"],
-            "detail": event["detail"]}
+            "detail": event["detail"],
+            "suppressed": int(event["suppressed"]) if event["suppressed"] is not None else None}
 
 
 async def write_batch(engine, entries: Sequence[Entry]) -> List[str]:
