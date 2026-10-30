@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import socket
 import uuid
@@ -24,7 +24,7 @@ from typing import Any, Iterable, List, Sequence, Tuple
 from industryflow_contracts import capability_audit as audit
 from prometheus_client import Counter, Gauge
 from sqlalchemy import text
-from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, StatementError
+from sqlalchemy.exc import DBAPIError
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +55,25 @@ EXPIRE = text("SELECT public.expire_capability_use(:days)")
 Entry = Tuple[str, Any]
 
 
+def _sqlstate(exc: BaseException):
+    """The server's SQLSTATE for a refusal, through SQLAlchemy's and the asyncpg adapter's wrapping;
+    None when the server never judged the statement (unreachable, or the driver failed to bind)."""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        code = getattr(exc, "sqlstate", None)
+        if code:
+            return code
+        exc = getattr(exc, "orig", None) or exc.__cause__
+    return None
+
+
 def _row_fault(exc: BaseException) -> bool:
-    """A failure caused by what one row holds: the database refused the value, or the driver could
-    not bind it. An unreachable or failing database is not one, and its rows are kept for redelivery."""
-    if isinstance(exc, (DataError, IntegrityError)):
-        return True
-    return isinstance(exc, StatementError) and not isinstance(exc, DBAPIError)
+    """A failure caused by what one row holds: the server refused its value as data (class 22) or
+    against a constraint (class 23). The driver failing to bind is the writer's own fault, the same
+    for every row, and like an unreachable or failing database it keeps the rows for redelivery."""
+    code = _sqlstate(exc)
+    return code is not None and code[:2] in ("22", "23")
 
 
 def _uuid(value):
@@ -68,9 +81,10 @@ def _uuid(value):
 
 
 def _params(stream_id: str, event: dict) -> dict:
-    # asyncpg binds a cast parameter as that type: a timestamptz takes a datetime, not its text.
+    # asyncpg binds a cast parameter as that type: a timestamptz takes a datetime, not its text. It is
+    # converted here, so a time asyncpg could not convert is unreadable rather than a failed bind.
     return {"stream_id": stream_id, "kind": event["kind"], "plane": event["plane"],
-            "at": datetime.fromisoformat(event["at"]),
+            "at": datetime.fromisoformat(event["at"]).astimezone(timezone.utc),
             "company_id": _uuid(event["company_id"]), "user_id": event["user"], "audience": event["audience"],
             "handle_id": _uuid(event["handle_id"]), "digest": event["digest"], "reason": event["reason"],
             "detail": event["detail"]}
@@ -87,7 +101,7 @@ async def write_batch(engine, entries: Sequence[Entry]) -> List[str]:
     for stream_id, fields in entries:
         try:
             rows.append(_params(stream_id, audit.decode(fields)))
-        except (ValueError, KeyError, TypeError) as exc:
+        except (ValueError, KeyError, TypeError, OverflowError) as exc:
             EVENTS.labels("unreadable").inc()
             logger.warning("capability audit: unreadable stream entry %s skipped: %s", stream_id, exc)
         ack.append(stream_id)
@@ -98,7 +112,7 @@ async def write_batch(engine, entries: Sequence[Entry]) -> List[str]:
             for row in rows:
                 await conn.execute(RECORD, row)
         EVENTS.labels("written").inc(len(rows))
-    except StatementError as batch_exc:
+    except DBAPIError as batch_exc:
         if not _row_fault(batch_exc):
             raise
         for row in rows:
@@ -106,7 +120,7 @@ async def write_batch(engine, entries: Sequence[Entry]) -> List[str]:
                 async with engine.begin() as conn:
                     await conn.execute(RECORD, row)
                 EVENTS.labels("written").inc()
-            except StatementError as exc:
+            except DBAPIError as exc:
                 if not _row_fault(exc):
                     raise
                 EVENTS.labels("refused").inc()
@@ -169,9 +183,12 @@ async def drain_once(redis, engine, consumer: str, *, block_ms: int = BLOCK_MS) 
         return 0
     ack = await write_batch(engine, entries)
     if ack:
-        # Acknowledged, then removed: the stream keeps only the backlog (dec 7), not a copy of the record.
-        await redis.xack(audit.STREAM_KEY, GROUP, *ack)
-        await redis.xdel(audit.STREAM_KEY, *ack)
+        # Acknowledged and removed together: the stream keeps only the backlog (dec 7), not a copy of
+        # the record, and an entry acknowledged but left behind would never be delivered again.
+        async with redis.pipeline(transaction=True) as pipe:
+            pipe.xack(audit.STREAM_KEY, GROUP, *ack)
+            pipe.xdel(audit.STREAM_KEY, *ack)
+            await pipe.execute()
     return len(ack)
 
 

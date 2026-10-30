@@ -38,7 +38,8 @@ async def list_capability_use(
     company_id: Optional[UUID] = Query(None, description="Superuser only: one tenant's events"),
     handle_id: Optional[UUID] = Query(None, description="One capability's events"),
     since: Optional[datetime] = Query(None, description="Events at or after this time"),
-    before_id: Optional[int] = Query(None, description="Page: events older than this event_id"),
+    # Bounded to the column's bigint, or the bind fails as a server error instead of a 422.
+    before_id: Optional[int] = Query(None, ge=1, le=2**63 - 1, description="Page: events older than this event_id"),
     limit: int = Query(100, ge=1, le=1000),
     user: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),

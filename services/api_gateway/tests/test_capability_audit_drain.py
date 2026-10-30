@@ -16,19 +16,37 @@ from datetime import datetime
 import pytest
 import pytest_asyncio
 from industryflow_contracts import capability_audit as audit
-from sqlalchemy.exc import DataError
+from sqlalchemy.exc import DBAPIError
 
 from messaging import capability_audit_drain as drain
 
 fakeredis = pytest.importorskip("fakeredis")
+asyncpg = pytest.importorskip("asyncpg")
+
+
+def as_the_stack_raises(error):
+    """``error`` (an asyncpg exception) as the gateway receives it: translated by SQLAlchemy's asyncpg
+    adapter, then wrapped by SQLAlchemy, as on the live database (proven there by
+    infrastructure/timescaledb/tests/test_capability_audit.py)."""
+    from sqlalchemy.dialects.postgresql.asyncpg import AsyncAdapt_asyncpg_dbapi
+    dbapi = AsyncAdapt_asyncpg_dbapi(asyncpg)
+    translated = error
+    for super_ in type(error).__mro__:
+        if super_ in dbapi._asyncpg_error_translate:
+            translated = dbapi._asyncpg_error_translate[super_](f"{type(error)}: {error}")
+            translated.pgcode = translated.sqlstate = getattr(error, "sqlstate", None)
+            translated.__cause__ = error
+            break
+    return DBAPIError.instance("SELECT public.record_capability_use(...)", {}, translated, dbapi.Error)
 
 
 class Engine:
     """Commits a transaction's rows unless asked to fail it; ``poison`` stream ids make the database
-    refuse any transaction that holds them, as a CHECK or a NUL would."""
+    refuse any transaction that holds them with ``refusal``, as the real stack raises it."""
 
-    def __init__(self, fail=False, poison=()):
+    def __init__(self, fail=False, poison=(), refusal=None):
         self.rows, self.fail, self.poison = [], fail, set(poison)
+        self.refusal = refusal or asyncpg.exceptions.CheckViolationError("violates check constraint")
 
     @asynccontextmanager
     async def begin(self):
@@ -46,7 +64,7 @@ class Engine:
         if self.fail:
             raise RuntimeError("database unreachable")
         if any(p["stream_id"] in self.poison for p in pending):
-            raise DataError("SELECT public.record_capability_use(...)", {}, Exception("refused"))
+            raise as_the_stack_raises(self.refusal)
         self.rows += pending
 
 
@@ -99,14 +117,31 @@ async def test_a_refused_batch_is_not_acknowledged_and_comes_back(redis, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_a_row_the_database_refuses_does_not_hold_back_the_rest(redis):
+@pytest.mark.parametrize("refusal", [
+    asyncpg.exceptions.CheckViolationError("violates check constraint"),
+    asyncpg.exceptions.CharacterNotInRepertoireError("invalid byte sequence"),
+    asyncpg.exceptions.InvalidParameterValueError("value out of range"),
+])
+async def test_a_row_the_database_refuses_does_not_hold_back_the_rest(redis, refusal):
     ids = [await redis.xadd(**audit.append_args(_event())) for _ in range(5)]
-    engine = Engine(poison={ids[2]})
+    engine = Engine(poison={ids[2]}, refusal=refusal)
     before = drain.EVENTS.labels("refused")._value.get()
     assert await drain.drain_once(redis, engine, "c1", block_ms=10) == 5
     assert [r["stream_id"] for r in engine.rows] == ids[:2] + ids[3:]
     assert drain.EVENTS.labels("refused")._value.get() == before + 1
     assert (await redis.xpending(audit.STREAM_KEY, drain.GROUP))["pending"] == 0
+    assert await redis.xlen(audit.STREAM_KEY) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_value_asyncpg_could_not_convert_is_unreadable_not_a_failed_bind(redis):
+    fields = dict(_event())
+    fields["at"] = "9999-12-31T23:59:59-12:00"  # past the end of time once converted to UTC
+    bad = await redis.xadd(audit.STREAM_KEY, fields)
+    good = await redis.xadd(**audit.append_args(_event()))
+    engine = Engine()
+    assert await drain.drain_once(redis, engine, "c1", block_ms=10) == 2
+    assert [r["stream_id"] for r in engine.rows] == [good] and bad != good
 
 
 @pytest.mark.asyncio
@@ -147,7 +182,15 @@ def test_a_read_blocks_well_inside_the_clients_read_timeout():
 
 
 def test_only_a_rows_own_fault_is_skipped():
-    from sqlalchemy.exc import OperationalError, StatementError
-    assert drain._row_fault(DataError("s", {}, Exception()))
-    assert drain._row_fault(StatementError("bind failed", "s", {}, TypeError("str for timestamptz")))
-    assert not drain._row_fault(OperationalError("s", {}, Exception("connection refused")))
+    from sqlalchemy.exc import StatementError
+    assert drain._row_fault(as_the_stack_raises(asyncpg.exceptions.CheckViolationError("check")))
+    assert drain._row_fault(as_the_stack_raises(asyncpg.exceptions.UniqueViolationError("unique")))
+    assert drain._row_fault(as_the_stack_raises(asyncpg.exceptions.CharacterNotInRepertoireError("nul")))
+    # The writer's own binding is wrong for every row (#502): kept, and the backlog grows visibly.
+    # (asyncpg's client-side DataError, not the server's class-22000 one of the same name)
+    assert not drain._row_fault(as_the_stack_raises(asyncpg.exceptions._base.DataError(
+        "invalid input for query argument $4: '2026-10-29' (expected a datetime.date or datetime.datetime "
+        "instance, got 'str')")))
+    assert not drain._row_fault(StatementError("bind failed", "s", {}, TypeError("str for timestamptz")))
+    assert not drain._row_fault(as_the_stack_raises(asyncpg.exceptions.ConnectionDoesNotExistError("closed")))
+    assert not drain._row_fault(as_the_stack_raises(OSError("connection refused")))

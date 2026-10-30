@@ -70,6 +70,7 @@ the same file the chart renders into its PrometheusRule ([ADR-0016](../../ADR/AD
 | `IndustryFlowKafkaConsumerLag` | A consumer group lags more than 1000 for 10m | The consumer's logs |
 | `IndustryFlowDeadLetteredReadings` | A letter reached a `*.dlq` topic in the last 15m | [Dead-letter handling](dead-letters.md) |
 | `IndustryFlowCapabilityAuditBacklog` | More than 1000 capability-use events wait to be recorded for 15m | The API gateway's logs (`capability audit writer`); [capability-use record](../architecture/notebooks.md#capability-use-record) |
+| `IndustryFlowCapabilityEventsDropped` | The writer acknowledged a capability-use event it could not record (unreadable, or refused by the database) | The API gateway's logs (`capability audit`) name each stream id; [capability-use record](../architecture/notebooks.md#capability-use-record) |
 
 | Where to see firing alerts | Address |
 |---|---|
