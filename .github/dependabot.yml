@@ -87,10 +87,15 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "pandas"
         update-types: ["version-update:semver-major"]
-      # pyspark tracks the job images' Spark (scripts/check_spark_version_parity.py), whose minors are
-      # ignored in the docker entries below; a pyspark minor alone fails that guard.
+      # pyspark equals the job images' Spark exactly (scripts/check_spark_version_parity.py), which the
+      # docker entries below do not move; a pyspark bump alone, patch included, fails that guard.
       - dependency-name: "pyspark"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor",
+                       "version-update:semver-patch"]
+      # Held below 2.1 as in the services entry: the DB proofs pin the gateway's sqlalchemy
+      # (tests/config_guards/test_service_sql_drivers.py).
+      - dependency-name: "sqlalchemy"
+        versions: [">=2.1"]
 
   - package-ecosystem: "npm"
     directory: "/services/frontend"
