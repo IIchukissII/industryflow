@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0042 — Capability use is recorded, by the planes that resolve it, into one durable record
 
 - **Status:** Accepted
-- **Date:** 2026-10-29; changed 2026-10-29
+- **Date:** 2026-10-29; changed 2026-10-30
 - **Parent:** [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (the capability and its
   store)
 - **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (dec 2: the
@@ -30,7 +30,7 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 1. **A capability's life is recorded: its mint, its first use by each plane, its refusals (decision 8),
    its revocation or consumption, and the start and stop of the environment it was minted for.** Each record
    names the user, the tenant, the audience, the plane and the time. A SQL session's opening and closing
-   are recorded; statements are not, because the proxy relays them unread.
+   are recorded as decision 8 bounds them; statements are not, because the proxy relays them unread.
 2. **A handle appears in the record only as a non-secret identifier bound into its entry at mint.** The
    handle is a bearer secret; a reader of the record must not be able to use it. A presented handle with
    no entry is recorded by a short digest, enough to correlate repeated refusals and too short to search
@@ -48,12 +48,16 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
    their own.** The tenant filter is the caller's verified tenant (ADR-0003 dec 1).
 7. **A stream the writer has not drained is bounded and its lag is observable.** Losing the capability
    store loses only what was not yet drained, and the lag alert names that window.
-8. **A refusal naming a real entry is recorded every time; a presented value naming none, once per
-   plane and value in a window.** Only a real handle can cause the first, and its count is evidence;
-   anyone can present the second, and a repeat says nothing the first did not.
+8. **An event a real entry can repeat at will, a refusal or a SQL session opening or closing, is
+   recorded once per entry, plane and kind in a window, and the next record carries how many were not;
+   a presented value naming no entry, once per plane and value in a window.** A kernel can repeat the
+   first with its own handles at request rate, and the count, not each row, is the evidence; anyone
+   can present the second, and a repeat says nothing the first did not.
 9. **A plane records at most a bounded number of unknown values per source address in a window;
    requests themselves are not throttled.** Distinct random values are the one flood the per-value
-   window does not bound, and they arrive past the edge as well as through it.
+   window does not bound, and they arrive past the edge as well as through it. A request's source is
+   the client address the edge reports when the edge relayed it, and the connecting peer otherwise; a
+   reported address is believed from the edge alone.
 10. **The record keeps rows for a configured period, never less than thirty days, and its writer
     expires the rest.** The floor is the database's, whoever calls it, and outlasts the suspension that
     precedes a tenant's deletion (ADR-0033 dec 7).
@@ -75,9 +79,13 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 | 6 | Only the platform operator reads it | A tenant cannot answer who reached its own data |
 | 8 | Recording every refusal of an unknown value | One row per request anyone can send: the record and the database grow at an attacker's rate |
 | 8 | Counting unknown-value refusals only | A counter names no value and no plane to correlate |
-| 8 | Recording a real entry's refusals once per window too | Their count is bounded by real handles and is part of what they show |
+| 8 | Recording a real entry's refusals and SQL sessions every time | One handle repeats them at request rate: the record grows at a kernel's rate, and a stream filling faster than it drains loses other tenants' undrained events to its bound |
+| 8 | Recording only the first in a window, with no count | How often a handle was refused or reconnected is what distinguishes misuse from a mistake |
+| 8 | A larger stream bound | Moves the point at which the flood displaces other events; bounds nothing |
 | 9 | A request rate limit at the public edge | Kernels reach the planes inside the network, and it throttles use where only the record needed bounding |
 | 9 | Relying on the per-value window alone | Every random value is new to it |
+| 9 | The connecting peer as the source behind the edge | Every external client is the edge, so one client spends the budget for all of them |
+| 9 | A reported client address from any peer | A kernel reaches the planes directly and could name a new source with every request |
 | 10 | No retention | The record grows without bound in the platform database |
 | 10 | Expiry by a separate operator job | A scheduler no deployment otherwise needs; the database's floor already bounds what any caller removes |
 | 10 | A retention period per tenant | A tenant would shorten the evidence of what reached its own data |
@@ -92,6 +100,8 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 - Every capability mint, revocation and first use writes one more entry to the capability store.
 - Repeats of an unknown value within a window, and unknown values beyond a source's limit, are not in
   the record.
+- A real entry's repeated events within a window appear only as a count on its next record, which is
+  never written if the entry repeats nothing after the window.
 - A compromised writer can remove rows older than the floor.
 - Events not yet drained are lost with the capability store.
 - Every plane that resolves handles carries the recording rule, as it carries the resolution rule.
