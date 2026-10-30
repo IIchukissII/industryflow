@@ -13,7 +13,7 @@ from config import get_settings
 from routers import (
     health, measurements, aggregations, websocket, cache,
     training_data, alerts_history, companies,
-    equipment, alert_rules, auth_tokens, auth_verify, user_admin, capability_use
+    equipment, alert_rules, auth_tokens, auth_verify, user_admin, capability_use, platform_switches
 )
 from database import close_engine, engine
 from messaging.redis_client import redis_client
@@ -123,6 +123,7 @@ app.include_router(alert_rules.router)
 app.include_router(companies.router)
 app.include_router(equipment.router)
 app.include_router(capability_use.router)
+app.include_router(platform_switches.router)
 
 
 @app.get("/", tags=["Root"])
