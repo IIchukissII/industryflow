@@ -16,4 +16,4 @@ redis[asyncio]==8.1.0
 aiohttp==3.14.5
 
 # Utilities
-python-dateutil==2.9.0.post0
+python-dateutil==3.0.0
