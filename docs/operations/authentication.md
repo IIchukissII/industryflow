@@ -76,7 +76,7 @@ refresh, on a socket and on a capability handle
 
 | Element | Behaviour |
 |---|---|
-| Gateway cache | Per-process, `COMPANY_STATUS_CACHE_SECONDS`; the replica that changes the flag sees it at once |
+| Gateway check | The suspension marker in the capability store first (every process refuses a suspension at once), then a per-process cache of the registry (`COMPANY_STATUS_CACHE_SECONDS`), which alone decides when the store is unreachable |
 | Suspension marker | `nbcap-suspended:<company_id>` in the capability store, read by the SQL proxy, tracking gateway, cold-store broker, notebook hub and upload minter |
 | Devices | Refused at ingestion (HTTP 403) within `TENANT_STATUS_PUBLISH_SECONDS` (10 s), from the `tenant-status` stream ([stream processing](../architecture/stream-processing.md#kafka-topics)); counter `ingestion_suspended_tenant_refusals_total` |
 | Writers of tenant data | Read the registry, not the marker: the stream jobs dead-letter the tenant's readings at once (`suspended_tenant`); the alert worker drops its rules at the next reload (`RULE_RELOAD_INTERVAL`) |
@@ -120,6 +120,6 @@ curl -k https://<host>/api/measurements/latest -H "Authorization: Bearer $TOKEN"
 | `COOKIE_SAMESITE` | `lax` | `SameSite` on the cookies |
 | `CORS_ORIGINS` | none (required) | Allowed origins, comma-separated; also the websocket `Origin` allowlist |
 | `WS_SESSION_RECHECK_SECONDS` | `60` | Open-socket session re-check |
-| `COMPANY_STATUS_CACHE_SECONDS` | `30` | Tenant active-flag cache |
+| `COMPANY_STATUS_CACHE_SECONDS` | `30` | Tenant active-flag cache: bounds a reactivation, a change made outside the API, and a suspension while the capability store is unreachable |
 | `INTERNAL_SERVICE_TOKEN` | none | Shared secret for `X-Internal-Service-Token` (alert worker → `/api/inference/predict`, `/api/drift/evaluate`); unset, `ml-service-api` refuses internal calls |
 | `NOTEBOOK_SSO_PROXY_SECRET` | none (required, notebooks) | Shared secret for `X-IF-SSO-Proxy-Secret` (notebook SSO proxy → hub); the hub honours the `X-IF-*` identity only with it and does not start without it |
