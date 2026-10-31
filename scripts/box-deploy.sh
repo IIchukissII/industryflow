@@ -19,7 +19,18 @@
 # The infrastructure agent (profile ops-agent) is built and run when the environment enables it, i.e.
 # `.env` sets OPS_AGENT_WEBHOOK_SECRET. The monitoring stack is recreated last: its config files are
 # single-file mounts, which keep the file the checkout replaced until the container is recreated.
+#
+# A failure never leaves the stream engines stopped: they are started again on any exit.
 set -euo pipefail
+SPARK=(spark-master spark-worker spark-streaming spark-aggregations)
+spark_down=0
+restore_spark() {
+    if [ "$spark_down" = 1 ]; then
+        echo "box-deploy: failed; starting the stream engines again" >&2
+        docker compose start "${SPARK[@]}" || true
+    fi
+}
+trap restore_spark EXIT
 cd "$(dirname "$0")/.."
 ref="${1:-origin/main}"
 PROFILES=(--profile notebooks --profile tenant-delete --profile backup --profile cold-export)
@@ -58,7 +69,8 @@ sha="$(git rev-parse HEAD)"
 git log --oneline -1
 echo "== build"
 # The stream engines stop for the build's memory on a small host, and start again below.
-docker compose stop spark-master spark-worker spark-streaming spark-aggregations
+spark_down=1
+docker compose stop "${SPARK[@]}"
 docker compose "${PROFILES[@]}" build
 echo "== schema"
 docker compose up --no-deps --exit-code-from db-migrate db-migrate
@@ -67,7 +79,8 @@ docker compose "${UP_PROFILES[@]}" up -d
 # The edges cache their upstreams' addresses: the device edge is recreated, the web edge reloaded.
 docker compose up -d --no-deps --force-recreate ingestion-edge
 docker compose exec -T frontend nginx -s reload
-docker compose start spark-master spark-worker spark-streaming spark-aggregations
+docker compose start "${SPARK[@]}"
+spark_down=0
 echo "== monitoring config"
 docker compose up -d --no-deps --force-recreate prometheus alertmanager grafana
 printf 'deployed=%s\nfrom=%s\nat=%s\n' "$sha" "${from:-}" "$(date -u +%FT%TZ)" > .box-deployed
