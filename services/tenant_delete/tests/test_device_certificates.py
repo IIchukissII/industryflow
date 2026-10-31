@@ -74,7 +74,7 @@ def test_a_crl_signed_before_the_request_is_waited_on(ca):
 
 def test_a_revocation_signed_in_the_second_of_the_request_is_accepted(ca):
     """On the box, the e2e teardown requested deletion at 15:50:58.263 and revoked at 15:50:58: the CRL
-    read as signed before the request, and the deletion waited for good."""
+    read as signed before the request, and the deletion waited for the next re-signing."""
     from cryptography import x509
     tenant = str(uuid.uuid4())
     ca.run("issue", tenant, "gw-1")
