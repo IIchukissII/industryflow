@@ -129,7 +129,7 @@ receivers:
 
 | Item | Value |
 |---|---|
-| Evidence | The rule's PromQL over the 30 minutes before the alert to now; error lines of the services in the rule's `services` annotation and the target's host; other active alerts; matching `Symptom \| Cause \| Fix` rows from `docs/operations` |
+| Evidence | The rule's PromQL over the 30 minutes before the alert to now; error lines of the services in the rule's `services` annotation and the target's host; other active alerts; the alert's row in the [alert table](#alerts) (every platform rule has one); `Symptom \| Cause \| Fix` rows sharing at least two words with the alert. The metric series are narrowed to the alert's own labels |
 | Sent to the model | The alert and the evidence, after redaction: tenant identifiers, emails, network addresses and credential-shaped strings become `<tenant-1>`, `<email-1>`, … ; the note records the counts per category |
 | Output | Loki stream `{job="ops-agent"}`; the `complete-system` and Incidents dashboards draw it as annotations. No Grafana credential |
 | Without a model | A model error or refusal still publishes a note: the evidence listing, `model` = `none` |

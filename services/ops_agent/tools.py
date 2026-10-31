@@ -53,6 +53,7 @@ def _reported(fn: Callable[..., Awaitable[dict[str, Any]]]) -> Callable[..., Awa
 def build_server(config: Config, transport: httpx.AsyncBaseTransport | None = None) -> MCPServer:
     server = MCPServer("industryflow-ops")
     rows = runbooks.load(config.runbooks_dir) if config.runbooks_dir.is_dir() else []
+    alert_rows = runbooks.load_alerts(config.runbooks_dir) if config.runbooks_dir.is_dir() else {}
 
     def client() -> httpx.AsyncClient:
         return httpx.AsyncClient(timeout=15.0, transport=transport)
@@ -96,6 +97,13 @@ def build_server(config: Config, transport: httpx.AsyncBaseTransport | None = No
         return {"alerts": [{"alertname": a.get("labels", {}).get("alertname"), "labels": a.get("labels", {}),
                             "startsAt": a.get("startsAt"), "state": a.get("status", {}).get("state")}
                            for a in r.json()[:50]]}
+
+    @server.tool()
+    @_reported
+    async def alert_runbook(alertname: str) -> dict[str, Any]:
+        """The alert table's row for one alert, by its exact name: when it fires and how to handle it."""
+        row = alert_rows.get(alertname)
+        return {"row": vars(row) if row else None}
 
     @server.tool()
     @_reported
