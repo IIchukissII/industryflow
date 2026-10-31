@@ -119,7 +119,9 @@ class DeviceCertificates:
         now = self.clock()
         if crl.next_update_utc is None or crl.next_update_utc <= now:
             raise DeviceCaError(f"the issuing intermediate's CRL expired at {crl.next_update_utc}")
-        if crl.last_update_utc < requested_at:
+        # A CRL's time has one-second resolution: a revocation signed in the second of the request reads
+        # as earlier than the request's sub-second time, and would be waited on for good.
+        if crl.last_update_utc < requested_at.replace(microsecond=0):
             logger.warning("tenant %s: the CRL was signed at %s, before the deletion was requested; "
                            "waiting for device-ca.sh revoke-tenant", company_id, crl.last_update_utc)
             return None
