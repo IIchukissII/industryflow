@@ -6,7 +6,7 @@
 # requirements.txt only). Install with: pip install -r requirements.txt -r requirements-dev.txt
 -r requirements.txt
 
-pytest==9.1.1
+pytest==9.2.0
 pytest-asyncio==1.4.1
 # Starlette's TestClient needs it (it raises at import without one). test_auth_surface.py drives the
 # real fastapi-users routers through it — the only place the auth surface is actually exercised.
