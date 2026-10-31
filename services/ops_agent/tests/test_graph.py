@@ -161,3 +161,13 @@ def test_framing_words_are_not_matched():
 async def test_a_note_without_a_model_says_so_plainly(config):
     _, _, note = await _run(config, writer=FakeWriter(fail=True))
     assert note["text"].startswith("Built by the infrastructure agent from the evidence alone; no model wrote it.")
+
+
+@pytest.mark.asyncio
+async def test_runbook_items_reach_the_model_as_reference_not_observation(config):
+    """On the box, Mistral cited a runbook row's example symptom (a 401) as an observed error."""
+    _, writer, _ = await _run(config)
+    observed, _, reference = writer.prompts[0].partition("\n\nRunbook reference:\n")
+    assert "(runbook " not in observed and "Observed:" in observed
+    assert "(runbook " in reference and all("(reference)" in line for line in reference.splitlines())
+    assert "A reference item is never a cause" in graph.SYSTEM
