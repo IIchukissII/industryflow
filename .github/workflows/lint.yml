@@ -13,7 +13,7 @@ on:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
@@ -33,7 +33,7 @@ jobs:
   ruff:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -41,7 +41,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install ruff
-        run: pip install ruff==0.15.20
+        run: pip install -r scripts/ci/requirements.txt
       - name: ruff check
         run: ruff check .
 
@@ -58,7 +58,7 @@ jobs:
   deps-resolve:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -69,7 +69,7 @@ jobs:
         run: |
           # A range resolves differently on each build, and Dependabot cannot group a range bump: it
           # opens a separate PR per range and its requirement replacer can fail on them.
-          bad=$(git ls-files 'services/**requirements*.txt' 'infrastructure/**requirements*.txt' 'clients/**requirements*.txt' \
+          bad=$(git ls-files '**requirements*.txt' 'requirements*.txt' \
             | xargs grep -nE '^[A-Za-z0-9]' | grep -vE '^[^:]+:[0-9]+:[A-Za-z0-9_.-]+(\[[A-Za-z0-9_,-]+\])?==[^,;]+(\s*;.*)?(\s*#.*)?$' || true)
           if [ -n "$bad" ]; then echo "::error::non-exact requirement specifiers:"; echo "$bad"; exit 1; fi
       - name: Resolve every requirements file
@@ -99,7 +99,7 @@ jobs:
   eslint:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:
       run:
@@ -122,7 +122,7 @@ jobs:
   frontend-tests:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:
       run:
@@ -146,7 +146,7 @@ jobs:
     name: lint-gate
     needs: [changes, ruff, deps-resolve, eslint, frontend-tests]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Gate

@@ -34,7 +34,7 @@ on:
 
 jobs:
   compose-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -408,7 +408,7 @@ jobs:
     name: compose-smoke-gate
     needs: [compose-smoke]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Gate on the smoke result
