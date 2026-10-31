@@ -114,7 +114,7 @@ health reaches Grafana as `postgres-exporter` metrics.
 | Source | Metrics |
 |---|---|
 | `api-gateway`, `ml-service-api`, `ingestion-service` (`prometheus-fastapi-instrumentator` defaults) | `http_requests_total{handler,method,status}` (`status` grouped: `2xx`, `5xx`, …), `http_request_duration_seconds{handler,method}`, `http_request_duration_highr_seconds`, `http_request_size_bytes`, `http_response_size_bytes` |
-| `ml-service-api` | `ml_stateful_features_neutralized_total` — see [kill-switch](#runbook-stateful-feature-kill-switch) |
+| `ml-service-api` | `ml_stateful_features_neutralized_total` — see [kill-switch](#runbook-stateful-feature-kill-switch); `ml_stateful_features_unavailable_total` — stateful slots served neutral because their aggregate was unavailable ([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 3) |
 | Spark | Native `PrometheusServlet` driver, executor and master metrics |
 | `cadvisor` | `container_cpu_usage_seconds_total`, `container_memory_usage_bytes`, `container_network_{receive,transmit}_bytes_total`, `container_last_seen` (disk and diskIO metrics disabled) |
 | `node-exporter` | `node_cpu_seconds_total`, `node_memory_*`, `node_filesystem_*`, `node_network_*` |
@@ -183,7 +183,8 @@ The switch ([ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) make
 fill every stateful transform's slot (`statistical`, `rolling_stat`) with its neutral value without
 calling the transform, so inference stops reading the aggregate tables. Vector length and order are
 unchanged. Use it when the database is alive but overloaded; in a total outage it reads as enabled
-and the transforms fall back to the same neutral value.
+and each stateful slot whose aggregate read fails takes the same neutral value, counted in
+`ml_stateful_features_unavailable_total` and named in `neutralized_features`.
 
 | Task | Command / signal |
 |---|---|

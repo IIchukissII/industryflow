@@ -10,10 +10,10 @@ This is illustrative: the worked example of the extension contract (ADR-0008/001
 The platform loads this module only when EXTENSION_MODULES names ``tep_reference``; the core
 never imports it.
 """
-from extensions import register_transform, register_detector, DetectionResult, check_api_version
+from extensions import register_transform, register_detector, DetectionResult, check_api_version, sensor_value
 
 # Declare the platform extension-API this module was written against (ADR-0010 dec 3).
-EXTENSION_TARGET_API = "0.1.0"
+EXTENSION_TARGET_API = "0.4.0"
 check_api_version(EXTENSION_TARGET_API)
 
 
@@ -29,7 +29,8 @@ async def reactor_pressure_margin(transformation, sensor_data, ctx):
     params = transformation.get("params", {})
     limit_kpa = params.get("limit_kpa", 2950.0)
     sensor = transformation.get("sensor", "xmeas_7")  # TEP reactor pressure (kPa)
-    return limit_kpa - sensor_data.get(sensor, 0.0)
+    # Read through the SDK, which refuses a missing value rather than scoring it as zero (ADR-0044).
+    return limit_kpa - sensor_value(sensor_data, sensor)
 
 
 def _flatten(features):

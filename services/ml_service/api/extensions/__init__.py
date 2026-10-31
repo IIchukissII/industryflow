@@ -13,6 +13,7 @@ operator names in EXTENSION_MODULES — never a named extension directly.
 """
 import importlib
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List
 
@@ -25,7 +26,11 @@ logger = logging.getLogger(__name__)
 # 0.3.0 adds the optional `semantics` / `handles_flavors` declarations to register_detector
 # (ADR-0028 dec 1) — additive in the same way: a detector written against 0.2.0 still registers, it
 # simply declares nothing, and the capabilities view says so rather than pretending otherwise.
-EXTENSION_API_VERSION = "0.3.0"
+# 0.4.0 adds `sensor_value`, `MissingSensors`, `InvalidFeature` and `StatefulUnavailable` (ADR-0044):
+# a transform refuses or reports instead of returning a substitute, and the engine no longer turns
+# an exception into zero. Within 0.x a minor bump may break (ADR-0010 dec 3); this one does for a
+# transform that relied on that conversion.
+EXTENSION_API_VERSION = "0.4.0"
 
 
 @dataclass
@@ -39,6 +44,57 @@ class TransformContext:
     baseline_provider: Any = None
     equipment_id: Any = None
     company_id: Any = None
+
+
+class FeatureRefused(ValueError):
+    """No honest input vector can be computed, so nothing is scored (ADR-0044)."""
+
+
+class MissingSensors(FeatureRefused):
+    """The reading lacks sensors the configuration reads: absent, or not a finite number
+    (ADR-0044 dec 1). A fault of the request, not of the platform."""
+
+    def __init__(self, sensors):
+        self.sensors = list(dict.fromkeys(sensors))
+        super().__init__(f"the reading lacks sensors the model's feature configuration reads: "
+                         f"{', '.join(self.sensors)}")
+
+
+class InvalidFeature(FeatureRefused):
+    """A feature definition its transform cannot interpret (ADR-0044 dec 2): a defect of the
+    configuration that no reading can make computable."""
+
+    def __init__(self, feature, reason):
+        self.feature = feature
+        super().__init__(f"feature {feature!r} cannot be computed from its definition: {reason}")
+
+
+class StatefulUnavailable(Exception):
+    """A stateful transform's substrate cannot supply its value for this reading (ADR-0044 dec 3).
+
+    Raised only by a transform registered ``stateful=True``. The engine fills the slot with the
+    type's neutral value and names it on the response, as ADR-0024 permits for the outage fallback;
+    from any other transform it is an ordinary failure."""
+
+
+def _finite(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def sensor_value(sensor_data: Dict[str, Any], sensor: str) -> float:
+    """The reading's value for ``sensor``; refuses one that is absent or not a finite number.
+
+    The only way a transform reads a sensor, so no transform can quietly substitute a default
+    for a missing value (ADR-0044 dec 1)."""
+    value = sensor_data.get(sensor)
+    if not _finite(value):
+        raise MissingSensors([sensor])
+    return float(value)
+
+
+def missing_sensors(sensor_data: Dict[str, Any], sensors: List[str]) -> List[str]:
+    """The named sensors the reading does not carry as finite numbers, in order."""
+    return [s for s in sensors if not _finite(sensor_data.get(s))]
 
 
 # A transform is: async (transformation_config, sensor_data, ctx) -> float

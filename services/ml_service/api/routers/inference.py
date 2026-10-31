@@ -25,7 +25,7 @@ import auth
 import model_cache
 import model_loader
 import uploaded_model
-from feature_engineering import FeatureEngineeringEngine, UnknownTransform
+from feature_engineering import FeatureEngineeringEngine, FeatureRefused
 from extensions import get_detector, DetectorContext, UninterpretableModel
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,12 @@ mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 STATEFUL_NEUTRALIZED = Counter(
     "ml_stateful_features_neutralized_total",
     "Feature slots filled with a neutral value because the stateful-feature kill-switch is off",
+)
+# The outage fallback ADR-0024 keeps: a stateful slot whose aggregate could not be read. Separate
+# from the switch's count, which is zero in normal operation (ADR-0044 dec 3).
+STATEFUL_UNAVAILABLE = Counter(
+    "ml_stateful_features_unavailable_total",
+    "Stateful feature slots filled with a neutral value because their aggregate was unavailable",
 )
 
 
@@ -66,9 +72,9 @@ class InferenceResponse(BaseModel):
     model_version: Optional[str] = None
     degraded: bool = Field(
         default=False,
-        description="True when the stateful-feature kill-switch (ADR-0024) is off and this score "
-                    "was computed with those features neutralized — the score is real but the "
-                    "input was partially degraded. Consumers should treat it as lower-confidence.",
+        description="True when stateful features were served neutral (ADR-0024, ADR-0044 dec 3): the "
+                    "kill-switch is off, or their aggregate was unavailable. The score is real but "
+                    "the input was partially degraded. Consumers should treat it as lower-confidence.",
     )
     neutralized_features: Optional[List[str]] = Field(
         default=None, description="Feature slots filled with a neutral value instead of computed.",
@@ -283,9 +289,11 @@ async def predict(
         # A score computed on neutralized input must not be indistinguishable from an ordinary one
         # (ADR-0024 dec 5): trading a loud failure for a silent, confidently-wrong score is the one
         # outcome the kill-switch must not buy. Surface it on the response and in the metric.
-        neutralized = fe_engine.neutralized_features
-        if neutralized:
-            STATEFUL_NEUTRALIZED.inc(len(neutralized))
+        if fe_engine.neutralized_features:
+            STATEFUL_NEUTRALIZED.inc(len(fe_engine.neutralized_features))
+        if fe_engine.unavailable_features:
+            STATEFUL_UNAVAILABLE.inc(len(fe_engine.unavailable_features))
+        neutralized = [*fe_engine.neutralized_features, *fe_engine.unavailable_features]
 
         # Score the features through the detector the model record names (ADR-0010 dec 6), chosen at
         # the registration gate as the one that implements its declared semantics (ADR-0028 dec 1).
@@ -339,8 +347,9 @@ async def predict(
             neutralized_features=neutralized or None,
         )
 
-    except UnknownTransform as exc:
-        # The configuration cannot produce the input the model was bound to; no score is honest.
+    except FeatureRefused as exc:
+        # The reading or the configuration cannot produce the input the model was bound to; no
+        # score is honest (ADR-0044 dec 1, 2), and the detail names what is missing.
         raise HTTPException(status_code=422, detail=str(exc))
     except HTTPException:
         # A refusal raised above (400/404/422/503) is already the answer. Re-wrapping it as a 500
