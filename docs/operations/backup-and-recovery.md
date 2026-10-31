@@ -154,17 +154,17 @@ job variable named in *Meaning*.
 
 | Task | Command |
 |---|---|
-| One backup run | `docker compose run --rm db-backup` |
-| Notebook archives | `docker compose --profile backup run --rm notebook-backup` (after `db-backup` has built the image) |
-| Without the cold or model mirror | `docker compose run --rm -e COLD_SOURCE_BUCKET= -e MODEL_SOURCE_BUCKET= db-backup` |
-| Daily from host cron | `0 2 * * *  cd <install-dir> && docker compose run --rm db-backup && docker compose --profile backup run --rm notebook-backup` |
+| One backup run | `docker compose run --rm --no-deps db-backup` |
+| Notebook archives | `docker compose --profile backup run --rm --no-deps notebook-backup` (after `db-backup` has built the image) |
+| Without the cold or model mirror | `docker compose run --rm --no-deps -e COLD_SOURCE_BUCKET= -e MODEL_SOURCE_BUCKET= db-backup` |
+| Daily from host cron | `0 2 * * *  cd <install-dir> && docker compose run --rm --no-deps db-backup && docker compose --profile backup run --rm --no-deps notebook-backup` |
 
 ### Off-site target
 
 | Deployment | Setting |
 |---|---|
 | Helm | `backup.s3.endpoint`, `backup.s3.bucket`, and that bucket's keys as `BACKUP_STORE_ACCESS_KEY` / `BACKUP_STORE_SECRET_KEY` |
-| Compose | `BACKUP_S3_BUCKET` and `BACKUP_STORE_*` in `.env`; the endpoint per run: `docker compose run --rm -e S3_ENDPOINT_URL=https://<s3-endpoint> db-backup` (the service otherwise uses `MINIO_ENDPOINT`) |
+| Compose | `BACKUP_S3_BUCKET` and `BACKUP_STORE_*` in `.env`; the endpoint per run: `docker compose run --rm --no-deps -e S3_ENDPOINT_URL=https://<s3-endpoint> db-backup` (the service otherwise uses `MINIO_ENDPOINT`) |
 
 ## Restoring
 
@@ -194,7 +194,7 @@ incomplete; do not cut over to it.
 
 ```bash
 # Compose
-docker compose run --rm --entrypoint db-restore.sh db-backup \
+docker compose run --rm --no-deps --entrypoint db-restore.sh db-backup \
   industryflow latest --target industryflow_restore_test
 
 # Kubernetes: a Job from the backup CronJob (same env, Secret and CA mount), command replaced
@@ -213,8 +213,8 @@ Compare row counts and recent timestamps per tenant with the source, then drop t
 |---|---|
 | 1 | Start an empty TimescaleDB and `docker compose up db-migrate`: the schema sequence creates the roles (passwords from the environment) and base schema |
 | 2 | Apply `<prefix>/globals/<stamp>.sql` with `psql`: it recreates the runtime roles (`tenant_reader_*`, `tenant_sqlproxy_*`); `role … already exists` errors for the service roles are expected. Roles carry no passwords (`--no-role-passwords`) |
-| 3 | `docker compose run --rm --entrypoint db-restore.sh db-backup industryflow latest` |
-| 4 | `docker compose run --rm --entrypoint db-restore.sh db-backup mlflow latest` |
+| 3 | `docker compose run --rm --no-deps --entrypoint db-restore.sh db-backup industryflow latest` |
+| 4 | `docker compose run --rm --no-deps --entrypoint db-restore.sh db-backup mlflow latest` |
 | 5 | `docker compose up db-migrate`: the restored ledger is the backup's; scripts newer than the backup are applied ([ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md) dec 5) |
 | 6 | Verify row counts and recent timestamps per tenant before cutover |
 
@@ -247,12 +247,12 @@ difference from the archive in an entry's name, mode, owner or size. An existing
 
 ```bash
 # Rehearsal into a scratch volume (a name outside the work-volume prefix), then remove it
-docker compose --profile backup run --rm --entrypoint notebook-restore.sh notebook-backup \
+docker compose --profile backup run --rm --no-deps --entrypoint notebook-restore.sh notebook-backup \
   industryflow-nb-<user> latest --target rehearsal-industryflow-nb-<user>
 docker volume rm rehearsal-industryflow-nb-<user>
 
 # Real restore: the user's server stopped and the volume removed first
-docker compose --profile backup run --rm --entrypoint notebook-restore.sh notebook-backup \
+docker compose --profile backup run --rm --no-deps --entrypoint notebook-restore.sh notebook-backup \
   industryflow-nb-<user> latest
 ```
 

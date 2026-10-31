@@ -106,7 +106,10 @@ class Environment:
         return self.run("docker", "exec", "industryflow-redis", "redis-cli", "--no-raw", *args).strip()
 
     def job(self, profile: str, service: str, timeout: float = 900) -> str:
-        return self.run("docker", "compose", "--profile", profile, "run", "--rm", "-T", service, timeout=timeout)
+        # --no-deps: against the running stack. Starting dependencies re-runs the one-shot steps and
+        # recreates TimescaleDB and MinIO behind them, under the live stream.
+        return self.run("docker", "compose", "--profile", profile, "run", "--rm", "--no-deps", "-T", service,
+                        timeout=timeout)
 
     def script(self, *argv: str) -> str:
         return self.run("bash", *argv)
