@@ -55,7 +55,7 @@ release is cut only from such a commit.
 
 | Task | Command |
 |---|---|
-| Deploy a commit by upgrade on the environment's host | `scripts/box-deploy.sh [ref]` (default `origin/main`; backup, build, schema, recreate; writes `.box-deployed`) |
+| Deploy a commit by upgrade on the environment's host | `scripts/box-deploy.sh [ref]` (default `origin/main`; disk floor, backup, build, schema, recreate; writes `.box-deployed`). Below `BOX_MIN_FREE_GB` (default `20`) free it prunes all build cache and dangling images, then refuses if still below |
 | Run the suite on the environment's host | `scripts/box-e2e.sh` (from the deployment's checkout; refuses local changes or a stack not deployed from `HEAD`) |
 | Run it over SSH and post the `box-e2e` commit status | `scripts/box-validate.sh <ssh-target> [compose-dir]` (needs `gh`; refuses an upgrade from a commit without `box-e2e` success) |
 | First validation of an environment | `BOX_FIRST_VALIDATION=1 scripts/box-validate.sh <ssh-target>` |
@@ -67,7 +67,7 @@ release is cut only from such a commit.
 | Suite | `tests/e2e/` (runner image `tests/e2e/Dockerfile`) |
 | Journeys | Capability use and its record; a device reading through the certificate edge; a model uploaded, registered on a bound configuration, deployed and scored by its rule; a tenant through deletion |
 | Run's superuser | Created by `box-e2e.sh` in the oldest active tenant, removed on exit |
-| Run's tenant | Suspended with deletion requested at the end; the next run's deletion job removes it |
+| Run's tenant | Devices revoked (`device-ca.sh revoke-tenant`), suspended and deletion requested at the end; the next run's deletion job removes it |
 | Skips | Failures (`IF_E2E_REQUIRE=1`) |
 | Release workflow | `release.yml`: refuses a tag whose commit is not on `main`, has no successful `box-e2e` status, or has no successful `Images` run on `main`; resolves every image of `images.yml` from `:sha-<short>` to its digest, then tags each digest with the version |
 | Precondition | The environment runs the commit under test (`scripts/box-deploy.sh`), with the notebook authoring image and the device CA (`scripts/device-ca.sh init`) |
@@ -77,4 +77,5 @@ release is cut only from such a commit.
 |---|---|---|
 | `box-e2e: could not remove <email>` | The cleanup could not reach the database | `$RUN api-gateway python /scripts/manage_users.py delete --email <email> --yes` ([user management](user-management.md)) |
 | Device journey times out | Spark streaming not running | `docker compose up -d spark-master spark-worker spark-streaming` |
+| `box-deploy: … GB free after pruning … refusing` | Docker's disk is full beyond build cache | Free space (old images, volumes of removed services), or deploy with a lower `BOX_MIN_FREE_GB` knowingly |
 | Release fails at `The commit is box-validated` | No `box-e2e` success on that commit | `scripts/box-validate.sh` after deploying it |
