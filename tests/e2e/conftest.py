@@ -74,9 +74,9 @@ def root(edge, settings):
 def tenant(edge, root, env):
     """A tenant of this run, with an administrator and an engineer signed in. At the end it is suspended,
     its deletion requested and then its devices revoked; the next run's deletion job removes it
-    (test_tenant_life.py). The job accepts only a CRL signed after the request (ADR-0033), so the
-    revocation comes last: one made before the request leaves the tenant pending until the CRL is
-    next re-signed."""
+    (test_tenant_life.py). The job accepts only a CRL signed no earlier than the second of the request
+    (ADR-0033), so the revocation comes last: one made before the request leaves the tenant pending
+    until the CRL is next re-signed."""
     run = uuid.uuid4().hex[:8]
     company = root.post("/api/companies", json={"company_name": f"e2e-{run}"}).json()
     cid = company["company_id"]
