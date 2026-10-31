@@ -15,10 +15,19 @@
 # A full build needs room: one that fills the disk crash-loops the broker. Below BOX_MIN_FREE_GB
 # (default 20) free on Docker's disk it prunes all build cache and dangling images, and refuses if
 # that is still not enough, before the backup or the checkout moves.
+#
+# The infrastructure agent (profile ops-agent) is built and run when the environment enables it, i.e.
+# `.env` sets OPS_AGENT_WEBHOOK_SECRET. The monitoring stack is recreated last: its config files are
+# single-file mounts, which keep the file the checkout replaced until the container is recreated.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ref="${1:-origin/main}"
 PROFILES=(--profile notebooks --profile tenant-delete --profile backup --profile cold-export)
+UP_PROFILES=(--profile notebooks)
+if grep -qE '^OPS_AGENT_WEBHOOK_SECRET=.+' .env 2>/dev/null; then
+    PROFILES+=(--profile ops-agent)
+    UP_PROFILES+=(--profile ops-agent)
+fi
 min_free="${BOX_MIN_FREE_GB:-20}"
 
 free_gb() { df -BG --output=avail "$(docker info -f '{{.DockerRootDir}}')" | tail -1 | tr -dc '0-9'; }
@@ -54,10 +63,12 @@ docker compose "${PROFILES[@]}" build
 echo "== schema"
 docker compose up --no-deps --exit-code-from db-migrate db-migrate
 echo "== up"
-docker compose --profile notebooks up -d
+docker compose "${UP_PROFILES[@]}" up -d
 # The edges cache their upstreams' addresses: the device edge is recreated, the web edge reloaded.
 docker compose up -d --no-deps --force-recreate ingestion-edge
 docker compose exec -T frontend nginx -s reload
 docker compose start spark-master spark-worker spark-streaming spark-aggregations
+echo "== monitoring config"
+docker compose up -d --no-deps --force-recreate prometheus alertmanager grafana
 printf 'deployed=%s\nfrom=%s\nat=%s\n' "$sha" "${from:-}" "$(date -u +%FT%TZ)" > .box-deployed
 echo "box-deploy $sha"
