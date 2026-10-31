@@ -39,3 +39,17 @@ def test_rows_match_by_shared_words_best_first():
 def test_a_table_is_read_until_it_ends():
     text = "x\n| Symptom | Cause | Fix |\n|---|---|---|\n| a | b | c |\n| d | e | f |\n\n| Symptom | Other |\n|---|---|\n| g | h |\n"
     assert [(r.symptom, r.fix) for r in runbooks.parse(text, "t.md")] == [("a", "c"), ("d", "f")]
+
+
+def test_a_single_shared_word_is_not_a_match():
+    """Measured on the box's alerts: one shared word (`warning`, `readings`) matched unrelated rows."""
+    rows = [runbooks.Row("CRL refresh unhealthy", "a warning in the log", "re-sign", "a.md")]
+    assert runbooks.match(rows, "Readings were dead-lettered warning") == []
+
+
+def test_every_platform_rule_has_a_row_in_the_alert_table():
+    import yaml
+    rules = yaml.safe_load((REPO / "infrastructure/prometheus/rules/platform.yml").read_text())
+    names = {r["alert"] for g in rules["groups"] for r in g["rules"]}
+    table = runbooks.load_alerts(DOCS)
+    assert names and not names - set(table), f"platform alerts with no alert-table row: {sorted(names - set(table))}"

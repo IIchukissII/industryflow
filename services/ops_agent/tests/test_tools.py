@@ -40,7 +40,7 @@ async def _call(server, name, args):
 async def test_the_tool_set_is_the_monitoring_plane(config):
     async with Client(tools.build_server(config(), _transport([]))) as client:
         names = sorted(t.name for t in (await client.list_tools()).tools)
-    assert names == ["active_alerts", "loki_errors", "prometheus_range", "runbook_rows"]
+    assert names == ["active_alerts", "alert_runbook", "loki_errors", "prometheus_range", "runbook_rows"]
 
 
 @pytest.mark.asyncio
@@ -66,8 +66,16 @@ async def test_logs_select_the_service_and_only_error_lines(config):
 @pytest.mark.asyncio
 async def test_runbook_rows_come_from_the_real_runbooks(config):
     out = await _call(tools.build_server(config(), _transport([])), "runbook_rows",
-                      {"text": "Readings were dead-lettered"})
-    assert out["rows"], "the dead-letter runbook has a matching row"
+                      {"text": "redis-exporter:9121 redis Scrape target down"})
+    assert [r["symptom"] for r in out["rows"]] == ["`redis_up` is `0`"]
+
+
+@pytest.mark.asyncio
+async def test_the_alert_table_row_is_found_by_the_exact_name(config):
+    server = tools.build_server(config(), _transport([]))
+    out = await _call(server, "alert_runbook", {"alertname": "IndustryFlowDeadLetteredReadings"})
+    assert out["row"]["source"] == "monitoring.md" and "dead-letters.md" in out["row"]["handling"]
+    assert (await _call(server, "alert_runbook", {"alertname": "NoSuchAlert"}))["row"] is None
 
 
 @pytest.mark.asyncio
@@ -82,8 +90,8 @@ async def test_the_agent_reaches_its_tools_over_stdio(config, monkeypatch):
     mcp_tools = app.McpTools.from_config(config())
     assert "OPS_AGENT_WEBHOOK_SECRET" not in mcp_tools._target.env
     async with mcp_tools:
-        out = await mcp_tools.call("runbook_rows", {"text": "Readings were dead-lettered"})
-    assert out["rows"]
+        out = await mcp_tools.call("alert_runbook", {"alertname": "IndustryFlowDeadLetteredReadings"})
+    assert out["row"]
 
 
 @pytest.mark.asyncio

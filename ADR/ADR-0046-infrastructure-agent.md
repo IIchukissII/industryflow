@@ -43,8 +43,9 @@ and user addresses even though tenant data stays off that stack.
 8. **It redacts tenant identifiers, user addresses, network addresses and credential-shaped strings,
    into stable placeholders.** The same identifier gets the same placeholder within a note, so the
    evidence stays correlated.
-9. **The runbooks' symptom, cause and fix tables are a contract the agent reads.** A guard keeps their
-   shape.
+9. **The runbooks' tables are a contract the agent reads.** The alert table is read by the alert's
+   exact name and holds a row for every platform rule; a symptom, cause and fix row is read only when it
+   shares more than one word with the alert. Guards keep both shapes and the alert table complete.
 10. **It ships for both deployment shapes, off by default.** Endpoints are configuration, so on a
     cluster it reaches the operator's stack, and its dashboard is an integration object (ADR-0016 dec 1).
 
@@ -66,6 +67,7 @@ and user addresses even though tenant data stays off that stack.
 | 6 | Tenant-facing explanations | Platform-plane evidence describes every tenant at once |
 | 8 | Sending logs unredacted to a local model | A local endpoint is still another host (ADR-0045 dec 6) |
 | 9 | Retrieval over free text by similarity | The runbooks already hold structured rows; similarity adds a store and guesses |
+| 9 | Symptom rows matched by any shared word, as the only runbook source | On the platform's own alerts a single shared word matched unrelated rows; the alert table answers by name |
 | — | One record for the runtime and this agent | The runtime binds agents this one does not describe |
 
 ## Consequences

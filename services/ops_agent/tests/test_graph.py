@@ -140,3 +140,24 @@ async def test_a_tool_error_reaches_the_note_with_its_cause(config):
 
     _, writer, _ = await _run(config, tools=ErrorTools())
     assert "unavailable: HTTPStatusError: 503 Service Unavailable" in writer.prompts[0]
+
+
+def test_metrics_are_narrowed_to_the_alerts_own_series():
+    """On the box, TargetDown for redis-exporter carried every down target of the window."""
+    series = [{"metric": {"__name__": "up", "instance": "redis-exporter:9121", "job": "redis"}},
+              {"metric": {"__name__": "up", "instance": "spark-master:8080", "job": "spark-master"}}]
+    alert = {"labels": {"alertname": "IndustryFlowTargetDown", "severity": "critical",
+                        "instance": "redis-exporter:9121", "job": "redis"}}
+    assert graph._own_series(series, alert) == series[:1]
+    assert graph._own_series(series, {"labels": {"instance": "gone:1"}}) == series
+
+
+def test_framing_words_are_not_matched():
+    text = graph.match_text(ALERT)
+    assert "warning" not in text and "2026" not in text and "redis-exporter:9121" in text
+
+
+@pytest.mark.asyncio
+async def test_a_note_without_a_model_says_so_plainly(config):
+    _, _, note = await _run(config, writer=FakeWriter(fail=True))
+    assert note["text"].startswith("Built by the infrastructure agent from the evidence alone; no model wrote it.")

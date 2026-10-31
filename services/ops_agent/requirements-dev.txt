@@ -7,4 +7,6 @@
 -r requirements.txt
 
 pytest==9.2.0
+# test_runbooks.py reads the platform rules.
+pyyaml==6.0.3
 pytest-asyncio==1.4.1
