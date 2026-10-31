@@ -9,6 +9,14 @@ import { createEquipment, updateEquipment, getEquipmentSensors, removeSensorFrom
 import { sensorLabel } from '../utils/sensors';
 import api from '../services/api';
 import { errorText } from '../utils/errors';
+import { wizardReading } from '../utils/reading-equipment-wizard';
+import { humanize } from '../utils/humanize';
+
+// An unconfigured slot: the machine declares more sensors than are set up.
+const blankSensor = (position) => ({
+  sensor_id: '', sensor_name: '', display_name: '', sensor_type: 'temperature', unit: 'celsius',
+  description: '', position, is_critical: false, is_required_for_ml: true, normal_min: null, normal_max: null,
+});
 
 function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null }) {
   const [step, setStep] = useState(1); // 1: Basic Info, 2: Configure Sensors, 3: Review & Submit
@@ -59,13 +67,15 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
   const [createdEquipmentId, setCreatedEquipmentId] = useState(editEquipment?.equipment_id ?? null);
   const [isEditMode, setIsEditMode] = useState(!!editEquipment);
 
-  const loadExistingSensors = useCallback(async (equipmentId) => {
+  const loadExistingSensors = useCallback(async (equipmentId, declared = 0) => {
     try {
       // A stored sensor keeps the label it was saved with, so only a changed one is written back.
       const data = (await getEquipmentSensors(equipmentId)).map((s) => ({
         ...s, display_name: s.display_name || '', saved_display_name: s.display_name || '',
       }));
-      setSensors(data);
+      // Every declared sensor has a row, so a missing one can be set up from the review.
+      const slots = Array.from({ length: Math.max(0, declared - data.length) }, (_, i) => blankSensor(data.length + i));
+      setSensors([...data, ...slots]);
       setCurrentSensor(prev => ({ ...prev, position: data.length }));
       if (data.length > 0) {
         setStep(3); // Go to review if sensors already exist
@@ -83,7 +93,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
   // inner async function so the effect body itself starts no synchronous setState.
   useEffect(() => {
     if (editEquipment) {
-      (async () => { await loadExistingSensors(editEquipment.equipment_id); })();
+      (async () => { await loadExistingSensors(editEquipment.equipment_id, editEquipment.sensor_count); })();
     }
   }, [editEquipment, loadExistingSensors]);
 
@@ -227,7 +237,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
     if (isEditMode && sensors[position].created_at) {
       if (!window.confirm('Remove this sensor from database?')) return;
       removeSensorFromEquipment(createdEquipmentId, sensors[position].sensor_id)
-        .then(() => loadExistingSensors(createdEquipmentId))
+        .then(() => loadExistingSensors(createdEquipmentId, parseInt(formData.sensor_count) || 0))
         .catch(err => setError(errorText(err)));
     } else {
       // Just remove from local array for new equipment
@@ -257,7 +267,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
       // Validate all sensors have IDs
       const incompleteSensors = sensors.filter(s => !s.sensor_id);
       if (incompleteSensors.length > 0) {
-        throw new Error(`Please configure all ${formData.sensor_count} sensors`);
+        throw new Error(`Set up all ${formData.sensor_count} sensors before saving`);
       }
 
       // An empty label is sent as unset; the key is shown in its place.
@@ -323,47 +333,61 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
 
   if (!isOpen) return null;
 
+  const total = parseInt(formData.sensor_count) || 0;
   const configuredCount = sensors.filter(s => s.sensor_id && s.sensor_id.trim() !== "").length;
-  const isAllConfigured = configuredCount === parseInt(formData.sensor_count);
+  const isAllConfigured = configuredCount === total;
+  const reading = wizardReading({
+    step, editing: isEditMode, name: formData.name,
+    position: currentSensor.position, total, configured: configuredCount,
+  });
+  const STEPS = ['Machine', 'Sensors', 'Review'];
+  const optional = <span className="ecm-optional">optional</span>;
 
   return (
     <div className="modal-overlay" onClick={handleClose}>
-      <div className="modal-content equipment-config-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal-content equipment-config-modal" role="dialog" aria-modal="true"
+        aria-labelledby="ecm-title" onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <h2>{isEditMode ? 'Edit Equipment' : 'Create New Equipment'}</h2>
-          <button className="modal-close" onClick={handleClose}>×</button>
+          <h2 id="ecm-title">{isEditMode ? `Edit ${editEquipment?.name || formData.name}` : 'Add equipment'}</h2>
+          <button type="button" className="modal-close" aria-label="Close" onClick={handleClose}>×</button>
         </div>
 
-        {error && <div className="error-message">{error}</div>}
-
         <div className="modal-body">
-          {/* Step Indicator */}
-          <div className="step-indicator">
-            <div className={`step ${step === 1 ? 'active' : step > 1 ? 'completed' : ''}`}>
-              <span className="step-number">1</span>
-              <span className="step-label">Basic Info</span>
-            </div>
-            <div className="step-line"></div>
-            <div className={`step ${step === 2 ? 'active' : step > 2 ? 'completed' : ''}`}>
-              <span className="step-number">2</span>
-              <span className="step-label">Configure Sensors</span>
-            </div>
-            <div className="step-line"></div>
-            <div className={`step ${step === 3 ? 'active' : ''}`}>
-              <span className="step-number">3</span>
-              <span className="step-label">Review & Submit</span>
-            </div>
-          </div>
+          <ol className="ecm-steps" aria-label="Steps">
+            {STEPS.map((label, i) => {
+              const n = i + 1;
+              const state = n === step ? 'is-current' : n < step ? 'is-done' : '';
+              return (
+                <li key={label} className="ecm-step-item">
+                  {i > 0 && <span className="ecm-step-line" aria-hidden="true" />}
+                  <span className={`ecm-step ${state}`} aria-current={n === step ? 'step' : undefined}>
+                    <span className="ecm-step-n">{n < step ? <Icon name="check" size={13} /> : n}</span>
+                    <span className="ecm-step-label">{label}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
 
-          {/* Step 1: Basic Equipment Info */}
+          <p className="ecm-lede">{reading.lede}</p>
+          {reading.sub && (
+            <p className={`ecm-lede-sub ${reading.pending ? 'ecm-pending' : ''}`}>{reading.sub}</p>
+          )}
+
+          {error && <div className="ecm-error" role="alert">{error}</div>}
+
           {step === 1 && (
-            <form onSubmit={handleStep1Submit} className="equipment-form">
+            <form onSubmit={handleStep1Submit} className="ecm-form">
               <div className="form-row">
                 <div className="form-group">
-                  <label>Equipment ID *</label>
+                  <label htmlFor="ecm-equipment-id">Equipment ID</label>
                   <input
+                    id="ecm-equipment-id"
                     type="text"
                     name="equipment_id"
+                    className="mono"
                     value={formData.equipment_id}
                     onChange={handleInputChange}
                     placeholder="The UUID the device reports"
@@ -372,8 +396,9 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
                   />
                 </div>
                 <div className="form-group">
-                  <label>Equipment Type *</label>
+                  <label htmlFor="ecm-equipment-type">Type</label>
                   <select
+                    id="ecm-equipment-type"
                     name="equipment_type"
                     value={formData.equipment_type}
                     onChange={handleInputChange}
@@ -391,32 +416,34 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
               </div>
 
               <div className="form-group">
-                <label>Name *</label>
+                <label htmlFor="ecm-name">Name</label>
                 <input
+                  id="ecm-name"
                   type="text"
                   name="name"
                   value={formData.name}
                   onChange={handleInputChange}
-                  placeholder="e.g., Main Circulation Pump"
+                  placeholder="e.g., Main circulation pump"
                   required
                 />
               </div>
 
               <div className="form-group">
-                <label>Description</label>
+                <label htmlFor="ecm-description">Description{optional}</label>
                 <textarea
+                  id="ecm-description"
                   name="description"
                   value={formData.description}
                   onChange={handleInputChange}
-                  placeholder="Optional description..."
                   rows="3"
                 />
               </div>
 
               <div className="form-row">
                 <div className="form-group">
-                  <label>Site ID</label>
+                  <label htmlFor="ecm-site">Site{optional}</label>
                   <input
+                    id="ecm-site"
                     type="text"
                     name="site_id"
                     value={formData.site_id}
@@ -425,305 +452,262 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
                   />
                 </div>
                 <div className="form-group">
-                  <label>Location</label>
+                  <label htmlFor="ecm-location">Location{optional}</label>
                   <input
+                    id="ecm-location"
                     type="text"
                     name="location"
                     value={formData.location}
                     onChange={handleInputChange}
-                    placeholder="e.g., Building 3, Floor 2"
+                    placeholder="e.g., Building 3, floor 2"
                   />
                 </div>
               </div>
 
               <div className="form-row">
                 <div className="form-group">
-                  <label>Number of Sensors *</label>
+                  <label htmlFor="ecm-sensor-count">Sensors</label>
                   <input
+                    id="ecm-sensor-count"
                     type="number"
                     name="sensor_count"
+                    className="mono"
                     value={formData.sensor_count}
                     onChange={handleInputChange}
                     min="1"
                     max="100"
                     required
                   />
-                  <small>Total sensors on this equipment (1-100)</small>
+                  <small>How many sensors report from this machine, 1 to 100</small>
                 </div>
               </div>
 
               <div className="form-actions">
-                <button type="button" onClick={handleClose} className="btn-secondary">
-                  Cancel
-                </button>
+                <button type="button" onClick={handleClose} className="btn">Cancel</button>
                 <button type="submit" disabled={loading} className="btn-primary">
-                  {loading ? 'Saving...' : 'Next: Configure Sensors'}
+                  {loading ? 'Saving…' : 'Next: sensors'}
                 </button>
               </div>
             </form>
           )}
 
-          {/* Step 2: Configure Sensors */}
           {step === 2 && (
-            <div className="sensor-config-step">
-              <div className="sensor-progress">
-                <h3>Configuring Sensor {currentSensor.position + 1} of {formData.sensor_count}</h3>
-                <p>Equipment: <strong>{formData.name}</strong></p>
-                <p>Configured: <strong>{configuredCount}</strong> / <strong>{formData.sensor_count}</strong></p>
+            <form onSubmit={handleAddSensorToList} className="ecm-form">
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="ecm-sensor-id">Sensor ID</label>
+                  <input
+                    id="ecm-sensor-id"
+                    type="text"
+                    name="sensor_id"
+                    className="mono"
+                    value={currentSensor.sensor_id}
+                    onChange={handleSensorInputChange}
+                    placeholder="The UUID the device reports"
+                    required
+                    disabled={!!currentSensor.created_at}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="ecm-sensor-key">Key</label>
+                  <input
+                    id="ecm-sensor-key"
+                    type="text"
+                    name="sensor_name"
+                    className="mono"
+                    value={currentSensor.sensor_name}
+                    onChange={handleSensorInputChange}
+                    placeholder="e.g., temp_root_1"
+                    required
+                    disabled={!!currentSensor.created_at}
+                  />
+                  <small>Models, features and rule patterns refer to it; it cannot change</small>
+                </div>
               </div>
 
-              <form onSubmit={handleAddSensorToList} className="sensor-form">
-                <h4>Sensor Configuration</h4>
-                
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Sensor ID *</label>
-                    <input
-                      type="text"
-                      name="sensor_id"
-                      value={currentSensor.sensor_id}
-                      onChange={handleSensorInputChange}
-                      placeholder="The UUID the device reports"
-                      required
-                      disabled={!!currentSensor.created_at}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Sensor key *</label>
-                    <input
-                      type="text"
-                      name="sensor_name"
-                      value={currentSensor.sensor_name}
-                      onChange={handleSensorInputChange}
-                      placeholder="e.g., temp_root_1"
-                      required
-                      disabled={!!currentSensor.created_at}
-                    />
-                    <small>Models, features and rule patterns refer to it; it cannot change</small>
-                  </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Display name</label>
-                    <input
-                      type="text"
-                      name="display_name"
-                      value={currentSensor.display_name}
-                      onChange={handleSensorInputChange}
-                      placeholder="e.g., Root zone temperature"
-                      maxLength={100}
-                    />
-                    <small>What people read; empty shows the key</small>
-                  </div>
-                  <div className="form-group">
-                    <label>Position</label>
-                    <input
-                      type="number"
-                      value={currentSensor.position}
-                      disabled
-                    />
-                    <small>Auto-assigned (0-based index)</small>
-                  </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Sensor Type *</label>
-                    <select
-                      name="sensor_type"
-                      value={currentSensor.sensor_type}
-                      onChange={handleSensorInputChange}
-                      required
-                    >
-                      <option value="temperature">Temperature</option>
-                      <option value="pressure">Pressure</option>
-                      <option value="vibration">Vibration</option>
-                      <option value="flow">Flow</option>
-                      <option value="power">Power</option>
-                      <option value="speed">Speed</option>
-                      <option value="voltage">Voltage</option>
-                      <option value="current">Current</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label>Unit</label>
-                    <input
-                      type="text"
-                      name="unit"
-                      value={currentSensor.unit}
-                      onChange={handleSensorInputChange}
-                      placeholder="e.g., celsius, bar, m/s"
-                    />
-                  </div>
-                </div>
-
+              <div className="form-row">
                 <div className="form-group">
-                  <label>Description</label>
+                  <label htmlFor="ecm-display-name">Display name{optional}</label>
                   <input
+                    id="ecm-display-name"
+                    type="text"
+                    name="display_name"
+                    value={currentSensor.display_name}
+                    onChange={handleSensorInputChange}
+                    placeholder="e.g., Root zone temperature"
+                    maxLength={100}
+                  />
+                  <small>What people read; empty shows the key</small>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="ecm-sensor-type">Type</label>
+                  <select
+                    id="ecm-sensor-type"
+                    name="sensor_type"
+                    value={currentSensor.sensor_type}
+                    onChange={handleSensorInputChange}
+                    required
+                  >
+                    <option value="temperature">Temperature</option>
+                    <option value="pressure">Pressure</option>
+                    <option value="vibration">Vibration</option>
+                    <option value="flow">Flow</option>
+                    <option value="power">Power</option>
+                    <option value="speed">Speed</option>
+                    <option value="voltage">Voltage</option>
+                    <option value="current">Current</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="ecm-unit">Unit{optional}</label>
+                  <input
+                    id="ecm-unit"
+                    type="text"
+                    name="unit"
+                    value={currentSensor.unit}
+                    onChange={handleSensorInputChange}
+                    placeholder="e.g., celsius, bar, m/s"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="ecm-sensor-description">Description{optional}</label>
+                  <input
+                    id="ecm-sensor-description"
                     type="text"
                     name="description"
                     value={currentSensor.description}
                     onChange={handleSensorInputChange}
-                    placeholder="Optional description..."
                   />
                 </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Normal Min</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      name="normal_min"
-                      value={currentSensor.normal_min}
-                      onChange={handleSensorInputChange}
-                      placeholder="e.g., 20.0"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Normal Max</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      name="normal_max"
-                      value={currentSensor.normal_max}
-                      onChange={handleSensorInputChange}
-                      placeholder="e.g., 80.0"
-                    />
-                  </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        name="is_critical"
-                        checked={currentSensor.is_critical}
-                        onChange={handleSensorInputChange}
-                      />
-                      <span>Critical Sensor</span>
-                    </label>
-                  </div>
-                  <div className="form-group">
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        name="is_required_for_ml"
-                        checked={currentSensor.is_required_for_ml}
-                        onChange={handleSensorInputChange}
-                      />
-                      <span>Required for ML</span>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="form-actions">
-                  <button type="button" onClick={() => setStep(1)} className="btn-secondary">
-                    Back
-                  </button>
-                  {configuredCount > 0 && (
-                    <button type="button" onClick={() => setStep(3)} className="btn-secondary">
-                      Skip to Review
-                    </button>
-                  )}
-                  <button type="submit" className="btn-primary">
-                    {currentSensor.position < formData.sensor_count - 1 ? 'Next Sensor' : 'Review Configuration'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-
-          {/* Step 3: Review & Submit */}
-          {step === 3 && (
-            <div className="sensor-config-step">
-              <div className="sensor-progress">
-                <h3>Review Configuration</h3>
-                <p>Equipment: <strong>{formData.name}</strong></p>
-                <p>Configured: <strong>{configuredCount}</strong> / <strong>{formData.sensor_count}</strong></p>
-                {isAllConfigured && (
-                  <div className="success-message" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon name="check" size={15} /> All sensors configured!</div>
-                )}
-                {!isAllConfigured && (
-                  <div className="error-message">
-                    Please configure all {formData.sensor_count} sensors before submitting
-                  </div>
-                )}
               </div>
 
-              <div className="sensor-list-container">
-                <h4>Configured Sensors</h4>
-                <div className="sensor-table">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Pos</th>
-                        <th>Sensor</th>
-                        <th>Type</th>
-                        <th>Unit</th>
-                        <th>Critical</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sensors.map((sensor, idx) => (
-                        <tr key={idx} className={!sensor.sensor_id ? 'incomplete-row' : ''}>
-                          <td>{sensor.position}</td>
-                          <td>
-                            {sensor.sensor_id
-                              ? <>
-                                {sensorLabel(sensor)}
-                                {sensor.display_name && sensor.sensor_name && (
-                                  <small className="text-muted mono"> {sensor.sensor_name}</small>
-                                )}
-                              </>
-                              : <em className="text-muted">Not configured</em>}
-                          </td>
-                          <td>{sensor.sensor_type}</td>
-                          <td>{sensor.unit || '-'}</td>
-                          <td>{sensor.is_critical ? <Icon name="check" size={14} color="var(--live)" /> : '–'}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn-edit-small"
-                              onClick={() => handleEditSensor(idx)}
-                            >
-                              {sensor.sensor_id ? 'Edit' : 'Configure'}
-                            </button>
-                            {sensor.sensor_id && (
-                              <button
-                                type="button"
-                                className="btn-remove"
-                                onClick={() => handleRemoveSensorFromList(idx)}
-                              >
-                                Remove
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="ecm-normal-min">Normal minimum{optional}</label>
+                  <input
+                    id="ecm-normal-min"
+                    type="number"
+                    step="0.01"
+                    name="normal_min"
+                    className="mono"
+                    value={currentSensor.normal_min}
+                    onChange={handleSensorInputChange}
+                    placeholder="e.g., 20.0"
+                  />
                 </div>
+                <div className="form-group">
+                  <label htmlFor="ecm-normal-max">Normal maximum{optional}</label>
+                  <input
+                    id="ecm-normal-max"
+                    type="number"
+                    step="0.01"
+                    name="normal_max"
+                    className="mono"
+                    value={currentSensor.normal_max}
+                    onChange={handleSensorInputChange}
+                    placeholder="e.g., 80.0"
+                  />
+                </div>
+              </div>
+
+              <div className="form-row">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    name="is_critical"
+                    checked={currentSensor.is_critical}
+                    onChange={handleSensorInputChange}
+                  />
+                  <span>Critical sensor</span>
+                </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    name="is_required_for_ml"
+                    checked={currentSensor.is_required_for_ml}
+                    onChange={handleSensorInputChange}
+                  />
+                  <span>Required by models</span>
+                </label>
               </div>
 
               <div className="form-actions">
-                <button type="button" onClick={() => setStep(2)} className="btn-secondary">
-                  Back to Configure
+                <button type="button" onClick={() => setStep(1)} className="btn ecm-actions-start">Back</button>
+                {configuredCount > 0 && currentSensor.position < total - 1 && (
+                  <button type="button" onClick={() => setStep(3)} className="btn">Review</button>
+                )}
+                <button type="submit" className="btn-primary">
+                  {currentSensor.position < total - 1 ? 'Next sensor' : 'Review'}
                 </button>
+              </div>
+            </form>
+          )}
+
+          {step === 3 && (
+            <>
+              <div className="ecm-table-wrap">
+                <table className="data-table ecm-table">
+                  <thead>
+                    <tr>
+                      <th className="ecm-pos">#</th>
+                      <th>Sensor</th>
+                      <th>Type</th>
+                      <th>Unit</th>
+                      <th>Critical</th>
+                      <th aria-label="Actions" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sensors.map((sensor, idx) => (
+                      <tr key={idx} className={!sensor.sensor_id ? 'ecm-row-pending' : ''}>
+                        <td className="ecm-pos mono">{sensor.position + 1}</td>
+                        <td>
+                          {sensor.sensor_id
+                            ? <>
+                              {sensorLabel(sensor)}
+                              {sensor.display_name && sensor.sensor_name && (
+                                <span className="ecm-key mono">{sensor.sensor_name}</span>
+                              )}
+                            </>
+                            : 'Not set up'}
+                        </td>
+                        <td>{sensor.sensor_id ? humanize(sensor.sensor_type) : ''}</td>
+                        <td>{sensor.sensor_id ? (sensor.unit || '–') : ''}</td>
+                        <td>{sensor.is_critical ? 'Yes' : ''}</td>
+                        <td>
+                          <div className="ecm-row-actions">
+                            <button type="button" className="btn btn-sm" onClick={() => handleEditSensor(idx)}>
+                              {sensor.sensor_id ? 'Edit' : 'Set up'}
+                            </button>
+                            {sensor.sensor_id && (
+                              <button type="button" className="btn-danger btn-sm" onClick={() => handleRemoveSensorFromList(idx)}>
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="form-actions">
+                <button type="button" onClick={() => setStep(2)} className="btn ecm-actions-start">Back</button>
                 <button
                   type="button"
                   onClick={handleFinalSubmit}
                   disabled={!isAllConfigured || loading}
                   className="btn-primary"
                 >
-                  {loading ? 'Submitting...' : isEditMode ? 'Save Sensors' : 'Create Equipment with Sensors'}
+                  {loading ? 'Saving…' : isEditMode ? 'Save sensors' : 'Add equipment'}
                 </button>
               </div>
-            </div>
+            </>
           )}
         </div>
       </div>
