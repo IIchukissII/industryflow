@@ -13,6 +13,7 @@ note built from the evidence alone, so an alert is never left without one.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol, TypedDict
 from urllib.parse import parse_qs, urlparse
@@ -65,12 +66,32 @@ class State(TypedDict, total=False):
     raw: list[dict[str, Any]]
     evidence: list[dict[str, str]]
     alert_text: str
+    services: str
     prompt: str
     redactions: dict[str, int]
     redacted: str
     text: str
     model: str
     error: str
+
+
+SECTIONS = (("what", "What happened"), ("impact", "Impact"), ("cause", "Likely cause"),
+            ("next_step", "Next step"))
+_HEADING = re.compile(r"^\s*(" + "|".join(label for _, label in SECTIONS) + r")\s*:\s*", re.I | re.M)
+# The dashboards order incidents by this; a severity the rules do not use sorts last.
+PRIORITY = {"critical": 1, "warning": 2, "info": 3}
+
+
+def sections(text: str) -> dict[str, str]:
+    """The note's four sections as fields, for the dashboards' columns. A section the model left out
+    is empty; text before the first heading belongs to none."""
+    keys = {label.lower(): key for key, label in SECTIONS}
+    found = {key: "" for key, _ in SECTIONS}
+    marks = list(_HEADING.finditer(text))
+    for mark, following in zip(marks, [*marks[1:], None]):
+        body = text[mark.end():following.start() if following else len(text)]
+        found[keys[mark.group(1).lower()]] = " ".join(body.split())
+    return found
 
 
 def _iso(t: datetime) -> str:
@@ -223,7 +244,8 @@ def build(config: Config, tools: Tools, writer: NoteWriter, publisher: Publisher
         reference = [e for e in evidence if e["source"].endswith("(reference)")]
         prompt = ("Alert: " + _flat(alert_text) + "\n\nObserved:\n" + block(observed)
                   + "\n\nRunbook reference:\n" + block(reference))
-        return {"alert_text": alert_text, "evidence": evidence, "prompt": prompt,
+        services = redactor(", ".join(services_of(state["alert"])))
+        return {"alert_text": alert_text, "evidence": evidence, "prompt": prompt, "services": services,
                 "redactions": redactor.record(), "redacted": redactor.summary()}
 
     async def explain(state: State) -> State:
@@ -260,7 +282,15 @@ def build(config: Config, tools: Tools, writer: NoteWriter, publisher: Publisher
             "redactions": state["redactions"],
             "redacted": state["redacted"],
             "error": state.get("error", ""),
+            "priority": PRIORITY.get(alert.get("labels", {}).get("severity", ""), 4),
+            "services": state["services"],
         }
+        if state["model"] == "none":
+            note.update(what=state["alert_text"], impact="",
+                        cause="Unknown: no model wrote this note",
+                        next_step="Read the evidence in the note")
+        else:
+            note.update(sections(state["text"]))
         await publisher.publish(note)
         return {}
 

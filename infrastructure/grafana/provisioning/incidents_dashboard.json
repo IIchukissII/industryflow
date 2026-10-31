@@ -7,7 +7,7 @@
     "ops-agent"
   ],
   "schemaVersion": 38,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "time": {
     "from": "now-7d",
@@ -80,6 +80,37 @@
         },
         "refresh": 2,
         "sort": 1
+      },
+      {
+        "name": "severity",
+        "label": "Priority",
+        "type": "custom",
+        "query": "critical,warning,info",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": []
+      },
+      {
+        "name": "incident",
+        "label": "Incident",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "description": "The fingerprint of the incident to show in the detail panel; empty shows the newest."
       }
     ]
   },
@@ -87,7 +118,8 @@
     {
       "id": 1,
       "type": "stat",
-      "title": "Notes in range",
+      "title": "P1 critical",
+      "description": "Critical alerts the agent explained in the selected time range.",
       "datasource": {
         "type": "loki",
         "uid": "Loki"
@@ -105,10 +137,34 @@
             "type": "loki",
             "uid": "Loki"
           },
-          "expr": "sum(count_over_time({job=\"ops-agent\", alertname=~\"$alertname\"}[$__range]))",
+          "expr": "sum(count_over_time({job=\"ops-agent\", alertname=~\"$alertname\", severity=\"critical\"}[$__range]))",
           "queryType": "instant"
         }
       ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "#d03b3b",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -117,23 +173,20 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "none",
+        "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "noValue": "0"
-        },
-        "overrides": []
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
       }
     },
     {
       "id": 2,
       "type": "stat",
-      "title": "Written without a model",
-      "description": "Notes built from the evidence alone because the model could not write them.",
+      "title": "P2 warning",
+      "description": "Warning alerts the agent explained in the selected time range.",
       "datasource": {
         "type": "loki",
         "uid": "Loki"
@@ -151,10 +204,34 @@
             "type": "loki",
             "uid": "Loki"
           },
-          "expr": "sum(count_over_time({job=\"ops-agent\", alertname=~\"$alertname\"} | json | model=\"none\" [$__range]))",
+          "expr": "sum(count_over_time({job=\"ops-agent\", alertname=~\"$alertname\", severity=\"warning\"}[$__range]))",
           "queryType": "instant"
         }
       ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "#fab219",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -163,29 +240,27 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "none",
+        "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "noValue": "0"
-        },
-        "overrides": []
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
       }
     },
     {
       "id": 3,
-      "type": "timeseries",
-      "title": "Notes by alert",
+      "type": "stat",
+      "title": "All incidents",
+      "description": "Every alert the agent explained in the selected time range, all priorities.",
       "datasource": {
         "type": "loki",
         "uid": "Loki"
       },
       "gridPos": {
         "h": 4,
-        "w": 12,
+        "w": 6,
         "x": 12,
         "y": 0
       },
@@ -196,41 +271,129 @@
             "type": "loki",
             "uid": "Loki"
           },
-          "expr": "sum by (alertname) (count_over_time({job=\"ops-agent\", alertname=~\"$alertname\"}[$__interval]))",
-          "legendFormat": "{{alertname}}"
+          "expr": "sum(count_over_time({job=\"ops-agent\", alertname=~\"$alertname\", severity=~\"$severity\"}[$__range]))",
+          "queryType": "instant"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 80,
-            "lineWidth": 1
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
           },
-          "unit": "none"
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "text",
+                "value": 1
+              }
+            ]
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi"
-        }
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
       }
     },
     {
       "id": 4,
-      "type": "logs",
-      "title": "Notes, newest first",
+      "type": "stat",
+      "title": "Written without a model",
+      "description": "Notes the agent built from the evidence alone, because no model answered.",
       "datasource": {
         "type": "loki",
         "uid": "Loki"
       },
       "gridPos": {
-        "h": 20,
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "expr": "sum(count_over_time({job=\"ops-agent\", alertname=~\"$alertname\", severity=~\"$severity\"} | json model=\"model\" | model=\"none\" [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "text",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Incidents over time, by priority",
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "description": "How many alerts the agent explained per interval, stacked by priority.",
+      "gridPos": {
+        "h": 7,
         "w": 24,
         "x": 0,
         "y": 4
@@ -242,7 +405,376 @@
             "type": "loki",
             "uid": "Loki"
           },
-          "expr": "{job=\"ops-agent\", alertname=~\"$alertname\"} | json | line_format \"{{.alertname}} ({{.severity}})\\n{{.text}}\\n\\nEvidence: {{.evidence}} \u00b7 redacted: {{.redacted}}\""
+          "expr": "sum by (severity) (count_over_time({job=\"ops-agent\", alertname=~\"$alertname\", severity=~\"$severity\"}[$__interval]))",
+          "legendFormat": "{{severity}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#8a8a85"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 85,
+            "lineWidth": 0,
+            "barAlignment": 0,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisSoftMin": 0,
+            "showPoints": "never",
+            "axisGridShow": true,
+            "axisPlacement": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "critical"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d03b3b"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "P1 critical"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "warning"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#fab219"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "P2 warning"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Incidents: highest priority first. Click an alert to open it below",
+      "description": "One row per alert the agent explained. Sorted by priority, newest first within a priority.",
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "queryType": "range",
+          "maxLines": 500,
+          "expr": "{job=\"ops-agent\", alertname=~\"$alertname\", severity=~\"$severity\"} | json priority=\"priority\", services=\"services\", what=\"what\", cause=\"cause\", next_step=\"next_step\", model=\"model\", fingerprint=\"fingerprint\""
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "labels",
+            "format": "auto",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "priority",
+                "destinationType": "number"
+              }
+            ]
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "priority",
+                "desc": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "includeByName": {
+              "Time": true,
+              "severity": true,
+              "alertname": true,
+              "services": true,
+              "what": true,
+              "cause": true,
+              "next_step": true,
+              "model": true,
+              "fingerprint": true,
+              "priority": true
+            },
+            "indexByName": {
+              "severity": 0,
+              "Time": 1,
+              "alertname": 2,
+              "services": 3,
+              "what": 4,
+              "cause": 5,
+              "next_step": 6,
+              "model": 7,
+              "fingerprint": 8,
+              "priority": 9
+            },
+            "renameByName": {
+              "severity": "Priority",
+              "Time": "Time",
+              "alertname": "Alert",
+              "services": "Services",
+              "what": "What happened",
+              "cause": "Likely cause",
+              "next_step": "Next step",
+              "model": "Written by"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto",
+              "wrapText": true
+            },
+            "inspect": true,
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Priority"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": {
+                        "text": "P1 critical",
+                        "color": "#d03b3b",
+                        "index": 0
+                      },
+                      "warning": {
+                        "text": "P2 warning",
+                        "color": "#fab219",
+                        "index": 1
+                      },
+                      "info": {
+                        "text": "P3 info",
+                        "color": "#8a8a85",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "P4 unknown",
+                        "color": "#8a8a85",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 170
+              },
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Alert"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 240
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open this incident",
+                    "url": "/grafana/d/ops-agent-incidents/incidents?${__url_time_range}&var-incident=${__data.fields.fingerprint}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Services"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Written by"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fingerprint"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "priority"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "logs",
+      "title": "Incident detail: the one picked in the table, or the newest",
+      "description": "The full note for one alert, with the evidence it cites. Generated text: advice beside the alert, not a diagnosis.",
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "queryType": "range",
+          "maxLines": 1,
+          "expr": "{job=\"ops-agent\"} |= \"$incident\" | json | line_format \"{{.alertname}}    {{ if eq .severity \\\"critical\\\" }}P1 critical{{ else if eq .severity \\\"warning\\\" }}P2 warning{{ else }}{{.severity}}{{ end }}    {{.services}}\\n\\n{{ if .what }}WHAT HAPPENED\\n{{.what}}\\n\\nIMPACT\\n{{.impact}}\\n\\nLIKELY CAUSE\\n{{.cause}}\\n\\nNEXT STEP\\n{{.next_step}}\\n\\nWritten by {{.model}}. Advice beside the alert, not a diagnosis.{{ else }}{{.text}}{{ end }}\\n\\nEvidence: {{.evidence}}\\nRedacted: {{.redacted}}\""
         }
       ],
       "options": {

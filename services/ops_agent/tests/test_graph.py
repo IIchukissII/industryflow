@@ -171,3 +171,24 @@ async def test_runbook_items_reach_the_model_as_reference_not_observation(config
     assert "(runbook " not in observed and "Observed:" in observed
     assert "(runbook " in reference and all("(reference)" in line for line in reference.splitlines())
     assert "A reference item is never a cause" in graph.SYSTEM
+
+
+def test_the_notes_sections_become_fields():
+    text = ("What happened: Redis is near its limit [E1].\nImpact: writes may be refused.\n"
+            "Likely cause:\n  memory grew [E2].\nNext step: raise maxmemory [R1].")
+    assert graph.sections(text) == {"what": "Redis is near its limit [E1].", "impact": "writes may be refused.",
+                                    "cause": "memory grew [E2].", "next_step": "raise maxmemory [R1]."}
+    assert graph.sections("no headings at all") == {"what": "", "impact": "", "cause": "", "next_step": ""}
+
+
+@pytest.mark.asyncio
+async def test_a_note_carries_its_priority_services_and_sections(config):
+    _, _, note = await _run(config)
+    assert note["priority"] == 2 and note["services"] == "redis, api-gateway, redis-exporter"
+    assert note["what"] == "memory high [E1]." and note["cause"] == ""
+
+
+@pytest.mark.asyncio
+async def test_a_note_without_a_model_still_fills_the_columns(config):
+    _, _, note = await _run(config, writer=FakeWriter(fail=True))
+    assert note["what"] == note["alert"] and note["cause"].startswith("Unknown")
