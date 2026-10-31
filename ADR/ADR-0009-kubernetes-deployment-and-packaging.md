@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0009 — Kubernetes deployment packaged with Helm
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-17
+- **Date:** 2026-06-27; changed 2026-10-31
 - **Parent:** ADR-0001
 - **Related:** ADR-0002 and ADR-0004 (the TLS edges), ADR-0006 (Spark checkpoints), ADR-0016
   (monitoring), ADR-0018 (single-host Compose)
@@ -66,6 +66,7 @@ without a fork, and must never contain secrets.
 | Autoscaling policy (workloads, metrics, thresholds) | First load test against the chart |
 | Secrets backend | First production cluster |
 | Native Spark-on-Kubernetes submission | A Spark job needing more than one process |
+| The chart proven on a live cluster: per-user notebook pods, network-policy enforcement, non-root stateful infrastructure with volume ownership | The first IndustryFlow cluster |
 
 ## References
 
