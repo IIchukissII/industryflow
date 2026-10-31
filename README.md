@@ -34,6 +34,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 | Extensions | Domain feature transforms and detectors as plugins | [ADR-0008](ADR/ADR-0008-extension-and-plugin-interface.md), [ADR-0010](ADR/ADR-0010-extension-plugin-mechanism.md) |
 | Deployment | Docker Compose (single host), Helm chart (Kubernetes) | [ADR-0009](ADR/ADR-0009-kubernetes-deployment-and-packaging.md) |
 | Observability | Prometheus, Grafana, Loki; platform alert rules shared by Compose and the chart, routed by Alertmanager | [ADR-0016](ADR/ADR-0016-observability-and-monitoring-integration.md) |
+| Operator agents | Agents as services: a graph behind a trigger-in, note-out contract, tools over MCP, the model over an API; the infrastructure agent explains platform alerts on the operator's dashboards | [ADR-0045](ADR/ADR-0045-agent-runtime.md), [ADR-0046](ADR/ADR-0046-infrastructure-agent.md) |
 
 ## Technology
 
