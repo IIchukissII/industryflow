@@ -21,7 +21,7 @@ env:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       # A manual dispatch builds everything; there is no diff to filter on. A push to main publishes
@@ -38,6 +38,7 @@ jobs:
         with:
           filters: |
             relevant:
+              - 'scripts/ci/requirements.txt'
               # Every build context in the matrix below, whole: an image is everything its context
               # COPYs, not only its Dockerfile and pins.
               - 'services/**'
@@ -66,6 +67,7 @@ jobs:
               - 'scripts/check_spark_version_parity.py'
               - 'scripts/tests/test_spark_version_parity.py'
               - '.github/workflows/images.yml'
+              - '.github/workflows/unit-tests.yml'
 
   # Seconds, and it gates the matrix below: a Spark image whose base tag and Kafka connector
   # coordinate disagree is not worth building, because building it is exactly what will NOT catch
@@ -76,14 +78,14 @@ jobs:
   spark-version-parity:
     needs: changes
     if: needs.changes.outputs.relevant == 'true' || needs.changes.outputs.spark_parity == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - run: pip install pytest==9.1.1
+      - run: pip install -r scripts/ci/requirements.txt
       - name: The base tag and the connector coordinates must agree
         run: python scripts/check_spark_version_parity.py
       - name: The check itself must still be able to fail
@@ -99,7 +101,7 @@ jobs:
     # run exactly when the change detector says so, whatever happens to the gating job's own `if`.
     needs: [changes, spark-version-parity]
     if: needs.changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -272,7 +274,7 @@ jobs:
           IMAGE: ${{ env.REGISTRY }}/industryflow-${{ matrix.name }}:${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
-          pip install --quiet pyyaml==6.0.3
+          pip install --quiet -r scripts/ci/requirements.txt
           python scripts/edge_env.py compose > compose.env
           python scripts/edge_env.py helm --set notebookHub.enabled=true > helm.env
           for env in compose helm; do
@@ -336,7 +338,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
     # Dependency CVE audit. Report-only for now (informational) — tighten to gating later.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     continue-on-error: true
     steps:
@@ -346,7 +348,7 @@ jobs:
           python-version: "3.14"
       - name: pip-audit (runtime requirements)
         run: |
-          pip install pip-audit==2.7.3
+          pip install -r scripts/ci/requirements.txt
           for req in $(git ls-files '**/requirements.txt'); do
             echo "::group::pip-audit $req"
             pip-audit -r "$req" || true
@@ -362,7 +364,7 @@ jobs:
     name: images-gate
     needs: [changes, spark-version-parity, build-scan, deps-audit]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Gate

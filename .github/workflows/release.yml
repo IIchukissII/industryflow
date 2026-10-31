@@ -19,7 +19,7 @@ env:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       actions: read
@@ -64,7 +64,7 @@ jobs:
       - name: The images to release
         id: images
         run: |
-          pip install -q PyYAML==6.0.3
+          pip install -q -r scripts/ci/requirements.txt
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import yaml
           matrix = yaml.safe_load(open(".github/workflows/images.yml"))["jobs"]["build-scan"]["strategy"]["matrix"]["include"]
