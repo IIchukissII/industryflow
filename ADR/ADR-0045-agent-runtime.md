@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0045 — Agents: a graph behind a platform contract, tools over MCP, the model over an API
 
 - **Status:** Accepted
-- **Date:** 2026-10-31
+- **Date:** 2026-10-31; changed 2026-10-31
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md) (dec 1: observability and analytics are in
   scope)
 - **Related:** [ADR-0036](ADR-0036-out-of-process-model-runtime.md) (dec 1: a separate service, deployed
@@ -80,6 +80,7 @@ authoritative.
 | Tools that act, and the human confirmation they need | The first agent that proposes an action |
 | Cost limits per agent or per day | The first hosted-model bill that matters |
 | Agents serving tenants rather than operators | The first tenant-facing agent; tenant isolation then binds every tool |
+| Tracing an agent's runs (each step, tool and model call, with timing, tokens and errors) on the open generative-AI telemetry conventions, kept in the operator's own stack and without prompt text by default | A note whose making cannot be reconstructed from the logs, or a second agent |
 
 ## References
 
