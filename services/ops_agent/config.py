@@ -32,6 +32,8 @@ class Config:
     model_api_key: str
     effort: str
     tools: str
+    # Whether the Anthropic SDK has a credential to use (it reads the key from the environment itself).
+    anthropic_credentials: bool = True
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -54,6 +56,7 @@ class Config:
             effort=_env("OPS_AGENT_EFFORT", "medium"),
             # `stdio` launches the tool server as a subprocess; a URL reaches one over HTTP.
             tools=_env("OPS_AGENT_TOOLS", "stdio"),
+            anthropic_credentials=bool(_env("ANTHROPIC_API_KEY") or _env("ANTHROPIC_AUTH_TOKEN")),
         )
 
     def refusals(self) -> list[str]:
@@ -64,6 +67,9 @@ class Config:
             problems.append("OPS_AGENT_WEBHOOK_SECRET is unset or shorter than 32 characters")
         if self.model_provider not in ("anthropic", "openai-compatible"):
             problems.append(f"OPS_AGENT_MODEL_PROVIDER {self.model_provider!r} is not anthropic or openai-compatible")
+        if self.model_provider == "anthropic" and not self.anthropic_credentials:
+            # Without it every note would quietly be the evidence-only fallback.
+            problems.append("ANTHROPIC_API_KEY is unset, so the anthropic provider has no credential")
         if self.model_provider == "openai-compatible" and not self.model_base_url:
             problems.append("OPS_AGENT_MODEL_BASE_URL is required for an openai-compatible provider")
         return problems

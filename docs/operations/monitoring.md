@@ -133,7 +133,10 @@ receivers:
 | Sent to the model | The alert and the evidence, after redaction: tenant identifiers, emails, network addresses and credential-shaped strings become `<tenant-1>`, `<email-1>`, … ; the note records the counts per category |
 | Output | Loki stream `{job="ops-agent"}`; the `complete-system` and Incidents dashboards draw it as annotations. No Grafana credential |
 | Without a model | A model error or refusal still publishes a note: the evidence listing, `model` = `none` |
-| Kubernetes | `observability.opsAgent` in the chart values (endpoints of your monitoring stack, `secrets.data.OPS_AGENT_WEBHOOK_SECRET`); the webhook URL is the `<release>-ops-agent` Service |
+| Once per firing | A firing (fingerprint and start) is explained once; remembered 7 days, and after a restart the agent finds its earlier note in Loki |
+| Alert storm | At most 5 alerts of one webhook (critical first) and 10 waiting; the rest are logged as not explained |
+| Refuses to start | Webhook secret under 32 characters; `anthropic` without `ANTHROPIC_API_KEY`; `openai-compatible` without `OPS_AGENT_MODEL_BASE_URL` |
+| Kubernetes | `observability.opsAgent` in the chart values (endpoints of your monitoring stack, `secrets.data.OPS_AGENT_WEBHOOK_SECRET`); the webhook URL is the `<release>-ops-agent` Service. With `networkPolicy.enabled`: ingress from `monitoringNamespace` only; egress to DNS, that namespace, HTTPS on public addresses, and `modelEndpoints` (an in-house model server's CIDR and port) |
 
 ## Grafana
 

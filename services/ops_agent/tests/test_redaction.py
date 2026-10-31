@@ -43,3 +43,49 @@ def test_the_record_holds_counts_never_values():
 def test_plain_operational_text_is_untouched():
     line = "consumer group alert-detector lag 1200 on sensor-data-raw.measurements; disk 84% used"
     assert Redactor()(line) == line
+
+
+import pytest  # noqa: E402
+
+UUID = "0b2f503a-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+
+
+@pytest.mark.parametrize("raw,secret", [
+    ("postgresql://ingest:S3cretPass@timescaledb:5432/industryflow", "S3cretPass"),
+    ("redis://:hunter22@redis:6379/0", "hunter22"),
+    ("POSTGRES_PASSWORD=pa55word", "pa55word"),
+    ("MINIO_ROOT_PASSWORD=minio-root-pw", "minio-root-pw"),
+    ("access_token=abc123def", "abc123def"),
+    ("refresh_token: zyx987", "zyx987"),
+    ("client_secret: s3cr3t-value", "s3cr3t-value"),
+    ("aws_secret_access_key = wJalrXUtnFEMI", "wJalrXUtnFEMI"),
+    ('password="hunter2xx"', "hunter2xx"),
+    ("password='hunter2yy'", "hunter2yy"),
+    ('{"token":"abc"}', '"abc"'),
+    ("Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="),
+    ("ghp_abcdefghijklmnopqrstuvwxyz0123456789", "ghp_abcdefghijklmnop"),
+    ("key AKIAIOSFODNN7EXAMPLE used", "AKIAIOSFODNN7EXAMPLE"),
+])
+def test_credentials_in_their_common_shapes_are_replaced(raw, secret):
+    out = Redactor()(raw)
+    assert secret not in out and "<secret-1>" in out, out
+
+
+@pytest.mark.parametrize("raw,value,category", [
+    ("from fe80::1 to", "fe80::1", "address"),
+    ("peer 2001:db8::8a2e:370:7334 closed", "2001:db8::8a2e:370:7334", "address"),
+    ("listening on [::1]:8000", "::1", "address"),
+    (f"cursor cold_read_tenant_{UUID.replace('-', '_')}_2026-10-31", UUID.replace("-", "_"), "tenant"),
+    (f"user_{UUID} logged in", UUID, "tenant"),
+    ("company 0b2f503a1c2d4e5f8a9b0c1d2e3f4a5b deleted", "0b2f503a1c2d4e5f8a9b0c1d2e3f4a5b", "tenant"),
+    ("Uppercase 0B2F503A-1C2D-4E5F-8A9B-0C1D2E3F4A5B", "0B2F503A", "tenant"),
+    ("login bob%40example.com failed", "bob%40example.com", "email"),
+])
+def test_identifiers_hidden_inside_names_or_encodings_are_replaced(raw, value, category):
+    out = Redactor()(raw)
+    assert value not in out and f"<{category}-1>" in out, out
+
+
+def test_clock_times_versions_and_ports_are_not_addresses():
+    line = "2026-10-31 10:42:31 spark 4.1.3 on port 8000 retried 3x; ratio 1.2.3"
+    assert Redactor()(line) == line

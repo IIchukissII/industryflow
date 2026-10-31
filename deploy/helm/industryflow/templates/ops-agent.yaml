@@ -96,12 +96,19 @@ spec:
               value: {{ $agent.modelBaseUrl | quote }}
             - name: OPS_AGENT_EFFORT
               value: {{ $agent.effort | quote }}
-            {{- range $key := list "OPS_AGENT_WEBHOOK_SECRET" "OPS_AGENT_MODEL_API_KEY" "ANTHROPIC_API_KEY" }}
+            - name: OPS_AGENT_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: OPS_AGENT_WEBHOOK_SECRET
+            {{- /* One of the two model keys is used, by provider; an existingSecret may hold only it. */}}
+            {{- range $key := list "OPS_AGENT_MODEL_API_KEY" "ANTHROPIC_API_KEY" }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:
                   name: {{ $secret }}
                   key: {{ $key }}
+                  optional: true
             {{- end }}
           volumeMounts:
             - name: tmp
@@ -123,8 +130,9 @@ spec:
 {{- end }}
 {{- if .Values.networkPolicy.enabled }}
 ---
-# Only the operator's monitoring namespace reaches the receiver; the agent reaches DNS, that namespace
-# and the model endpoint's ports, and nothing in the platform (ADR-0046 dec 7).
+# Only the operator's monitoring namespace reaches the receiver. The agent reaches DNS, that namespace,
+# HTTPS on public addresses (a hosted model API) and the operator's listed model endpoints; private
+# ranges, and so every platform service, are excluded (ADR-0046 dec 7).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -135,6 +143,7 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: ops-agent
+      app.kubernetes.io/instance: {{ .Release.Name }}
   policyTypes: [Ingress, Egress]
   ingress:
     - from:
@@ -151,9 +160,18 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $agent.monitoringNamespace }}
-    - ports:
-        {{- range $agent.modelPorts }}
-        - { port: {{ . }}, protocol: TCP }
-        {{- end }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 127.0.0.0/8]
+      ports:
+        - { port: 443, protocol: TCP }
+    {{- range $agent.modelEndpoints }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr }}
+      ports:
+        - { port: {{ .port }}, protocol: TCP }
+    {{- end }}
 {{- end }}
 {{- end }}

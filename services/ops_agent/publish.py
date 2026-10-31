@@ -24,6 +24,20 @@ class LokiPublisher:
         self._url = f"{config.loki_url}/loki/api/v1/push"
         self._transport = transport
 
+    async def published(self, key: str, days: int = 7) -> bool:
+        """Whether a note for this firing is already in the log store, so a restarted agent does not
+        explain it again. An unreadable store answers no: a second note beats none."""
+        now = time.time_ns()
+        params = {"query": f'{{job="ops-agent"}} |= `{key}`', "start": str(now - days * 86_400 * 10**9),
+                  "end": str(now), "limit": "1"}
+        try:
+            async with httpx.AsyncClient(timeout=10.0, transport=self._transport) as http:
+                r = await http.get(self._url.replace("/push", "/query_range"), params=params)
+            r.raise_for_status()
+            return any(s.get("values") for s in r.json().get("data", {}).get("result", []))
+        except (httpx.HTTPError, ValueError):
+            return False
+
     async def publish(self, note: dict[str, Any]) -> None:
         stream = {**STREAM, "alertname": note["alertname"], "severity": note["severity"]}
         async with httpx.AsyncClient(timeout=15.0, transport=self._transport) as http:

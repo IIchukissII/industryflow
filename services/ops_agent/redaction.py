@@ -8,35 +8,57 @@ The categories are the ones ADR-0046 names: tenant identifiers, user addresses, 
 credential-shaped strings. Each value becomes a stable placeholder within one note (the same tenant
 is `<tenant-1>` wherever it appears), so the evidence stays correlated after redaction. The record of
 a sending keeps how many values of each category were replaced, never the values.
+
+Identifiers are bounded by non-identifier characters rather than word boundaries, because the
+platform writes them inside names joined by underscores (`tenant_<uuid>`, `cold_read_<…>`), where a
+word boundary never falls. Network addresses are confirmed by the standard library's parser, so
+compressed IPv6 is caught and a clock time is not.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
-_UUID = r"[0-9a-fA-F]{8}[-_][0-9a-fA-F]{4}[-_][0-9a-fA-F]{4}[-_][0-9a-fA-F]{4}[-_][0-9a-fA-F]{12}"
+_HEX = "0-9a-fA-F"
+_UUID = rf"[{_HEX}]{{8}}[-_][{_HEX}]{{4}}[-_][{_HEX}]{{4}}[-_][{_HEX}]{{4}}[-_][{_HEX}]{{12}}"
+# A key that names a credential, anywhere in an identifier: password, POSTGRES_PASSWORD, access_token,
+# client_secret, aws_secret_access_key, api-key.
+_KEY = r"[A-Za-z0-9_.-]*(?:passw(?:or)?d|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)[A-Za-z0-9_.-]*"
 
-# Order matters: a credential pattern must claim `token=<uuid>` before the tenant pattern claims the
-# uuid inside it, and a schema name must be taken whole before its uuid is.
-_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("secret", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")),
-    ("secret", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")),  # JWT
-    ("secret", re.compile(r"\bsk-[A-Za-z0-9_-]{16,}")),
-    # key=value and "key": "value": only the value (group `v`) is replaced, so the key stays readable.
-    ("secret", re.compile(
-        r"(?i)\b(?:password|passwd|pwd|secret|token|api[_-]?key)\s*[=:]\s*(?P<v>[^\s,;&\"'<]{4,})"
-    )),
-    ("secret", re.compile(
-        r"(?i)\"(?:password|passwd|pwd|secret|token|api[_-]?key)\"\s*:\s*\"(?P<v>[^\"<]{4,})\""
-    )),
-    ("tenant", re.compile(rf"\btenant_(?:sqlproxy_|reader_)?{_UUID}\b")),
-    ("tenant", re.compile(rf"\b{_UUID}\b")),
-    ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
-    ("address", re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")),
-    ("address", re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){4,7}[0-9a-fA-F]{1,4}\b")),
-    ("secret", re.compile(r"\b[A-Fa-f0-9]{40,}\b")),
+
+def _is_ip(text: str) -> bool:
+    candidate = text.strip("[]").split("%", 1)[0]
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return False
+    return True
+
+
+# (category, pattern, accept). Order matters: credentials are claimed before the identifiers inside
+# them, and the value group `v`, when a pattern has one, is the only part replaced, so the key stays
+# readable. A tenant's schema and role names carry its uuid, which the uuid pattern replaces in
+# place; the names themselves are the contract package's, not restated here.
+_PATTERNS: list[tuple[str, re.Pattern[str], Callable[[str], bool] | None]] = [
+    ("secret", re.compile(r"(?i)\b(?:bearer|basic)\s+(?P<v>[A-Za-z0-9._~+/=-]{8,})"), None),
+    ("secret", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), None),  # JWT
+    ("secret", re.compile(r"\b(?:sk|ghp|gho|ghu|ghs|ghr|github_pat|xox[abpr])[-_][A-Za-z0-9_-]{16,}"), None),
+    ("secret", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"), None),
+    # scheme://user:password@host — the password only.
+    ("secret", re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]*:(?P<v>[^@\s/]+)@"), None),
+    # "key": "value" and key=value / key: value, quoted or not.
+    ("secret", re.compile(rf"(?i)\"{_KEY}\"\s*:\s*\"(?P<v>[^\"]+)\""), None),
+    ("secret", re.compile(rf"(?i)(?<![A-Za-z0-9]){_KEY}\s*[=:]\s*[\"']?(?P<v>[^\s,;&\"'<>]{{2,}})"), None),
+    ("tenant", re.compile(rf"(?<![{_HEX}]){_UUID}(?![{_HEX}])"), None),
+    ("tenant", re.compile(rf"(?<![{_HEX}])[{_HEX}]{{32}}(?![{_HEX}])"), None),
+    ("email", re.compile(r"[A-Za-z0-9._%+-]+(?:@|%40)[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), None),
+    ("address", re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])"), _is_ip),
+    ("address", re.compile(rf"(?<![\w:.])\[?[{_HEX}:]*:[{_HEX}:]*(?:%\w+)?\]?(?![\w:.])"), _is_ip),
+    ("secret", re.compile(rf"(?<![{_HEX}])[{_HEX}]{{40,}}(?![{_HEX}])"), None),
 ]
 
 
@@ -55,19 +77,25 @@ class Redactor:
         self.counts[category] += 1
         return self._seen[key]
 
-    def _replace(self, category: str, m: re.Match[str]) -> str:
-        if "v" not in m.re.groupindex:
-            return self._placeholder(category, m.group(0).strip())
-        start, end = m.span("v")
+    def _replace(self, category: str, accept: Callable[[str], bool] | None, m: re.Match[str]) -> str:
         whole = m.group(0)
+        if accept is not None and not accept(whole):
+            return whole
+        if "v" not in m.re.groupindex:
+            return self._placeholder(category, whole.strip())
+        start, end = m.span("v")
         offset = m.start()
         return whole[: start - offset] + self._placeholder(category, m.group("v")) + whole[end - offset:]
 
     def __call__(self, text: str) -> str:
-        for category, pattern in _PATTERNS:
-            text = pattern.sub(lambda m, c=category: self._replace(c, m), text)
+        for category, pattern, accept in _PATTERNS:
+            text = pattern.sub(lambda m, c=category, a=accept: self._replace(c, a, m), text)
         return text
 
     def record(self) -> dict[str, int]:
         """What a sending's record keeps: counts per category, never a value."""
         return dict(sorted(self.counts.items()))
+
+    def summary(self) -> str:
+        """The record as one line, for the dashboards."""
+        return ", ".join(f"{k} {v}" for k, v in self.record().items()) or "nothing"

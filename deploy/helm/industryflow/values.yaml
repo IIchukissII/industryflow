@@ -503,8 +503,10 @@ observability:
     model: claude-opus-5-5
     modelBaseUrl: ""
     effort: medium
-    # Egress ports to the model endpoint (HTTPS for hosted APIs; add the port of an in-house server).
-    modelPorts: [443]
+    # A model server on the operator's own network (an in-house GPU host): its address range and port,
+    # e.g. [{cidr: <gpu-host-ip>/32, port: 8000}]. A hosted API needs nothing here: HTTPS to public
+    # addresses is allowed, private ranges (the cluster among them) are not.
+    modelEndpoints: []
     resources:
       requests: { cpu: 50m, memory: 128Mi }
       limits: { cpu: 500m, memory: 384Mi }

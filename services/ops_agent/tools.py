@@ -11,6 +11,8 @@ module over stdio. Results are capped, because they are evidence for one note, n
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -27,6 +29,27 @@ MAX_LINE_CHARS = 500
 ERROR_FILTER = r'|~ "(?i)(error|exception|traceback|fatal|refused|failed|timeout|denied)"'
 
 
+def _cut(line: str) -> str:
+    """A line within MAX_LINE_CHARS, cut at a space: a value cut in half would reach the redactor
+    as a fragment it cannot recognise."""
+    if len(line) <= MAX_LINE_CHARS:
+        return line
+    head = line[:MAX_LINE_CHARS]
+    return (head.rsplit(" ", 1)[0] if " " in head else "") + " …"
+
+
+def _reported(fn: Callable[..., Awaitable[dict[str, Any]]]) -> Callable[..., Awaitable[dict[str, Any]]]:
+    """A failure comes back as data with its cause: the MCP layer would otherwise replace it with a
+    generic message, and the note would say only that the store was unavailable."""
+    @functools.wraps(fn)
+    async def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        try:
+            return await fn(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 — reported to the caller as evidence
+            return {"error": f"{type(exc).__name__}: {exc}"}
+    return wrapper
+
+
 def build_server(config: Config, transport: httpx.AsyncBaseTransport | None = None) -> MCPServer:
     server = MCPServer("industryflow-ops")
     rows = runbooks.load(config.runbooks_dir) if config.runbooks_dir.is_dir() else []
@@ -35,6 +58,7 @@ def build_server(config: Config, transport: httpx.AsyncBaseTransport | None = No
         return httpx.AsyncClient(timeout=15.0, transport=transport)
 
     @server.tool()
+    @_reported
     async def prometheus_range(query: str, start: str, end: str, step: str = "60s") -> dict[str, Any]:
         """A PromQL range query over the platform's metrics; at most 10 series of 120 points."""
         async with client() as http:
@@ -47,6 +71,7 @@ def build_server(config: Config, transport: httpx.AsyncBaseTransport | None = No
                 "truncated": len(result) > MAX_SERIES}
 
     @server.tool()
+    @_reported
     async def loki_errors(service: str, start: str, end: str, limit: int = 40) -> dict[str, Any]:
         """Error lines from one service's logs between start and end, newest first."""
         selector = config.log_selector % service.replace('"', "")
@@ -55,13 +80,14 @@ def build_server(config: Config, transport: httpx.AsyncBaseTransport | None = No
                                params={"query": f"{selector} {ERROR_FILTER}", "start": start, "end": end,
                                        "limit": min(limit, MAX_LINES), "direction": "backward"})
         r.raise_for_status()
-        lines = [{"ts": ts, "line": line[:MAX_LINE_CHARS]}
+        lines = [{"ts": ts, "line": _cut(line)}
                  for stream in r.json().get("data", {}).get("result", [])
                  for ts, line in stream.get("values", [])]
         lines.sort(key=lambda x: x["ts"], reverse=True)
         return {"service": service, "lines": lines[:MAX_LINES]}
 
     @server.tool()
+    @_reported
     async def active_alerts() -> dict[str, Any]:
         """The alerts the operator's alert router holds now (its own state, never tenant alerts)."""
         async with client() as http:
@@ -72,6 +98,7 @@ def build_server(config: Config, transport: httpx.AsyncBaseTransport | None = No
                            for a in r.json()[:50]]}
 
     @server.tool()
+    @_reported
     async def runbook_rows(text: str, limit: int = 3) -> dict[str, Any]:
         """The runbook rows (symptom, cause, fix) that best match a description of the problem."""
         return {"rows": [vars(row) for row in runbooks.match(rows, text, limit)]}

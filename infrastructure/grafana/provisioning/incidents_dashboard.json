@@ -242,7 +242,7 @@
             "type": "loki",
             "uid": "Loki"
           },
-          "expr": "{job=\"ops-agent\", alertname=~\"$alertname\"} | json | line_format \"{{.alertname}} ({{.severity}})\\n{{.text}}\\n\\nEvidence: {{.evidence}} \u00b7 redacted: {{.redactions}}\""
+          "expr": "{job=\"ops-agent\", alertname=~\"$alertname\"} | json | line_format \"{{.alertname}} ({{.severity}})\\n{{.text}}\\n\\nEvidence: {{.evidence}} \u00b7 redacted: {{.redacted}}\""
         }
       ],
       "options": {

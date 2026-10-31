@@ -59,7 +59,8 @@ async def test_logs_select_the_service_and_only_error_lines(config):
     query = seen[0].url.params["query"]
     assert query.startswith('{service="redis} or {x="}') and "error" in query
     assert [l["ts"] for l in out["lines"]] == ["2", "1"]
-    assert len(out["lines"][1]["line"]) == tools.MAX_LINE_CHARS
+    # Cut at a space, never through a value the redactor would then see only half of.
+    assert out["lines"][1]["line"] == "ERROR …"
 
 
 @pytest.mark.asyncio
@@ -102,3 +103,30 @@ async def test_a_note_is_pushed_to_its_own_log_stream(config):
     assert seen[0].url.path == "/loki/api/v1/push"
     assert stream["stream"] == {"job": "ops-agent", "alertname": "IndustryFlowRedisDown", "severity": "warning"}
     assert json.loads(stream["values"][0][1]) == note
+
+
+@pytest.mark.asyncio
+async def test_a_store_failure_comes_back_with_its_cause(config):
+    out = await _call(tools.build_server(config(), httpx.MockTransport(lambda r: httpx.Response(503))),
+                      "prometheus_range", {"query": "up", "start": "a", "end": "b"})
+    assert out["error"].startswith("HTTPStatusError") and "503" in out["error"]
+
+
+@pytest.mark.asyncio
+async def test_the_log_store_answers_whether_a_firing_has_a_note(config):
+    import publish
+
+    seen = []
+
+    def handle(request):
+        seen.append(request)
+        found = "f1@" in request.url.params["query"]
+        return httpx.Response(200, json={"data": {"result": [{"values": [["1", "{}"]]}] if found else []}})
+
+    publisher = publish.LokiPublisher(config(), httpx.MockTransport(handle))
+    assert await publisher.published("f1@2026-10-31T10:00:00Z") is True
+    assert await publisher.published("f2@2026-10-31T10:00:00Z") is False
+    assert seen[0].url.path == "/loki/api/v1/query_range"
+    assert seen[0].url.params["query"] == '{job="ops-agent"} |= `f1@2026-10-31T10:00:00Z`'
+    unreachable = publish.LokiPublisher(config(), httpx.MockTransport(lambda r: httpx.Response(500)))
+    assert await unreachable.published("f1@x") is False
