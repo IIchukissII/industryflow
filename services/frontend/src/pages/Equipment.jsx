@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useState, useEffect, useCallback } from 'react';
+import { humanize } from '../utils/humanize';
 import EquipmentConfigModal from '../components/EquipmentConfigModal';
 import { getEquipment, getEquipmentById, getEquipmentSensors, deleteEquipment } from '../services/equipmentApi';
 import './Equipment.css';
@@ -12,7 +13,6 @@ import { sensorLabel } from '../utils/sensors';
 import { errorText } from '../utils/errors';
 
 // "grow-cabinet" -> "Grow cabinet"
-const humanize = (t) => (t ? (t.charAt(0).toUpperCase() + t.slice(1)).replace(/[-_]+/g, ' ') : '');
 
 // The machine's own small mandala: one node per configured sensor around a gold core.
 function SensorRing({ count }) {
