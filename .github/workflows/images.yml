@@ -292,6 +292,11 @@ jobs:
           echo "::group::nginx -t with the dashboards route on"
           docker run --rm --env-file compose.env -e EDGE_GRAFANA=grafana:3000 "$IMAGE" sh -c \
             '/docker-entrypoint.d/10-edge-config.sh && grep -q "location /grafana/" /etc/nginx/conf.d/edge-optional/grafana.conf && nginx -t'
+          docker run --rm --env-file compose.env -e EDGE_GRAFANA=grafana:3000 -e "EDGE_GRAFANA_ALLOW=192.0.2.0/24,2001:db8::1" "$IMAGE" sh -c \
+            '/docker-entrypoint.d/10-edge-config.sh && grep -q "deny all;" /etc/nginx/conf.d/edge-optional/grafana.conf && nginx -t'
+          if docker run --rm --env-file compose.env -e EDGE_GRAFANA=grafana:3000 -e "EDGE_GRAFANA_ALLOW=192.0.2.1;allow" "$IMAGE" nginx -t; then
+            echo "::error::the edge started with an invalid dashboards allowlist"; exit 1
+          fi
           echo "::endgroup::"
           grep -v '^EDGE_ML_SERVICE=' compose.env > incomplete.env
           if docker run --rm --env-file incomplete.env "$IMAGE" nginx -t; then

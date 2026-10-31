@@ -148,10 +148,9 @@ def test_the_dashboards_route_is_rendered_only_when_its_upstream_is_named():
     # ADR-0016 dec 6: optional, so it is not in the template's required set, and the entrypoint
     # renders it with exactly its own variable (envsubst unrestricted would eat nginx's $vars).
     code = "\n".join(line for line in GRAFANA_ROUTE.splitlines() if not line.lstrip().startswith("#"))
-    assert set(re.findall(r"\$\{(EDGE_\w+)\}", code)) == {"EDGE_GRAFANA"}
+    assert set(re.findall(r"\$\{(EDGE_\w+)\}", code)) == {"EDGE_GRAFANA", "EDGE_GRAFANA_ACCESS"}
     assert "EDGE_GRAFANA" not in _template_vars()
     assert 'if [ -n "${EDGE_GRAFANA:-}" ]' in ENTRYPOINT
-    assert "envsubst '${EDGE_GRAFANA}'" in ENTRYPOINT
     assert "include /etc/nginx/conf.d/edge-optional/*.conf;" in TEMPLATE
     dockerfile = (FRONTEND / "Dockerfile").read_text()
     assert "COPY grafana.conf.template /etc/nginx/edge/grafana.conf.template" in dockerfile
@@ -180,3 +179,10 @@ def test_grafana_serves_from_the_path_the_edge_forwards():
     assert env["GF_SERVER_SERVE_FROM_SUB_PATH"] == "true"
     assert "/grafana/api/health" in " ".join(grafana["healthcheck"]["test"])
     assert any(p.startswith("127.0.0.1:") for p in grafana["ports"])
+
+
+def test_the_dashboards_source_allowlist_is_optional_and_validated():
+    assert compose_env()["EDGE_GRAFANA_ALLOW"] == ""
+    assert "${EDGE_GRAFANA_ACCESS}" in GRAFANA_ROUTE
+    assert "envsubst '${EDGE_GRAFANA} ${EDGE_GRAFANA_ACCESS}'" in ENTRYPOINT
+    assert "deny all;" in ENTRYPOINT and "refusing to start: EDGE_GRAFANA_ALLOW" in ENTRYPOINT

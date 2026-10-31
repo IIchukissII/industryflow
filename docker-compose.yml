@@ -660,6 +660,8 @@ services:
       EDGE_OBJECT_STORE_URL: ${MINIO_ENDPOINT:-http://minio:9000}
       # Optional: the dashboards at /grafana/ (ADR-0016 dec 6), e.g. grafana:3000. Unset: no route.
       EDGE_GRAFANA: ${EDGE_GRAFANA:-}
+      # Optional: the only source addresses or CIDR blocks /grafana/ answers. Unset: any.
+      EDGE_GRAFANA_ALLOW: ${EDGE_GRAFANA_ALLOW:-}
     ports:
       # Unprivileged nginx listens on 8443/8080 inside the container; host ports unchanged.
       - "${FRONTEND_HTTPS_PORT:-3443}:8443"

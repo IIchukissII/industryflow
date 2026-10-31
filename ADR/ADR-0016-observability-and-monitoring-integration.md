@@ -37,7 +37,8 @@ not leave the tenant-isolated path.
 6. **On a single host, the dashboards are reached through the platform's TLS edge when the operator
    turns that on, behind the dashboards' own login; every other console stays on the loopback.**
    External traffic is TLS at the edge only (ADR-0004 dec 1), and the operator decides whether the
-   operator plane is reachable wherever the edge is.
+   operator plane is reachable wherever the edge is. The operator may limit it to named source
+   addresses; with none named, any source reaches the login.
 
 ## Alternatives
 
@@ -56,6 +57,7 @@ not leave the tenant-isolated path.
 | 6 | The dashboards' port bound on every interface | Plaintext external traffic, against ADR-0004 dec 1 |
 | 6 | The dashboards at the edge by default | Exposes the operator plane, and a default administrator credential, wherever the edge is reachable without the operator choosing it |
 | 6 | Dashboards reached only through a tunnel to the loopback | An operator cannot use them from a browser alone |
+| 6 | Source addresses limited by default | The platform cannot know an operator's addresses |
 | 6 | Sign-on to the dashboards from the platform session | No platform role maps to the operator who may read every service's logs; deferred below |
 
 ## Consequences

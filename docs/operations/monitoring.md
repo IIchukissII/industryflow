@@ -144,6 +144,7 @@ receivers:
 |---|---|
 | URL | `http://localhost:<GRAFANA_PORT>/grafana/` on the host |
 | Through the edge | `https://<host>:<FRONTEND_HTTPS_PORT>/grafana/` when `.env` sets `EDGE_GRAFANA=grafana:3000` ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 6) |
+| Source addresses | `EDGE_GRAFANA_ALLOW`: addresses or CIDR blocks, space- or comma-separated; others get `403`. Unset: any. An invalid entry stops the edge from starting |
 | Login | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env` |
 | Datasources | `Prometheus` (default), `Loki` — `datasources.yml` |
 | Dashboard provider | folder `IndustryFlow`, files under `/etc/grafana/provisioning/dashboards` — `dashboards.yml` |

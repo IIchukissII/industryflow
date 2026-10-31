@@ -6,6 +6,8 @@
 # Grafana keeps its own login and serves from this sub-path, so the full URI is passed through.
 # Declaring proxy_set_header here drops every inherited one, so the forwarding headers are restated.
 location /grafana/ {
+    # The source addresses allowed when the deployment names them (EDGE_GRAFANA_ALLOW); empty: any.
+${EDGE_GRAFANA_ACCESS}
     set $grafana ${EDGE_GRAFANA};
     proxy_pass http://$grafana;
     proxy_http_version 1.1;
