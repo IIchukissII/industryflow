@@ -126,7 +126,7 @@ the issued register (no key), all of these hold
 | The chain is one intermediate signed by its root; the intermediate's CRL and the register verify against it | Job error |
 | The intermediate's CRL has not expired | Job error |
 | The register names the published CRL's number | Waiting |
-| That CRL was signed after the deletion was requested | Waiting |
+| That CRL was signed no earlier than the second the deletion was requested (a CRL's time has one-second resolution) | Waiting |
 | Every unexpired certificate of the tenant in the register is on that CRL | Waiting; the log names the serials |
 
 An expired certificate needs no revocation. A tenant with no certificate is recorded at once.

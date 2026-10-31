@@ -72,6 +72,19 @@ def test_a_crl_signed_before_the_request_is_waited_on(ca):
     assert ca.step().verify(tenant, [], datetime.now(timezone.utc) + timedelta(minutes=5)) is None
 
 
+def test_a_revocation_signed_in_the_second_of_the_request_is_accepted(ca):
+    """On the box, the e2e teardown requested deletion at 15:50:58.263 and revoked at 15:50:58: the CRL
+    read as signed before the request, and the deletion waited for good."""
+    from cryptography import x509
+    tenant = str(uuid.uuid4())
+    ca.run("issue", tenant, "gw-1")
+    ca.run("revoke-tenant", tenant)
+    signed = x509.load_pem_x509_crl((ca.root / "crl" / "intermediate.crl").read_bytes()).last_update_utc
+    assert ca.step().verify(tenant, [], signed + timedelta(milliseconds=500)).detail["revoked"] == 1
+    # A CRL signed in an earlier second than the request is still waited on.
+    assert ca.step().verify(tenant, [], signed + timedelta(seconds=1)) is None
+
+
 def test_an_expired_certificate_needs_no_revocation(ca):
     tenant = str(uuid.uuid4())
     ca.run("issue", tenant, "gw-1", DEVICE_DAYS="1")
