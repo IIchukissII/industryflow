@@ -32,6 +32,7 @@ updates:
       - "/services/alert_service"
       - "/services/ingestion_service"
       - "/scripts/ci"
+      - "/services/ops_agent"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3

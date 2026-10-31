@@ -478,6 +478,38 @@ observability:
     # ConfigMaps labelled for the Grafana sidecar; harmless (just ConfigMaps) without it.
     enabled: true
     label: grafana_dashboard
+  # Infrastructure agent (ADR-0045, ADR-0046): explains each platform alert in a note written to the
+  # operator's Loki, which the shipped dashboards draw as annotations. Off by default. Enabling it
+  # needs secrets.data.OPS_AGENT_WEBHOOK_SECRET (>= 32 characters), the operator's endpoints below,
+  # and a webhook receiver in the operator's Alertmanager pointing at the agent's Service
+  # (docs/operations/monitoring.md#infrastructure-agent).
+  opsAgent:
+    enabled: false
+    image: industryflow-ops-agent
+    digest: ""
+    port: 8095
+    # The operator's monitoring stack (installed beside the chart, ADR-0016 dec 4).
+    prometheusUrl: ""
+    lokiUrl: ""
+    alertmanagerUrl: ""
+    # Namespace of that stack: the only source the agent accepts webhooks from, and a destination
+    # of its egress.
+    monitoringNamespace: monitoring
+    # How a service's logs are selected; `%s` is the workload name (app.kubernetes.io/name). Empty:
+    # {namespace="<release namespace>", app="%s"}, the labels the loki-stack collector sets.
+    logSelector: ""
+    # anthropic (Claude) or openai-compatible (Mistral, or a model server on the operator's host).
+    modelProvider: anthropic
+    model: claude-opus-5-5
+    modelBaseUrl: ""
+    effort: medium
+    # A model server on the operator's own network (an in-house GPU host): its address range and port,
+    # e.g. [{cidr: <gpu-host-ip>/32, port: 8000}]. A hosted API needs nothing here: HTTPS to public
+    # addresses is allowed, private ranges (the cluster among them) are not.
+    modelEndpoints: []
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 384Mi }
   # Data-store exporters — app-specific (they target our DB/Redis/Kafka). node-exporter and
   # kube-state-metrics come from the cluster stack, not here. Pinned by tag + digest, identical to
   # the compose stack's exporters (tests/config_guards checks the two agree).
@@ -621,6 +653,11 @@ secrets:
     # stack is deployed. Distinct from the write principal above.
     COLD_READ_ACCESS_KEY: "CHANGE_ME"
     COLD_READ_SECRET_KEY: "CHANGE_ME"
+    # Infrastructure agent (observability.opsAgent): empty, not a placeholder, because the agent is
+    # off by default; enabling it without the webhook secret fails the render.
+    OPS_AGENT_WEBHOOK_SECRET: ""
+    OPS_AGENT_MODEL_API_KEY: ""
+    ANTHROPIC_API_KEY: ""
     TENANT_DELETE_COLD_ACCESS_KEY: "CHANGE_ME"
     TENANT_DELETE_COLD_SECRET_KEY: "CHANGE_ME"
     # The tenant-delete job's secret for the tracking gateway's operator plane (ADR-0033 dec 4).

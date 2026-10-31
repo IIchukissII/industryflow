@@ -58,7 +58,18 @@ jobs:
             --set secrets.failOnPlaceholders=false \
             --set networkPolicy.enabled=true \
             --set notebookHub.enabled=true \
-            --set ingress.mtls.enabled=true > /dev/null
+            --set ingress.mtls.enabled=true \
+            --set observability.opsAgent.enabled=true \
+            --set secrets.data.OPS_AGENT_WEBHOOK_SECRET=ci-only-webhook-secret-of-32-chars-or-more \
+            --set observability.opsAgent.prometheusUrl=http://prometheus.monitoring:9090 \
+            --set observability.opsAgent.lokiUrl=http://loki.monitoring:3100 \
+            --set observability.opsAgent.alertmanagerUrl=http://alertmanager.monitoring:9093 > /dev/null
+      - name: The infrastructure agent refuses to render without its webhook secret
+        run: |
+          if helm template if deploy/helm/industryflow --set secrets.failOnPlaceholders=false \
+              --set observability.opsAgent.enabled=true > /dev/null 2>&1; then
+            echo "::error::expected the agent to refuse a render without OPS_AGENT_WEBHOOK_SECRET"; exit 1
+          fi
       - name: Fail-closed guard rejects placeholder secrets
         run: |
           if helm template if deploy/helm/industryflow > /dev/null 2>&1; then

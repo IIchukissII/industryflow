@@ -1,0 +1,260 @@
+{
+  "uid": "ops-agent-incidents",
+  "title": "Incidents",
+  "description": "Notes the infrastructure agent wrote for platform alerts (ADR-0046). Generated text: advice beside the alert, not a diagnosis.",
+  "tags": [
+    "industryflow",
+    "ops-agent"
+  ],
+  "schemaVersion": 38,
+  "version": 1,
+  "editable": true,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "timezone": "browser",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "loki",
+          "uid": "Loki"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "orange",
+        "name": "Incident notes",
+        "expr": "{job=\"ops-agent\"}",
+        "target": {
+          "expr": "{job=\"ops-agent\"}",
+          "refId": "Anno"
+        },
+        "textFormat": "{{alertname}}",
+        "tagKeys": "alertname,severity",
+        "titleFormat": "Incident note"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "alertname",
+        "label": "Alert",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "Loki"
+        },
+        "query": {
+          "label": "alertname",
+          "stream": "{job=\"ops-agent\"}",
+          "type": 1,
+          "refId": "LokiVariableQueryEditor-VariableQuery"
+        },
+        "definition": "label_values({job=\"ops-agent\"}, alertname)",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Notes in range",
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "expr": "sum(count_over_time({job=\"ops-agent\", alertname=~\"$alertname\"}[$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "0"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Written without a model",
+      "description": "Notes built from the evidence alone because the model could not write them.",
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "expr": "sum(count_over_time({job=\"ops-agent\", alertname=~\"$alertname\"} | json | model=\"none\" [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "0"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Notes by alert",
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "expr": "sum by (alertname) (count_over_time({job=\"ops-agent\", alertname=~\"$alertname\"}[$__interval]))",
+          "legendFormat": "{{alertname}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "Notes, newest first",
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "gridPos": {
+        "h": 20,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "expr": "{job=\"ops-agent\", alertname=~\"$alertname\"} | json | line_format \"{{.alertname}} ({{.severity}})\\n{{.text}}\\n\\nEvidence: {{.evidence}} \u00b7 redacted: {{.redacted}}\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none",
+        "showLabels": false,
+        "showCommonLabels": false
+      }
+    }
+  ]
+}

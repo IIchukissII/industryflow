@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Test-only dependencies (kept out of the runtime image). The stores and the model are faked: httpx
+# transports for the stores, stub clients for the model, and the MCP tool server in-process.
+-r requirements.txt
+
+pytest==9.2.0
+pytest-asyncio==1.4.1

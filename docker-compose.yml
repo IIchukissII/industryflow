@@ -1190,6 +1190,46 @@ services:
       timeout: 10s
       retries: 3
 
+  # Infrastructure agent (ADR-0045, ADR-0046): a receiver for the operator's alert router that explains
+  # each platform alert in a note, written to Loki, which the Grafana dashboards draw as annotations. Off unless
+  # the `ops-agent` profile runs AND the operator's Alertmanager copy names it as a webhook receiver
+  # (docs/operations/monitoring.md#infrastructure-agent). It reaches Prometheus, Loki, Alertmanager and
+  # the model endpoint only: no Grafana, database, broker, Docker socket or tenant credential. It
+  # refuses to start without OPS_AGENT_WEBHOOK_SECRET (at least 32 characters).
+  ops-agent:
+    profiles: ["ops-agent"]
+    build:
+      context: ./services/ops_agent
+      dockerfile: Dockerfile
+      additional_contexts:
+        runbooks: ./docs/operations
+    image: industryflow-ops-agent
+    container_name: industryflow-ops-agent
+    environment:
+      OPS_AGENT_WEBHOOK_SECRET: ${OPS_AGENT_WEBHOOK_SECRET:-}
+      OPS_AGENT_MODEL_PROVIDER: ${OPS_AGENT_MODEL_PROVIDER:-anthropic}
+      OPS_AGENT_MODEL: ${OPS_AGENT_MODEL:-claude-opus-5-5}
+      OPS_AGENT_MODEL_BASE_URL: ${OPS_AGENT_MODEL_BASE_URL:-}
+      OPS_AGENT_MODEL_API_KEY: ${OPS_AGENT_MODEL_API_KEY:-}
+      OPS_AGENT_EFFORT: ${OPS_AGENT_EFFORT:-medium}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      - prometheus
+      - loki
+      - alertmanager
+    networks:
+      - industryflow-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8095/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   # cAdvisor - Container metrics
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
@@ -1293,6 +1333,7 @@ services:
       - ./infrastructure/grafana/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
       - ./infrastructure/grafana/provisioning/complete_system_dashboard.json:/etc/grafana/provisioning/dashboards/complete_system_dashboard.json
       - ./infrastructure/grafana/provisioning/logs_dashboard.json:/etc/grafana/provisioning/dashboards/logs_dashboard.json
+      - ./infrastructure/grafana/provisioning/incidents_dashboard.json:/etc/grafana/provisioning/dashboards/incidents_dashboard.json
     networks:
       - industryflow-network
     depends_on:
