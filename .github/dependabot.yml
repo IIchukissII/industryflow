@@ -25,12 +25,13 @@ updates:
       mlflow-server-major:
         update-types: ["major"]
 
-  # The platform API, alerting and ingestion services.
+  # The platform API, alerting and ingestion services, and the workflows' own tools.
   - package-ecosystem: "pip"
     directories:
       - "/services/api_gateway"
       - "/services/alert_service"
       - "/services/ingestion_service"
+      - "/scripts/ci"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3

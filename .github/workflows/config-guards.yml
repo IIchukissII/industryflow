@@ -18,7 +18,7 @@ on:
 jobs:
   config-guards:
     name: config-guards
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -30,7 +30,7 @@ jobs:
         with:
           version: v3.16.3
       # The shared contracts package too: the tenant-contract guards read its definitions.
-      - run: pip install pytest==9.1.1 pyyaml==6.0.3 ./libs/industryflow_contracts
+      - run: pip install -r scripts/ci/requirements.txt ./libs/industryflow_contracts
       - name: Configuration guards
         run: pytest tests/config_guards -v
 
@@ -39,7 +39,7 @@ jobs:
   # else. A policy document that reads right proves nothing until the store has said no to it.
   object-store-principals:
     name: object-store-principals
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
       MINIO_IMAGE: cgr.dev/chainguard/minio:latest@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82
@@ -75,7 +75,7 @@ jobs:
   # it mounts them, and the shipped Alertmanager config.
   alert-rules:
     name: alert-rules
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
       PROMETHEUS_IMAGE: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
@@ -91,7 +91,7 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           version: v3.16.3
-      - run: pip install pyyaml==6.0.3
+      - run: pip install -r scripts/ci/requirements.txt
       - name: Chart rule unit tests
         run: |
           mkdir -p "$RUNNER_TEMP/k8s"
@@ -120,7 +120,7 @@ jobs:
     name: config-guards-gate
     needs: [config-guards, object-store-principals, alert-rules]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Gate

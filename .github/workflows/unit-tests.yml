@@ -19,7 +19,7 @@ on:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
@@ -30,6 +30,7 @@ jobs:
         with:
           filters: |
             relevant:
+              - 'scripts/ci/requirements.txt'
               - 'services/**'
               - 'libs/**'
               - 'clients/python/**'
@@ -51,7 +52,7 @@ jobs:
   pytest:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     # Tests that need the capability store run against a real Redis, never quietly on the fake: the
     # fake has no client timeouts, which hid #501 (libs/industryflow_contracts/industryflow_contracts/testing.py).
@@ -98,13 +99,13 @@ jobs:
           - { service: cold_export,         path: services/cold_export/tests, args: "--ignore=services/cold_export/tests/test_cold_export_integration.py" }
           - { service: tenant_delete,         path: services/tenant_delete/tests }
           # The backup image's scripts, run under bash against stand-in aws/psql/pg_* binaries.
-          - { service: backup,              path: infrastructure/backup/tests, install: "pip install pytest==9.1.1" }
+          - { service: backup,              path: infrastructure/backup/tests, install: "pip install -r scripts/ci/requirements.txt" }
           # The notebook client is packaged (pyproject extras), so it overrides the install.
           - { service: python_client,       path: clients/python/tests, install: "pip install -e 'clients/python[dev,cold]'" }
           # The device CA's issue/renew/revoke/revoke-tenant and register, against a throwaway CA and the runner's openssl.
-          - { service: device_ca,           path: scripts/tests/test_device_ca.py, install: "pip install pytest==9.1.1" }
+          - { service: device_ca,           path: scripts/tests/test_device_ca.py, install: "pip install -r scripts/ci/requirements.txt" }
           # Dead-letter inspection and replay, against stand-in Kafka console tools.
-          - { service: dead_letters,        path: scripts/tests/test_dead_letters.py, install: "pip install pytest==9.1.1" }
+          - { service: dead_letters,        path: scripts/tests/test_dead_letters.py, install: "pip install -r scripts/ci/requirements.txt" }
           # The shared contracts package itself. The repository-wide guards that every service takes
           # its tenant names and window contract from it live in tests/config_guards.
           - { service: contracts,           path: libs/industryflow_contracts/tests, install: "pip install './libs/industryflow_contracts[dev]'" }
@@ -128,7 +129,7 @@ jobs:
     name: unit-tests-gate
     needs: [changes, pytest]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Gate on matrix result

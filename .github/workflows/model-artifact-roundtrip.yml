@@ -31,7 +31,7 @@ on:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
@@ -42,6 +42,7 @@ jobs:
         with:
           filters: |
             relevant:
+              - 'scripts/ci/requirements.txt'
               - 'services/notebook_hub/Dockerfile.authoring'
               # The whole serving tree, not just its Dockerfile and pins: the harness imports
               # ml_service's own resolver and loaders (skops_trust, model_uri, uploaded_model), so a
@@ -63,14 +64,14 @@ jobs:
   parity:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - run: pip install pytest==9.1.1
+      - run: pip install -r scripts/ci/requirements.txt
       - name: The pins the two images declare must satisfy ADR-0027
         run: python scripts/check_model_env_parity.py
       - name: The check itself must still be able to fail
@@ -80,7 +81,7 @@ jobs:
         run: pytest scripts/tests -q
 
   roundtrip:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     needs: parity
     steps:
@@ -197,7 +198,7 @@ jobs:
     name: model-artifact-roundtrip-gate
     needs: [changes, parity, roundtrip]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Verdict
