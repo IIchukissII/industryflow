@@ -55,7 +55,7 @@ release is cut only from such a commit.
 
 | Task | Command |
 |---|---|
-| Deploy a commit by upgrade on the environment's host | `scripts/box-deploy.sh [ref]` (default `origin/main`; disk floor, backup, build, schema, recreate; writes `.box-deployed`). Below `BOX_MIN_FREE_GB` (default `20`) free it prunes all build cache and dangling images, then refuses if still below |
+| Deploy a commit by upgrade on the environment's host | `scripts/box-deploy.sh [ref]` (default `origin/main`; disk floor, backup, build, schema, recreate, monitoring stack recreated so its single-file configs are re-read; writes `.box-deployed`). The `ops-agent` profile is built and started when `.env` sets `OPS_AGENT_WEBHOOK_SECRET`. Below `BOX_MIN_FREE_GB` (default `20`) free it prunes all build cache and dangling images, then refuses if still below |
 | Run the suite on the environment's host | `scripts/box-e2e.sh` (from the deployment's checkout; refuses local changes or a stack not deployed from `HEAD`) |
 | Run it over SSH and post the `box-e2e` commit status | `scripts/box-validate.sh <ssh-target> [compose-dir]` (needs `gh`; refuses an upgrade from a commit without `box-e2e` success) |
 | First validation of an environment | `BOX_FIRST_VALIDATION=1 scripts/box-validate.sh <ssh-target>` |
