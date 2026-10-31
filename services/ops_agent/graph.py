@@ -78,8 +78,6 @@ class State(TypedDict, total=False):
 SECTIONS = (("what", "What happened"), ("impact", "Impact"), ("cause", "Likely cause"),
             ("next_step", "Next step"))
 _HEADING = re.compile(r"^\s*(" + "|".join(label for _, label in SECTIONS) + r")\s*:\s*", re.I | re.M)
-# The dashboards order incidents by this; a severity the rules do not use sorts last.
-PRIORITY = {"critical": 1, "warning": 2, "info": 3}
 
 
 def sections(text: str) -> dict[str, str]:
@@ -282,7 +280,6 @@ def build(config: Config, tools: Tools, writer: NoteWriter, publisher: Publisher
             "redactions": state["redactions"],
             "redacted": state["redacted"],
             "error": state.get("error", ""),
-            "priority": PRIORITY.get(alert.get("labels", {}).get("severity", ""), 4),
             "services": state["services"],
         }
         if state["model"] == "none":

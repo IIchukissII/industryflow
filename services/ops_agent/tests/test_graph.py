@@ -182,9 +182,9 @@ def test_the_notes_sections_become_fields():
 
 
 @pytest.mark.asyncio
-async def test_a_note_carries_its_priority_services_and_sections(config):
+async def test_a_note_carries_its_services_and_sections(config):
     _, _, note = await _run(config)
-    assert note["priority"] == 2 and note["services"] == "redis, api-gateway, redis-exporter"
+    assert note["services"] == "redis, api-gateway, redis-exporter"
     assert note["what"] == "memory high [E1]." and note["cause"] == ""
 
 

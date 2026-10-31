@@ -132,7 +132,7 @@ receivers:
 | Evidence | The rule's PromQL over the 30 minutes before the alert to now; error lines of the services in the rule's `services` annotation and the target's host; other active alerts; the alert's row in the [alert table](#alerts) (every platform rule has one); `Symptom \| Cause \| Fix` rows sharing at least two words with the alert. The metric series are narrowed to the alert's own labels |
 | Sent to the model | The alert and the evidence, after redaction: tenant identifiers, emails, network addresses and credential-shaped strings become `<tenant-1>`, `<email-1>`, … ; the note records the counts per category |
 | Output | Loki stream `{job="ops-agent"}`; the `complete-system` and Incidents dashboards draw it as annotations. No Grafana credential |
-| Note fields | `alertname`, `severity`, `priority` (1 critical, 2 warning, 3 info, 4 other), `services`, `what`, `impact`, `cause`, `next_step` (the model's four sections), `text` (the whole note), `model`, `evidence`, `redacted`, `fingerprint`, `key` |
+| Note fields | `alertname`, `severity`, `services`, `what`, `impact`, `cause`, `next_step` (the model's four sections), `text` (the whole note), `model`, `evidence`, `redacted`, `fingerprint`, `key` |
 | Without a model | A model error or refusal still publishes a note: the evidence listing, `model` = `none` |
 | Once per firing | A firing (fingerprint and start) is explained once; remembered 7 days, and after a restart the agent finds its earlier note in Loki |
 | Alert storm | At most 5 alerts of one webhook (critical first) and 10 waiting; the rest are logged as not explained |
