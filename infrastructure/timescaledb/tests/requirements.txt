@@ -7,10 +7,10 @@
 # These pins are what the services run, not a set of their own: asyncpg lagged at 0.30.0 while every
 # service moved to 0.31.0, and 0.30.0 ships no cp314 wheel — on the 3.14 runner pip was quietly
 # building it from source rather than failing, which is why the drift stayed invisible.
-pytest==9.1.1
+pytest==9.2.0
 psycopg2-binary==2.9.13
 asyncpg==0.32.0
-pytest-asyncio==1.4.0
+pytest-asyncio==1.4.1
 # The gateway's writer runs here itself (test_capability_audit.py), on the gateway's pins.
 sqlalchemy[asyncio]==2.0.55
 prometheus-client==0.26.0

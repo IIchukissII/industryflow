@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 -r requirements.txt
-pytest==9.1.1
+pytest==9.2.0
 # A real store for the capability store's purge: the contract's Lua records each revocation
 # (test_capability_store.py).
 fakeredis==2.40.0

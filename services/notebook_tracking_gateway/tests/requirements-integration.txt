@@ -5,7 +5,7 @@
 # Deps for the live end-to-end proofs (test_*_integration.py): drive the running gateway over HTTP
 # and mint capabilities in Redis. Run inside the compose network so the artifact pre-signed-URL host
 # (minio:9000) resolves.
-pytest==9.1.1
+pytest==9.2.0
 requests==2.34.2
 redis==8.1.0
 

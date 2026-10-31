@@ -6,4 +6,4 @@
 # against in-memory fakes — no database and no object store — so only pyarrow (for RecordBatch)
 # and pytest are needed.
 -r requirements.txt
-pytest==9.1.1
+pytest==9.2.0

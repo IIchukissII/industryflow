@@ -2,6 +2,6 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-pytest==9.1.1
+pytest==9.2.0
 # Deletes as the consumers send them: a bare DeleteObject, no metadata read first.
-boto3==1.43.116
+boto3==1.43.120
