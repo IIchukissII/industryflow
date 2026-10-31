@@ -9,7 +9,7 @@
 # quietly skipped for lack of them.
 -r requirements.txt
 
-pytest==9.1.1
+pytest==9.2.0
 # A real Redis protocol, with Lua, for the capability store adapter and its record (ADR-0042;
 # test_redis_capability_store.py).
 fakeredis==2.40.0

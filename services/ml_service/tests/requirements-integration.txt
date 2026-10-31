@@ -5,7 +5,7 @@
 # Deps for the live upload-serving proof (test_upload_serving_integration.py), run in a bare container
 # inside the compose network. It saves real models as an external author would, so the model stack
 # matches the serving image's pins (api/requirements.txt); it shares the model-stack bot group.
-pytest==9.1.1
+pytest==9.2.0
 requests==2.34.2
 numpy==2.5.4
 pandas==2.3.3
