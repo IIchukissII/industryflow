@@ -33,6 +33,8 @@ jobs:
               - 'scripts/ci/requirements.txt'
               - 'services/**'
               - 'libs/**'
+              # The runbooks the ops-agent tests read as a contract (ADR-0046 dec 9).
+              - 'docs/operations/**'
               - 'clients/python/**'
               # Read by the parity guards (e.g. the alert worker's config parity test), so an
               # edit on that side alone must run them too.
@@ -99,6 +101,9 @@ jobs:
           # it needs TimescaleDB + MinIO and would only skip. It runs in cold-layer-integration.yml.
           - { service: cold_export,         path: services/cold_export/tests, args: "--ignore=services/cold_export/tests/test_cold_export_integration.py" }
           - { service: tenant_delete,         path: services/tenant_delete/tests }
+          # The infrastructure agent (ADR-0046): stores and model faked; its tool server also runs as
+          # a real stdio subprocess. It reads the runbooks under docs/operations.
+          - { service: ops_agent,           path: services/ops_agent/tests }
           # The backup image's scripts, run under bash against stand-in aws/psql/pg_* binaries.
           - { service: backup,              path: infrastructure/backup/tests, install: "pip install -r scripts/ci/requirements.txt" }
           # The notebook client is packaged (pyproject extras), so it overrides the install.

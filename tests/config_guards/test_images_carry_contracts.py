@@ -111,7 +111,8 @@ def test_ci_supplies_the_context_to_every_image_build():
     workflows = sorted((REPO / ".github" / "workflows").glob("*.yml"))
     images = yaml.safe_load((REPO / ".github" / "workflows" / "images.yml").read_text())
     build_step = next(s for s in images["jobs"]["build-scan"]["steps"] if s.get("uses", "").startswith("docker/build-push-action"))
-    assert build_step["with"].get("build-contexts") == f"contracts={CONTEXT_DIR}"
+    named = dict(line.split("=", 1) for line in (build_step["with"].get("build-contexts") or "").split())
+    assert named.get("contracts") == CONTEXT_DIR
     checked = 0
     for wf in workflows:
         for cmd in re.findall(r"docker build\b[^\n]*", wf.read_text()):

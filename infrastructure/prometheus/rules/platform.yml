@@ -7,6 +7,8 @@
 # exporters' own), and every selector carries platform="industryflow", the target label both
 # deployment shapes attach to every scrape, so a shared Prometheus never alerts on another stack.
 # Operational and aggregate only (ADR-0016 dec 5): no tenant value or alert content.
+# Every rule's `services` annotation names the services behind it (Compose service names), which the
+# infrastructure agent reads for their logs (ADR-0046 dec 2); a scrape target's host is added to them.
 groups:
   - name: industryflow.platform
     rules:
@@ -18,6 +20,7 @@ groups:
         annotations:
           summary: "Scrape target down"
           description: "{{ $labels.job }}/{{ $labels.instance }} has been unreachable for 5m."
+          services: "{{ $labels.instance }}"
       - alert: IndustryFlowPostgresDown
         expr: pg_up{platform="industryflow"} == 0
         for: 5m
@@ -26,6 +29,7 @@ groups:
         annotations:
           summary: "TimescaleDB exporter reports the database down"
           description: "pg_up == 0 (postgres-exporter cannot reach TimescaleDB)."
+          services: "timescaledb, postgres-exporter"
       - alert: IndustryFlowRedisDown
         expr: redis_up{platform="industryflow"} == 0
         for: 5m
@@ -34,6 +38,7 @@ groups:
         annotations:
           summary: "Redis is down"
           description: "redis_up == 0 (redis-exporter cannot reach Redis)."
+          services: "redis, redis-exporter"
       - alert: IndustryFlowRedisMemoryHigh
         # The capability store never evicts (ADR-0015 dec 8): at its limit it refuses mints, sign-ins and
         # cache writes, so it is watched before it gets there.
@@ -46,6 +51,7 @@ groups:
         annotations:
           summary: "Redis is near its memory limit"
           description: "Redis uses {{ $value | humanizePercentage }} of its memory limit; at the limit it refuses writes (it never evicts)."
+          services: "redis, api-gateway"
       - alert: IndustryFlowKafkaConsumerLag
         expr: kafka_consumergroup_lag{platform="industryflow"} > 1000
         for: 10m
@@ -54,6 +60,7 @@ groups:
         annotations:
           summary: "Kafka consumer lag is high"
           description: "Consumer group {{ $labels.consumergroup }} lag on {{ $labels.topic }} exceeds 1000."
+          services: "kafka, spark-streaming, spark-aggregations, alert-service-detector"
       # ADR-0005: an unprocessable reading is dead-lettered, never dropped; a dead letter nobody looks
       # at is a drop with extra steps. A dead-letter topic's offset counts its letters. A topic is
       # created by its first letter, so its series starts above zero, which increase() cannot see:
@@ -70,6 +77,7 @@ groups:
         annotations:
           summary: "Capability-use events are waiting to be recorded"
           description: "{{ $value }} capability-use events are in the capability store and not yet in the record; check the API gateway's capability audit writer."
+          services: "api-gateway, redis"
       - alert: IndustryFlowCapabilityEventsDropped
         # The writer acknowledged events it could not record (ADR-0042 dec 7): an entry it could not
         # read, or a row the database refused. Each is logged with its stream id; nothing else keeps it.
@@ -79,6 +87,7 @@ groups:
         annotations:
           summary: "Capability-use events were dropped from the record"
           description: "Capability-use events were acknowledged without being recorded in the last 15m; the API gateway's logs (capability audit) name each stream id."
+          services: "api-gateway"
       - alert: IndustryFlowDeadLetteredReadings
         expr: |
           sum by (topic) (increase(kafka_topic_partition_current_offset{platform="industryflow", topic=~".+\\.dlq"}[15m])) > 0
@@ -95,3 +104,4 @@ groups:
         annotations:
           summary: "Readings were dead-lettered"
           description: "Letters reached {{ $labels.topic }} in the last 15m. They raised no alert and were not written: docs/operations/dead-letters.md."
+          services: "spark-streaming, alert-service-detector"

@@ -65,6 +65,9 @@ def test_the_overlay_lands_every_digest_in_the_rendered_chart(tmp_path):
     rendered = yaml.safe_dump_all(helm_template(
         "-f", str(overlay), "--set", "notebookHub.enabled=true", "--set", "backup.enabled=true",
         "--set", "coldExport.enabled=true",
+        "--set", "observability.opsAgent.enabled=true", "--set", "secrets.data.OPS_AGENT_WEBHOOK_SECRET=" + "x" * 32,
+        "--set", "observability.opsAgent.prometheusUrl=http://p", "--set", "observability.opsAgent.lokiUrl=http://l",
+        "--set", "observability.opsAgent.alertmanagerUrl=http://a",
     ))
     missing = [".".join(p) for p, d in fake.items() if d not in rendered]
     assert not missing, f"overlay keys that pin nothing in the render: {missing}"

@@ -46,6 +46,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 | ML | MLflow |
 | Frontend | React 19, Vite, nginx |
 | Observability | Prometheus, Alertmanager, Grafana, Loki |
+| Agents | LangGraph, MCP; the model over the Claude API or an OpenAI-compatible endpoint |
 
 ## Documentation
 

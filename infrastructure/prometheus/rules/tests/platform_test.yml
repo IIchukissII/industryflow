@@ -31,6 +31,7 @@ tests:
             exp_annotations:
               summary: "Readings were dead-lettered"
               description: "Letters reached sensor-data-raw.measurements.dlq in the last 15m. They raised no alert and were not written: docs/operations/dead-letters.md."
+              services: "spark-streaming, alert-service-detector"
       # The window has passed with no new letter: it clears.
       - eval_time: 39m
         alertname: IndustryFlowDeadLetteredReadings
@@ -53,6 +54,7 @@ tests:
             exp_annotations:
               summary: "Readings were dead-lettered"
               description: "Letters reached sensor-data-raw.dlq in the last 15m. They raised no alert and were not written: docs/operations/dead-letters.md."
+              services: "spark-streaming, alert-service-detector"
       - eval_time: 45m
         alertname: IndustryFlowDeadLetteredReadings
         exp_alerts: []
@@ -75,6 +77,7 @@ tests:
             exp_annotations:
               summary: "Scrape target down"
               description: "api-gateway/api-gateway:8000 has been unreachable for 5m."
+              services: "api-gateway:8000"
 
   # A Prometheus that has just started finds old letters on an existing topic: nothing new, no alert.
   - interval: 1m
@@ -116,6 +119,7 @@ tests:
             exp_annotations:
               summary: "Capability-use events are waiting to be recorded"
               description: "5000 capability-use events are in the capability store and not yet in the record; check the API gateway's capability audit writer."
+              services: "api-gateway, redis"
   - interval: 1m
     input_series:
       - series: 'capability_audit_backlog{platform="industryflow", instance="gw-1"}'
@@ -153,6 +157,7 @@ tests:
             exp_annotations:
               summary: "Redis is near its memory limit"
               description: "Redis uses 85.68% of its memory limit; at the limit it refuses writes (it never evicts)."
+              services: "redis, api-gateway"
   # A dropped event fires at once; written ones, retries and another stack's drops do not.
   - interval: 1m
     input_series:
@@ -176,3 +181,4 @@ tests:
             exp_annotations:
               summary: "Capability-use events were dropped from the record"
               description: "Capability-use events were acknowledged without being recorded in the last 15m; the API gateway's logs (capability audit) name each stream id."
+              services: "api-gateway"

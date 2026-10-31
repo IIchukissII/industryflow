@@ -47,6 +47,8 @@ jobs:
               - 'infrastructure/backup/**'
               # The named `contracts` context most images install the shared package from.
               - 'libs/industryflow_contracts/**'
+              # The runbooks baked into the ops-agent image (named context `runbooks`).
+              - 'docs/operations/**'
               - '.trivyignore'
               # The edge smoke renders the frontend config from these.
               - 'docker-compose.yml'
@@ -167,6 +169,8 @@ jobs:
               smoke: "python -c \"import gateway; print('tracking-gateway ok')\"" }
           - { name: notebook-cold-broker,   context: services/notebook_cold_broker, file: services/notebook_cold_broker/Dockerfile, security_refresh: true,
               smoke: "python -c \"import broker; print('cold-broker imports ok')\"" }
+          - { name: ops-agent,              context: services/ops_agent,        file: services/ops_agent/Dockerfile, security_refresh: true,
+              smoke: "python -c \"import pathlib, app, tools, graph, runbooks; n = len(runbooks.load(pathlib.Path('/app/runbooks'))); assert n >= 15, n; print('ops-agent ok, runbook rows', n)\"" }
           - { name: notebook-authoring,     context: clients/python,            file: services/notebook_hub/Dockerfile.authoring, security_refresh: true,
               smoke: "python -c \"import numpy, pandas, pyarrow.parquet, sklearn, mlflow, industryflow; print('authoring kernel ok', numpy.__version__)\"" }
           - { name: notebook-analytics,     context: clients/python,            file: services/notebook_hub/Dockerfile.analytics, security_refresh: true,
@@ -225,7 +229,9 @@ jobs:
           file: ${{ matrix.file }}
           # The shared contracts package (libs/industryflow_contracts), which a Dockerfile takes with
           # `COPY --from=contracts`. Offered to every image; the ones that do not use it ignore it.
-          build-contexts: contracts=libs/industryflow_contracts
+          build-contexts: |
+            contracts=libs/industryflow_contracts
+            runbooks=docs/operations
           push: ${{ github.event_name != 'pull_request' }}
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

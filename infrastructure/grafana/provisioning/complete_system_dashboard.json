@@ -1,6 +1,37 @@
 {
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "loki",
+          "uid": "Loki"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "orange",
+        "name": "Incident notes",
+        "expr": "{job=\"ops-agent\"}",
+        "target": {
+          "expr": "{job=\"ops-agent\"}",
+          "refId": "Anno"
+        },
+        "textFormat": "{{alertname}}",
+        "tagKeys": "alertname,severity",
+        "titleFormat": "Incident note"
+      }
+    ]
   },
   "editable": true,
   "fiscalYearStartMonth": 0,

@@ -25,6 +25,7 @@ Host ports bind to `127.0.0.1`.
 | `postgres-exporter` | TimescaleDB metrics | `9187` | env in `docker-compose.yml` |
 | `redis-exporter` | Redis metrics | `9121` | env in `docker-compose.yml` |
 | `kafka-exporter` | Kafka topic offsets, consumer lag | `9308` | flags in `docker-compose.yml` |
+| `ops-agent` | Infrastructure agent: explains each platform alert in a note in Loki; profile `ops-agent`, off by default ([below](#infrastructure-agent)) | none (`8095` internal) | `OPS_AGENT_*` in `.env` |
 
 | Volume | Holds |
 |---|---|
@@ -89,6 +90,51 @@ integration: nothing is sent.
 | 3 | `docker compose up -d alertmanager` |
 | 4 | Check: `docker compose exec alertmanager amtool check-config /etc/alertmanager/alertmanager.yml` |
 
+### Infrastructure agent
+
+The `ops-agent` service receives Alertmanager's webhook, gathers evidence for each firing platform
+alert and has a model write a short note: what happened, impact, likely cause with evidence, next
+step from the runbooks ([ADR-0045](../../ADR/ADR-0045-agent-runtime.md),
+[ADR-0046](../../ADR/ADR-0046-infrastructure-agent.md)). Notes are generated text, marked with the
+model that wrote them; advice beside the alert, not a diagnosis.
+
+| Step | Action |
+|---|---|
+| 1 | `.env`: `OPS_AGENT_WEBHOOK_SECRET=$(openssl rand -hex 32)`, the model settings below |
+| 2 | In your `ALERTMANAGER_CONFIG` copy, add to receiver `operator` the webhook below |
+| 3 | `docker compose --profile ops-agent up -d --build ops-agent` and `docker compose up -d alertmanager` |
+| 4 | Check: `docker compose logs ops-agent` shows no `refusing to start`; Grafana › IndustryFlow › Incidents |
+
+```yaml
+receivers:
+  - name: operator
+    webhook_configs:
+      - url: http://ops-agent:8095/alertmanager
+        send_resolved: false
+        http_config:
+          authorization:
+            type: Bearer
+            credentials: <OPS_AGENT_WEBHOOK_SECRET>
+```
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `OPS_AGENT_WEBHOOK_SECRET` | none | Bearer secret the receiver checks; at least 32 characters, or the agent refuses to start |
+| `OPS_AGENT_MODEL_PROVIDER` | `anthropic` | `anthropic` (Claude), or `openai-compatible` (Mistral's API, or a model server on your own host) |
+| `OPS_AGENT_MODEL` | `claude-opus-5-5` | Model name at the provider |
+| `ANTHROPIC_API_KEY` | none | Key for `anthropic` |
+| `OPS_AGENT_MODEL_BASE_URL`, `OPS_AGENT_MODEL_API_KEY` | none | Endpoint and key for `openai-compatible`, e.g. `https://api.mistral.ai/v1` or `http://<gpu-host>:8000/v1` |
+| `OPS_AGENT_EFFORT` | `medium` | Claude's effort level |
+| `OPS_AGENT_LOG_SELECTOR` | `{service="%s"}` | Loki selector for a service's logs; `%s` is the service name |
+
+| Item | Value |
+|---|---|
+| Evidence | The rule's PromQL over the 30 minutes before the alert to now; error lines of the services in the rule's `services` annotation and the target's host; other active alerts; matching `Symptom \| Cause \| Fix` rows from `docs/operations` |
+| Sent to the model | The alert and the evidence, after redaction: tenant identifiers, emails, network addresses and credential-shaped strings become `<tenant-1>`, `<email-1>`, … ; the note records the counts per category |
+| Output | Loki stream `{job="ops-agent"}`; the `complete-system` and Incidents dashboards draw it as annotations. No Grafana credential |
+| Without a model | A model error or refusal still publishes a note: the evidence listing, `model` = `none` |
+| Kubernetes | `observability.opsAgent` in the chart values (endpoints of your monitoring stack, `secrets.data.OPS_AGENT_WEBHOOK_SECRET`); the webhook URL is the `<release>-ops-agent` Service |
+
 ## Grafana
 
 | Item | Value |
@@ -107,6 +153,7 @@ health reaches Grafana as `postgres-exporter` metrics.
 | UID | Title | File | Rows / panels |
 |---|---|---|---|
 | `complete-system` | Complete System Infrastructure | `complete_system_dashboard.json` | Service health (`up` for prometheus, postgres, redis, kafka, api-gateway, ml-service; alert detector via cAdvisor `container_last_seen`); system CPU / memory / disk; container CPU and memory; container and host network I/O; DB connections and activity; Redis hit rate and activity; Kafka topic offsets and consumer lag; Spark container CPU / memory / network. Refresh `10s` |
+| `ops-agent-incidents` | Incidents | `incidents_dashboard.json` | Notes in range, notes written without a model, notes by alert, the notes themselves (newest first). Variable `alertname`. Refresh `1m` |
 | `container_logs` | Container Logs Dashboard | `logs_dashboard.json` | Log rate by service, active containers, current log rate, top 10 services by volume, log viewer. Variables `service`, `container`, `search` (regex). Refresh `10s` |
 
 ## Metrics
@@ -213,6 +260,8 @@ No shipped rule alerts on the counter.
 | `pg_up` is `0` | `metrics_user` has no password, or the CA mount for `verify-full` is missing (`docker logs industryflow-postgres-exporter`) | Set the password as `12-metrics-role.sql` describes; check the CA mount |
 | `redis_up` is `0` | Redis down (`docker exec industryflow-redis redis-cli ping`) | Start `redis`, then the exporter |
 | LogQL parse error | Unquoted label value or range without a unit | `{job="docker"}`, `[5m]` |
+| No incident note for a firing alert | The webhook is missing from `ALERTMANAGER_CONFIG`, its secret differs (`401` in `docker compose logs alertmanager`), or the `ops-agent` profile is not up | Add the receiver as in [Infrastructure agent](#infrastructure-agent); `docker compose --profile ops-agent up -d ops-agent` |
+| Incident note reads "The model could not write this note" | The model key is missing or wrong, the endpoint is unreachable, or the model declined; the note's `error` field names it | Set `ANTHROPIC_API_KEY` or `OPS_AGENT_MODEL_BASE_URL` / `OPS_AGENT_MODEL_API_KEY`; `docker compose logs ops-agent` |
 
 ## Links
 

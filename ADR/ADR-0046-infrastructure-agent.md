@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0046 — The infrastructure agent explains platform alerts to operators
 
 - **Status:** Accepted
-- **Date:** 2026-10-31
+- **Date:** 2026-10-31; changed 2026-10-31
 - **Parent:** [ADR-0045](ADR-0045-agent-runtime.md) (the agent contract)
 - **Related:** [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (dec 1, 4, 5: the
   operator's stack, its receivers, tenant data kept off it), [ADR-0031](ADR-0031-alerting-http-surface-single-owner.md)
@@ -32,13 +32,14 @@ and user addresses even though tenant data stays off that stack.
    out of reach (ADR-0016 dec 5, ADR-0031 dec 1).
 3. **A note states what happened, the impact, the likely cause with its evidence, and the next step from
    the runbook.** A cause the evidence does not support is reported as unknown.
-4. **The note is written to the log store and as an annotation on the operator's dashboards, with a
-   provisioned dashboard listing them.** Notes are derivable, not backed up (ADR-0032 dec 1).
+4. **The note is written to the log store only; the operator's dashboards draw it from there as an
+   annotation, and a provisioned dashboard lists the notes.** Notes are derivable, not backed up
+   (ADR-0032 dec 1).
 5. **The agent is read-only.** It acts on nothing, and remediation is not part of it.
 6. **It serves platform operators only and is never exposed to tenants.**
-7. **Its reach is the metrics store, the log store, the alert router, the dashboard annotations and the
-   model endpoint.** Its credentials are the receiver's secret and a token that can only annotate; no
-   database, broker, container runtime or tenant credential.
+7. **Its reach is the metrics store, the log store, the alert router and the model endpoint.** Its
+   credentials are the receiver's secret and the model's key; no dashboard, database, broker,
+   container runtime or tenant credential.
 8. **It redacts tenant identifiers, user addresses, network addresses and credential-shaped strings,
    into stable placeholders.** The same identifier gets the same placeholder within a note, so the
    evidence stays correlated.
@@ -60,6 +61,7 @@ and user addresses even though tenant data stays off that stack.
 | 4 | Notes only in the product console | The console is tenant-facing; the operator works in the monitoring stack |
 | 4 | A database table for notes | A store and credential for text that is derivable |
 | 4 | Notes as authoritative records, backed up | They can be regenerated and are advice, not record |
+| 4, 7 | Writing annotations through the dashboard service's API with a token | The open-source dashboard service's narrowest role that can annotate also edits every dashboard; drawing annotations from the log store needs no credential |
 | 5 | Restarting or scaling services from the note | An unreviewed model acting on production |
 | 6 | Tenant-facing explanations | Platform-plane evidence describes every tenant at once |
 | 8 | Sending logs unredacted to a local model | A local endpoint is still another host (ADR-0045 dec 6) |
@@ -70,6 +72,7 @@ and user addresses even though tenant data stays off that stack.
 
 **Positive**
 - An alert arrives with an explanation and a next step, on the dashboards the operator already uses.
+- The agent writes to one store and holds no credential for the dashboards.
 - The agent's reach is the operator's monitoring plane, so a compromised agent exposes no tenant store.
 
 **Negative**
@@ -77,6 +80,7 @@ and user addresses even though tenant data stays off that stack.
   symptoms.
 - A note can be wrong; it is advice beside the alert, not a diagnosis.
 - Runbook tables gain a consumer, so their shape can no longer change freely.
+- An annotation marks when the note was written, shortly after the alert started, not the start itself.
 
 ## Deferred
 
