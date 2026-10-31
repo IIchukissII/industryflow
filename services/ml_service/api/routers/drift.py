@@ -35,7 +35,7 @@ from drift import (
     MIN_ROWS,
 )
 from extensions import DetectorContext, UninterpretableModel
-from feature_engineering import FeatureEngineeringEngine, UnknownTransform
+from feature_engineering import FeatureEngineeringEngine, FeatureRefused
 from .inference import _resolve_company_id, detector_for, load_model_or_refuse
 
 logger = logging.getLogger(__name__)
@@ -106,12 +106,15 @@ async def _current_predictions(
             company_id=company_id,
             kill_switch=getattr(request.app.state, "stateful_switch", None),
         )
-    except UnknownTransform as exc:
+        rows = []
+        for i in _even_sample(n, MAX_PREDICTION_ROWS):
+            rows.append(await engine.transform({s: aligned[s][i] for s in base_sensors}))
+    except FeatureRefused as exc:
         # Prediction drift only; data drift reads the sensors, not the transforms.
         return None, f"the model cannot be scored: {exc}"
-    rows = []
-    for i in _even_sample(n, MAX_PREDICTION_ROWS):
-        rows.append(await engine.transform({s: aligned[s][i] for s in base_sensors}))
+    except Exception as exc:  # noqa: BLE001 — recorded as the reason; data drift still reports
+        logger.warning("Prediction drift not scored for model %s: %s", model.get("id"), exc, exc_info=True)
+        return None, f"the model cannot be scored: {type(exc).__name__}: {exc}"
 
     training_metrics = model.get("training_metrics") or {}
     ctx = DetectorContext(

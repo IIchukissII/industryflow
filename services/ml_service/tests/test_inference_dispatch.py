@@ -242,3 +242,42 @@ def test_a_warm_hit_still_runs_the_address_check(monkeypatch, loads):
     assert _predict(client).status_code == 200
     assert len(seen) == 1, "the second call was not a warm hit"
     assert checked == [{"company_id": CID, "mlflow_run_id": "run-mine", "artifact_uri": None}]
+
+
+# --- a model is scored on complete, computed input or not at all (ADR-0044) ----------------------
+
+@pytest.mark.parametrize("value", [None, "1.0"])
+def test_a_reading_lacking_a_sensor_is_a_422_naming_it(monkeypatch, loads, value):
+    _, model = loads
+    reading = {} if value is None else {"a": value}
+    r = _client(monkeypatch, _row()).post(
+        "/api/inference/predict", json={"model_id": "m1", "sensor_data": reading})
+    assert r.status_code == 422, r.text
+    assert "a" in r.json()["detail"].split(": ")[-1]
+    assert model.calls == [], "an incomplete reading reached the model"
+
+
+def test_a_definition_that_cannot_be_computed_is_a_422(monkeypatch, loads):
+    config = {"base_sensors": ["a"], "transformations": [
+        {"name": "x", "type": "statistical", "sensor": "a", "params": {"stat_type": "nope"}}]}
+    r = _predict(_client(monkeypatch, _row(), feature_config=config))
+    assert r.status_code == 422, r.text
+    assert "nope" in r.json()["detail"]
+
+
+def test_a_feature_that_fails_to_compute_fails_the_score(monkeypatch, loads):
+    config = {"base_sensors": ["a"], "transformations": [
+        {"name": "p", "type": "polynomial", "sensor": "a", "params": {"power": "two"}}]}
+    r = _predict(_client(monkeypatch, _row(), feature_config=config))
+    assert r.status_code == 500, r.text
+
+
+def test_an_unavailable_aggregate_is_served_neutral_and_named(monkeypatch, loads):
+    config = {"base_sensors": ["a"], "transformations": [
+        {"name": "a", "type": "identity", "sensor": "a"},
+        {"name": "a_dev", "type": "statistical", "sensor": "a",
+         "params": {"stat_type": "deviation_from_window_mean"}}]}
+    r = _predict(_client(monkeypatch, _row(), feature_config=config))   # no baseline provider
+    assert r.status_code == 200, r.text
+    assert r.json()["degraded"] is True
+    assert r.json()["neutralized_features"] == ["a_dev"]

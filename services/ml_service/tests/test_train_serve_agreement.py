@@ -32,8 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'api'))
 # `requests` dependency, which this test has no use for.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'notebooks', 'utils'))
 
-from extensions import get_transform, TransformContext  # noqa: E402
-from feature_engineering import baseline_provider  # noqa: E402
+from feature_engineering import FeatureEngineeringEngine, baseline_provider  # noqa: E402
 import offline_baseline  # noqa: E402
 
 # The producer's window table (services/spark_jobs/aggregation_windows.py), loaded by path: it is a
@@ -45,7 +44,6 @@ _spec = importlib.util.spec_from_file_location(
 aggregation_windows = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(aggregation_windows)
 
-STATISTICAL = get_transform("statistical")
 EQUIPMENT_ID = "550e8400-e29b-41d4-a716-446655440100"
 COMPANY_ID = "11111111-2222-3333-4444-555555555555"
 
@@ -101,9 +99,14 @@ class _ProviderOver:
         return self.baseline
 
 
-def _ctx(provider):
-    return TransformContext(baseline_provider=provider, equipment_id=EQUIPMENT_ID,
-                            company_id=COMPANY_ID)
+async def _served(transformation, reading, provider):
+    """What serving puts in the slot: the engine's value, including the neutral it fills when the
+    aggregate has no closed window yet (ADR-0044 dec 3), not the transform's bare return."""
+    engine = FeatureEngineeringEngine(
+        feature_config={"base_sensors": list(reading), "transformations": [transformation]},
+        baseline_provider=provider, equipment_id=EQUIPMENT_ID, company_id=COMPANY_ID,
+    )
+    return float((await engine.transform(reading))[0][0])
 
 
 # ------------------------------------------------------------------ the definitions cannot drift
@@ -193,7 +196,7 @@ async def test_offline_feature_equals_what_serving_computes(stat_type, suffix):
         # Serve this row as if it had just arrived: the provider answers with the window closed
         # before the row's own timestamp, which is what inference would read.
         provider = _ProviderOver(df, now=row["timestamp"])
-        served = await STATISTICAL(transformation, {"xmeas_1": row["xmeas_1"]}, _ctx(provider))
+        served = await _served(transformation, {"xmeas_1": row["xmeas_1"]}, provider)
         assert served == pytest.approx(row[f"xmeas_1{suffix}"]), (
             f"train/serve skew at sample {row['sample']}: "
             f"offline={row[f'xmeas_1{suffix}']} served={served}"
@@ -215,9 +218,9 @@ async def test_cold_start_rows_agree_on_neutral():
     assert (first_window["xmeas_1_deviation"] == 0.0).all()
 
     row = first_window.iloc[0]
-    served = await STATISTICAL(
+    served = await _served(
         offline_baseline.feature_config("xmeas_1", "deviation_from_window_mean"),
-        {"xmeas_1": row["xmeas_1"]}, _ctx(_ProviderOver(df, now=row["timestamp"])),
+        {"xmeas_1": row["xmeas_1"]}, _ProviderOver(df, now=row["timestamp"]),
     )
     assert served == 0.0
 

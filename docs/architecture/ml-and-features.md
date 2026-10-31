@@ -11,7 +11,8 @@ Feature configurations, the model registry, inference, detectors and drift in `m
 | Decision | ADR |
 |---|---|
 | Extension contract and mechanism (transforms, detectors) | [ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md), [ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md) |
-| Window baselines read from the Spark aggregates; neutral value on a missing baseline | [ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md) |
+| Window baselines read from the Spark aggregates; neutral value on a missing baseline | [ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md), [ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 3 |
+| A reading lacking an input, or a definition that cannot be computed, is refused; no substitute values | [ADR-0044](../../ADR/ADR-0044-complete-model-input.md) |
 | Stateful-feature kill-switch | [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md) |
 | Artifact formats, supported flavor set, skops trust by provenance | [ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) |
 | Out-of-process runtime for torch/GPU (not built) | [ADR-0036](../../ADR/ADR-0036-out-of-process-model-runtime.md) |
@@ -81,7 +82,7 @@ config.
 | `interaction` | no |
 | `deviation` | no |
 | `statistical` | yes |
-| `rolling_stat` | yes |
+| `rolling_stat` | yes; not implemented, a feature using it is refused |
 
 Stateful transforms read their baseline window from `params.granularity` (default `1min`, from
 `industryflow_contracts.windows`).
@@ -119,8 +120,9 @@ the gate; serving them in a separate runtime from an ONNX export is accepted but
 | Tenant | From the verified identity, or the `company_id` body field on an internal-token call |
 | Load | Model record and feature config; model from the warm cache or a cold load off the event loop |
 | Address check | A run must belong to one of the tenant's experiments; an artifact must be an admitted upload under the tenant's prefix; re-checked on every call |
-| Features | Feature config applied; stateful slots neutralised when the kill-switch is off |
-| Score | Detector named by the record; response `degraded: true` when any feature was neutralised |
+| Input | A reading lacking a sensor the config reads (absent or not a finite number) is `422` naming the sensors |
+| Features | Feature config applied; a definition its transform cannot interpret is `422`; any other feature failure is `500`; stateful slots neutralised when the kill-switch is off or their aggregate is unavailable |
+| Score | Detector named by the record; response `degraded: true` and `neutralized_features` when any slot was neutralised |
 
 Kernel-trained tree-based sklearn models need the skops grant at log time:
 `mlflow.sklearn.log_model(model, name="model", skops_trusted_types=industryflow.SKOPS_TRUSTED_TYPES)`.

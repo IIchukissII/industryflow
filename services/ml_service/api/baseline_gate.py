@@ -26,7 +26,7 @@ import numpy as np
 
 import drift
 from extensions import DetectorContext, UninterpretableModel
-from feature_engineering import FeatureEngineeringEngine, UnknownTransform
+from feature_engineering import FeatureEngineeringEngine, FeatureRefused
 
 # The detector's threshold does not change its score; the gate asks only for the score.
 _THRESHOLD = 0.5
@@ -108,15 +108,18 @@ async def plan(app_state, repository, company_id: str, model: Dict[str, Any]) ->
             company_id=company_id,
             kill_switch=getattr(app_state, "stateful_switch", None),
         )
-    except UnknownTransform as exc:
+        scored = [await engine.transform(row) for row in rows]
+    except FeatureRefused as exc:
         return Plan(profile, reason=f"the sample cannot be scored: {exc}")
+    except Exception as exc:  # noqa: BLE001 — the reason is recorded; a baseline never decides a deployment
+        return Plan(profile, reason=f"the sample cannot be scored: {type(exc).__name__}: {exc}")
     training_metrics = model.get("training_metrics") or {}
     return Plan(
         profile,
         detector=model.get("detector"),
         context={"equipment_id": model.get("equipment_id"),
                  "reconstruction_scale": training_metrics.get("reconstruction_scale")},
-        rows=[await engine.transform(row) for row in rows],
+        rows=scored,
     )
 
 
