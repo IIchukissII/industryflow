@@ -186,3 +186,9 @@ def test_the_dashboards_source_allowlist_is_optional_and_validated():
     assert "${EDGE_GRAFANA_ACCESS}" in GRAFANA_ROUTE
     assert "envsubst '${EDGE_GRAFANA} ${EDGE_GRAFANA_ACCESS}'" in ENTRYPOINT
     assert "deny all;" in ENTRYPOINT and "refusing to start: EDGE_GRAFANA_ALLOW" in ENTRYPOINT
+
+
+def test_nginx_redirects_never_name_the_containers_listen_port():
+    # /grafana and /jupyter without the slash were sent to https://<host>:8443/..., unpublished.
+    server, _ = _locations()
+    assert "absolute_redirect off;" in server

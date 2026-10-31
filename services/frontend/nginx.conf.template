@@ -57,6 +57,11 @@ server {
 
     resolver ${EDGE_RESOLVER} valid=10s ipv6=off;
 
+    # nginx's own redirects (a prefix without its trailing slash, e.g. /grafana -> /grafana/) carry a
+    # relative Location: an absolute one names the container's listen port, which the host does not
+    # publish, so the browser was sent to :8443.
+    absolute_redirect off;
+
     if ($edge_redirect_to_https) {
         return 301 https://$host$request_uri;
     }
