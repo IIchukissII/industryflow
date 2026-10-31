@@ -4,6 +4,12 @@
 
 apiVersion: 1
 
+# Removed on every start: a database datasource that an earlier provisioning created lives on in the
+# Grafana volume, because provisioning never deletes what a file stops listing (ADR-0016 dec 5).
+deleteDatasources:
+  - name: TimescaleDB
+    orgId: 1
+
 # Operator-facing platform plane only (ADR-0016): metrics and logs. There is deliberately no database
 # datasource — the database holds tenant data, and a shared monitoring Grafana that can query it
 # would put every tenant's readings in front of every operator (ADR-0016 dec 5). Database health
