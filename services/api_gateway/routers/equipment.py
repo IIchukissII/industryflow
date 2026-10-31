@@ -31,18 +31,12 @@ class EquipmentCreate(BaseModel):
     sensor_count: int = Field(gt=0)
     # Sensor ids (the column is uuid[]).
     expected_sensors: List[UUID] = Field(default_factory=list)
-    batch_timeout_seconds: int = Field(default=5, gt=0)
-    require_complete_batch: bool = True
-    min_sensors_for_partial: Optional[int] = None
 
 class EquipmentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     sensor_count: Optional[int] = None
     expected_sensors: Optional[List[UUID]] = None
-    batch_timeout_seconds: Optional[int] = None
-    require_complete_batch: Optional[bool] = None
-    min_sensors_for_partial: Optional[int] = None
 
 DISPLAY_NAME_MAX = 100  # sensors.display_name is VARCHAR(100) (init script 22)
 
@@ -142,12 +136,10 @@ async def create_equipment(
         result = await db.execute(text("""
             INSERT INTO equipment (
                 equipment_id, equipment_type, name, description,
-                site_id, location, sensor_count, expected_sensors,
-                batch_timeout_seconds, require_complete_batch, min_sensors_for_partial
+                site_id, location, sensor_count, expected_sensors
             ) VALUES (
                 :equipment_id, :equipment_type, :name, :description,
-                :site_id, :location, :sensor_count, :expected_sensors,
-                :batch_timeout_seconds, :require_complete_batch, :min_sensors_for_partial
+                :site_id, :location, :sensor_count, :expected_sensors
             )
             RETURNING *
         """), {
@@ -159,9 +151,6 @@ async def create_equipment(
             "location": equipment.location,
             "sensor_count": equipment.sensor_count,
             "expected_sensors": equipment.expected_sensors,
-            "batch_timeout_seconds": equipment.batch_timeout_seconds,
-            "require_complete_batch": equipment.require_complete_batch,
-            "min_sensors_for_partial": equipment.min_sensors_for_partial
         })
         row = result.fetchone()
         await db.commit()
@@ -181,8 +170,7 @@ async def update_equipment(
     updates = []
     params = {"equipment_id": equipment_id}
     
-    for field in ['name', 'description', 'sensor_count', 'expected_sensors', 
-                  'batch_timeout_seconds', 'require_complete_batch', 'min_sensors_for_partial']:
+    for field in ['name', 'description', 'sensor_count', 'expected_sensors']:
         value = getattr(equipment, field, None)
         if value is not None:
             updates.append(f"{field} = :{field}")

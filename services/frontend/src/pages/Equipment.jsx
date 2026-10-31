@@ -136,7 +136,6 @@ function Equipment() {
                 <Fact label="Sensors" mono>{equip.sensor_count}</Fact>
                 <Fact label="Site">{equip.site_id || 'Not set'}</Fact>
                 <Fact label="Location">{equip.location || 'Not set'}</Fact>
-                <Fact label="Batch window" mono>{equip.batch_timeout_seconds} s</Fact>
               </dl>
               <div className="eq-actions">
                 <a className="btn btn-primary" href="/">Show on Core</a>
@@ -175,17 +174,6 @@ function Equipment() {
                   <Fact label="Type">{humanize(selectedEquipment.equipment_type)}</Fact>
                   <Fact label="Site">{selectedEquipment.site_id || 'Not set'}</Fact>
                   <Fact label="Location">{selectedEquipment.location || 'Not set'}</Fact>
-                </dl>
-              </section>
-              <section className="detail-section">
-                <h3>Batching</h3>
-                <dl className="detail-grid">
-                  <Fact label="Sensors" mono>{selectedEquipment.sensor_count}</Fact>
-                  <Fact label="Batch window" mono>{selectedEquipment.batch_timeout_seconds} s</Fact>
-                  <Fact label="Complete batch required">{selectedEquipment.require_complete_batch ? 'Yes' : 'No'}</Fact>
-                  <Fact label="Minimum sensors for a partial batch" mono={!!selectedEquipment.min_sensors_for_partial}>
-                    {selectedEquipment.min_sensors_for_partial || 'Not set'}
-                  </Fact>
                 </dl>
               </section>
               <section className="detail-section">

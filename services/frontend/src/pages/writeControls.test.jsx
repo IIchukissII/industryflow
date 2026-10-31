@@ -24,7 +24,7 @@ const RULE = {
   condition: 'greater_than', threshold: 10,
 };
 const EQUIPMENT = {
-  equipment_id: 'e1', name: 'Pump', equipment_type: 'pump', sensor_count: 1, batch_timeout_seconds: 5,
+  equipment_id: 'e1', name: 'Pump', equipment_type: 'pump', sensor_count: 1,
 };
 
 function respond(body) {
