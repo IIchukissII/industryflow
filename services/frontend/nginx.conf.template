@@ -33,6 +33,7 @@ map $uri $edge_csp {
     default "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'";
     ~^/jupyter/ "";
     ~^/docs     "";
+    ~^/grafana/ "";
 }
 map $uri $edge_frame_options {
     default     SAMEORIGIN;
@@ -179,6 +180,9 @@ server {
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
     }
+
+    # Optional routes the deployment turns on (grafana.conf.template); none when the directory is empty.
+    include /etc/nginx/conf.d/edge-optional/*.conf;
 
     # Single-page app: serve index.html for any non-file route (client-side routing).
     location / {

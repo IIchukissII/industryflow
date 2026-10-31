@@ -658,6 +658,8 @@ services:
       EDGE_NOTEBOOK_SSO: notebook-sso:8080
       EDGE_TRACKING_GATEWAY: notebook-tracking-gateway:5050
       EDGE_OBJECT_STORE_URL: ${MINIO_ENDPOINT:-http://minio:9000}
+      # Optional: the dashboards at /grafana/ (ADR-0016 dec 6), e.g. grafana:3000. Unset: no route.
+      EDGE_GRAFANA: ${EDGE_GRAFANA:-}
     ports:
       # Unprivileged nginx listens on 8443/8080 inside the container; host ports unchanged.
       - "${FRONTEND_HTTPS_PORT:-3443}:8443"
@@ -1327,6 +1329,9 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_INSTALL_PLUGINS: ""
+      # Served from /grafana/, the path the edge forwards (ADR-0016 dec 6), on the loopback port too.
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./infrastructure/grafana/provisioning/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
@@ -1341,7 +1346,7 @@ services:
       - loki
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/grafana/api/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

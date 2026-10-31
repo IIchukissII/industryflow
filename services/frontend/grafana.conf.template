@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The single host's dashboards at the edge (ADR-0016 dec 6). Rendered into the server block by
+# 10-edge-config.sh only when the deployment names EDGE_GRAFANA; absent, /grafana/ is the SPA's.
+# Grafana keeps its own login and serves from this sub-path, so the full URI is passed through.
+# Declaring proxy_set_header here drops every inherited one, so the forwarding headers are restated.
+location /grafana/ {
+    set $grafana ${EDGE_GRAFANA};
+    proxy_pass http://$grafana;
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 3600s;
+}

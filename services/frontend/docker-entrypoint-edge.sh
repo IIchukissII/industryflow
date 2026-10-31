@@ -37,4 +37,14 @@ if [ -n "$missing" ]; then
 fi
 
 envsubst "$subst" < "$TEMPLATE" > "$OUTPUT"
+
+# Optional routes: rendered only when the deployment names their upstream, removed otherwise.
+OPTIONAL_DIR="${EDGE_OPTIONAL_DIR:-/etc/nginx/conf.d/edge-optional}"
+GRAFANA_TEMPLATE="${EDGE_GRAFANA_TEMPLATE:-/etc/nginx/edge/grafana.conf.template}"
+rm -f "$OPTIONAL_DIR/grafana.conf"
+if [ -n "${EDGE_GRAFANA:-}" ]; then
+    export EDGE_GRAFANA
+    envsubst '${EDGE_GRAFANA}' < "$GRAFANA_TEMPLATE" > "$OPTIONAL_DIR/grafana.conf"
+    echo "[edge] dashboards at /grafana/ (upstream $EDGE_GRAFANA)"
+fi
 echo "[edge] rendered $OUTPUT (resolver $EDGE_RESOLVER, gateway $EDGE_API_GATEWAY)"

@@ -289,6 +289,10 @@ jobs:
             docker run --rm --env-file "${env}.env" "$IMAGE" nginx -t
             echo "::endgroup::"
           done
+          echo "::group::nginx -t with the dashboards route on"
+          docker run --rm --env-file compose.env -e EDGE_GRAFANA=grafana:3000 "$IMAGE" sh -c \
+            '/docker-entrypoint.d/10-edge-config.sh && grep -q "location /grafana/" /etc/nginx/conf.d/edge-optional/grafana.conf && nginx -t'
+          echo "::endgroup::"
           grep -v '^EDGE_ML_SERVICE=' compose.env > incomplete.env
           if docker run --rm --env-file incomplete.env "$IMAGE" nginx -t; then
             echo "::error::the edge started without an upstream"; exit 1

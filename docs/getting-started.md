@@ -102,6 +102,7 @@ per-user containers through the Docker socket ([notebooks](architecture/notebook
 ## Components
 
 Host ports bind to `127.0.0.1`, except `frontend` and `ingestion-edge`, which bind every interface.
+Grafana can also be served by the edge at `/grafana/` ([monitoring](operations/monitoring.md#grafana)).
 From another machine, reach a loopback port through an SSH tunnel (`ssh -L 5000:localhost:5000 <host>`).
 
 | Name | Role | Port | Config |

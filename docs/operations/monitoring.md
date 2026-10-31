@@ -142,7 +142,8 @@ receivers:
 
 | Item | Value |
 |---|---|
-| URL | `http://localhost:<GRAFANA_PORT>` |
+| URL | `http://localhost:<GRAFANA_PORT>/grafana/` on the host |
+| Through the edge | `https://<host>:<FRONTEND_HTTPS_PORT>/grafana/` when `.env` sets `EDGE_GRAFANA=grafana:3000` ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 6) |
 | Login | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env` |
 | Datasources | `Prometheus` (default), `Loki` — `datasources.yml` |
 | Dashboard provider | folder `IndustryFlow`, files under `/etc/grafana/provisioning/dashboards` — `dashboards.yml` |
