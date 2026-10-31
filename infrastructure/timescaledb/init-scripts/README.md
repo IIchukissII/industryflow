@@ -79,6 +79,7 @@ every script once. Every script is idempotent.
 | `30-bound-feature-config.sql` | `add_bound_feature_config_rules()`: `ml_models.feature_config_id` `ON DELETE RESTRICT`; triggers refusing a change to a bound config's `base_sensors`/`transformations` and to a model's binding; backfill | [ADR-0041](../../../ADR/ADR-0041-bound-feature-configuration.md) |
 | `31-capability-audit.sql` | `public.capability_use_events`; `record_capability_use()` (writer), `expire_capability_use()` (retention, ≥ 30 days); `SELECT` and both functions for `api_gateway_user` only | [ADR-0042](../../../ADR/ADR-0042-capability-use-audit.md) |
 | `32-platform-switch-control.sql` | `public.platform_config_changes`; `set_platform_switch()` (the one writer of a platform switch, records each flip); `EXECUTE` and `SELECT` on both tables for `api_gateway_user` only | [ADR-0043](../../../ADR/ADR-0043-platform-switch-operator-control.md) |
+| `33-equipment-batch-settings-removed.sql` | Drops `batch_timeout_seconds`, `require_complete_batch`, `min_sensors_for_partial` from every tenant's `equipment` | [ADR-0044](../../../ADR/ADR-0044-complete-model-input.md) dec 5 |
 
 `create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22 and 23.
 The per-tenant definitions also apply themselves to every existing tenant schema (ADR-0034 dec 3).

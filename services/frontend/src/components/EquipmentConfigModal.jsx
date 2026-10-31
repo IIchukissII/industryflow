@@ -26,10 +26,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
     site_id: editEquipment.site_id || '',
     location: editEquipment.location || '',
     sensor_count: editEquipment.sensor_count,
-    expected_sensors: editEquipment.expected_sensors || [],
-    batch_timeout_seconds: editEquipment.batch_timeout_seconds,
-    require_complete_batch: editEquipment.require_complete_batch,
-    min_sensors_for_partial: editEquipment.min_sensors_for_partial
+    expected_sensors: editEquipment.expected_sensors || []
   } : {
     equipment_id: '',
     equipment_type: 'pump',
@@ -38,10 +35,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
     site_id: '',
     location: '',
     sensor_count: 1,
-    expected_sensors: [],
-    batch_timeout_seconds: 5,
-    require_complete_batch: true,
-    min_sensors_for_partial: null
+    expected_sensors: []
   });
 
   // Array of sensors to be added
@@ -122,11 +116,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
 
       const equipmentData = {
         ...formData,
-        sensor_count: sensorCount,
-        batch_timeout_seconds: parseInt(formData.batch_timeout_seconds),
-        min_sensors_for_partial: formData.min_sensors_for_partial 
-          ? parseInt(formData.min_sensors_for_partial) 
-          : null
+        sensor_count: sensorCount
       };
 
       if (isEditMode) {
@@ -309,10 +299,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
       site_id: '',
       location: '',
       sensor_count: 1,
-      expected_sensors: [],
-      batch_timeout_seconds: 5,
-      require_complete_batch: true,
-      min_sensors_for_partial: null
+      expected_sensors: []
     });
     setCurrentSensor({
       sensor_id: '',
@@ -463,47 +450,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
                   />
                   <small>Total sensors on this equipment (1-100)</small>
                 </div>
-                <div className="form-group">
-                  <label>Batch Timeout (seconds) *</label>
-                  <input
-                    type="number"
-                    name="batch_timeout_seconds"
-                    value={formData.batch_timeout_seconds}
-                    onChange={handleInputChange}
-                    min="1"
-                    required
-                  />
-                  <small>Wait time for complete batch</small>
-                </div>
               </div>
-
-              <div className="form-group">
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    name="require_complete_batch"
-                    checked={formData.require_complete_batch}
-                    onChange={handleInputChange}
-                  />
-                  <span>Require Complete Batch for ML Evaluation</span>
-                </label>
-              </div>
-
-              {!formData.require_complete_batch && (
-                <div className="form-group">
-                  <label>Minimum Sensors for Partial Batch</label>
-                  <input
-                    type="number"
-                    name="min_sensors_for_partial"
-                    value={formData.min_sensors_for_partial || ''}
-                    onChange={handleInputChange}
-                    min="1"
-                    max={formData.sensor_count}
-                    placeholder="e.g., 3"
-                  />
-                  <small>Minimum sensors needed if partial batches are allowed</small>
-                </div>
-              )}
 
               <div className="form-actions">
                 <button type="button" onClick={handleClose} className="btn-secondary">
