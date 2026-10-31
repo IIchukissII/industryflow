@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'api'))
 
-from extensions import get_transform, TransformContext  # noqa: E402
+from extensions import InvalidFeature, StatefulUnavailable, get_transform, TransformContext  # noqa: E402
 from feature_engineering.baseline_provider import AggregateBaselineProvider  # noqa: E402
 
 
@@ -65,28 +65,29 @@ async def test_deviation_happy_path():
 
 
 @pytest.mark.asyncio
-async def test_neutral_when_provider_raises():
-    """Provider error yields neutral 0.0 — NOT the raw value (regression for the OOD-fallback bug)."""
-    result = await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(_FakeProvider(raises=True)))
-    assert result == 0.0
+async def test_unavailable_when_provider_raises():
+    """A provider error is reported for the engine's neutral, never the raw value (regression for the
+    OOD-fallback bug; ADR-0044 dec 3)."""
+    with pytest.raises(StatefulUnavailable):
+        await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(_FakeProvider(raises=True)))
 
 
 @pytest.mark.asyncio
-async def test_neutral_when_no_baseline():
-    result = await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=None)))
-    assert result == 0.0
+async def test_unavailable_when_no_baseline():
+    with pytest.raises(StatefulUnavailable):
+        await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=None)))
 
 
 @pytest.mark.asyncio
-async def test_neutral_when_no_provider():
-    result = await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(None))
-    assert result == 0.0
+async def test_unavailable_when_no_provider():
+    with pytest.raises(StatefulUnavailable):
+        await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(None))
 
 
 @pytest.mark.asyncio
-async def test_neutral_when_no_company_id():
-    result = await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0), company_id=None))
-    assert result == 0.0
+async def test_unavailable_when_no_company_id():
+    with pytest.raises(StatefulUnavailable):
+        await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0), company_id=None))
 
 
 @pytest.mark.asyncio
@@ -98,10 +99,11 @@ async def test_granularity_passed_through():
 
 
 @pytest.mark.asyncio
-async def test_unknown_stat_type_is_neutral():
+async def test_unknown_stat_type_is_refused():
     t = {"name": "x", "type": "statistical", "sensor": "xmeas_1",
          "params": {"stat_type": "nope"}}
-    assert await STATISTICAL(t, {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0))) == 0.0
+    with pytest.raises(InvalidFeature, match="nope"):
+        await STATISTICAL(t, {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0)))
 
 
 @pytest.mark.asyncio
@@ -113,7 +115,7 @@ async def test_legacy_stat_type_still_resolves():
 
 
 @pytest.mark.asyncio
-async def test_missing_stat_type_is_neutral():
+async def test_missing_stat_type_is_refused():
     """No default: a config that names no statistic must not silently receive a deviation.
 
     Regression for a real defect: configs emitted with `{"operation": "mean"}` params carried no
@@ -122,7 +124,8 @@ async def test_missing_stat_type_is_neutral():
     """
     t = {"name": "xmeas_1_run_mean", "type": "statistical", "sensor": "xmeas_1",
          "params": {"operation": "mean", "groupby": "simulationRun"}}
-    assert await STATISTICAL(t, {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0))) == 0.0
+    with pytest.raises(InvalidFeature):
+        await STATISTICAL(t, {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0)))
 
 
 @pytest.mark.asyncio
@@ -148,9 +151,10 @@ async def test_window_std_neutral_when_single_sample_window():
 
 
 @pytest.mark.asyncio
-async def test_missing_sensor_is_neutral():
+async def test_a_definition_naming_no_sensor_is_refused():
     t = {"name": "bad", "type": "statistical", "params": {}}
-    assert await STATISTICAL(t, {}, _ctx(_FakeProvider(mean=70.0))) == 0.0
+    with pytest.raises(InvalidFeature, match="no sensor"):
+        await STATISTICAL(t, {}, _ctx(_FakeProvider(mean=70.0)))
 
 
 # --------------------------------------------------------------------------- provider tests

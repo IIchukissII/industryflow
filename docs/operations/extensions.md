@@ -33,22 +33,38 @@ configured transform `type` through the registry. `ctx` is a `TransformContext` 
 `equipment_id`, `company_id`).
 
 ```python
-from extensions import register_transform
+from extensions import InvalidFeature, StatefulUnavailable, register_transform, sensor_value
 
 @register_transform("pressure_margin")
 async def pressure_margin(transformation, sensor_data, ctx):
-    limit = transformation.get("params", {}).get("limit", 0.0)
-    return limit - sensor_data.get(transformation["sensor"], 0.0)
+    if "limit" not in transformation.get("params", {}):
+        raise InvalidFeature(transformation.get("name"), "it names no limit")
+    return transformation["params"]["limit"] - sensor_value(sensor_data, transformation["sensor"])
 
 @register_transform("pressure_baseline", stateful=True, neutral=0.0)
 async def pressure_baseline(transformation, sensor_data, ctx):
-    return await ctx.baseline_provider.compute_rolling_mean(...)
+    baseline = await ctx.baseline_provider.compute_baseline(...)
+    if baseline is None:
+        raise StatefulUnavailable("no closed window yet")
+    return baseline["mean"]
 ```
+
+A transform never returns a substitute value ([ADR-0044](../../ADR/ADR-0044-complete-model-input.md)):
+
+| SDK name | Use | Result at `/api/inference/predict` |
+|---|---|---|
+| `sensor_value(sensor_data, name)` | The only way to read a sensor; raises `MissingSensors` for an absent or non-finite value | `422` naming the sensors |
+| `InvalidFeature(feature, reason)` | The definition cannot be interpreted (missing or unknown parameter) | `422` |
+| `StatefulUnavailable(reason)` | A `stateful=True` transform's store cannot supply the value | Slot takes `neutral`; `degraded: true`, named in `neutralized_features` |
+| Any other exception | — | `500`; the score fails |
+
+The engine refuses a reading lacking any `base_sensors` entry, or any sensor a feature names in
+`sensor` / `sensors`, before a transform runs.
 
 | Tag | Meaning |
 |---|---|
 | `stateful=True` | The transform reads an external store. Required for any such transform ([ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) |
-| `neutral` | Value the engine puts in the slot while the stateful-feature kill-switch is off; the transform is then not called. The vector keeps its length and order |
+| `neutral` | Value the engine puts in the slot while the stateful-feature kill-switch is off (the transform is then not called), or when the transform raises `StatefulUnavailable`. The vector keeps its length and order |
 
 Operating the kill-switch: [monitoring](monitoring.md#runbook-stateful-feature-kill-switch).
 

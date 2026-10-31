@@ -14,13 +14,16 @@ import logging
 # generic transforms are built-ins; domains register new types in their own modules. The registry
 # also carries each type's capability tags (ADR-0024), which is how the engine can neutralize the
 # stateful class without knowing which types are in it.
-from extensions import get_transform, is_stateful, neutral_value, TransformContext
+from extensions import (
+    FeatureRefused, MissingSensors, StatefulUnavailable, TransformContext,
+    get_transform, is_stateful, missing_sensors, neutral_value,
+)
 
 logger = logging.getLogger(__name__)
 
 
 
-class UnknownTransform(ValueError):
+class UnknownTransform(FeatureRefused):
     """A feature configuration names a transform type no registered transform implements."""
 
     def __init__(self, types):
@@ -61,6 +64,13 @@ class FeatureEngineeringEngine:
         self.base_sensors = feature_config.get('base_sensors', [])
         self.transformations = feature_config.get('transformations', [])
         self.feature_names = [t['name'] for t in self.transformations]
+        # Every sensor the configuration reads: its declared inputs and any a feature names. A
+        # reading lacking one is refused before a slot is filled (ADR-0044 dec 1).
+        named = []
+        for t in self.transformations:
+            named += [t['sensor']] if t.get('sensor') else []
+            named += [s for s in (t.get('sensors') or []) if s]
+        self.required_sensors: List[str] = list(dict.fromkeys([*self.base_sensors, *named]))
         # A type no registered transform implements has no value to compute: refused here, before any
         # slot is filled, rather than scored on a substitute the model never saw.
         unknown = sorted({str(t.get('type')) for t in self.transformations if get_transform(t.get('type')) is None})
@@ -70,9 +80,11 @@ class FeatureEngineeringEngine:
         self.equipment_id = equipment_id
         self.company_id = company_id
         self.kill_switch = kill_switch
-        # Slots the switch neutralized on the last transform() call. Empty is the normal state, so
-        # a caller that reads it before transform() sees "nothing degraded" rather than an error.
+        # Slots the switch neutralized on the last transform() call, and slots whose aggregate was
+        # unavailable. Empty is the normal state, so a caller that reads them before transform()
+        # sees "nothing degraded" rather than an error.
         self.neutralized_features: List[str] = []
+        self.unavailable_features: List[str] = []
 
         logger.info(f"Initialized FeatureEngineeringEngine: {len(self.base_sensors)} base sensors, {len(self.transformations)} transformations, baseline provider: {baseline_provider is not None}")
 
@@ -87,12 +99,21 @@ class FeatureEngineeringEngine:
         Returns:
             numpy array of engineered features in the order defined by transformations
 
-        Also sets ``neutralized_features``: the names of the slots the kill-switch filled with a
-        neutral value instead of computing. The caller surfaces it, because a score computed on
-        partially-neutralized input must not look like an ordinary one (ADR-0024 dec 5).
+        Also sets ``neutralized_features`` (slots the kill-switch filled with a neutral value) and
+        ``unavailable_features`` (stateful slots whose aggregate could not be read). The caller
+        surfaces both, because a score on partially-neutral input must not look like an ordinary
+        one (ADR-0024 dec 5, ADR-0044 dec 3).
+
+        Raises ``MissingSensors`` for an incomplete reading and ``FeatureRefused`` for a definition
+        that cannot be computed (ADR-0044 dec 1, 2); any other failure propagates (dec 4).
         """
+        missing = missing_sensors(sensor_data, self.required_sensors)
+        if missing:
+            raise MissingSensors(missing)
+
         features = []
         neutralized: List[str] = []
+        unavailable: List[str] = []
 
         # Read the switch ONCE per inference, not once per feature: a model may carry many stateful
         # features, and the switch's own read must not become N queries on the hot path — the load
@@ -106,13 +127,18 @@ class FeatureEngineeringEngine:
                 feature_value = await self._apply_transformation(
                     transformation, sensor_data, stateful_enabled, neutralized,
                 )
-                features.append(feature_value)
-            except Exception as e:
-                logger.warning(f"Failed to compute feature '{transformation['name']}': {e}")
-                # Use 0.0 as fallback for missing features
-                features.append(0.0)
+            except StatefulUnavailable as e:
+                # The outage fallback ADR-0024 keeps, for the stateful class only; from any other
+                # transform this is an ordinary failure and fails the score (ADR-0044 dec 3, 4).
+                if not is_stateful(transformation['type']):
+                    raise
+                logger.warning("Feature '%s' served neutral, aggregate unavailable: %s", transformation['name'], e)
+                unavailable.append(transformation['name'])
+                feature_value = neutral_value(transformation['type'])
+            features.append(feature_value)
 
         self.neutralized_features = neutralized
+        self.unavailable_features = unavailable
         if neutralized:
             logger.warning(
                 "Stateful features neutralized by the kill-switch (ADR-0024): %d of %d slots (%s)",
