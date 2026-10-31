@@ -72,8 +72,10 @@ def root(edge, settings):
 
 @pytest.fixture(scope="session")
 def tenant(edge, root, env):
-    """A tenant of this run, with an administrator and an engineer signed in. At the end it is suspended
-    and its deletion requested; the next run's deletion job removes it (test_tenant_life.py)."""
+    """A tenant of this run, with an administrator and an engineer signed in. At the end its devices are
+    revoked, it is suspended and its deletion requested; the next run's deletion job removes it
+    (test_tenant_life.py). Deletion waits for every device of the tenant to be revoked (ADR-0033), so a
+    teardown that skipped the revocation would leave the tenant pending for good."""
     run = uuid.uuid4().hex[:8]
     company = root.post("/api/companies", json={"company_name": f"e2e-{run}"}).json()
     cid = company["company_id"]
@@ -85,6 +87,7 @@ def tenant(edge, root, env):
                                       "company_id": cid})
         users[role] = edge.session(email, password)
     yield {"company_id": cid, "schema": company.get("schema_name"), "run": run, **users}
+    env.script("scripts/device-ca.sh", "revoke-tenant", cid)
     root.put(f"/api/companies/{cid}", json={"is_active": False}, expect=(200, 400, 404))
     env.sql(f"UPDATE public.companies SET suspended_at = now() - interval '31 days' WHERE company_id = '{cid}'")
     root.post(f"/api/companies/{cid}/deletion", expect=(200, 201, 202, 409))
