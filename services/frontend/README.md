@@ -48,8 +48,9 @@ instead of literal colours.
 |---|---|
 | `Dockerfile` | `node:22-alpine` runs `npm ci && npm run build`; `nginxinc/nginx-unprivileged` serves `build/` as uid 101 |
 | `docker-entrypoint-tls.sh` | Generates a self-signed `/etc/nginx/certs/tls.{crt,key}` when none is mounted; `CERT_EXTRA_SAN` adds SANs |
-| `docker-entrypoint-edge.sh` | Renders `nginx.conf.template` from the `EDGE_*` variables; refuses to start if one is unset |
+| `docker-entrypoint-edge.sh` | Renders `nginx.conf.template` from the `EDGE_*` variables; refuses to start if a required one is unset; renders `grafana.conf.template` only when `EDGE_GRAFANA` is set |
 | `nginx.conf.template` | Routes the API prefixes, `/ws/`, `/jupyter/`, the upload plane and the SPA (`try_files … /index.html`); sets HSTS, CSP, frame/sniff/referrer/permissions policy |
+| `grafana.conf.template` | Optional `/grafana/` route to Grafana, with the `EDGE_GRAFANA_ALLOW` source allowlist |
 
 | Port | Serves |
 |---|---|
@@ -66,6 +67,8 @@ instead of literal colours.
 | `EDGE_TRACKING_GATEWAY` | `notebook-tracking-gateway:5050` | tracking gateway Service FQDN |
 | `EDGE_OBJECT_STORE_URL` | `${MINIO_ENDPOINT:-http://minio:9000}` | in-cluster MinIO Service URL, or `infra.minio.external.endpoint` |
 | `EDGE_RESOLVER` | the container's nameservers | same |
+| `EDGE_GRAFANA` | unset (no route); `grafana:3000` turns it on | not set (no Grafana in the chart) |
+| `EDGE_GRAFANA_ALLOW` | unset (any source) | not set |
 
 Kubernetes upstreams are fully qualified (`<svc>.<namespace>.svc.<clusterDomain>`): nginx re-resolves
 them per request, and the resolver applies no search domains.

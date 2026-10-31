@@ -33,6 +33,7 @@ map $uri $edge_csp {
     default "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'";
     ~^/jupyter/ "";
     ~^/docs     "";
+    ~^/grafana/ "";
 }
 map $uri $edge_frame_options {
     default     SAMEORIGIN;
@@ -55,6 +56,11 @@ server {
     ssl_protocols       TLSv1.2 TLSv1.3;
 
     resolver ${EDGE_RESOLVER} valid=10s ipv6=off;
+
+    # nginx's own redirects (a prefix without its trailing slash, e.g. /grafana -> /grafana/) carry a
+    # relative Location: an absolute one names the container's listen port, which the host does not
+    # publish, so the browser was sent to :8443.
+    absolute_redirect off;
 
     if ($edge_redirect_to_https) {
         return 301 https://$host$request_uri;
@@ -179,6 +185,9 @@ server {
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
     }
+
+    # Optional routes the deployment turns on (grafana.conf.template); none when the directory is empty.
+    include /etc/nginx/conf.d/edge-optional/*.conf;
 
     # Single-page app: serve index.html for any non-file route (client-side routing).
     location / {

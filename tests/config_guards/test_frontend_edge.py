@@ -139,3 +139,56 @@ def test_api_and_websocket_routes_forward_the_host_with_its_port():
         assert "proxy_set_header Host $http_host;" in effective, f"{loc} forwards {effective}"
         assert any(d.startswith("proxy_set_header X-Forwarded-Proto") for d in effective), loc
     assert checked >= 10, f"only {checked} gateway/ML locations found — the parser is not reading"
+
+
+GRAFANA_ROUTE = (FRONTEND / "grafana.conf.template").read_text()
+
+
+def test_the_dashboards_route_is_rendered_only_when_its_upstream_is_named():
+    # ADR-0016 dec 6: optional, so it is not in the template's required set, and the entrypoint
+    # renders it with exactly its own variable (envsubst unrestricted would eat nginx's $vars).
+    code = "\n".join(line for line in GRAFANA_ROUTE.splitlines() if not line.lstrip().startswith("#"))
+    assert set(re.findall(r"\$\{(EDGE_\w+)\}", code)) == {"EDGE_GRAFANA", "EDGE_GRAFANA_ACCESS"}
+    assert "EDGE_GRAFANA" not in _template_vars()
+    assert 'if [ -n "${EDGE_GRAFANA:-}" ]' in ENTRYPOINT
+    assert "include /etc/nginx/conf.d/edge-optional/*.conf;" in TEMPLATE
+    dockerfile = (FRONTEND / "Dockerfile").read_text()
+    assert "COPY grafana.conf.template /etc/nginx/edge/grafana.conf.template" in dockerfile
+    assert "/etc/nginx/conf.d/edge-optional" in dockerfile
+
+
+def test_the_dashboards_route_is_off_unless_the_operator_turns_it_on():
+    assert compose_env()["EDGE_GRAFANA"] == ""
+    assert "EDGE_GRAFANA" not in helm_env(["--set", "notebookHub.enabled=true"])
+
+
+def test_the_dashboards_route_forwards_the_host_and_is_outside_the_spa_policy():
+    assert "proxy_set_header Host $http_host;" in GRAFANA_ROUTE
+    assert "proxy_set_header X-Forwarded-Proto https;" in GRAFANA_ROUTE
+    assert "add_header" not in "\n".join(
+        line for line in GRAFANA_ROUTE.splitlines() if not line.lstrip().startswith("#"))
+    assert '~^/grafana/ "";' in TEMPLATE
+
+
+def test_grafana_serves_from_the_path_the_edge_forwards():
+    import yaml
+
+    grafana = yaml.safe_load((ROOT / "docker-compose.yml").read_text())["services"]["grafana"]
+    env = grafana["environment"]
+    assert env["GF_SERVER_ROOT_URL"].endswith("/grafana/")
+    assert env["GF_SERVER_SERVE_FROM_SUB_PATH"] == "true"
+    assert "/grafana/api/health" in " ".join(grafana["healthcheck"]["test"])
+    assert any(p.startswith("127.0.0.1:") for p in grafana["ports"])
+
+
+def test_the_dashboards_source_allowlist_is_optional_and_validated():
+    assert compose_env()["EDGE_GRAFANA_ALLOW"] == ""
+    assert "${EDGE_GRAFANA_ACCESS}" in GRAFANA_ROUTE
+    assert "envsubst '${EDGE_GRAFANA} ${EDGE_GRAFANA_ACCESS}'" in ENTRYPOINT
+    assert "deny all;" in ENTRYPOINT and "refusing to start: EDGE_GRAFANA_ALLOW" in ENTRYPOINT
+
+
+def test_nginx_redirects_never_name_the_containers_listen_port():
+    # /grafana and /jupyter without the slash were sent to https://<host>:8443/..., unpublished.
+    server, _ = _locations()
+    assert "absolute_redirect off;" in server

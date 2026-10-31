@@ -37,4 +37,28 @@ if [ -n "$missing" ]; then
 fi
 
 envsubst "$subst" < "$TEMPLATE" > "$OUTPUT"
+
+# Optional routes: rendered only when the deployment names their upstream, removed otherwise.
+OPTIONAL_DIR="${EDGE_OPTIONAL_DIR:-/etc/nginx/conf.d/edge-optional}"
+GRAFANA_TEMPLATE="${EDGE_GRAFANA_TEMPLATE:-/etc/nginx/edge/grafana.conf.template}"
+rm -f "$OPTIONAL_DIR/grafana.conf"
+if [ -n "${EDGE_GRAFANA:-}" ]; then
+    # EDGE_GRAFANA_ALLOW: addresses or CIDR blocks, space- or comma-separated. Unset: no restriction.
+    # An entry that is not an address refuses the start rather than widening or breaking the route.
+    EDGE_GRAFANA_ACCESS=""
+    set -f  # an entry is never a filename pattern
+    for entry in $(printf '%s' "${EDGE_GRAFANA_ALLOW:-}" | tr ',' ' '); do
+        if ! printf '%s' "$entry" | grep -Eq '^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$'; then
+            echo "[edge] refusing to start: EDGE_GRAFANA_ALLOW entry '$entry' is not an address or CIDR block" >&2
+            exit 1
+        fi
+        EDGE_GRAFANA_ACCESS="$EDGE_GRAFANA_ACCESS    allow $entry;
+"
+    done
+    set +f
+    [ -z "$EDGE_GRAFANA_ACCESS" ] || EDGE_GRAFANA_ACCESS="${EDGE_GRAFANA_ACCESS}    deny all;"
+    export EDGE_GRAFANA EDGE_GRAFANA_ACCESS
+    envsubst '${EDGE_GRAFANA} ${EDGE_GRAFANA_ACCESS}' < "$GRAFANA_TEMPLATE" > "$OPTIONAL_DIR/grafana.conf"
+    echo "[edge] dashboards at /grafana/ (upstream $EDGE_GRAFANA, allowed: ${EDGE_GRAFANA_ALLOW:-any})"
+fi
 echo "[edge] rendered $OUTPUT (resolver $EDGE_RESOLVER, gateway $EDGE_API_GATEWAY)"

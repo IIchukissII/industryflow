@@ -32,6 +32,7 @@ RUN echo "security refresh: ${SECURITY_REFRESH}" \
 # FQDNs), and refuses to start without them. It is kept out of /etc/nginx/templates so the stock
 # envsubst step, which substitutes every environment variable, never touches it.
 COPY nginx.conf.template /etc/nginx/edge/default.conf.template
+COPY grafana.conf.template /etc/nginx/edge/grafana.conf.template
 # TLS cert bootstrap and the config render run before nginx starts (/docker-entrypoint.d/*.sh).
 COPY docker-entrypoint-tls.sh /docker-entrypoint.d/00-tls.sh
 COPY docker-entrypoint-edge.sh /docker-entrypoint.d/10-edge-config.sh
@@ -39,7 +40,7 @@ COPY docker-entrypoint-edge.sh /docker-entrypoint.d/10-edge-config.sh
 # k8s emptyDir mounted here inherits this ownership); a real cert mounted here overrides it. The
 # rendered config is written over the stock conf.d/default.conf, which the base already gives 101.
 RUN chmod +x /docker-entrypoint.d/00-tls.sh /docker-entrypoint.d/10-edge-config.sh \
- && mkdir -p /etc/nginx/certs && chown -R 101:101 /etc/nginx/certs /etc/nginx/conf.d
+ && mkdir -p /etc/nginx/certs /etc/nginx/conf.d/edge-optional && chown -R 101:101 /etc/nginx/certs /etc/nginx/conf.d
 COPY --from=build /app/build /usr/share/nginx/html
 USER 101
 EXPOSE 8080 8443

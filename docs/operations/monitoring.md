@@ -132,6 +132,7 @@ receivers:
 | Evidence | The rule's PromQL over the 30 minutes before the alert to now; error lines of the services in the rule's `services` annotation and the target's host; other active alerts; the alert's row in the [alert table](#alerts) (every platform rule has one); `Symptom \| Cause \| Fix` rows sharing at least two words with the alert. The metric series are narrowed to the alert's own labels |
 | Sent to the model | The alert and the evidence, after redaction: tenant identifiers, emails, network addresses and credential-shaped strings become `<tenant-1>`, `<email-1>`, … ; the note records the counts per category |
 | Output | Loki stream `{job="ops-agent"}`; the `complete-system` and Incidents dashboards draw it as annotations. No Grafana credential |
+| Note fields | `alertname`, `severity`, `services`, `what`, `impact`, `cause`, `next_step` (the model's four sections), `text` (the whole note), `model`, `evidence`, `redacted`, `fingerprint`, `key` |
 | Without a model | A model error or refusal still publishes a note: the evidence listing, `model` = `none` |
 | Once per firing | A firing (fingerprint and start) is explained once; remembered 7 days, and after a restart the agent finds its earlier note in Loki |
 | Alert storm | At most 5 alerts of one webhook (critical first) and 10 waiting; the rest are logged as not explained |
@@ -142,7 +143,9 @@ receivers:
 
 | Item | Value |
 |---|---|
-| URL | `http://localhost:<GRAFANA_PORT>` |
+| URL | `http://localhost:<GRAFANA_PORT>/grafana/` on the host |
+| Through the edge | `https://<host>:<FRONTEND_HTTPS_PORT>/grafana/` when `.env` sets `EDGE_GRAFANA=grafana:3000` ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 6) |
+| Source addresses | `EDGE_GRAFANA_ALLOW`: addresses or CIDR blocks, space- or comma-separated; others get `403`. Unset: any. An invalid entry stops the edge from starting |
 | Login | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env` |
 | Datasources | `Prometheus` (default), `Loki` — `datasources.yml` |
 | Dashboard provider | folder `IndustryFlow`, files under `/etc/grafana/provisioning/dashboards` — `dashboards.yml` |
@@ -156,7 +159,7 @@ health reaches Grafana as `postgres-exporter` metrics.
 | UID | Title | File | Rows / panels |
 |---|---|---|---|
 | `complete-system` | Complete System Infrastructure | `complete_system_dashboard.json` | Service health (`up` for prometheus, postgres, redis, kafka, api-gateway, ml-service; alert detector via cAdvisor `container_last_seen`); system CPU / memory / disk; container CPU and memory; container and host network I/O; DB connections and activity; Redis hit rate and activity; Kafka topic offsets and consumer lag; Spark container CPU / memory / network. Refresh `10s` |
-| `ops-agent-incidents` | Incidents | `incidents_dashboard.json` | Notes in range, notes written without a model, notes by alert, the notes themselves (newest first). Variable `alertname`. Refresh `1m` |
+| `ops-agent-incidents` | Incidents | `incidents_dashboard.json` | Counts per priority (P1 critical, P2 warning), all incidents, notes without a model; incidents over time by priority; incident table by priority (what happened, likely cause, next step); detail of the incident picked in the table, or the newest. Variables `alertname`, `severity`, `incident`. Refresh `1m` |
 | `container_logs` | Container Logs Dashboard | `logs_dashboard.json` | Log rate by service, active containers, current log rate, top 10 services by volume, log viewer. Variables `service`, `container`, `search` (regex). Refresh `10s` |
 
 ## Metrics

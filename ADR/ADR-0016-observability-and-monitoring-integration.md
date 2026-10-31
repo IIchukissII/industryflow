@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0016 — Observability and monitoring integration
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-25
+- **Date:** 2026-06-27; changed 2026-10-31
 - **Parent:** ADR-0001
-- **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (self-contained chart; deferred monitoring here), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the tenant-isolated path alerts stay on)
+- **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (self-contained chart; deferred monitoring here), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the tenant-isolated path alerts stay on), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (external traffic only over the TLS edge)
 
 ## Context
 
@@ -34,6 +34,11 @@ not leave the tenant-isolated path.
 5. **Tenant alerts stay on the tenant-isolated path and never pass through the shared monitoring
    stack.** An alert goes from the rules engine directly into the tenant's own store, and metrics on the
    platform plane are operational and aggregate, never per-tenant values or alert contents.
+6. **On a single host, the dashboards are reached through the platform's TLS edge when the operator
+   turns that on, behind the dashboards' own login; every other console stays on the loopback.**
+   External traffic is TLS at the edge only (ADR-0004 dec 1), and the operator decides whether the
+   operator plane is reachable wherever the edge is. The operator may limit it to named source
+   addresses; with none named, any source reaches the login.
 
 ## Alternatives
 
@@ -49,22 +54,30 @@ not leave the tenant-isolated path.
 | 4 | A default notification receiver | The platform cannot know an operator's address |
 | 5 | Tenant alerts passing through a topic shared by all tenants on the way to the tenant's store | A second, shared copy of tenant data outside the tenant-isolated path |
 | 5 | A shared alert topic kept for a future consumer | Every tenant's alerts on one topic with no reader |
+| 6 | The dashboards' port bound on every interface | Plaintext external traffic, against ADR-0004 dec 1 |
+| 6 | The dashboards at the edge by default | Exposes the operator plane, and a default administrator credential, wherever the edge is reachable without the operator choosing it |
+| 6 | Dashboards reached only through a tunnel to the loopback | An operator cannot use them from a browser alone |
+| 6 | Source addresses limited by default | The platform cannot know an operator's addresses |
+| 6 | Sign-on to the dashboards from the platform session | No platform role maps to the operator who may read every service's logs; deferred below |
 
 ## Consequences
 
 **Positive**
 - The platform is observable wherever an operator-compatible stack exists, including managed ones.
 - Dashboards and rules grow without touching service definitions.
+- A single-host operator reads the dashboards in a browser over the platform's own TLS.
 
 **Negative**
 - Self-hosted operators install the monitoring stack once per cluster and enable the integration.
 - Without the operator, only raw exporter metrics are available.
+- With the dashboards at the edge, their login is a second credential exposed wherever the edge is.
 
 ## Deferred
 
 | Open question | Settled by |
 |---|---|
 | A tenant-scoped alert stream for a future consumer | The first consumer that needs one |
+| Sign-on to the single host's dashboards from the platform session | A platform operator role |
 
 ## References
 
@@ -72,3 +85,4 @@ not leave the tenant-isolated path.
 - [deploy/observability/README.md](../deploy/observability/README.md): installing the cluster stack.
 - `infrastructure/prometheus/rules/platform.yml`: the platform rules, decision 1.
 - `deploy/helm/industryflow/templates/observability-*.yaml`: decisions 1–2.
+- `services/frontend/grafana.conf.template`: decision 6.
