@@ -61,7 +61,7 @@ fi
 echo "$(free_gb) GB free"
 
 echo "== backup"
-docker compose --profile backup run --rm db-backup
+docker compose --profile backup run --rm --no-deps db-backup
 echo "== checkout $ref"
 git fetch -q origin
 git checkout -q --detach "$ref"
