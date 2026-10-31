@@ -67,6 +67,7 @@ jobs:
               - 'scripts/check_spark_version_parity.py'
               - 'scripts/tests/test_spark_version_parity.py'
               - '.github/workflows/images.yml'
+              - '.github/workflows/unit-tests.yml'
 
   # Seconds, and it gates the matrix below: a Spark image whose base tag and Kafka connector
   # coordinate disagree is not worth building, because building it is exactly what will NOT catch
