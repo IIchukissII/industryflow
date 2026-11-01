@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0000 — Decision records and the single source of truth
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-10-17
+- **Date:** 2026-06-26; changed 2026-11-01
 - **Parent:** none (governs the form of every other ADR)
 
 ## Context
@@ -49,6 +49,10 @@ cannot tell which copy is right.
    negative), Deferred (table), References. Alternatives hold every rejected alternative, one row each,
    with the decision number it lost to. One decision per record, in about a hundred lines; a record
    that needs more holds several decisions.
+10. **Every cross-reference to a decision is checked mechanically.** A citation of an ADR or of one of
+    its numbered decisions, and a relative link between documents, must resolve; the check runs with
+    the configuration guards on every change. A record compacted or a decision moved elsewhere otherwise
+    leaves its citations pointing at text that no longer says what they claim.
 
 ## Alternatives
 
@@ -61,12 +65,15 @@ cannot tell which copy is right.
 | 5 | A numbered revision block with a supersedes line for every change to a decision | The record grows into its own history, and the decision in force is hard to find |
 | 5 | Labelled status addenda on an accepted record | Outcomes accumulate beside the decision instead of being stated where they belong |
 | 5 | A full revision for every edit after acceptance, status notes included | Ceremony heavy enough to discourage keeping the record current |
+| 10 | Review alone catches a dangling citation | A citation reads right in a diff that does not touch the record it cites |
+| 10 | Checking links only, not decision numbers | A moved decision leaves the file link valid and the number wrong |
 
 ## Consequences
 
 **Positive**
 - One place to read a decision's reason and one place to change a value; "is this duplicated?" is a
   mechanical review question.
+- A citation that stops resolving fails the change that broke it, not a later reader.
 - A reader sees the decision in force without reading its history.
 
 **Negative**
@@ -77,7 +84,6 @@ cannot tell which copy is right.
 
 | Open question | Settled by |
 |---|---|
-| A checker that every cross-reference resolves | First broken reference that reaches a reader |
 | A map of which artifact owns which class of fact | The maintainer, when contributors repeatedly ask where a value lives |
 
 ## References
@@ -86,3 +92,4 @@ cannot tell which copy is right.
 - M. Nygard, "Documenting Architecture Decisions" (2011): the practice this record formalises.
 - MADR (Markdown Any Decision Records): the section lineage.
 - `tests/config_guards/`: the checks that hold unavoidable copies equal (decision 3).
+- `tests/config_guards/test_adr_references.py`: the cross-reference check (decision 10).
