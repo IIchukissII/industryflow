@@ -23,6 +23,7 @@ from messaging import capability_audit_drain
 
 # Authentication imports
 from users import auth_backend, fastapi_users, ACCESS_COOKIE
+import sign_in_throttle
 
 import asyncio
 
@@ -33,6 +34,8 @@ settings = get_settings()
 async def lifespan(_app: FastAPI):
     """Manage application lifespan events."""
     # Startup
+    from dependencies import EDGE_PEERS
+    sign_in_throttle.check_configuration(get_settings().SIGN_IN_THROTTLE, EDGE_PEERS)
     await redis_client.connect()
 
     cache_task = asyncio.create_task(update_redis_cache())

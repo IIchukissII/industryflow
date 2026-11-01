@@ -253,7 +253,11 @@ async def session_was_ended(session_id: Optional[str]) -> bool:
     with the ending, is refused rather than continuing it."""
     if not session_id:
         return False
-    return await redis_client.redis.get(sessions.ended_session_key(str(session_id))) is not None
+    import asyncio
+
+    raw = await asyncio.wait_for(redis_client.redis.get(sessions.ended_session_key(str(session_id))),
+                                 sessions.READ_TIMEOUT_SECONDS)
+    return raw is not None
 
 
 async def wait_out_an_end(user_id: str) -> float:

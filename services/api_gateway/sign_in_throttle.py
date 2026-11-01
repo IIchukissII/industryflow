@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import time
 
 from industryflow_contracts.sessions import READ_TIMEOUT_SECONDS
@@ -53,8 +54,33 @@ def _key(email: str) -> str:
     return _PREFIX + hashlib.sha256((email or "").strip().lower().encode()).hexdigest()
 
 
+# How the gateway counts (SIGN_IN_THROTTLE): per account and source, where it is told each client's
+# own address by the edge; off where it is not (behind a proxy that hides them, ADR-0004 Deferred),
+# since every client would then share one source and the count would hold the owner out.
+MODES = ("per-source", "off")
+
+
+def check_configuration(mode: str, edge_peers) -> None:
+    """Refuses a start in which the throttle could not tell clients apart."""
+    if mode not in MODES:
+        raise RuntimeError(f"SIGN_IN_THROTTLE must be one of {MODES}, not {mode!r}")
+    if mode == "per-source" and not (edge_peers.networks or edge_peers.names):
+        raise RuntimeError("SIGN_IN_THROTTLE=per-source needs EDGE_PROXY_PEERS: without the edge's address "
+                           "every client's source is the edge, and one source's failures would hold the owner out")
+
+
 def _source(source) -> str:
-    return str(source or "unknown")[:64]
+    """The counted source: an IPv4 address, or an IPv6 address's /64 (one host holds a whole one)."""
+    text = str(source or "unknown")[:64]
+    try:
+        address = ipaddress.ip_address(text)
+    except ValueError:
+        return text
+    if address.version == 6:
+        if address.ipv4_mapped:
+            return str(address.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return str(address)
 
 
 def delay_after(failures: int) -> int:

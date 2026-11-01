@@ -112,7 +112,7 @@ async def refresh(
         if replayed.kind != "successor":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
         claim, successor = replayed.claim, replayed.successor
-    elif await refresh_tokens.session_was_ended(claim.session_id):
+    elif await _session_was_ended(claim.session_id):
         # Issued in a race with the end of its session (a reuse): it does not continue it.
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session ended")
     try:
@@ -141,6 +141,13 @@ async def refresh(
     access = await get_jwt_strategy().write_token(user, session_id)
     _set_auth_cookies(response, access, new_refresh)
     return TokenPair(access_token=access, refresh_token=new_refresh)
+
+
+async def _session_was_ended(session_id) -> bool:
+    try:
+        return await refresh_tokens.session_was_ended(session_id)
+    except Exception:  # noqa: BLE001 - an unknown answer is not a yes
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Session store not available")
 
 
 def _presented_access_claims(request: Request) -> Optional[dict]:

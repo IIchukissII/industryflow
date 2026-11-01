@@ -102,7 +102,8 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
   HTTP exception.
 - An access token is not revoked individually; a password change logs out every device.
 - Every authenticated request reads the session store, and none is served while it is unreachable.
-- An attacker with many source addresses gets that handful from each of them.
+- An attacker with many source addresses gets that handful from each of them; an IPv6 network
+  allotted to one host counts as one source.
 - A refresh whose answer is lost, retried after the grace, ends its own session.
 - A stolen refresh credential used within the grace after a rotation is not detected.
 - A sign-in or refresh within a clock-skew allowance after an end of all the user's sessions waits
@@ -114,7 +115,7 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 |---|---|
 | Internal service-to-service authentication | An ADR, when an internal call carries tenant authority beyond the interim mechanism |
 | E-mail delivery of reset and verification credentials | The first deployment that enables self-service reset |
-| The per-source sign-in limit behind a proxy that hides client addresses | The first deployment behind a Kubernetes Ingress |
+| Slowing password guessing behind a proxy that hides client addresses (neither limit applies there) | The first deployment behind a Kubernetes Ingress |
 
 ## References
 

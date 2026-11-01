@@ -174,3 +174,33 @@ async def test_the_source_is_the_edges_report_only_from_the_edge(monkeypatch):
 
     assert (await manager_for("10.0.0.5", OWNER)).sign_in_source == OWNER
     assert (await manager_for("10.9.9.9", OWNER)).sign_in_source == "10.9.9.9"
+
+
+
+def test_ipv6_is_counted_by_its_64_and_ipv4_by_its_address():
+    a, b = "2001:db8:1:2::1", "2001:db8:1:2:ffff:ffff:ffff:ffff"
+    assert throttle._source(a) == throttle._source(b) == "2001:db8:1:2::/64"
+    assert throttle._source("2001:db8:1:3::1") != throttle._source(a)
+    assert throttle._source("::ffff:198.51.100.7") == throttle._source("198.51.100.7") == "198.51.100.7"
+    assert throttle._source(None) == "unknown"
+
+
+def test_per_source_counting_refuses_to_start_without_the_edges_address():
+    from industryflow_contracts import capability_audit as audit
+
+    with pytest.raises(RuntimeError, match="EDGE_PROXY_PEERS"):
+        throttle.check_configuration("per-source", audit.EdgePeers(""))
+    throttle.check_configuration("per-source", audit.EdgePeers("frontend"))
+    throttle.check_configuration("off", audit.EdgePeers(""))
+    with pytest.raises(RuntimeError):
+        throttle.check_configuration("per-account", audit.EdgePeers("frontend"))
+
+
+@pytest.mark.asyncio
+async def test_off_counts_nothing_and_still_refuses_a_suspended_company(store, monkeypatch):
+    monkeypatch.setattr(users.settings, "SIGN_IN_THROTTLE", "off")
+    manager = _manager(monkeypatch, lambda c: None)
+    for _ in range(throttle.THRESHOLD + 3):
+        assert await manager.authenticate(SimpleNamespace(username=EMAIL, password="wrong")) is None
+    assert await store.exists(throttle._key(EMAIL)) == 0
+

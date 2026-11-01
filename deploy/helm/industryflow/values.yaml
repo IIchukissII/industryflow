@@ -575,6 +575,10 @@ config:
   # pod CIDR here lets a kernel name its own source. A Service name resolves to its ClusterIP, never a
   # connecting peer. Read by the api-gateway and the tracking gateway.
   EDGE_PROXY_PEERS: ""
+  # The api-gateway's password sign-in throttle (ADR-0004 dec 10): per account and source needs the
+  # client's own address, which the gateway does not get behind the Ingress, so it is off here
+  # (ADR-0004 Deferred). "per-source" also needs EDGE_PROXY_PEERS; the gateway refuses it without.
+  SIGN_IN_THROTTLE: "off"
   ENVIRONMENT: production
   # Extension plugin modules the ML service loads at startup (ADR-0008/0010); empty = built-ins.
   EXTENSION_MODULES: ""

@@ -83,6 +83,8 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         being unreadable refuses it with 503."""
         from messaging.redis_client import redis_client
 
+        if settings.SIGN_IN_THROTTLE == "off":
+            return await self._admitted(credentials)
         email, source = credentials.username, getattr(self, "sign_in_source", None)
         store = redis_client.redis
         wait = await _throttled(sign_in_throttle.reserve(store, email, source))
@@ -91,12 +93,18 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
                                 detail="Too many failed sign-ins; try again later",
                                 headers={"Retry-After": str(wait)})
         # The attempt is counted as failed until it is admitted.
+        user = await self._admitted(credentials)
+        if user is not None and user.is_active:
+            await _throttled(sign_in_throttle.succeeded(store, email, source))
+        return user
+
+    async def _admitted(self, credentials) -> Optional[User]:
+        """The account the credentials sign in, unless its company is suspended."""
         user = await super().authenticate(credentials)
         if user is None or not user.is_active:
             return user
         if user.company_id and not await company_status.is_company_active(user.company_id):
             return None
-        await _throttled(sign_in_throttle.succeeded(store, email, source))
         return user
 
     # A session must not outlive the credential or the account it was opened with (ADR-0004

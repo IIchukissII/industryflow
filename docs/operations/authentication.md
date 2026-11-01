@@ -92,9 +92,9 @@ Password sign-in (`/auth/login`, `/auth/jwt/login`) is slowed, never locked
 
 | Limit | Where | Behaviour |
 |---|---|---|
-| Per account and source | Gateway, `services/api_gateway/sign_in_throttle.py` | From the 5th consecutive failure for one e-mail address from one source (the address the edge reports), each attempt from it waits 1, 2, 4 … s after the last, up to 300 s; inside the wait **429** with `Retry-After`, the password unchecked and the attempt not counted. Each attempt is counted before the password is checked, so simultaneous guesses pass one at a time. Other sources are not slowed. Unknown addresses are counted the same. An admitted sign-in clears its source; a password change or reset (`manage_users.py reset-password` included) clears every source; an hour without a failure forgets it |
+| Per account and source | Gateway, `services/api_gateway/sign_in_throttle.py` | `SIGN_IN_THROTTLE=per-source` (compose; needs `EDGE_PROXY_PEERS`, else the gateway refuses to start). From the 5th consecutive failure for one e-mail address from one source (the address the edge reports; IPv6 by its /64), each attempt from it waits 1, 2, 4 … s after the last, up to 300 s; inside the wait **429** with `Retry-After`, the password unchecked and the attempt not counted. Each attempt is counted before the password is checked, so simultaneous guesses pass one at a time. Other sources are not slowed. Unknown addresses are counted the same. An admitted sign-in clears its source; a password change or reset (`manage_users.py reset-password` included) clears every source; an hour without a failure forgets it |
 | Per source address | Edge, `EDGE_SIGN_IN_PER_SOURCE=on` (compose) | Burst of 20, then 10 a minute; beyond it **429** |
-| Per source address | Behind a Kubernetes Ingress (`off` in the chart) | Not set: the edge sees only the Ingress |
+| Both | Behind a Kubernetes Ingress (the chart: `EDGE_SIGN_IN_PER_SOURCE=off`, `SIGN_IN_THROTTLE=off`) | Not applied: the edge and the gateway see only the Ingress (ADR-0004 Deferred) |
 
 Store unreachable: sign-in is refused with **503**.
 

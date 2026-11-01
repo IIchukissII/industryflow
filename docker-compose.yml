@@ -643,6 +643,8 @@ services:
       CAPABILITY_AUDIT_RETENTION_DAYS: ${CAPABILITY_AUDIT_RETENTION_DAYS:-365}
       # The edge, the one peer whose reported client address is believed (ADR-0042 dec 9).
       EDGE_PROXY_PEERS: frontend
+      # Password sign-in slowed per account and source, the source as the edge reports it (ADR-0004 dec 10).
+      SIGN_IN_THROTTLE: per-source
       # The dashboards' sign-on assertion (ADR-0016 dec 7), signed for a platform superuser.
       DASHBOARDS_SIGNING_KEY_FILE: /run/dashboards-signing/signing.pem
     depends_on:

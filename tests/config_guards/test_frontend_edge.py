@@ -331,3 +331,14 @@ def test_password_sign_in_is_limited_per_source_on_both_routes():
     assert compose_env().get("EDGE_SIGN_IN_PER_SOURCE") == "on"
     assert helm_env([]).get("EDGE_SIGN_IN_PER_SOURCE") == "off"
     assert 'on|off) ;;' in ENTRYPOINT
+
+
+
+def test_the_gateway_throttles_per_source_only_where_it_is_told_the_clients_addresses():
+    """ADR-0004 dec 10: compose counts per account and source, with the edge named so its reported
+    client address is believed; the chart, behind an Ingress, does not (ADR-0004 Deferred)."""
+    from _repo import load_yaml
+
+    gateway = load_yaml("docker-compose.yml")["services"]["api-gateway"]["environment"]
+    assert gateway["SIGN_IN_THROTTLE"] == "per-source" and gateway["EDGE_PROXY_PEERS"]
+    assert load_yaml("deploy/helm/industryflow/values.yaml")["config"]["SIGN_IN_THROTTLE"] == "off"

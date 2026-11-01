@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # How often an open live socket re-checks its session: the account, its company, and whether
     # the session was ended (ADR-0004 dec 9). A socket outlives its session by at most this.
     WS_SESSION_RECHECK_SECONDS: int = 60
+    # Password sign-in throttle (ADR-0004 dec 10, sign_in_throttle.py): per-source, or off where the
+    # gateway is not told each client's own address.
+    SIGN_IN_THROTTLE: str = "per-source"
 
     # CORS Configuration
     CORS_ORIGINS: str
