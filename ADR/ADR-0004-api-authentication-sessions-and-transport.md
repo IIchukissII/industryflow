@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0004 — API authentication, session model and transport security
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-10-17
+- **Date:** 2026-06-26; changed 2026-11-01
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0002](ADR-0002-ingestion-authentication-and-device-identity.md) (shared edge),
   [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant claim),
@@ -28,10 +28,10 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
    development.
 2. **A session is a short-lived JWT access token carrying the tenant claim, plus a rotating,
    server-side refresh credential.** Each refresh claims the credential atomically and issues a
-   successor, so reuse is refused. Logout,
-   compromise, a password change or reset, and deactivating or deleting the account or its company
-   end all the user's sessions and the notebook capabilities minted from them, and every request
-   re-reads the account.
+   successor, so reuse is refused. Logout ends its session and the user's notebook capabilities;
+   compromise, a password change or reset, a move to another company, and deactivating or deleting
+   the account or its company end all the user's sessions and those capabilities. Every request re-reads the account and refuses
+   an access token whose session has ended, and is refused while that cannot be read.
 3. **The browser holds tokens in httpOnly, Secure, SameSite cookies set by the backend.** Every
    state-changing request authenticated by the session cookie must echo a double-submit CSRF token in
    a header; bearer-authenticated requests and the authentication endpoints are exempt.
@@ -56,6 +56,11 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 | 2 | A long-lived stateless JWT with no revocation | A leaked token stays valid for its whole lifetime and cannot be cancelled |
 | 2 | A short-lived stateless JWT without refresh or revocation | Still not revocable before expiry, and short lifetimes force repeated full logins |
 | 2 | Ending sessions only on logout and compromise | A refreshing session survives the password change made after a leak, and its capabilities keep working |
+| 2 | Logout ending all the user's sessions | Signing out on one device would sign out every other |
+| 2 | Checking for an ended session only on live sockets | An access token keeps working after its logout or a password change until it expires |
+| 2 | Admitting a request when the record of ended sessions cannot be read | While it is unreadable no ended session is enforced, and a leaked token is good for its whole lifetime |
+| 2 | Comparing a token's issue time with an end exactly | A replica whose clock runs ahead issues tokens that outlive the end for their whole lifetime |
+| 2 | Keeping the sessions of a user moved to another company | Their tokens name the old tenant, whose data stays reachable through them until they expire |
 | 3 | Tokens in browser local storage, with a CSP | Injected script can still read the token; a CSP lowers the odds but not the readability |
 | 6 | Wildcard origins combined with credentials | Browsers reject it, and it invites cross-site use of the credential |
 | 8 | A public ACME certificate in every deployment | No public CA issues for an internal hostname, so self-hosting would need a public name |
@@ -68,8 +73,8 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 
 **Positive**
 - Tokens and readings are encrypted in transit, and injected script cannot read the session.
-- A leaked access token lapses within minutes; a session, its capabilities and its sockets end at
-  once on revocation or account change.
+- A session's access tokens, capabilities and sockets stop working at once when it ends; a leaked
+  access token whose session does not end lapses within minutes.
 - No caller reaches another tenant's data or any data unauthenticated.
 
 **Negative**
@@ -77,6 +82,9 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 - Each deployment shape needs its certificate machinery; local development needs TLS or an explicit
   HTTP exception.
 - An access token is not revoked individually; a password change logs out every device.
+- Every authenticated request reads the session store, and none is served while it is unreachable.
+- A token issued within a clock-skew allowance after an end of all the user's sessions counts as
+  issued before it, so its holder signs in or refreshes again once the allowance has passed.
 
 ## Deferred
 
@@ -89,3 +97,5 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 
 - [docs/operations/tls.md](../docs/operations/tls.md): the internal CA and installing its root.
 - `services/api_gateway/routers/auth_tokens.py`, `routers/websocket.py`: sessions and sockets.
+- `libs/industryflow_contracts/industryflow_contracts/sessions.py`: the record of ended sessions every
+  verifier reads.

@@ -73,9 +73,9 @@ RUN='docker compose run --rm --no-deps -v ./scripts:/scripts:ro -e PYTHONPATH=/a
 | Task | Command |
 |---|---|
 | Create a user (password prompted twice) | `$RUN -it api-gateway python /scripts/manage_users.py create --email <email> --company-id <company-id> --role admin [--superuser]` |
-| Reset a password from stdin | `printf '%s\n' "$NEW_PASSWORD" \| $RUN -T api-gateway python /scripts/manage_users.py reset-password --email <email> --password-stdin` |
+| Reset a password from stdin (ends the user's sessions) | `printf '%s\n' "$NEW_PASSWORD" \| $RUN -T api-gateway python /scripts/manage_users.py reset-password --email <email> --password-stdin` |
 | List users | `$RUN api-gateway python /scripts/manage_users.py list` |
-| Delete a user | `$RUN api-gateway python /scripts/manage_users.py delete --email <email> --yes` |
+| Delete a user (ends the user's sessions) | `$RUN api-gateway python /scripts/manage_users.py delete --email <email> --yes` |
 | Seed users from the environment | `op run -- $RUN -e ADMIN_USER_1_EMAIL -e ADMIN_USER_1_PASSWORD -e ADMIN_USER_1_COMPANY_ID api-gateway python /scripts/seed_users.py` |
 
 `create` also takes `--password-stdin`. A CLI password reset ends the user's sessions at their next

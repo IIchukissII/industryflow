@@ -13,8 +13,9 @@ refusing the tenant (ADR-0033 dec 8). So does the capability-use record's stream
 tenant's but evidence of what reached it (ADR-0042 dec 4): each handle removed here is recorded in it
 as revoked, atomically with its removal (dec 1, 3).
 
-The key layouts are the shared contract of services/api_gateway/capability_auth.py,
-messaging/refresh_tokens.py, messaging/redis_client.py and services/alert_service/worker/feature_store.py;
+The key layouts are the shared contract of industryflow_contracts.sessions (the ended-session record),
+services/api_gateway/capability_auth.py, messaging/refresh_tokens.py, messaging/redis_client.py and
+services/alert_service/worker/feature_store.py;
 services/api_gateway/tests/test_suspension_contract.py holds this copy to the gateway's marker.
 """
 from __future__ import annotations
@@ -23,6 +24,7 @@ import json
 import uuid
 
 from industryflow_contracts import capability_audit as audit
+from industryflow_contracts import sessions as session_record
 
 from .job import Removal
 
@@ -32,7 +34,6 @@ _UPLOAD_INDEX_PREFIX = "nbcap-upload-user:"
 _SUSPENDED_PREFIX = "nbcap-suspended:"
 _REFRESH_PREFIX = "refresh:"
 _REFRESH_USER_PREFIX = "refresh-user:"
-_USER_ENDED_PREFIX = "sessions-ended-at:"
 _FEATURES_PREFIX = "features:"
 _LATEST_PREFIX = "sensor:latest:"
 
@@ -96,7 +97,7 @@ class CapabilityStore:
             handles.update(f"{_KEY_PREFIX}{_s(h)}" for h in self._redis.smembers(upload))
             refresh_index = f"{_REFRESH_USER_PREFIX}{user}"
             sessions.extend(f"{_REFRESH_PREFIX}{_s(t)}" for t in self._redis.smembers(refresh_index))
-            indexes += [index, upload, refresh_index, f"{_USER_ENDED_PREFIX}{user}"]
+            indexes += [index, upload, refresh_index, session_record.user_ended_key(user)]
         features = [_s(k) for k in self._redis.scan_iter(match=f"{_FEATURES_PREFIX}{company_id}:*", count=500)]
         latest = self._matching(f"{_LATEST_PREFIX}*", company_id)
         for key in sorted(handles):

@@ -151,7 +151,14 @@ class _Manager:
 
 
 @pytest.mark.asyncio
-async def test_a_session_request_of_a_suspended_company_is_refused(company_flags):
+async def test_a_session_request_of_a_suspended_company_is_refused(company_flags, monkeypatch):
+    from messaging import redis_client as redis_module
+
+    class NoSessionEnded:
+        async def get(self, key):
+            return None
+
+    monkeypatch.setattr(redis_module.redis_client, "redis", NoSessionEnded())
     user = _user()
     strategy = users.get_jwt_strategy()
     token = await strategy.write_token(user)

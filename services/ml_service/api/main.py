@@ -115,13 +115,16 @@ async def startup_event():
         logger.error(f"Configuration validation failed: {e}")
         raise
 
+    # The ended-session record every request is checked against (ADR-0004 dec 2). Required.
+    import redis.asyncio as aioredis
+    app.state.session_store = aioredis.from_url(config.config.SESSION_REDIS_URL)
+
     # The capability store, for demand-minting upload handles (ADR-0030 dec 3). Optional: a
     # deployment that mints none simply has none, and the surface refuses honestly rather than
     # failing obscurely at the first request. This is ADR-0015's shared capability store, NOT a
     # feature store (this service holds no windowing state, ADR-0023 dec 7).
     app.state.capability_store = None
     if config.config.CAPABILITY_REDIS_URL:
-        import redis.asyncio as aioredis
         app.state.capability_store = aioredis.from_url(config.config.CAPABILITY_REDIS_URL)
         logger.info("Capability store connected — upload capabilities can be minted (ADR-0030)")
     else:

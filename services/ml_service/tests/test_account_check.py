@@ -6,7 +6,9 @@
 The ML service re-reads the account behind every token (ADR-0004 dec 2, ADR-0033 dec 3).
 
 A validly signed access token is not enough: a deactivated or deleted user, or a user of a suspended
-company, is refused at once rather than when the token expires. The account store is a fake pool.
+company, is refused at once rather than when the token expires, and so is a token whose session has
+ended (industryflow_contracts.sessions). The account store is a fake pool, the session store a
+mapping read the way the contract reads it (only GETs).
 """
 import os
 import sys
@@ -25,6 +27,7 @@ import config  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 USER = uuid.uuid4()
+COMPANY = uuid.uuid4()
 
 
 @pytest.fixture(autouse=True)
@@ -55,7 +58,17 @@ class FakePool:
         return Conn()
 
 
-def _client(pool):
+class Records:
+    """The session store as the verifier reads it: GETs over the contract's keys."""
+
+    def __init__(self, **kv):
+        self.kv = kv
+
+    async def get(self, key):
+        return self.kv.get(key)
+
+
+def _client(pool, store="fresh"):
     app = FastAPI()
 
     @app.get("/who")
@@ -64,19 +77,23 @@ def _client(pool):
 
     if pool is not None:
         app.state.db_pool = pool
+    if store is not None:
+        app.state.session_store = Records() if store == "fresh" else store
     return TestClient(app)
 
 
-def _token(sub=USER):
-    return jwt.encode({"sub": str(sub), "exp": int(time.time()) + 600},
+def _token(sub=USER, company=COMPANY, **claims):
+    if company is not None:
+        claims["company_id"] = str(company)
+    return jwt.encode({"sub": str(sub), "exp": int(time.time()) + 600, **claims},
                       config.config.JWT_SECRET_KEY, algorithm=auth.JWT_ALGORITHM)
 
 
-def _get(pool, token=None):
-    return _client(pool).get("/who", headers={"Authorization": f"Bearer {token or _token()}"})
+def _get(pool, token=None, store="fresh"):
+    return _client(pool, store).get("/who", headers={"Authorization": f"Bearer {token or _token()}"})
 
 
-def _row(user_active=True, company_active=True, company_id=uuid.uuid4(), role="observer", is_superuser=False):
+def _row(user_active=True, company_active=True, company_id=COMPANY, role="observer", is_superuser=False):
     return {"user_active": user_active, "company_id": company_id, "company_active": company_active,
             "role": role, "is_superuser": is_superuser}
 
@@ -109,7 +126,8 @@ def test_the_role_is_the_account_s_not_the_token_s():
         return {"role": user["role"], "is_superuser": user["is_superuser"]}
 
     app.state.db_pool = FakePool(_row(role="observer"))
-    token = jwt.encode({"sub": str(USER), "role": "admin", "is_superuser": True,
+    app.state.session_store = Records()
+    token = jwt.encode({"sub": str(USER), "company_id": str(COMPANY), "role": "admin", "is_superuser": True,
                         "exp": int(time.time()) + 600},
                        config.config.JWT_SECRET_KEY, algorithm=auth.JWT_ALGORITHM)
     r = TestClient(app).get("/who", headers={"Authorization": f"Bearer {token}"})
@@ -117,7 +135,7 @@ def test_the_role_is_the_account_s_not_the_token_s():
 
 
 def test_a_user_with_no_company_is_not_refused_for_it():
-    assert _get(FakePool(_row(company_id=None, company_active=None))).status_code == 200
+    assert _get(FakePool(_row(company_id=None, company_active=None)), _token(company=None)).status_code == 200
 
 
 def test_a_token_whose_subject_is_not_a_user_id_is_refused():
@@ -146,3 +164,55 @@ def test_the_registry_read_is_granted():
     sql = open(os.path.join(ROOT, "infrastructure", "timescaledb", "init-scripts",
                             "21-company-provisioning.sql"), encoding="utf-8").read()
     assert "GRANT SELECT ON public.companies TO ml_service_user;" in sql
+
+
+def _store(**records):
+    """A session store holding the gateway's ended-session records, keyed through the contract."""
+    from industryflow_contracts import sessions
+
+    kv = {}
+    if "ended_session" in records:
+        kv[sessions.ended_session_key(records["ended_session"])] = b"1"
+    if "all_ended_at" in records:
+        kv[sessions.user_ended_key(str(USER))] = repr(records["all_ended_at"]).encode()
+    return Records(**kv)
+
+
+def test_a_token_of_a_session_ended_by_logout_is_refused():
+    now = int(time.time())
+    store = _store(ended_session="s-1")
+    assert _get(FakePool(_row()), _token(sid="s-1", iat=now), store).status_code == 401
+    assert _get(FakePool(_row()), _token(sid="s-2", iat=now), store).status_code == 200
+
+
+def test_ending_all_sessions_refuses_the_tokens_issued_before_and_not_after():
+    now = int(time.time())
+    store = _store(all_ended_at=now - 10)
+    assert _get(FakePool(_row()), _token(sid="s", iat=now - 20), store).status_code == 401
+    assert _get(FakePool(_row()), _token(sid="s", iat=now - 10), store).status_code == 401
+    assert _get(FakePool(_row()), _token(sid="s", iat=now), store).status_code == 200
+    # A token with no issue time cannot be placed after the end.
+    assert _get(FakePool(_row()), _token(), store).status_code == 401
+
+
+def test_an_unreadable_session_store_fails_closed():
+    class Down:
+        async def get(self, key):
+            raise ConnectionError("down")
+
+    assert _get(FakePool(_row()), store=Down()).status_code == 503
+    assert _get(FakePool(_row()), store=None).status_code == 503
+
+
+def test_the_session_store_is_required_configuration():
+    assert "SESSION_REDIS_URL" in open(os.path.join(ROOT, "services", "ml_service", "api", "config.py"),
+                                       encoding="utf-8").read().split("def validate", 1)[1]
+
+
+def test_a_token_naming_another_tenant_than_the_account_is_refused():
+    """A user moved to another company: the tokens issued before name the old one."""
+    pool = FakePool(_row(company_id=uuid.uuid4()))
+    assert _get(pool).status_code == 401
+    assert _get(FakePool(_row()), _token(company=None)).status_code == 401
+    assert _get(FakePool(_row(company_id=None, company_active=None))).status_code == 401
+    assert _get(FakePool(_row()), _token(company=str(COMPANY).upper())).status_code == 200

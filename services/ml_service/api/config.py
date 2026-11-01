@@ -57,6 +57,10 @@ class Config:
     # Absent = this deployment mints no upload capabilities, and the surface says so rather than
     # failing obscurely at the first request.
     CAPABILITY_REDIS_URL: str = os.getenv('CAPABILITY_REDIS_URL', '')
+    # The store holding the gateway's ended-session record (industryflow_contracts.sessions): every
+    # request is refused once the session its access token was minted in has ended (ADR-0004 dec 2).
+    # Required: a verifier that cannot read it cannot tell a live session from an ended one.
+    SESSION_REDIS_URL: str = os.getenv('SESSION_REDIS_URL', '')
     # Where an uploader takes the handle. Advertised with the handle so a client does not have to
     # know the platform's internal topology to use one.
     UPLOAD_GATEWAY_URL: str = os.getenv('UPLOAD_GATEWAY_URL', '')
@@ -83,7 +87,7 @@ class Config:
         required = [
             'DB_HOST', 'DB_PORT', 'DB_NAME',
             'ML_SERVICE_DB_USER', 'ML_SERVICE_DB_PASSWORD',
-            'JWT_SECRET_KEY', 'MLFLOW_TRACKING_URI'
+            'JWT_SECRET_KEY', 'MLFLOW_TRACKING_URI', 'SESSION_REDIS_URL'
         ]
         
         missing = []

@@ -17,8 +17,9 @@ admin CLI writes the database directly) no longer matches, so the old sessions c
 A session has an id that its refresh tokens carry from rotation to rotation and that every access
 token minted in it names (``sid``). Ending a session records that it ended, and ending all of a
 user's sessions records when; both records outlive every access token issued before them, and that
-is what a live socket re-checks (``session_ended``, ADR-0004 dec 9): a socket closes within its
-re-check interval of its session ending, rather than only when its access token expires.
+is what every request re-checks (``session_ended``, ADR-0004 dec 2; the record's layout is the shared
+contract ``industryflow_contracts.sessions``): an access token stops working when its session ends,
+and a live socket closes within its re-check interval of it (dec 9).
 """
 import hashlib
 import json
@@ -27,6 +28,8 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
+from industryflow_contracts import sessions
+
 from messaging.redis_client import redis_client
 from config import get_settings
 
@@ -34,10 +37,6 @@ settings = get_settings()
 
 _PREFIX = "refresh:"
 _USER_PREFIX = "refresh-user:"
-# A session that was ended (logout, or one of the user's sessions ended all at once).
-_ENDED_SESSION_PREFIX = "session-ended:"
-# When all of a user's sessions were last ended (epoch seconds).
-_USER_ENDED_PREFIX = "sessions-ended-at:"
 
 
 @dataclass(frozen=True)
@@ -147,7 +146,12 @@ def _owner(raw: str) -> tuple[str, Optional[str]]:
 
 
 async def _record_session_ended(session_id: str) -> None:
-    await redis_client.redis.set(f"{_ENDED_SESSION_PREFIX}{session_id}", "1", ex=_ended_ttl())
+    await redis_client.redis.set(sessions.ended_session_key(session_id), "1", ex=_ended_ttl())
+
+
+async def end_session(session_id: str) -> None:
+    """Record that one session ended, so the access tokens issued in it are refused (logout)."""
+    await _record_session_ended(str(session_id))
 
 
 async def revoke_all_refresh_tokens(user_id: str) -> int:
@@ -178,28 +182,11 @@ async def end_all_sessions(user_id: str) -> None:
     from one issued after it (``session_ended``)."""
     from capability_auth import revoke_user_capabilities
 
-    await redis_client.redis.set(f"{_USER_ENDED_PREFIX}{user_id}", repr(time.time()), ex=_ended_ttl())
+    await redis_client.redis.set(sessions.user_ended_key(user_id), repr(time.time()), ex=_ended_ttl())
     await revoke_all_refresh_tokens(str(user_id))
     await revoke_user_capabilities(redis_client.redis, str(user_id))
 
 
 async def session_ended(user_id: str, session_id: Optional[str], issued_at: Optional[float]) -> bool:
-    """Whether the session an access token was issued in has since ended.
-
-    True if that session was ended by itself (logout), or all of the user's sessions were ended at
-    or after the token's issue time. A token with no issue time cannot be placed after such an end,
-    so it counts as ended by it. Whole seconds round towards ended: a token issued in the same
-    second as the end is treated as issued before it, and its holder refreshes.
-    """
-    if session_id and await redis_client.redis.get(f"{_ENDED_SESSION_PREFIX}{session_id}") is not None:
-        return True
-    ended_at = await redis_client.redis.get(f"{_USER_ENDED_PREFIX}{user_id}")
-    if ended_at is None:
-        return False
-    if isinstance(ended_at, bytes):
-        ended_at = ended_at.decode()
-    try:
-        ended = float(ended_at)
-    except ValueError:
-        return True
-    return issued_at is None or float(issued_at) <= ended
+    """Whether the session an access token was issued in has since ended (``sessions.session_ended``)."""
+    return await sessions.session_ended(redis_client.redis, user_id, session_id, issued_at)

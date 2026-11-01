@@ -124,6 +124,7 @@ async def test_a_pre_fingerprint_token_is_refused(redis):
     ({"password": "new-password-1"}, True),
     ({"is_active": False}, True),
     ({"is_active": True}, False),
+    ({"company_id": uuid.uuid4()}, True),
     ({"email": "x@example.com"}, False),
 ])
 @pytest.mark.asyncio
@@ -287,3 +288,111 @@ async def test_ending_all_sessions_records_each_session_and_the_time(redis):
     assert await refresh_tokens.session_ended(uid, None, None) is True
     assert await refresh_tokens.session_ended(uid, "sid-z", time.time() + 60) is False
     assert await refresh_tokens.session_ended(str(uuid.uuid4()), None, None) is False
+
+
+# --- every request reads it (ADR-0004 dec 2) -------------------------------------------------
+
+class _Manager:
+    def __init__(self, user):
+        self.user = user
+
+    def parse_id(self, value):
+        return uuid.UUID(value)
+
+    async def get(self, user_id):
+        return self.user
+
+
+def _account():
+    return SimpleNamespace(id=uuid.uuid4(), company_id=None, is_active=True, role="engineer",
+                           hashed_password="h")
+
+
+@pytest.mark.asyncio
+async def test_an_access_token_stops_working_when_its_session_is_logged_out(refresh_client, redis):
+    client, user = refresh_client
+    strategy = users.get_jwt_strategy()
+    t = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, "sid-a")
+    this, other = await strategy.write_token(user, "sid-a"), await strategy.write_token(user, "sid-b")
+    assert await strategy.read_token(this, _Manager(user)) is user
+    assert client.post("/auth/logout", json={"refresh_token": t}).status_code == 204
+    assert await strategy.read_token(this, _Manager(user)) is None
+    assert await strategy.read_token(other, _Manager(user)) is user
+
+
+@pytest.mark.asyncio
+async def test_ending_all_sessions_refuses_the_access_tokens_issued_before_it(redis, monkeypatch):
+    import time
+
+    user = _account()
+    strategy = users.get_jwt_strategy()
+    real = time.time
+    clock = [real() - 10]  # never ahead of the real clock: a token issued in the future is refused
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    before = await strategy.write_token(user, "sid-a")
+    clock[0] += 5
+    await refresh_tokens.end_all_sessions(str(user.id))
+    clock[0] += 5
+    after = await strategy.write_token(user, "sid-b")
+    monkeypatch.setattr(time, "time", real)
+    assert await strategy.read_token(before, _Manager(user)) is None
+    assert await strategy.read_token(after, _Manager(user)) is user
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_session_store_refuses_the_request(redis, monkeypatch):
+    from fastapi import HTTPException
+
+    user = _account()
+    strategy = users.get_jwt_strategy()
+    token = await strategy.write_token(user, "sid-a")
+
+    async def down(key):
+        raise ConnectionError("down")
+
+    monkeypatch.setattr(redis, "get", down)
+    with pytest.raises(HTTPException) as refused:
+        await strategy.read_token(token, _Manager(user))
+    assert refused.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_every_access_token_names_a_session():
+    import jwt as pyjwt
+
+    token = await users.get_jwt_strategy().write_token(_account())
+    assert pyjwt.decode(token, options={"verify_signature": False})["sid"]
+
+
+@pytest.mark.asyncio
+async def test_the_fastapi_users_logout_ends_its_session_and_the_capabilities(redis):
+    user = _account()
+    strategy = users.get_jwt_strategy()
+    token, other = await strategy.write_token(user), await strategy.write_token(user)
+    _give_capability(redis, user.id)
+    await strategy.destroy_token(token, user)
+    assert await strategy.read_token(token, _Manager(user)) is None
+    assert await strategy.read_token(other, _Manager(user)) is user
+    assert "nbcap:h1" not in redis.kv
+
+
+@pytest.mark.asyncio
+async def test_a_logout_with_only_an_access_token_ends_its_session(refresh_client, redis):
+    client, user = refresh_client
+    strategy = users.get_jwt_strategy()
+    token = await strategy.write_token(user, "sid-bearer")
+    _give_capability(redis, user.id)
+    assert client.post("/auth/logout", headers={"Authorization": f"Bearer {token}"}).status_code == 204
+    assert await refresh_tokens.session_ended(str(user.id), "sid-bearer", None) is True
+    assert "nbcap:h1" not in redis.kv
+
+
+@pytest.mark.asyncio
+async def test_a_logout_with_a_forged_access_token_ends_nothing(refresh_client, redis):
+    import jwt as pyjwt
+
+    client, user = refresh_client
+    forged = pyjwt.encode({"sub": str(user.id), "sid": "sid-victim", "aud": ["fastapi-users:auth"]},
+                          "not-the-secret", algorithm="HS256")
+    assert client.post("/auth/logout", headers={"Authorization": f"Bearer {forged}"}).status_code == 204
+    assert await refresh_tokens.session_ended(str(user.id), "sid-victim", None) is False

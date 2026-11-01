@@ -82,6 +82,28 @@ async def list_users(args) -> None:
     print(f"Total users: {len(users)}")
 
 
+async def end_sessions(user_id) -> None:
+    """End every session and notebook capability of the user (ADR-0004 dec 2): the access tokens
+    issued before are refused from the next request. Runs in the gateway's image (PYTHONPATH=/app),
+    against the store the gateway uses."""
+    from messaging import refresh_tokens
+    from messaging.redis_client import redis_client
+
+    await redis_client.connect()
+    try:
+        await refresh_tokens.end_all_sessions(str(user_id))
+    finally:
+        await redis_client.disconnect()
+
+
+async def _end_sessions_after(change: str, user_id) -> None:
+    try:
+        await end_sessions(user_id)
+    except Exception as e:  # noqa: BLE001 - the change is made; say plainly what is not
+        raise UserAdminError(f"{change}, but the user's sessions were not ended ({type(e).__name__}: {e}); "
+                             "run the command again once the session store is reachable") from e
+
+
 async def delete_user(args) -> None:
     if not args.yes:
         confirm = input(f"Are you sure you want to delete user {args.email}? (yes/no): ")
@@ -90,9 +112,11 @@ async def delete_user(args) -> None:
     async with db.connect() as conn:
         result = await conn.execute(
             text('DELETE FROM public."user" WHERE email = :email RETURNING id'), {"email": args.email})
-        if result.first() is None:
+        row = result.first()
+        if row is None:
             raise UserAdminError(f"user {args.email} not found")
-    print(f"✅ User {args.email} deleted")
+    await _end_sessions_after(f"user {args.email} deleted", row[0])
+    print(f"✅ User {args.email} deleted; their sessions ended")
 
 
 async def reset_password(args) -> None:
@@ -102,11 +126,11 @@ async def reset_password(args) -> None:
             text('UPDATE public."user" SET hashed_password = :hashed WHERE email = :email RETURNING id'),
             {"hashed": db.hash_password(password), "email": args.email},
         )
-        if result.first() is None:
+        row = result.first()
+        if row is None:
             raise UserAdminError(f"user {args.email} not found")
-    # The user's refresh tokens carry a fingerprint of the old hash, so existing sessions end at
-    # their next refresh (services/api_gateway/messaging/refresh_tokens.py).
-    print(f"✅ Password reset for {args.email}; existing sessions end at their next refresh")
+    await _end_sessions_after(f"password reset for {args.email}", row[0])
+    print(f"✅ Password reset for {args.email}; their sessions ended")
 
 
 COMMANDS = {

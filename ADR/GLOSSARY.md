@@ -42,7 +42,7 @@ Three separate roots of trust; never describe them as one.
 |---|---|---|
 | Platform session | A browser's authenticated session: it persists through refresh-credential rotation while each request carries a short-lived access token | ADR-0004 dec 2 |
 | Access token | A JWT valid for minutes, carrying the signed tenant claim | ADR-0004 dec 2, ADR-0003 dec 2 |
-| Refresh token | The server-side credential that renews the session: each use claims it atomically and issues a successor, so reuse is refused. Logout, compromise, a password change or reset, and deactivating or deleting the account or its company end all the user's sessions and the notebook capabilities minted from them | ADR-0004 dec 2 |
+| Refresh token | The server-side credential that renews the session: each use claims it atomically and issues a successor, so reuse is refused. Revoking it ends its session, and the session's access tokens are refused from the next request | ADR-0004 dec 2 |
 | httpOnly session cookie | How the browser holds the tokens: `httpOnly`, `Secure`, `SameSite` cookies set by the backend, unreadable by page JavaScript | ADR-0004 dec 3 |
 | Notebook SSO | Signing a user into the notebook hub from the platform session ("who are you"); distinct from a capability ("what may this kernel touch") | ADR-0014 |
 

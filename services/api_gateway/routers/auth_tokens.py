@@ -125,6 +125,13 @@ async def refresh(
     return TokenPair(access_token=access, refresh_token=new_refresh)
 
 
+def _presented_access_claims(request: Request) -> Optional[dict]:
+    """The verified claims of the access token the request carries (Bearer header or cookie)."""
+    header = request.headers.get("Authorization", "")
+    token = header[7:] if header.startswith("Bearer ") else request.cookies.get(ACCESS_COOKIE)
+    return get_jwt_strategy().claims(token) if token else None
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(request: Request, response: Response, body: Optional[RefreshRequest] = None):
     """Revoke the refresh token (from body or cookie), the user's notebook capabilities, and clear
@@ -135,8 +142,14 @@ async def logout(request: Request, response: Response, body: Optional[RefreshReq
     session is recorded as ended, so a socket opened in it closes at its next re-check.
     """
     token = (body.refresh_token if body and body.refresh_token else None) or request.cookies.get(REFRESH_COOKIE)
+    user_id = None
     if token:
         user_id = await refresh_tokens.revoke_refresh_token(token)
-        if user_id:
-            await revoke_user_capabilities(redis_client.redis, user_id)
+    # The access token presented ends its own session too, so a logout that carries no refresh
+    # token (or another session's) still ends the session the caller is in.
+    claims = _presented_access_claims(request)
+    if claims and claims.get("sid"):
+        await refresh_tokens.end_session(claims["sid"])
+    for uid in {u for u in (user_id, claims and claims.get("sub")) if u}:
+        await revoke_user_capabilities(redis_client.redis, str(uid))
     _clear_auth_cookies(response)

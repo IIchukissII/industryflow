@@ -149,7 +149,7 @@ async def test_logout_revokes_the_users_notebook_capabilities(monkeypatch):
     _seed(redis, "alice", ["a1", "a2"])
     _seed(redis, "bob", ["b1"])
 
-    request = SimpleNamespace(cookies={auth_tokens.REFRESH_COOKIE: "tok"})
+    request = SimpleNamespace(cookies={auth_tokens.REFRESH_COOKIE: "tok"}, headers={})
     from fastapi import Response
 
     await auth_tokens.logout(request, Response(), None)
@@ -170,7 +170,7 @@ async def test_logout_with_an_unknown_refresh_token_revokes_nothing(monkeypatch)
     monkeypatch.setattr(redis_client, "redis", redis)
     _seed(redis, "alice", ["a1"])
 
-    await auth_tokens.logout(SimpleNamespace(cookies={auth_tokens.REFRESH_COOKIE: "stale"}), Response(), None)
+    await auth_tokens.logout(SimpleNamespace(cookies={auth_tokens.REFRESH_COOKIE: "stale"}, headers={}), Response(), None)
     assert set(redis.strings) == {"nbcap:a1"}
 
 
