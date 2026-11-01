@@ -36,7 +36,7 @@ WRITER_ROLES = ("engineer", "admin")
 # rides on the user read.
 _ACCOUNT_SQL = """
     SELECT u.is_active AS user_active, u.company_id, c.is_active AS company_active,
-           u.role, u.is_superuser
+           u.role, u.is_superuser, u.password_change_required
     FROM public."user" u
     LEFT JOIN public.companies c ON c.company_id = u.company_id
     WHERE u.id = $1
@@ -56,6 +56,9 @@ async def _usable_account(pool, user_id: str) -> Optional[dict]:
         return None
     if row["company_id"] is not None and not row["company_active"]:
         return None
+    # An account that must change its password first reaches nothing here (ADR-0004 dec 11).
+    if row["password_change_required"]:
+        raise HTTPException(status_code=403, detail="PASSWORD_CHANGE_REQUIRED")
     return {"role": row["role"], "is_superuser": bool(row["is_superuser"]),
             "company_id": str(row["company_id"]) if row["company_id"] is not None else None}
 

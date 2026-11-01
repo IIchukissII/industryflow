@@ -18,6 +18,8 @@ class UserRead(schemas.BaseUser[uuid.UUID]):
     """
     company_id: uuid.UUID
     role: str
+    # The account must change its password before anything else (ADR-0004 dec 11).
+    password_change_required: bool = False
 
 
 Role = Literal["admin", "engineer", "observer"]

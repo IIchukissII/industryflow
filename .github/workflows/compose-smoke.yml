@@ -317,6 +317,52 @@ jobs:
           fi
           echo "OK    ingestion-edge: verified device reaches ingestion, anonymous client refused"
 
+      # ADR-0004 dec 11. The stack starts with no superuser, so the gateway creates the first-run one
+      # with the published defaults; until its holder changes the password the account reads itself,
+      # changes the password and signs out, and nothing more. Then it is an ordinary superuser.
+      - name: The first-run superuser exists and must change its password first
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, ssl, urllib.error, urllib.parse, urllib.request
+          CTX = ssl.create_default_context(cafile="deploy/certs/ca.crt")
+          EDGE = "https://localhost:3443"
+
+          def call(method, path, token=None, form=None, body=None):
+              data, headers = None, {}
+              if form is not None:
+                  data = urllib.parse.urlencode(form).encode()
+              if body is not None:
+                  data, headers["Content-Type"] = json.dumps(body).encode(), "application/json"
+              if token:
+                  headers["Authorization"] = "Bearer " + token
+              req = urllib.request.Request(EDGE + path, data=data, method=method, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, context=CTX, timeout=30) as r:
+                      return r.status, json.loads(r.read() or b"null")
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read() or b"null")
+
+          status, pair = call("POST", "/auth/login", form={"username": "admin@industryflow.local", "password": "industryflow"})
+          assert status == 200, (status, pair)
+          token = pair["access_token"]
+          status, me = call("GET", "/users/me", token)
+          assert status == 200 and me["is_superuser"] and me["password_change_required"], me
+          status, body = call("GET", "/api/companies", token)
+          assert status == 403 and body["detail"] == "PASSWORD_CHANGE_REQUIRED", (status, body)
+          status, body = call("PATCH", "/users/me", token, body={"password": "industryflow"})
+          assert status == 400, ("the default cannot be kept", status, body)
+          status, body = call("PATCH", "/users/me", token, body={"password": "Smoke-first-run-2026"})
+          assert status == 200, (status, body)
+          status, pair = call("POST", "/auth/login", form={"username": "admin@industryflow.local", "password": "Smoke-first-run-2026"})
+          assert status == 200, (status, pair)
+          status, me = call("GET", "/users/me", pair["access_token"])
+          assert status == 200 and not me["password_change_required"], me
+          status, body = call("GET", "/api/companies", pair["access_token"])
+          assert status == 200, (status, body)
+          print("OK    first-run superuser: created, held to a password change, then an ordinary superuser")
+          PY
+
       # ADR-0018 dec 4: a kernel is untrusted code on a dedicated network that holds only the hub, the
       # trusted mediators and the object store. Both halves are asserted, because each fails silently:
       # a mediator missing from the network breaks notebooks, and a platform service added to it (or a

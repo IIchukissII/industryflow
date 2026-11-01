@@ -21,6 +21,7 @@ const Notebooks = lazy(() => import('./pages/Notebooks'));
 const Experiments = lazy(() => import('./pages/Experiments'));
 const Help = lazy(() => import('./pages/Help'));
 const Login = lazy(() => import('./pages/Login'));
+const FirstPasswordChange = lazy(() => import('./pages/FirstPasswordChange'));
 
 function PageFallback() {
   return <div className="app-fallback"><span className="sdot pending" /> Loading…</div>;
@@ -61,6 +62,19 @@ function App() {
     setUser(null);
   }, []);
   const next = returnPath(window.location.search);
+
+  // An account still on the default password sets its own before anything else (ADR-0004 dec 11);
+  // then, if the dashboards sent it here, back to them.
+  if (user?.password_change_required) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <FirstPasswordChange user={user} onDone={(me) => {
+          setUser(me);
+          if (next) resume(next).catch(handleExpired);
+        }} />
+      </Suspense>
+    );
+  }
 
   return (
     <Router>

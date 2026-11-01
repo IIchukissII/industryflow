@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+from typing import Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from sqlalchemy.engine import URL
@@ -49,6 +51,11 @@ class Settings(BaseSettings):
     # Password sign-in throttle (ADR-0004 dec 10, sign_in_throttle.py): per-source, or off where the
     # gateway is not told each client's own address.
     SIGN_IN_THROTTLE: str = "per-source"
+    # The first-run superuser (ADR-0004 dec 11, first_run.py), created only while none exists. Unset:
+    # the published defaults, and the account must change its password before anything else.
+    PLATFORM_ADMIN_EMAIL: Optional[str] = None
+    PLATFORM_ADMIN_PASSWORD: Optional[str] = None
+    PLATFORM_ADMIN_TENANT: Optional[str] = None
 
     # CORS Configuration
     CORS_ORIGINS: str

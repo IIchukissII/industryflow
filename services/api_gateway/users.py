@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # src/api/users.py
+import contextvars
 import logging
 import time
 import uuid
@@ -12,6 +13,7 @@ import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.requests import HTTPConnection
 from fastapi_users import BaseUserManager, UUIDIDMixin
+from fastapi_users.exceptions import InvalidPasswordException
 from fastapi_users import FastAPIUsers
 from fastapi.security import OAuth2PasswordRequestForm
 
@@ -32,6 +34,13 @@ from fastapi_users.authentication import (
 from fastapi_users.jwt import decode_jwt, generate_jwt
 
 logger = logging.getLogger(__name__)
+
+# The request being authenticated, as (method, path): set by main.remember_the_request.
+CURRENT_REQUEST: contextvars.ContextVar = contextvars.ContextVar("current_request", default=None)
+# All an account that must change its password may do (ADR-0004 dec 11).
+PASSWORD_CHANGE_ALLOWED = {("GET", "/users/me"), ("PATCH", "/users/me"), ("POST", "/auth/logout"),
+                           ("POST", "/auth/jwt/logout")}
+PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED"
 
 # Cookie name for the httpOnly access-token cookie (ADR-0004 dec 3).
 ACCESS_COOKIE = "if_access"
@@ -117,6 +126,15 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             await refresh_tokens.end_all_sessions(str(user.id))
         if "password" in update_dict:
             await _clear_sign_in_failures(user)
+            # The holder has set their own password: the account is an ordinary one (ADR-0004 dec 11).
+            if getattr(user, "password_change_required", False):
+                await self.user_db.update(user, {"password_change_required": False})
+
+    async def validate_password(self, password: str, user) -> None:
+        """A password that must be changed cannot be changed to itself (ADR-0004 dec 11)."""
+        if getattr(user, "password_change_required", False) and getattr(user, "hashed_password", None):
+            if self.password_helper.verify_and_update(password, user.hashed_password)[0]:
+                raise InvalidPasswordException(reason="Choose a password other than the current one")
 
     async def on_after_reset_password(self, user: User, request: Optional[Request] = None):
         await refresh_tokens.end_all_sessions(str(user.id))
@@ -211,7 +229,11 @@ class CompanyClaimJWTStrategy(JWTStrategy):
             logger.error("session store unreadable, refusing the request: %s", type(exc).__name__)
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                                 detail="Session store not available")
-        return None if ended else user
+        if ended:
+            return None
+        if getattr(user, "password_change_required", False) and CURRENT_REQUEST.get() not in PASSWORD_CHANGE_ALLOWED:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PASSWORD_CHANGE_REQUIRED)
+        return user
 
     def claims(self, token: str) -> Optional[dict]:
         """The verified claims of an unexpired access token, else None."""

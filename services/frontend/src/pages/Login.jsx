@@ -38,7 +38,8 @@ function Login({ onLogin }) {
       onLogin(me.data);
       // Back to the dashboards when the edge sent the visitor here from them (ADR-0016 dec 7).
       const next = returnPath(window.location.search);
-      if (next) window.location.assign(next);
+      // Held to a password change: the app asks for it first, and resumes the dashboards after.
+      if (next && !me.data.password_change_required) window.location.assign(next);
       else navigate('/');
     } catch (err) {
       const status = err.response?.status;

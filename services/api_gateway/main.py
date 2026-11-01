@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import logging
 import secrets
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,10 +25,26 @@ from messaging import capability_audit_drain
 # Authentication imports
 from users import auth_backend, fastapi_users, ACCESS_COOKIE
 import sign_in_throttle
+import users
 
 import asyncio
 
 settings = get_settings()
+
+
+async def _first_run() -> None:
+    """A platform with no superuser gets one (ADR-0004 dec 11). A failure is logged and the gateway
+    starts anyway: it is retried at the next start, and the CLI can create one meanwhile."""
+    import first_run
+    from database import AsyncSessionLocal
+
+    s = get_settings()
+    try:
+        async with AsyncSessionLocal() as session:
+            await first_run.ensure_first_superuser(session, s.PLATFORM_ADMIN_EMAIL, s.PLATFORM_ADMIN_PASSWORD,
+                                                   s.PLATFORM_ADMIN_TENANT)
+    except Exception as exc:  # noqa: BLE001 - see above
+        logging.getLogger(__name__).error("first-run superuser not created: %s: %s", type(exc).__name__, exc)
 
 
 @asynccontextmanager
@@ -37,6 +54,7 @@ async def lifespan(_app: FastAPI):
     from dependencies import EDGE_PEERS
     sign_in_throttle.check_configuration(get_settings().SIGN_IN_THROTTLE, EDGE_PEERS)
     await redis_client.connect()
+    await _first_run()
 
     cache_task = asyncio.create_task(update_redis_cache())
     # The one writer of the capability-use record (ADR-0042 dec 4); the store is the same Redis.
@@ -73,6 +91,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def remember_the_request(request, call_next):
+    """What the request asks, for the one check that depends on it inside authentication: an
+    account that must change its password may do only that (ADR-0004 dec 11, users.py)."""
+    token = users.CURRENT_REQUEST.set((request.method, request.url.path))
+    try:
+        return await call_next(request)
+    finally:
+        users.CURRENT_REQUEST.reset(token)
 
 
 @app.middleware("http")
