@@ -55,6 +55,6 @@ def test_a_held_account_must_change_its_password_before_anything_else(settings, 
 
 
 def test_a_platform_with_accounts_gets_no_first_run_account(env):
-    count = env.sql("SELECT count(*) FROM public.\"user\" WHERE email = 'admin@industryflow.local' "
+    count = env.sql("SELECT count(*) FROM public.\"user\" WHERE email = 'admin@example.com' "
                     "AND password_change_required").strip()
     assert count == "0", count

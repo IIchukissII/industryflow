@@ -26,11 +26,25 @@ from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_EMAIL = "admin@industryflow.local"
+# A reserved domain the API's own e-mail validation accepts (".local" and the like it refuses).
+DEFAULT_EMAIL = "admin@example.com"
 DEFAULT_PASSWORD = "industryflow"
 DEFAULT_TENANT = "Default"
 # Any constant shared by every gateway replica; it names this one critical section.
 LOCK_KEY = 0x1F_5E_57_AD
+
+
+def checked_email(email: Optional[str]) -> str:
+    """The first-run address, as the API will validate it on every read of the account: an address it
+    would refuse would make every page of that account fail, so it is refused here instead."""
+    from pydantic import EmailStr, TypeAdapter, ValidationError
+
+    address = (email or DEFAULT_EMAIL).strip().lower()
+    try:
+        TypeAdapter(EmailStr).validate_python(address)
+    except ValidationError as e:
+        raise ValueError(f"PLATFORM_ADMIN_EMAIL {address!r} is not an address the API accepts") from e
+    return address
 
 
 async def ensure_first_superuser(session, email: Optional[str], password: Optional[str],
@@ -38,7 +52,7 @@ async def ensure_first_superuser(session, email: Optional[str], password: Option
     """Create the first-run superuser if the platform has no account; returns what was created, else None.
 
     ``session`` is an AsyncSession as the gateway's role; the caller commits nothing, this does."""
-    email = (email or DEFAULT_EMAIL).strip().lower()
+    email = checked_email(email)
     password = password or DEFAULT_PASSWORD
     await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": LOCK_KEY})
     exists = await session.execute(text('SELECT 1 FROM public."user" LIMIT 1'))

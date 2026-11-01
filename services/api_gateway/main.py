@@ -39,6 +39,11 @@ async def _first_run(retry_seconds: float = 30.0) -> None:
     from database import AsyncSessionLocal
 
     s = get_settings()
+    try:
+        first_run.checked_email(s.PLATFORM_ADMIN_EMAIL)
+    except ValueError as exc:
+        logging.getLogger(__name__).error("first-run superuser not created: %s", exc)
+        return
     while True:
         try:
             async with AsyncSessionLocal() as session:

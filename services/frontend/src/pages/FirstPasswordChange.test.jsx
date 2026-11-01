@@ -13,7 +13,7 @@ vi.mock('../components/Starfield', () => ({ default: () => null }));
 
 import FirstPasswordChange from './FirstPasswordChange';
 
-const HELD = { email: 'admin@industryflow.local', is_superuser: true, password_change_required: true };
+const HELD = { email: 'admin@example.com', is_superuser: true, password_change_required: true };
 
 afterEach(() => {
   cleanup();

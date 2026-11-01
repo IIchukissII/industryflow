@@ -234,3 +234,20 @@ def test_through_the_app_a_held_account_reads_itself_and_nothing_else(store):
         assert client.get("/auth/verify", headers=bearer).status_code == 403
     finally:
         main.app.dependency_overrides.clear()
+
+
+
+def test_the_default_address_passes_the_apis_own_validation():
+    """admin@industryflow.local signed in and then failed every read of itself (500): the API's
+    e-mail type refuses special-use domains. Found by compose-smoke."""
+    import schemas
+
+    assert first_run.checked_email(None) == first_run.DEFAULT_EMAIL
+    schemas.UserRead(id=uuid.uuid4(), email=first_run.DEFAULT_EMAIL, is_active=True, is_superuser=True,
+                     is_verified=False, company_id=uuid.uuid4(), role="admin")
+
+
+@pytest.mark.parametrize("address", ["admin@industryflow.local", "not-an-address", "ops@localhost"])
+def test_an_address_the_api_would_refuse_is_refused_up_front(address):
+    with pytest.raises(ValueError, match="PLATFORM_ADMIN_EMAIL"):
+        first_run.checked_email(address)

@@ -349,7 +349,7 @@ jobs:
 
           # The gateway creates the account in the background once it serves: wait for it.
           for _ in range(30):
-              status, pair = call("POST", "/auth/login", form={"username": "admin@industryflow.local", "password": "industryflow"})
+              status, pair = call("POST", "/auth/login", form={"username": "admin@example.com", "password": "industryflow"})
               if status == 200:
                   break
               print("waiting for the first-run account:", status, pair)
@@ -364,7 +364,7 @@ jobs:
           assert status == 400, ("the default cannot be kept", status, body)
           status, body = call("PATCH", "/users/me", token, body={"password": "Smoke-first-run-2026"})
           assert status == 200, (status, body)
-          status, pair = call("POST", "/auth/login", form={"username": "admin@industryflow.local", "password": "Smoke-first-run-2026"})
+          status, pair = call("POST", "/auth/login", form={"username": "admin@example.com", "password": "Smoke-first-run-2026"})
           assert status == 200, (status, pair)
           status, me = call("GET", "/users/me", pair["access_token"])
           assert status == 200 and not me["password_change_required"], me

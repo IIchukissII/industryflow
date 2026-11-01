@@ -58,7 +58,7 @@ named `Default` when there is none.
 
 | Setting (`.env`) | Default | Meaning |
 |---|---|---|
-| `PLATFORM_ADMIN_EMAIL` | `admin@industryflow.local` | Its sign-in address |
+| `PLATFORM_ADMIN_EMAIL` | `admin@example.com` | Its sign-in address |
 | `PLATFORM_ADMIN_PASSWORD` | `industryflow` | Its first password; with the default, the account must set its own before anything else |
 | `PLATFORM_ADMIN_TENANT` | `Default` | The tenant created for it when the platform has none |
 
