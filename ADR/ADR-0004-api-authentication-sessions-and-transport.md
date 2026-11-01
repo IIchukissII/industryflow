@@ -29,8 +29,8 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 2. **A session is a short-lived JWT access token carrying the tenant claim, plus a rotating,
    server-side refresh credential.** Each refresh claims the credential atomically and issues a
    successor, so reuse is refused. Logout ends its session and the user's notebook capabilities;
-   compromise, a password change or reset, and deactivating or deleting the account or its company
-   end all the user's sessions and those capabilities. Every request re-reads the account and refuses
+   compromise, a password change or reset, a move to another company, and deactivating or deleting
+   the account or its company end all the user's sessions and those capabilities. Every request re-reads the account and refuses
    an access token whose session has ended, and is refused while that cannot be read.
 3. **The browser holds tokens in httpOnly, Secure, SameSite cookies set by the backend.** Every
    state-changing request authenticated by the session cookie must echo a double-submit CSRF token in
@@ -59,6 +59,8 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 | 2 | Logout ending all the user's sessions | Signing out on one device would sign out every other |
 | 2 | Checking for an ended session only on live sockets | An access token keeps working after its logout or a password change until it expires |
 | 2 | Admitting a request when the record of ended sessions cannot be read | While it is unreadable no ended session is enforced, and a leaked token is good for its whole lifetime |
+| 2 | Comparing a token's issue time with an end exactly | A replica whose clock runs ahead issues tokens that outlive the end for their whole lifetime |
+| 2 | Keeping the sessions of a user moved to another company | Their tokens name the old tenant, whose data stays reachable through them until they expire |
 | 3 | Tokens in browser local storage, with a CSP | Injected script can still read the token; a CSP lowers the odds but not the readability |
 | 6 | Wildcard origins combined with credentials | Browsers reject it, and it invites cross-site use of the credential |
 | 8 | A public ACME certificate in every deployment | No public CA issues for an internal hostname, so self-hosting would need a public name |
@@ -81,8 +83,8 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
   HTTP exception.
 - An access token is not revoked individually; a password change logs out every device.
 - Every authenticated request reads the session store, and none is served while it is unreachable.
-- A token issued in the same second as an end of all the user's sessions counts as issued before it,
-  so its holder refreshes once.
+- A token issued within a clock-skew allowance after an end of all the user's sessions counts as
+  issued before it, so its holder signs in or refreshes again once the allowance has passed.
 
 ## Deferred
 

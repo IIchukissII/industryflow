@@ -85,7 +85,8 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     # the user's sessions (refresh tokens). Access tokens are short-lived, and the per-request
     # user load refuses an inactive or deleted user, so nothing else stays usable.
     async def on_after_update(self, user: User, update_dict: dict, request: Optional[Request] = None):
-        if "password" in update_dict or update_dict.get("is_active") is False:
+        # A move to another company too: the access tokens name the tenant they were issued for.
+        if "password" in update_dict or "company_id" in update_dict or update_dict.get("is_active") is False:
             await refresh_tokens.end_all_sessions(str(user.id))
 
     async def on_after_reset_password(self, user: User, request: Optional[Request] = None):
@@ -111,8 +112,10 @@ class CompanyClaimJWTStrategy(JWTStrategy):
 
     async def write_token(self, user, session_id: Optional[str] = None) -> str:
         """``session_id`` names the refresh-token session the token is minted in, and ``iat``
-        when: together they let a live socket notice that its session has ended (ADR-0004 dec 9,
-        messaging/refresh_tokens.session_ended)."""
+        when: together they let every request, and a live socket, refuse a token whose session has
+        ended (ADR-0004 dec 2, 9; messaging/refresh_tokens.session_ended). A token minted without
+        a refresh session (the fastapi-users login) is its own session, so its logout can end it."""
+        session_id = session_id or refresh_tokens.new_session_id()
         data = {
             "sub": str(user.id),
             "aud": self.token_audience,
@@ -120,8 +123,7 @@ class CompanyClaimJWTStrategy(JWTStrategy):
             "company_id": str(user.company_id) if user.company_id else None,
             "role": getattr(user, "role", None),
         }
-        if session_id:
-            data["sid"] = session_id
+        data["sid"] = session_id
         return generate_jwt(
             data, self.encode_key, self.lifetime_seconds, algorithm=self.algorithm
         )
@@ -140,9 +142,8 @@ class CompanyClaimJWTStrategy(JWTStrategy):
             return None
         if user.company_id and not await company_status.is_company_active(user.company_id):
             return None
-        try:
-            claims = decode_jwt(token, self.decode_key, self.token_audience, algorithms=[self.algorithm])
-        except jwt.PyJWTError:
+        claims = self.claims(token)
+        if claims is None:
             return None
         try:
             ended = await refresh_tokens.session_ended(str(user.id), claims.get("sid"), claims.get("iat"))
@@ -151,6 +152,24 @@ class CompanyClaimJWTStrategy(JWTStrategy):
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                                 detail="Session store not available")
         return None if ended else user
+
+    def claims(self, token: str) -> Optional[dict]:
+        """The verified claims of an unexpired access token, else None."""
+        try:
+            return decode_jwt(token, self.decode_key, self.token_audience, algorithms=[self.algorithm])
+        except jwt.PyJWTError:
+            return None
+
+    async def destroy_token(self, token: str, user) -> None:
+        """The fastapi-users logout ends the token's session and the user's notebook capabilities,
+        as /auth/logout does (ADR-0004 dec 2)."""
+        from capability_auth import revoke_user_capabilities
+        from messaging.redis_client import redis_client
+
+        claims = self.claims(token) or {}
+        if claims.get("sid"):
+            await refresh_tokens.end_session(claims["sid"])
+        await revoke_user_capabilities(redis_client.redis, str(user.id))
 
 
 def get_jwt_strategy() -> JWTStrategy:

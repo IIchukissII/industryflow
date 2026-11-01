@@ -11,6 +11,7 @@ dec 9): at the access token's expiry, or at its next re-check once its user is d
 company is suspended, or the session it was opened in has ended (logout, or all of the user's
 sessions ended). The names cache never crosses tenants.
 """
+from industryflow_contracts import sessions
 import time
 import uuid
 from types import SimpleNamespace
@@ -258,7 +259,9 @@ def test_a_token_issued_before_its_sessions_ended_cannot_open_a_socket(world):
 def test_a_token_issued_after_the_sessions_ended_streams(world):
     u = world.add_user()
     _run(refresh_tokens.end_all_sessions(str(u.id)))
-    with _client(_token(u.id, iat=int(time.time()) + 2)).websocket_connect("/ws/sensors") as s:
+    # Issued later than the end by more than the replicas' clock skew allowance.
+    later = int(time.time()) + sessions.CLOCK_SKEW_SECONDS + 2
+    with _client(_token(u.id, iat=later)).websocket_connect("/ws/sensors") as s:
         assert s.receive_json()["type"] == "sensor_update"
 
 

@@ -62,9 +62,10 @@ Downstream services read the tenant from the `company_id` claim
 | Event | Effect |
 |---|---|
 | Refresh | The token is claimed atomically (single use) and replaced; a used or unknown token is rejected |
-| Logout | That session's refresh token is revoked, the session is recorded as ended; the user's capability handles, notebook and model upload, are revoked ([ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md)) |
-| Password change or reset, user deactivated or deleted, tenant deactivated | All of the user's sessions and capability handles are revoked |
-| Password set outside the gateway (`manage_users.py`) | Existing sessions fail at their next refresh (fingerprint mismatch) |
+| Logout (`/auth/logout`, `/auth/jwt/logout`) | The session of the refresh token sent and of the access token presented is recorded as ended, the refresh token revoked; the user's capability handles, notebook and model upload, are revoked ([ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md)) |
+| Password change or reset, user moved to another company, deactivated or deleted, tenant deactivated | All of the user's sessions and capability handles are revoked |
+| `manage_users.py reset-password` or `delete` | The same; the command exits non-zero if the session store cannot be reached |
+| Password set in the database directly | Existing sessions fail at their next refresh (fingerprint mismatch) |
 
 An ended session is recorded in the capability store for one access-token lifetime
 (`libs/industryflow_contracts/industryflow_contracts/sessions.py`). Every verifier of an access token
@@ -73,12 +74,13 @@ reads the record:
 | Verifier | Access token of an ended session | Store unreachable |
 |---|---|---|
 | API gateway, every request | **401** | **503** |
-| `ml-service-api`, every request (`SESSION_REDIS_URL`, required) | **401** | **503** |
+| `ml-service-api`, every request (`SESSION_REDIS_URL`, required); also **401** when the token's `company_id` is not the account's | **401** | **503** |
 | Socket handshake | Close **4401** | Close **4401** |
 | Open socket, at re-check | Close **4401** | Checked again next interval |
 
-A token issued in the same second as an end of all the user's sessions counts as ended; the client
-refreshes.
+A read slower than `READ_TIMEOUT_SECONDS` (2 s) counts as unreachable. A token issued up to
+`CLOCK_SKEW_SECONDS` (2 s) after an end of all the user's sessions counts as ended; the client signs in
+or refreshes again after that.
 
 ## Suspended tenants
 

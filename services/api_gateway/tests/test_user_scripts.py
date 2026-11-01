@@ -73,6 +73,12 @@ class FakeConn:
 @pytest.fixture
 def db(monkeypatch):
     conn = FakeConn()
+    conn.ended = []
+
+    async def end_sessions(user_id):
+        conn.ended.append(user_id)
+
+    monkeypatch.setattr(manage_users, "end_sessions", end_sessions)
 
     @asynccontextmanager
     async def connect():
@@ -163,6 +169,48 @@ def test_reset_password_binds_the_new_hash(db, monkeypatch):
     (sql, params), = [(s, p) for s, p in db.statements if s.startswith("UPDATE")]
     assert params["email"] == "u@example.com" and "new-pw" not in sql
     assert user_admin_db.PasswordHelper().verify_and_update("new-pw", params["hashed"])[0]
+    assert db.ended == ["id"]
+
+
+def test_delete_ends_the_users_sessions(db):
+    db.users.add("u@example.com")
+    assert manage_users.main(["delete", "--email", "u@example.com", "--yes"]) == 0
+    assert db.ended == ["id"]
+
+
+def test_a_change_whose_sessions_could_not_be_ended_exits_nonzero(db, monkeypatch, capsys):
+    async def down(user_id):
+        raise ConnectionError("store down")
+
+    monkeypatch.setattr(manage_users, "end_sessions", down)
+    db.users.add("u@example.com")
+    _stdin(monkeypatch, "new-pw\n")
+    assert manage_users.main(["reset-password", "--email", "u@example.com", "--password-stdin"]) == 1
+    assert "sessions were not ended" in capsys.readouterr().err
+
+
+def test_ending_sessions_uses_the_gateways_store(monkeypatch):
+    import asyncio
+
+    from messaging import redis_client as redis_module
+    from messaging import refresh_tokens
+
+    calls = []
+
+    async def connect():
+        calls.append("connect")
+
+    async def disconnect():
+        calls.append("disconnect")
+
+    async def end_all(uid):
+        calls.append(uid)
+
+    monkeypatch.setattr(redis_module.redis_client, "connect", connect)
+    monkeypatch.setattr(redis_module.redis_client, "disconnect", disconnect)
+    monkeypatch.setattr(refresh_tokens, "end_all_sessions", end_all)
+    asyncio.run(manage_users.end_sessions("u-1"))
+    assert calls == ["connect", "u-1", "disconnect"]
 
 
 def test_ci_runs_these_tests_when_the_scripts_change():

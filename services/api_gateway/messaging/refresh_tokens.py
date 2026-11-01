@@ -149,6 +149,11 @@ async def _record_session_ended(session_id: str) -> None:
     await redis_client.redis.set(sessions.ended_session_key(session_id), "1", ex=_ended_ttl())
 
 
+async def end_session(session_id: str) -> None:
+    """Record that one session ended, so the access tokens issued in it are refused (logout)."""
+    await _record_session_ended(str(session_id))
+
+
 async def revoke_all_refresh_tokens(user_id: str) -> int:
     """Revoke every refresh token of a user (end all sessions). Returns how many were live."""
     index = _user_key(str(user_id))

@@ -56,7 +56,8 @@ async def _usable_account(pool, user_id: str) -> Optional[dict]:
         return None
     if row["company_id"] is not None and not row["company_active"]:
         return None
-    return {"role": row["role"], "is_superuser": bool(row["is_superuser"])}
+    return {"role": row["role"], "is_superuser": bool(row["is_superuser"]),
+            "company_id": str(row["company_id"]) if row["company_id"] is not None else None}
 
 
 async def verify_jwt_token(
@@ -122,6 +123,11 @@ async def verify_jwt_token(
         raise HTTPException(status_code=503, detail="Account store not available")
     if account is None:
         raise HTTPException(status_code=401, detail="User not found or inactive")
+    # The tenant is read from the token (company_id_of); a token issued before the user moved to
+    # another company names the old one, and is refused rather than believed.
+    claim = payload.get("company_id")
+    if (str(claim).lower() if claim else None) != (account.pop("company_id") or None):
+        raise HTTPException(status_code=401, detail="Token names another tenant than the account")
     store = getattr(request.app.state, "session_store", None)
     if store is None:
         raise HTTPException(status_code=503, detail="Session store not available")

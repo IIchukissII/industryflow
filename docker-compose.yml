@@ -620,9 +620,11 @@ services:
       DB_NAME: ${DB_NAME}
       API_GATEWAY_DB_USER: ${API_GATEWAY_DB_USER}
       API_GATEWAY_DB_PASSWORD: ${API_GATEWAY_DB_PASSWORD}
-      REDIS_HOST: ${REDIS_HOST}
-      REDIS_PORT: ${REDIS_PORT}
-      REDIS_DB: ${REDIS_DB}
+      # The shared capability store every plane names as redis://redis:6379/0: its sessions, ended
+      # sessions and handles are read there by the other services, so it is not a setting here.
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}

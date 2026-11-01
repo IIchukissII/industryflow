@@ -35,8 +35,9 @@ def test_a_session_ended_by_itself_is_ended_whatever_its_issue_time():
     assert _ended(records, [(USER, "s", 10**12), (USER, "other", 10**12)]) == [True, False]
 
 
-@pytest.mark.parametrize("issued_at, ended", [(99, True), (100, True), (100.0, True), (101, False),
-                                              (None, True), ("not a time", True)])
+# Ended at 100.4: a token issued up to CLOCK_SKEW_SECONDS after it counts as issued before it.
+@pytest.mark.parametrize("issued_at, ended", [(99, True), (100, True), (102, True), (102.4, True),
+                                              (103, False), (None, True), ("not a time", True)])
 def test_ending_all_sessions_ends_the_tokens_issued_at_or_before_it(issued_at, ended):
     records = {sessions.user_ended_key(USER): "100.4"}
     assert _ended(records, [(USER, "s", issued_at), ("someone-else", "s", issued_at)]) == [ended, False]
@@ -58,3 +59,12 @@ def test_a_store_error_propagates():
 def test_the_key_layout():
     assert sessions.ended_session_key("abc") == "session-ended:abc"
     assert sessions.user_ended_key(USER) == f"sessions-ended-at:{USER}"
+
+
+def test_a_read_that_hangs_propagates_as_a_timeout():
+    class Hung:
+        async def get(self, key):
+            await asyncio.sleep(60)
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(sessions.session_ended(Hung(), USER, "s", 1, timeout=0.05))

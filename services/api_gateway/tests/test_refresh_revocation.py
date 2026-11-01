@@ -124,6 +124,7 @@ async def test_a_pre_fingerprint_token_is_refused(redis):
     ({"password": "new-password-1"}, True),
     ({"is_active": False}, True),
     ({"is_active": True}, False),
+    ({"company_id": uuid.uuid4()}, True),
     ({"email": "x@example.com"}, False),
 ])
 @pytest.mark.asyncio
@@ -353,3 +354,45 @@ async def test_an_unreadable_session_store_refuses_the_request(redis, monkeypatc
     with pytest.raises(HTTPException) as refused:
         await strategy.read_token(token, _Manager(user))
     assert refused.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_every_access_token_names_a_session():
+    import jwt as pyjwt
+
+    token = await users.get_jwt_strategy().write_token(_account())
+    assert pyjwt.decode(token, options={"verify_signature": False})["sid"]
+
+
+@pytest.mark.asyncio
+async def test_the_fastapi_users_logout_ends_its_session_and_the_capabilities(redis):
+    user = _account()
+    strategy = users.get_jwt_strategy()
+    token, other = await strategy.write_token(user), await strategy.write_token(user)
+    _give_capability(redis, user.id)
+    await strategy.destroy_token(token, user)
+    assert await strategy.read_token(token, _Manager(user)) is None
+    assert await strategy.read_token(other, _Manager(user)) is user
+    assert "nbcap:h1" not in redis.kv
+
+
+@pytest.mark.asyncio
+async def test_a_logout_with_only_an_access_token_ends_its_session(refresh_client, redis):
+    client, user = refresh_client
+    strategy = users.get_jwt_strategy()
+    token = await strategy.write_token(user, "sid-bearer")
+    _give_capability(redis, user.id)
+    assert client.post("/auth/logout", headers={"Authorization": f"Bearer {token}"}).status_code == 204
+    assert await refresh_tokens.session_ended(str(user.id), "sid-bearer", None) is True
+    assert "nbcap:h1" not in redis.kv
+
+
+@pytest.mark.asyncio
+async def test_a_logout_with_a_forged_access_token_ends_nothing(refresh_client, redis):
+    import jwt as pyjwt
+
+    client, user = refresh_client
+    forged = pyjwt.encode({"sub": str(user.id), "sid": "sid-victim", "aud": ["fastapi-users:auth"]},
+                          "not-the-secret", algorithm="HS256")
+    assert client.post("/auth/logout", headers={"Authorization": f"Bearer {forged}"}).status_code == 204
+    assert await refresh_tokens.session_ended(str(user.id), "sid-victim", None) is False

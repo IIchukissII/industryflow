@@ -37,7 +37,7 @@ def _spellings(paths):
     found = []
     for path in paths:
         for line, value in _code_literals(path):
-            if any(prefix in value for prefix in PREFIXES):
+            if any(prefix.rstrip(":") in value for prefix in PREFIXES):
                 found.append(f"{path.relative_to(ROOT)}:{line}")
     return found
 
@@ -66,3 +66,36 @@ def test_every_verifier_of_an_access_token_reads_the_record():
     }
     missing = [rel for rel, call in readers.items() if call not in (ROOT / rel).read_text(encoding="utf-8")]
     assert not missing, f"no ended-session check in: {missing}"
+
+
+# --- one store: a reader on another database finds no record and admits every ended session ------
+
+SHARED_STORE = "redis://redis:6379/0"
+
+
+def _compose_env():
+    from _repo import load_yaml
+
+    for name, service in load_yaml("docker-compose.yml")["services"].items():
+        env = service.get("environment") or {}
+        if isinstance(env, dict):
+            yield name, env
+
+
+def test_every_compose_service_names_the_one_store():
+    urls = {(name, key): str(value) for name, env in _compose_env() for key, value in env.items()
+            if str(value).startswith("redis://") or "REDIS_URL:-redis://" in str(value)}
+    assert any(key == "SESSION_REDIS_URL" for _, key in urls), "the scan finds no session-store URL"
+    wrong = {k: v for k, v in urls.items() if SHARED_STORE not in v}
+    assert not wrong, f"a Redis URL that is not {SHARED_STORE}: {wrong}"
+    gateway = dict(_compose_env())["api-gateway"]
+    assert (gateway["REDIS_HOST"], str(gateway["REDIS_PORT"]), str(gateway["REDIS_DB"])) == ("redis", "6379", "0")
+
+
+def test_helm_names_the_one_store_for_the_gateway_and_the_session_readers():
+    lines = (ROOT / "deploy/helm/industryflow/templates/configmap.yaml").read_text(encoding="utf-8").splitlines()
+    value = {line.split(":", 1)[0].strip(): line.split(":", 1)[1].strip() for line in lines
+             if line.startswith("  ") and not line.strip().startswith(("#", "{{")) and ":" in line}
+    assert value["SESSION_REDIS_URL"] == value["REDIS_URL"]
+    assert value["REDIS_DB"] == '"0"' and value["REDIS_URL"].endswith('"redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}')
+    assert value["REDIS_PORT"] == "{{ .Values.infra.redis.port | quote }}"

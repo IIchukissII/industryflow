@@ -27,6 +27,7 @@ import config  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 USER = uuid.uuid4()
+COMPANY = uuid.uuid4()
 
 
 @pytest.fixture(autouse=True)
@@ -81,7 +82,9 @@ def _client(pool, store="fresh"):
     return TestClient(app)
 
 
-def _token(sub=USER, **claims):
+def _token(sub=USER, company=COMPANY, **claims):
+    if company is not None:
+        claims["company_id"] = str(company)
     return jwt.encode({"sub": str(sub), "exp": int(time.time()) + 600, **claims},
                       config.config.JWT_SECRET_KEY, algorithm=auth.JWT_ALGORITHM)
 
@@ -90,7 +93,7 @@ def _get(pool, token=None, store="fresh"):
     return _client(pool, store).get("/who", headers={"Authorization": f"Bearer {token or _token()}"})
 
 
-def _row(user_active=True, company_active=True, company_id=uuid.uuid4(), role="observer", is_superuser=False):
+def _row(user_active=True, company_active=True, company_id=COMPANY, role="observer", is_superuser=False):
     return {"user_active": user_active, "company_id": company_id, "company_active": company_active,
             "role": role, "is_superuser": is_superuser}
 
@@ -124,7 +127,7 @@ def test_the_role_is_the_account_s_not_the_token_s():
 
     app.state.db_pool = FakePool(_row(role="observer"))
     app.state.session_store = Records()
-    token = jwt.encode({"sub": str(USER), "role": "admin", "is_superuser": True,
+    token = jwt.encode({"sub": str(USER), "company_id": str(COMPANY), "role": "admin", "is_superuser": True,
                         "exp": int(time.time()) + 600},
                        config.config.JWT_SECRET_KEY, algorithm=auth.JWT_ALGORITHM)
     r = TestClient(app).get("/who", headers={"Authorization": f"Bearer {token}"})
@@ -132,7 +135,7 @@ def test_the_role_is_the_account_s_not_the_token_s():
 
 
 def test_a_user_with_no_company_is_not_refused_for_it():
-    assert _get(FakePool(_row(company_id=None, company_active=None))).status_code == 200
+    assert _get(FakePool(_row(company_id=None, company_active=None)), _token(company=None)).status_code == 200
 
 
 def test_a_token_whose_subject_is_not_a_user_id_is_refused():
@@ -204,3 +207,12 @@ def test_an_unreadable_session_store_fails_closed():
 def test_the_session_store_is_required_configuration():
     assert "SESSION_REDIS_URL" in open(os.path.join(ROOT, "services", "ml_service", "api", "config.py"),
                                        encoding="utf-8").read().split("def validate", 1)[1]
+
+
+def test_a_token_naming_another_tenant_than_the_account_is_refused():
+    """A user moved to another company: the tokens issued before name the old one."""
+    pool = FakePool(_row(company_id=uuid.uuid4()))
+    assert _get(pool).status_code == 401
+    assert _get(FakePool(_row()), _token(company=None)).status_code == 401
+    assert _get(FakePool(_row(company_id=None, company_active=None))).status_code == 401
+    assert _get(FakePool(_row()), _token(company=str(COMPANY).upper())).status_code == 200
