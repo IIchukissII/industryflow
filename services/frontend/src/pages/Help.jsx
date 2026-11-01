@@ -19,7 +19,7 @@ const SECTIONS = [
       { term: 'Finding your way', def: 'The sidebar has three groups. The core holds the Core and Alerts: what is happening now. The ground holds Equipment, Notebooks and Experiments: the machines and the work on their data. The watch holds Alert rules and Models: what decides when to raise an alert.' },
       { term: 'Your role', def: 'Observers see everything but change nothing. Engineers also change equipment, alert rules and models, and handle alerts. Admins also manage the users of their organization. Your role is shown beneath your email.' },
     ],
-    tip: 'Change your password under Settings.',
+    tip: 'Change your e-mail address or password under Settings.',
   },
   {
     id: 'monitoring',
