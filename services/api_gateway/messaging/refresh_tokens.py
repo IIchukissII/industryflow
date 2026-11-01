@@ -149,6 +149,32 @@ async def _record_session_ended(session_id: str) -> None:
     await redis_client.redis.set(sessions.ended_session_key(session_id), "1", ex=_ended_ttl())
 
 
+async def wait_out_an_end(user_id: str) -> float:
+    """Before a token is minted for the user: if all their sessions ended within the clock-skew
+    allowance, wait until a token issued now would count as issued after the end
+    (``sessions.session_ended``), so a sign-in or refresh never yields a token that is refused for
+    its whole life. Returns the seconds waited; an unreadable record waits for nothing (the token
+    is then refused or not by the same rule at each request)."""
+    import asyncio
+    import math
+
+    try:
+        raw = await asyncio.wait_for(redis_client.redis.get(sessions.user_ended_key(user_id)),
+                                     sessions.READ_TIMEOUT_SECONDS)
+        ended = float(raw.decode() if isinstance(raw, bytes) else raw) if raw is not None else None
+    except Exception:  # noqa: BLE001 - see above
+        return 0.0
+    if ended is None:
+        return 0.0
+    # Issue times are whole seconds: the first one after the allowance.
+    ready = math.floor(ended + sessions.CLOCK_SKEW_SECONDS) + 1
+    delay = ready - time.time()
+    if 0 < delay <= sessions.CLOCK_SKEW_SECONDS + 1:
+        await asyncio.sleep(delay)
+        return delay
+    return 0.0
+
+
 async def end_session(session_id: str) -> None:
     """Record that one session ended, so the access tokens issued in it are refused (logout)."""
     await _record_session_ended(str(session_id))

@@ -78,9 +78,10 @@ reads the record:
 | Socket handshake | Close **4401** | Close **4401** |
 | Open socket, at re-check | Close **4401** | Checked again next interval |
 
-A read slower than `READ_TIMEOUT_SECONDS` (2 s) counts as unreachable. A token issued up to
-`CLOCK_SKEW_SECONDS` (2 s) after an end of all the user's sessions counts as ended; the client signs in
-or refreshes again after that.
+A read slower than `READ_TIMEOUT_SECONDS` (2 s) counts as unreachable; so does the gateway's read of
+the suspension marker, which then leaves the decision to the registry. A token issued up to
+`CLOCK_SKEW_SECONDS` (2 s) after an end of all the user's sessions would count as ended, so a sign-in
+or refresh in that window waits it out (at most 3 s).
 
 ## Suspended tenants
 

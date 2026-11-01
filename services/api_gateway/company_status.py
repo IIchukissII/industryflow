@@ -19,6 +19,7 @@ writes a suspension marker into the shared capability store (``mark_suspended``)
 verifier and minter of capability handles consults (capability_auth.SUSPENDED_PREFIX, the shared
 contract), so no handle for a suspended company resolves or is minted, at once and everywhere.
 """
+import asyncio
 import logging
 import time
 from collections import OrderedDict
@@ -28,6 +29,7 @@ from industryflow_contracts import tenancy
 from sqlalchemy import text
 
 from capability_auth import suspended_key
+from industryflow_contracts.sessions import READ_TIMEOUT_SECONDS
 from config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -76,7 +78,7 @@ async def _marked_suspended(company_id: str) -> bool:
     if store is None:
         return False
     try:
-        return bool(await store.exists(suspended_key(company_id)))
+        return bool(await asyncio.wait_for(store.exists(suspended_key(company_id)), READ_TIMEOUT_SECONDS))
     except Exception as exc:  # noqa: BLE001 - an unreachable store must not refuse every request
         logger.warning("company status: suspension marker unreadable, using the registry: %s", exc)
         return False
