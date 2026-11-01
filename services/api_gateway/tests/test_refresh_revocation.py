@@ -396,3 +396,31 @@ async def test_a_logout_with_a_forged_access_token_ends_nothing(refresh_client, 
                           "not-the-secret", algorithm="HS256")
     assert client.post("/auth/logout", headers={"Authorization": f"Bearer {forged}"}).status_code == 204
     assert await refresh_tokens.session_ended(str(user.id), "sid-victim", None) is False
+
+
+@pytest.mark.asyncio
+async def test_a_token_minted_right_after_an_end_of_all_sessions_is_not_dead(redis):
+    """Within the clock-skew allowance a token would count as issued before the end, for its whole
+    life; the mint waits the allowance out instead."""
+    import time
+
+    from industryflow_contracts import sessions
+
+    user = _account()
+    strategy = users.get_jwt_strategy()
+    await refresh_tokens.end_all_sessions(str(user.id))
+    started = time.monotonic()
+    token = await strategy.write_token(user, "sid-new")
+    waited = time.monotonic() - started
+    assert await strategy.read_token(token, _Manager(user)) is user
+    assert 0 < waited <= sessions.CLOCK_SKEW_SECONDS + 1.5
+
+
+@pytest.mark.asyncio
+async def test_no_wait_without_a_recent_end(redis):
+    import time
+
+    user = _account()
+    redis.kv[f"sessions-ended-at:{user.id}"] = repr(time.time() - 60)
+    assert await refresh_tokens.wait_out_an_end(str(user.id)) == 0.0
+    assert await refresh_tokens.wait_out_an_end(str(uuid.uuid4())) == 0.0

@@ -116,6 +116,7 @@ class CompanyClaimJWTStrategy(JWTStrategy):
         ended (ADR-0004 dec 2, 9; messaging/refresh_tokens.session_ended). A token minted without
         a refresh session (the fastapi-users login) is its own session, so its logout can end it."""
         session_id = session_id or refresh_tokens.new_session_id()
+        await refresh_tokens.wait_out_an_end(str(user.id))
         data = {
             "sub": str(user.id),
             "aud": self.token_audience,

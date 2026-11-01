@@ -251,3 +251,20 @@ async def test_marking_and_lifting_a_suspension():
     assert kv == {f"nbcap-suspended:{cid}": "1"}
     await company_status.clear_suspended(Store(), cid)
     assert kv == {}
+
+
+@pytest.mark.asyncio
+async def test_a_hung_suspension_marker_read_gives_up_within_the_bound(monkeypatch):
+    import asyncio
+
+    from industryflow_contracts.sessions import READ_TIMEOUT_SECONDS
+
+    class Hung:
+        async def exists(self, key):
+            await asyncio.sleep(60)
+
+    monkeypatch.setattr(company_status, "_store", lambda: Hung())
+    monkeypatch.setattr(company_status, "READ_TIMEOUT_SECONDS", 0.05)
+    started = time.monotonic()
+    assert await company_status._marked_suspended(str(uuid.uuid4())) is False
+    assert time.monotonic() - started < READ_TIMEOUT_SECONDS
