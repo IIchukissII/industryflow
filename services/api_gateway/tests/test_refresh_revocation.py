@@ -287,3 +287,69 @@ async def test_ending_all_sessions_records_each_session_and_the_time(redis):
     assert await refresh_tokens.session_ended(uid, None, None) is True
     assert await refresh_tokens.session_ended(uid, "sid-z", time.time() + 60) is False
     assert await refresh_tokens.session_ended(str(uuid.uuid4()), None, None) is False
+
+
+# --- every request reads it (ADR-0004 dec 2) -------------------------------------------------
+
+class _Manager:
+    def __init__(self, user):
+        self.user = user
+
+    def parse_id(self, value):
+        return uuid.UUID(value)
+
+    async def get(self, user_id):
+        return self.user
+
+
+def _account():
+    return SimpleNamespace(id=uuid.uuid4(), company_id=None, is_active=True, role="engineer",
+                           hashed_password="h")
+
+
+@pytest.mark.asyncio
+async def test_an_access_token_stops_working_when_its_session_is_logged_out(refresh_client, redis):
+    client, user = refresh_client
+    strategy = users.get_jwt_strategy()
+    t = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, "sid-a")
+    this, other = await strategy.write_token(user, "sid-a"), await strategy.write_token(user, "sid-b")
+    assert await strategy.read_token(this, _Manager(user)) is user
+    assert client.post("/auth/logout", json={"refresh_token": t}).status_code == 204
+    assert await strategy.read_token(this, _Manager(user)) is None
+    assert await strategy.read_token(other, _Manager(user)) is user
+
+
+@pytest.mark.asyncio
+async def test_ending_all_sessions_refuses_the_access_tokens_issued_before_it(redis, monkeypatch):
+    import time
+
+    user = _account()
+    strategy = users.get_jwt_strategy()
+    real = time.time
+    clock = [real() - 10]  # never ahead of the real clock: a token issued in the future is refused
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    before = await strategy.write_token(user, "sid-a")
+    clock[0] += 5
+    await refresh_tokens.end_all_sessions(str(user.id))
+    clock[0] += 5
+    after = await strategy.write_token(user, "sid-b")
+    monkeypatch.setattr(time, "time", real)
+    assert await strategy.read_token(before, _Manager(user)) is None
+    assert await strategy.read_token(after, _Manager(user)) is user
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_session_store_refuses_the_request(redis, monkeypatch):
+    from fastapi import HTTPException
+
+    user = _account()
+    strategy = users.get_jwt_strategy()
+    token = await strategy.write_token(user, "sid-a")
+
+    async def down(key):
+        raise ConnectionError("down")
+
+    monkeypatch.setattr(redis, "get", down)
+    with pytest.raises(HTTPException) as refused:
+        await strategy.read_token(token, _Manager(user))
+    assert refused.value.status_code == 503

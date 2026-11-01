@@ -8,7 +8,7 @@ JWT token validation; the tenant is the token's signed company_id claim
 """
 import asyncpg
 from fastapi import Cookie, Header, HTTPException, Depends, Request
-from industryflow_contracts import tenancy
+from industryflow_contracts import sessions, tenancy
 from jose import jwt, JWTError
 from typing import Optional
 import logging
@@ -73,7 +73,9 @@ async def verify_jwt_token(
 
     A valid signature is not enough: every request re-reads the account, and a deactivated or
     deleted user, or a user of a suspended company, is refused at once rather than when the
-    token expires (ADR-0004 dec 2, ADR-0033 dec 3).
+    token expires (ADR-0004 dec 2, ADR-0033 dec 3). So is a token whose session has ended — logout, a
+    password change or reset — read from the gateway's ended-session record
+    (``industryflow_contracts.sessions``).
 
     The role is read from the account on the same round trip, not from the token or the request:
     a role change applies to the next request, like a deactivation.
@@ -83,7 +85,7 @@ async def verify_jwt_token(
 
     Raises:
         HTTPException: 401 if token invalid or missing, or the account is not usable;
-        503 if the account cannot be read
+        503 if the account or the session store cannot be read
     """
     if authorization and authorization.startswith('Bearer '):
         token = authorization.replace('Bearer ', '')
@@ -120,6 +122,16 @@ async def verify_jwt_token(
         raise HTTPException(status_code=503, detail="Account store not available")
     if account is None:
         raise HTTPException(status_code=401, detail="User not found or inactive")
+    store = getattr(request.app.state, "session_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="Session store not available")
+    try:
+        ended = await sessions.session_ended(store, user_id, payload.get("sid"), payload.get("iat"))
+    except Exception as e:  # noqa: BLE001 - any store failure leaves the session unknown
+        logger.error(f"Session check failed: {type(e).__name__}")
+        raise HTTPException(status_code=503, detail="Session store not available")
+    if ended:
+        raise HTTPException(status_code=401, detail="Session ended")
     return {"user_id": user_id, "payload": payload, **account}
 
 

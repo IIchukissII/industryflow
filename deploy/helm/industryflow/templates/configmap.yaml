@@ -15,6 +15,8 @@ data:
   KAFKA_BOOTSTRAP_SERVERS: {{ include "industryflow.kafkaBootstrap" . | quote }}
   REDIS_HOST: {{ include "industryflow.redisHost" . | quote }}
   REDIS_URL: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
+  # The gateway's ended-session record, which every verifier of an access token reads (ADR-0004 dec 2).
+  SESSION_REDIS_URL: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
   MLFLOW_TRACKING_URI: {{ include "industryflow.mlflowUri" . | quote }}
   MLFLOW_S3_ENDPOINT_URL: {{ include "industryflow.minioEndpoint" . | quote }}
   # ML service URL the alert worker calls for ML inference + drift evaluation (ADR-0021).

@@ -872,6 +872,8 @@ services:
       # ADR-0023 dec 7); what is written here is a revocable, single-tenant handle and nothing worse.
       # Unset = this deployment accepts no externally-authored models, and says so.
       CAPABILITY_REDIS_URL: ${CAPABILITY_REDIS_URL:-redis://redis:6379/0}
+      # The gateway's ended-session record: a token whose session has ended is refused (ADR-0004 dec 2).
+      SESSION_REDIS_URL: redis://redis:6379/0
       # Advertised alongside a minted handle so a client need not know the internal topology. When
       # PUBLIC_BASE_URL is set (a browser deployment, ADR-0030 dec 10) it names the public edge, so a
       # browser can reach stage/commit same-origin; unset, it names the internal gateway, which only

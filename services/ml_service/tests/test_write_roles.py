@@ -97,6 +97,13 @@ def secret(monkeypatch):
     monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", INTERNAL)
 
 
+class NoSessionEnded:
+    """A session store with no ended-session record (industryflow_contracts.sessions)."""
+
+    async def get(self, key):
+        return None
+
+
 def _app(row, rec):
     app = FastAPI()
     for r in (models.router, registered_models.router, feature_configs.router, inference.router, drift.router):
@@ -104,6 +111,7 @@ def _app(row, rec):
     app.state.db_pool = FakePool(row)
     app.state.ml_repository = rec
     app.state.capability_store = rec
+    app.state.session_store = NoSessionEnded()
     return TestClient(app, raise_server_exceptions=False)
 
 

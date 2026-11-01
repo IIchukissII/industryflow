@@ -3,11 +3,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # src/api/users.py
+import logging
 import time
 import uuid
 from typing import Optional
 
-from fastapi import Depends, Request
+import jwt
+from fastapi import Depends, HTTPException, Request, status
 from fastapi_users import BaseUserManager, UUIDIDMixin
 from fastapi_users import FastAPIUsers
 from fastapi.security import OAuth2PasswordRequestForm
@@ -25,7 +27,9 @@ from fastapi_users.authentication import (
     CookieTransport,
     JWTStrategy,
 )
-from fastapi_users.jwt import generate_jwt
+from fastapi_users.jwt import decode_jwt, generate_jwt
+
+logger = logging.getLogger(__name__)
 
 # Cookie name for the httpOnly access-token cookie (ADR-0004 dec 3).
 ACCESS_COOKIE = "if_access"
@@ -123,13 +127,30 @@ class CompanyClaimJWTStrategy(JWTStrategy):
         )
 
     async def read_token(self, token, user_manager):
-        """The token's user, unless that user's company is suspended (ADR-0004 dec 2,
-        ADR-0033 dec 3): every session-authenticated request is refused for it, through the
-        cached company flag (company_status.py)."""
+        """The token's user, unless that user's company is suspended (ADR-0033 dec 3, through the
+        cached company flag in company_status.py) or the session the token was minted in has ended
+        (ADR-0004 dec 2): logout, a password change or reset, deactivation and deletion refuse the
+        access tokens issued before them on the next request, not when they expire.
+
+        The session store is read on every request; when it cannot be read the request fails with
+        503 rather than being admitted, since an unknown answer is not a yes.
+        """
         user = await super().read_token(token, user_manager)
-        if user is not None and user.company_id and not await company_status.is_company_active(user.company_id):
+        if user is None:
             return None
-        return user
+        if user.company_id and not await company_status.is_company_active(user.company_id):
+            return None
+        try:
+            claims = decode_jwt(token, self.decode_key, self.token_audience, algorithms=[self.algorithm])
+        except jwt.PyJWTError:
+            return None
+        try:
+            ended = await refresh_tokens.session_ended(str(user.id), claims.get("sid"), claims.get("iat"))
+        except Exception as exc:  # noqa: BLE001 - any store failure leaves the session unknown
+            logger.error("session store unreadable, refusing the request: %s", type(exc).__name__)
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail="Session store not available")
+        return None if ended else user
 
 
 def get_jwt_strategy() -> JWTStrategy:
