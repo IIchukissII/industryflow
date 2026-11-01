@@ -50,23 +50,23 @@ docker compose ps
 curl http://localhost:8000/health
 ```
 
-## 4. Create the first tenant and admin
+## 4. Sign in as the first-run superuser
 
-The database starts with no tenants.
+A platform with no account gets a superuser when the gateway starts
+([ADR-0004](../ADR/ADR-0004-api-authentication-sessions-and-transport.md) dec 11), in a first tenant
+named `Default` when there is none.
 
-```bash
-scripts/create-tenant.sh "Your Company"     # prints the company_id
+| Setting (`.env`) | Default | Meaning |
+|---|---|---|
+| `PLATFORM_ADMIN_EMAIL` | `admin@example.com` | Its sign-in address |
+| `PLATFORM_ADMIN_PASSWORD` | `industryflow` | Its first password; with the default, the account must set its own before anything else |
+| `PLATFORM_ADMIN_TENANT` | `Default` | The tenant created for it when the platform has none |
 
-# In .env: ADMIN_USER_1_EMAIL, ADMIN_USER_1_PASSWORD, ADMIN_USER_1_COMPANY_ID=<company_id>
-set -a; . ./.env; set +a
-docker compose run --rm --no-deps -v ./scripts:/scripts:ro -e PYTHONPATH=/app \
-  -e ADMIN_USER_1_EMAIL -e ADMIN_USER_1_PASSWORD -e ADMIN_USER_1_COMPANY_ID -e ADMIN_USER_1_ROLE \
-  -e ADMIN_USER_1_SUPERUSER \
-  api-gateway python /scripts/seed_users.py
-```
-
-`-e NAME` copies the variable from the shell, so the password is never an argument. Seeder variables,
-further users and tenants: [user management](operations/user-management.md).
+Sign in with these, set your own password (and address, if you like) on the page that follows, and
+continue as a superuser: tenants, users and the dashboards at `/grafana/`. Both can be changed later in
+Settings. Nothing is created once any account exists: a platform that has users but no superuser gets
+one from the CLI. Seeding further users from the environment and
+the CLI: [user management](operations/user-management.md).
 
 Open `https://localhost:<FRONTEND_HTTPS_PORT>` and sign in. From another machine:
 [name resolution](operations/tls.md#name-resolution).

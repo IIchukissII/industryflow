@@ -12,6 +12,18 @@ Roles, tenant scoping, and the API and CLI for managing users and tenants. Sign-
 |---|---|
 | Role and tenant scoping | [ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) dec 5 |
 | Tenant lifecycle | [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) |
+| First-run superuser | [ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) dec 11 |
+
+## First-run superuser
+
+| Fact | Detail |
+|---|---|
+| Created | At gateway start, only while the platform has no account at all; in the oldest active tenant, or a new one (`PLATFORM_ADMIN_TENANT`, default `Default`). Retried in the background after a failure. A platform with users but no superuser gets one from the CLI |
+| Credentials | `PLATFORM_ADMIN_EMAIL` (default `admin@example.com`), `PLATFORM_ADMIN_PASSWORD` (default `industryflow`) |
+| Held to a change | With the default password: until the holder sets their own, every request answers **403** `PASSWORD_CHANGE_REQUIRED` except `GET`/`PATCH /users/me` and logout, and a socket handshake is closed **1008**; the current password and the default (any case, surrounding spaces) are refused as the new one; a new password has at least 8 characters |
+| Helm | `config.PLATFORM_ADMIN_EMAIL` and `config.PLATFORM_ADMIN_TENANT` in values; the chart passes no password, so its first run uses the default and is held |
+| Afterwards | An ordinary superuser; e-mail and password change in Settings (`PATCH /users/me`) |
+| Log | `first-run superuser created: email=… company_id=… tenant_provisioned=… password_change_required=…` (never the password) |
 
 ## Roles
 

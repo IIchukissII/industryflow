@@ -121,7 +121,7 @@ refresh, on a socket and on a capability handle
 | POST | `/auth/logout` | Refresh token | Revokes it, clears the cookies (204) |
 | POST | `/auth/jwt/login` | Form `username`, `password` | Access token only (fastapi-users) |
 | GET | `/auth/verify` | session | 204 with `X-IF-User` / `X-IF-Company-Id` / `X-IF-Role` for the notebook SSO proxy ([ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on.md)) |
-| GET, PATCH | `/users/me` | session | Current user; change own email or password |
+| GET, PATCH | `/users/me` | session | Current user (`password_change_required` when held to a change); change own email or password |
 | GET, POST, PATCH, DELETE | `/api/users[/{id}]` | `admin` | [User management](user-management.md) |
 
 ```bash

@@ -70,4 +70,40 @@ describe('Login', () => {
     expect(get).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
   });
+
+  test('an account held to a password change is not sent on to the dashboards (ADR-0004 dec 11)', async () => {
+    const real = window.location;
+    const assign = vi.fn();
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...real, search: '?next=/grafana/d/x', assign } });
+    try {
+      post.mockResolvedValue({ data: {} });
+      get.mockResolvedValue({ data: { email: 'a@b.io', password_change_required: true } });
+      const onLogin = vi.fn();
+      render(<MemoryRouter><Login onLogin={onLogin} /></MemoryRouter>);
+      fill('Email', 'a@b.io');
+      fill('Password', 'industryflow');
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+      await waitFor(() => expect(onLogin).toHaveBeenCalled());
+      expect(assign).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: real });
+    }
+  });
+});
+
+describe('Settings e-mail change', () => {
+  test('the new address is saved and remembered', async () => {
+    patch.mockResolvedValue({ data: { email: 'ana@new.io' } });
+    render(<Settings />);
+    fill('E-mail', 'ana@new.io');
+    fireEvent.click(screen.getByRole('button', { name: 'Change e-mail' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/e-mail address is changed/));
+    expect(patch).toHaveBeenCalledWith('/users/me', { email: 'ana@new.io' });
+    expect(JSON.parse(localStorage.getItem('user')).email).toBe('ana@new.io');
+  });
+
+  test('the current address cannot be submitted as a change', () => {
+    render(<Settings />);
+    expect(screen.getByRole('button', { name: 'Change e-mail' }).disabled).toBe(true);
+  });
 });

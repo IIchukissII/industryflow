@@ -26,6 +26,8 @@ from sqlalchemy.engine import URL  # noqa: E402
 from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
+# services/api_gateway/first_run.LOCK_KEY: the lock the first-run check holds (a guard keeps them equal).
+FIRST_RUN_LOCK_KEY = 0x1F_5E_57_AD
 VALID_ROLES = ("admin", "engineer", "observer")
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -87,6 +89,9 @@ async def insert_user(conn, *, email: str, password: str, company_id: str, role:
     company_id = check_user_fields(email, company_id, role)
     if not password:
         raise UserAdminError("empty password")
+    # The gateway's first-run superuser is created only on a platform with no account; this insert
+    # and that check must not interleave (ADR-0004 dec 11, services/api_gateway/first_run.py).
+    await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": FIRST_RUN_LOCK_KEY})
     found = await conn.execute(
         text("SELECT 1 FROM public.companies WHERE company_id = :company_id"), {"company_id": uuid.UUID(company_id)})
     if found.first() is None:

@@ -93,9 +93,10 @@ def _get(pool, token=None, store="fresh"):
     return _client(pool, store).get("/who", headers={"Authorization": f"Bearer {token or _token()}"})
 
 
-def _row(user_active=True, company_active=True, company_id=COMPANY, role="observer", is_superuser=False):
+def _row(user_active=True, company_active=True, company_id=COMPANY, role="observer", is_superuser=False,
+         password_change_required=False):
     return {"user_active": user_active, "company_id": company_id, "company_active": company_active,
-            "role": role, "is_superuser": is_superuser}
+            "role": role, "is_superuser": is_superuser, "password_change_required": password_change_required}
 
 
 def test_an_active_user_of_an_active_company_passes():
@@ -216,3 +217,20 @@ def test_a_token_naming_another_tenant_than_the_account_is_refused():
     assert _get(FakePool(_row()), _token(company=None)).status_code == 401
     assert _get(FakePool(_row(company_id=None, company_active=None))).status_code == 401
     assert _get(FakePool(_row()), _token(company=str(COMPANY).upper())).status_code == 200
+
+
+
+def test_an_account_that_must_change_its_password_reaches_nothing():
+    r = _get(FakePool(_row(password_change_required=True)))
+    assert r.status_code == 403 and r.json()["detail"] == "PASSWORD_CHANGE_REQUIRED"
+
+
+def test_the_account_query_selects_every_column_the_check_reads():
+    """The rows here are written by hand: a column dropped from the query would pass them and fail
+    every request in production (KeyError)."""
+    import inspect
+    import re
+
+    read = set(re.findall(r'row\["([a-z_]+)"\]', inspect.getsource(auth._usable_account)))
+    selected = set(re.findall(r"(?:AS |\bu\.)([a-z_]+)", auth._ACCOUNT_SQL))
+    assert read and read <= selected, read - selected

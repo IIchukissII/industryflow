@@ -83,7 +83,7 @@ class FakePool:
 
 def _row(role, is_superuser=False):
     return {"user_active": True, "company_id": uuid.UUID(CID), "company_active": True,
-            "role": role, "is_superuser": is_superuser}
+            "role": role, "is_superuser": is_superuser, "password_change_required": False}
 
 
 def _token(**claims):

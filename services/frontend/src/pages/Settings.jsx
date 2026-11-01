@@ -82,9 +82,57 @@ function PasswordForm() {
   );
 }
 
+// A user may change the e-mail address they sign in with (PATCH /users/me).
+function EmailForm({ current, onChanged }) {
+  const [email, setEmail] = useState(current || '');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setResult(null);
+    try {
+      const me = await api.patch('/users/me', { email: email.trim() });
+      onChanged(me.data);
+      setResult({ ok: true, text: 'Your e-mail address is changed. Sign in with it from now on.' });
+    } catch (err) {
+      const reason = err.response?.status === 400 ? detailText(err.response.data?.detail) : null;
+      setResult({
+        ok: false,
+        text: reason
+          ? `The e-mail address was not changed: ${reason}`
+          : 'The e-mail address was not changed: the server did not answer. Try again in a moment.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="set-form" onSubmit={submit}>
+      <div className="set-field">
+        <label htmlFor="set-email">E-mail</label>
+        <input id="set-email" type="email" autoComplete="username" required
+          value={email} onChange={(e) => setEmail(e.target.value)} />
+      </div>
+      {result && (
+        <p className={`set-result${result.ok ? '' : ' set-result-bad'}`} role={result.ok ? 'status' : 'alert'}>
+          {result.text}
+        </p>
+      )}
+      <div>
+        <button type="submit" className="btn btn-primary set-submit" disabled={busy || email.trim() === current}>
+          {busy ? 'Changing e-mail' : 'Change e-mail'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function Settings() {
   // Restore the (non-sensitive) user profile synchronously at first render — nothing to await.
-  const [user] = useState(() => {
+  const [user, setUser] = useState(() => {
     try {
       const userData = localStorage.getItem('user');
       return userData ? JSON.parse(userData) : null;
@@ -110,6 +158,17 @@ function Settings() {
             <Fact label="Status">{user.is_active ? 'Active' : 'Inactive'}</Fact>
           </dl>
           <p className="set-note">Your administrator sets your role and organization.</p>
+        </section>
+      )}
+
+      {user && (
+        <section className="set-section" aria-labelledby="set-email-h">
+          <h2 id="set-email-h">Sign-in address</h2>
+          <EmailForm current={user.email} onChanged={(me) => {
+            const updated = { ...user, ...me };
+            localStorage.setItem('user', JSON.stringify(updated));
+            setUser(updated);
+          }} />
         </section>
       )}
 

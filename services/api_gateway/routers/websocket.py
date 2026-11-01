@@ -135,6 +135,9 @@ async def _load_active_user(user_id: str) -> Optional[User]:
         user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         return None
+    # An account that must change its password first opens no socket (ADR-0004 dec 11).
+    if getattr(user, "password_change_required", False):
+        return None
     return user
 
 

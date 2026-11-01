@@ -25,6 +25,12 @@ from users import current_active_user, get_user_manager
 router = APIRouter(tags=["users"])
 
 
+def _invalid_password(exc, code: str) -> HTTPException:
+    """A password the user manager refuses is the caller's mistake (400), in fastapi-users' own shape,
+    which the SPA shows as the reason (ADR-0004 dec 11: the default cannot be kept)."""
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": code, "reason": exc.reason})
+
+
 @router.get("/users/me", response_model=UserRead)
 async def read_me(user: User = Depends(current_active_user)):
     return user
@@ -39,6 +45,8 @@ async def update_me(
 ):
     try:
         return await manager.update(body, user, safe=True, request=request)
+    except exceptions.InvalidPasswordException as e:
+        raise _invalid_password(e, "UPDATE_USER_INVALID_PASSWORD")
     except exceptions.UserAlreadyExists:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already in use")
 
@@ -103,6 +111,8 @@ async def create_user(
     )
     try:
         return await manager.create(create, safe=False, request=request)
+    except exceptions.InvalidPasswordException as e:
+        raise _invalid_password(e, "REGISTER_INVALID_PASSWORD")
     except exceptions.UserAlreadyExists:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already in use")
 
@@ -124,6 +134,8 @@ async def update_user(
     _refuse_superuser_only(admin, fields)
     try:
         return await manager.update(AdminUserUpdate(**fields), target, safe=False, request=request)
+    except exceptions.InvalidPasswordException as e:
+        raise _invalid_password(e, "UPDATE_USER_INVALID_PASSWORD")
     except exceptions.UserAlreadyExists:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already in use")
 
