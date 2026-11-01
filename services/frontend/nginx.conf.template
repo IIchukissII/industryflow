@@ -35,6 +35,16 @@ map $uri $edge_csp {
     ~^/docs     "";
     ~^/grafana/ "";
 }
+# A write to the dashboards that a browser did not send from this origin (ADR-0016 dec 7): the
+# dashboards hold no session of their own, so their CSRF check never runs, and the platform cookie
+# rides along on any same-site request. Reads pass; a write needs Sec-Fetch-Site: same-origin, or no
+# browser headers at all (a script with a bearer token is not a forged browser request).
+map "$request_method:$http_sec_fetch_site:$http_origin" $edge_dashboards_foreign_write {
+    default                   1;
+    "~^(GET|HEAD|OPTIONS):"   0;
+    "~^[A-Z]+:same-origin:"   0;
+    "~^[A-Z]+::$"             0;
+}
 map $uri $edge_frame_options {
     default     SAMEORIGIN;
     ~^/jupyter/ "";

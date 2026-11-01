@@ -50,7 +50,7 @@ instead of literal colours.
 | `docker-entrypoint-tls.sh` | Generates a self-signed `/etc/nginx/certs/tls.{crt,key}` when none is mounted; `CERT_EXTRA_SAN` adds SANs |
 | `docker-entrypoint-edge.sh` | Renders `nginx.conf.template` from the `EDGE_*` variables; refuses to start if a required one is unset; renders `grafana.conf.template` only when `EDGE_GRAFANA` is set |
 | `nginx.conf.template` | Routes the API prefixes, `/ws/`, `/jupyter/`, the upload plane and the SPA (`try_files … /index.html`); sets HSTS, CSP, frame/sniff/referrer/permissions policy |
-| `grafana.conf.template` | Optional `/grafana/` route to Grafana, with the `EDGE_GRAFANA_ALLOW` source allowlist |
+| `grafana.conf.template` | Optional `/grafana/` route to Grafana: sign-on assertion from the gateway per request, `EDGE_GRAFANA_ALLOW` source allowlist |
 
 | Port | Serves |
 |---|---|

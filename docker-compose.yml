@@ -13,6 +13,12 @@ x-db-tls-env: &db-tls-env
   DB_SSLMODE: ${DB_SSLMODE:-verify-full}
   DB_SSLROOTCERT: /etc/ssl/industryflow/ca.crt
 x-ca-mount: &ca-mount "${TLS_CERT_DIR:-db-ca}:/etc/ssl/industryflow:ro"
+# The gateway's image, built once and named, so the dashboards' key one-shot runs the same image.
+x-api-gateway-build: &api-gateway-build
+  context: ./services/api_gateway
+  dockerfile: Dockerfile
+  additional_contexts:
+    contracts: ./libs/industryflow_contracts
 
 # Spark checkpoint on object storage (ADR-0006). The driver reads/writes the same checkpoint as
 # the executors, so on a multi-worker cluster it must live on ONE store visible to all — MinIO
@@ -133,6 +139,23 @@ services:
     restart: "no"
     networks:
       - industryflow-network
+
+  # The key the gateway signs the dashboards' sign-on assertion with (ADR-0016 dec 7), generated once
+  # and kept; its public half is re-derived from it on every run (services/api_gateway/dashboards_key.py).
+  # The gateway's own image, which carries the crypto library, as root (to hand the private half to
+  # the gateway's uid 10001) and with no network. The dashboards get the public half in a volume of
+  # their own. Rotation: docs/operations/monitoring.md#grafana.
+  dashboards-key-init:
+    image: industryflow-api-gateway
+    build: *api-gateway-build
+    container_name: industryflow-dashboards-key-init
+    user: "0"
+    command: ["python", "dashboards_key.py", "/signing", "/verify", "10001"]
+    volumes:
+      - dashboards-signing-key:/signing
+      - dashboards-verify-key:/verify
+    restart: "no"
+    network_mode: none
 
   # TimescaleDB - Time-series database
   timescaledb:
@@ -586,11 +609,8 @@ services:
 
   api-gateway:
     container_name: industryflow-api-gateway
-    build:
-      context: ./services/api_gateway
-      dockerfile: Dockerfile
-      additional_contexts:
-        contracts: ./libs/industryflow_contracts
+    image: industryflow-api-gateway
+    build: *api-gateway-build
     ports:
       - "127.0.0.1:${API_GATEWAY_PORT:-8000}:8000"
     environment:
@@ -621,13 +641,18 @@ services:
       CAPABILITY_AUDIT_RETENTION_DAYS: ${CAPABILITY_AUDIT_RETENTION_DAYS:-365}
       # The edge, the one peer whose reported client address is believed (ADR-0042 dec 9).
       EDGE_PROXY_PEERS: frontend
+      # The dashboards' sign-on assertion (ADR-0016 dec 7), signed for a platform superuser.
+      DASHBOARDS_SIGNING_KEY_FILE: /run/dashboards-signing/signing.pem
     depends_on:
       db-migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+      dashboards-key-init:
+        condition: service_completed_successfully
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
+      - dashboards-signing-key:/run/dashboards-signing:ro
     networks:
       - industryflow-network
       - notebook-kernels
@@ -1334,8 +1359,29 @@ services:
       # Served from /grafana/, the path the edge forwards (ADR-0016 dec 6), on the loopback port too.
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      # Sign-on from a platform superuser's session (ADR-0016 dec 7): the edge forwards the assertion
+      # the gateway signs (services/api_gateway/routers/dashboards_assertion.py names the header,
+      # issuer, audience and role); an identity without a valid signature signs no one in. The
+      # loopback port keeps the administrator's own login.
+      GF_AUTH_JWT_ENABLED: "true"
+      GF_AUTH_JWT_HEADER_NAME: X-IF-Dashboards-Assertion
+      GF_AUTH_JWT_KEY_FILE: /etc/grafana/dashboards-verify/public.pem
+      GF_AUTH_JWT_EXPECT_CLAIMS: '{"iss": "industryflow-api-gateway", "aud": "industryflow-dashboards"}'
+      # The login is the platform user's id (no e-mail claim: an e-mail would be matched against
+      # the dashboards' own accounts first, the administrator's included).
+      GF_AUTH_JWT_USERNAME_CLAIM: sub
+      GF_AUTH_JWT_AUTO_SIGN_UP: "true"
+      GF_AUTH_JWT_ROLE_ATTRIBUTE_PATH: role
+      GF_AUTH_JWT_ROLE_ATTRIBUTE_STRICT: "true"
+      GF_AUTH_JWT_ALLOW_ASSIGN_GRAFANA_ADMIN: "false"
+      GF_AUTH_JWT_URL_LOGIN: "false"
+      # Live channels are websockets the edge checks the session on once, at the upgrade; with them
+      # off, every request the dashboards serve passes the per-request check.
+      GF_LIVE_MAX_CONNECTIONS: "0"
+      GF_SECURITY_CSRF_ALWAYS_CHECK: "true"
     volumes:
       - grafana-data:/var/lib/grafana
+      - dashboards-verify-key:/etc/grafana/dashboards-verify:ro
       - ./infrastructure/grafana/provisioning/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
       - ./infrastructure/grafana/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
       - ./infrastructure/grafana/provisioning/complete_system_dashboard.json:/etc/grafana/provisioning/dashboards/complete_system_dashboard.json
@@ -1344,8 +1390,12 @@ services:
     networks:
       - industryflow-network
     depends_on:
-      - prometheus
-      - loki
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+      dashboards-key-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/grafana/api/health || exit 1"]
@@ -1621,6 +1671,12 @@ volumes:
     driver: local
   frontend-certs:
     driver: local
+  # The dashboards' sign-on key (ADR-0016 dec 7): the private half, the gateway's alone, and the public
+  # half, the dashboards'. Kept apart so the dashboards never hold what signs them in.
+  dashboards-signing-key:
+    name: industryflow-dashboards-signing-key
+  dashboards-verify-key:
+    name: industryflow-dashboards-verify-key
 
 # ==========================================================================
 # NETWORKS

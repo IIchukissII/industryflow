@@ -52,7 +52,7 @@ The browser reaches every API same-origin through the HTTPS edge
 | `/mlflow/_upload-staging/` | Object store, pre-signed requests only |
 | `/api/`, `/auth/`, `/users/`, `/health`, `/docs`, `/openapi.json`, `/ws/` | `api-gateway` |
 | `/jupyter/` | Notebook SSO → notebook hub ([ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on.md)) |
-| `/grafana/` | Grafana, only when `EDGE_GRAFANA` is set ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 6) |
+| `/grafana/` | Grafana, only when `EDGE_GRAFANA` is set; signed on from a superuser session ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 6-7) |
 | `/` | The single-page app |
 
 ## Conventions

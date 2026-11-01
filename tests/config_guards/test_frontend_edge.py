@@ -192,3 +192,127 @@ def test_nginx_redirects_never_name_the_containers_listen_port():
     # /grafana and /jupyter without the slash were sent to https://<host>:8443/..., unpublished.
     server, _ = _locations()
     assert "absolute_redirect off;" in server
+
+
+# The dashboards' sign-on (ADR-0016 dec 7) spans three artifacts that each name the same values: the
+# gateway route that signs the assertion, the edge route that asks for it and forwards it, and the
+# dashboards' configuration that verifies it. A mismatch in any one fails closed or, worse, silently
+# leaves the dashboards' own login as the only door.
+ASSERTION_ROUTER = (ROOT / "services" / "api_gateway" / "routers" / "dashboards_assertion.py").read_text()
+
+
+def _router_constant(name: str) -> str:
+    return re.search(rf'^{name} = "([^"]+)"', ASSERTION_ROUTER, re.M).group(1)
+
+
+def _compose_services():
+    import yaml
+
+    return yaml.safe_load((ROOT / "docker-compose.yml").read_text())["services"]
+
+
+def _volume_names(service) -> set[str]:
+    return {v.split(":")[0] for v in service.get("volumes", []) if isinstance(v, str)}
+
+
+def test_the_edge_asks_the_gateway_route_that_signs_the_assertion():
+    path = _router_constant("PATH")
+    assert f"proxy_pass http://$api_gateway{path};" in GRAFANA_ROUTE
+    assert "location = /_dashboards_assertion {\n    internal;" in GRAFANA_ROUTE
+    assert "auth_request /_dashboards_assertion;" in GRAFANA_ROUTE
+    assert "proxy_set_header Cookie $http_cookie;" in GRAFANA_ROUTE
+
+
+def test_the_edge_never_routes_the_gateways_internal_paths():
+    # The assertion must never reach the browser: no edge location may forward /internal/.
+    assert _router_constant("PATH").startswith("/internal/")
+    for text in (TEMPLATE, GRAFANA_ROUTE):
+        prefixes = re.findall(r"^\s*location\s+(?:=\s+|\^~\s+)?(/[^\s{]*)", text, re.M)
+        regexes = re.findall(r"^\s*location\s+~\*?\s+(\S+)", text, re.M)
+        assert not [x for x in regexes if "internal" in x], regexes
+        assert prefixes, "no locations found — the parser is not reading"
+        for prefix in prefixes:
+            assert not ("/internal/".startswith(prefix) and prefix != "/") and \
+                not prefix.startswith("/internal"), f"edge location {prefix} reaches /internal/"
+    root = re.search(r"location / \{(.*?)\n    \}", TEMPLATE, re.S)
+    assert root and "proxy_pass" not in root.group(1), "the edge's catch-all must not proxy"
+
+
+def test_the_assertion_travels_under_one_header_name():
+    header = _router_constant("ASSERTION_HEADER")
+    upstream_var = "$upstream_http_" + header.lower().replace("-", "_")
+    assert f"auth_request_set $if_dashboards_assertion {upstream_var};" in GRAFANA_ROUTE
+    # Set unconditionally, so whatever the client sent under this name is overwritten.
+    assert f"proxy_set_header {header} $if_dashboards_assertion;" in GRAFANA_ROUTE
+    env = _compose_services()["grafana"]["environment"]
+    assert env["GF_AUTH_JWT_HEADER_NAME"] == header
+
+
+def test_the_dashboards_verify_what_the_gateway_signs():
+    import json
+
+    env = _compose_services()["grafana"]["environment"]
+    assert env["GF_AUTH_JWT_ENABLED"] == "true"
+    assert json.loads(env["GF_AUTH_JWT_EXPECT_CLAIMS"]) == {
+        "iss": _router_constant("ISSUER"), "aud": _router_constant("AUDIENCE")}
+    assert env["GF_AUTH_JWT_ROLE_ATTRIBUTE_PATH"] == "role"
+    assert env["GF_AUTH_JWT_ROLE_ATTRIBUTE_STRICT"] == "true"
+    assert env["GF_AUTH_JWT_ALLOW_ASSIGN_GRAFANA_ADMIN"] == "false"
+    assert env["GF_AUTH_JWT_URL_LOGIN"] == "false"
+    assert _router_constant("ROLE") in {"Viewer", "Editor"}
+    # The login is the platform user's id, in a namespace of its own; no e-mail is mapped, because the
+    # dashboards match an e-mail against their existing accounts (the administrator's) first.
+    assert env["GF_AUTH_JWT_USERNAME_CLAIM"] == "sub"
+    assert "GF_AUTH_JWT_EMAIL_CLAIM" not in env and "GF_AUTH_JWT_EMAIL_ATTRIBUTE_PATH" not in env
+    assert '"sub": f"{LOGIN_PREFIX}{user.id}",' in ASSERTION_ROUTER
+    assert '"email"' not in ASSERTION_ROUTER
+
+
+def test_only_requests_the_per_request_check_covers_reach_the_dashboards():
+    # A websocket is checked once, at its upgrade, and then outlives a logout or a demotion.
+    env = _compose_services()["grafana"]["environment"]
+    assert env["GF_LIVE_MAX_CONNECTIONS"] == "0"
+    route = GRAFANA_ROUTE[GRAFANA_ROUTE.index("location /grafana/ {"):]
+    assert "Upgrade" not in route.split("\n}")[0]
+
+
+def test_a_write_a_browser_did_not_send_from_this_origin_is_refused():
+    # The dashboards hold no session, so their own CSRF check never runs; the edge refuses instead.
+    assert 'map "$request_method:$http_sec_fetch_site:$http_origin" $edge_dashboards_foreign_write {' in TEMPLATE
+    m = re.search(r"\$edge_dashboards_foreign_write \{(.*?)\n\}", TEMPLATE, re.S).group(1)
+    assert re.search(r"^\s*default\s+1;", m, re.M)
+    route = GRAFANA_ROUTE[GRAFANA_ROUTE.index("location /grafana/ {"):]
+    check = route.index("if ($edge_dashboards_foreign_write) {\n        return 403;")
+    assert check < route.index("auth_request /_dashboards_assertion;")
+    assert _compose_services()["grafana"]["environment"]["GF_SECURITY_CSRF_ALWAYS_CHECK"] == "true"
+
+
+def test_a_visitor_without_a_session_comes_back_to_the_dashboards():
+    assert "return 302 /login?next=$request_uri;" in GRAFANA_ROUTE
+    returns = (ROOT / "services" / "frontend" / "src" / "services" / "returnPath.js").read_text()
+    assert "/^\\/grafana\\/" in returns
+
+
+def test_the_signing_key_reaches_the_gateway_and_only_its_public_half_the_dashboards():
+    services = _compose_services()
+    init = services["dashboards-key-init"]
+    signing, verify = ("dashboards-signing-key", "dashboards-verify-key")
+    assert {signing, verify} <= _volume_names(init)
+    gateway, grafana = services["api-gateway"], services["grafana"]
+    key_file = gateway["environment"]["DASHBOARDS_SIGNING_KEY_FILE"]
+    assert any(v.startswith(f"{signing}:") and key_file.startswith(v.split(":")[1] + "/")
+               and v.endswith(":ro") for v in gateway["volumes"])
+    public = grafana["environment"]["GF_AUTH_JWT_KEY_FILE"]
+    assert any(v.startswith(f"{verify}:") and public.startswith(v.split(":")[1] + "/")
+               and v.endswith(":ro") for v in grafana["volumes"])
+    assert init["image"] == gateway["image"] and init["build"] == gateway["build"]
+    assert init["network_mode"] == "none"
+    assert init["command"][:2] == ["python", "dashboards_key.py"]
+    assert init["command"][-1] == "10001"
+    gateway_dockerfile = (ROOT / "services" / "api_gateway" / "Dockerfile").read_text()
+    assert "USER 10001" in gateway_dockerfile and "COPY . ." in gateway_dockerfile
+    holders = [name for name, svc in services.items() if signing in _volume_names(svc)]
+    assert sorted(holders) == ["api-gateway", "dashboards-key-init"], holders
+    for name in ("api-gateway", "grafana"):
+        dep = services[name]["depends_on"]["dashboards-key-init"]
+        assert dep["condition"] == "service_completed_successfully"

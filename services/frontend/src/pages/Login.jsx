@@ -8,6 +8,7 @@ import './Login.css';
 import api from '../services/api';
 import Mandala from '../components/Mandala';
 import Starfield from '../components/Starfield';
+import { returnPath } from '../services/returnPath';
 
 function Login({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -35,7 +36,10 @@ function Login({ onLogin }) {
       const me = await api.get('/users/me');
       localStorage.setItem('user', JSON.stringify(me.data));
       onLogin(me.data);
-      navigate('/');
+      // Back to the dashboards when the edge sent the visitor here from them (ADR-0016 dec 7).
+      const next = returnPath(window.location.search);
+      if (next) window.location.assign(next);
+      else navigate('/');
     } catch (err) {
       const status = err.response?.status;
       setError(status === 400 || status === 401
