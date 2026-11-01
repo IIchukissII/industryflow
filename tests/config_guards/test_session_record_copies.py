@@ -16,7 +16,7 @@ import ast
 from _repo import ROOT
 from industryflow_contracts import sessions
 
-PREFIXES = (sessions.ENDED_SESSION_PREFIX, sessions.USER_ENDED_PREFIX)
+PREFIXES = (sessions.ENDED_SESSION_PREFIX, sessions.USER_ENDED_PREFIX, sessions.ROTATED_REFRESH_PREFIX)
 PACKAGE = ROOT / "libs" / "industryflow_contracts" / "industryflow_contracts"
 
 

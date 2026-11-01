@@ -10,6 +10,7 @@ from typing import Optional
 
 import jwt
 from fastapi import Depends, HTTPException, Request, status
+from fastapi.requests import HTTPConnection
 from fastapi_users import BaseUserManager, UUIDIDMixin
 from fastapi_users import FastAPIUsers
 from fastapi.security import OAuth2PasswordRequestForm
@@ -20,6 +21,7 @@ from database import get_user_db
 from config import get_settings
 from messaging import refresh_tokens
 import company_status
+import sign_in_throttle
 
 from fastapi_users.authentication import (
     AuthenticationBackend,
@@ -74,9 +76,34 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
     async def authenticate(self, credentials: OAuth2PasswordRequestForm) -> Optional[User]:
         """A user of a suspended company cannot sign in (ADR-0033 dec 3); refused like a bad
-        password, so the answer does not reveal the company's state."""
+        password, so the answer does not reveal the company's state.
+
+        Password guessing is slowed per address and source (ADR-0004 dec 10, sign_in_throttle.py):
+        inside the wait the attempt is refused with 429 before the password is checked, and the store
+        being unreadable refuses it with 503."""
+        from messaging.redis_client import redis_client
+
+        if settings.SIGN_IN_THROTTLE == "off":
+            return await self._admitted(credentials)
+        email, source = credentials.username, getattr(self, "sign_in_source", None)
+        store = redis_client.redis
+        wait = await _throttled(sign_in_throttle.reserve(store, email, source))
+        if wait:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                                detail="Too many failed sign-ins; try again later",
+                                headers={"Retry-After": str(wait)})
+        # The attempt is counted as failed until it is admitted.
+        user = await self._admitted(credentials)
+        if user is not None and user.is_active:
+            await _throttled(sign_in_throttle.succeeded(store, email, source))
+        return user
+
+    async def _admitted(self, credentials) -> Optional[User]:
+        """The account the credentials sign in, unless its company is suspended."""
         user = await super().authenticate(credentials)
-        if user is not None and user.company_id and not await company_status.is_company_active(user.company_id):
+        if user is None or not user.is_active:
+            return user
+        if user.company_id and not await company_status.is_company_active(user.company_id):
             return None
         return user
 
@@ -88,17 +115,49 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         # A move to another company too: the access tokens name the tenant they were issued for.
         if "password" in update_dict or "company_id" in update_dict or update_dict.get("is_active") is False:
             await refresh_tokens.end_all_sessions(str(user.id))
+        if "password" in update_dict:
+            await _clear_sign_in_failures(user)
 
     async def on_after_reset_password(self, user: User, request: Optional[Request] = None):
         await refresh_tokens.end_all_sessions(str(user.id))
+        await _clear_sign_in_failures(user)
 
     async def on_after_delete(self, user: User, request: Optional[Request] = None):
         await refresh_tokens.end_all_sessions(str(user.id))
 
 
-async def get_user_manager(user_db=Depends(get_user_db)):
-    """Dependency to get User Manager instance"""
-    yield UserManager(user_db)
+async def _clear_sign_in_failures(user) -> None:
+    """A new password starts with no failed sign-ins against it (ADR-0004 dec 10)."""
+    from messaging.redis_client import redis_client
+
+    if getattr(user, "email", None):
+        await _throttled(sign_in_throttle.cleared(redis_client.redis, user.email))
+
+
+async def _throttled(call):
+    """A sign-in throttle store call; the store unreadable refuses the sign-in (503), since an
+    unknown answer is not a yes (ADR-0004 dec 10)."""
+    try:
+        return await call
+    except Exception as exc:  # noqa: BLE001
+        logger.error("sign-in throttle unreadable, refusing the sign-in: %s", type(exc).__name__)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Session store not available")
+
+
+async def get_user_manager(connection: HTTPConnection, user_db=Depends(get_user_db)):
+    """The user manager, told the request's source (the client address the edge reports, believed
+    only from the edge: industryflow_contracts.capability_audit.client_source) for the sign-in
+    throttle (ADR-0004 dec 10)."""
+    from industryflow_contracts import capability_audit as audit
+
+    from dependencies import EDGE_PEERS
+
+    manager = UserManager(user_db)
+    manager.sign_in_source = await audit.client_source(
+        connection.client.host if connection.client else None, connection.headers.get("x-real-ip"),
+        EDGE_PEERS)
+    yield manager
 
 bearer_transport = BearerTransport(tokenUrl="auth/jwt/login")
 

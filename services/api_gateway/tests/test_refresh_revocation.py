@@ -167,7 +167,9 @@ async def test_refresh_rotates(refresh_client):
     r = client.post("/auth/refresh", json={"refresh_token": t})
     assert r.status_code == 200
     assert r.json()["refresh_token"] != t
-    assert client.post("/auth/refresh", json={"refresh_token": t}).status_code == 401
+    # Presented again within the grace (another tab): the successor already issued.
+    again = client.post("/auth/refresh", json={"refresh_token": t})
+    assert again.status_code == 200 and again.json()["refresh_token"] == r.json()["refresh_token"]
 
 
 @pytest.mark.asyncio
@@ -424,3 +426,104 @@ async def test_no_wait_without_a_recent_end(redis):
     redis.kv[f"sessions-ended-at:{user.id}"] = repr(time.time() - 60)
     assert await refresh_tokens.wait_out_an_end(str(user.id)) == 0.0
     assert await refresh_tokens.wait_out_an_end(str(uuid.uuid4())) == 0.0
+
+
+
+# --- reuse of a rotated refresh token (ADR-0004 dec 2) -----------------------------------------
+
+def _age_rotation(redis, token, seconds):
+    record = json.loads(redis.kv[f"refresh-rotated:{token}"])
+    record["at"] -= seconds
+    redis.kv[f"refresh-rotated:{token}"] = json.dumps(record)
+
+
+@pytest.mark.asyncio
+async def test_a_reuse_after_the_grace_ends_the_session(refresh_client, redis):
+    client, user = refresh_client
+    strategy = users.get_jwt_strategy()
+    t = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, "sid-r")
+    other = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, "sid-other")
+    rotated = client.post("/auth/refresh", json={"refresh_token": t}).json()
+    _give_capability(redis, user.id)
+    _age_rotation(redis, t, refresh_tokens.ROTATION_GRACE_SECONDS + 1)
+    r = client.post("/auth/refresh", json={"refresh_token": t})
+    assert r.status_code == 401 and "reused" in r.text
+    # The thief's or the owner's copy: neither refreshes, and the session's access tokens are refused.
+    assert client.post("/auth/refresh", json={"refresh_token": rotated["refresh_token"]}).status_code == 401
+    assert await strategy.read_token(rotated["access_token"], _Manager(user)) is None
+    assert "nbcap:h1" not in redis.kv
+    # Another session of the user is untouched.
+    assert f"refresh:{other}" in redis.kv
+
+
+@pytest.mark.asyncio
+async def test_within_the_grace_a_successor_already_rotated_again_is_not_given(refresh_client, redis):
+    client, user = refresh_client
+    t = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, "sid-g")
+    first = client.post("/auth/refresh", json={"refresh_token": t}).json()
+    assert client.post("/auth/refresh", json={"refresh_token": first["refresh_token"]}).status_code == 200
+    r = client.post("/auth/refresh", json={"refresh_token": t})
+    assert r.status_code == 401 and "reused" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_a_token_never_issued_is_simply_refused(refresh_client, redis):
+    client, _ = refresh_client
+    r = client.post("/auth/refresh", json={"refresh_token": "never-issued"})
+    assert r.status_code == 401 and "reused" not in r.text
+
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_token_issued_in_a_race_with_the_end_does_not_continue_the_session(refresh_client, redis):
+    client, user = refresh_client
+    late = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, "sid-race")
+    await refresh_tokens._end_reused_session(refresh_tokens.RefreshClaim(str(user.id), "c", "sid-race"))
+    # Missed by the end's scan (minted after it): still refused, for the refresh lifetime.
+    redis.kv[f"refresh:{late}"] = json.dumps({"uid": str(user.id), "cred": refresh_tokens.credential_fingerprint(user.hashed_password), "sid": "sid-race"})
+    assert client.post("/auth/refresh", json={"refresh_token": late}).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_only_the_first_reuse_revokes_the_capabilities(refresh_client, redis):
+    client, user = refresh_client
+    t = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, "sid-once")
+    client.post("/auth/refresh", json={"refresh_token": t})
+    _age_rotation(redis, t, refresh_tokens.ROTATION_GRACE_SECONDS + 1)
+    assert client.post("/auth/refresh", json={"refresh_token": t}).status_code == 401
+    _give_capability(redis, user.id)
+    assert client.post("/auth/refresh", json={"refresh_token": t}).status_code == 401
+    assert "nbcap:h1" in redis.kv, "a repeat of an old token must not keep revoking the user's notebooks"
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_racing_the_rotation_waits_for_its_successor(redis, monkeypatch):
+    import asyncio
+
+    t = await refresh_tokens.create_refresh_token("u-race", "h", "sid-wait")
+    claim = await refresh_tokens.claim_refresh_token(t)
+    assert claim is not None
+
+    async def rotate_late():
+        await asyncio.sleep(0.3)
+        await refresh_tokens.record_successor(t, await refresh_tokens.create_refresh_token("u-race", "h", "sid-wait"))
+
+    replayed, _ = await asyncio.gather(refresh_tokens.replay(t), rotate_late())
+    assert replayed.kind == "successor" and replayed.successor
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_racing_the_claim_waits_for_its_record(redis, monkeypatch):
+    import asyncio
+
+    t = await refresh_tokens.create_refresh_token("u-race2", "h", "sid-wait2")
+    raw = redis.kv.pop(f"refresh:{t}")  # claimed, record not yet written
+
+    async def record_late():
+        await asyncio.sleep(0.2)
+        redis.kv[f"refresh:{t}"] = raw
+        await refresh_tokens.claim_refresh_token(t)
+        await refresh_tokens.record_successor(t, await refresh_tokens.create_refresh_token("u-race2", "h", "sid-wait2"))
+
+    replayed, _ = await asyncio.gather(refresh_tokens.replay(t), record_late())
+    assert replayed.kind == "successor"

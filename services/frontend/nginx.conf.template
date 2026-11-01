@@ -17,6 +17,15 @@
 # reaches 8080 with X-Forwarded-Proto: https). Anything else on 8080 is plain HTTP from a client and
 # is redirected (ADR-0004 dec 1) — except the probe. A client that forges the header on 8080 only
 # chooses plaintext for itself; it gains nothing it could not get by not following the redirect.
+# Password sign-in per source address (ADR-0004 dec 10): a burst, then one attempt every 6 s, refused
+# with 429 beyond it. Counted only where the edge sees the clients' own addresses
+# (EDGE_SIGN_IN_PER_SOURCE=on): an empty key is not counted. Each account is slowed by the gateway.
+map "${EDGE_SIGN_IN_PER_SOURCE}" $edge_sign_in_source {
+    on      $binary_remote_addr;
+    default "";
+}
+limit_req_zone $edge_sign_in_source zone=edge_sign_in:1m rate=10r/m;
+
 map "$scheme:$http_x_forwarded_proto:$uri" $edge_redirect_to_https {
     default            1;
     "~^https:"         0;
@@ -131,6 +140,8 @@ server {
     # are first-party and no CORS is needed (ADR-0004 / ADR-0009).
     location /api/         { proxy_pass http://$api_gateway; }
     location /auth/        { proxy_pass http://$api_gateway; }
+    location = /auth/login     { limit_req zone=edge_sign_in burst=20 nodelay; limit_req_status 429; proxy_pass http://$api_gateway; }
+    location = /auth/jwt/login { limit_req zone=edge_sign_in burst=20 nodelay; limit_req_status 429; proxy_pass http://$api_gateway; }
     location /users/       { proxy_pass http://$api_gateway; }
     location = /health     { proxy_pass http://$api_gateway; }
     location /docs         { proxy_pass http://$api_gateway; }

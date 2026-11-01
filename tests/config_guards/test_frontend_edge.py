@@ -26,8 +26,9 @@ FRONTEND = ROOT / "services" / "frontend"
 TEMPLATE = (FRONTEND / "nginx.conf.template").read_text()
 ENTRYPOINT = (FRONTEND / "docker-entrypoint-edge.sh").read_text()
 
-# Defaulted by the entrypoint from the container's own nameservers; a deployment may override it.
-OPTIONAL = {"EDGE_RESOLVER"}
+# Defaulted by the entrypoint (the container's own nameservers; the sign-in limit on); a deployment may
+# override them.
+OPTIONAL = {"EDGE_RESOLVER", "EDGE_SIGN_IN_PER_SOURCE"}
 
 
 def _template_vars() -> set[str]:
@@ -316,3 +317,28 @@ def test_the_signing_key_reaches_the_gateway_and_only_its_public_half_the_dashbo
     for name in ("api-gateway", "grafana"):
         dep = services[name]["depends_on"]["dashboards-key-init"]
         assert dep["condition"] == "service_completed_successfully"
+
+
+
+def test_password_sign_in_is_limited_per_source_on_both_routes():
+    """ADR-0004 dec 10: both sign-in routes carry the limit, keyed by the client address only where
+    the deployment says the edge sees it; the chart (behind an Ingress) says it does not."""
+    for route in ("/auth/login", "/auth/jwt/login"):
+        line = next(line for line in TEMPLATE.splitlines() if line.strip().startswith(f"location = {route} "))
+        assert "limit_req zone=edge_sign_in" in line and "limit_req_status 429" in line, line
+    assert re.search(r"limit_req_zone \$edge_sign_in_source zone=edge_sign_in:", TEMPLATE)
+    assert re.search(r'map "\$\{EDGE_SIGN_IN_PER_SOURCE\}" \$edge_sign_in_source \{\s*on\s+\$binary_remote_addr;', TEMPLATE)
+    assert compose_env().get("EDGE_SIGN_IN_PER_SOURCE") == "on"
+    assert helm_env([]).get("EDGE_SIGN_IN_PER_SOURCE") == "off"
+    assert 'on|off) ;;' in ENTRYPOINT
+
+
+
+def test_the_gateway_throttles_per_source_only_where_it_is_told_the_clients_addresses():
+    """ADR-0004 dec 10: compose counts per account and source, with the edge named so its reported
+    client address is believed; the chart, behind an Ingress, does not (ADR-0004 Deferred)."""
+    from _repo import load_yaml
+
+    gateway = load_yaml("docker-compose.yml")["services"]["api-gateway"]["environment"]
+    assert gateway["SIGN_IN_THROTTLE"] == "per-source" and gateway["EDGE_PROXY_PEERS"]
+    assert load_yaml("deploy/helm/industryflow/values.yaml")["config"]["SIGN_IN_THROTTLE"] == "off"

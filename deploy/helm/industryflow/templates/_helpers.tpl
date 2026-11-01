@@ -168,6 +168,10 @@ variables move together (tests/config_guards renders both and compares).
   value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "notebook-sso")) .Values.notebookHub.ssoProxy.port | quote }}
 - name: EDGE_TRACKING_GATEWAY
   value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "notebook-tracking-gateway")) .Values.notebookHub.trackingGateway.port | quote }}
+# Behind the Ingress the edge sees the Ingress's address, not the client's: the per-source sign-in
+# limit belongs in front of it (ADR-0004 dec 10).
+- name: EDGE_SIGN_IN_PER_SOURCE
+  value: "off"
 - name: EDGE_OBJECT_STORE_URL
   {{- if .Values.infra.minio.inCluster }}
   value: {{ printf "http://%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "minio")) .Values.infra.minio.apiPort | quote }}

@@ -28,10 +28,12 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
    development.
 2. **A session is a short-lived JWT access token carrying the tenant claim, plus a rotating,
    server-side refresh credential.** Each refresh claims the credential atomically and issues a
-   successor, so reuse is refused. Logout ends its session and the user's notebook capabilities;
-   compromise, a password change or reset, a move to another company, and deactivating or deleting
-   the account or its company end all the user's sessions and those capabilities. Every request re-reads the account and refuses
-   an access token whose session has ended, and is refused while that cannot be read.
+   successor; the claimed credential presented again within a short grace (a concurrent refresh) is
+   answered with that successor, and later ends its session. Logout ends its session and the
+   user's notebook capabilities; compromise, a password change or reset, a move to another company,
+   and deactivating or deleting the account or its company end all the user's sessions and those
+   capabilities. Every request re-reads the account and refuses an access token whose session has
+   ended, and is refused while that cannot be read.
 3. **The browser holds tokens in httpOnly, Secure, SameSite cookies set by the backend.** Every
    state-changing request authenticated by the session cookie must echo a double-submit CSRF token in
    a header; bearer-authenticated requests and the authentication endpoints are exempt.
@@ -47,6 +49,11 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
    session cookie only and is origin-checked against decision 6's allowlist; it closes when its
    credential expires, or at a periodic re-check once its session has ended or its account is
    inactive.
+10. **Password guessing is slowed per account and source, never locked out.** Consecutive failures
+    for one account from one source wait exponentially longer, up to a cap; each attempt is counted
+    before its password is checked, and one inside the wait is refused unchecked. Where the edge sees
+    the clients' own addresses it also limits each source across accounts. No account is locked, as
+    no channel exists to unlock one, and one source's failures never slow the owner at another.
 
 ## Alternatives
 
@@ -56,6 +63,8 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 | 2 | A long-lived stateless JWT with no revocation | A leaked token stays valid for its whole lifetime and cannot be cancelled |
 | 2 | A short-lived stateless JWT without refresh or revocation | Still not revocable before expiry, and short lifetimes force repeated full logins |
 | 2 | Ending sessions only on logout and compromise | A refreshing session survives the password change made after a leak, and its capabilities keep working |
+| 2 | Refusing a reused rotated credential and keeping its session | Reuse after the rotation means two holders, and the stolen copy's session would live on |
+| 2 | Ending the session on every second presentation | Two tabs of one browser refreshing at once would sign the user out |
 | 2 | Logout ending all the user's sessions | Signing out on one device would sign out every other |
 | 2 | Checking for an ended session only on live sockets | An access token keeps working after its logout or a password change until it expires |
 | 2 | Admitting a request when the record of ended sessions cannot be read | While it is unreadable no ended session is enforced, and a leaked token is good for its whole lifetime |
@@ -69,6 +78,13 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 | 9 | A credential carried in the socket URL, as a fallback to the cookie | A second credential channel, readable by script and written to logs |
 | 9 | A socket handshake accepted from any origin | The automatically sent cookie would let a foreign page open the socket |
 | 9 | A socket that lives as long as its connection | It outlives the session and account behind it |
+| 10 | No limit on password sign-in | An online guess costs nothing, so a weak password falls to a script |
+| 10 | Locking an account after repeated failures | No e-mail or other channel exists to unlock it, so anyone could lock out any user |
+| 10 | A limit per source address only | Many addresses guess one account unhindered |
+| 10 | A limit per account only, across sources | One wrong password per wait from anywhere keeps the owner refused for ever |
+| 10 | A per-account limit across sources on top | Whoever holds it at its cap locks the owner out the same way |
+| 10 | Checking the wait and counting the failure as separate steps | Guesses sent at the same moment all pass the check |
+| 10 | Counting failures only for existing accounts | The difference in answers reveals which addresses have accounts |
 
 ## Consequences
 
@@ -76,6 +92,8 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 - Tokens and readings are encrypted in transit, and injected script cannot read the session.
 - A session's access tokens, capabilities and sockets stop working at once when it ends; a leaked
   access token whose session does not end lapses within minutes.
+- A stolen refresh credential replayed after its owner refreshed ends the session for both.
+- Online password guessing falls to a handful of attempts an hour per account from each source.
 - No caller reaches another tenant's data or any data unauthenticated.
 
 **Negative**
@@ -84,6 +102,10 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
   HTTP exception.
 - An access token is not revoked individually; a password change logs out every device.
 - Every authenticated request reads the session store, and none is served while it is unreachable.
+- An attacker with many source addresses gets that handful from each of them; an IPv6 network
+  allotted to one host counts as one source.
+- A refresh whose answer is lost, retried after the grace, ends its own session.
+- A stolen refresh credential used within the grace after a rotation is not detected.
 - A sign-in or refresh within a clock-skew allowance after an end of all the user's sessions waits
   the allowance out, since a token issued in it would count as issued before the end.
 
@@ -93,6 +115,7 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 |---|---|
 | Internal service-to-service authentication | An ADR, when an internal call carries tenant authority beyond the interim mechanism |
 | E-mail delivery of reset and verification credentials | The first deployment that enables self-service reset |
+| Slowing password guessing behind a proxy that hides client addresses (neither limit applies there) | The first deployment behind a Kubernetes Ingress |
 
 ## References
 

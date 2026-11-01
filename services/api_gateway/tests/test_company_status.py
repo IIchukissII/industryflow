@@ -185,12 +185,17 @@ async def test_a_suspended_companys_user_cannot_sign_in(company_flags, monkeypat
     async def authenticate(self, credentials):
         return user
 
+    from industryflow_contracts import testing
+    from messaging import redis_client as redis_module
+
+    monkeypatch.setattr(redis_module.redis_client, "redis", await testing.async_redis())
     monkeypatch.setattr(BaseUserManager, "authenticate", authenticate)
     manager = users.UserManager(user_db=None)
-    assert await manager.authenticate(None) is user
+    credentials = SimpleNamespace(username="u@example.com", password="pw")
+    assert await manager.authenticate(credentials) is user
     company_flags.inactive.add(str(user.company_id))
     company_status.clear()
-    assert await manager.authenticate(None) is None
+    assert await manager.authenticate(credentials) is None
 
 
 @pytest.mark.asyncio

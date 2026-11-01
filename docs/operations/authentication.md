@@ -61,7 +61,9 @@ Downstream services read the tenant from the `company_id` claim
 
 | Event | Effect |
 |---|---|
-| Refresh | The token is claimed atomically (single use) and replaced; a used or unknown token is rejected |
+| Refresh | The token is claimed atomically (single use) and replaced; an unknown token is rejected (401) |
+| A claimed refresh token presented again within `ROTATION_GRACE_SECONDS` (10 s) | Answered with the successor already issued, if still unused (another tab refreshing at once) |
+| A claimed refresh token presented again later | **401**; its session is ended: its live refresh token, its access tokens and the user's capability handles |
 | Logout (`/auth/logout`, `/auth/jwt/logout`) | The session of the refresh token sent and of the access token presented is recorded as ended, the refresh token revoked; the user's capability handles, notebook and model upload, are revoked ([ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md)) |
 | Password change or reset, user moved to another company, deactivated or deleted, tenant deactivated | All of the user's sessions and capability handles are revoked |
 | `manage_users.py reset-password` or `delete` | The same; the command exits non-zero if the session store cannot be reached |
@@ -82,6 +84,19 @@ A read slower than `READ_TIMEOUT_SECONDS` (2 s) counts as unreachable; so does t
 the suspension marker, which then leaves the decision to the registry. A token issued up to
 `CLOCK_SKEW_SECONDS` (2 s) after an end of all the user's sessions would count as ended, so a sign-in
 or refresh in that window waits it out (at most 3 s).
+
+## Sign-in throttling
+
+Password sign-in (`/auth/login`, `/auth/jwt/login`) is slowed, never locked
+([ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) dec 10).
+
+| Limit | Where | Behaviour |
+|---|---|---|
+| Per account and source | Gateway, `services/api_gateway/sign_in_throttle.py` | `SIGN_IN_THROTTLE=per-source` (compose; needs `EDGE_PROXY_PEERS`, else the gateway refuses to start). From the 5th consecutive failure for one e-mail address from one source (the address the edge reports; IPv6 by its /64), each attempt from it waits 1, 2, 4 … s after the last, up to 300 s; inside the wait **429** with `Retry-After`, the password unchecked and the attempt not counted. Each attempt is counted before the password is checked, so simultaneous guesses pass one at a time. Other sources are not slowed. Unknown addresses are counted the same. An admitted sign-in clears its source; a password change or reset (`manage_users.py reset-password` included) clears every source; an hour without a failure forgets it |
+| Per source address | Edge, `EDGE_SIGN_IN_PER_SOURCE=on` (compose) | Burst of 20, then 10 a minute; beyond it **429** |
+| Both | Behind a Kubernetes Ingress (the chart: `EDGE_SIGN_IN_PER_SOURCE=off`, `SIGN_IN_THROTTLE=off`) | Not applied: the edge and the gateway see only the Ingress (ADR-0004 Deferred) |
+
+Store unreachable: sign-in is refused with **503**.
 
 ## Suspended tenants
 

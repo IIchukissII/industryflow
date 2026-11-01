@@ -75,8 +75,8 @@ def db(monkeypatch):
     conn = FakeConn()
     conn.ended = []
 
-    async def end_sessions(user_id):
-        conn.ended.append(user_id)
+    async def end_sessions(user_id, email=None):
+        conn.ended.append(user_id if email is None else (user_id, email))
 
     monkeypatch.setattr(manage_users, "end_sessions", end_sessions)
 
@@ -169,7 +169,7 @@ def test_reset_password_binds_the_new_hash(db, monkeypatch):
     (sql, params), = [(s, p) for s, p in db.statements if s.startswith("UPDATE")]
     assert params["email"] == "u@example.com" and "new-pw" not in sql
     assert user_admin_db.PasswordHelper().verify_and_update("new-pw", params["hashed"])[0]
-    assert db.ended == ["id"]
+    assert db.ended == [("id", "u@example.com")]
 
 
 def test_delete_ends_the_users_sessions(db):
@@ -206,11 +206,17 @@ def test_ending_sessions_uses_the_gateways_store(monkeypatch):
     async def end_all(uid):
         calls.append(uid)
 
+    async def cleared(store, email):
+        calls.append(email)
+
+    import sign_in_throttle
+
     monkeypatch.setattr(redis_module.redis_client, "connect", connect)
     monkeypatch.setattr(redis_module.redis_client, "disconnect", disconnect)
     monkeypatch.setattr(refresh_tokens, "end_all_sessions", end_all)
-    asyncio.run(manage_users.end_sessions("u-1"))
-    assert calls == ["connect", "u-1", "disconnect"]
+    monkeypatch.setattr(sign_in_throttle, "cleared", cleared)
+    asyncio.run(manage_users.end_sessions("u-1", "u@example.com"))
+    assert calls == ["connect", "u-1", "u@example.com", "disconnect"]
 
 
 def test_ci_runs_these_tests_when_the_scripts_change():

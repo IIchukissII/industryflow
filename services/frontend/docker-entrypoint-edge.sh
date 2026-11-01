@@ -22,7 +22,16 @@ if [ -z "${EDGE_RESOLVER:-}" ]; then
 fi
 export EDGE_RESOLVER
 
-VARS="EDGE_RESOLVER EDGE_API_GATEWAY EDGE_ML_SERVICE EDGE_NOTEBOOK_SSO EDGE_TRACKING_GATEWAY EDGE_OBJECT_STORE_URL"
+# The per-source limit on password sign-in (ADR-0004 dec 10): on where the edge sees the clients' own
+# addresses, off behind a proxy that reaches it from its own (a Kubernetes Ingress).
+EDGE_SIGN_IN_PER_SOURCE="${EDGE_SIGN_IN_PER_SOURCE:-on}"
+case "$EDGE_SIGN_IN_PER_SOURCE" in
+    on|off) ;;
+    *) echo "[edge] refusing to start: EDGE_SIGN_IN_PER_SOURCE must be on or off" >&2; exit 1 ;;
+esac
+export EDGE_SIGN_IN_PER_SOURCE
+
+VARS="EDGE_RESOLVER EDGE_SIGN_IN_PER_SOURCE EDGE_API_GATEWAY EDGE_ML_SERVICE EDGE_NOTEBOOK_SSO EDGE_TRACKING_GATEWAY EDGE_OBJECT_STORE_URL"
 missing=""
 subst=""
 for v in $VARS; do

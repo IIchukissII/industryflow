@@ -82,23 +82,27 @@ async def list_users(args) -> None:
     print(f"Total users: {len(users)}")
 
 
-async def end_sessions(user_id) -> None:
+async def end_sessions(user_id, email=None) -> None:
     """End every session and notebook capability of the user (ADR-0004 dec 2): the access tokens
-    issued before are refused from the next request. Runs in the gateway's image (PYTHONPATH=/app),
-    against the store the gateway uses."""
+    issued before are refused from the next request. With ``email``, also forget its failed
+    sign-ins (a new password, dec 10). Runs in the gateway's image (PYTHONPATH=/app), against the
+    store the gateway uses."""
+    import sign_in_throttle
     from messaging import refresh_tokens
     from messaging.redis_client import redis_client
 
     await redis_client.connect()
     try:
         await refresh_tokens.end_all_sessions(str(user_id))
+        if email:
+            await sign_in_throttle.cleared(redis_client.redis, email)
     finally:
         await redis_client.disconnect()
 
 
-async def _end_sessions_after(change: str, user_id) -> None:
+async def _end_sessions_after(change: str, user_id, email=None) -> None:
     try:
-        await end_sessions(user_id)
+        await end_sessions(user_id, email)
     except Exception as e:  # noqa: BLE001 - the change is made; say plainly what is not
         raise UserAdminError(f"{change}, but the user's sessions were not ended ({type(e).__name__}: {e}); "
                              "run the command again once the session store is reachable") from e
@@ -129,7 +133,7 @@ async def reset_password(args) -> None:
         row = result.first()
         if row is None:
             raise UserAdminError(f"user {args.email} not found")
-    await _end_sessions_after(f"password reset for {args.email}", row[0])
+    await _end_sessions_after(f"password reset for {args.email}", row[0], args.email)
     print(f"✅ Password reset for {args.email}; their sessions ended")
 
 

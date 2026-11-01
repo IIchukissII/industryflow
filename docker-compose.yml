@@ -643,6 +643,8 @@ services:
       CAPABILITY_AUDIT_RETENTION_DAYS: ${CAPABILITY_AUDIT_RETENTION_DAYS:-365}
       # The edge, the one peer whose reported client address is believed (ADR-0042 dec 9).
       EDGE_PROXY_PEERS: frontend
+      # Password sign-in slowed per account and source, the source as the edge reports it (ADR-0004 dec 10).
+      SIGN_IN_THROTTLE: per-source
       # The dashboards' sign-on assertion (ADR-0016 dec 7), signed for a platform superuser.
       DASHBOARDS_SIGNING_KEY_FILE: /run/dashboards-signing/signing.pem
     depends_on:
@@ -685,6 +687,8 @@ services:
       EDGE_NOTEBOOK_SSO: notebook-sso:8080
       EDGE_TRACKING_GATEWAY: notebook-tracking-gateway:5050
       EDGE_OBJECT_STORE_URL: ${MINIO_ENDPOINT:-http://minio:9000}
+      # The edge sees the clients' own addresses: password sign-in is limited per source (ADR-0004 dec 10).
+      EDGE_SIGN_IN_PER_SOURCE: "on"
       # Optional: the dashboards at /grafana/ (ADR-0016 dec 6), e.g. grafana:3000. Unset: no route.
       EDGE_GRAFANA: ${EDGE_GRAFANA:-}
       # Optional: the only source addresses or CIDR blocks /grafana/ answers. Unset: any.
