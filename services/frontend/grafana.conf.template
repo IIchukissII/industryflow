@@ -1,13 +1,34 @@
 # SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# The single host's dashboards at the edge (ADR-0016 dec 6). Rendered into the server block by
+# The single host's dashboards at the edge (ADR-0016 dec 6-7). Rendered into the server block by
 # 10-edge-config.sh only when the deployment names EDGE_GRAFANA; absent, /grafana/ is the SPA's.
-# Grafana keeps its own login and serves from this sub-path, so the full URI is passed through.
+# Each request is signed on from the platform session: the gateway answers the subrequest with an
+# assertion for a platform superuser only (401 without a session, 403 for anyone else), and the
+# dashboards accept no identity without it. The assertion goes from the gateway to the dashboards and
+# never to the browser; whatever the client sent in its header is overwritten.
+# Grafana serves from this sub-path, so the full URI is passed through.
 # Declaring proxy_set_header here drops every inherited one, so the forwarding headers are restated.
+location = /_dashboards_assertion {
+    internal;
+    proxy_pass http://$api_gateway/internal/dashboards/assertion;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Cookie $http_cookie;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+}
+
 location /grafana/ {
     # The source addresses allowed when the deployment names them (EDGE_GRAFANA_ALLOW); empty: any.
 ${EDGE_GRAFANA_ACCESS}
+    auth_request /_dashboards_assertion;
+    auth_request_set $if_dashboards_assertion $upstream_http_x_if_dashboards_assertion;
+    proxy_set_header X-IF-Dashboards-Assertion $if_dashboards_assertion;
+    # The platform session is the only sign-on here: no session goes to the platform's login.
+    error_page 401 = @dashboards_login;
+
     set $grafana ${EDGE_GRAFANA};
     proxy_pass http://$grafana;
     proxy_http_version 1.1;
@@ -18,4 +39,8 @@ ${EDGE_GRAFANA_ACCESS}
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_read_timeout 3600s;
+}
+
+location @dashboards_login {
+    return 302 /login;
 }

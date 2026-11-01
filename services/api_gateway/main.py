@@ -13,7 +13,8 @@ from config import get_settings
 from routers import (
     health, measurements, aggregations, websocket, cache,
     training_data, alerts_history, companies,
-    equipment, alert_rules, auth_tokens, auth_verify, user_admin, capability_use, platform_switches
+    equipment, alert_rules, auth_tokens, auth_verify, user_admin, capability_use, platform_switches,
+    dashboards_assertion,
 )
 from database import close_engine, engine
 from messaging.redis_client import redis_client
@@ -107,6 +108,7 @@ app.include_router(user_admin.router)
 app.include_router(auth_tokens.router)
 # Session-verification endpoint for the notebook-hub SSO handoff (ADR-0014).
 app.include_router(auth_verify.router)
+app.include_router(dashboards_assertion.router)
 
 
 # API routers

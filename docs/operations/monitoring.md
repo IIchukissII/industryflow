@@ -146,7 +146,10 @@ receivers:
 | URL | `http://localhost:<GRAFANA_PORT>/grafana/` on the host |
 | Through the edge | `https://<host>:<FRONTEND_HTTPS_PORT>/grafana/` when `.env` sets `EDGE_GRAFANA=grafana:3000` ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 6) |
 | Source addresses | `EDGE_GRAFANA_ALLOW`: addresses or CIDR blocks, space- or comma-separated; others get `403`. Unset: any. An invalid entry stops the edge from starting |
-| Login | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env` |
+| Sign-on through the edge | The platform session of a superuser; no session: `302` to `/login`; any other user: `403`. Grafana user = the superuser's email, role `Editor` ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 7) |
+| Sign-on key | `dashboards-key-init` generates it once: private half in volume `industryflow-dashboards-signing-key` (gateway only), public half in `industryflow-dashboards-verify-key` (Grafana) |
+| Rotate the sign-on key | `docker compose rm -sf dashboards-key-init grafana api-gateway && docker volume rm industryflow-dashboards-signing-key industryflow-dashboards-verify-key && docker compose up -d` |
+| Login on the loopback URL | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env` |
 | Datasources | `Prometheus` (default), `Loki` — `datasources.yml` |
 | Dashboard provider | folder `IndustryFlow`, files under `/etc/grafana/provisioning/dashboards` — `dashboards.yml` |
 

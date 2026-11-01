@@ -134,6 +134,35 @@ services:
     networks:
       - industryflow-network
 
+  # The key the gateway signs the dashboards' sign-on assertion with (ADR-0016 dec 7), generated once
+  # and kept. The private half goes to the gateway only (uid 10001, its image's user); the dashboards
+  # get the public half in a volume of their own. Rotation: docs/operations/monitoring.md#grafana.
+  dashboards-key-init:
+    image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+    container_name: industryflow-dashboards-key-init
+    command:
+      - sh
+      - -ec
+      - |
+        if [ -s /signing/signing.pem ] && [ -s /verify/public.pem ]; then
+          echo "keeping the dashboards signing key"
+        else
+          apk add --no-cache openssl >/dev/null
+          umask 077
+          openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out /signing/signing.pem.new
+          openssl pkey -in /signing/signing.pem.new -pubout -out /verify/public.pem.new
+          mv /signing/signing.pem.new /signing/signing.pem
+          mv /verify/public.pem.new /verify/public.pem
+          echo "generated the dashboards signing key"
+        fi
+        chown 10001:10001 /signing/signing.pem && chmod 400 /signing/signing.pem
+        chmod 644 /verify/public.pem
+    volumes:
+      - dashboards-signing-key:/signing
+      - dashboards-verify-key:/verify
+    restart: "no"
+    network_mode: none
+
   # TimescaleDB - Time-series database
   timescaledb:
     image: timescale/timescaledb:latest-pg15@sha256:6343bdc87ca132c6b53acb26113a6bad1821d188fa39975a745f32ddd9757634
@@ -621,13 +650,18 @@ services:
       CAPABILITY_AUDIT_RETENTION_DAYS: ${CAPABILITY_AUDIT_RETENTION_DAYS:-365}
       # The edge, the one peer whose reported client address is believed (ADR-0042 dec 9).
       EDGE_PROXY_PEERS: frontend
+      # The dashboards' sign-on assertion (ADR-0016 dec 7), signed for a platform superuser.
+      DASHBOARDS_SIGNING_KEY_FILE: /run/dashboards-signing/signing.pem
     depends_on:
       db-migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+      dashboards-key-init:
+        condition: service_completed_successfully
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
+      - dashboards-signing-key:/run/dashboards-signing:ro
     networks:
       - industryflow-network
       - notebook-kernels
@@ -1334,8 +1368,24 @@ services:
       # Served from /grafana/, the path the edge forwards (ADR-0016 dec 6), on the loopback port too.
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      # Sign-on from a platform superuser's session (ADR-0016 dec 7): the edge forwards the assertion
+      # the gateway signs (services/api_gateway/routers/dashboards_assertion.py names the header,
+      # issuer, audience and role); an identity without a valid signature signs no one in. The
+      # loopback port keeps the administrator's own login.
+      GF_AUTH_JWT_ENABLED: "true"
+      GF_AUTH_JWT_HEADER_NAME: X-IF-Dashboards-Assertion
+      GF_AUTH_JWT_KEY_FILE: /etc/grafana/dashboards-verify/public.pem
+      GF_AUTH_JWT_EXPECT_CLAIMS: '{"iss": "industryflow-api-gateway", "aud": "industryflow-dashboards"}'
+      GF_AUTH_JWT_USERNAME_CLAIM: sub
+      GF_AUTH_JWT_EMAIL_CLAIM: email
+      GF_AUTH_JWT_AUTO_SIGN_UP: "true"
+      GF_AUTH_JWT_ROLE_ATTRIBUTE_PATH: role
+      GF_AUTH_JWT_ROLE_ATTRIBUTE_STRICT: "true"
+      GF_AUTH_JWT_ALLOW_ASSIGN_GRAFANA_ADMIN: "false"
+      GF_AUTH_JWT_URL_LOGIN: "false"
     volumes:
       - grafana-data:/var/lib/grafana
+      - dashboards-verify-key:/etc/grafana/dashboards-verify:ro
       - ./infrastructure/grafana/provisioning/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
       - ./infrastructure/grafana/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
       - ./infrastructure/grafana/provisioning/complete_system_dashboard.json:/etc/grafana/provisioning/dashboards/complete_system_dashboard.json
@@ -1344,8 +1394,12 @@ services:
     networks:
       - industryflow-network
     depends_on:
-      - prometheus
-      - loki
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+      dashboards-key-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/grafana/api/health || exit 1"]
@@ -1621,6 +1675,12 @@ volumes:
     driver: local
   frontend-certs:
     driver: local
+  # The dashboards' sign-on key (ADR-0016 dec 7): the private half, the gateway's alone, and the public
+  # half, the dashboards'. Kept apart so the dashboards never hold what signs them in.
+  dashboards-signing-key:
+    name: industryflow-dashboards-signing-key
+  dashboards-verify-key:
+    name: industryflow-dashboards-verify-key
 
 # ==========================================================================
 # NETWORKS
