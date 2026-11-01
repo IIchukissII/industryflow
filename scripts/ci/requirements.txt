@@ -5,7 +5,7 @@
 # Tools the workflows install outside any service: test runners for jobs with no requirements file of
 # their own, the YAML reader of the guards, the linter and the auditor. Pinned here, not inline in a
 # workflow, so the dependency bot moves them (tests/config_guards/test_workflow_tool_pins.py).
-pip-audit==2.7.3
-pytest==9.1.1
+pip-audit==2.10.1
+pytest==9.2.0
 pyyaml==6.0.3
-ruff==0.15.20
+ruff==0.17.3
