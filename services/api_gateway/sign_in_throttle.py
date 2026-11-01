@@ -2,22 +2,27 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Password guessing is slowed per account, never locked out (ADR-0004 dec 10).
+"""Password guessing is slowed per account and source, never locked out (ADR-0004 dec 10).
 
-Consecutive failed password sign-ins for one e-mail address are counted in the shared store. From
-``THRESHOLD`` failures on, the next attempt must wait twice as long as the one before, up to
-``MAX_DELAY_SECONDS``; an attempt inside the wait is refused (429) without the password being checked.
-A success, a password change or a reset clears the count, and an hour without a failure forgets it.
+Failed password sign-ins are counted per e-mail address and source address in the shared store. From
+``THRESHOLD`` failures on, each attempt from that source must wait twice as long after the last as the
+one before, up to ``MAX_DELAY_SECONDS``; an attempt inside the wait is refused (429) without the
+password being checked, and is not counted. One source slowing an account does not slow the account's
+owner at another, so no one can lock a user out; each source is also limited across all accounts at
+the edge.
+
+Each attempt is reserved before the password is checked, atomically (``RESERVE_SCRIPT``): it is
+counted as a failure up front, so guesses sent at the same moment are refused all but one, and a
+success clears the count. A password change or reset clears every source's count for the address,
+and an hour without a failure forgets it.
 
 The key is a hash of the address as submitted, normalised, so an unknown address is counted exactly
-like a known one and the answer reveals nothing about which accounts exist. Each source address is
-limited separately at the edge.
+like a known one and the answer reveals nothing about which accounts exist.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import math
 import time
 
 from industryflow_contracts.sessions import READ_TIMEOUT_SECONDS
@@ -27,41 +32,54 @@ MAX_DELAY_SECONDS = 300
 FORGET_AFTER_SECONDS = 3600
 _PREFIX = "sign-in-failures:"
 
+# KEYS[1] the address's record; ARGV: source, now, threshold, cap, forget. Returns 0 when the attempt
+# may go ahead (and is now counted), else the whole seconds still to wait.
+RESERVE_SCRIPT = """
+local n = tonumber(redis.call('HGET', KEYS[1], 'n:' .. ARGV[1]) or '0')
+local at = tonumber(redis.call('HGET', KEYS[1], 'at:' .. ARGV[1]) or '0')
+local now, threshold, cap = tonumber(ARGV[2]), tonumber(ARGV[3]), tonumber(ARGV[4])
+if n >= threshold then
+  local remaining = at + math.min(2 ^ (n - threshold), cap) - now
+  if remaining > 0 then return math.ceil(remaining) end
+end
+redis.call('HINCRBY', KEYS[1], 'n:' .. ARGV[1], 1)
+redis.call('HSET', KEYS[1], 'at:' .. ARGV[1], ARGV[2])
+redis.call('EXPIRE', KEYS[1], ARGV[5])
+return 0
+"""
+
 
 def _key(email: str) -> str:
     return _PREFIX + hashlib.sha256((email or "").strip().lower().encode()).hexdigest()
 
 
+def _source(source) -> str:
+    return str(source or "unknown")[:64]
+
+
 def delay_after(failures: int) -> int:
-    """How long the next attempt must wait after ``failures`` consecutive failures."""
+    """How long the next attempt from a source must wait after ``failures`` consecutive failures."""
     if failures < THRESHOLD:
         return 0
     return min(2 ** (failures - THRESHOLD), MAX_DELAY_SECONDS)
 
 
-async def retry_after(store, email: str) -> int:
-    """Seconds until the address may try again; 0 when it may now. A store error propagates."""
-    record = await asyncio.wait_for(store.hgetall(_key(email)), READ_TIMEOUT_SECONDS)
-    if not record:
-        return 0
-    record = {(k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
-              for k, v in record.items()}
-    try:
-        failures, last = int(record.get("n", 0)), float(record.get("at", 0))
-    except ValueError:
-        return 0
-    remaining = last + delay_after(failures) - time.time()
-    return math.ceil(remaining) if remaining > 0 else 0
+async def reserve(store, email: str, source) -> int:
+    """0 when this attempt may check the password (it is counted until ``succeeded``), else the
+    seconds to wait. A store error, or a store slower than the read timeout, propagates."""
+    waited = await asyncio.wait_for(
+        store.eval(RESERVE_SCRIPT, 1, _key(email), _source(source), repr(time.time()), THRESHOLD,
+                   MAX_DELAY_SECONDS, FORGET_AFTER_SECONDS),
+        READ_TIMEOUT_SECONDS)
+    return int(waited)
 
 
-async def failed(store, email: str) -> None:
-    key = _key(email)
-    async with store.pipeline(transaction=True) as pipe:
-        pipe.hincrby(key, "n", 1)
-        pipe.hset(key, "at", repr(time.time()))
-        pipe.expire(key, FORGET_AFTER_SECONDS)
-        await asyncio.wait_for(pipe.execute(), READ_TIMEOUT_SECONDS)
+async def succeeded(store, email: str, source) -> None:
+    """The password was right and the sign-in admitted: this source's count starts again."""
+    src = _source(source)
+    await asyncio.wait_for(store.hdel(_key(email), f"n:{src}", f"at:{src}"), READ_TIMEOUT_SECONDS)
 
 
 async def cleared(store, email: str) -> None:
+    """A new password: no source's failures count against it."""
     await asyncio.wait_for(store.delete(_key(email)), READ_TIMEOUT_SECONDS)

@@ -105,12 +105,16 @@ async def refresh(
         # session it belonged to (ADR-0004 dec 2).
         replayed = await refresh_tokens.replay(token)
         if replayed.kind == "reused":
-            await revoke_user_capabilities(redis_client.redis, replayed.claim.user_id)
+            if replayed.first:
+                await revoke_user_capabilities(redis_client.redis, replayed.claim.user_id)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                                 detail="Refresh token reused; its session has ended")
         if replayed.kind != "successor":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
         claim, successor = replayed.claim, replayed.successor
+    elif await refresh_tokens.session_was_ended(claim.session_id):
+        # Issued in a race with the end of its session (a reuse): it does not continue it.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session ended")
     try:
         user = await user_manager.get(uuid.UUID(claim.user_id))
     except (UserNotExists, ValueError):

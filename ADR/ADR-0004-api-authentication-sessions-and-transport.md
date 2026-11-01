@@ -49,10 +49,11 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
    session cookie only and is origin-checked against decision 6's allowlist; it closes when its
    credential expires, or at a periodic re-check once its session has ended or its account is
    inactive.
-10. **Password guessing is slowed per account and per source address, never locked out.**
-    Consecutive failures for one address wait exponentially longer, up to a cap, and an attempt
-    inside the wait is refused unchecked; where the edge sees the clients' own addresses it also
-    limits each source. No account is locked, because no channel exists to unlock one.
+10. **Password guessing is slowed per account and source, never locked out.** Consecutive failures
+    for one account from one source wait exponentially longer, up to a cap; each attempt is counted
+    before its password is checked, and one inside the wait is refused unchecked. Where the edge sees
+    the clients' own addresses it also limits each source across accounts. No account is locked, as
+    no channel exists to unlock one, and one source's failures never slow the owner at another.
 
 ## Alternatives
 
@@ -80,7 +81,9 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 | 10 | No limit on password sign-in | An online guess costs nothing, so a weak password falls to a script |
 | 10 | Locking an account after repeated failures | No e-mail or other channel exists to unlock it, so anyone could lock out any user |
 | 10 | A limit per source address only | Many addresses guess one account unhindered |
-| 10 | A limit per account only | One address sprays one guess at each of many accounts |
+| 10 | A limit per account only, across sources | One wrong password per wait from anywhere keeps the owner refused for ever |
+| 10 | A per-account limit across sources on top | Whoever holds it at its cap locks the owner out the same way |
+| 10 | Checking the wait and counting the failure as separate steps | Guesses sent at the same moment all pass the check |
 | 10 | Counting failures only for existing accounts | The difference in answers reveals which addresses have accounts |
 
 ## Consequences
@@ -90,7 +93,7 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 - A session's access tokens, capabilities and sockets stop working at once when it ends; a leaked
   access token whose session does not end lapses within minutes.
 - A stolen refresh credential replayed after its owner refreshed ends the session for both.
-- Online password guessing falls to a handful of attempts an hour per account.
+- Online password guessing falls to a handful of attempts an hour per account from each source.
 - No caller reaches another tenant's data or any data unauthenticated.
 
 **Negative**
@@ -99,7 +102,8 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
   HTTP exception.
 - An access token is not revoked individually; a password change logs out every device.
 - Every authenticated request reads the session store, and none is served while it is unreachable.
-- Repeated wrong passwords slow the real owner's sign-in as much as the guesser's, up to the cap.
+- An attacker with many source addresses gets that handful from each of them.
+- A refresh whose answer is lost, retried after the grace, ends its own session.
 - A stolen refresh credential used within the grace after a rotation is not detected.
 - A sign-in or refresh within a clock-skew allowance after an end of all the user's sessions waits
   the allowance out, since a token issued in it would count as issued before the end.

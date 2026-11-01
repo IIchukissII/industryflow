@@ -143,11 +143,13 @@ class Replay:
     """What presenting an already-claimed refresh token again means.
 
     ``successor``: within the grace, the token it was rotated into (still live), for its session.
-    ``reused``: after the grace; its session has been ended. ``unknown``: never issued, expired, or
-    a concurrent refresh whose rotation produced nothing to share."""
+    ``reused``: after the grace; its session has been ended, by this presentation when ``first``.
+    ``unknown``: never issued, expired, or a concurrent refresh whose rotation produced nothing to
+    share."""
     kind: str
     claim: Optional[RefreshClaim] = None
     successor: Optional[str] = None
+    first: bool = False
 
 
 async def _rotation(token: str) -> Optional[dict]:
@@ -177,8 +179,12 @@ async def replay(token: str) -> Replay:
     claim = RefreshClaim(user_id=str(record["uid"]), credential=str(record.get("cred", "")),
                          session_id=record.get("sid"))
     if time.time() - float(record.get("at", 0)) > ROTATION_GRACE_SECONDS:
+        if record.get("ended"):
+            return Replay("reused", claim)
+        record["ended"] = True
+        await redis_client.redis.set(_ROTATED_PREFIX + token, json.dumps(record), ex=_ttl())
         await _end_reused_session(claim)
-        return Replay("reused", claim)
+        return Replay("reused", claim, first=True)
     deadline = time.monotonic() + _SUCCESSOR_WAIT_SECONDS
     while not record.get("successor") and time.monotonic() < deadline:
         await asyncio.sleep(0.1)
@@ -194,7 +200,9 @@ async def _end_reused_session(claim: RefreshClaim) -> None:
     longer the user's alone. End it: its live refresh token, and (by the record) its access tokens."""
     if not claim.session_id:
         return
-    await _record_session_ended(claim.session_id)
+    # For the refresh lifetime, not the access one: a refresh token of the session issued in a race
+    # with this must find the session ended whenever it is presented (session_was_ended).
+    await _record_session_ended(claim.session_id, ttl=_ttl())
     index = _user_key(claim.user_id)
     for t in await redis_client.redis.smembers(index):
         t = t.decode() if isinstance(t, bytes) else t
@@ -236,8 +244,16 @@ def _owner(raw: str) -> tuple[str, Optional[str]]:
         return raw, None
 
 
-async def _record_session_ended(session_id: str) -> None:
-    await redis_client.redis.set(sessions.ended_session_key(session_id), "1", ex=_ended_ttl())
+async def _record_session_ended(session_id: str, ttl: Optional[int] = None) -> None:
+    await redis_client.redis.set(sessions.ended_session_key(session_id), "1", ex=ttl or _ended_ttl())
+
+
+async def session_was_ended(session_id: Optional[str]) -> bool:
+    """Whether this session itself was recorded as ended: a refresh token of it, issued in a race
+    with the ending, is refused rather than continuing it."""
+    if not session_id:
+        return False
+    return await redis_client.redis.get(sessions.ended_session_key(str(session_id))) is not None
 
 
 async def wait_out_an_end(user_id: str) -> float:
