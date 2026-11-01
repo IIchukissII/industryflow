@@ -126,15 +126,25 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             await refresh_tokens.end_all_sessions(str(user.id))
         if "password" in update_dict:
             await _clear_sign_in_failures(user)
-            # The holder has set their own password: the account is an ordinary one (ADR-0004 dec 11).
-            if getattr(user, "password_change_required", False):
-                await self.user_db.update(user, {"password_change_required": False})
 
     async def validate_password(self, password: str, user) -> None:
-        """A password that must be changed cannot be changed to itself (ADR-0004 dec 11)."""
-        if getattr(user, "password_change_required", False) and getattr(user, "hashed_password", None):
-            if self.password_helper.verify_and_update(password, user.hashed_password)[0]:
-                raise InvalidPasswordException(reason="Choose a password other than the current one")
+        """A password that must be changed cannot be changed to itself, nor to the published default
+        in another case or with spaces around it (ADR-0004 dec 11)."""
+        if not getattr(user, "password_change_required", False):
+            return
+        import first_run
+
+        if password.strip().lower() == first_run.DEFAULT_PASSWORD or (
+                getattr(user, "hashed_password", None)
+                and self.password_helper.verify_and_update(password, user.hashed_password)[0]):
+            raise InvalidPasswordException(reason="Choose a password other than the current one")
+
+    async def _update(self, user, update_dict):
+        """A held account's new password releases it in the same write (ADR-0004 dec 11), so it is
+        never left with a changed password and still held."""
+        if update_dict.get("password") is not None and getattr(user, "password_change_required", False):
+            update_dict = {**update_dict, "password_change_required": False}
+        return await super()._update(user, update_dict)
 
     async def on_after_reset_password(self, user: User, request: Optional[Request] = None):
         await refresh_tokens.end_all_sessions(str(user.id))

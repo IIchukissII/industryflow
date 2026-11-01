@@ -4,7 +4,7 @@
 
 """An account held to a password change reads itself, changes its password and signs out, and nothing
 more, at the gateway and the ML service alike; once it has its own password it is an ordinary account
-(ADR-0004 dec 11). A platform that has a superuser gets no first-run account. The first run on an
+(ADR-0004 dec 11). A platform that has accounts gets no first-run account. The first run on an
 empty platform itself is proved at every compose-smoke start."""
 import uuid
 
@@ -54,7 +54,7 @@ def test_a_held_account_must_change_its_password_before_anything_else(settings, 
     eventually(released, timeout=20, every=1, what="the account after its own password")
 
 
-def test_a_platform_with_a_superuser_gets_no_first_run_account(env):
+def test_a_platform_with_accounts_gets_no_first_run_account(env):
     count = env.sql("SELECT count(*) FROM public.\"user\" WHERE email = 'admin@industryflow.local' "
                     "AND password_change_required").strip()
     assert count == "0", count

@@ -579,6 +579,11 @@ config:
   # client's own address, which the gateway does not get behind the Ingress, so it is off here
   # (ADR-0004 Deferred). "per-source" also needs EDGE_PROXY_PEERS; the gateway refuses it without.
   SIGN_IN_THROTTLE: "off"
+  # The first-run superuser's address and tenant, on a platform with no account (ADR-0004 dec 11).
+  # Empty: admin@industryflow.local in a tenant named Default. Its password is the published default,
+  # which the account must change before anything else.
+  PLATFORM_ADMIN_EMAIL: ""
+  PLATFORM_ADMIN_TENANT: ""
   ENVIRONMENT: production
   # Extension plugin modules the ML service loads at startup (ADR-0008/0010); empty = built-ins.
   EXTENSION_MODULES: ""

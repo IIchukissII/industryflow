@@ -22,15 +22,15 @@ from messaging import redis_client as redis_module
 class Session:
     """Answers the bootstrap's reads; records its writes."""
 
-    def __init__(self, superuser=False, tenant=None):
-        self.superuser, self.tenant, self.writes, self.committed = superuser, tenant, [], False
+    def __init__(self, accounts=False, tenant=None):
+        self.accounts, self.tenant, self.writes, self.committed = accounts, tenant, [], False
 
     async def execute(self, clause, params=None):
         sql = str(clause)
         if "pg_advisory_xact_lock" in sql:
             return SimpleNamespace(first=lambda: (None,))
-        if 'FROM public."user" WHERE is_superuser' in sql:
-            return SimpleNamespace(first=lambda: (1,) if self.superuser else None)
+        if sql == 'SELECT 1 FROM public."user" LIMIT 1':
+            return SimpleNamespace(first=lambda: (1,) if self.accounts else None)
         if "FROM public.companies WHERE is_active" in sql:
             return SimpleNamespace(first=lambda: SimpleNamespace(company_id=self.tenant) if self.tenant else None)
         if "provision_company" in sql:
@@ -51,8 +51,10 @@ def _inserted(session):
 
 
 @pytest.mark.asyncio
-async def test_nothing_is_created_while_a_superuser_exists():
-    session = Session(superuser=True, tenant=uuid.uuid4())
+async def test_nothing_is_created_on_a_platform_that_has_any_account():
+    """Not only a superuser: a platform seeded with tenant admins alone, or whose last superuser was
+    removed, must not gain one with a published password."""
+    session = Session(accounts=True, tenant=uuid.uuid4())
     assert await first_run.ensure_first_superuser(session, None, None, None) is None
     assert session.writes == [] and not session.committed
 
@@ -109,9 +111,12 @@ def store(monkeypatch):
     monkeypatch.setattr(redis_module.redis_client, "redis", NoSessionEnded())
 
 
+_DEFAULT_HASH = PasswordHelper().hash("industryflow")
+
+
 def _held():
-    return SimpleNamespace(id=uuid.uuid4(), company_id=None, is_active=True, role="admin", hashed_password="h",
-                           password_change_required=True)
+    return SimpleNamespace(id=uuid.uuid4(), email="held@example.com", company_id=None, is_active=True, role="admin",
+                           hashed_password=_DEFAULT_HASH, password_change_required=True)
 
 
 @pytest.mark.asyncio
@@ -152,8 +157,12 @@ def test_only_reading_oneself_changing_the_password_and_signing_out_are_allowed(
 async def test_the_password_cannot_be_changed_to_itself():
     manager = users.UserManager(user_db=None)
     user = SimpleNamespace(password_change_required=True, hashed_password=PasswordHelper().hash("industryflow"))
+    for same in ("industryflow", "Industryflow", " industryflow ", "INDUSTRYFLOW"):
+        with pytest.raises(InvalidPasswordException):
+            await manager.validate_password(same, user)
+    chosen = SimpleNamespace(password_change_required=True, hashed_password=PasswordHelper().hash("Chosen-one-1"))
     with pytest.raises(InvalidPasswordException):
-        await manager.validate_password("industryflow", user)
+        await manager.validate_password("Chosen-one-1", chosen)
     await manager.validate_password("Something-else-entirely", user)
     # An ordinary account may set any password the rules allow, its current one included.
     await manager.validate_password("industryflow", SimpleNamespace(password_change_required=False,
@@ -161,22 +170,67 @@ async def test_the_password_cannot_be_changed_to_itself():
 
 
 @pytest.mark.asyncio
-async def test_changing_the_password_releases_the_account(monkeypatch):
-    updates = []
+async def test_the_new_password_releases_the_account_in_the_same_write():
+    writes = []
 
     class UserDb:
         async def update(self, user, values):
-            updates.append(values)
+            writes.append(values)
+            return user
 
-    async def no_op(*a, **k):
-        return None
+        async def get_by_email(self, email):
+            return None
 
-    from messaging import refresh_tokens
-    monkeypatch.setattr(refresh_tokens, "end_all_sessions", no_op)
-    monkeypatch.setattr(users, "_clear_sign_in_failures", no_op)
     manager = users.UserManager(user_db=UserDb())
-    await manager.on_after_update(_held(), {"password": "new"})
-    assert updates == [{"password_change_required": False}]
-    updates.clear()
-    await manager.on_after_update(_held(), {"email": "x@example.com"})
-    assert updates == []
+    await manager._update(_held(), {"password": "Something-else-entirely"})
+    (values,) = writes
+    assert values["password_change_required"] is False and "hashed_password" in values
+    writes.clear()
+    await manager._update(_held(), {"email": "x@example.com"})
+    assert "password_change_required" not in writes[0]
+
+
+def test_a_self_chosen_password_has_the_admin_forms_minimum():
+    import schemas
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        schemas.UserSelfUpdate(password="short")
+    assert schemas.UserSelfUpdate(password="long-enough").password == "long-enough"
+
+
+def test_the_cli_takes_the_first_run_lock():
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+    import user_admin_db
+
+    assert user_admin_db.FIRST_RUN_LOCK_KEY == first_run.LOCK_KEY
+
+
+def test_through_the_app_a_held_account_reads_itself_and_nothing_else(store):
+    """The request reaches authentication through main.remember_the_request: without it every request
+    of a held account would be refused, and with it broken any would pass."""
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    import main
+    from users import get_user_manager
+
+    user = _held()
+    user.company_id = uuid.uuid4()
+    user.is_superuser, user.is_verified = True, False
+    main.app.dependency_overrides[get_user_manager] = lambda: _Manager(user)
+    try:
+        token = asyncio.run(users.get_jwt_strategy().write_token(user, "sid-app"))
+        client = TestClient(main.app, raise_server_exceptions=False)
+        bearer = {"Authorization": f"Bearer {token}"}
+        me = client.get("/users/me", headers=bearer)
+        assert me.status_code == 200 and me.json()["password_change_required"] is True, me.text
+        refused = client.get("/api/companies", headers=bearer)
+        assert refused.status_code == 403 and refused.json()["detail"] == users.PASSWORD_CHANGE_REQUIRED
+        assert client.get("/auth/verify", headers=bearer).status_code == 403
+    finally:
+        main.app.dependency_overrides.clear()

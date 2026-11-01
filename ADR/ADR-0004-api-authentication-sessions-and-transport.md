@@ -54,10 +54,11 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
     before its password is checked, and one inside the wait is refused unchecked. Where the edge sees
     the clients' own addresses it also limits each source across accounts. No account is locked, as
     no channel exists to unlock one, and one source's failures never slow the owner at another.
-11. **A platform with no superuser gets one at start, held to a password change while its password is
-    the published default.** It is created only while no superuser exists, in the oldest tenant or a
-    first one; until its holder sets their own password it may read itself, change that password and
-    sign out, and nothing more. A deployment that names its own first password is not held.
+11. **A platform with no account gets a superuser at start, held to a password change while its
+    password is the published default.** It is created only while no account of any kind exists, in
+    the oldest tenant or a first one; until its holder sets their own password it may read itself,
+    change that password and sign out, and nothing more. A deployment that names its own first
+    password is not held.
 
 ## Alternatives
 
@@ -93,6 +94,7 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 | 11 | A published default password with a change the holder may skip | The well-known password stays valid against cross-tenant authority |
 | 11 | A generated first password written to the log or the console | A secret in the log stays readable wherever the log goes |
 | 11 | Creating the account again whenever it is missing | A removed account would come back with the default password beside other superusers |
+| 11 | Creating it whenever no superuser exists | A populated platform without one would gain a published password beside its tenants' data |
 | 11 | A superuser outside every tenant | Every tenant-scoped page and claim assumes a tenant, which this one would lack |
 
 ## Consequences

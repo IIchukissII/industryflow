@@ -75,3 +75,20 @@ describe('First password change (ADR-0004 dec 11)', () => {
     expect(done).not.toHaveBeenCalled();
   });
 });
+
+describe('After the change, a failed sign-in', () => {
+  test('says the password is changed and offers sign-in, never "not changed"', async () => {
+    localStorage.setItem('user', JSON.stringify(HELD));
+    patch.mockResolvedValue({ data: {} });
+    post.mockRejectedValue({ response: { status: 429 } });
+    const done = vi.fn();
+    render(<FirstPasswordChange user={HELD} onDone={done} />);
+    fill('New password', 'My-own-password');
+    fill('Repeat the new password', 'My-own-password');
+    fireEvent.click(screen.getByRole('button', { name: 'Save and continue' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/password is changed/));
+    expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toBe('/login');
+    expect(localStorage.getItem('user')).toBeNull();
+    expect(done).not.toHaveBeenCalled();
+  });
+});

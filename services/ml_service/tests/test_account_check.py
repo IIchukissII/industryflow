@@ -223,3 +223,14 @@ def test_a_token_naming_another_tenant_than_the_account_is_refused():
 def test_an_account_that_must_change_its_password_reaches_nothing():
     r = _get(FakePool(_row(password_change_required=True)))
     assert r.status_code == 403 and r.json()["detail"] == "PASSWORD_CHANGE_REQUIRED"
+
+
+def test_the_account_query_selects_every_column_the_check_reads():
+    """The rows here are written by hand: a column dropped from the query would pass them and fail
+    every request in production (KeyError)."""
+    import inspect
+    import re
+
+    read = set(re.findall(r'row\["([a-z_]+)"\]', inspect.getsource(auth._usable_account)))
+    selected = set(re.findall(r"(?:AS |\bu\.)([a-z_]+)", auth._ACCOUNT_SQL))
+    assert read and read <= selected, read - selected

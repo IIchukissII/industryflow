@@ -2,16 +2,17 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The first-run superuser (ADR-0004 dec 11): a platform with no superuser gets one at start.
+"""The first-run superuser (ADR-0004 dec 11): a platform with no account at all gets one at start.
 
-While no superuser exists at all, the gateway creates one, ``PLATFORM_ADMIN_EMAIL`` with
-``PLATFORM_ADMIN_PASSWORD``, in the oldest active tenant, or in a first tenant it provisions
-(``PLATFORM_ADMIN_TENANT``) when there is none. With the published default password the account must
+Only while the platform has no account of any kind, the gateway creates a superuser,
+``PLATFORM_ADMIN_EMAIL`` with ``PLATFORM_ADMIN_PASSWORD``, in the oldest active tenant, or in a first
+tenant it provisions (``PLATFORM_ADMIN_TENANT``) when there is none. With the published default password the account must
 change it before anything else (``password_change_required``); a password the deployment set itself
-is not forced. Once any superuser exists this does nothing, so it never re-creates a removed account
-while another holds the platform.
+is not forced. Once any account exists this does nothing: a populated platform never gains a superuser
+with a published password, whatever became of its superusers (the CLI makes one there).
 
-Replicas starting together are serialised by a transaction-scoped advisory lock.
+Replicas starting together, and the CLI inserting a user, are serialised by a transaction-scoped
+advisory lock (``LOCK_KEY``).
 """
 from __future__ import annotations
 
@@ -29,18 +30,18 @@ DEFAULT_EMAIL = "admin@industryflow.local"
 DEFAULT_PASSWORD = "industryflow"
 DEFAULT_TENANT = "Default"
 # Any constant shared by every gateway replica; it names this one critical section.
-_LOCK_KEY = 0x1F_5E_57_AD
+LOCK_KEY = 0x1F_5E_57_AD
 
 
 async def ensure_first_superuser(session, email: Optional[str], password: Optional[str],
                                  tenant: Optional[str]) -> Optional[dict]:
-    """Create the first-run superuser if no superuser exists; returns what was created, else None.
+    """Create the first-run superuser if the platform has no account; returns what was created, else None.
 
     ``session`` is an AsyncSession as the gateway's role; the caller commits nothing, this does."""
     email = (email or DEFAULT_EMAIL).strip().lower()
     password = password or DEFAULT_PASSWORD
-    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _LOCK_KEY})
-    exists = await session.execute(text('SELECT 1 FROM public."user" WHERE is_superuser LIMIT 1'))
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": LOCK_KEY})
+    exists = await session.execute(text('SELECT 1 FROM public."user" LIMIT 1'))
     if exists.first() is not None:
         await session.rollback()
         return None

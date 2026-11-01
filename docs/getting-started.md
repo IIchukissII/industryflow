@@ -52,7 +52,7 @@ curl http://localhost:8000/health
 
 ## 4. Sign in as the first-run superuser
 
-A platform with no superuser gets one when the gateway starts
+A platform with no account gets a superuser when the gateway starts
 ([ADR-0004](../ADR/ADR-0004-api-authentication-sessions-and-transport.md) dec 11), in a first tenant
 named `Default` when there is none.
 
@@ -64,7 +64,8 @@ named `Default` when there is none.
 
 Sign in with these, set your own password (and address, if you like) on the page that follows, and
 continue as a superuser: tenants, users and the dashboards at `/grafana/`. Both can be changed later in
-Settings. Nothing is created once any superuser exists. Seeding further users from the environment and
+Settings. Nothing is created once any account exists: a platform that has users but no superuser gets
+one from the CLI. Seeding further users from the environment and
 the CLI: [user management](operations/user-management.md).
 
 Open `https://localhost:<FRONTEND_HTTPS_PORT>` and sign in. From another machine:

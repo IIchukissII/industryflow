@@ -32,19 +32,23 @@ import asyncio
 settings = get_settings()
 
 
-async def _first_run() -> None:
-    """A platform with no superuser gets one (ADR-0004 dec 11). A failure is logged and the gateway
-    starts anyway: it is retried at the next start, and the CLI can create one meanwhile."""
+async def _first_run(retry_seconds: float = 30.0) -> None:
+    """A platform with no account gets its first superuser (ADR-0004 dec 11). The gateway serves
+    meanwhile; a failure is logged and tried again until the platform has an account."""
     import first_run
     from database import AsyncSessionLocal
 
     s = get_settings()
-    try:
-        async with AsyncSessionLocal() as session:
-            await first_run.ensure_first_superuser(session, s.PLATFORM_ADMIN_EMAIL, s.PLATFORM_ADMIN_PASSWORD,
-                                                   s.PLATFORM_ADMIN_TENANT)
-    except Exception as exc:  # noqa: BLE001 - see above
-        logging.getLogger(__name__).error("first-run superuser not created: %s: %s", type(exc).__name__, exc)
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                await first_run.ensure_first_superuser(session, s.PLATFORM_ADMIN_EMAIL, s.PLATFORM_ADMIN_PASSWORD,
+                                                       s.PLATFORM_ADMIN_TENANT)
+            return
+        except Exception as exc:  # noqa: BLE001 - see above
+            logging.getLogger(__name__).error("first-run superuser not created, retrying in %ss: %s: %s",
+                                              retry_seconds, type(exc).__name__, exc)
+            await asyncio.sleep(retry_seconds)
 
 
 @asynccontextmanager
@@ -54,7 +58,7 @@ async def lifespan(_app: FastAPI):
     from dependencies import EDGE_PEERS
     sign_in_throttle.check_configuration(get_settings().SIGN_IN_THROTTLE, EDGE_PEERS)
     await redis_client.connect()
-    await _first_run()
+    first_run_task = asyncio.create_task(_first_run())
 
     cache_task = asyncio.create_task(update_redis_cache())
     # The one writer of the capability-use record (ADR-0042 dec 4); the store is the same Redis.
@@ -63,7 +67,7 @@ async def lifespan(_app: FastAPI):
     yield
 
     # Shutdown
-    for task in (cache_task, audit_task):
+    for task in (cache_task, audit_task, first_run_task):
         task.cancel()
         try:
             await task

@@ -51,7 +51,8 @@ class Settings(BaseSettings):
     # Password sign-in throttle (ADR-0004 dec 10, sign_in_throttle.py): per-source, or off where the
     # gateway is not told each client's own address.
     SIGN_IN_THROTTLE: str = "per-source"
-    # The first-run superuser (ADR-0004 dec 11, first_run.py), created only while none exists. Unset:
+    # The first-run superuser (ADR-0004 dec 11, first_run.py), created only on a platform with no
+    # account. Unset:
     # the published defaults, and the account must change its password before anything else.
     PLATFORM_ADMIN_EMAIL: Optional[str] = None
     PLATFORM_ADMIN_PASSWORD: Optional[str] = None

@@ -19,6 +19,7 @@ export default function FirstPasswordChange({ user, onDone }) {
   const [repeat, setRepeat] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [signIn, setSignIn] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -28,10 +29,12 @@ export default function FirstPasswordChange({ user, onDone }) {
       return;
     }
     setBusy(true);
+    let changed = false;
     try {
       const change = { password };
       if (email.trim() && email.trim() !== user?.email) change.email = email.trim();
       await api.patch('/users/me', change);
+      changed = true;
       const form = new URLSearchParams();
       form.append('username', change.email || user.email);
       form.append('password', password);
@@ -40,6 +43,13 @@ export default function FirstPasswordChange({ user, onDone }) {
       localStorage.setItem('user', JSON.stringify(me.data));
       onDone(me.data);
     } catch (err) {
+      if (changed) {
+        // The change is made and the old password no longer works: say so, and send them to sign in.
+        localStorage.removeItem('user');
+        setError('Your password is changed, but signing you in again failed. Sign in with the new password.');
+        setSignIn(true);
+        return;
+      }
       const reason = err.response?.status === 400 ? detailText(err.response.data?.detail) : null;
       setError(reason
         ? `Not changed: ${reason}`
@@ -82,6 +92,7 @@ export default function FirstPasswordChange({ user, onDone }) {
                 value={repeat} onChange={(e) => setRepeat(e.target.value)} />
             </div>
             {error && <p className="set-result set-result-bad" role="alert">{error}</p>}
+          {signIn && <p><a href="/login">Sign in</a></p>}
             <div>
               <button type="submit" className="btn btn-primary set-submit" disabled={busy}>
                 {busy ? 'Saving' : 'Save and continue'}

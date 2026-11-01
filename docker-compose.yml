@@ -645,7 +645,7 @@ services:
       EDGE_PROXY_PEERS: frontend
       # Password sign-in slowed per account and source, the source as the edge reports it (ADR-0004 dec 10).
       SIGN_IN_THROTTLE: per-source
-      # The first-run superuser, created only while none exists (ADR-0004 dec 11). Unset: the
+      # The first-run superuser, created only on a platform with no account (ADR-0004 dec 11). Unset: the
       # published defaults, and the account must change its password before anything else.
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
       PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-}

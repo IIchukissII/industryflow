@@ -323,8 +323,8 @@ jobs:
       - name: The first-run superuser exists and must change its password first
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json, ssl, urllib.error, urllib.parse, urllib.request
+          python3 - <<'PY' || { docker compose logs --tail 80 api-gateway frontend; exit 1; }
+          import json, ssl, time, urllib.error, urllib.parse, urllib.request
           CTX = ssl.create_default_context(cafile="deploy/certs/ca.crt")
           EDGE = "https://localhost:3443"
 
@@ -339,11 +339,21 @@ jobs:
               req = urllib.request.Request(EDGE + path, data=data, method=method, headers=headers)
               try:
                   with urllib.request.urlopen(req, context=CTX, timeout=30) as r:
-                      return r.status, json.loads(r.read() or b"null")
+                      status, raw = r.status, r.read()
               except urllib.error.HTTPError as e:
-                  return e.code, json.loads(e.read() or b"null")
+                  status, raw = e.code, e.read()
+              try:
+                  return status, json.loads(raw or b"null")
+              except ValueError:
+                  return status, raw[:300].decode(errors="replace")
 
-          status, pair = call("POST", "/auth/login", form={"username": "admin@industryflow.local", "password": "industryflow"})
+          # The gateway creates the account in the background once it serves: wait for it.
+          for _ in range(30):
+              status, pair = call("POST", "/auth/login", form={"username": "admin@industryflow.local", "password": "industryflow"})
+              if status == 200:
+                  break
+              print("waiting for the first-run account:", status, pair)
+              time.sleep(2)
           assert status == 200, (status, pair)
           token = pair["access_token"]
           status, me = call("GET", "/users/me", token)

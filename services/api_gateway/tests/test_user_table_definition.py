@@ -27,8 +27,8 @@ def _defined_columns() -> dict[str, str]:
     body = body[:body.index("\n);")]
     columns = {m.group(1): m.group(2) for m in re.finditer(r"^    ([a-z_]+) ([^,]+),?$", body, re.M)}
     added = re.compile(r'ALTER TABLE public\."user" ADD COLUMN IF NOT EXISTS ([a-z_]+) ([^;]+);')
-    for later in sorted(SCRIPTS.glob("[0-9]*.sql")):
-        if later.name > "29-user-table.sql":
+    for later in sorted(SCRIPTS.glob("[0-9]*.sql"), key=lambda p: int(p.name.split("-")[0])):
+        if int(later.name.split("-")[0]) > 29:
             columns.update({m.group(1): m.group(2).strip() for m in added.finditer(later.read_text())})
     return columns
 

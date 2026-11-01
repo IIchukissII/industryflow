@@ -41,6 +41,7 @@ class UserSelfUpdate(schemas.BaseUserUpdate):
     Unknown fields are refused rather than silently dropped.
     """
     model_config = ConfigDict(extra="forbid")
+    password: Optional[str] = Field(None, min_length=8)
     is_active: None = None
     is_superuser: None = None
     is_verified: None = None
