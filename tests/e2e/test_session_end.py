@@ -4,7 +4,9 @@
 
 """An access token stops working when its session ends, not when it expires (ADR-0004 dec 2): after a
 logout, and after a password change, the gateway and the ML service both refuse the access token the
-ended session was issued, while a session that did not end keeps working."""
+ended session was issued, while a session that did not end keeps working; repeated wrong passwords
+slow one account, and a refresh token reused after its rotation ends its session."""
+import time
 import uuid
 
 import pytest
@@ -82,3 +84,44 @@ def test_the_access_token_only_logout_ends_its_session(settings, account):
         r = edge.client.post("/auth/jwt/logout", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code in (200, 204), r.text[:300]
         assert [_status(edge, token, p) for p in PROBES] == [401, 401]
+
+
+def test_wrong_passwords_slow_that_account_and_no_other(settings, account, root, tenant):
+    """ADR-0004 dec 10: from the fifth failure the account waits, the right password included; another
+    account signs in as before."""
+    email, password = account
+    with Edge(settings["IF_E2E_EDGE"], settings["IF_E2E_CA"]) as edge:
+        for _ in range(5):
+            r = edge.client.post("/auth/login", data={"username": email, "password": "wrong-password"})
+            assert r.status_code == 400, r.text[:200]
+        r = edge.client.post("/auth/login", data={"username": email, "password": password.reveal()})
+        assert r.status_code == 429 and int(r.headers["Retry-After"]) >= 1, (r.status_code, r.headers)
+    other_email, other_password = _another(root, tenant)
+    with _sign_in(settings, other_email, other_password)[0]:
+        pass
+
+
+def test_a_refresh_token_reused_after_the_grace_ends_its_session(settings, account):
+    """ADR-0004 dec 2: presented again at once (another tab), the rotated token gets the successor;
+    presented again after the grace, it ends the session for every holder."""
+    edge, pair = _sign_in(settings, *account)
+    with edge:
+        rotated = edge.client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+        assert rotated.status_code == 200, rotated.text[:200]
+        again = edge.client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+        assert again.status_code == 200 and again.json()["refresh_token"] == rotated.json()["refresh_token"]
+        edge.client.cookies.clear()
+        time.sleep(11)  # past the grace (ROTATION_GRACE_SECONDS, 10 s)
+        reused = edge.client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+        assert reused.status_code == 401, reused.text[:200]
+        edge.client.cookies.clear()
+        assert edge.client.post("/auth/refresh", json={"refresh_token": rotated.json()["refresh_token"]}).status_code == 401
+        assert [_status(edge, rotated.json()["access_token"], p) for p in PROBES] == [401, 401]
+
+
+def _another(root, tenant):
+    email = f"e2e-{tenant['run']}-other-{uuid.uuid4().hex[:6]}@example.com"
+    password = Secret(f"E2e-{uuid.uuid4().hex}")
+    root.post("/api/users", json={"email": email, "password": password.reveal(), "role": "engineer",
+                                  "company_id": tenant["company_id"]})
+    return email, password

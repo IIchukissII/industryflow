@@ -22,6 +22,9 @@ from typing import Optional
 ENDED_SESSION_PREFIX = "session-ended:"
 # When all of a user's sessions were last ended (epoch seconds).
 USER_ENDED_PREFIX = "sessions-ended-at:"
+# What a claimed refresh token was rotated into (JSON naming its user as ``uid``), kept for the
+# token's lifetime so that presenting it again can be told apart: a concurrent refresh, or a reuse.
+ROTATED_REFRESH_PREFIX = "refresh-rotated:"
 
 # How far the clocks of the gateway's replicas may disagree: a token issued this long after an end of
 # all the user's sessions still counts as issued before it.

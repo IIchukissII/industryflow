@@ -37,6 +37,14 @@ settings = get_settings()
 
 _PREFIX = "refresh:"
 _USER_PREFIX = "refresh-user:"
+# What a claimed refresh token was rotated into, kept for the token's own lifetime (ADR-0004 dec 2).
+_ROTATED_PREFIX = sessions.ROTATED_REFRESH_PREFIX
+# A second presentation this soon after the rotation is a concurrent refresh (another tab of the same
+# browser), answered with the successor already issued; later, it is a reuse and ends the session.
+ROTATION_GRACE_SECONDS = 10
+# How long a concurrent refresh waits for the rotation it raced to record itself, and its successor.
+_RECORD_WAIT_SECONDS = 0.5
+_SUCCESSOR_WAIT_SECONDS = 2.0
 
 
 @dataclass(frozen=True)
@@ -113,7 +121,90 @@ async def claim_refresh_token(token: str) -> Optional[RefreshClaim]:
         # Pre-fingerprint tokens held only a user id: they cannot prove the password is unchanged.
         return None
     await redis_client.redis.srem(_user_key(claim.user_id), token)
+    await redis_client.redis.set(_ROTATED_PREFIX + token, json.dumps(
+        {"uid": claim.user_id, "cred": claim.credential, "sid": claim.session_id, "at": time.time(),
+         "successor": None}), ex=_ttl())
     return claim
+
+
+async def record_successor(token: str, successor: str) -> None:
+    """The refresh token a claimed one was rotated into, for a concurrent refresh to be given."""
+    key = _ROTATED_PREFIX + token
+    raw = await redis_client.redis.get(key)
+    if raw is None:
+        return
+    record = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+    record["successor"] = successor
+    await redis_client.redis.set(key, json.dumps(record), ex=_ttl())
+
+
+@dataclass(frozen=True)
+class Replay:
+    """What presenting an already-claimed refresh token again means.
+
+    ``successor``: within the grace, the token it was rotated into (still live), for its session.
+    ``reused``: after the grace; its session has been ended. ``unknown``: never issued, expired, or
+    a concurrent refresh whose rotation produced nothing to share."""
+    kind: str
+    claim: Optional[RefreshClaim] = None
+    successor: Optional[str] = None
+
+
+async def _rotation(token: str) -> Optional[dict]:
+    raw = await redis_client.redis.get(_ROTATED_PREFIX + token)
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+    except ValueError:
+        return None
+
+
+async def replay(token: str) -> Replay:
+    """Answer a refresh token that could not be claimed (ADR-0004 dec 2): a concurrent refresh
+    within the grace gets the successor; a reuse after it ends the session it belonged to, its live
+    refresh token and its access tokens."""
+    import asyncio
+
+    record = await _rotation(token)
+    # The claim and its record are two writes: a refresh racing the claim may arrive between them.
+    deadline = time.monotonic() + _RECORD_WAIT_SECONDS
+    while record is None and time.monotonic() < deadline:
+        await asyncio.sleep(0.1)
+        record = await _rotation(token)
+    if record is None:
+        return Replay("unknown")
+    claim = RefreshClaim(user_id=str(record["uid"]), credential=str(record.get("cred", "")),
+                         session_id=record.get("sid"))
+    if time.time() - float(record.get("at", 0)) > ROTATION_GRACE_SECONDS:
+        await _end_reused_session(claim)
+        return Replay("reused", claim)
+    deadline = time.monotonic() + _SUCCESSOR_WAIT_SECONDS
+    while not record.get("successor") and time.monotonic() < deadline:
+        await asyncio.sleep(0.1)
+        record = await _rotation(token) or record
+    successor = record.get("successor")
+    if successor and await redis_client.redis.get(_key(successor)) is not None:
+        return Replay("successor", claim, successor)
+    return Replay("unknown")
+
+
+async def _end_reused_session(claim: RefreshClaim) -> None:
+    """A rotated refresh token came back after the grace: whoever holds it, the session is no
+    longer the user's alone. End it: its live refresh token, and (by the record) its access tokens."""
+    if not claim.session_id:
+        return
+    await _record_session_ended(claim.session_id)
+    index = _user_key(claim.user_id)
+    for t in await redis_client.redis.smembers(index):
+        t = t.decode() if isinstance(t, bytes) else t
+        raw = await redis_client.redis.get(_key(t))
+        if raw is None:
+            continue
+        _, sid = _owner(raw.decode() if isinstance(raw, bytes) else raw)
+        if sid == claim.session_id:
+            await redis_client.redis.getdel(_key(t))
+            await redis_client.redis.srem(index, t)
 
 
 async def revoke_refresh_token(token: str) -> Optional[str]:

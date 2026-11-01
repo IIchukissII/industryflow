@@ -50,6 +50,14 @@ def _bound_to(raw, company_id: str) -> bool:
     return isinstance(record, dict) and str(record.get("company_id", "")).lower() == company_id
 
 
+def _names_user(raw, users: set) -> bool:
+    try:
+        record = json.loads(_s(raw))
+    except (TypeError, ValueError):
+        return False
+    return isinstance(record, dict) and str(record.get("uid", "")) in users
+
+
 def _entry_facts(raw) -> dict:
     """What a handle's entry says that a record may carry: user, tenant, audience and the handle's
     non-secret identifier, each only when well-formed — never the handle (ADR-0042 dec 2)."""
@@ -98,16 +106,21 @@ class CapabilityStore:
             refresh_index = f"{_REFRESH_USER_PREFIX}{user}"
             sessions.extend(f"{_REFRESH_PREFIX}{_s(t)}" for t in self._redis.smembers(refresh_index))
             indexes += [index, upload, refresh_index, session_record.user_ended_key(user)]
+        # The record of each rotated refresh token of these users (ADR-0004 dec 2): it names its user.
+        users = {str(u) for u in user_ids}
+        rotations = [_s(k) for k in self._redis.scan_iter(match=f"{session_record.ROTATED_REFRESH_PREFIX}*", count=500)
+                     if _names_user(self._redis.get(k), users)]
         features = [_s(k) for k in self._redis.scan_iter(match=f"{_FEATURES_PREFIX}{company_id}:*", count=500)]
         latest = self._matching(f"{_LATEST_PREFIX}*", company_id)
         for key in sorted(handles):
             self._revoke(key, company_id)
-        keys = sessions + indexes + features + latest
+        keys = sessions + indexes + rotations + features + latest
         for start in range(0, len(keys), 500):
             self._redis.delete(*keys[start:start + 500])
         # A lost marker would let a verifier honour a stray handle of the tenant: put it back.
         self._redis.set(f"{_SUSPENDED_PREFIX}{company_id}", "1")
         return Removal(detail={"handles": len(handles), "sessions": len(sessions), "user_indexes": len(indexes),
+                               "refresh_rotations": len(rotations),
                                "feature_snapshots": len(features), "latest_readings": len(latest)})
 
     def _revoke(self, key: str, company_id: str) -> None:

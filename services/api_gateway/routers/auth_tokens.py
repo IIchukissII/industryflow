@@ -99,8 +99,18 @@ async def refresh(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
     # Single use: the token is consumed here whatever happens next.
     claim = await refresh_tokens.claim_refresh_token(token)
+    successor = None
     if claim is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+        # Already claimed: a concurrent refresh is given the successor; a later reuse ends the
+        # session it belonged to (ADR-0004 dec 2).
+        replayed = await refresh_tokens.replay(token)
+        if replayed.kind == "reused":
+            await revoke_user_capabilities(redis_client.redis, replayed.claim.user_id)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="Refresh token reused; its session has ended")
+        if replayed.kind != "successor":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+        claim, successor = replayed.claim, replayed.successor
     try:
         user = await user_manager.get(uuid.UUID(claim.user_id))
     except (UserNotExists, ValueError):
@@ -119,7 +129,11 @@ async def refresh(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
     # The rotation continues the session; a token from before sessions had ids starts one.
     session_id = claim.session_id or refresh_tokens.new_session_id()
-    new_refresh = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, session_id)
+    if successor is None:
+        new_refresh = await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, session_id)
+        await refresh_tokens.record_successor(token, new_refresh)
+    else:
+        new_refresh = successor
     access = await get_jwt_strategy().write_token(user, session_id)
     _set_auth_cookies(response, access, new_refresh)
     return TokenPair(access_token=access, refresh_token=new_refresh)
