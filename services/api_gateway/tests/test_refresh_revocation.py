@@ -535,7 +535,6 @@ async def test_a_timer_that_wakes_early_does_not_yield_a_dead_token(redis, monke
     """asyncio may wake a sleep slightly early; the token minted then would name the second before
     the allowance ends and be refused for its whole life (seen on the box, 1 in 5)."""
     import asyncio
-    import time as clock
 
     real_sleep = asyncio.sleep
 
