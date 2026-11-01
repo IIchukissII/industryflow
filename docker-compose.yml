@@ -1421,8 +1421,8 @@ services:
       S3_PREFIX: ${BACKUP_S3_PREFIX:-timescaledb}
       DATABASES: ${BACKUP_DATABASES:-industryflow mlflow}
       RETAIN_PER_DB: ${BACKUP_RETAIN_PER_DB:-14}
-      # Object mirrors (ADR-0032 dec 4, 8): the cold bucket holds the only copy of raw history older
-      # than the export horizon, the artifact bucket the only copy of every model. Both are read with
+      # Object mirrors (ADR-0032 dec 4, ADR-0038 dec 1): the cold bucket holds the only copy of raw
+      # history older than the export horizon, the artifact bucket the only copy of every model. Both are read with
       # the backup's own read-only principal (minio-init.sh backup-read); the backup principal above
       # cannot read either.
       SOURCE_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}

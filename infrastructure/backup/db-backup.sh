@@ -21,7 +21,7 @@
 # <COLD_BACKUP_PREFIX>/_absent.tsv.
 #
 # Model artifacts (the tracking artifact bucket) are mirrored the same way, under their own prefix
-# (ADR-0032 dec 8): they exist nowhere else either. The upload staging area is left out; it holds
+# (ADR-0038 dec 1): they exist nowhere else either. The upload staging area is left out; it holds
 # unadmitted bytes that expire on their own (ADR-0030 dec 10). Both sources are read with one
 # read-only backup principal that no other workload holds (ADR-0032 dec 5).
 #
