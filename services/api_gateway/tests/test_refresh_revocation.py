@@ -527,3 +527,25 @@ async def test_a_refresh_racing_the_claim_waits_for_its_record(redis, monkeypatc
 
     replayed, _ = await asyncio.gather(refresh_tokens.replay(t), record_late())
     assert replayed.kind == "successor"
+
+
+
+@pytest.mark.asyncio
+async def test_a_timer_that_wakes_early_does_not_yield_a_dead_token(redis, monkeypatch):
+    """asyncio may wake a sleep slightly early; the token minted then would name the second before
+    the allowance ends and be refused for its whole life (seen on the box, 1 in 5)."""
+    import asyncio
+    import time as clock
+
+    real_sleep = asyncio.sleep
+
+    async def early(seconds):
+        await real_sleep(max(0.0, seconds - 0.05))
+
+    monkeypatch.setattr(asyncio, "sleep", early)
+    user = _account()
+    strategy = users.get_jwt_strategy()
+    await refresh_tokens.end_all_sessions(str(user.id))
+    token = await strategy.write_token(user, "sid-early")
+    monkeypatch.setattr(asyncio, "sleep", real_sleep)
+    assert await strategy.read_token(token, _Manager(user)) is user

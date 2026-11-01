@@ -279,11 +279,14 @@ async def wait_out_an_end(user_id: str) -> float:
         return 0.0
     # Issue times are whole seconds: the first one after the allowance.
     ready = math.floor(ended + sessions.CLOCK_SKEW_SECONDS) + 1
-    delay = ready - time.time()
-    if 0 < delay <= sessions.CLOCK_SKEW_SECONDS + 1:
-        await asyncio.sleep(delay)
-        return delay
-    return 0.0
+    started = time.time()
+    if not 0 < ready - started <= sessions.CLOCK_SKEW_SECONDS + 1:
+        return 0.0
+    # The event loop may wake a timer up to its clock resolution early, and a token issued then
+    # would still name the second before: wait on the wall clock the issue time is read from.
+    while time.time() < ready:
+        await asyncio.sleep(ready - time.time() + 0.005)
+    return time.time() - started
 
 
 async def end_session(session_id: str) -> None:
