@@ -3,9 +3,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The dashboards at the edge sign on from a platform superuser's session (ADR-0016 dec 7): no session
-goes to the platform's login, a tenant's administrator is refused, the superuser is signed in as an
-editor, and an assertion without the gateway's signature signs no one in, even from inside the
-platform network. Where the deployment has not turned the route on (ADR-0016 dec 6), the journey
+goes to the platform's login and comes back, a tenant's administrator is refused, the superuser is
+signed in as an editor under their platform id, an assertion the client sends is overwritten, a write a
+browser did not send from this origin is refused, and an assertion without the gateway's signature
+signs no one in, even from inside the platform network. Where the deployment has not turned the route on (ADR-0016 dec 6), the journey
 checks that the edge serves no dashboards at all."""
 import json
 
@@ -15,7 +16,8 @@ PROBE = "/grafana/api/user"
 HEADER = "X-IF-Dashboards-Assertion"
 
 # Run inside the gateway's container: it is on the dashboards' network and carries the signing
-# library. argv[1] is the key to sign with ("real" or "forged"); prints the dashboards' status.
+# library. argv[1] is the key to sign with ("real" or "forged"), argv[2] the login; prints the
+# dashboards' status.
 SIGN_AND_ASK = r"""
 import json, sys, time, urllib.error, urllib.request
 from cryptography.hazmat.primitives import serialization
@@ -29,7 +31,7 @@ else:
         serialization.NoEncryption()).decode()
 now = int(time.time())
 token = jwt.encode({"iss": "industryflow-api-gateway", "aud": "industryflow-dashboards",
-                    "sub": sys.argv[2], "email": sys.argv[2], "role": "Editor",
+                    "sub": sys.argv[2], "role": "Editor",
                     "iat": now, "nbf": now, "exp": now + 60}, key, algorithm="ES256")
 req = urllib.request.Request("http://grafana:3000/grafana/api/user", headers={"%s": token})
 try:
@@ -44,9 +46,30 @@ def _routed(edge) -> bool:
     return not (r.status_code == 200 and r.headers.get("content-type", "").startswith("text/html"))
 
 
-def _inside(env, which: str, email: str) -> int:
-    return int(env.run("docker", "exec", "-i", "industryflow-api-gateway", "python", "-", which, email,
+def _inside(env, which: str, login: str) -> int:
+    return int(env.run("docker", "exec", "-i", "industryflow-api-gateway", "python", "-", which, login,
                        input=SIGN_AND_ASK).strip())
+
+
+def _forged_assertion() -> str:
+    """A well-formed ES256 assertion for another login, under a signature no key made."""
+    import base64
+    import os
+    import time
+
+    def part(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+    now = int(time.time())
+    claims = {"iss": "industryflow-api-gateway", "aud": "industryflow-dashboards", "sub": "if-forged",
+              "role": "Editor", "iat": now, "nbf": now, "exp": now + 60}
+    return ".".join([part(json.dumps({"alg": "ES256", "typ": "JWT"}).encode()),
+                     part(json.dumps(claims).encode()), part(os.urandom(64))])
+
+
+@pytest.fixture(scope="module")
+def login(root) -> str:
+    return "if-" + root.get("/users/me").json()["id"]
 
 
 @pytest.fixture(scope="module")
@@ -62,18 +85,22 @@ def test_without_the_route_the_edge_serves_no_dashboards(edge, routed):
     assert "grafana" not in r.text.lower()[:2000]
 
 
-def test_no_session_is_sent_to_the_platform_login(edge, routed):
+def test_no_session_goes_to_the_platform_login_and_back(edge, routed):
     if not routed:
         return
-    r = edge.anonymous(PROBE, follow_redirects=False)
-    assert r.status_code == 302 and r.headers["location"] == "/login", (r.status_code, r.headers)
+    page = edge.anonymous("/grafana/d/x?orgId=1", follow_redirects=False)
+    assert page.status_code == 302 and page.headers["location"] == "/login?next=/grafana/d/x?orgId=1", (
+        page.status_code, page.headers)
+    # The dashboards' own API calls get the 401, so their page reloads through the edge.
+    assert edge.anonymous(PROBE, follow_redirects=False).status_code == 401
 
 
-def test_a_client_supplied_assertion_without_a_session_changes_nothing(edge, routed):
+def test_a_client_supplied_assertion_is_overwritten(root, tenant, login, routed):
     if not routed:
         return
-    r = edge.anonymous(PROBE, headers={HEADER: "eyJhbGciOiJub25lIn0.e30."}, follow_redirects=False)
-    assert r.status_code == 302
+    forged = {HEADER: _forged_assertion()}
+    tenant["admin"].get(PROBE, headers=forged, expect=(403,))
+    assert root.get(PROBE, headers=forged).json()["login"] == login
 
 
 def test_a_tenant_administrator_is_refused(tenant, routed):
@@ -82,20 +109,27 @@ def test_a_tenant_administrator_is_refused(tenant, routed):
     tenant["admin"].get(PROBE, expect=(403,))
 
 
-def test_the_superuser_is_signed_in_as_an_editor(root, settings, routed):
+def test_the_superuser_is_signed_in_as_an_editor_under_their_platform_id(root, login, routed):
     if not routed:
         return
     me = root.get(PROBE).json()
-    assert me["login"] == me["email"] == settings["IF_E2E_SUPERUSER_EMAIL"], me
+    assert me["login"] == login, me
     assert me.get("isGrafanaAdmin") is False, me
     orgs = root.get("/grafana/api/user/orgs").json()
     assert [o["role"] for o in orgs] == ["Editor"], json.dumps(orgs)
 
 
-def test_only_the_gateways_signature_signs_in_from_inside_the_network(env, settings, routed):
+@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+def test_a_write_a_browser_did_not_send_from_this_origin_is_refused(root, routed, site):
     if not routed:
         return
-    email = settings["IF_E2E_SUPERUSER_EMAIL"]
+    root.post("/grafana/api/search/sorting", headers={"Sec-Fetch-Site": site, "Origin": "https://evil.example"},
+              json={}, expect=(403,))
+
+
+def test_only_the_gateways_signature_signs_in_from_inside_the_network(env, login, routed):
+    if not routed:
+        return
     # The positive control from the same place proves the refusal is the signature's, not the route's.
-    assert _inside(env, "real", email) == 200
-    assert _inside(env, "forged", email) == 401
+    assert _inside(env, "real", login) == 200
+    assert _inside(env, "forged", login) == 401

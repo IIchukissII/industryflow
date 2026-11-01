@@ -228,6 +228,8 @@ def test_the_edge_never_routes_the_gateways_internal_paths():
     assert _router_constant("PATH").startswith("/internal/")
     for text in (TEMPLATE, GRAFANA_ROUTE):
         prefixes = re.findall(r"^\s*location\s+(?:=\s+|\^~\s+)?(/[^\s{]*)", text, re.M)
+        regexes = re.findall(r"^\s*location\s+~\*?\s+(\S+)", text, re.M)
+        assert not [x for x in regexes if "internal" in x], regexes
         assert prefixes, "no locations found — the parser is not reading"
         for prefix in prefixes:
             assert not ("/internal/".startswith(prefix) and prefix != "/") and \
@@ -258,6 +260,37 @@ def test_the_dashboards_verify_what_the_gateway_signs():
     assert env["GF_AUTH_JWT_ALLOW_ASSIGN_GRAFANA_ADMIN"] == "false"
     assert env["GF_AUTH_JWT_URL_LOGIN"] == "false"
     assert _router_constant("ROLE") in {"Viewer", "Editor"}
+    # The login is the platform user's id, in a namespace of its own; no e-mail is mapped, because the
+    # dashboards match an e-mail against their existing accounts (the administrator's) first.
+    assert env["GF_AUTH_JWT_USERNAME_CLAIM"] == "sub"
+    assert "GF_AUTH_JWT_EMAIL_CLAIM" not in env and "GF_AUTH_JWT_EMAIL_ATTRIBUTE_PATH" not in env
+    assert '"sub": f"{LOGIN_PREFIX}{user.id}",' in ASSERTION_ROUTER
+    assert '"email"' not in ASSERTION_ROUTER
+
+
+def test_only_requests_the_per_request_check_covers_reach_the_dashboards():
+    # A websocket is checked once, at its upgrade, and then outlives a logout or a demotion.
+    env = _compose_services()["grafana"]["environment"]
+    assert env["GF_LIVE_MAX_CONNECTIONS"] == "0"
+    route = GRAFANA_ROUTE[GRAFANA_ROUTE.index("location /grafana/ {"):]
+    assert "Upgrade" not in route.split("\n}")[0]
+
+
+def test_a_write_a_browser_did_not_send_from_this_origin_is_refused():
+    # The dashboards hold no session, so their own CSRF check never runs; the edge refuses instead.
+    assert 'map "$request_method:$http_sec_fetch_site:$http_origin" $edge_dashboards_foreign_write {' in TEMPLATE
+    m = re.search(r"\$edge_dashboards_foreign_write \{(.*?)\n\}", TEMPLATE, re.S).group(1)
+    assert re.search(r"^\s*default\s+1;", m, re.M)
+    route = GRAFANA_ROUTE[GRAFANA_ROUTE.index("location /grafana/ {"):]
+    check = route.index("if ($edge_dashboards_foreign_write) {\n        return 403;")
+    assert check < route.index("auth_request /_dashboards_assertion;")
+    assert _compose_services()["grafana"]["environment"]["GF_SECURITY_CSRF_ALWAYS_CHECK"] == "true"
+
+
+def test_a_visitor_without_a_session_comes_back_to_the_dashboards():
+    assert "return 302 /login?next=$request_uri;" in GRAFANA_ROUTE
+    returns = (ROOT / "services" / "frontend" / "src" / "services" / "returnPath.js").read_text()
+    assert "/^\\/grafana\\/" in returns
 
 
 def test_the_signing_key_reaches_the_gateway_and_only_its_public_half_the_dashboards():
@@ -272,6 +305,12 @@ def test_the_signing_key_reaches_the_gateway_and_only_its_public_half_the_dashbo
     public = grafana["environment"]["GF_AUTH_JWT_KEY_FILE"]
     assert any(v.startswith(f"{verify}:") and public.startswith(v.split(":")[1] + "/")
                and v.endswith(":ro") for v in grafana["volumes"])
+    assert init["image"] == gateway["image"] and init["build"] == gateway["build"]
+    assert init["network_mode"] == "none"
+    assert init["command"][:2] == ["python", "dashboards_key.py"]
+    assert init["command"][-1] == "10001"
+    gateway_dockerfile = (ROOT / "services" / "api_gateway" / "Dockerfile").read_text()
+    assert "USER 10001" in gateway_dockerfile and "COPY . ." in gateway_dockerfile
     holders = [name for name, svc in services.items() if signing in _volume_names(svc)]
     assert sorted(holders) == ["api-gateway", "dashboards-key-init"], holders
     for name in ("api-gateway", "grafana"):

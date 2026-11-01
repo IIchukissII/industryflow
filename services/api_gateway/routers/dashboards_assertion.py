@@ -38,6 +38,10 @@ AUDIENCE = "industryflow-dashboards"
 LIFETIME_SECONDS = 60
 # Reading and exploring every service's metrics and logs; never the dashboards' administrator.
 ROLE = "Editor"
+# The dashboards' login for a platform user: stable across e-mail changes, and in a namespace no
+# account the dashboards hold on their own can be in. The assertion carries no e-mail, because the
+# dashboards match an e-mail against existing accounts first, their administrator's included.
+LOGIN_PREFIX = "if-"
 ALGORITHM = "ES256"
 
 router = APIRouter(tags=["Auth"])
@@ -73,8 +77,7 @@ async def dashboards_assertion(user: User = Depends(require_superuser)) -> Respo
     claims = {
         "iss": ISSUER,
         "aud": AUDIENCE,
-        "sub": user.email,
-        "email": user.email,
+        "sub": f"{LOGIN_PREFIX}{user.id}",
         "role": ROLE,
         "iat": now,
         "nbf": now,

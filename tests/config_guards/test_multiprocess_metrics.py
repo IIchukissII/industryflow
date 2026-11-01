@@ -44,8 +44,12 @@ def test_every_metrics_service_aggregates_its_workers():
 
 
 def test_compose_keeps_the_image_command():
+    # Every service that serves from the image; a one-shot that runs another program from it (the
+    # dashboards' key, ADR-0016 dec 7) serves no metrics and starts no server.
     builds = {s: c for s, c in COMPOSE["services"].items()
-              if isinstance(c.get("build"), dict) and c["build"].get("dockerfile")}
+              if isinstance(c.get("build"), dict) and c["build"].get("dockerfile")
+              and c.get("restart") != "no"}
+    assert len(builds) >= 5, builds
     for d in METRICS_SERVICES:
         dockerfile = str((d / "Dockerfile").relative_to(ROOT))
         for name, svc in builds.items():

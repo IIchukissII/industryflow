@@ -43,13 +43,15 @@ async def test_assertion_verifies_as_the_dashboards_verify_it(tmp_path, monkeypa
     path, public = _keypair(tmp_path)
     monkeypatch.setenv("DASHBOARDS_SIGNING_KEY_FILE", str(path))
 
-    resp = await da.dashboards_assertion(user=_superuser())
+    user = _superuser()
+    resp = await da.dashboards_assertion(user=user)
 
     assert resp.status_code == 204
     assert resp.headers["Cache-Control"] == "no-store"
     claims = jwt.decode(resp.headers[da.ASSERTION_HEADER], public, algorithms=["ES256"],
                         audience=da.AUDIENCE, issuer=da.ISSUER)
-    assert claims["sub"] == claims["email"] == "ops@example.test"
+    assert claims["sub"] == f"if-{user.id}"
+    assert "email" not in claims  # the dashboards would match it against their own accounts first
     assert claims["role"] == "Editor"
     assert claims["exp"] - claims["iat"] == da.LIFETIME_SECONDS
 

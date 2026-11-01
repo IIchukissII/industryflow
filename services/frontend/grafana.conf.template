@@ -23,10 +23,15 @@ location = /_dashboards_assertion {
 location /grafana/ {
     # The source addresses allowed when the deployment names them (EDGE_GRAFANA_ALLOW); empty: any.
 ${EDGE_GRAFANA_ACCESS}
+    if ($edge_dashboards_foreign_write) {
+        return 403;
+    }
     auth_request /_dashboards_assertion;
     auth_request_set $if_dashboards_assertion $upstream_http_x_if_dashboards_assertion;
     proxy_set_header X-IF-Dashboards-Assertion $if_dashboards_assertion;
-    # The platform session is the only sign-on here: no session goes to the platform's login.
+    # The platform session is the only sign-on here. Without one, a page load goes to the platform's
+    # login, which brings the visitor back here (services/frontend/src/services/returnPath.js); the
+    # dashboards' own API calls get the 401, so their page reloads through this route.
     error_page 401 = @dashboards_login;
 
     set $grafana ${EDGE_GRAFANA};
@@ -36,11 +41,11 @@ ${EDGE_GRAFANA_ACCESS}
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto https;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_read_timeout 3600s;
 }
 
 location @dashboards_login {
-    return 302 /login;
+    if ($uri ~ ^/grafana/api/) {
+        return 401;
+    }
+    return 302 /login?next=$request_uri;
 }

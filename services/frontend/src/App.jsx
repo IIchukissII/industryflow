@@ -2,11 +2,12 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useState, lazy, Suspense } from 'react';
+import { useCallback, useEffect, useState, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import './App.css';
 import AppShell from './components/AppShell';
 import Core from './pages/Core';
+import { returnPath, resume } from './services/returnPath';
 
 // Route pages are code-split: each becomes its own chunk, loaded on demand, so the initial
 // bundle is the shell and Core rather than one big blob.
@@ -23,6 +24,15 @@ const Login = lazy(() => import('./pages/Login'));
 
 function PageFallback() {
   return <div className="app-fallback"><span className="sdot pending" /> Loading…</div>;
+}
+
+// Signed in here, but the dashboards' edge found no live access cookie: refresh it and go back; if the
+// session cannot be refreshed, it is over and the login form takes the visitor back instead.
+function ResumeDashboards({ next, onExpired }) {
+  useEffect(() => {
+    resume(next).catch(onExpired);
+  }, [next, onExpired]);
+  return <PageFallback />;
 }
 
 function ProtectedRoute({ children, user }) {
@@ -46,12 +56,20 @@ function App() {
     setUser(userData);
   };
 
+  const handleExpired = useCallback(() => {
+    localStorage.removeItem('user');
+    setUser(null);
+  }, []);
+  const next = returnPath(window.location.search);
+
   return (
     <Router>
       <Suspense fallback={<PageFallback />}>
       <Routes>
         <Route path="/login" element={
-          user ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />
+          user
+            ? (next ? <ResumeDashboards next={next} onExpired={handleExpired} /> : <Navigate to="/" replace />)
+            : <Login onLogin={handleLogin} />
         } />
         <Route path="/" element={
           <ProtectedRoute user={user}>
