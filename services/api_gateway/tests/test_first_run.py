@@ -251,3 +251,33 @@ def test_the_default_address_passes_the_apis_own_validation():
 def test_an_address_the_api_would_refuse_is_refused_up_front(address):
     with pytest.raises(ValueError, match="PLATFORM_ADMIN_EMAIL"):
         first_run.checked_email(address)
+
+
+
+def test_a_refused_password_answers_400_with_its_reason_not_500(store):
+    """validate_password's refusal escaped the self-update route as a 500. Found by compose-smoke."""
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    import main
+    from users import get_user_manager
+
+    user = _held()
+    user.company_id = uuid.uuid4()
+    user.is_superuser, user.is_verified = True, False
+
+    class Manager(_Manager):
+        async def update(self, update, target, safe=False, request=None):
+            raise InvalidPasswordException(reason="Choose a password other than the current one")
+
+    main.app.dependency_overrides[get_user_manager] = lambda: Manager(user)
+    try:
+        token = asyncio.run(users.get_jwt_strategy().write_token(user, "sid-patch"))
+        r = TestClient(main.app, raise_server_exceptions=False).patch(
+            "/users/me", headers={"Authorization": f"Bearer {token}"}, json={"password": "industryflow"})
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"] == {"code": "UPDATE_USER_INVALID_PASSWORD",
+                                      "reason": "Choose a password other than the current one"}
+    finally:
+        main.app.dependency_overrides.clear()
