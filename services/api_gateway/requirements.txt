@@ -10,7 +10,7 @@ uvicorn[standard]==0.54.0
 asyncpg==0.32.0
 sqlalchemy[asyncio]==2.0.55
 pydantic==2.14.1
-pydantic-settings==2.16.1
+pydantic-settings==2.16.2
 redis==8.1.0
 
 # FastAPI Users - Authentication
@@ -20,7 +20,7 @@ PyJWT[crypto]==2.15.1
 python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 
-aiokafka==0.14.0
+aiokafka==0.15.0
 python-snappy==0.7.3
 
 # Prometheus metrics
