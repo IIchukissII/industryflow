@@ -43,8 +43,9 @@ not leave the tenant-isolated path.
    gateway signs for them alone.** The superuser is the platform's one cross-tenant authority (ADR-0043
    dec 1), the operator who may read every service's logs; any other session is refused at the edge.
    The dashboards accept an identity only under that signature, short-lived and addressed to them,
-   never from a header that network position vouches for; the role it confers is below the dashboards'
-   own administrator, whose login stays on the loopback.
+   never from a header that network position vouches for; it names the platform user by a stable id, and
+   the role it confers is below the dashboards' own administrator, whose login stays on the loopback. A
+   write reaches them only from this origin.
 
 ## Alternatives
 
@@ -69,6 +70,8 @@ not leave the tenant-isolated path.
 | 7 | The dashboards on a network only the edge reaches | Ties trust to addresses fixed in the deployment, and the loopback port would still honour the header |
 | 7 | Any authenticated platform user | A tenant's authority ends at its tenant (ADR-0004 dec 5); the dashboards show every service |
 | 7 | The superuser as the dashboards' administrator | A stolen session would also rewrite data sources and users; operating needs reading and exploring only |
+| 7 | The assertion naming the user by e-mail | The dashboards match an e-mail against their own accounts first, their administrator's included, and an e-mail can change hands |
+| 7 | A write accepted on the session alone | The dashboards hold no session of their own, so their forgery check never runs; a same-site page could write as the superuser |
 | 7 | An assertion handed to the browser | A token the page can read outlives the request it was minted for; the edge asks for it per request and forwards it |
 
 ## Consequences
