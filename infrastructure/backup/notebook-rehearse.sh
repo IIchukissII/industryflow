@@ -60,6 +60,8 @@ rehearse_main() {
   # Nothing restored proves nothing (a deployment without notebooks, or a wrong prefix): no success
   # time is written.
   if [ "$n" -eq 0 ]; then
+    # A success time from when archives existed would raise a stale alert with nothing to fix.
+    [ -z "${METRICS_TEXTFILE_DIR:-}" ] || rm -f "${METRICS_TEXTFILE_DIR}/notebook-rehearse.prom"
     log "no notebook archive under s3://${S3_BUCKET}/${PREFIX}/; nothing rehearsed"; return 0
   fi
   write_metric notebook-rehearse \

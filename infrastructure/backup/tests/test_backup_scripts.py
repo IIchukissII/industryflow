@@ -555,15 +555,30 @@ def test_a_restore_that_differs_from_the_backup_fails_and_still_drops_scratch(en
     assert list(metrics.iterdir()) == []
 
 
-def test_empty_tables_the_dump_lacks_and_timescaledb_s_own_catalog_are_not_compared(env):
+def test_empty_tables_the_dump_lacks_and_timescaledb_s_scheduler_tables_are_not_compared(env):
     _backed_up(env)
-    dumped = (DUMP_DATA + _copy("_timescaledb_catalog.hypertable", "1\th")
+    dumped = (DUMP_DATA + _copy("_timescaledb_catalog.chunk", "1\tc") + _copy("_timescaledb_catalog.metadata", "u")
               + _copy("_timescaledb_config.bgw_job", "1000\tj"))
-    restored = (DUMP_DATA + _copy("public.empty_parent") + _copy("_timescaledb_catalog.hypertable", "1\th", "2\th")
-                + _copy("_timescaledb_internal.bgw_job_stat", "1\ts"))
+    restored = (DUMP_DATA + _copy("public.empty_parent") + _copy("_timescaledb_catalog.chunk", "1\tc")
+                + _copy("_timescaledb_catalog.metadata", "u", "v") + _copy("_timescaledb_internal.bgw_job_stat", "1\ts"))
     r = _rehearse(env, FAKE_DUMP_DATA=dumped, FAKE_RESTORED_DATA=restored)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "2 tables match the rows the backup holds" in r.stdout
+    assert "3 tables match the rows the backup holds" in r.stdout
+
+
+def test_a_restore_that_lost_chunk_metadata_fails(env):
+    _backed_up(env)
+    dumped = DUMP_DATA + _copy("_timescaledb_catalog.dimension_slice", "1\ts", "2\ts")
+    restored = DUMP_DATA + _copy("_timescaledb_catalog.dimension_slice", "1\ts")
+    r = _rehearse(env, FAKE_DUMP_DATA=dumped, FAKE_RESTORED_DATA=restored)
+    assert r.returncode == 1
+    assert "differs: _timescaledb_catalog.dimension_slice (2 dumped, 1 restored)" in r.stdout
+
+
+def test_a_target_that_cannot_be_listed_fails_with_a_line(env):
+    r = _rehearse(env, FAKE_S3_FAIL_LIST="1")
+    assert r.returncode == 1
+    assert "the backup target could not be listed" in r.stdout
 
 
 def test_a_dump_that_cannot_be_read_fails_the_rehearsal_before_restoring(env):
@@ -574,11 +589,14 @@ def test_a_dump_that_cannot_be_read_fails_the_rehearsal_before_restoring(env):
     assert "CREATE DATABASE" not in (env["psql"].read_text() if env["psql"].exists() else "")
 
 
-def test_a_dump_holding_no_table_fails_the_rehearsal(env):
+def test_a_dump_holding_no_table_is_rehearsed_and_says_so(env):
     _backed_up(env)
-    r = _rehearse(env, FAKE_DUMP_DATA="")
-    assert r.returncode == 1
-    assert "holds no table" in r.stdout
+    r = _rehearse(env, FAKE_DUMP_DATA="", FAKE_RESTORED_DATA="")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "holds no table data" in r.stdout and 'CREATE DATABASE "industryflow_rehearsal"' in env["psql"].read_text()
+    # Rows the empty backup never held still fail.
+    r = _rehearse(env, FAKE_DUMP_DATA="", FAKE_RESTORED_DATA=_copy("public.x", "1"))
+    assert r.returncode == 1 and "not in the backup: public.x (1 rows)" in r.stdout
 
 
 def test_no_backup_fails_the_rehearsal(env):

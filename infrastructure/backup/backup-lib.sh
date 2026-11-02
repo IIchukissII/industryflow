@@ -21,10 +21,15 @@ copy_rows() {
     }'
 }
 
-# compared_tables — keeps the lines of a row listing that a rehearsal compares: TimescaleDB's own
-# catalog and configuration change after a restore (its scheduler records its jobs), its chunks do not.
+# compared_tables — keeps the lines of a row listing that a rehearsal compares. Of TimescaleDB's own
+# tables, the structure a restore must bring back (hypertables, chunks and their slices, constraints,
+# continuous aggregates) and the chunks are compared; what its scheduler writes after a restore (job
+# statistics, telemetry, metadata) and its job configuration are not.
 compared_tables() {
-  awk -F'\t' '$1 ~ /^_timescaledb_(catalog|config)\./ { next }
+  awk -F'\t' '$1 ~ /^_timescaledb_catalog\./ {
+                 if ($1 !~ /\.(hypertable|chunk|dimension|dimension_slice|chunk_constraint|continuous_agg)$/) next
+               }
+               $1 ~ /^_timescaledb_config\./ { next }
                $1 ~ /^_timescaledb_internal\./ && $1 !~ /_chunk"?$/ { next }
                { print }' | sort
 }

@@ -183,7 +183,7 @@ job variable named in *Meaning*.
 | Notebook archives | `docker compose --profile backup run --rm --no-deps notebook-backup` (after `db-backup` has built the image) |
 | Without the cold or model mirror | `docker compose run --rm --no-deps -e COLD_SOURCE_BUCKET= -e MODEL_SOURCE_BUCKET= db-backup` |
 | Daily from host cron | `0 2 * * *  cd <install-dir> && docker compose run --rm --no-deps db-backup && docker compose --profile backup run --rm --no-deps notebook-backup` |
-| Weekly rehearsal from host cron | `0 4 * * 0  cd <install-dir> && docker compose --profile backup run --rm --no-deps restore-rehearsal && docker compose --profile backup run --rm --no-deps notebook-rehearsal` |
+| Weekly rehearsal from host cron | `0 4 * * 0  cd <install-dir> && { docker compose --profile backup run --rm --no-deps restore-rehearsal; docker compose --profile backup run --rm --no-deps notebook-rehearsal; }` |
 
 Each job writes its success time to the `backup-metrics` volume, which node-exporter exposes;
 `IndustryFlowBackupStale` and `IndustryFlowRestoreRehearsalStale` fire when they stop,
@@ -205,9 +205,9 @@ dec 6). Compose: services `restore-rehearsal` and `notebook-rehearsal`; Helm: Cr
 
 | Step | `db-rehearse.sh` |
 |---|---|
-| 1 | Per database, the newest dump's rows are counted per table from the dump itself (`pg_restore -a`, the lines of each COPY block); a dump holding no table fails |
+| 1 | Per database, the newest dump's rows are counted per table from the dump itself (`pg_restore -a`, the lines of each COPY block) |
 | 2 | The dump is restored by `db-restore.sh --hold-jobs` into `<db>_rehearsal` on `PGHOST`, the restored TimescaleDB policies unscheduled, and read back the same way (`pg_dump -a`) |
-| 3 | Every table must match: a dumped table missing or with another count fails, as does a restored table with rows the dump does not hold. Compared per physical table (chunks and compressed chunks included); TimescaleDB's own catalog and configuration, which its scheduler writes to, are not |
+| 3 | Every table must match: a dumped table missing or with another count fails, as does a restored table with rows the dump does not hold. Compared per physical table (chunks and compressed chunks included) and TimescaleDB's structural catalog (hypertables, chunks, dimensions and slices, chunk constraints, continuous aggregates); what its scheduler writes after a restore and its job configuration are not |
 | 4 | The scratch database is dropped, also after a failure |
 | 5 | Per object mirror: an object held by both at different sizes fails; `REHEARSAL_OBJECT_SAMPLE` objects held at the same size are read from both and compared by SHA-256; a mirror holding none of a non-empty source fails. Cold manifests (rewritten in place) are neither compared nor sampled |
 | 6 | On a pass: `industryflow_restore_rehearsal_last_success_timestamp_seconds{backup="databases"}` and `industryflow_restore_rehearsal_duration_seconds{database}` |

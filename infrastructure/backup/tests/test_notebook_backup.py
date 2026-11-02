@@ -200,6 +200,7 @@ def test_a_scratch_prefix_naming_a_work_volume_is_refused(env, prefix):
 def test_no_archives_passes_without_claiming_a_rehearsal(env, tmp_path):
     metrics = tmp_path / "metrics"
     metrics.mkdir()
+    (metrics / "notebook-rehearse.prom").write_text("old\n")  # from when archives existed
     r = _rehearse(env, METRICS_TEXTFILE_DIR=str(metrics))
     assert r.returncode == 0, r.stdout + r.stderr
     assert "nothing rehearsed" in r.stdout

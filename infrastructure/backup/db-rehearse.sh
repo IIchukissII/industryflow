@@ -32,16 +32,20 @@ log() { echo "[db-rehearse $(date -u +%H:%M:%S)] $*"; }
 FAILED=0
 RESTORE_SECONDS=()
 
-# The newest dump's stamp of <database>, or nothing.
+# The newest dump's stamp of <database>, or nothing; fails when the target cannot be listed.
 latest_stamp() {
-  aws "${AWS_ARGS[@]}" s3api list-objects-v2 --bucket "$S3_BUCKET" --prefix "${S3_PREFIX}/${1}/" \
-      --query 'Contents[].Key' --output text \
-    | tr '\t' '\n' | { grep '\.dump$' || true; } | sort | tail -n 1 | sed 's|.*/||; s|\.dump$||'
+  local keys
+  keys="$(aws "${AWS_ARGS[@]}" s3api list-objects-v2 --bucket "$S3_BUCKET" --prefix "${S3_PREFIX}/${1}/" \
+            --query 'Contents[].Key' --output text)" || return 1
+  printf '%s\n' "$keys" | tr '\t' '\n' | { grep '\.dump$' || true; } | sort | tail -n 1 \
+    | sed 's|.*/||; s|\.dump$||'
 }
 
 rehearse_database() {
   local db="$1" target="${1}${REHEARSAL_SUFFIX}" stamp started took
-  stamp="$(latest_stamp "$db")"
+  if ! stamp="$(latest_stamp "$db")"; then
+    log "${db}: FAILED, the backup target could not be listed"; FAILED=1; return
+  fi
   if [ -z "$stamp" ]; then
     log "${db}: FAILED, no backup to rehearse"; FAILED=1; return
   fi
@@ -53,9 +57,9 @@ rehearse_database() {
   fi
   rm -f "${WORKDIR}/${db}.dump"
   compared_tables < "${WORKDIR}/${db}.dumped.all" > "${WORKDIR}/${db}.dumped"
-  if ! [ -s "${WORKDIR}/${db}.dumped" ]; then
-    log "${db}: FAILED, backup ${stamp} holds no table"; FAILED=1; return
-  fi
+  # An empty database (a tracking server that never started) dumps no table; its restore is still
+  # rehearsed, and any table with rows in the copy still fails.
+  [ -s "${WORKDIR}/${db}.dumped" ] || log "${db}: backup ${stamp} holds no table data"
 
   log "${db}: restoring backup ${stamp} into '${target}'"
   started="$(date -u +%s)"
