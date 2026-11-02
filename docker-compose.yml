@@ -1526,8 +1526,8 @@ services:
     restart: "no"
 
   # Restore rehearsal (ADR-0032 dec 6): restores the latest dumps into scratch databases
-  # (<db>_rehearsal, on the same server), compares every table's rows with the counts taken in the
-  # dump's snapshot, drops them, and reads a sample of the mirrored objects back. Weekly, like
+  # (<db>_rehearsal, on the same server), compares every table's rows with the rows the dump holds,
+  # drops them, and reads a sample of the mirrored objects back. Weekly, like
   # db-backup from a host cron: docs/operations/backup-and-recovery.md#restore-rehearsal.
   #   one-off:   docker compose --profile backup run --rm --no-deps restore-rehearsal
   restore-rehearsal:

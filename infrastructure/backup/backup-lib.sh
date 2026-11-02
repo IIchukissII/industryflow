@@ -5,17 +5,29 @@
 
 # Shared by the backup and rehearsal scripts (sourced, never run).
 
-# One query per table: "<schema>.<table>\t<rows>", ordered by name. The statements are generated and
-# run by psql's \gexec. TimescaleDB's own schemas are left out: a hypertable's rows are counted through
-# the hypertable, not its chunks, so the count does not depend on how the rows are chunked.
-# shellcheck disable=SC2034  # used by the scripts that source this file
-COUNT_SQL="SELECT format('SELECT %L, count(*) FROM %I.%I', n.nspname || '.' || c.relname, n.nspname, c.relname)
-  FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
- WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition
-   AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-   AND n.nspname !~ '^(pg_toast|pg_temp|_timescaledb|timescaledb)'
- ORDER BY 1
-\\gexec"
+# copy_rows — reads a data-only SQL dump on stdin and prints "<schema>.<table>\t<rows>" per table
+# (the table as pg_dump names it): the lines of each COPY block, one per row (a newline inside a value
+# is escaped). A backup and its restored copy are both read through it, so both are counted as COPY
+# reads them: each relation's own rows, a compressed chunk's in its compressed table, with no planner
+# in between.
+copy_rows() {
+  awk -v OFS='\t' '
+    copying && $0 == "\\." { print table, rows; copying = 0; next }
+    copying { rows++; next }
+    /^COPY .* FROM stdin;$/ {
+      # The table as written, a quoted identifier included: COPY <name> [(<columns>)] FROM stdin;
+      match($0, /^COPY ("([^"]|"")*"|[^ ."]+)(\.("([^"]|"")*"|[^ ."]+))?/)
+      table = substr($0, 6, RLENGTH - 5); rows = 0; copying = 1
+    }'
+}
+
+# compared_tables — keeps the lines of a row listing that a rehearsal compares: TimescaleDB's own
+# catalog and configuration change after a restore (its scheduler records its jobs), its chunks do not.
+compared_tables() {
+  awk -F'\t' '$1 ~ /^_timescaledb_(catalog|config)\./ { next }
+               $1 ~ /^_timescaledb_internal\./ && $1 !~ /_chunk"?$/ { next }
+               { print }' | sort
+}
 
 # write_metric <file stem> <metric lines...>
 # Writes a node-exporter textfile (<METRICS_TEXTFILE_DIR>/<stem>.prom) atomically: a scrape sees the

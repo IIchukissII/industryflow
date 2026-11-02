@@ -44,6 +44,15 @@ TOC = """;
 """
 
 
+# A data-only dump as pg_restore -a / pg_dump -a print it: one COPY block per table.
+def _copy(table, *rows):
+    return f"COPY {table} (a, b) FROM stdin;\n" + "".join(f"{r}\n" for r in rows) + "\\.\n\n"
+
+
+DUMP_DATA = ("--\n-- Data for Name: companies\n--\n\n" + _copy("public.companies", "1\ta", "2\tb")
+             + _copy('public."user"', "1\tx") + "SELECT pg_catalog.setval('s', 2, true);\n")
+
+
 def _exe(path: Path, body: str):
     path.write_text(body)
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
@@ -69,19 +78,22 @@ def env(tmp_path):
          'out=; list=; prev=\n'
          'for a; do case "$a" in -l) cat "${FAKE_PG_RESTORE_TOC:-' + str(toc) + '}"; exit 0 ;; esac\n'
          '  [ "$prev" = -f ] && out="$a"; [ "$prev" = -L ] && list="$a"; prev="$a"; done\n'
+         'if [ "$out" = - ]; then [ -z "$FAKE_PG_RESTORE_DATA_FAIL" ] || exit 1\n'
+         '  printf "%s" "${FAKE_DUMP_DATA-$DEFAULT_DUMP_DATA}"; exit 0; fi\n'
          'if [ -n "$out" ]; then\n'
          '  if [ -n "$list" ]; then printf "%s" "${FAKE_PG_RESTORE_DB_SQL:-}" > "$out"\n'
          '  else printf "%s" "${FAKE_PG_RESTORE_SQL:-}" > "$out"; fi\n'
          '  exit 0\nfi\n'
          'cat "$FAKE_PG_RESTORE_STDERR" >&2\nexit "${FAKE_PG_RESTORE_RC:-0}"\n')
+    # -a (the rehearsal reading its restored copy back) prints that copy's data; otherwise a dump file.
     _exe(bin_dir / "pg_dump", f'#!/usr/bin/env bash\necho "$*" >> {tmp_path / "pg_dump.log"}\n'
-                              '[ -z "$FAKE_ORDER_LOG" ] || echo dump >> "$FAKE_ORDER_LOG"\n'
                               '[ -z "$FAKE_PG_DUMP_FAIL" ] || exit 1\n'
+                              'if [ "$1" = -a ]; then printf "%s" "${FAKE_RESTORED_DATA-${FAKE_DUMP_DATA-$DEFAULT_DUMP_DATA}}"; exit 0; fi\n'
                               'while [ "$1" != "-f" ]; do shift; done; echo dump > "$2"\n')
     _exe(bin_dir / "pg_dumpall", "#!/usr/bin/env bash\necho '-- globals'\n")
     e = {
         "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(tmp_path), "FAKE_S3_ROOT": str(s3),
-        "FAKE_PSQL_LOG": str(calls),
+        "FAKE_PSQL_LOG": str(calls), "DEFAULT_DUMP_DATA": DUMP_DATA,
         "PGHOST": "db", "PGUSER": "postgres", "PGPASSWORD": "pw", "S3_BUCKET": "backups",
         "S3_ENDPOINT_URL": "http://backup-store:9000",
         "AWS_ACCESS_KEY_ID": "backup-writer", "AWS_SECRET_ACCESS_KEY": "backup-secret",
@@ -424,7 +436,7 @@ def test_a_key_with_a_control_character_fails_the_run_but_not_the_other_objects(
     assert not (_store(env, env["env"]["S3_ENDPOINT_URL"]) / "backups" / "models" / "tenant_x" / "a").exists()
 
 
-# --- row counts in the dump's snapshot (ADR-0032 dec 6) -------------------------------------------
+# --- db-backup.sh: the dump and its success time ----------------------------------------------------
 
 BACKUPS = "http://backup-store:9000"
 
@@ -440,61 +452,15 @@ def _keys(env, prefix):
         if (root / prefix).exists() else []
 
 
-def test_the_dump_reads_the_snapshot_its_rows_were_counted_in(env):
-    r = _backup_run(env, FAKE_COUNTS="public.companies\t5\n")
+def test_the_backup_is_one_plain_dump_per_database(env):
+    # The rehearsal counts what a dump holds from the dump itself: the backup holds no session or
+    # lock of its own on the database beside pg_dump's.
+    r = _backup_run(env)
     assert r.returncode == 0, r.stdout + r.stderr
-    [counts] = _keys(env, "timescaledb/counts/industryflow")
-    assert (_store(env, BACKUPS) / "backups" / counts).read_text() == "public.companies\t5\n"
-    [dump] = _keys(env, "timescaledb/industryflow")
-    assert dump.removesuffix(".dump").rsplit("/", 1)[1] == counts.removesuffix(".tsv").rsplit("/", 1)[1]
-    dumps = (env["tmp"] / "pg_dump.log").read_text().splitlines()
-    assert len(dumps) == 1 and "--snapshot=00000003-0000001B-1" in dumps[0]
-    # The session that exported the snapshot counted in a repeatable-read transaction and ended it.
-    assert "1 tables counted" in r.stdout
-
-
-def test_the_session_counts_only_after_the_dump_has_read_the_snapshot(env):
-    # Counting first would hold a read lock on every table while pg_dump waits for its own: a chunk
-    # drop queued in between would wait on the session, pg_dump on the drop, the session on pg_dump.
-    order = env["tmp"] / "order.log"
-    r = _backup_run(env, FAKE_ORDER_LOG=str(order))
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert order.read_text().split() == ["export", "dump", "count"]
-
-
-def test_a_failed_count_fails_the_backup_and_uploads_nothing(env):
-    r = _backup_run(env, FAKE_PSQL_FAIL_COUNT="1")
-    assert r.returncode != 0
-    assert "counting rows of 'industryflow' FAILED" in r.stdout
-    assert "permission denied" in r.stderr
-    assert _keys(env, "timescaledb/industryflow") == []
-    assert _keys(env, "timescaledb/counts/industryflow") == []
-
-
-def test_a_failed_dump_fails_the_backup_without_counting(env):
-    order = env["tmp"] / "order.log"
-    r = _backup_run(env, FAKE_PG_DUMP_FAIL="1", FAKE_ORDER_LOG=str(order))
-    assert r.returncode != 0
-    assert "dumping 'industryflow' FAILED" in r.stdout
-    assert "count" not in order.read_text().split()
-    assert _keys(env, "timescaledb/industryflow") == []
-
-
-def test_a_session_that_dies_mid_dump_fails_the_backup_with_a_log_line(env):
-    # The session exits before it is asked to count; the write to it must not kill the script.
-    r = _backup_run(env, FAKE_PSQL_EXIT_AFTER_EXPORT="1")
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert "counting rows of 'industryflow' FAILED" in r.stdout
-    assert _keys(env, "timescaledb/industryflow") == []
-
-
-def test_counts_do_not_halve_the_dumps_pruning_keeps(env):
-    import time
-    for _ in range(3):
-        assert _backup_run(env, RETAIN_PER_DB="2").returncode == 0
-        time.sleep(1.05)  # stamps are to the second
-    assert len(_keys(env, "timescaledb/industryflow")) == 2
-    assert len(_keys(env, "timescaledb/counts/industryflow")) == 2
+    assert len(_keys(env, "timescaledb/industryflow")) == 1
+    [dump] = (env["tmp"] / "pg_dump.log").read_text().splitlines()
+    assert dump.startswith("-Fc -Z6 ") and "--snapshot" not in dump
+    assert not env["psql"].exists()
 
 
 def test_a_successful_backup_writes_its_metric_and_a_failed_one_does_not(env):
@@ -504,7 +470,7 @@ def test_a_successful_backup_writes_its_metric_and_a_failed_one_does_not(env):
     text = (metrics / "db-backup.prom").read_text()
     assert 'industryflow_backup_last_success_timestamp_seconds{backup="databases"} ' in text
     (metrics / "db-backup.prom").unlink()
-    assert _backup_run(env, METRICS_TEXTFILE_DIR=str(metrics), FAKE_PSQL_FAIL_COUNT="1").returncode != 0
+    assert _backup_run(env, METRICS_TEXTFILE_DIR=str(metrics), FAKE_PG_DUMP_FAIL="1").returncode != 0
     assert list(metrics.iterdir()) == []
 
 
@@ -542,10 +508,8 @@ def test_hold_jobs_unschedules_the_restored_policies_before_the_scheduler_starts
 STAMP = "20260101T020000Z"
 
 
-def _backed_up(env, db="industryflow", counts="public.companies\t2\npublic.user\t1\n"):
+def _backed_up(env, db="industryflow"):
     _put(env, BACKUPS, "backups", f"timescaledb/{db}/{STAMP}.dump", b"x")
-    if counts is not None:
-        _put(env, BACKUPS, "backups", f"timescaledb/counts/{db}/{STAMP}.tsv", counts.encode())
 
 
 def _rehearse(env, **extra):
@@ -561,7 +525,7 @@ def test_a_rehearsal_restores_the_latest_dump_into_scratch_compares_and_drops_it
     metrics.mkdir()
     r = _rehearse(env, METRICS_TEXTFILE_DIR=str(metrics))
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "2 tables match their dumped row counts" in r.stdout
+    assert "2 tables match the rows the backup holds" in r.stdout
     log = env["psql"].read_text()
     assert 'CREATE DATABASE "industryflow_rehearsal"' in log
     assert 'DROP DATABASE IF EXISTS "industryflow_rehearsal" WITH (FORCE);' in log.splitlines()[-1]
@@ -572,27 +536,49 @@ def test_a_rehearsal_restores_the_latest_dump_into_scratch_compares_and_drops_it
     assert 'industryflow_restore_rehearsal_duration_seconds{database="industryflow"} ' in text
 
 
-@pytest.mark.parametrize("restored", [
-    "public.companies\t1\npublic.user\t1\n",              # rows lost
-    "public.user\t1\n",                                    # a table lost
-    "public.companies\t2\npublic.user\t1\npublic.x\t0\n",  # a table that was not dumped
+@pytest.mark.parametrize("restored, why", [
+    (_copy("public.companies", "1\ta") + _copy('public."user"', "1\tx"),
+     "differs: public.companies (2 dumped, 1 restored)"),
+    (_copy('public."user"', "1\tx"), "missing: public.companies (2 rows dumped)"),
+    (DUMP_DATA + _copy("public.x", "9\tz"), "not in the backup: public.x (1 rows)"),
+    (DUMP_DATA + _copy("_timescaledb_internal._hyper_1_1_chunk", "1\tq"),
+     "not in the backup: _timescaledb_internal._hyper_1_1_chunk (1 rows)"),
 ])
-def test_a_restore_that_differs_from_the_dumped_counts_fails_and_still_drops_scratch(env, restored):
+def test_a_restore_that_differs_from_the_backup_fails_and_still_drops_scratch(env, restored, why):
     _backed_up(env)
     metrics = env["tmp"] / "metrics"
     metrics.mkdir()
-    r = _rehearse(env, FAKE_RESTORED_COUNTS=restored, METRICS_TEXTFILE_DIR=str(metrics))
+    r = _rehearse(env, FAKE_RESTORED_DATA=restored, METRICS_TEXTFILE_DIR=str(metrics))
     assert r.returncode == 1, r.stdout + r.stderr
-    assert "the restored rows differ from the backup's" in r.stdout
+    assert "the restored rows differ from the backup's" in r.stdout and why in r.stdout
     assert 'DROP DATABASE IF EXISTS "industryflow_rehearsal"' in env["psql"].read_text()
     assert list(metrics.iterdir()) == []
 
 
-def test_a_backup_without_counts_fails_the_rehearsal(env):
-    _backed_up(env, counts=None)
-    r = _rehearse(env)
+def test_empty_tables_the_dump_lacks_and_timescaledb_s_own_catalog_are_not_compared(env):
+    _backed_up(env)
+    dumped = (DUMP_DATA + _copy("_timescaledb_catalog.hypertable", "1\th")
+              + _copy("_timescaledb_config.bgw_job", "1000\tj"))
+    restored = (DUMP_DATA + _copy("public.empty_parent") + _copy("_timescaledb_catalog.hypertable", "1\th", "2\th")
+                + _copy("_timescaledb_internal.bgw_job_stat", "1\ts"))
+    r = _rehearse(env, FAKE_DUMP_DATA=dumped, FAKE_RESTORED_DATA=restored)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "2 tables match the rows the backup holds" in r.stdout
+
+
+def test_a_dump_that_cannot_be_read_fails_the_rehearsal_before_restoring(env):
+    _backed_up(env)
+    r = _rehearse(env, FAKE_PG_RESTORE_DATA_FAIL="1")
     assert r.returncode == 1
-    assert "has no row counts" in r.stdout
+    assert "could not be read" in r.stdout
+    assert "CREATE DATABASE" not in (env["psql"].read_text() if env["psql"].exists() else "")
+
+
+def test_a_dump_holding_no_table_fails_the_rehearsal(env):
+    _backed_up(env)
+    r = _rehearse(env, FAKE_DUMP_DATA="")
+    assert r.returncode == 1
+    assert "holds no table" in r.stdout
 
 
 def test_no_backup_fails_the_rehearsal(env):
@@ -712,3 +698,11 @@ def test_a_rewritten_manifest_of_another_size_is_not_a_size_failure(env):
     _mirrored_pair(env, PART, b"PAR1", b"PAR1", prefix="cold", bucket="industryflow-cold")
     r = _rehearse(env, COLD_SOURCE_BUCKET="industryflow-cold", SOURCE_ENDPOINT_URL=ART)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_copy_rows_counts_each_line_of_a_copy_block_as_one_row(env):
+    data = (_copy("public.a", "1\\nan escaped newline", "2") + _copy('"Odd Schema"."t ("') + "SELECT 1;\n")
+    r = subprocess.run(["bash", "-c", f'source {SCRIPTS / "backup-lib.sh"}; copy_rows'], input=data,
+                       env=env["env"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines() == ["public.a\t2", '"Odd Schema"."t ("\t0']

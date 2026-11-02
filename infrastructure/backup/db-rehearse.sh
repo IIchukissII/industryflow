@@ -5,12 +5,14 @@
 
 # Restore rehearsal (ADR-0032 dec 6): proves the latest backup restores, on a schedule.
 #
-# For each database in DATABASES, the latest dump is restored by db-restore.sh into a scratch database
-# (<database><REHEARSAL_SUFFIX>, policies held) and every table's row count is compared with the counts
-# db-backup.sh took in the dump's own snapshot: a table missing, added or with another count fails the
-# rehearsal. The scratch database is then dropped. For each object mirror (cold layer, model
-# artifacts), a sample of objects is read back from the mirror and compared byte for byte with the
-# source.
+# For each database in DATABASES, the rows the latest dump holds are counted per table from the dump
+# itself (its COPY blocks). The dump is restored by db-restore.sh into a scratch database
+# (<database><REHEARSAL_SUFFIX>, policies held), read back the same way (pg_dump -a), and every table's
+# rows there are compared with the dump's: a table missing or with another count fails, as does a
+# restored table with rows the dump does not hold. TimescaleDB's own catalog is not compared (its
+# scheduler writes to it). The scratch database is then dropped. For each object mirror (cold layer,
+# model artifacts), a sample of objects is read back from the mirror and compared byte for byte with
+# the source.
 #
 # The restore runs on PGHOST: by default the production server, which then briefly holds a second copy
 # of each database. Point PGHOST at a scratch server that holds the globals to keep that load off it.
@@ -43,10 +45,16 @@ rehearse_database() {
   if [ -z "$stamp" ]; then
     log "${db}: FAILED, no backup to rehearse"; FAILED=1; return
   fi
-  if ! aws "${AWS_ARGS[@]}" s3 cp "s3://${S3_BUCKET}/${S3_PREFIX}/counts/${db}/${stamp}.tsv" \
-         "${WORKDIR}/${db}.dumped" --only-show-errors 2>/dev/null; then
-    log "${db}: FAILED, backup ${stamp} has no row counts (taken before they were recorded); the next backup will"
-    FAILED=1; return
+  # What the backup holds, read from the dump itself.
+  if ! aws "${AWS_ARGS[@]}" s3 cp "s3://${S3_BUCKET}/${S3_PREFIX}/${db}/${stamp}.dump" \
+         "${WORKDIR}/${db}.dump" --only-show-errors \
+     || ! pg_restore -a -f - "${WORKDIR}/${db}.dump" | copy_rows > "${WORKDIR}/${db}.dumped.all"; then
+    log "${db}: FAILED, backup ${stamp} could not be read"; FAILED=1; return
+  fi
+  rm -f "${WORKDIR}/${db}.dump"
+  compared_tables < "${WORKDIR}/${db}.dumped.all" > "${WORKDIR}/${db}.dumped"
+  if ! [ -s "${WORKDIR}/${db}.dumped" ]; then
+    log "${db}: FAILED, backup ${stamp} holds no table"; FAILED=1; return
   fi
 
   log "${db}: restoring backup ${stamp} into '${target}'"
@@ -57,21 +65,30 @@ rehearse_database() {
   fi
   took=$(( $(date -u +%s) - started ))
 
-  # On stdin: -c cannot carry the \gexec that runs the generated counts.
-  if ! printf '%s\n' "$COUNT_SQL" | psql -X -q -t -A -F "$(printf '\t')" -v ON_ERROR_STOP=1 \
-         -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$target" -f - \
-         > "${WORKDIR}/${db}.restored" 2> "${WORKDIR}/${db}.count.err"; then
-    log "${db}: FAILED, counting the restored rows:"; cat "${WORKDIR}/${db}.count.err"
+  # Read back the way the backup was written, so both sides are counted alike.
+  if ! pg_dump -a -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$target" 2> "${WORKDIR}/${db}.count.err" \
+         | copy_rows > "${WORKDIR}/${db}.restored.all"; then
+    log "${db}: FAILED, reading the restored rows:"; cat "${WORKDIR}/${db}.count.err"
     drop_scratch "$target"; FAILED=1; return
   fi
   drop_scratch "$target"
+  compared_tables < "${WORKDIR}/${db}.restored.all" > "${WORKDIR}/${db}.restored"
 
-  if ! diff "${WORKDIR}/${db}.dumped" "${WORKDIR}/${db}.restored" > "${WORKDIR}/${db}.diff"; then
-    log "${db}: FAILED, the restored rows differ from the backup's (< dumped, > restored):"
+  # Every table the dump holds must be restored with its rows; a restored table the dump does not
+  # hold must be empty.
+  awk -F'\t' 'FILENAME == ARGV[1] { want[$1] = $2; next }
+               { got[$1] = $2 }
+               END {
+                 for (t in want) if (!(t in got)) print "missing: " t " (" want[t] " rows dumped)"
+                                 else if (got[t] != want[t]) print "differs: " t " (" want[t] " dumped, " got[t] " restored)"
+                 for (t in got) if (!(t in want) && got[t] != 0) print "not in the backup: " t " (" got[t] " rows)"
+               }' "${WORKDIR}/${db}.dumped" "${WORKDIR}/${db}.restored" | sort > "${WORKDIR}/${db}.diff"
+  if [ -s "${WORKDIR}/${db}.diff" ]; then
+    log "${db}: FAILED, the restored rows differ from the backup's:"
     head -n 40 "${WORKDIR}/${db}.diff"
     FAILED=1; return
   fi
-  log "${db}: backup ${stamp} restored in ${took}s, $(wc -l < "${WORKDIR}/${db}.restored") tables match their dumped row counts"
+  log "${db}: backup ${stamp} restored in ${took}s, $(wc -l < "${WORKDIR}/${db}.dumped") tables match the rows the backup holds"
   RESTORE_SECONDS+=("industryflow_restore_rehearsal_duration_seconds{database=\"${db}\"} ${took}")
 }
 

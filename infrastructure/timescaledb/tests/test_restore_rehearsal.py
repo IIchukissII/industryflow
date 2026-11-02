@@ -5,10 +5,10 @@
 """
 The restore rehearsal against a real TimescaleDB (ADR-0032 dec 6; infrastructure/backup/db-rehearse.sh).
 
-The compose stack's own services run: db-backup dumps both databases with the row counts of the dump's
-snapshot, restore-rehearsal restores them into scratch databases and holds them to those counts. A
-backup whose recorded counts disagree with what it holds must fail the rehearsal, naming the table,
-and the scratch databases must be gone either way.
+The compose stack's own services run: db-backup dumps both databases; restore-rehearsal counts each
+dump's rows, restores it into a scratch database, reads it back and holds it to those counts. A
+restore that loses a row must fail the rehearsal, naming the table, and the scratch databases must be
+gone either way.
 
 Needs the compose stack and docker on PATH; db-tenant-isolation.yml provides them. Skips otherwise;
 with IF_REQUIRE_LIVE_STACK set a skip is a failure.
@@ -78,28 +78,26 @@ def test_the_latest_backup_restores_with_every_table_at_its_dumped_count(backed_
     r = _run(*NO_MIRRORS, "restore-rehearsal")
     assert r.returncode == 0, f"rehearsal failed:\n{r.stdout}\n{r.stderr}"
     for db in ("industryflow", "mlflow"):
-        assert f"{db}: backup " in r.stdout and "tables match their dumped row counts" in r.stdout, r.stdout
+        assert f"{db}: backup " in r.stdout and "tables match the rows the backup holds" in r.stdout, r.stdout
     assert _scratch_databases() == []
 
 
-def test_a_backup_holding_other_rows_than_it_recorded_fails_the_rehearsal(backed_up):
-    # Rewrite the newest recorded count of public.companies, as a dump that lost a row would read.
-    tamper = r'''
-      set -e
-      key=$(aws --endpoint-url "$S3_ENDPOINT_URL" s3api list-objects-v2 --bucket "$S3_BUCKET" \
-              --prefix "$S3_PREFIX/counts/industryflow/" --query 'Contents[].Key' --output text \
-            | tr '\t' '\n' | sort | tail -n 1)
-      aws --endpoint-url "$S3_ENDPOINT_URL" s3 cp "s3://$S3_BUCKET/$key" /tmp/c --only-show-errors
-      awk -F'\t' -v OFS='\t' '$1 == "public.companies" { $2 = $2 + 1 } { print }' /tmp/c > /tmp/c2
-      grep -q '^public.companies' /tmp/c2
-      aws --endpoint-url "$S3_ENDPOINT_URL" s3 cp /tmp/c2 "s3://$S3_BUCKET/$key" --only-show-errors
-    '''
-    r = _run("--entrypoint", "sh", "db-backup", "-c", tamper)
-    assert r.returncode == 0, f"could not rewrite the counts:\n{r.stdout}\n{r.stderr}"
-    r = _run(*NO_MIRRORS, "restore-rehearsal")
+def test_a_restore_that_loses_a_row_fails_the_rehearsal(backed_up, tmp_path):
+    # The real restore, then one row of a table nothing references lost from the scratch copy.
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    wrapper = shadow / "db-restore.sh"
+    wrapper.write_text(
+        "#!/usr/bin/env bash\n"
+        "/usr/local/bin/db-restore.sh \"$@\" || exit $?\n"
+        "[ \"$1\" = industryflow ] || exit 0\n"
+        "psql -X -q -v ON_ERROR_STOP=1 -d industryflow_rehearsal -c "
+        "\"DELETE FROM public.schema_ledger WHERE ctid = (SELECT ctid FROM public.schema_ledger LIMIT 1)\"\n")
+    wrapper.chmod(0o755)
+    shadow.chmod(0o755)
+    r = _run(*NO_MIRRORS, "-v", f"{shadow}:/opt/shadow:ro",
+             "-e", "PATH=/opt/shadow:/usr/local/bin:/usr/bin:/bin", "restore-rehearsal")
     assert r.returncode == 1, r.stdout + r.stderr
     assert "industryflow: FAILED, the restored rows differ" in r.stdout
-    assert "public.companies" in r.stdout
+    assert "differs: public.schema_ledger" in r.stdout
     assert _scratch_databases() == []
-    # Leave a good backup as the newest for whatever runs next.
-    assert _run(*NO_MIRRORS, "db-backup").returncode == 0

@@ -7,7 +7,7 @@
   documented tier-2 upgrade — docs/operations/backup-and-recovery.md.
 
   The restore rehearsal (ADR-0032 dec 6) is the same image and configuration on its own schedule:
-  it restores the latest dumps into scratch databases, holds them to the dumped row counts, drops
+  it restores the latest dumps into scratch databases, holds them to the rows each dump holds, drops
   them and reads a sample of the mirrored objects back (db-rehearse.sh). One definition renders both,
   so the rehearsal can never read another bucket or prefix than the backup writes.
 */}}

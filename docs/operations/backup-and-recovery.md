@@ -36,7 +36,7 @@ counts toward its objectives only while its [restore rehearsal](#restore-rehears
 
 | Store | Recovery point | Recovery time | Proven by |
 |---|---|---|---|
-| Platform database | One backup interval (`backup.schedule`, default daily) | 1 h | Weekly rehearsal: restore, every table's rows against the dump's own counts; `industryflow_restore_rehearsal_duration_seconds{database="industryflow"}` |
+| Platform database | One backup interval (`backup.schedule`, default daily) | 1 h | Weekly rehearsal: restore, every table's rows against the rows the dump holds; `industryflow_restore_rehearsal_duration_seconds{database="industryflow"}` |
 | Tracking database | One backup interval | 1 h | As above, `database="mlflow"` |
 | Cold layer | One backup interval for a newly exported day | Copy-back time of the mirror | Weekly rehearsal: sampled objects compared byte for byte with the source |
 | Model artifacts | One backup interval | Copy-back time of the mirror | As above |
@@ -53,17 +53,13 @@ Image `infrastructure/backup/` (`postgres:15-alpine` + `aws-cli`, uid 10001), en
 | Object | Key |
 |---|---|
 | Database dump | `s3://<bucket>/<prefix>/<db>/<stamp>.dump` |
-| Row counts of the dump's snapshot | `s3://<bucket>/<prefix>/counts/<db>/<stamp>.tsv` (`<schema>.<table>`, rows) |
 | Globals | `s3://<bucket>/<prefix>/globals/<stamp>.sql` |
 | Cold mirror | `s3://<bucket>/<cold-prefix>/<source key>` |
 | Model mirror | `s3://<bucket>/<model-prefix>/<source key>` |
 | Notebook archive | `s3://<bucket>/<notebook-prefix>/<volume>/<stamp>.tar.gz` |
 
-`<stamp>` is UTC `YYYYMMDDTHHMMSSZ`; lexical order is chronological. Dumps, row counts and globals are
-pruned to the newest `RETAIN_PER_DB` per prefix. A session exports a repeatable-read snapshot,
-`pg_dump --snapshot` reads it, and the session then counts every table in it, so the counts are exactly
-what the dump holds; TimescaleDB's own schemas are left out, a hypertable is counted through itself.
-The counts are uploaded before the dump. The bucket is created if absent.
+`<stamp>` is UTC `YYYYMMDDTHHMMSSZ`; lexical order is chronological. Dumps and globals are pruned to
+the newest `RETAIN_PER_DB` per prefix. The bucket is created if absent.
 
 | Name | Default | Meaning |
 |---|---|---|
@@ -209,11 +205,12 @@ dec 6). Compose: services `restore-rehearsal` and `notebook-rehearsal`; Helm: Cr
 
 | Step | `db-rehearse.sh` |
 |---|---|
-| 1 | Per database, the newest dump is restored by `db-restore.sh --hold-jobs` into `<db>_rehearsal` on `PGHOST`, the restored TimescaleDB policies unscheduled |
-| 2 | Every table's rows are counted and compared with `counts/<db>/<stamp>.tsv`; a table missing, added or with another count fails |
-| 3 | The scratch database is dropped, also after a failure |
-| 4 | Per object mirror: an object held by both at different sizes fails; `REHEARSAL_OBJECT_SAMPLE` objects held at the same size are read from both and compared by SHA-256; a mirror holding none of a non-empty source fails. Cold manifests (rewritten in place) are neither compared nor sampled |
-| 5 | On a pass: `industryflow_restore_rehearsal_last_success_timestamp_seconds{backup="databases"}` and `industryflow_restore_rehearsal_duration_seconds{database}` |
+| 1 | Per database, the newest dump's rows are counted per table from the dump itself (`pg_restore -a`, the lines of each COPY block); a dump holding no table fails |
+| 2 | The dump is restored by `db-restore.sh --hold-jobs` into `<db>_rehearsal` on `PGHOST`, the restored TimescaleDB policies unscheduled, and read back the same way (`pg_dump -a`) |
+| 3 | Every table must match: a dumped table missing or with another count fails, as does a restored table with rows the dump does not hold. Compared per physical table (chunks and compressed chunks included); TimescaleDB's own catalog and configuration, which its scheduler writes to, are not |
+| 4 | The scratch database is dropped, also after a failure |
+| 5 | Per object mirror: an object held by both at different sizes fails; `REHEARSAL_OBJECT_SAMPLE` objects held at the same size are read from both and compared by SHA-256; a mirror holding none of a non-empty source fails. Cold manifests (rewritten in place) are neither compared nor sampled |
+| 6 | On a pass: `industryflow_restore_rehearsal_last_success_timestamp_seconds{backup="databases"}` and `industryflow_restore_rehearsal_duration_seconds{database}` |
 
 | Step | `notebook-rehearse.sh` (Compose) |
 |---|---|
@@ -228,7 +225,8 @@ dec 6). Compose: services `restore-rehearsal` and `notebook-rehearsal`; Helm: Cr
 | `REHEARSAL_VOLUME_PREFIX` | `rehearsal-` | Scratch volume prefix; empty, or one starting with the work-volume prefix, is refused |
 | `PGHOST` | the backup's | Server restored into; it briefly holds a second copy of each database. A scratch server holding the [globals](#full-recovery) keeps that load off production |
 
-A backup taken before row counts were recorded fails the rehearsal until the next backup.
+The rehearsal proves a backup restores to exactly the rows it holds; it does not compare the backup
+with the live database.
 
 ## Restoring
 

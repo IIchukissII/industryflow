@@ -8,9 +8,8 @@
 # Dumps each application database with pg_dump custom format (-Fc, compressed, supports
 # selective/parallel restore) plus the cluster globals (roles), and uploads them to an
 # S3-compatible object store (MinIO in-cluster by default; point at off-site S3 for real DR).
-# Count-based retention prunes old copies per database. Each dump is taken in one snapshot with a
-# per-table row count of that snapshot (<prefix>/counts/<db>/<stamp>.tsv), which the restore
-# rehearsal (db-rehearse.sh) holds the restored database to.
+# Count-based retention prunes old copies per database. The restore rehearsal (db-rehearse.sh) proves
+# the latest dump restores to exactly the rows it holds.
 #
 # Then it mirrors the cold-layer bucket (ADR-0025) into the same backup target. Once the cold export
 # drops a day from the database, the cold bucket holds the only copy of that raw history — a database
@@ -192,59 +191,6 @@ age_out_mirror() {
   log "  ${label} mirror: ${expired} object(s) gone from the source for ${retain_days} days removed, $(wc -l < "${work}/absent.next") ageing"
 }
 
-# dump_with_counts <database> <dump file> <counts file>
-# Dumps the database and counts its rows in the same snapshot: a session opens a repeatable-read
-# transaction and exports its snapshot, pg_dump reads that snapshot, and the session then counts every
-# table (COUNT_SQL) in it. The counts are therefore exactly what the dump holds, however busy the
-# database is, and a restore rehearsal can be held to them (ADR-0032 dec 6).
-#
-# The session takes no table lock until pg_dump has finished. Counting first would hold a read lock on
-# every table while pg_dump waits for its own: an exclusive request in between (a retention job
-# dropping a chunk) queues behind the session, pg_dump queues behind the request, and the session
-# waits for pg_dump — a cycle the server cannot see, so nothing would ever break it.
-dump_with_counts() {
-  local db="$1" out="$2" counts="$3" ctl pid snap rc=0
-  ctl="$(mktemp -d)"
-  mkfifo "${ctl}/in"
-  psql -X -q -t -A -F "$(printf '\t')" -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" \
-    -d "$db" < "${ctl}/in" > "${ctl}/out" 2> "${ctl}/err" &
-  pid=$!
-  exec 7> "${ctl}/in"
-  # A write to the session after it died must fail the run with its error, not kill the script.
-  trap '' PIPE
-  if _session "$pid" "$ctl" exported "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY;" \
-       "\\o ${ctl}/snapshot" "SELECT pg_export_snapshot();" "\\o"; then
-    snap="$(tr -d '[:space:]' < "${ctl}/snapshot")"
-    pg_dump -Fc -Z6 --snapshot="$snap" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$db" -f "$out" || rc=$?
-    if [ "$rc" -ne 0 ]; then
-      log "dumping '${db}' FAILED"
-    elif ! _session "$pid" "$ctl" counted "\\o ${counts}" "$COUNT_SQL" "\\o"; then
-      log "counting rows of '${db}' FAILED:"; rc=1
-    fi
-  else
-    log "exporting a snapshot of '${db}' FAILED:"; rc=1
-  fi
-  printf '%s\n' "COMMIT;" "\\q" >&7 2>/dev/null || true
-  exec 7>&-
-  trap - PIPE
-  wait "$pid" || [ "$rc" -ne 0 ] || { log "the snapshot session of '${db}' FAILED:"; rc=1; }
-  [ "$rc" -eq 0 ] || cat "${ctl}/err" >&2
-  rm -rf "$ctl"
-  return "$rc"
-}
-
-# _session <pid> <ctl dir> <marker> <lines...> — sends lines to the snapshot session and waits until it
-# has run them (it touches <marker>), or fails when the session has exited.
-_session() {
-  local pid="$1" ctl="$2" marker="$3"
-  shift 3
-  printf '%s\n' "$@" "\\! touch ${ctl}/${marker}" >&7 2>/dev/null || return 1
-  while [ ! -e "${ctl}/${marker}" ]; do
-    kill -0 "$pid" 2>/dev/null || return 1
-    sleep 0.2
-  done
-}
-
 prune() {
   # Keep the newest $RETAIN_PER_DB objects under a prefix; delete the rest. Keys are
   # timestamp-named so lexical sort == chronological.
@@ -306,19 +252,14 @@ main() {
   for db in $DATABASES; do
     log "dumping database '${db}'"
     out="${WORKDIR}/${db}.dump"
-    # -Fc custom format, compressed; whole-database dump (TimescaleDB-safe — restore uses
-    # timescaledb_pre/post_restore, see the runbook). The row counts of the same snapshot go under
-    # their own prefix, so the count-based pruning of the dumps is not halved by them.
-    dump_with_counts "$db" "$out" "${WORKDIR}/${db}.counts"
+    # -Fc custom format, max compression; whole-database dump (TimescaleDB-safe — restore uses
+    # timescaledb_pre/post_restore, see the runbook).
+    pg_dump -Fc -Z6 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$db" -f "$out"
     size="$(du -h "$out" | cut -f1)"
-    # The counts first: a rehearsal that sees the dump finds its counts.
-    aws "${AWS_ARGS[@]}" s3 cp "${WORKDIR}/${db}.counts" \
-      "s3://${S3_BUCKET}/${S3_PREFIX}/counts/${db}/${STAMP}.tsv" --only-show-errors
     aws "${AWS_ARGS[@]}" s3 cp "$out" \
       "s3://${S3_BUCKET}/${S3_PREFIX}/${db}/${STAMP}.dump" --only-show-errors
-    log "  uploaded ${db}/${STAMP}.dump (${size}, $(wc -l < "${WORKDIR}/${db}.counts") tables counted)"
+    log "  uploaded ${db}/${STAMP}.dump (${size})"
     prune "${S3_PREFIX}/${db}/"
-    prune "${S3_PREFIX}/counts/${db}/"
   done
 
   prune "${S3_PREFIX}/globals/"
