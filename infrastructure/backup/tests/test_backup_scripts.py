@@ -44,6 +44,15 @@ TOC = """;
 """
 
 
+# A data-only dump as pg_restore -a / pg_dump -a print it: one COPY block per table.
+def _copy(table, *rows):
+    return f"COPY {table} (a, b) FROM stdin;\n" + "".join(f"{r}\n" for r in rows) + "\\.\n\n"
+
+
+DUMP_DATA = ("--\n-- Data for Name: companies\n--\n\n" + _copy("public.companies", "1\ta", "2\tb")
+             + _copy('public."user"', "1\tx") + "SELECT pg_catalog.setval('s', 2, true);\n")
+
+
 def _exe(path: Path, body: str):
     path.write_text(body)
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
@@ -59,9 +68,8 @@ def env(tmp_path):
     _exe(bin_dir / "aws", f"#!{sys.executable}\nimport runpy, sys\n"
                           f"sys.argv[0] = 'aws'\nrunpy.run_path({str(HERE / 'fake_aws.py')!r}, run_name='__main__')\n")
     calls = tmp_path / "psql.log"
-    # The role check (-f …/roles.sql) prints $FAKE_PSQL_REFUSED: nothing means every role exists.
-    _exe(bin_dir / "psql", f'#!/usr/bin/env bash\necho "$*" >> {calls}\n'
-                           'case "$*" in *roles.sql*) printf "%s" "${FAKE_PSQL_REFUSED:-}" ;; esac\n')
+    _exe(bin_dir / "psql", f"#!{sys.executable}\nimport runpy, sys\n"
+                           f"sys.argv[0] = 'psql'\nrunpy.run_path({str(HERE / 'fake_psql.py')!r}, run_name='__main__')\n")
     # -l prints the table of contents; -f writes the script (-L: the database-level one); otherwise
     # it is the restore itself.
     toc = tmp_path / "toc.list"
@@ -70,15 +78,22 @@ def env(tmp_path):
          'out=; list=; prev=\n'
          'for a; do case "$a" in -l) cat "${FAKE_PG_RESTORE_TOC:-' + str(toc) + '}"; exit 0 ;; esac\n'
          '  [ "$prev" = -f ] && out="$a"; [ "$prev" = -L ] && list="$a"; prev="$a"; done\n'
+         'if [ "$out" = - ]; then [ -z "$FAKE_PG_RESTORE_DATA_FAIL" ] || exit 1\n'
+         '  printf "%s" "${FAKE_DUMP_DATA-$DEFAULT_DUMP_DATA}"; exit 0; fi\n'
          'if [ -n "$out" ]; then\n'
          '  if [ -n "$list" ]; then printf "%s" "${FAKE_PG_RESTORE_DB_SQL:-}" > "$out"\n'
          '  else printf "%s" "${FAKE_PG_RESTORE_SQL:-}" > "$out"; fi\n'
          '  exit 0\nfi\n'
          'cat "$FAKE_PG_RESTORE_STDERR" >&2\nexit "${FAKE_PG_RESTORE_RC:-0}"\n')
-    _exe(bin_dir / "pg_dump", '#!/usr/bin/env bash\nwhile [ "$1" != "-f" ]; do shift; done; echo dump > "$2"\n')
+    # -a (the rehearsal reading its restored copy back) prints that copy's data; otherwise a dump file.
+    _exe(bin_dir / "pg_dump", f'#!/usr/bin/env bash\necho "$*" >> {tmp_path / "pg_dump.log"}\n'
+                              '[ -z "$FAKE_PG_DUMP_FAIL" ] || exit 1\n'
+                              'if [ "$1" = -a ]; then printf "%s" "${FAKE_RESTORED_DATA-${FAKE_DUMP_DATA-$DEFAULT_DUMP_DATA}}"; exit 0; fi\n'
+                              'while [ "$1" != "-f" ]; do shift; done; echo dump > "$2"\n')
     _exe(bin_dir / "pg_dumpall", "#!/usr/bin/env bash\necho '-- globals'\n")
     e = {
         "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(tmp_path), "FAKE_S3_ROOT": str(s3),
+        "FAKE_PSQL_LOG": str(calls), "DEFAULT_DUMP_DATA": DUMP_DATA,
         "PGHOST": "db", "PGUSER": "postgres", "PGPASSWORD": "pw", "S3_BUCKET": "backups",
         "S3_ENDPOINT_URL": "http://backup-store:9000",
         "AWS_ACCESS_KEY_ID": "backup-writer", "AWS_SECRET_ACCESS_KEY": "backup-secret",
@@ -419,3 +434,293 @@ def test_a_key_with_a_control_character_fails_the_run_but_not_the_other_objects(
     assert _model_mirrored(env, MODEL).read_bytes() == b"skops"
     assert json.dumps(bad) in r.stdout and "INCOMPLETE: 1 object(s) not mirrored" in r.stdout
     assert not (_store(env, env["env"]["S3_ENDPOINT_URL"]) / "backups" / "models" / "tenant_x" / "a").exists()
+
+
+# --- db-backup.sh: the dump and its success time ----------------------------------------------------
+
+BACKUPS = "http://backup-store:9000"
+
+
+def _backup_run(env, **extra):
+    e = dict(env["env"], DATABASES="industryflow", **extra)
+    return subprocess.run(["bash", str(SCRIPTS / "db-backup.sh")], env=e, capture_output=True, text=True)
+
+
+def _keys(env, prefix):
+    root = _store(env, BACKUPS) / "backups"
+    return sorted(str(p.relative_to(root)) for p in (root / prefix).rglob("*") if p.is_file()) \
+        if (root / prefix).exists() else []
+
+
+def test_the_backup_is_one_plain_dump_per_database(env):
+    # The rehearsal counts what a dump holds from the dump itself: the backup holds no session or
+    # lock of its own on the database beside pg_dump's.
+    r = _backup_run(env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert len(_keys(env, "timescaledb/industryflow")) == 1
+    [dump] = (env["tmp"] / "pg_dump.log").read_text().splitlines()
+    assert dump.startswith("-Fc -Z6 ") and "--snapshot" not in dump
+    assert not env["psql"].exists()
+
+
+def test_a_successful_backup_writes_its_metric_and_a_failed_one_does_not(env):
+    metrics = env["tmp"] / "metrics"
+    metrics.mkdir()
+    assert _backup_run(env, METRICS_TEXTFILE_DIR=str(metrics)).returncode == 0
+    text = (metrics / "db-backup.prom").read_text()
+    assert 'industryflow_backup_last_success_timestamp_seconds{backup="databases"} ' in text
+    (metrics / "db-backup.prom").unlink()
+    assert _backup_run(env, METRICS_TEXTFILE_DIR=str(metrics), FAKE_PG_DUMP_FAIL="1").returncode != 0
+    assert list(metrics.iterdir()) == []
+
+
+def test_restore_latest_takes_only_a_dump(env):
+    _put(env, BACKUPS, "backups", "timescaledb/industryflow/20260101T020000Z.dump", b"x")
+    _put(env, BACKUPS, "backups", "timescaledb/industryflow/20260101T020000Z.zzz", b"x")
+    (env["tmp"] / "restore.err").write_text("")
+    e = dict(env["env"], FAKE_PG_RESTORE_STDERR=str(env["tmp"] / "restore.err"))
+    r = subprocess.run(["bash", str(SCRIPTS / "db-restore.sh"), "industryflow", "latest", "--target", "t"],
+                       env=e, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "20260101T020000Z.dump -> database 't'" in r.stdout
+
+
+@pytest.mark.parametrize("hold", [True, False])
+def test_hold_jobs_unschedules_the_restored_policies_before_the_scheduler_starts(env, hold):
+    r = _restore(env, "", 0) if not hold else None
+    if hold:
+        (env["tmp"] / "restore.err").write_text("")
+        _put(env, BACKUPS, "backups", "timescaledb/industryflow/20260101T020000Z.dump", b"x")
+        e = dict(env["env"], FAKE_PG_RESTORE_STDERR=str(env["tmp"] / "restore.err"))
+        r = subprocess.run(["bash", str(SCRIPTS / "db-restore.sh"), "industryflow", "latest",
+                            "--target", "t", "--hold-jobs"], env=e, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = env["psql"].read_text().splitlines()
+    held = [i for i, c in enumerate(log) if "_timescaledb_config.bgw_job SET scheduled = false" in c]
+    post = [i for i, c in enumerate(log) if "timescaledb_post_restore()" in c]
+    assert bool(held) == hold
+    if hold:
+        assert held[0] < post[0]
+
+
+# --- db-rehearse.sh (ADR-0032 dec 6) ---------------------------------------------------------------
+
+STAMP = "20260101T020000Z"
+
+
+def _backed_up(env, db="industryflow"):
+    _put(env, BACKUPS, "backups", f"timescaledb/{db}/{STAMP}.dump", b"x")
+
+
+def _rehearse(env, **extra):
+    (env["tmp"] / "restore.err").write_text("")
+    e = dict(env["env"], DATABASES="industryflow", FAKE_PG_RESTORE_STDERR=str(env["tmp"] / "restore.err"),
+             PATH=f"{SCRIPTS}:{env['env']['PATH']}", **extra)
+    return subprocess.run(["bash", str(SCRIPTS / "db-rehearse.sh")], env=e, capture_output=True, text=True)
+
+
+def test_a_rehearsal_restores_the_latest_dump_into_scratch_compares_and_drops_it(env):
+    _backed_up(env)
+    metrics = env["tmp"] / "metrics"
+    metrics.mkdir()
+    r = _rehearse(env, METRICS_TEXTFILE_DIR=str(metrics))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "2 tables match the rows the backup holds" in r.stdout
+    log = env["psql"].read_text()
+    assert 'CREATE DATABASE "industryflow_rehearsal"' in log
+    assert 'DROP DATABASE IF EXISTS "industryflow_rehearsal" WITH (FORCE);' in log.splitlines()[-1]
+    # The scratch copy runs no restored policy.
+    assert "_timescaledb_config.bgw_job SET scheduled = false" in log
+    text = (metrics / "db-rehearse.prom").read_text()
+    assert 'industryflow_restore_rehearsal_last_success_timestamp_seconds{backup="databases"} ' in text
+    assert 'industryflow_restore_rehearsal_duration_seconds{database="industryflow"} ' in text
+
+
+@pytest.mark.parametrize("restored, why", [
+    (_copy("public.companies", "1\ta") + _copy('public."user"', "1\tx"),
+     "differs: public.companies (2 dumped, 1 restored)"),
+    (_copy('public."user"', "1\tx"), "missing: public.companies (2 rows dumped)"),
+    (DUMP_DATA + _copy("public.x", "9\tz"), "not in the backup: public.x (1 rows)"),
+    (DUMP_DATA + _copy("_timescaledb_internal._hyper_1_1_chunk", "1\tq"),
+     "not in the backup: _timescaledb_internal._hyper_1_1_chunk (1 rows)"),
+])
+def test_a_restore_that_differs_from_the_backup_fails_and_still_drops_scratch(env, restored, why):
+    _backed_up(env)
+    metrics = env["tmp"] / "metrics"
+    metrics.mkdir()
+    r = _rehearse(env, FAKE_RESTORED_DATA=restored, METRICS_TEXTFILE_DIR=str(metrics))
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "the restored rows differ from the backup's" in r.stdout and why in r.stdout
+    assert 'DROP DATABASE IF EXISTS "industryflow_rehearsal"' in env["psql"].read_text()
+    assert list(metrics.iterdir()) == []
+
+
+def test_empty_tables_the_dump_lacks_and_timescaledb_s_scheduler_tables_are_not_compared(env):
+    _backed_up(env)
+    dumped = (DUMP_DATA + _copy("_timescaledb_catalog.chunk", "1\tc") + _copy("_timescaledb_catalog.metadata", "u")
+              + _copy("_timescaledb_config.bgw_job", "1000\tj"))
+    restored = (DUMP_DATA + _copy("public.empty_parent") + _copy("_timescaledb_catalog.chunk", "1\tc")
+                + _copy("_timescaledb_catalog.metadata", "u", "v") + _copy("_timescaledb_internal.bgw_job_stat", "1\ts"))
+    r = _rehearse(env, FAKE_DUMP_DATA=dumped, FAKE_RESTORED_DATA=restored)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "3 tables match the rows the backup holds" in r.stdout
+
+
+def test_a_restore_that_lost_chunk_metadata_fails(env):
+    _backed_up(env)
+    dumped = DUMP_DATA + _copy("_timescaledb_catalog.dimension_slice", "1\ts", "2\ts")
+    restored = DUMP_DATA + _copy("_timescaledb_catalog.dimension_slice", "1\ts")
+    r = _rehearse(env, FAKE_DUMP_DATA=dumped, FAKE_RESTORED_DATA=restored)
+    assert r.returncode == 1
+    assert "differs: _timescaledb_catalog.dimension_slice (2 dumped, 1 restored)" in r.stdout
+
+
+def test_a_target_that_cannot_be_listed_fails_with_a_line(env):
+    r = _rehearse(env, FAKE_S3_FAIL_LIST="1")
+    assert r.returncode == 1
+    assert "the backup target could not be listed" in r.stdout
+
+
+def test_a_dump_that_cannot_be_read_fails_the_rehearsal_before_restoring(env):
+    _backed_up(env)
+    r = _rehearse(env, FAKE_PG_RESTORE_DATA_FAIL="1")
+    assert r.returncode == 1
+    assert "could not be read" in r.stdout
+    assert "CREATE DATABASE" not in (env["psql"].read_text() if env["psql"].exists() else "")
+
+
+def test_a_dump_holding_no_table_is_rehearsed_and_says_so(env):
+    _backed_up(env)
+    r = _rehearse(env, FAKE_DUMP_DATA="", FAKE_RESTORED_DATA="")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "holds no table data" in r.stdout and 'CREATE DATABASE "industryflow_rehearsal"' in env["psql"].read_text()
+    # Rows the empty backup never held still fail.
+    r = _rehearse(env, FAKE_DUMP_DATA="", FAKE_RESTORED_DATA=_copy("public.x", "1"))
+    assert r.returncode == 1 and "not in the backup: public.x (1 rows)" in r.stdout
+
+
+def test_no_backup_fails_the_rehearsal(env):
+    r = _rehearse(env)
+    assert r.returncode == 1
+    assert "no backup to rehearse" in r.stdout
+
+
+def test_a_failed_restore_fails_the_rehearsal(env):
+    _backed_up(env)
+    (env["tmp"] / "other.err").write_text(OTHER)
+    # pg_restore fails with an error that is not the expected extension collision.
+    r = subprocess.run(["bash", str(SCRIPTS / "db-rehearse.sh")], capture_output=True, text=True,
+                       env=dict(env["env"], DATABASES="industryflow", FAKE_PG_RESTORE_RC="1",
+                                FAKE_PG_RESTORE_STDERR=str(env["tmp"] / "other.err"),
+                                PATH=f"{SCRIPTS}:{env['env']['PATH']}"))
+    assert r.returncode == 1
+    assert "the restore did not complete" in r.stdout
+    assert 'DROP DATABASE IF EXISTS "industryflow_rehearsal"' in env["psql"].read_text()
+
+
+def test_an_empty_suffix_is_refused_before_anything_is_restored(env):
+    _backed_up(env)
+    r = _rehearse(env, REHEARSAL_SUFFIX="")
+    assert r.returncode == 2
+    assert "CREATE DATABASE" not in (env["psql"].read_text() if env["psql"].exists() else "")
+
+
+def _mirrored_pair(env, key, source: bytes, mirror: bytes, prefix="models", bucket="mlflow"):
+    _put(env, ART, bucket, key, source)
+    _put(env, BACKUPS, "backups", f"{prefix}/{key}", mirror)
+
+
+def test_mirrored_objects_are_read_back_and_compared(env):
+    _backed_up(env)
+    _mirrored_pair(env, MODEL, b"skops", b"skops")
+    r = _rehearse(env, MODEL_SOURCE_BUCKET="mlflow", SOURCE_ENDPOINT_URL=ART,
+                  SOURCE_ACCESS_KEY_ID="backup-reader", SOURCE_SECRET_ACCESS_KEY="s")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "model mirror: 1 sampled object(s) read back and compared" in r.stdout
+
+
+def test_a_mirrored_object_with_other_bytes_fails_the_rehearsal(env):
+    _backed_up(env)
+    _mirrored_pair(env, MODEL, b"skops", b"skopz")  # same size, other bytes
+    r = _rehearse(env, MODEL_SOURCE_BUCKET="mlflow", SOURCE_ENDPOINT_URL=ART)
+    assert r.returncode == 1
+    assert f"{MODEL} differs between the source and the mirror" in r.stdout
+
+
+def test_a_mirror_holding_none_of_the_source_fails_the_rehearsal(env):
+    _backed_up(env)
+    _put(env, ART, "mlflow", MODEL, b"skops")
+    r = _rehearse(env, MODEL_SOURCE_BUCKET="mlflow", SOURCE_ENDPOINT_URL=ART)
+    assert r.returncode == 1
+    assert "the mirror holds none of them" in r.stdout
+
+
+def test_a_rewritten_cold_manifest_is_not_sampled(env):
+    _backed_up(env)
+    _mirrored_pair(env, "tenant_x/2026/01/01/_manifest.json", b"{new}", b"{old}", prefix="cold",
+                   bucket="industryflow-cold")
+    _mirrored_pair(env, PART, b"PAR1", b"PAR1", prefix="cold", bucket="industryflow-cold")
+    r = _rehearse(env, COLD_SOURCE_BUCKET="industryflow-cold", SOURCE_ENDPOINT_URL=ART)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "cold mirror: 1 sampled object(s)" in r.stdout
+
+
+# --- backup-lib.sh ---------------------------------------------------------------------------------
+
+def test_write_metric_replaces_the_file_whole_and_is_a_no_op_without_a_directory(env):
+    d = env["tmp"] / "m"
+    d.mkdir()
+    run = lambda e: subprocess.run(  # noqa: E731
+        ["bash", "-c", f'source {SCRIPTS / "backup-lib.sh"}; write_metric x "a 1" "b 2"'],
+        env=e, capture_output=True, text=True)
+    assert run(dict(env["env"], METRICS_TEXTFILE_DIR=str(d))).returncode == 0
+    assert (d / "x.prom").read_text() == "a 1\nb 2\n"
+    assert oct((d / "x.prom").stat().st_mode & 0o777) == "0o644"
+    assert [p.name for p in d.iterdir()] == ["x.prom"]
+    assert run(env["env"]).returncode == 0
+
+
+def test_restore_latest_with_no_dump_says_so(env):
+    _put(env, BACKUPS, "backups", "timescaledb/industryflow/20260101T020000Z.zzz", b"x")
+    r = subprocess.run(["bash", str(SCRIPTS / "db-restore.sh"), "industryflow", "latest", "--target", "t"],
+                       env=env["env"], capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "no backups for industryflow" in r.stderr
+
+
+def test_an_unwritable_metric_directory_warns_without_failing_the_job(env):
+    d = env["tmp"] / "ro"
+    d.mkdir()
+    d.chmod(0o500)
+    try:
+        r = _backup_run(env, METRICS_TEXTFILE_DIR=str(d))
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "could not write the db-backup metric" in r.stderr
+    finally:
+        d.chmod(0o700)
+
+
+def test_a_mirrored_object_of_another_size_fails_the_rehearsal(env):
+    _backed_up(env)
+    _mirrored_pair(env, MODEL, b"skops", b"sko")  # truncated in the mirror
+    _mirrored_pair(env, UPLOAD, b"skops", b"skops")
+    r = _rehearse(env, MODEL_SOURCE_BUCKET="mlflow", SOURCE_ENDPOINT_URL=ART)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "1 object(s) differ in size from the source" in r.stdout and MODEL in r.stdout
+
+
+def test_a_rewritten_manifest_of_another_size_is_not_a_size_failure(env):
+    _backed_up(env)
+    _mirrored_pair(env, "tenant_x/2026/01/01/_manifest.json", b"{newer}", b"{old}", prefix="cold",
+                   bucket="industryflow-cold")
+    _mirrored_pair(env, PART, b"PAR1", b"PAR1", prefix="cold", bucket="industryflow-cold")
+    r = _rehearse(env, COLD_SOURCE_BUCKET="industryflow-cold", SOURCE_ENDPOINT_URL=ART)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_copy_rows_counts_each_line_of_a_copy_block_as_one_row(env):
+    data = (_copy("public.a", "1\\nan escaped newline", "2") + _copy('"Odd Schema"."t ("') + "SELECT 1;\n")
+    r = subprocess.run(["bash", "-c", f'source {SCRIPTS / "backup-lib.sh"}; copy_rows'], input=data,
+                       env=env["env"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines() == ["public.a\t2", '"Odd Schema"."t ("\t0']

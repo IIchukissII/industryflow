@@ -17,9 +17,10 @@
 # the target is touched. PGUSER must be a superuser: only a superuser can restore objects to other
 # owners.
 #
-# DESTRUCTIVE: restoring into an existing database drops and recreates it. Intended to be run
-# deliberately by an operator following docs/operations/backup-and-recovery.md, not on a
-# schedule. Restore the globals (roles) first if rebuilding a fresh cluster (see runbook).
+# DESTRUCTIVE: restoring into an existing database drops and recreates it. A cutover restore is run
+# deliberately by an operator following docs/operations/backup-and-recovery.md; the scheduled
+# rehearsal (db-rehearse.sh) restores only into its own scratch name. Restore the globals (roles)
+# first if rebuilding a fresh cluster (see runbook).
 #
 # Required env: PGHOST PGPORT PGUSER PGPASSWORD S3_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 # Optional env: S3_ENDPOINT_URL AWS_DEFAULT_REGION S3_PREFIX(=timescaledb)
@@ -28,6 +29,7 @@
 #   <database>  source database name as backed up (industryflow | mlflow)
 #   <stamp>     backup stamp (e.g. 20260627T020000Z) or "latest" (default)
 #   --target    restore into a different db name (safe rehearsal); default = <database>
+#   --hold-jobs leave the restored TimescaleDB policies unscheduled (a rehearsal copy, never a cutover)
 
 set -euo pipefail
 
@@ -134,13 +136,15 @@ main() {
   export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
   export PGPASSWORD
 
-  SRC_DB="${1:?usage: db-restore.sh <database> [<stamp>|latest] [--target <db>]}"
+  SRC_DB="${1:?usage: db-restore.sh <database> [<stamp>|latest] [--target <db>] [--hold-jobs]}"
   STAMP="${2:-latest}"
   TARGET_DB="$SRC_DB"
+  HOLD_JOBS=0
   shift || true; shift || true
   while [ $# -gt 0 ]; do
     case "$1" in
       --target) TARGET_DB="${2:?--target needs a name}"; shift 2 ;;
+      --hold-jobs) HOLD_JOBS=1; shift ;;
       *) echo "unknown arg: $1" >&2; exit 2 ;;
     esac
   done
@@ -153,7 +157,7 @@ main() {
   if [ "$STAMP" = "latest" ]; then
     KEY="$(aws "${AWS_ARGS[@]}" s3api list-objects-v2 --bucket "$S3_BUCKET" \
             --prefix "${S3_PREFIX}/${SRC_DB}/" --query 'Contents[].Key' --output text \
-            | tr '\t' '\n' | sort | tail -n1)"
+            | tr '\t' '\n' | { grep '\.dump$' || true; } | sort | tail -n1)"
     [ -n "$KEY" ] && [ "$KEY" != "None" ] || { echo "no backups for ${SRC_DB}" >&2; exit 1; }
   else
     KEY="${S3_PREFIX}/${SRC_DB}/${STAMP}.dump"
@@ -217,6 +221,13 @@ SQL
   local rc=0
   pg_restore -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "${TARGET_DB}" "$DUMP" 2>"$RESTORE_LOG" || rc=$?
   cat "$RESTORE_LOG" >&2
+  # --hold-jobs: the restored policies (retention, compression, aggregate refresh) are unscheduled
+  # while the scheduler is still stopped by pre-restore mode, so none runs in the copy. A rehearsal
+  # needs that: a retention job dropping a chunk would make the copy differ from what was dumped.
+  # Ids below 1000 are TimescaleDB's own jobs.
+  if [ "$timescale" = 1 ] && [ "$HOLD_JOBS" = 1 ]; then
+    "${PSQL[@]}" -d "${TARGET_DB}" -c "UPDATE _timescaledb_config.bgw_job SET scheduled = false WHERE id >= 1000;"
+  fi
   # Leave pre-restore mode whatever happened, so the database is not left with its background jobs
   # stopped.
   if [ "$timescale" = 1 ]; then

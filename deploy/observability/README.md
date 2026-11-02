@@ -85,6 +85,10 @@ Group `industryflow.kubernetes`, on kube-state-metrics series:
 |---|---|---|---|
 | `IndustryFlowDeviceCrlStale` | `time() - (kube_cronjob_status_last_successful_time{cronjob="<fullname>-device-crl-check"} or on (namespace, cronjob) kube_cronjob_created{…}) > ingress.mtls.crlCheck.alertAfterSeconds`; rendered only when `ingress.enabled`, `ingress.mtls.enabled` and `ingress.mtls.crlCheck.enabled` | none | critical |
 | `IndustryFlowDeviceCertExpiring` | `time() - (kube_cronjob_status_last_successful_time{cronjob="<fullname>-device-cert-check"} or on (namespace, cronjob) kube_cronjob_created{…}) > ingress.mtls.certCheck.alertAfterSeconds`; rendered only when `ingress.enabled`, `ingress.mtls.enabled` and `ingress.mtls.certCheck.enabled` | none | warning |
+| `IndustryFlowBackupStale` | `time() - (kube_cronjob_status_last_successful_time{cronjob="<fullname>-db-backup"} or on (namespace, cronjob) kube_cronjob_created{…}) > backup.alertAfterSeconds`; rendered when `backup.enabled` | none | critical |
+| `IndustryFlowRestoreRehearsalStale` | `time() - (kube_cronjob_status_last_successful_time{cronjob="<fullname>-restore-rehearsal"} or on (namespace, cronjob) kube_cronjob_created{…}) > backup.rehearsal.alertAfterSeconds`; rendered when `backup.enabled` and `backup.rehearsal.enabled` | none | warning |
 
 Dead letters: [dead-letter handling](../../docs/operations/dead-letters.md). Device CRL:
-[device mTLS](../../docs/operations/device-mtls.md#kubernetes).
+[device mTLS](../../docs/operations/device-mtls.md#kubernetes). Backups and rehearsals:
+[backup and disaster recovery](../../docs/operations/backup-and-recovery.md). Unit tests:
+`deploy/observability/tests/kubernetes_rules_test.yml`.

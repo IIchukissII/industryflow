@@ -203,8 +203,9 @@ ledger shows every platform script applied (`migrate.sh verify --wait`, read-onl
 own role). Kubernetes has no start order across workloads, so this is how a service never starts
 against a database the ledger shows behind. A client of the tracking database (database "mlflow")
 cannot read the platform ledger; it waits for its own login instead, which exists only once the
-runner has created its database and role. Call with a dict: ctx, user, workload (whose scoped
-Secret holds the password), passwordKey, and optionally database. Pair with schemaReadyVolumes.
+runner has created its database and role. Call with a dict: ctx, user (or userKey, the key of the
+workload's Secret that holds it), workload (whose scoped Secret holds the password), passwordKey, and
+optionally database. Pair with schemaReadyVolumes.
 */}}
 {{- define "industryflow.schemaReadyInitContainer" -}}
 {{- $ctx := .ctx -}}
@@ -221,7 +222,15 @@ Secret holds the password), passwordKey, and optionally database. Pair with sche
     - { name: PGHOST, value: {{ include "industryflow.dbHost" $ctx | quote }} }
     - { name: PGPORT, value: {{ $ctx.Values.infra.timescaledb.port | quote }} }
     - { name: PGDATABASE, value: {{ $db | quote }} }
+    {{- if .userKey }}
+    - name: PGUSER
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "industryflow.workloadSecretName" (dict "ctx" $ctx "workload" .workload) }}
+          key: {{ .userKey }}
+    {{- else }}
     - { name: PGUSER, value: {{ .user | quote }} }
+    {{- end }}
     - name: PGPASSWORD
       valueFrom:
         secretKeyRef:

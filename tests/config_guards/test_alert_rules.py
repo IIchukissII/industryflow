@@ -18,6 +18,8 @@ import pytest
 from _repo import ROOT, helm_template, load_yaml
 
 RULES = load_yaml("infrastructure/prometheus/rules/platform.yml")
+# Every file Compose's Prometheus loads (rule_files: rules/*.yml); the chart ships platform.yml only.
+RULE_FILES = sorted((ROOT / "infrastructure" / "prometheus" / "rules").glob("*.yml"))
 PROMETHEUS = load_yaml("infrastructure/prometheus/prometheus.yml")
 COMPOSE = load_yaml("docker-compose.yml")["services"]
 LABEL = 'platform="industryflow"'
@@ -25,9 +27,23 @@ FUNCTIONS = {"sum", "increase", "rate", "by", "unless", "offset", "or", "and", "
 
 
 def _rules():
-    rules = [r for g in RULES["groups"] for r in g["rules"]]
+    rules = [r for f in RULE_FILES for g in load_yaml(str(f.relative_to(ROOT)))["groups"] for r in g["rules"]]
     assert rules, "no rules — the guard is not looking"
     return rules
+
+
+def test_the_guard_reads_every_rules_file():
+    assert {f.name for f in RULE_FILES} >= {"platform.yml", "compose.yml"}
+
+
+def test_every_rules_file_has_unit_tests_that_ci_runs():
+    workflow = (ROOT / ".github" / "workflows" / "config-guards.yml").read_text()
+    step = next(line for line in workflow.splitlines() if "test rules" in line and "platform_test.yml" in line)
+    for f in RULE_FILES:
+        test = f.parent / "tests" / f"{f.stem}_test.yml"
+        assert test.exists(), f"{f.name} has no promtool tests ({test.relative_to(ROOT)})"
+        assert f"../{f.name}" in load_yaml(str(test.relative_to(ROOT)))["rule_files"], test.name
+        assert test.name in step.split(), f"the alert-rules job does not run {test.name}"
 
 
 @pytest.mark.parametrize("rule", _rules(), ids=lambda r: r["alert"])

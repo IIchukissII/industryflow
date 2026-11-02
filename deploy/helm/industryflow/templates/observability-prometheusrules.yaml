@@ -12,6 +12,8 @@
 {{- $mtls := and .Values.ingress.enabled .Values.ingress.mtls.enabled }}
 {{- $crl := and $mtls .Values.ingress.mtls.crlCheck.enabled }}
 {{- $cert := and $mtls .Values.ingress.mtls.certCheck.enabled }}
+{{- $backup := .Values.backup.enabled }}
+{{- $rehearsal := and $backup .Values.backup.rehearsal.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -24,7 +26,7 @@ metadata:
 spec:
   groups:
     {{- (.Files.Get "files/prometheus-rules.yml" | fromYaml).groups | toYaml | nindent 4 }}
-    {{- if or $crl $cert }}
+    {{- if or $crl $cert $backup }}
     - name: industryflow.kubernetes
       rules:
         {{- if $crl }}
@@ -50,6 +52,27 @@ spec:
           annotations:
             summary: "A device certificate is close to expiry"
             description: "The device-cert-check job log names the device. Renew it (docs/operations/device-mtls.md) and republish the CRL and register to the {{ .Values.ingress.mtls.caSecret }} Secret; an expired certificate is refused at ingestion."
+        {{- end }}
+        {{- if $backup }}
+        # ADR-0032: a backup that has stopped completing is found at the restore that needed it. Keyed
+        # on the last success, measured from creation for a job that never succeeded.
+        - alert: IndustryFlowBackupStale
+          expr: time() - (kube_cronjob_status_last_successful_time{cronjob="{{ include "industryflow.fullname" . }}-db-backup"} or on (namespace, cronjob) kube_cronjob_created{cronjob="{{ include "industryflow.fullname" . }}-db-backup"}) > {{ .Values.backup.alertAfterSeconds }}
+          labels:
+            severity: critical
+          annotations:
+            summary: "No backup has completed recently"
+            description: "The db-backup CronJob has not succeeded recently, or never has; its job log names the failing step (docs/operations/backup-and-recovery.md)."
+        {{- end }}
+        {{- if $rehearsal }}
+        # ADR-0032 dec 6: an unexercised backup counts toward no recovery objective.
+        - alert: IndustryFlowRestoreRehearsalStale
+          expr: time() - (kube_cronjob_status_last_successful_time{cronjob="{{ include "industryflow.fullname" . }}-restore-rehearsal"} or on (namespace, cronjob) kube_cronjob_created{cronjob="{{ include "industryflow.fullname" . }}-restore-rehearsal"}) > {{ .Values.backup.rehearsal.alertAfterSeconds }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "No restore rehearsal has passed recently"
+            description: "The restore-rehearsal CronJob has not passed recently, or never has; its backups count toward no recovery objective until one does. Its job log names the database or object that differed (docs/operations/backup-and-recovery.md)."
         {{- end }}
     {{- end }}
 {{- end }}

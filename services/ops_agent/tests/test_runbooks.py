@@ -49,7 +49,8 @@ def test_a_single_shared_word_is_not_a_match():
 
 def test_every_platform_rule_has_a_row_in_the_alert_table():
     import yaml
-    rules = yaml.safe_load((REPO / "infrastructure/prometheus/rules/platform.yml").read_text())
-    names = {r["alert"] for g in rules["groups"] for r in g["rules"]}
+    names = {r["alert"] for f in sorted((REPO / "infrastructure/prometheus/rules").glob("*.yml"))
+             for g in yaml.safe_load(f.read_text())["groups"] for r in g["rules"]}
+    assert "IndustryFlowBackupStale" in names, "the rules files were not read"
     table = runbooks.load_alerts(DOCS)
     assert names and not names - set(table), f"platform alerts with no alert-table row: {sorted(names - set(table))}"

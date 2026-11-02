@@ -23,9 +23,27 @@ notebooks: [ADR-0038](../../ADR/ADR-0038-model-and-notebook-backup.md).
 | Notebook hub database | No | Derivable: users and servers return from the platform session |
 | Continuous WAL archiving / point-in-time recovery | No | Deferred in [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) |
 
-The recovery point of the databases is the schedule interval. The default target is the deployment's
-own MinIO: that is undo, not disaster recovery, until the target is a separate failure domain
-([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 3; [off-site target](#off-site-target)).
+The default target is the deployment's own MinIO: that is undo, not disaster recovery, until the
+target is a separate failure domain ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md)
+dec 3; [off-site target](#off-site-target)).
+
+## Recovery objectives
+
+Per authoritative store ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 2). A store
+counts toward its objectives only while its [restore rehearsal](#restore-rehearsal) passes (dec 6);
+`IndustryFlowRestoreRehearsalStale` fires when none has for nine days, and on Compose
+`IndustryFlowRestoreRehearsalNeverPassed` when none ever has.
+
+| Store | Recovery point | Recovery time | Proven by |
+|---|---|---|---|
+| Platform database | One backup interval (`backup.schedule`, default daily) | 1 h | Weekly rehearsal: restore, every table's rows against the rows the dump holds; `industryflow_restore_rehearsal_duration_seconds{database="industryflow"}` |
+| Tracking database | One backup interval | 1 h | As above, `database="mlflow"` |
+| Cold layer | One backup interval for a newly exported day | Copy-back time of the mirror | Weekly rehearsal: sampled objects compared byte for byte with the source |
+| Model artifacts | One backup interval | Copy-back time of the mirror | As above |
+| Notebook volumes (Compose) | One backup interval | Per volume: one `notebook-restore.sh` run | Weekly rehearsal: every volume's latest archive restored and compared entry by entry |
+
+Reference measurement, 4-core 8 GB node, 70 MB platform database: a [full recovery](#full-recovery)
+from an empty server (steps 1-5) takes about 30 s; the rehearsal's restore 6-9 s.
 
 ## Backup job
 
@@ -51,6 +69,7 @@ the newest `RETAIN_PER_DB` per prefix. The bucket is created if absent.
 | `S3_PREFIX` | `timescaledb` | Key prefix for dumps and globals |
 | `DATABASES` | `industryflow mlflow` | Databases to dump |
 | `RETAIN_PER_DB` | `14` | Copies kept per database |
+| `METRICS_TEXTFILE_DIR` | unset | Directory for the run's success time, `industryflow_backup_last_success_timestamp_seconds{backup="databases"}` (node-exporter textfile); Compose sets it |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | required | Backup principal |
 | `SOURCE_ENDPOINT_URL` | `S3_ENDPOINT_URL` | Endpoint of the mirrored buckets |
 | `SOURCE_ACCESS_KEY_ID` / `SOURCE_SECRET_ACCESS_KEY` | the `AWS_*` pair | Read-only `backup-read` principal |
@@ -119,6 +138,11 @@ CronJob `<release>-db-backup` (`templates/cronjob-db-backup.yaml`).
 | `backup.s3.bucket` / `region` / `prefix` | `industryflow-backups` / `us-east-1` / `timescaledb` | Target |
 | `backup.cold.enabled` / `prefix` | `true` / `cold` | Cold mirror, only when `coldExport.enabled`; source is `coldExport.store.*` |
 | `backup.models.enabled` / `prefix` | `true` / `models` | Model mirror of `notebookHub.trackingGateway.artifactBucket`, staging (`uploadStaging.prefix`) excluded |
+| `backup.alertAfterSeconds` | `172800` | `IndustryFlowBackupStale` after this long without a successful run |
+| `backup.rehearsal.enabled` | `true` | CronJob `<release>-restore-rehearsal` rendered ([restore rehearsal](#restore-rehearsal)) |
+| `backup.rehearsal.schedule` | `0 4 * * 0` | Weekly, after the backup |
+| `backup.rehearsal.objectSample` | `20` | `REHEARSAL_OBJECT_SAMPLE` |
+| `backup.rehearsal.alertAfterSeconds` | `777600` | `IndustryFlowRestoreRehearsalStale` after this long without a pass |
 
 Credentials come from the `db-backup` workload Secret: `DB_USER`, `DB_PASSWORD`,
 `BACKUP_STORE_ACCESS_KEY`, `BACKUP_STORE_SECRET_KEY`, `BACKUP_READ_ACCESS_KEY`, `BACKUP_READ_SECRET_KEY`.
@@ -151,6 +175,7 @@ job variable named in *Meaning*.
 | `UPLOAD_STAGING_PREFIX` | `_upload-staging/` | `MODEL_SOURCE_EXCLUDE_PREFIX` |
 | `BACKUP_NOTEBOOK_PREFIX` | `notebooks` | `notebook-backup`: `NOTEBOOK_BACKUP_PREFIX` |
 | `DOCKER_GID` | `999` | `notebook-backup`: the host's docker group |
+| `BACKUP_REHEARSAL_OBJECT_SAMPLE` | `20` | `restore-rehearsal`: `REHEARSAL_OBJECT_SAMPLE` |
 
 | Task | Command |
 |---|---|
@@ -158,6 +183,12 @@ job variable named in *Meaning*.
 | Notebook archives | `docker compose --profile backup run --rm --no-deps notebook-backup` (after `db-backup` has built the image) |
 | Without the cold or model mirror | `docker compose run --rm --no-deps -e COLD_SOURCE_BUCKET= -e MODEL_SOURCE_BUCKET= db-backup` |
 | Daily from host cron | `0 2 * * *  cd <install-dir> && docker compose run --rm --no-deps db-backup && docker compose --profile backup run --rm --no-deps notebook-backup` |
+| Weekly rehearsal from host cron | `0 4 * * 0  cd <install-dir> && { docker compose --profile backup run --rm --no-deps restore-rehearsal; docker compose --profile backup run --rm --no-deps notebook-rehearsal; }` |
+
+Each job writes its success time to the `backup-metrics` volume, which node-exporter exposes;
+`IndustryFlowBackupStale` and `IndustryFlowRestoreRehearsalStale` fire when they stop,
+`IndustryFlowBackupNeverCompleted` and `IndustryFlowRestoreRehearsalNeverPassed` when they never ran
+([`compose.yml`](../../infrastructure/prometheus/rules/compose.yml)).
 
 ### Off-site target
 
@@ -166,9 +197,41 @@ job variable named in *Meaning*.
 | Helm | `backup.s3.endpoint`, `backup.s3.bucket`, and that bucket's keys as `BACKUP_STORE_ACCESS_KEY` / `BACKUP_STORE_SECRET_KEY` |
 | Compose | `BACKUP_S3_BUCKET` and `BACKUP_STORE_*` in `.env`; the endpoint per run: `docker compose run --rm --no-deps -e S3_ENDPOINT_URL=https://<s3-endpoint> db-backup` (the service otherwise uses `MINIO_ENDPOINT`) |
 
+## Restore rehearsal
+
+Scheduled proof that the latest backup restores ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md)
+dec 6). Compose: services `restore-rehearsal` and `notebook-rehearsal`; Helm: CronJob
+`<release>-restore-rehearsal`.
+
+| Step | `db-rehearse.sh` |
+|---|---|
+| 1 | Per database, the newest dump's rows are counted per table from the dump itself (`pg_restore -a`, the lines of each COPY block) |
+| 2 | The dump is restored by `db-restore.sh --hold-jobs` into `<db>_rehearsal` on `PGHOST`, the restored TimescaleDB policies unscheduled, and read back the same way (`pg_dump -a`) |
+| 3 | Every table must match: a dumped table missing or with another count fails, as does a restored table with rows the dump does not hold. Compared per physical table (chunks and compressed chunks included) and TimescaleDB's structural catalog (hypertables, chunks, dimensions and slices, chunk constraints, continuous aggregates); what its scheduler writes after a restore and its job configuration are not |
+| 4 | The scratch database is dropped, also after a failure |
+| 5 | Per object mirror: an object held by both at different sizes fails; `REHEARSAL_OBJECT_SAMPLE` objects held at the same size are read from both and compared by SHA-256; a mirror holding none of a non-empty source fails. Cold manifests (rewritten in place) are neither compared nor sampled |
+| 6 | On a pass: `industryflow_restore_rehearsal_last_success_timestamp_seconds{backup="databases"}` and `industryflow_restore_rehearsal_duration_seconds{database}` |
+
+| Step | `notebook-rehearse.sh` (Compose) |
+|---|---|
+| 1 | Per volume with an archive, the latest is restored by `notebook-restore.sh` into `rehearsal-<volume>` and compared with the archive entry by entry |
+| 2 | The scratch volume is removed; a leftover from an interrupted run is replaced |
+| 3 | On a pass with at least one volume: `industryflow_restore_rehearsal_last_success_timestamp_seconds{backup="notebooks"}` |
+
+| Name | Default | Meaning |
+|---|---|---|
+| `REHEARSAL_SUFFIX` | `_rehearsal` | Scratch database suffix; empty is refused |
+| `REHEARSAL_OBJECT_SAMPLE` | `20` | Objects compared per mirror |
+| `REHEARSAL_VOLUME_PREFIX` | `rehearsal-` | Scratch volume prefix; empty, or one starting with the work-volume prefix, is refused |
+| `PGHOST` | the backup's | Server restored into; it briefly holds a second copy of each database. A scratch server holding the [globals](#full-recovery) keeps that load off production |
+
+The rehearsal proves a backup restores to exactly the rows it holds; it does not compare the backup
+with the live database.
+
 ## Restoring
 
-`db-restore.sh <database> [<stamp>|latest] [--target <db>]` (same image) downloads one dump and:
+`db-restore.sh <database> [<stamp>|latest] [--target <db>] [--hold-jobs]` (same image) downloads one
+dump (`latest`: the newest `.dump`) and:
 
 1. refuses, before touching the target, when the dump names a role the cluster lacks or `PGUSER`
    is not a superuser;
@@ -177,7 +240,8 @@ job variable named in *Meaning*.
 3. for a dump that contains `timescaledb`: creates the extension and calls
    `timescaledb_pre_restore()`;
 4. runs `pg_restore`, keeping owners and privileges;
-5. calls `timescaledb_post_restore()`, whatever the result;
+5. with `--hold-jobs`, unschedules the restored TimescaleDB policies (for a rehearsal copy, never a
+   cutover); calls `timescaledb_post_restore()`, whatever the result;
 6. applies the database's own grants and settings to the target.
 
 | Restored as dumped | Includes |

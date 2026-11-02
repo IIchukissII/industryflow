@@ -1,0 +1,91 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# promtool test rules infrastructure/prometheus/rules/tests/compose_test.yml
+rule_files:
+  - ../compose.yml
+
+evaluation_interval: 1h
+
+tests:
+  # A daily backup keeps it quiet; one that stops completing is raised two days after its last success,
+  # per kind; another stack's series is not read.
+  - interval: 1h
+    input_series:
+      # Last success at t=0, never again.
+      - series: 'industryflow_backup_last_success_timestamp_seconds{platform="industryflow", backup="databases"}'
+        values: '0x120'
+      # Succeeds every day: the value is the time of the latest run.
+      - series: 'industryflow_backup_last_success_timestamp_seconds{platform="industryflow", backup="notebooks"}'
+        values: '0x23 86400x23 172800x23 259200x23 345600x23 432000x23'
+      - series: 'industryflow_backup_last_success_timestamp_seconds{platform="other", backup="x"}'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 47h
+        alertname: IndustryFlowBackupStale
+        exp_alerts: []
+      - eval_time: 49h
+        alertname: IndustryFlowBackupStale
+        exp_alerts:
+          - exp_labels: {severity: critical, backup: databases}
+            exp_annotations:
+              summary: "No backup has completed recently"
+              description: "No databases backup has completed in the last two days. The job's output names the failing step: docs/operations/backup-and-recovery.md."
+              services: "db-backup, notebook-backup, timescaledb, minio"
+      - eval_time: 49h
+        alertname: IndustryFlowBackupNeverCompleted
+        exp_alerts: []
+
+  # A deployment on which no database backup ever completed is raised after a day, the rehearsal after
+  # a week; neither raises the stale alerts.
+  - interval: 1h
+    input_series:
+      - series: 'up{platform="industryflow", job="node-exporter"}'
+        values: '1x200'
+    alert_rule_test:
+      - eval_time: 23h
+        alertname: IndustryFlowBackupNeverCompleted
+        exp_alerts: []
+      - eval_time: 25h
+        alertname: IndustryFlowBackupNeverCompleted
+        exp_alerts:
+          - exp_labels: {severity: critical, platform: industryflow, backup: databases}
+            exp_annotations:
+              summary: "No database backup has ever completed"
+              description: "No database backup has completed on this deployment. Run db-backup and schedule it: docs/operations/backup-and-recovery.md#running-backups."
+              services: "db-backup, timescaledb, minio"
+      - eval_time: 25h
+        alertname: IndustryFlowBackupStale
+        exp_alerts: []
+      - eval_time: 6d
+        alertname: IndustryFlowRestoreRehearsalNeverPassed
+        exp_alerts: []
+      - eval_time: 7d2h
+        alertname: IndustryFlowRestoreRehearsalNeverPassed
+        exp_alerts:
+          - exp_labels: {severity: warning, platform: industryflow, backup: databases}
+            exp_annotations:
+              summary: "No restore rehearsal has ever passed"
+              description: "No database restore rehearsal has passed on this deployment, so its backups count toward no recovery objective. Run restore-rehearsal and schedule it: docs/operations/backup-and-recovery.md#restore-rehearsal."
+              services: "restore-rehearsal, timescaledb, minio"
+
+  # A weekly rehearsal keeps it quiet; one that stops passing is raised nine days after its last pass.
+  - interval: 1h
+    input_series:
+      # Passes at day 0, 7 and 14, then never again (hourly samples: a series sampled daily is stale
+      # between its samples).
+      - series: 'industryflow_restore_rehearsal_last_success_timestamp_seconds{platform="industryflow", backup="databases"}'
+        values: '0x167 604800x167 1209600x500'
+    alert_rule_test:
+      - eval_time: 23d
+        alertname: IndustryFlowRestoreRehearsalStale
+        exp_alerts: []
+      - eval_time: 23d2h
+        alertname: IndustryFlowRestoreRehearsalStale
+        exp_alerts:
+          - exp_labels: {severity: warning, backup: databases}
+            exp_annotations:
+              summary: "No restore rehearsal has passed recently"
+              description: "No databases restore rehearsal has passed in the last nine days; its backups count toward no recovery objective until one does. Its output names the table or object that differed: docs/operations/backup-and-recovery.md."
+              services: "restore-rehearsal, notebook-rehearsal, timescaledb, minio"

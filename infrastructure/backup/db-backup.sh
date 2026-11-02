@@ -8,7 +8,8 @@
 # Dumps each application database with pg_dump custom format (-Fc, compressed, supports
 # selective/parallel restore) plus the cluster globals (roles), and uploads them to an
 # S3-compatible object store (MinIO in-cluster by default; point at off-site S3 for real DR).
-# Count-based retention prunes old copies per database.
+# Count-based retention prunes old copies per database. The restore rehearsal (db-rehearse.sh) proves
+# the latest dump restores to exactly the rows it holds.
 #
 # Then it mirrors the cold-layer bucket (ADR-0025) into the same backup target. Once the cold export
 # drops a day from the database, the cold bucket holds the only copy of that raw history — a database
@@ -39,6 +40,7 @@
 #   AWS_DEFAULT_REGION                                  (default: us-east-1)
 #   S3_PREFIX        key prefix within the bucket        (default: "timescaledb")
 #   RETAIN_PER_DB    copies to keep per database         (default: 14)
+#   METRICS_TEXTFILE_DIR  node-exporter textfile directory for the run's success time (unset: none)
 # Object-store mirrors:
 #   SOURCE_ENDPOINT_URL             the mirrored buckets' S3 endpoint (default: S3_ENDPOINT_URL)
 #   SOURCE_ACCESS_KEY_ID SOURCE_SECRET_ACCESS_KEY
@@ -53,6 +55,9 @@
 #   MODEL_SOURCE_EXCLUDE_PREFIX     a key prefix left out of the model mirror (default: "_upload-staging/")
 
 set -euo pipefail
+
+# shellcheck source=backup-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/backup-lib.sh"
 
 log() { echo "[db-backup $(date -u +%H:%M:%S)] $*"; }
 
@@ -273,6 +278,10 @@ main() {
     log "backup run ${STAMP} INCOMPLETE: ${UNMIRRORED} object(s) not mirrored, see above"
     exit 1
   fi
+  write_metric db-backup \
+    "# HELP industryflow_backup_last_success_timestamp_seconds When a backup run last completed." \
+    "# TYPE industryflow_backup_last_success_timestamp_seconds gauge" \
+    "industryflow_backup_last_success_timestamp_seconds{backup=\"databases\"} $(date -u +%s)"
   log "backup run ${STAMP} complete"
 }
 

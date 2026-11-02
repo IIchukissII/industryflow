@@ -55,3 +55,36 @@ tests:
             exp_annotations:
               description: "The device-cert-check job log names the device. Renew it (docs/operations/device-mtls.md) and republish the CRL and register to the industryflow-device-ca Secret; an expired certificate is refused at ingestion."
               summary: "A device certificate is close to expiry"
+
+  # ADR-0032: the backup is raised two days after its last success, or after two days of never having
+  # succeeded; the rehearsal nine days after its last pass.
+  - interval: 1h
+    input_series:
+      - series: 'kube_cronjob_created{namespace="if", cronjob="if-industryflow-db-backup"}'
+        values: '0x400'
+      - series: 'kube_cronjob_created{namespace="if", cronjob="if-industryflow-restore-rehearsal"}'
+        values: '0x400'
+      # Passes at 0h and 168h (day 7), then never again.
+      - series: 'kube_cronjob_status_last_successful_time{namespace="if", cronjob="if-industryflow-restore-rehearsal"}'
+        values: '0x167 604800x232'
+    alert_rule_test:
+      - eval_time: 47h
+        alertname: IndustryFlowBackupStale
+        exp_alerts: []
+      - eval_time: 49h
+        alertname: IndustryFlowBackupStale
+        exp_alerts:
+          - exp_labels: {severity: critical, namespace: if, cronjob: if-industryflow-db-backup}
+            exp_annotations:
+              summary: "No backup has completed recently"
+              description: "The db-backup CronJob has not succeeded recently, or never has; its job log names the failing step (docs/operations/backup-and-recovery.md)."
+      - eval_time: 380h
+        alertname: IndustryFlowRestoreRehearsalStale
+        exp_alerts: []
+      - eval_time: 386h
+        alertname: IndustryFlowRestoreRehearsalStale
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: if, cronjob: if-industryflow-restore-rehearsal}
+            exp_annotations:
+              summary: "No restore rehearsal has passed recently"
+              description: "The restore-rehearsal CronJob has not passed recently, or never has; its backups count toward no recovery objective until one does. Its job log names the database or object that differed (docs/operations/backup-and-recovery.md)."

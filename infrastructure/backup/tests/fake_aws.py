@@ -37,6 +37,9 @@ def main(argv):
         return store / bucket / key
 
     if argv[:2] == ["s3api", "list-objects-v2"]:
+        if os.environ.get("FAKE_S3_FAIL_LIST"):
+            print("An error occurred (AccessDenied) when calling the ListObjectsV2 operation", file=sys.stderr)
+            return 254
         bucket, prefix, query = store / opt("--bucket"), opt("--prefix", ""), opt("--query")
         keys = sorted(str(p.relative_to(bucket)) for p in bucket.rglob("*") if p.is_file()) \
             if bucket.exists() else []
