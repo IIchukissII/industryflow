@@ -107,7 +107,7 @@ Raw `sensor_measurements` older than the export horizon, as Parquet in the objec
 | Database side | `16-cold-layer-raw-retention.sql`: `cold_export_day_fingerprint`, `cold_export_drop_day` (`SECURITY DEFINER`), `public.cold_export_drops` |
 | Object-store principals | Write-scoped exporter principal; read-only broker principal; created by `minio-init` / Helm `job-minio-init.yaml` |
 | Read path | `services/notebook_cold_broker/`, client `industryflow.IndustryFlowCold` ([notebooks](notebooks.md)) |
-| Backup | `db-backup` mirrors the cold and artifact buckets (`backup-read` principal; Helm `backup.cold`, `backup.models`); `notebook-backup` archives work volumes ([backup and recovery](../operations/backup-and-recovery.md)) |
+| Backup | `db-backup` mirrors the cold and artifact buckets (`backup-read` principal; Helm `backup.cold`, `backup.models`); `notebook-backup` archives work volumes; `restore-rehearsal` and `notebook-rehearsal` restore the latest backups into scratch copies weekly ([backup and recovery](../operations/backup-and-recovery.md)) |
 
 Exporter behaviour per tenant and day:
 
