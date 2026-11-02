@@ -57,6 +57,11 @@ rehearse_main() {
   if [ "$failed" -ne 0 ]; then
     log "notebook restore rehearsal FAILED, see above"; exit 1
   fi
+  # Nothing restored proves nothing (a deployment without notebooks, or a wrong prefix): no success
+  # time is written.
+  if [ "$n" -eq 0 ]; then
+    log "no notebook archive under s3://${S3_BUCKET}/${PREFIX}/; nothing rehearsed"; return 0
+  fi
   write_metric notebook-rehearse \
     "# HELP industryflow_restore_rehearsal_last_success_timestamp_seconds When a restore rehearsal last passed." \
     "# TYPE industryflow_restore_rehearsal_last_success_timestamp_seconds gauge" \

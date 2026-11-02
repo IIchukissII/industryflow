@@ -75,6 +75,8 @@ def env(tmp_path):
          '  exit 0\nfi\n'
          'cat "$FAKE_PG_RESTORE_STDERR" >&2\nexit "${FAKE_PG_RESTORE_RC:-0}"\n')
     _exe(bin_dir / "pg_dump", f'#!/usr/bin/env bash\necho "$*" >> {tmp_path / "pg_dump.log"}\n'
+                              '[ -z "$FAKE_ORDER_LOG" ] || echo dump >> "$FAKE_ORDER_LOG"\n'
+                              '[ -z "$FAKE_PG_DUMP_FAIL" ] || exit 1\n'
                               'while [ "$1" != "-f" ]; do shift; done; echo dump > "$2"\n')
     _exe(bin_dir / "pg_dumpall", "#!/usr/bin/env bash\necho '-- globals'\n")
     e = {
@@ -451,12 +453,38 @@ def test_the_dump_reads_the_snapshot_its_rows_were_counted_in(env):
     assert "1 tables counted" in r.stdout
 
 
-def test_a_failed_count_fails_the_backup(env):
+def test_the_session_counts_only_after_the_dump_has_read_the_snapshot(env):
+    # Counting first would hold a read lock on every table while pg_dump waits for its own: a chunk
+    # drop queued in between would wait on the session, pg_dump on the drop, the session on pg_dump.
+    order = env["tmp"] / "order.log"
+    r = _backup_run(env, FAKE_ORDER_LOG=str(order))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert order.read_text().split() == ["export", "dump", "count"]
+
+
+def test_a_failed_count_fails_the_backup_and_uploads_nothing(env):
     r = _backup_run(env, FAKE_PSQL_FAIL_COUNT="1")
     assert r.returncode != 0
     assert "counting rows of 'industryflow' FAILED" in r.stdout
     assert "permission denied" in r.stderr
-    assert not (env["tmp"] / "pg_dump.log").exists()
+    assert _keys(env, "timescaledb/industryflow") == []
+    assert _keys(env, "timescaledb/counts/industryflow") == []
+
+
+def test_a_failed_dump_fails_the_backup_without_counting(env):
+    order = env["tmp"] / "order.log"
+    r = _backup_run(env, FAKE_PG_DUMP_FAIL="1", FAKE_ORDER_LOG=str(order))
+    assert r.returncode != 0
+    assert "dumping 'industryflow' FAILED" in r.stdout
+    assert "count" not in order.read_text().split()
+    assert _keys(env, "timescaledb/industryflow") == []
+
+
+def test_a_session_that_dies_mid_dump_fails_the_backup_with_a_log_line(env):
+    # The session exits before it is asked to count; the write to it must not kill the script.
+    r = _backup_run(env, FAKE_PSQL_EXIT_AFTER_EXPORT="1")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "counting rows of 'industryflow' FAILED" in r.stdout
     assert _keys(env, "timescaledb/industryflow") == []
 
 
@@ -666,3 +694,21 @@ def test_an_unwritable_metric_directory_warns_without_failing_the_job(env):
         assert "could not write the db-backup metric" in r.stderr
     finally:
         d.chmod(0o700)
+
+
+def test_a_mirrored_object_of_another_size_fails_the_rehearsal(env):
+    _backed_up(env)
+    _mirrored_pair(env, MODEL, b"skops", b"sko")  # truncated in the mirror
+    _mirrored_pair(env, UPLOAD, b"skops", b"skops")
+    r = _rehearse(env, MODEL_SOURCE_BUCKET="mlflow", SOURCE_ENDPOINT_URL=ART)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "1 object(s) differ in size from the source" in r.stdout and MODEL in r.stdout
+
+
+def test_a_rewritten_manifest_of_another_size_is_not_a_size_failure(env):
+    _backed_up(env)
+    _mirrored_pair(env, "tenant_x/2026/01/01/_manifest.json", b"{newer}", b"{old}", prefix="cold",
+                   bucket="industryflow-cold")
+    _mirrored_pair(env, PART, b"PAR1", b"PAR1", prefix="cold", bucket="industryflow-cold")
+    r = _rehearse(env, COLD_SOURCE_BUCKET="industryflow-cold", SOURCE_ENDPOINT_URL=ART)
+    assert r.returncode == 0, r.stdout + r.stderr

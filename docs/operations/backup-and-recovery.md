@@ -31,7 +31,8 @@ dec 3; [off-site target](#off-site-target)).
 
 Per authoritative store ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 2). A store
 counts toward its objectives only while its [restore rehearsal](#restore-rehearsal) passes (dec 6);
-`IndustryFlowRestoreRehearsalStale` fires when none has for nine days.
+`IndustryFlowRestoreRehearsalStale` fires when none has for nine days, and on Compose
+`IndustryFlowRestoreRehearsalNeverPassed` when none ever has.
 
 | Store | Recovery point | Recovery time | Proven by |
 |---|---|---|---|
@@ -59,9 +60,10 @@ Image `infrastructure/backup/` (`postgres:15-alpine` + `aws-cli`, uid 10001), en
 | Notebook archive | `s3://<bucket>/<notebook-prefix>/<volume>/<stamp>.tar.gz` |
 
 `<stamp>` is UTC `YYYYMMDDTHHMMSSZ`; lexical order is chronological. Dumps, row counts and globals are
-pruned to the newest `RETAIN_PER_DB` per prefix. Each database is dumped (`pg_dump --snapshot`) from a
-repeatable-read snapshot in which every table's rows were counted, so the counts are exactly what the
-dump holds; TimescaleDB's own schemas are left out, a hypertable is counted through itself. The bucket is created if absent.
+pruned to the newest `RETAIN_PER_DB` per prefix. A session exports a repeatable-read snapshot,
+`pg_dump --snapshot` reads it, and the session then counts every table in it, so the counts are exactly
+what the dump holds; TimescaleDB's own schemas are left out, a hypertable is counted through itself.
+The counts are uploaded before the dump. The bucket is created if absent.
 
 | Name | Default | Meaning |
 |---|---|---|
@@ -188,8 +190,9 @@ job variable named in *Meaning*.
 | Weekly rehearsal from host cron | `0 4 * * 0  cd <install-dir> && docker compose --profile backup run --rm --no-deps restore-rehearsal && docker compose --profile backup run --rm --no-deps notebook-rehearsal` |
 
 Each job writes its success time to the `backup-metrics` volume, which node-exporter exposes;
-`IndustryFlowBackupStale` and `IndustryFlowRestoreRehearsalStale`
-([`compose.yml`](../../infrastructure/prometheus/rules/compose.yml)) fire when they stop.
+`IndustryFlowBackupStale` and `IndustryFlowRestoreRehearsalStale` fire when they stop,
+`IndustryFlowBackupNeverCompleted` and `IndustryFlowRestoreRehearsalNeverPassed` when they never ran
+([`compose.yml`](../../infrastructure/prometheus/rules/compose.yml)).
 
 ### Off-site target
 
@@ -209,14 +212,14 @@ dec 6). Compose: services `restore-rehearsal` and `notebook-rehearsal`; Helm: Cr
 | 1 | Per database, the newest dump is restored by `db-restore.sh --hold-jobs` into `<db>_rehearsal` on `PGHOST`, the restored TimescaleDB policies unscheduled |
 | 2 | Every table's rows are counted and compared with `counts/<db>/<stamp>.tsv`; a table missing, added or with another count fails |
 | 3 | The scratch database is dropped, also after a failure |
-| 4 | Per object mirror, `REHEARSAL_OBJECT_SAMPLE` objects held by source and mirror at the same size are read from both and compared by SHA-256; cold manifests are not sampled (rewritten in place); a mirror holding none of a non-empty source fails |
+| 4 | Per object mirror: an object held by both at different sizes fails; `REHEARSAL_OBJECT_SAMPLE` objects held at the same size are read from both and compared by SHA-256; a mirror holding none of a non-empty source fails. Cold manifests (rewritten in place) are neither compared nor sampled |
 | 5 | On a pass: `industryflow_restore_rehearsal_last_success_timestamp_seconds{backup="databases"}` and `industryflow_restore_rehearsal_duration_seconds{database}` |
 
 | Step | `notebook-rehearse.sh` (Compose) |
 |---|---|
 | 1 | Per volume with an archive, the latest is restored by `notebook-restore.sh` into `rehearsal-<volume>` and compared with the archive entry by entry |
 | 2 | The scratch volume is removed; a leftover from an interrupted run is replaced |
-| 3 | On a pass: `industryflow_restore_rehearsal_last_success_timestamp_seconds{backup="notebooks"}` |
+| 3 | On a pass with at least one volume: `industryflow_restore_rehearsal_last_success_timestamp_seconds{backup="notebooks"}` |
 
 | Name | Default | Meaning |
 |---|---|---|

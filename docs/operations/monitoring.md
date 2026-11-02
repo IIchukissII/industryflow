@@ -73,8 +73,10 @@ Every target carries the label `platform="industryflow"`, which every platform a
 | `IndustryFlowKafkaConsumerLag` | A consumer group lags more than 1000 for 10m | The consumer's logs |
 | `IndustryFlowDeadLetteredReadings` | A letter reached a `*.dlq` topic in the last 15m | [Dead-letter handling](dead-letters.md) |
 | `IndustryFlowCapabilityAuditBacklog` | More than 1000 capability-use events wait to be recorded for 15m | The API gateway's logs (`capability audit writer`); [capability-use record](../architecture/notebooks.md#capability-use-record) |
-| `IndustryFlowBackupStale` | No `databases` or `notebooks` backup has completed for two days, or no database backup ever has (after a day) | [Backup and disaster recovery](backup-and-recovery.md#running-backups); the job's output |
-| `IndustryFlowRestoreRehearsalStale` | No restore rehearsal has passed for nine days, or none ever has (after a week) | [Restore rehearsal](backup-and-recovery.md#restore-rehearsal); the rehearsal's output names the table or object that differed |
+| `IndustryFlowBackupStale` | No `databases` or `notebooks` backup has completed for two days (Compose) | [Backup and disaster recovery](backup-and-recovery.md#running-backups); the job's output |
+| `IndustryFlowBackupNeverCompleted` | No database backup has ever completed, for a day (Compose) | Run and schedule `db-backup`: [running backups](backup-and-recovery.md#running-backups) |
+| `IndustryFlowRestoreRehearsalStale` | No restore rehearsal has passed for nine days (Compose) | [Restore rehearsal](backup-and-recovery.md#restore-rehearsal); its output names the table or object that differed |
+| `IndustryFlowRestoreRehearsalNeverPassed` | No database restore rehearsal has ever passed, for a week (Compose) | Run and schedule `restore-rehearsal`: [restore rehearsal](backup-and-recovery.md#restore-rehearsal) |
 | `IndustryFlowCapabilityEventsDropped` | The writer acknowledged a capability-use event it could not record (unreadable, or refused by the database) | The API gateway's logs (`capability audit`) name each stream id; [capability-use record](../architecture/notebooks.md#capability-use-record) |
 
 | Where to see firing alerts | Address |

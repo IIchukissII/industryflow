@@ -194,38 +194,55 @@ age_out_mirror() {
 
 # dump_with_counts <database> <dump file> <counts file>
 # Dumps the database and counts its rows in the same snapshot: a session opens a repeatable-read
-# transaction, exports its snapshot and counts every table (COUNT_SQL) in it, and pg_dump reads that
-# snapshot while the session holds it. The counts are therefore exactly what the dump holds, however
-# busy the database is, and a restore rehearsal can be held to them (ADR-0032 dec 6).
+# transaction and exports its snapshot, pg_dump reads that snapshot, and the session then counts every
+# table (COUNT_SQL) in it. The counts are therefore exactly what the dump holds, however busy the
+# database is, and a restore rehearsal can be held to them (ADR-0032 dec 6).
+#
+# The session takes no table lock until pg_dump has finished. Counting first would hold a read lock on
+# every table while pg_dump waits for its own: an exclusive request in between (a retention job
+# dropping a chunk) queues behind the session, pg_dump queues behind the request, and the session
+# waits for pg_dump — a cycle the server cannot see, so nothing would ever break it.
 dump_with_counts() {
-  local db="$1" out="$2" counts="$3" ctl pid snap
+  local db="$1" out="$2" counts="$3" ctl pid snap rc=0
   ctl="$(mktemp -d)"
   mkfifo "${ctl}/in"
   psql -X -q -t -A -F "$(printf '\t')" -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" \
     -d "$db" < "${ctl}/in" > "${ctl}/out" 2> "${ctl}/err" &
   pid=$!
   exec 7> "${ctl}/in"
-  printf '%s\n' "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY;" \
-    "\\o ${ctl}/snapshot" "SELECT pg_export_snapshot();" \
-    "\\o ${counts}" "$COUNT_SQL" "\\o" "\\! touch ${ctl}/ready" >&7
-  # The session prints nothing else; it is ready once it has counted, and fails by exiting.
-  while [ ! -e "${ctl}/ready" ]; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      exec 7>&-
-      log "counting rows of '${db}' FAILED:"; cat "${ctl}/err" >&2
-      rm -rf "$ctl"; return 1
+  # A write to the session after it died must fail the run with its error, not kill the script.
+  trap '' PIPE
+  if _session "$pid" "$ctl" exported "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY;" \
+       "\\o ${ctl}/snapshot" "SELECT pg_export_snapshot();" "\\o"; then
+    snap="$(tr -d '[:space:]' < "${ctl}/snapshot")"
+    pg_dump -Fc -Z6 --snapshot="$snap" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$db" -f "$out" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      log "dumping '${db}' FAILED"
+    elif ! _session "$pid" "$ctl" counted "\\o ${counts}" "$COUNT_SQL" "\\o"; then
+      log "counting rows of '${db}' FAILED:"; rc=1
     fi
-    sleep 0.2
-  done
-  snap="$(tr -d '[:space:]' < "${ctl}/snapshot")"
-  local rc=0
-  pg_dump -Fc -Z6 --snapshot="$snap" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$db" -f "$out" || rc=$?
-  printf '%s\n' "COMMIT;" "\\q" >&7
+  else
+    log "exporting a snapshot of '${db}' FAILED:"; rc=1
+  fi
+  printf '%s\n' "COMMIT;" "\\q" >&7 2>/dev/null || true
   exec 7>&-
-  wait "$pid" || rc=$?
-  [ "$rc" -eq 0 ] || { log "dumping '${db}' FAILED"; cat "${ctl}/err" >&2; }
+  trap - PIPE
+  wait "$pid" || [ "$rc" -ne 0 ] || { log "the snapshot session of '${db}' FAILED:"; rc=1; }
+  [ "$rc" -eq 0 ] || cat "${ctl}/err" >&2
   rm -rf "$ctl"
   return "$rc"
+}
+
+# _session <pid> <ctl dir> <marker> <lines...> — sends lines to the snapshot session and waits until it
+# has run them (it touches <marker>), or fails when the session has exited.
+_session() {
+  local pid="$1" ctl="$2" marker="$3"
+  shift 3
+  printf '%s\n' "$@" "\\! touch ${ctl}/${marker}" >&7 2>/dev/null || return 1
+  while [ ! -e "${ctl}/${marker}" ]; do
+    kill -0 "$pid" 2>/dev/null || return 1
+    sleep 0.2
+  done
 }
 
 prune() {
@@ -294,10 +311,11 @@ main() {
     # their own prefix, so the count-based pruning of the dumps is not halved by them.
     dump_with_counts "$db" "$out" "${WORKDIR}/${db}.counts"
     size="$(du -h "$out" | cut -f1)"
-    aws "${AWS_ARGS[@]}" s3 cp "$out" \
-      "s3://${S3_BUCKET}/${S3_PREFIX}/${db}/${STAMP}.dump" --only-show-errors
+    # The counts first: a rehearsal that sees the dump finds its counts.
     aws "${AWS_ARGS[@]}" s3 cp "${WORKDIR}/${db}.counts" \
       "s3://${S3_BUCKET}/${S3_PREFIX}/counts/${db}/${STAMP}.tsv" --only-show-errors
+    aws "${AWS_ARGS[@]}" s3 cp "$out" \
+      "s3://${S3_BUCKET}/${S3_PREFIX}/${db}/${STAMP}.dump" --only-show-errors
     log "  uploaded ${db}/${STAMP}.dump (${size}, $(wc -l < "${WORKDIR}/${db}.counts") tables counted)"
     prune "${S3_PREFIX}/${db}/"
     prune "${S3_PREFIX}/counts/${db}/"

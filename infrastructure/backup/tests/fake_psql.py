@@ -47,9 +47,14 @@ def session(argv):
         elif line.startswith("\\!"):
             out.flush()
             subprocess.run(line[2:].strip(), shell=True, check=False)
+            if os.environ.get("FAKE_PSQL_EXIT_AFTER_EXPORT") and "exported" in line:
+                return 2
         elif line.startswith("\\q"):
             break
         elif line.strip() == "SELECT pg_export_snapshot();":
+            if os.environ.get("FAKE_ORDER_LOG"):
+                with open(os.environ["FAKE_ORDER_LOG"], "a") as order:
+                    order.write("export\n")
             out.write(SNAPSHOT + "\n")
         else:
             statement.append(line)
@@ -57,6 +62,9 @@ def session(argv):
                 if os.environ.get("FAKE_PSQL_FAIL_COUNT"):
                     print("ERROR:  permission denied for table x", file=sys.stderr)
                     return 3
+                if os.environ.get("FAKE_ORDER_LOG"):
+                    with open(os.environ["FAKE_ORDER_LOG"], "a") as order:
+                        order.write("count\n")
                 restored = os.environ.get("FAKE_RESTORED_COUNTS")
                 out.write(restored if restored is not None and db.endswith("_rehearsal")
                           else os.environ.get("FAKE_COUNTS", DEFAULT_COUNTS))

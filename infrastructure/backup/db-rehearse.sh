@@ -82,16 +82,29 @@ drop_scratch() {
 }
 
 # rehearse_mirror <label> <source bucket> <mirror prefix> <exclude prefix> <skipped glob>
-# Reads a random sample of the objects both source and mirror hold at the same size, from each side,
-# and compares their bytes. Keys matching the glob are rewritten in place at the source (a manifest)
-# and may legitimately be newer there, so they are not sampled.
+# An object both sides hold at different sizes fails: the backup re-copies such an object every run, so
+# one still differing after it is a mirror that does not hold the source. Then a random sample of the
+# objects both hold at the same size is read from each side and compared byte for byte. Keys matching
+# the glob are rewritten in place at the source (a manifest) and may legitimately be newer there, so
+# they are neither compared nor sampled.
 rehearse_mirror() {
   local label="$1" source="$2" prefix="$3" exclude="$4" skip="$5" key size n=0 a b
   _list_sizes _src_aws "$source" "" \
     | awk -F'\t' -v x="$exclude" 'x == "" || index($1, x) != 1' > "${WORKDIR}/${label}.source"
   _list_sizes _dst_aws "$S3_BUCKET" "${prefix}/" \
     | awk -F'\t' -v p="${prefix}/" '{ print substr($1, length(p) + 1) "\t" $2 }' > "${WORKDIR}/${label}.mirror"
-  # shellcheck disable=SC2016
+  awk -F'\t' 'FILENAME == ARGV[1] { m[$1] = $2; next } ($1 in m) && m[$1] != $2 { print $1 }' \
+      "${WORKDIR}/${label}.mirror" "${WORKDIR}/${label}.source" \
+    | while IFS= read -r key; do
+        # shellcheck disable=SC2053  # the glob is a pattern
+        [ -n "$skip" ] && [[ "$key" == $skip ]] && continue
+        printf '%s\n' "$key"
+      done > "${WORKDIR}/${label}.sizes"
+  if [ -s "${WORKDIR}/${label}.sizes" ]; then
+    log "${label} mirror: FAILED, $(wc -l < "${WORKDIR}/${label}.sizes") object(s) differ in size from the source, e.g.:"
+    head -n 10 "${WORKDIR}/${label}.sizes"
+    FAILED=1
+  fi
   awk -F'\t' 'FILENAME == ARGV[1] { m[$1] = $2; next } ($1 in m) && m[$1] == $2' \
       "${WORKDIR}/${label}.mirror" "${WORKDIR}/${label}.source" \
     | while IFS=$'\t' read -r key size; do

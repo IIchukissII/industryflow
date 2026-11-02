@@ -9,31 +9,40 @@
 groups:
   - name: industryflow.compose
     rules:
-      # ADR-0032: a backup that has stopped completing is found at the restore that needed it. A
-      # deployment on which no database backup ever completed has no series and is raised after a day.
+      # ADR-0032: a backup that has stopped completing is found at the restore that needed it.
       - alert: IndustryFlowBackupStale
-        expr: |
-          time() - max by (backup) (industryflow_backup_last_success_timestamp_seconds{platform="industryflow"}) > 2 * 86400
-          or
-          absent(industryflow_backup_last_success_timestamp_seconds{platform="industryflow", backup="databases"})
-        for: 1d
+        expr: time() - max by (backup) (industryflow_backup_last_success_timestamp_seconds{platform="industryflow"}) > 2 * 86400
         labels:
           severity: critical
         annotations:
           summary: "No backup has completed recently"
-          description: "No {{ $labels.backup }} backup has completed in the last two days, or none ever has. Run it and schedule it: docs/operations/backup-and-recovery.md."
+          description: "No {{ $labels.backup }} backup has completed in the last two days. The job's output names the failing step: docs/operations/backup-and-recovery.md."
           services: "db-backup, notebook-backup, timescaledb, minio"
-      # ADR-0032 dec 6: an unexercised backup counts toward no recovery objective. The rehearsal runs
-      # weekly; a deployment on which none has ever passed is raised after its first week.
+      # A deployment on which no database backup has ever completed has no series at all.
+      - alert: IndustryFlowBackupNeverCompleted
+        expr: absent(industryflow_backup_last_success_timestamp_seconds{platform="industryflow", backup="databases"})
+        for: 1d
+        labels:
+          severity: critical
+        annotations:
+          summary: "No database backup has ever completed"
+          description: "No database backup has completed on this deployment. Run db-backup and schedule it: docs/operations/backup-and-recovery.md#running-backups."
+          services: "db-backup, timescaledb, minio"
+      # ADR-0032 dec 6: an unexercised backup counts toward no recovery objective. Weekly.
       - alert: IndustryFlowRestoreRehearsalStale
-        expr: |
-          time() - max by (backup) (industryflow_restore_rehearsal_last_success_timestamp_seconds{platform="industryflow"}) > 9 * 86400
-          or
-          absent(industryflow_restore_rehearsal_last_success_timestamp_seconds{platform="industryflow", backup="databases"})
-        for: 7d
+        expr: time() - max by (backup) (industryflow_restore_rehearsal_last_success_timestamp_seconds{platform="industryflow"}) > 9 * 86400
         labels:
           severity: warning
         annotations:
           summary: "No restore rehearsal has passed recently"
-          description: "No {{ $labels.backup }} restore rehearsal has passed in the last nine days, or none ever has; its backups count toward no recovery objective until one does. Run it and read its log: docs/operations/backup-and-recovery.md."
+          description: "No {{ $labels.backup }} restore rehearsal has passed in the last nine days; its backups count toward no recovery objective until one does. Its output names the table or object that differed: docs/operations/backup-and-recovery.md."
           services: "restore-rehearsal, notebook-rehearsal, timescaledb, minio"
+      - alert: IndustryFlowRestoreRehearsalNeverPassed
+        expr: absent(industryflow_restore_rehearsal_last_success_timestamp_seconds{platform="industryflow", backup="databases"})
+        for: 7d
+        labels:
+          severity: warning
+        annotations:
+          summary: "No restore rehearsal has ever passed"
+          description: "No database restore rehearsal has passed on this deployment, so its backups count toward no recovery objective. Run restore-rehearsal and schedule it: docs/operations/backup-and-recovery.md#restore-rehearsal."
+          services: "restore-rehearsal, timescaledb, minio"

@@ -197,10 +197,13 @@ def test_a_scratch_prefix_naming_a_work_volume_is_refused(env, prefix):
     assert not any(c["path"] == "/volumes/create" for c in _calls(env))
 
 
-def test_no_archives_is_a_passing_rehearsal(env):
-    r = _rehearse(env)
+def test_no_archives_passes_without_claiming_a_rehearsal(env, tmp_path):
+    metrics = tmp_path / "metrics"
+    metrics.mkdir()
+    r = _rehearse(env, METRICS_TEXTFILE_DIR=str(metrics))
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "0 volume(s)" in r.stdout
+    assert "nothing rehearsed" in r.stdout
+    assert list(metrics.iterdir()) == []
 
 
 def test_a_successful_notebook_backup_writes_its_metric(env, tmp_path):
