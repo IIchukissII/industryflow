@@ -140,6 +140,18 @@ services:
     networks:
       - industryflow-network
 
+  # The backup and rehearsal jobs write their success times into this volume as the backup image's
+  # uid 10001; node-exporter reads them. Whichever container mounts a new volume first creates it
+  # root-owned, and the jobs run with --no-deps, so the ownership is set here, on every `up`.
+  backup-metrics-init:
+    image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+    container_name: industryflow-backup-metrics-init
+    command: ["sh", "-ec", "chown 10001:10001 /m && chmod 0755 /m"]
+    volumes:
+      - backup-metrics:/m
+    network_mode: none
+    restart: "no"
+
   # The key the gateway signs the dashboards' sign-on assertion with (ADR-0016 dec 7), generated once
   # and kept; its public half is re-derived from it on every run (services/api_gateway/dashboards_key.py).
   # The gateway's own image, which carries the crypto library, as root (to hand the private half to
@@ -1300,10 +1312,16 @@ services:
       - '--path.rootfs=/rootfs'
       - '--path.sysfs=/host/sys'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      # The backup and rehearsal jobs' success times (infrastructure/prometheus/rules/compose.yml).
+      - '--collector.textfile.directory=/textfile'
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:ro
+      - backup-metrics:/textfile:ro
+    depends_on:
+      backup-metrics-init:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:9100:9100"
     networks:
@@ -1467,7 +1485,8 @@ services:
     image: industryflow-db-backup
     container_name: industryflow-db-backup
     profiles: ["backup"]
-    environment:
+    environment: &backup-env
+      METRICS_TEXTFILE_DIR: /var/lib/industryflow/metrics
       PGSSLMODE: ${DB_SSLMODE:-verify-full}
       PGSSLROOTCERT: /etc/ssl/industryflow/ca.crt
       PGHOST: ${DB_HOST}
@@ -1501,6 +1520,34 @@ services:
         condition: service_completed_successfully
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
+      - backup-metrics:/var/lib/industryflow/metrics
+    networks:
+      - industryflow-network
+    restart: "no"
+
+  # Restore rehearsal (ADR-0032 dec 6): restores the latest dumps into scratch databases
+  # (<db>_rehearsal, on the same server), compares every table's rows with the counts taken in the
+  # dump's snapshot, drops them, and reads a sample of the mirrored objects back. Weekly, like
+  # db-backup from a host cron: docs/operations/backup-and-recovery.md#restore-rehearsal.
+  #   one-off:   docker compose --profile backup run --rm --no-deps restore-rehearsal
+  restore-rehearsal:
+    image: industryflow-db-backup
+    container_name: industryflow-restore-rehearsal
+    profiles: ["backup"]
+    entrypoint: ["db-rehearse.sh"]
+    environment:
+      <<: *backup-env
+      REHEARSAL_OBJECT_SAMPLE: ${BACKUP_REHEARSAL_OBJECT_SAMPLE:-20}
+    # Unlike db-backup, which must run before an upgrade migrates anything, the rehearsal restores
+    # dumps that name the migrated roles.
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    volumes:
+      - *ca-mount
+      - backup-metrics:/var/lib/industryflow/metrics
     networks:
       - industryflow-network
     restart: "no"
@@ -1515,7 +1562,8 @@ services:
     container_name: industryflow-notebook-backup
     profiles: ["backup"]
     entrypoint: ["notebook-backup.sh"]
-    environment:
+    environment: &notebook-backup-env
+      METRICS_TEXTFILE_DIR: /var/lib/industryflow/metrics
       AWS_ACCESS_KEY_ID: ${BACKUP_STORE_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${BACKUP_STORE_SECRET_KEY}
       AWS_DEFAULT_REGION: ${BACKUP_S3_REGION:-us-east-1}
@@ -1533,6 +1581,29 @@ services:
         condition: service_completed_successfully
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - backup-metrics:/var/lib/industryflow/metrics
+    networks:
+      - industryflow-network
+    restart: "no"
+
+  # Notebook restore rehearsal (ADR-0032 dec 6, ADR-0038 dec 8): restores each volume's latest archive
+  # into a scratch volume (rehearsal-<volume>), compares it with the archive and removes it.
+  #   one-off:   docker compose --profile backup run --rm --no-deps notebook-rehearsal
+  notebook-rehearsal:
+    image: industryflow-db-backup
+    container_name: industryflow-notebook-rehearsal
+    profiles: ["backup"]
+    entrypoint: ["notebook-rehearse.sh"]
+    environment:
+      <<: *notebook-backup-env
+    group_add:
+      - "${DOCKER_GID:-999}"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - backup-metrics:/var/lib/industryflow/metrics
     networks:
       - industryflow-network
     restart: "no"
@@ -1690,6 +1761,9 @@ volumes:
     name: industryflow-dashboards-signing-key
   dashboards-verify-key:
     name: industryflow-dashboards-verify-key
+  # The backup and rehearsal jobs' success times, read by node-exporter's textfile collector.
+  backup-metrics:
+    name: industryflow-backup-metrics
 
 # ==========================================================================
 # NETWORKS

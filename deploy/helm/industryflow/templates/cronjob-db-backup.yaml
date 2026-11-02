@@ -5,17 +5,30 @@
   Tier-1 DR: scheduled logical backups (pg_dump) of every application database to S3/MinIO.
   Recovery granularity = the schedule interval (RPO). Continuous-WAL PITR (pgBackRest) is the
   documented tier-2 upgrade — docs/operations/backup-and-recovery.md.
+
+  The restore rehearsal (ADR-0032 dec 6) is the same image and configuration on its own schedule:
+  it restores the latest dumps into scratch databases, holds them to the dumped row counts, drops
+  them and reads a sample of the mirrored objects back (db-rehearse.sh). One definition renders both,
+  so the rehearsal can never read another bucket or prefix than the backup writes.
 */}}
+{{- $root := . }}
+{{- $jobs := list (dict "name" "db-backup" "schedule" .Values.backup.schedule "rehearsal" false) }}
+{{- if .Values.backup.rehearsal.enabled }}
+{{- $jobs = append $jobs (dict "name" "restore-rehearsal" "schedule" .Values.backup.rehearsal.schedule "rehearsal" true) }}
+{{- end }}
+{{- range $job := $jobs }}
+{{- with $root }}
+---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ include "industryflow.fullname" . }}-db-backup
+  name: {{ include "industryflow.fullname" . }}-{{ $job.name }}
   labels:
     {{- include "industryflow.labels" . | nindent 4 }}
-    app.kubernetes.io/name: db-backup
+    app.kubernetes.io/name: {{ $job.name }}
     app.kubernetes.io/component: backup
 spec:
-  schedule: {{ .Values.backup.schedule | quote }}
+  schedule: {{ $job.schedule | quote }}
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 600
   successfulJobsHistoryLimit: 3
@@ -26,7 +39,7 @@ spec:
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: db-backup
+            app.kubernetes.io/name: {{ $job.name }}
             app.kubernetes.io/instance: {{ .Release.Name }}
         spec:
           restartPolicy: Never
@@ -43,10 +56,18 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           {{- end }}
+          {{- if $job.rehearsal }}
+          # The dumps name the migrated roles; the restore refuses one that names a missing role.
+          initContainers:
+            {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" . "userKey" "DB_USER" "workload" "db-backup" "passwordKey" "DB_PASSWORD") | nindent 12 }}
+          {{- end }}
           containers:
-            - name: db-backup
+            - name: {{ $job.name }}
               image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.backup.image "tag" .Values.image.tag "digest" .Values.backup.digest) | quote }}
               imagePullPolicy: {{ .Values.image.pullPolicy }}
+              {{- if $job.rehearsal }}
+              command: ["db-rehearse.sh"]
+              {{- end }}
               {{- if .Values.securityContext.enabled }}
               securityContext:
                 allowPrivilegeEscalation: false
@@ -128,7 +149,11 @@ spec:
                 - name: PGSSLROOTCERT
                   value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
                 {{- end }}
-              {{- with .Values.backup.resources }}
+                {{- if $job.rehearsal }}
+                - name: REHEARSAL_OBJECT_SAMPLE
+                  value: {{ .Values.backup.rehearsal.objectSample | quote }}
+                {{- end }}
+              {{- with (ternary .Values.backup.rehearsal.resources .Values.backup.resources $job.rehearsal) }}
               resources:
                 {{- toYaml . | nindent 16 }}
               {{- end }}
@@ -147,8 +172,11 @@ spec:
                   readOnly: true
                 {{- end }}
               {{- end }}
-          {{- if or .Values.securityContext.enabled .Values.tls.db.enabled }}
+          {{- if or .Values.securityContext.enabled .Values.tls.db.enabled $job.rehearsal }}
           volumes:
+            {{- if $job.rehearsal }}
+            {{- include "industryflow.schemaReadyVolumes" . | nindent 12 }}
+            {{- end }}
             {{- if .Values.securityContext.enabled }}
             - name: tmp
               emptyDir: {}
@@ -164,4 +192,6 @@ spec:
                     path: ca.crt
             {{- end }}
           {{- end }}
+{{- end }}
+{{- end }}
 {{- end }}

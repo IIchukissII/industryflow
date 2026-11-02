@@ -27,8 +27,12 @@
 #   RETAIN_PER_VOLUME        archives kept per volume          (default: RETAIN_PER_DB, else 14)
 #   MIRROR_RETAIN_DAYS       days a gone volume's archives stay (default: RETAIN_PER_VOLUME)
 #   MIRROR_NOW               epoch seconds standing in for the clock (tests)
+#   METRICS_TEXTFILE_DIR     node-exporter textfile directory for the run's success time (unset: none)
 
 set -euo pipefail
+
+# shellcheck source=backup-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/backup-lib.sh"
 
 log() { echo "[notebook-backup $(date -u +%H:%M:%S)] $*"; }
 
@@ -145,6 +149,10 @@ main() {
     n=$((n + 1))
   done 3< "${WORK}/present"
   age_out_gone "${WORK}/present"
+  write_metric notebook-backup \
+    "# HELP industryflow_backup_last_success_timestamp_seconds When a backup run last completed." \
+    "# TYPE industryflow_backup_last_success_timestamp_seconds gauge" \
+    "industryflow_backup_last_success_timestamp_seconds{backup=\"notebooks\"} $(date -u +%s)"
   log "${n} volume(s) archived"
 }
 

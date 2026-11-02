@@ -1,0 +1,77 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# promtool test rules infrastructure/prometheus/rules/tests/compose_test.yml
+rule_files:
+  - ../compose.yml
+
+evaluation_interval: 1h
+
+tests:
+  # A daily backup keeps it quiet; one that stops completing is raised two days after its last success
+  # (plus the rule's day), per kind; another stack's series is not read.
+  - interval: 1h
+    input_series:
+      # Last success at t=0, never again.
+      - series: 'industryflow_backup_last_success_timestamp_seconds{platform="industryflow", backup="databases"}'
+        values: '0x120'
+      # Succeeds every day: the value is the time of the latest run.
+      - series: 'industryflow_backup_last_success_timestamp_seconds{platform="industryflow", backup="notebooks"}'
+        values: '0x23 86400x23 172800x23 259200x23 345600x23 432000x23'
+      - series: 'industryflow_backup_last_success_timestamp_seconds{platform="other", backup="x"}'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 70h
+        alertname: IndustryFlowBackupStale
+        exp_alerts: []
+      - eval_time: 73h
+        alertname: IndustryFlowBackupStale
+        exp_alerts:
+          - exp_labels: {severity: critical, backup: databases}
+            exp_annotations:
+              summary: "No backup has completed recently"
+              description: "No databases backup has completed in the last two days, or none ever has. Run it and schedule it: docs/operations/backup-and-recovery.md."
+              services: "db-backup, notebook-backup, timescaledb, minio"
+
+  # A deployment on which no database backup ever completed is raised after a day.
+  - interval: 1h
+    input_series:
+      - series: 'up{platform="industryflow", job="node-exporter"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 23h
+        alertname: IndustryFlowBackupStale
+        exp_alerts: []
+      - eval_time: 25h
+        alertname: IndustryFlowBackupStale
+        exp_alerts:
+          - exp_labels: {severity: critical, platform: industryflow, backup: databases}
+            exp_annotations:
+              summary: "No backup has completed recently"
+              description: "No databases backup has completed in the last two days, or none ever has. Run it and schedule it: docs/operations/backup-and-recovery.md."
+              services: "db-backup, notebook-backup, timescaledb, minio"
+      - eval_time: 25h
+        alertname: IndustryFlowRestoreRehearsalStale
+        exp_alerts: []
+
+  # A weekly rehearsal keeps it quiet; one that stops passing is raised nine days after its last pass
+  # (plus the rule's week).
+  - interval: 1h
+    input_series:
+      # Passes at day 0, 7 and 14, then never again (hourly samples: a series sampled daily is stale
+      # between its samples).
+      - series: 'industryflow_restore_rehearsal_last_success_timestamp_seconds{platform="industryflow", backup="databases"}'
+        values: '0x167 604800x167 1209600x500'
+    alert_rule_test:
+      - eval_time: 20d
+        alertname: IndustryFlowRestoreRehearsalStale
+        exp_alerts: []
+      - eval_time: 31d
+        alertname: IndustryFlowRestoreRehearsalStale
+        exp_alerts:
+          - exp_labels: {severity: warning, backup: databases}
+            exp_annotations:
+              summary: "No restore rehearsal has passed recently"
+              description: "No databases restore rehearsal has passed in the last nine days, or none ever has; its backups count toward no recovery objective until one does. Run it and read its log: docs/operations/backup-and-recovery.md."
+              services: "restore-rehearsal, notebook-rehearsal, timescaledb, minio"

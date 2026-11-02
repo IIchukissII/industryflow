@@ -85,7 +85,7 @@ jobs:
       - name: Rule unit tests
         run: |
           docker run --rm --network none -v "$PWD/infrastructure/prometheus:/p:ro" -w /p/rules/tests \
-            --entrypoint promtool "$PROMETHEUS_IMAGE" test rules platform_test.yml
+            --entrypoint promtool "$PROMETHEUS_IMAGE" test rules platform_test.yml compose_test.yml
       # The chart's own group (industryflow.kubernetes) exists only in the template: render it with every
       # device check enabled and run its unit tests against what the chart actually ships.
       - uses: azure/setup-helm@v5

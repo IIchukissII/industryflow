@@ -9,7 +9,9 @@
 #     a capability handle for tenant A cannot read tenant B when relayed by the proxy;
 #   * that the GRANT boundary survives a disaster recovery: a real backup -> restore with the backup
 #     image keeps every owner, privilege and default privilege, and refuses a dump naming a role the
-#     cluster lacks (infrastructure/timescaledb/tests/test_backup_restore_privileges.py).
+#     cluster lacks (infrastructure/timescaledb/tests/test_backup_restore_privileges.py);
+#   * that the scheduled restore rehearsal holds a restore to the backup's own row counts and fails
+#     a backup holding other rows (infrastructure/timescaledb/tests/test_restore_rehearsal.py).
 #
 # The scope that ENFORCES isolation (the gateway's search_path routing and the proxy relay) is
 # path-gated in the `changes` job below, not just the DB init scripts — so a change that breaks the

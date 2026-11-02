@@ -405,6 +405,22 @@ backup:
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }
+  # IndustryFlowBackupStale fires once the backup CronJob has not succeeded for this long (or, never
+  # having succeeded, has existed this long). Rendered with observability.prometheusRules.
+  alertAfterSeconds: 172800    # two missed daily runs
+  # Restore rehearsal (ADR-0032 dec 6): a CronJob restoring the latest dumps into scratch databases
+  # (<db>_rehearsal, on the same server: briefly a second copy of each), holding them to the row
+  # counts taken in the dump's snapshot, dropping them, and reading objectSample mirrored objects per
+  # mirror back against the source. IndustryFlowRestoreRehearsalStale fires after alertAfterSeconds
+  # without a pass.
+  rehearsal:
+    enabled: true
+    schedule: "0 4 * * 0"      # weekly, Sunday 04:00 UTC (after the 02:00 backup)
+    objectSample: 20
+    alertAfterSeconds: 777600  # nine days: one missed weekly run
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 512Mi }
 
 # ---------------------------------------------------------------------------
 # Cold layer (ADR-0025). A CronJob exports raw sensor_measurements older than the horizon to

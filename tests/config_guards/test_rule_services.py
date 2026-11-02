@@ -11,9 +11,10 @@ alone and nothing says so.
 
 from __future__ import annotations
 
-from _repo import load_yaml
+from _repo import ROOT, load_yaml
 
-RULES = [r for g in load_yaml("infrastructure/prometheus/rules/platform.yml")["groups"] for r in g["rules"]]
+RULES = [r for f in sorted((ROOT / "infrastructure" / "prometheus" / "rules").glob("*.yml"))
+         for g in load_yaml(str(f.relative_to(ROOT)))["groups"] for r in g["rules"]]
 SERVICES = set(load_yaml("docker-compose.yml")["services"])
 
 

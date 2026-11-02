@@ -142,3 +142,71 @@ def test_a_restore_never_overwrites_an_existing_volume(env):
     r = _restore(env, ALICE)
     assert r.returncode != 0 and "already exists" in r.stdout
     assert (env["docker"] / "volumes" / ALICE / "analysis.ipynb").read_bytes() == b"current"
+
+
+# --- notebook-rehearse.sh (ADR-0032 dec 6) ---------------------------------------------------------
+
+def _rehearse(env, **extra):
+    e = dict(env["env"], **extra)
+    return subprocess.run(["bash", str(SCRIPTS / "notebook-rehearse.sh")], env=e, capture_output=True, text=True)
+
+
+def test_a_rehearsal_restores_every_volumes_latest_archive_into_scratch_and_removes_it(env, tmp_path):
+    _volume(env, ALICE, {"analysis.ipynb": b"1"})
+    _volume(env, "industryflow-nb-bob", {"b.ipynb": b"2"})
+    assert _backup(env, "20261026T020000Z").returncode == 0
+    metrics = tmp_path / "metrics"
+    metrics.mkdir()
+    r = _rehearse(env, METRICS_TEXTFILE_DIR=str(metrics))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "2 volume(s) restored and compared" in r.stdout
+    created = [json.loads(c["body"])["Name"] for c in _calls(env) if c["path"] == "/volumes/create"]
+    assert sorted(created) == ["rehearsal-industryflow-nb-alice", "rehearsal-industryflow-nb-bob"]
+    assert sorted(p.name for p in (env["docker"] / "volumes").iterdir()) == [ALICE, "industryflow-nb-bob"]
+    assert 'industryflow_restore_rehearsal_last_success_timestamp_seconds{backup="notebooks"} ' in \
+        (metrics / "notebook-rehearse.prom").read_text()
+
+
+def test_a_rehearsal_whose_restore_differs_fails_and_removes_scratch(env, tmp_path):
+    _volume(env, ALICE, {"analysis.ipynb": b"1", "notes.md": b"2"})
+    assert _backup(env, "20261026T020000Z").returncode == 0
+    metrics = tmp_path / "metrics"
+    metrics.mkdir()
+    r = _rehearse(env, FAKE_DOCKER_DROP_ON_PUT="notes.md", METRICS_TEXTFILE_DIR=str(metrics))
+    assert r.returncode == 1
+    assert f"{ALICE}: FAILED" in r.stdout
+    assert [p.name for p in (env["docker"] / "volumes").iterdir()] == [ALICE]
+    assert list(metrics.iterdir()) == []
+
+
+def test_a_leftover_scratch_volume_is_replaced(env):
+    _volume(env, ALICE, {"analysis.ipynb": b"1"})
+    _volume(env, "rehearsal-" + ALICE, {"stale": b"x"})
+    assert _backup(env, "20261026T020000Z").returncode == 0
+    r = _rehearse(env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (env["docker"] / "volumes" / ("rehearsal-" + ALICE)).exists()
+
+
+@pytest.mark.parametrize("prefix", ["", "industryflow-nb-x"])
+def test_a_scratch_prefix_naming_a_work_volume_is_refused(env, prefix):
+    _volume(env, ALICE, {"analysis.ipynb": b"1"})
+    assert _backup(env, "20261026T020000Z").returncode == 0
+    r = _rehearse(env, REHEARSAL_VOLUME_PREFIX=prefix)
+    assert r.returncode == 2
+    assert not any(c["path"] == "/volumes/create" for c in _calls(env))
+
+
+def test_no_archives_is_a_passing_rehearsal(env):
+    r = _rehearse(env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "0 volume(s)" in r.stdout
+
+
+def test_a_successful_notebook_backup_writes_its_metric(env, tmp_path):
+    _volume(env, ALICE, {"a.ipynb": b"1"})
+    metrics = tmp_path / "metrics"
+    metrics.mkdir()
+    assert _backup(env, "20261026T020000Z", METRICS_TEXTFILE_DIR=str(metrics)).returncode == 0
+    assert 'industryflow_backup_last_success_timestamp_seconds{backup="notebooks"} ' in \
+        (metrics / "notebook-backup.prom").read_text()

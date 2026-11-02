@@ -20,13 +20,16 @@ RUN echo "security refresh: ${SECURITY_REFRESH}" \
  && apk add --no-cache aws-cli bash curl jq \
  && rm -f /usr/local/bin/gosu
 
-COPY db-backup.sh db-restore.sh notebook-backup.sh notebook-restore.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/db-backup.sh /usr/local/bin/db-restore.sh \
-             /usr/local/bin/notebook-backup.sh /usr/local/bin/notebook-restore.sh
+# Every script, not a list: the scripts source and call each other by name, and a script left off a
+# list would fail only when that job runs (tests/test_image_scripts.py).
+COPY *.sh /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/*.sh
 
 # Run as a non-root user (uid 10001) with a writable home (aws-cli/mktemp). pg_dump connects
 # over TCP, so no local DB privileges are needed.
-RUN adduser -D -u 10001 -h /home/backup backup
+# The jobs' node-exporter textfile directory on a Docker host (METRICS_TEXTFILE_DIR), owned by the user.
+RUN adduser -D -u 10001 -h /home/backup backup \
+ && install -d -o backup -g backup -m 0755 /var/lib/industryflow/metrics
 USER 10001
 ENV HOME=/home/backup
 

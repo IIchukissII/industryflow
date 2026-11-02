@@ -8,7 +8,9 @@
 # Dumps each application database with pg_dump custom format (-Fc, compressed, supports
 # selective/parallel restore) plus the cluster globals (roles), and uploads them to an
 # S3-compatible object store (MinIO in-cluster by default; point at off-site S3 for real DR).
-# Count-based retention prunes old copies per database.
+# Count-based retention prunes old copies per database. Each dump is taken in one snapshot with a
+# per-table row count of that snapshot (<prefix>/counts/<db>/<stamp>.tsv), which the restore
+# rehearsal (db-rehearse.sh) holds the restored database to.
 #
 # Then it mirrors the cold-layer bucket (ADR-0025) into the same backup target. Once the cold export
 # drops a day from the database, the cold bucket holds the only copy of that raw history — a database
@@ -39,6 +41,7 @@
 #   AWS_DEFAULT_REGION                                  (default: us-east-1)
 #   S3_PREFIX        key prefix within the bucket        (default: "timescaledb")
 #   RETAIN_PER_DB    copies to keep per database         (default: 14)
+#   METRICS_TEXTFILE_DIR  node-exporter textfile directory for the run's success time (unset: none)
 # Object-store mirrors:
 #   SOURCE_ENDPOINT_URL             the mirrored buckets' S3 endpoint (default: S3_ENDPOINT_URL)
 #   SOURCE_ACCESS_KEY_ID SOURCE_SECRET_ACCESS_KEY
@@ -53,6 +56,9 @@
 #   MODEL_SOURCE_EXCLUDE_PREFIX     a key prefix left out of the model mirror (default: "_upload-staging/")
 
 set -euo pipefail
+
+# shellcheck source=backup-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/backup-lib.sh"
 
 log() { echo "[db-backup $(date -u +%H:%M:%S)] $*"; }
 
@@ -186,6 +192,42 @@ age_out_mirror() {
   log "  ${label} mirror: ${expired} object(s) gone from the source for ${retain_days} days removed, $(wc -l < "${work}/absent.next") ageing"
 }
 
+# dump_with_counts <database> <dump file> <counts file>
+# Dumps the database and counts its rows in the same snapshot: a session opens a repeatable-read
+# transaction, exports its snapshot and counts every table (COUNT_SQL) in it, and pg_dump reads that
+# snapshot while the session holds it. The counts are therefore exactly what the dump holds, however
+# busy the database is, and a restore rehearsal can be held to them (ADR-0032 dec 6).
+dump_with_counts() {
+  local db="$1" out="$2" counts="$3" ctl pid snap
+  ctl="$(mktemp -d)"
+  mkfifo "${ctl}/in"
+  psql -X -q -t -A -F "$(printf '\t')" -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" \
+    -d "$db" < "${ctl}/in" > "${ctl}/out" 2> "${ctl}/err" &
+  pid=$!
+  exec 7> "${ctl}/in"
+  printf '%s\n' "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY;" \
+    "\\o ${ctl}/snapshot" "SELECT pg_export_snapshot();" \
+    "\\o ${counts}" "$COUNT_SQL" "\\o" "\\! touch ${ctl}/ready" >&7
+  # The session prints nothing else; it is ready once it has counted, and fails by exiting.
+  while [ ! -e "${ctl}/ready" ]; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      exec 7>&-
+      log "counting rows of '${db}' FAILED:"; cat "${ctl}/err" >&2
+      rm -rf "$ctl"; return 1
+    fi
+    sleep 0.2
+  done
+  snap="$(tr -d '[:space:]' < "${ctl}/snapshot")"
+  local rc=0
+  pg_dump -Fc -Z6 --snapshot="$snap" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$db" -f "$out" || rc=$?
+  printf '%s\n' "COMMIT;" "\\q" >&7
+  exec 7>&-
+  wait "$pid" || rc=$?
+  [ "$rc" -eq 0 ] || { log "dumping '${db}' FAILED"; cat "${ctl}/err" >&2; }
+  rm -rf "$ctl"
+  return "$rc"
+}
+
 prune() {
   # Keep the newest $RETAIN_PER_DB objects under a prefix; delete the rest. Keys are
   # timestamp-named so lexical sort == chronological.
@@ -247,14 +289,18 @@ main() {
   for db in $DATABASES; do
     log "dumping database '${db}'"
     out="${WORKDIR}/${db}.dump"
-    # -Fc custom format, max compression; whole-database dump (TimescaleDB-safe — restore uses
-    # timescaledb_pre/post_restore, see the runbook).
-    pg_dump -Fc -Z6 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$db" -f "$out"
+    # -Fc custom format, compressed; whole-database dump (TimescaleDB-safe — restore uses
+    # timescaledb_pre/post_restore, see the runbook). The row counts of the same snapshot go under
+    # their own prefix, so the count-based pruning of the dumps is not halved by them.
+    dump_with_counts "$db" "$out" "${WORKDIR}/${db}.counts"
     size="$(du -h "$out" | cut -f1)"
     aws "${AWS_ARGS[@]}" s3 cp "$out" \
       "s3://${S3_BUCKET}/${S3_PREFIX}/${db}/${STAMP}.dump" --only-show-errors
-    log "  uploaded ${db}/${STAMP}.dump (${size})"
+    aws "${AWS_ARGS[@]}" s3 cp "${WORKDIR}/${db}.counts" \
+      "s3://${S3_BUCKET}/${S3_PREFIX}/counts/${db}/${STAMP}.tsv" --only-show-errors
+    log "  uploaded ${db}/${STAMP}.dump (${size}, $(wc -l < "${WORKDIR}/${db}.counts") tables counted)"
     prune "${S3_PREFIX}/${db}/"
+    prune "${S3_PREFIX}/counts/${db}/"
   done
 
   prune "${S3_PREFIX}/globals/"
@@ -273,6 +319,10 @@ main() {
     log "backup run ${STAMP} INCOMPLETE: ${UNMIRRORED} object(s) not mirrored, see above"
     exit 1
   fi
+  write_metric db-backup \
+    "# HELP industryflow_backup_last_success_timestamp_seconds When a backup run last completed." \
+    "# TYPE industryflow_backup_last_success_timestamp_seconds gauge" \
+    "industryflow_backup_last_success_timestamp_seconds{backup=\"databases\"} $(date -u +%s)"
   log "backup run ${STAMP} complete"
 }
 

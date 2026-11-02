@@ -62,6 +62,11 @@ def main(argv):
         return 0
     if method == "GET" and parts[0] == "volumes" and len(parts) == 2:
         return 0 if (VOLUMES / parts[1]).is_dir() else fail(404)
+    if method == "DELETE" and parts[0] == "volumes" and len(parts) == 2:
+        if not (VOLUMES / parts[1]).is_dir():
+            return fail(404)
+        shutil.rmtree(VOLUMES / parts[1])
+        return 0
     if method == "POST" and parts == ["volumes", "create"]:
         (VOLUMES / json.loads(body)["Name"]).mkdir()
         print(body)

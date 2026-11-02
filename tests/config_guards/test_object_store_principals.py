@@ -19,6 +19,8 @@ import os
 import re
 import subprocess
 
+import pytest
+
 from _repo import ROOT, find, helm_template, load_yaml
 
 SCRIPT = (ROOT / "infrastructure" / "minio" / "minio-init.sh").read_text()
@@ -197,15 +199,18 @@ def test_the_backup_mirrors_read_with_the_backup_read_principal():
 
 
 def test_only_the_backup_job_holds_the_backup_read_principal():
+    # ADR-0032 dec 5: the backup and restore jobs; the rehearsal is the restore job that reads the
+    # sources back to compare the mirrors with them.
     holders = {n for n, s in COMPOSE.items()
                if _interpolated(s.get("environment", {})) & {"BACKUP_READ_ACCESS_KEY", "BACKUP_READ_SECRET_KEY"}}
-    assert holders == {"db-backup", "minio-init"}, sorted(holders)
+    assert holders == {"db-backup", "restore-rehearsal", "minio-init"}, sorted(holders)
     assert _granted()["backup-read"] == {"art": {"s3:GetObject"}, "cold": {"s3:GetObject"}}
 
 
-def test_the_notebook_backup_holds_no_database_or_source_credential():
+@pytest.mark.parametrize("job", ["notebook-backup", "notebook-rehearsal"])
+def test_the_notebook_backup_holds_no_database_or_source_credential(job):
     # ADR-0038 dec 5: the Docker socket and the backup bucket's principal, nothing else.
-    held = _interpolated(COMPOSE["notebook-backup"]["environment"])
+    held = _interpolated(COMPOSE[job]["environment"])
     assert held & {"BACKUP_STORE_ACCESS_KEY", "BACKUP_STORE_SECRET_KEY"} == {"BACKUP_STORE_ACCESS_KEY", "BACKUP_STORE_SECRET_KEY"}
     assert not {v for v in held if v.endswith(("_PASSWORD", "_ACCESS_KEY", "_SECRET_KEY"))
                 and not v.startswith("BACKUP_STORE_")}, sorted(held)

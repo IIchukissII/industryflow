@@ -59,8 +59,10 @@ Every target carries the label `platform="industryflow"`, which every platform a
 
 ## Alerts
 
-Prometheus evaluates [`infrastructure/prometheus/rules/platform.yml`](../../infrastructure/prometheus/rules/platform.yml),
-the same file the chart renders into its PrometheusRule ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 1).
+| Rules file | Loaded by |
+|---|---|
+| [`platform.yml`](../../infrastructure/prometheus/rules/platform.yml) | Compose, and the chart's PrometheusRule ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 1) |
+| [`compose.yml`](../../infrastructure/prometheus/rules/compose.yml) | Compose only: the backup and rehearsal jobs' success times, from node-exporter's textfile collector (`backup-metrics` volume). The chart raises the same alerts from its CronJobs ([chart rules](../../deploy/observability/README.md#platform-alert-rules)) |
 
 | Alert | Fires when | Handling |
 |---|---|---|
@@ -71,6 +73,8 @@ the same file the chart renders into its PrometheusRule ([ADR-0016](../../ADR/AD
 | `IndustryFlowKafkaConsumerLag` | A consumer group lags more than 1000 for 10m | The consumer's logs |
 | `IndustryFlowDeadLetteredReadings` | A letter reached a `*.dlq` topic in the last 15m | [Dead-letter handling](dead-letters.md) |
 | `IndustryFlowCapabilityAuditBacklog` | More than 1000 capability-use events wait to be recorded for 15m | The API gateway's logs (`capability audit writer`); [capability-use record](../architecture/notebooks.md#capability-use-record) |
+| `IndustryFlowBackupStale` | No `databases` or `notebooks` backup has completed for two days, or no database backup ever has (after a day) | [Backup and disaster recovery](backup-and-recovery.md#running-backups); the job's output |
+| `IndustryFlowRestoreRehearsalStale` | No restore rehearsal has passed for nine days, or none ever has (after a week) | [Restore rehearsal](backup-and-recovery.md#restore-rehearsal); the rehearsal's output names the table or object that differed |
 | `IndustryFlowCapabilityEventsDropped` | The writer acknowledged a capability-use event it could not record (unreadable, or refused by the database) | The API gateway's logs (`capability audit`) name each stream id; [capability-use record](../architecture/notebooks.md#capability-use-record) |
 
 | Where to see firing alerts | Address |
