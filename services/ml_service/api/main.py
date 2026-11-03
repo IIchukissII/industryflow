@@ -12,6 +12,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
+
+from industryflow_contracts import build_info
 import asyncpg
 import logging
 import secrets
@@ -80,6 +82,8 @@ async def csrf_protect(request, call_next):
 
 # Prometheus metrics
 Instrumentator().instrument(app).expose(app)
+# The source revision this image was built from (ADR-0016 dec 8).
+build_info.report("ml-service-api")
 
 
 # ============================================================================

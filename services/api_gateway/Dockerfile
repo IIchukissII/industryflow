@@ -42,4 +42,8 @@ ENV API_GATEWAY_WORKERS=2
 # each scrape reads one worker's counters. Emptied at start so a restart drops stale files; also
 # created above, so importing the app outside this CMD (smoke tests) finds it.
 ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+# The commit this image is built from, reported as industryflow_build_info (ADR-0016 dec 8). Last, so
+# a new commit rebuilds no earlier layer.
+ARG INDUSTRYFLOW_REVISION=unknown
+ENV INDUSTRYFLOW_REVISION=${INDUSTRYFLOW_REVISION}
 CMD ["sh", "-c", "rm -rf \"$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$PROMETHEUS_MULTIPROC_DIR\" && exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers \"$API_GATEWAY_WORKERS\""]

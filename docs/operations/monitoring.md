@@ -135,7 +135,7 @@ receivers:
 
 | Item | Value |
 |---|---|
-| Evidence | The rule's PromQL over the 30 minutes before the alert to now; error lines of the services in the rule's `services` annotation and the target's host; other active alerts; the alert's row in the [alert table](#alerts) (every platform rule has one); `Symptom \| Cause \| Fix` rows sharing at least two words with the alert. The metric series are narrowed to the alert's own labels |
+| Evidence | The rule's PromQL over the 30 minutes before the alert to now; the revisions every service reported over the same window, in the order they ran (`industryflow_build_info`, each point the last value in its step, a change marked `CHANGED`, revisions cut to 12 characters); error lines of the services in the rule's `services` annotation and the target's host; other active alerts; the alert's row in the [alert table](#alerts) (every platform rule has one); `Symptom \| Cause \| Fix` rows sharing at least two words with the alert. The metric series are narrowed to the alert's own labels |
 | Sent to the model | The alert and the evidence, after redaction: tenant identifiers, emails, network addresses and credential-shaped strings become `<tenant-1>`, `<email-1>`, … ; the note records the counts per category |
 | Output | Loki stream `{job="ops-agent"}`; the `complete-system` and Incidents dashboards draw it as annotations. No Grafana credential |
 | Note fields | `alertname`, `severity`, `services`, `what`, `impact`, `cause`, `next_step` (the model's four sections), `text` (the whole note), `model`, `evidence`, `redacted`, `fingerprint`, `key` |
@@ -176,6 +176,7 @@ health reaches Grafana as `postgres-exporter` metrics.
 | Source | Metrics |
 |---|---|
 | `api-gateway`, `ml-service-api`, `ingestion-service` (`prometheus-fastapi-instrumentator` defaults) | `http_requests_total{handler,method,status}` (`status` grouped: `2xx`, `5xx`, …), `http_request_duration_seconds{handler,method}`, `http_request_duration_highr_seconds`, `http_request_size_bytes`, `http_response_size_bytes` |
+| `api-gateway`, `ml-service-api`, `ingestion-service` | `industryflow_build_info{component,revision} 1`: the commit the image was built from (`INDUSTRYFLOW_REVISION` build argument; `unknown` when the build passed none); `component` is the compose service name, since a Kubernetes scrape sets its own `service` label ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 8) |
 | `ml-service-api` | `ml_stateful_features_neutralized_total` — see [kill-switch](#runbook-stateful-feature-kill-switch); `ml_stateful_features_unavailable_total` — stateful slots served neutral because their aggregate was unavailable ([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 3) |
 | Spark | Native `PrometheusServlet` driver, executor and master metrics |
 | `cadvisor` | `container_cpu_usage_seconds_total`, `container_memory_usage_bytes`, `container_network_{receive,transmit}_bytes_total`, `container_last_seen` (disk and diskIO metrics disabled) |
@@ -198,6 +199,8 @@ health reaches Grafana as `postgres-exporter` metrics.
 | Host memory used % | `100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)` |
 | DB connections | `pg_stat_database_numbackends{datname="industryflow"}` |
 | Consumer lag | `sum by (consumergroup, topic) (kafka_consumergroup_lag)` |
+| Revision each service runs | `max by (component, revision) (industryflow_build_info)` |
+| Revisions each service ran in the last day (more than one: deployed) | `count by (component) (max by (component, revision) (count_over_time(industryflow_build_info[1d])))` |
 | Dead-lettered readings | `sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".+\\.dlq"}[15m]))` ([dead-letter handling](dead-letters.md)) |
 
 ## Logs

@@ -27,10 +27,20 @@ from redaction import Redactor
 log = logging.getLogger("ops_agent")
 
 MAX_SERVICES = 4
+# The revision each platform service reported over the window (ADR-0016 dec 8, ADR-0046 dec 2): a deploy
+# shortly before the alert is evidence. One series per service and revision; instance labels collapsed.
+REVISIONS_SOURCE = "service revisions"
+REVISIONS_METRIC = "industryflow_build_info"
+
+
+def revisions_query(step_seconds: int) -> str:
+    """Every point covers its whole step, so a revision that ran for less than one step still shows."""
+    return f"max by (component, revision) (last_over_time({REVISIONS_METRIC}[{step_seconds}s]))"
+REVISION_CHARS = 12  # a full commit id reads as credential-shaped to the redactor; 12 still names it
 
 SYSTEM = """You write incident notes for the operators of an industrial data platform.
-You are given one platform alert, the items the agent OBSERVED about it (metrics, logs, the alert
-router), and RUNBOOK REFERENCE items (known problems and their fixes from the platform's runbooks).
+You are given one platform alert, the items the agent OBSERVED about it (metrics, the revisions the
+services ran, logs, the alert router), and RUNBOOK REFERENCE items (known problems and their fixes from the platform's runbooks).
 Write a short note with exactly these sections:
 
 What happened: one or two sentences, from the alert and the observed items.
@@ -42,6 +52,9 @@ Next step: a reference fix only when the observed items match its symptom, citin
 first thing to check.
 
 The alert's own summary and description are observed: if they say nothing is failing, say so.
+A service whose revision CHANGED shortly before the alert started was deployed then. A deploy
+rebuilds every service of the platform, changed code or not, so name it as a candidate cause, citing
+that item, only when the other observed items point at that service.
 
 Rules: use only the items given. Never invent numbers, names or times. Values like <tenant-1> or
 <address-2> are redacted on purpose; keep them as they are. Plain text, no markdown headings,
@@ -169,6 +182,40 @@ def _series_summary(series: dict[str, Any]) -> str:
             f"min {min(values):g}, max {max(values):g}")
 
 
+def _clock(ts: float) -> str:
+    return datetime.fromtimestamp(float(ts), timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+
+
+def _revisions_summary(series: list[dict[str, Any]], truncated: bool = False) -> str:
+    """Per service, the revisions it ran in order, as runs of consecutive samples: a deploy followed by
+    a rollback reads A, then B, then A. A service with more than one run changed in the window."""
+    samples: dict[str, list[tuple[float, str]]] = {}
+    for s in series:
+        metric = s.get("metric", {})
+        if not metric.get("component"):
+            continue
+        rev = metric.get("revision", "unknown")
+        rev = "unknown (built without its commit)" if rev == "unknown" else rev[:REVISION_CHARS]
+        samples.setdefault(metric["component"], []).extend((float(t), rev) for t, _ in s.get("values", []))
+    if not any(samples.values()):
+        return "no service reported its revision in the window"
+    parts = []
+    for component in sorted(samples):
+        runs: list[list[Any]] = []  # [revision, first, last]
+        for t, rev in sorted(samples[component]):
+            if runs and runs[-1][0] == rev:
+                runs[-1][2] = t
+            else:
+                runs.append([rev, t, t])
+        if not runs:
+            continue
+        listed = ", then ".join(f"revision {r} from {_clock(a)} to {_clock(b)}" for r, a, b in runs)
+        parts.append(f"{component}: {'CHANGED in the window: ' if len(runs) > 1 else ''}{listed}")
+    if truncated:
+        parts.append("more series than the query returns; some services are not listed")
+    return "; ".join(parts)
+
+
 def build(config: Config, tools: Tools, writer: NoteWriter, publisher: Publisher):
     async def gather(state: State) -> State:
         alert = state["alert"]
@@ -180,6 +227,11 @@ def build(config: Config, tools: Tools, writer: NoteWriter, publisher: Publisher
             requests.append(("metrics", "prometheus_range", {"query": expr, **window}))
         for service in services_of(alert):
             requests.append((f"logs of {service}", "loki_errors", {"service": service, **window}))
+        # Every service, not only the alert's targets: a deploy of one can raise an alert on another.
+        # The step keeps the window within the tool's point limit, so the first sample is the window's.
+        step = max(60, int((end - start).total_seconds()) // 100 + 1)
+        requests.append((REVISIONS_SOURCE, "prometheus_range",
+                         {"query": revisions_query(step), **window, "step": f"{step}s"}))
         requests.append(("alert router", "active_alerts", {}))
         requests.append(("alert runbook", "alert_runbook", {"alertname": alert.get("labels", {}).get("alertname", "")}))
         requests.append(("runbooks", "runbook_rows", {"text": match_text(alert)}))
@@ -200,7 +252,9 @@ def build(config: Config, tools: Tools, writer: NoteWriter, publisher: Publisher
             if "error" in entry or "error" in result:
                 items.append((source, f"unavailable: {entry.get('error') or result['error']}"))
                 continue
-            if entry["tool"] == "prometheus_range":
+            if entry["tool"] == "prometheus_range" and source == REVISIONS_SOURCE:
+                items.append((source, _revisions_summary(result.get("series", []), result.get("truncated", False))))
+            elif entry["tool"] == "prometheus_range":
                 lines = [_series_summary(s) for s in _own_series(result.get("series", []), alert)] or ["no series returned"]
                 items.append((source, "; ".join(lines)))
             elif entry["tool"] == "loki_errors":
