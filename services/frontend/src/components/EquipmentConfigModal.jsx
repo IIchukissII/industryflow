@@ -663,7 +663,7 @@ function EquipmentConfigModal({ isOpen, onClose, onSuccess, editEquipment = null
                   </thead>
                   <tbody>
                     {sensors.map((sensor, idx) => (
-                      <tr key={idx} className={!sensor.sensor_id ? 'ecm-row-pending' : ''}>
+                      <tr key={`${sensor.position}:${sensor.sensor_id}`} className={!sensor.sensor_id ? 'ecm-row-pending' : ''}>
                         <td className="ecm-pos mono">{sensor.position + 1}</td>
                         <td>
                           {sensor.sensor_id
