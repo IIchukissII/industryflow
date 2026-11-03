@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0032 — Backup and disaster recovery for every durable store
 
 - **Status:** Accepted
-- **Date:** 2026-10-24; changed 2026-10-28
+- **Date:** 2026-10-24; changed 2026-11-03
 - **Parent:** ADR-0001
 - **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a backup holds every tenant), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability store, dec 7), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (notebook volumes), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (cold layer, the only copy of raw history; dec 13 its mirror), [ADR-0029](ADR-0029-spark-major-upgrade-checkpoint-cutover.md) (checkpoints), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (forward-only migrations), [ADR-0038](ADR-0038-model-and-notebook-backup.md) (model and notebook mechanism)
 
@@ -34,8 +34,10 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
    tenant session or tenant-facing plane can read it.
 6. **A restore is proven by doing it.** Restores are rehearsed on a schedule against a scratch target and
    compared with the source; an unexercised backup counts toward no recovery objective.
-7. **A schema rollback is a restore.** Migrations are forward-only, so a backup precedes every upgrade and
-   is the way back from a bad migration.
+7. **A schema rollback is a restore, and the migration runner enforces the backup it needs.** Migrations
+   are forward-only, so a backup precedes every upgrade and is the way back from a bad migration. The
+   runner refuses to change a database holding platform state unless a recent completed backup is recorded
+   in that database; proceeding without one is an explicit operator choice, never a default.
 
 ## Alternatives
 
@@ -48,6 +50,9 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 | 3 | Rely on the object store's own replication | In-cluster replication shares the failure domain and copies deletions; managed cross-region versioned replication is one way to meet decision 3 |
 | 4 | Keep the cold copy append-only | A deleted tenant's raw history would never leave it (ADR-0033 dec 4) |
 | 5 | A write-only backup principal | Pruning, ageing out and verifying a copy read and delete in the target |
+| 7 | Leave the pre-upgrade backup to the deploy procedure | An upgrade not run through that procedure, such as a plain start or a chart upgrade, migrates with no way back |
+| 7 | Accept the last scheduled backup, whatever its age | A rollback to it loses everything written since, up to a whole schedule interval |
+| 7 | Let the runner look for the backup in the backup target | Gives the runner the backup target's credentials, against decision 5 |
 
 ## Consequences
 
@@ -58,6 +63,8 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 **Negative**
 - Off-site copies cost storage and transfer; the cold copy grows without bound.
 - Restore rehearsal is recurring operational work that needs an owner.
+- A deployment without a backup job upgrades only by the explicit choice to go without one.
+- A restored database is backed up again before pending migrations apply to it.
 
 ## Deferred
 

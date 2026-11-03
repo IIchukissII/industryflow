@@ -442,7 +442,7 @@ BACKUPS = "http://backup-store:9000"
 
 
 def _backup_run(env, **extra):
-    e = dict(env["env"], DATABASES="industryflow", **extra)
+    e = {**env["env"], "DATABASES": "industryflow", **extra}
     return subprocess.run(["bash", str(SCRIPTS / "db-backup.sh")], env=e, capture_output=True, text=True)
 
 
@@ -460,7 +460,46 @@ def test_the_backup_is_one_plain_dump_per_database(env):
     assert len(_keys(env, "timescaledb/industryflow")) == 1
     [dump] = (env["tmp"] / "pg_dump.log").read_text().splitlines()
     assert dump.startswith("-Fc -Z6 ") and "--snapshot" not in dump
-    assert not env["psql"].exists()
+    # The one other session is the run's record, written after every dump (ADR-0032 dec 7).
+    [record] = env["psql"].read_text().splitlines()
+    assert "-d industryflow" in record and "-v run=" in record
+
+
+def _recorded_run(env, **extra):
+    stdin = env["tmp"] / "psql.stdin"
+    r = _backup_run(env, FAKE_PSQL_STDIN_LOG=str(stdin), **extra)
+    return r, (stdin.read_text() if stdin.exists() else "")
+
+
+def test_a_complete_run_records_itself_in_the_platform_database(env):
+    r, script = _recorded_run(env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "INSERT INTO public.backup_ledger (run, databases) VALUES (:'run', :'databases')" in script
+    stamp = _keys(env, "timescaledb/industryflow")[0].rsplit("/", 1)[1].removesuffix(".dump")
+    assert f"-v run={stamp}" in env["psql"].read_text()
+    assert "run recorded in industryflow.public.backup_ledger" in r.stdout
+
+
+def test_a_failed_run_records_nothing(env):
+    r, script = _recorded_run(env, FAKE_PG_DUMP_FAIL="1")
+    assert r.returncode != 0
+    assert script == "" and not env["psql"].exists()
+
+
+def test_a_run_without_the_platform_database_records_nothing(env):
+    r, script = _recorded_run(env, DATABASES="mlflow")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert script == ""
+    assert "industryflow not among the dumped databases" in r.stdout
+
+
+def test_a_run_that_cannot_record_itself_fails_without_its_metric(env):
+    # The migration runner would not see the backup; the run is not a success.
+    metrics = env["tmp"] / "metrics"
+    metrics.mkdir()
+    r, _ = _recorded_run(env, FAKE_PSQL_STDIN_FAIL="1", METRICS_TEXTFILE_DIR=str(metrics))
+    assert r.returncode != 0
+    assert list(metrics.iterdir()) == []
 
 
 def test_a_successful_backup_writes_its_metric_and_a_failed_one_does_not(env):

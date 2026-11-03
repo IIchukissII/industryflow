@@ -37,161 +37,192 @@ spec:
     spec:
       backoffLimit: 2
       template:
-        metadata:
-          labels:
-            app.kubernetes.io/name: {{ $job.name }}
-            app.kubernetes.io/instance: {{ .Release.Name }}
-        spec:
-          restartPolicy: Never
-          {{- with .Values.imagePullSecrets }}
-          imagePullSecrets:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- if .Values.securityContext.enabled }}
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: {{ .Values.securityContext.runAsUser }}
-            runAsGroup: {{ .Values.securityContext.runAsGroup }}
-            fsGroup: {{ .Values.securityContext.fsGroup }}
-            seccompProfile:
-              type: RuntimeDefault
-          {{- end }}
-          {{- if $job.rehearsal }}
-          # The dumps name the migrated roles; the restore refuses one that names a missing role.
-          initContainers:
-            {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" . "userKey" "DB_USER" "workload" "db-backup" "passwordKey" "DB_PASSWORD") | nindent 12 }}
-          {{- end }}
-          containers:
-            - name: {{ $job.name }}
-              image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.backup.image "tag" .Values.image.tag "digest" .Values.backup.digest) | quote }}
-              imagePullPolicy: {{ .Values.image.pullPolicy }}
-              {{- if $job.rehearsal }}
-              command: ["db-rehearse.sh"]
-              {{- end }}
-              {{- if .Values.securityContext.enabled }}
-              securityContext:
-                allowPrivilegeEscalation: false
-                readOnlyRootFilesystem: true
-                capabilities:
-                  drop: ["ALL"]
-              {{- end }}
-              env:
-                - name: PGHOST
-                  value: {{ include "industryflow.dbHost" . | quote }}
-                - name: PGPORT
-                  value: {{ .Values.infra.timescaledb.port | quote }}
-                - name: PGUSER
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
-                      key: DB_USER
-                - name: PGPASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
-                      key: DB_PASSWORD
-                - name: AWS_ACCESS_KEY_ID
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
-                      key: BACKUP_STORE_ACCESS_KEY
-                - name: AWS_SECRET_ACCESS_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
-                      key: BACKUP_STORE_SECRET_KEY
-                - name: AWS_DEFAULT_REGION
-                  value: {{ .Values.backup.s3.region | quote }}
-                - name: S3_ENDPOINT_URL
-                  value: {{ .Values.backup.s3.endpoint | default (include "industryflow.minioEndpoint" .) | quote }}
-                - name: S3_BUCKET
-                  value: {{ .Values.backup.s3.bucket | quote }}
-                - name: S3_PREFIX
-                  value: {{ .Values.backup.s3.prefix | quote }}
-                - name: DATABASES
-                  value: {{ .Values.backup.databases | quote }}
-                - name: RETAIN_PER_DB
-                  value: {{ .Values.backup.retainPerDatabase | quote }}
-                # Object mirrors (ADR-0032 dec 4, ADR-0038 dec 1-3): read with the backup job's own
-                # read-only principal, written with the backup credentials above.
-                - name: SOURCE_ENDPOINT_URL
-                  value: {{ include "industryflow.minioEndpoint" . | quote }}
-                - name: SOURCE_ACCESS_KEY_ID
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
-                      key: BACKUP_READ_ACCESS_KEY
-                - name: SOURCE_SECRET_ACCESS_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
-                      key: BACKUP_READ_SECRET_KEY
-                {{- if and .Values.coldExport.enabled .Values.backup.cold.enabled }}
-                - name: COLD_SOURCE_BUCKET
-                  value: {{ .Values.coldExport.store.bucket | quote }}
-                - name: COLD_SOURCE_ENDPOINT_URL
-                  value: {{ .Values.coldExport.store.endpoint | default (include "industryflow.minioEndpoint" .) | quote }}
-                - name: COLD_BACKUP_PREFIX
-                  value: {{ .Values.backup.cold.prefix | quote }}
-                {{- end }}
-                {{- if .Values.backup.models.enabled }}
-                - name: MODEL_SOURCE_BUCKET
-                  value: {{ .Values.notebookHub.trackingGateway.artifactBucket | quote }}
-                - name: MODEL_BACKUP_PREFIX
-                  value: {{ .Values.backup.models.prefix | quote }}
-                - name: MODEL_SOURCE_EXCLUDE_PREFIX
-                  value: {{ .Values.notebookHub.trackingGateway.uploadStaging.prefix | quote }}
-                {{- end }}
-                {{- if .Values.tls.db.enabled }}
-                # pg_dump over TLS (ADR-0017); libpq reads PGSSLMODE/PGSSLROOTCERT.
-                - name: PGSSLMODE
-                  value: {{ .Values.tls.db.sslmode | quote }}
-                - name: PGSSLROOTCERT
-                  value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
-                {{- end }}
-                {{- if $job.rehearsal }}
-                - name: REHEARSAL_OBJECT_SAMPLE
-                  value: {{ .Values.backup.rehearsal.objectSample | quote }}
-                {{- end }}
-              {{- with (ternary .Values.backup.rehearsal.resources .Values.backup.resources $job.rehearsal) }}
-              resources:
-                {{- toYaml . | nindent 16 }}
-              {{- end }}
-              {{- if or .Values.securityContext.enabled .Values.tls.db.enabled }}
-              volumeMounts:
-                {{- if .Values.securityContext.enabled }}
-                - name: tmp
-                  mountPath: /tmp
-                - name: home
-                  mountPath: /home/backup
-                {{- end }}
-                {{- if .Values.tls.db.enabled }}
-                - name: db-ca
-                  mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
-                  subPath: ca.crt
-                  readOnly: true
-                {{- end }}
-              {{- end }}
-          {{- if or .Values.securityContext.enabled .Values.tls.db.enabled $job.rehearsal }}
-          volumes:
-            {{- if $job.rehearsal }}
-            {{- include "industryflow.schemaReadyVolumes" . | nindent 12 }}
-            {{- end }}
-            {{- if .Values.securityContext.enabled }}
-            - name: tmp
-              emptyDir: {}
-            - name: home
-              emptyDir: {}
-            {{- end }}
-            {{- if .Values.tls.db.enabled }}
-            - name: db-ca
-              secret:
-                secretName: {{ .Values.tls.db.secretName | quote }}
-                items:
-                  - key: ca.crt
-                    path: ca.crt
-            {{- end }}
-          {{- end }}
+        {{- include "industryflow.backupPod" (dict "ctx" . "job" $job) | nindent 8 }}
 {{- end }}
+{{- end }}
+{{- /*
+  ADR-0032 dec 7: a schema rollback is a restore, so every upgrade is preceded by a backup. This hook
+  runs the backup job once before the upgrade applies anything, the db-migrate Job of the new revision
+  included; that Job refuses pending scripts unless a backup is recorded within
+  dbMigrations.backupMaxAgeSeconds. A hook that fails stops the upgrade and is kept for inspection.
+*/}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "industryflow.fullname" . }}-pre-upgrade-backup
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: db-backup
+    app.kubernetes.io/component: backup
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  template:
+    {{- include "industryflow.backupPod" (dict "ctx" . "job" (dict "name" "db-backup" "rehearsal" false)) | nindent 4 }}
+{{- else if not .Values.dbMigrations.withoutBackup }}
+{{- fail "backup.enabled=false leaves every upgrade without the backup the db-migrate Job requires (ADR-0032 dec 7); set dbMigrations.withoutBackup=true to choose that explicitly" }}
+{{- end }}
+
+{{- define "industryflow.backupPod" -}}
+{{- $job := .job }}
+{{- with .ctx -}}
+metadata:
+  labels:
+    app.kubernetes.io/name: {{ $job.name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  restartPolicy: Never
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if .Values.securityContext.enabled }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: {{ .Values.securityContext.runAsUser }}
+    runAsGroup: {{ .Values.securityContext.runAsGroup }}
+    fsGroup: {{ .Values.securityContext.fsGroup }}
+    seccompProfile:
+      type: RuntimeDefault
+  {{- end }}
+  {{- if $job.rehearsal }}
+  # The dumps name the migrated roles; the restore refuses one that names a missing role.
+  initContainers:
+    {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" . "userKey" "DB_USER" "workload" "db-backup" "passwordKey" "DB_PASSWORD") | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: {{ $job.name }}
+      image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.backup.image "tag" .Values.image.tag "digest" .Values.backup.digest) | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      {{- if $job.rehearsal }}
+      command: ["db-rehearse.sh"]
+      {{- end }}
+      {{- if .Values.securityContext.enabled }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      {{- end }}
+      env:
+        - name: PGHOST
+          value: {{ include "industryflow.dbHost" . | quote }}
+        - name: PGPORT
+          value: {{ .Values.infra.timescaledb.port | quote }}
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
+              key: DB_USER
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
+              key: DB_PASSWORD
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
+              key: BACKUP_STORE_ACCESS_KEY
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
+              key: BACKUP_STORE_SECRET_KEY
+        - name: AWS_DEFAULT_REGION
+          value: {{ .Values.backup.s3.region | quote }}
+        - name: S3_ENDPOINT_URL
+          value: {{ .Values.backup.s3.endpoint | default (include "industryflow.minioEndpoint" .) | quote }}
+        - name: S3_BUCKET
+          value: {{ .Values.backup.s3.bucket | quote }}
+        - name: S3_PREFIX
+          value: {{ .Values.backup.s3.prefix | quote }}
+        - name: DATABASES
+          value: {{ .Values.backup.databases | quote }}
+        - name: RETAIN_PER_DB
+          value: {{ .Values.backup.retainPerDatabase | quote }}
+        # Object mirrors (ADR-0032 dec 4, ADR-0038 dec 1-3): read with the backup job's own
+        # read-only principal, written with the backup credentials above.
+        - name: SOURCE_ENDPOINT_URL
+          value: {{ include "industryflow.minioEndpoint" . | quote }}
+        - name: SOURCE_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
+              key: BACKUP_READ_ACCESS_KEY
+        - name: SOURCE_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
+              key: BACKUP_READ_SECRET_KEY
+        {{- if and .Values.coldExport.enabled .Values.backup.cold.enabled }}
+        - name: COLD_SOURCE_BUCKET
+          value: {{ .Values.coldExport.store.bucket | quote }}
+        - name: COLD_SOURCE_ENDPOINT_URL
+          value: {{ .Values.coldExport.store.endpoint | default (include "industryflow.minioEndpoint" .) | quote }}
+        - name: COLD_BACKUP_PREFIX
+          value: {{ .Values.backup.cold.prefix | quote }}
+        {{- end }}
+        {{- if .Values.backup.models.enabled }}
+        - name: MODEL_SOURCE_BUCKET
+          value: {{ .Values.notebookHub.trackingGateway.artifactBucket | quote }}
+        - name: MODEL_BACKUP_PREFIX
+          value: {{ .Values.backup.models.prefix | quote }}
+        - name: MODEL_SOURCE_EXCLUDE_PREFIX
+          value: {{ .Values.notebookHub.trackingGateway.uploadStaging.prefix | quote }}
+        {{- end }}
+        {{- if .Values.tls.db.enabled }}
+        # pg_dump over TLS (ADR-0017); libpq reads PGSSLMODE/PGSSLROOTCERT.
+        - name: PGSSLMODE
+          value: {{ .Values.tls.db.sslmode | quote }}
+        - name: PGSSLROOTCERT
+          value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
+        {{- end }}
+        {{- if $job.rehearsal }}
+        - name: REHEARSAL_OBJECT_SAMPLE
+          value: {{ .Values.backup.rehearsal.objectSample | quote }}
+        {{- end }}
+      {{- with (ternary .Values.backup.rehearsal.resources .Values.backup.resources $job.rehearsal) }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.securityContext.enabled .Values.tls.db.enabled }}
+      volumeMounts:
+        {{- if .Values.securityContext.enabled }}
+        - name: tmp
+          mountPath: /tmp
+        - name: home
+          mountPath: /home/backup
+        {{- end }}
+        {{- if .Values.tls.db.enabled }}
+        - name: db-ca
+          mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
+          subPath: ca.crt
+          readOnly: true
+        {{- end }}
+      {{- end }}
+  {{- if or .Values.securityContext.enabled .Values.tls.db.enabled $job.rehearsal }}
+  volumes:
+    {{- if $job.rehearsal }}
+    {{- include "industryflow.schemaReadyVolumes" . | nindent 4 }}
+    {{- end }}
+    {{- if .Values.securityContext.enabled }}
+    - name: tmp
+      emptyDir: {}
+    - name: home
+      emptyDir: {}
+    {{- end }}
+    {{- if .Values.tls.db.enabled }}
+    - name: db-ca
+      secret:
+        secretName: {{ .Values.tls.db.secretName | quote }}
+        items:
+          - key: ca.crt
+            path: ca.crt
+    {{- end }}
+  {{- end }}
 {{- end }}
 {{- end }}

@@ -23,6 +23,12 @@
 # whenever its digest changes. A script with no kind is refused. A database without a ledger
 # applies every script once, which dec 2 (every script is idempotent) makes safe.
 #
+# A rollback is a restore (ADR-0032 dec 7), so `apply` refuses to run a pending script on a database
+# that holds platform state (a tenant or a user) unless a backup completed within MIGRATE_BACKUP_MAX_AGE_SECONDS
+# (default 3600) is recorded in it (public.backup_ledger, written by the backup job after every
+# complete run). MIGRATE_WITHOUT_BACKUP=1 is the operator's explicit choice to proceed without one; it
+# is logged. A database with no platform state (a fresh install) has nothing to roll back to.
+#
 # Connection: libpq's PG* variables, as a network client under ADR-0017 (PGSSLMODE=verify-full).
 # `apply` needs the database owner: scripts create databases, roles and extensions. The shell
 # scripts read the role passwords from the environment, as they did under the image's init hook,
@@ -31,6 +37,7 @@ set -eu
 
 DIR="${MIGRATIONS_DIR:-/migrations}"
 WAIT_SECONDS="${MIGRATE_WAIT_SECONDS:-300}"
+BACKUP_MAX_AGE="${MIGRATE_BACKUP_MAX_AGE_SECONDS:-3600}"
 LOCK_KEY=873402115
 export PGDATABASE="${PGDATABASE:-industryflow}"
 export POSTGRES_USER="${POSTGRES_USER:-${PGUSER:-postgres}}"
@@ -102,6 +109,50 @@ COMMENT ON TABLE public.schema_ledger IS
 SQL
 }
 
+# Prints "t" when the database holds platform state: a tenant or a user. A fresh install has
+# neither, even one whose first run failed part-way and is being retried, and nothing to roll back to.
+holds_state() {
+  for t in public.companies 'public."user"'; do
+    exists=$(q -c "SELECT to_regclass('$t') IS NOT NULL") || return 1
+    [ "$exists" = t ] || continue
+    rows=$(q -c "SELECT EXISTS (SELECT FROM $t)") || return 1
+    [ "$rows" = t ] && { echo t; return 0; }
+  done
+  echo f
+}
+
+# Seconds since the latest backup recorded in this database, or empty when none is.
+backup_age() {
+  exists=$(q -c "SELECT to_regclass('public.backup_ledger') IS NOT NULL") || return 1
+  [ "$exists" = t ] || return 0
+  q -c "SELECT floor(extract(epoch FROM now() - max(completed_at)))::bigint FROM public.backup_ledger"
+}
+
+# ADR-0032 dec 7: pending scripts change a database that holds state only after a recent backup.
+require_backup() {
+  [ -s "$tmp/pending" ] || return 0
+  state=$(holds_state) || die "cannot tell whether the database holds platform state"
+  [ "$state" = t ] || return 0
+  if [ "${MIGRATE_WITHOUT_BACKUP:-}" = 1 ]; then
+    echo "migrate: WARNING applying without a recent backup (MIGRATE_WITHOUT_BACKUP=1, the operator's choice)" >&2
+    return 0
+  fi
+  case "$BACKUP_MAX_AGE" in ''|*[!0-9]*) die "MIGRATE_BACKUP_MAX_AGE_SECONDS must be a whole number of seconds" ;; esac
+  age=$(backup_age) || die "cannot read the backup ledger"
+  if [ -z "$age" ]; then
+    reason="no backup is recorded in this database"
+  elif [ "$age" -gt "$BACKUP_MAX_AGE" ]; then
+    reason="the latest recorded backup completed ${age}s ago, more than ${BACKUP_MAX_AGE}s"
+  else
+    echo "migrate: latest backup completed ${age}s ago"
+    return 0
+  fi
+  echo "migrate: refused: $(wc -l < "$tmp/pending") pending script(s) and $reason;" \
+       "run the backup first (a schema rollback is a restore, ADR-0032 dec 7)," \
+       "or set MIGRATE_WITHOUT_BACKUP=1 to proceed without one" >&2
+  exit 2
+}
+
 # Runs inside the lock session (see apply): plans again under the lock, then applies.
 apply_locked() {
   plan
@@ -112,6 +163,7 @@ apply_locked() {
   fi
   n=0
   awk -F '\t' '$1 == "apply" || $1 == "reapply"' "$tmp/plan" > "$tmp/pending"
+  require_backup
   while IFS="$(printf '\t')" read -r action name kind digest; do
     echo "migrate: $action $name ($kind)"
     case "$name" in

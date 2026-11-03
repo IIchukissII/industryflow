@@ -8,7 +8,9 @@ The migration runner against a real database holding tenants (ADR-0034 dec 2, 4,
 The stack applied the sequence through db-migrate, so the ledger must be current. Then every script
 is applied again over that live state, migrations and definitions alike, which is what a database
 without a ledger does on its first run and what dec 2 promises is safe. A migration edited after it
-was applied is refused, and the ledger is left as it was.
+was applied is refused, and the ledger is left as it was. A pending script on a database holding a
+tenant is refused unless a recent backup is recorded in it (ADR-0032 dec 7), written by the backup
+script's own recording step.
 
 Requires a running database brought up by db-migrate (db-tenant-isolation.yml stands one up) and
 psql; skips when either is missing, and fails instead under IF_REQUIRE_LIVE_STACK=1.
@@ -44,7 +46,7 @@ def _env_file() -> dict:
     return {k: v for k, v in pairs if k.endswith("_DB_PASSWORD")}
 
 
-def _run(*args, migrations=SCRIPTS):
+def _run(*args, migrations=SCRIPTS, **extra):
     env = {
         **os.environ,
         **_env_file(),
@@ -54,6 +56,7 @@ def _run(*args, migrations=SCRIPTS):
         "PGUSER": os.getenv("PGUSER", "postgres"),
         "MIGRATIONS_DIR": str(migrations),
         "MIGRATE_WAIT_SECONDS": "10",
+        **extra,
     }
     return subprocess.run(["sh", str(RUNNER), *args], env=env, capture_output=True, text=True, timeout=600)
 
@@ -108,7 +111,8 @@ def test_every_script_applies_again_over_live_tenants(cur, tenant):
     kinds = _kinds()
     migrations = [n for n, k in kinds.items() if k == "migration"]
     cur.execute("DELETE FROM public.schema_ledger WHERE script = ANY(%s)", (migrations,))
-    r = _run("reapply", *[n for n, k in kinds.items() if k == "definition"])
+    # Convergence is under test here, not the backup gate (tested below).
+    r = _run("reapply", *[n for n, k in kinds.items() if k == "definition"], MIGRATE_WITHOUT_BACKUP="1")
     assert r.returncode == 0, r.stdout + r.stderr
     assert f"{len(kinds)} script(s) applied" in r.stdout, r.stdout
     assert _run("verify").returncode == 0
@@ -138,3 +142,75 @@ def test_a_migration_cannot_be_forced_again(cur):
     name = next(n for n, k in sorted(_kinds().items()) if k == "migration")
     r = _run("reapply", name)
     assert r.returncode == 2 and "is not a definition" in r.stderr
+
+
+# --- ADR-0032 dec 7: a backup precedes every upgrade -------------------------------------------------
+
+BACKUP = ROOT / "infrastructure" / "backup" / "db-backup.sh"
+PROBE = "999-backup-gate-probe.sql"
+
+
+def _record_backup(stamp):
+    """The backup script's own recording step, as a complete run calls it."""
+    env = {**os.environ, "PGHOST": os.getenv("PGHOST", "localhost"), "PGPORT": os.getenv("PGPORT", "5432"),
+           "PGUSER": os.getenv("PGUSER", "postgres"), "STAMP": stamp, "DATABASES": "industryflow mlflow"}
+    r = subprocess.run(["bash", "-c", f'source "{BACKUP}"; log() {{ echo "$*"; }}; record_run'],
+                       env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.fixture
+def upgrade(cur, tenant, tmp_path):
+    """A database holding a tenant, and one script pending: an upgrade."""
+    copy = tmp_path / "scripts"
+    shutil.copytree(SCRIPTS, copy)
+    (copy / PROBE).write_text("-- migration-kind: migration\nSELECT 1;\n")
+    cur.execute("SELECT to_regclass('public.backup_ledger') IS NOT NULL")
+    if cur.fetchone()[0]:
+        cur.execute("ALTER TABLE public.backup_ledger RENAME TO backup_ledger_before_test")
+    yield copy
+    cur.execute("DELETE FROM public.schema_ledger WHERE script = %s", (PROBE,))
+    cur.execute("DROP TABLE IF EXISTS public.backup_ledger")
+    cur.execute("SELECT to_regclass('public.backup_ledger_before_test') IS NOT NULL")
+    if cur.fetchone()[0]:
+        cur.execute("ALTER TABLE public.backup_ledger_before_test RENAME TO backup_ledger")
+
+
+def _probe_applied(cur):
+    cur.execute("SELECT count(*) FROM public.schema_ledger WHERE script = %s", (PROBE,))
+    return cur.fetchone()[0] == 1
+
+
+def test_an_upgrade_without_a_recorded_backup_is_refused(cur, upgrade):
+    r = _run("apply", migrations=upgrade)
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "no backup is recorded in this database" in r.stderr
+    assert not _probe_applied(cur)
+
+
+def test_an_upgrade_after_a_stale_backup_is_refused(cur, upgrade):
+    _record_backup("20000101T000000Z")
+    cur.execute("UPDATE public.backup_ledger SET completed_at = now() - interval '2 hours'")
+    r = _run("apply", migrations=upgrade, MIGRATE_BACKUP_MAX_AGE_SECONDS="3600")
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "more than 3600s" in r.stderr
+    assert not _probe_applied(cur)
+
+
+def test_an_upgrade_right_after_a_backup_applies(cur, upgrade):
+    _record_backup("20000101T000001Z")
+    r = _run("apply", migrations=upgrade)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "latest backup completed" in r.stdout
+    assert _probe_applied(cur)
+
+
+def test_the_operator_may_choose_to_upgrade_without_a_backup(cur, upgrade):
+    r = _run("apply", migrations=upgrade, MIGRATE_WITHOUT_BACKUP="1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "WARNING applying without a recent backup" in r.stderr
+    assert _probe_applied(cur)
+
+
+def test_nothing_pending_needs_no_backup(cur, tenant):
+    assert _run("apply").returncode == 0

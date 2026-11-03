@@ -70,6 +70,22 @@ jobs:
               --set observability.opsAgent.enabled=true > /dev/null 2>&1; then
             echo "::error::expected the agent to refuse a render without OPS_AGENT_WEBHOOK_SECRET"; exit 1
           fi
+      # ADR-0032 dec 7: every upgrade is preceded by a backup, and going without one is explicit.
+      - name: A backup hook precedes every upgrade, and going without one is an explicit choice
+        run: |
+          out=$(helm template if deploy/helm/industryflow --set secrets.failOnPlaceholders=false)
+          printf '%s\n' "$out" | grep -q 'helm.sh/hook: pre-upgrade' \
+            && printf '%s\n' "$out" | grep -q 'name: if-industryflow-pre-upgrade-backup' \
+            || { echo "::error::no pre-upgrade backup hook rendered"; exit 1; }
+          printf '%s\n' "$out" | grep -q 'name: MIGRATE_WITHOUT_BACKUP' \
+            && { echo "::error::the migrate Job goes without a backup by default"; exit 1; }
+          if helm template if deploy/helm/industryflow --set secrets.failOnPlaceholders=false \
+              --set backup.enabled=false > /dev/null 2>&1; then
+            echo "::error::expected a render with backups off to refuse without dbMigrations.withoutBackup"; exit 1
+          fi
+          helm template if deploy/helm/industryflow --set secrets.failOnPlaceholders=false \
+            --set backup.enabled=false --set dbMigrations.withoutBackup=true | grep -q 'name: MIGRATE_WITHOUT_BACKUP, value: "1"' \
+            || { echo "::error::withoutBackup did not reach the migrate Job"; exit 1; }
       - name: Fail-closed guard rejects placeholder secrets
         run: |
           if helm template if deploy/helm/industryflow > /dev/null 2>&1; then

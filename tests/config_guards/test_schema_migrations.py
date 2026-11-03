@@ -25,10 +25,11 @@ SCRIPTS = ROOT / "infrastructure" / "timescaledb" / "init-scripts"
 COMPOSE = load_yaml("docker-compose.yml")["services"]
 KIND = re.compile(r"^(?:--|#) *migration-kind: *(\w+) *$", re.M)
 
-# Not gated, each for a stated reason: the server; the runner itself; the backup, which must work
-# while the ledger is behind, because it is the step taken before an upgrade (ADR-0034 dec 5).
+# Not gated, each for a stated reason: the server; the runner itself; the backup and its pre-upgrade
+# hook, which must work while the ledger is behind, because the backup is the step taken before an
+# upgrade (ADR-0034 dec 5, ADR-0032 dec 7).
 COMPOSE_UNGATED = {"timescaledb", "db-migrate", "db-backup"}
-CHART_UNGATED = ("-timescaledb", "-db-migrate-", "-db-backup")
+CHART_UNGATED = ("-timescaledb", "-db-migrate-", "-db-backup", "-pre-upgrade-backup")
 
 
 def _scripts():

@@ -7,14 +7,15 @@
 #
 #   scripts/box-deploy.sh [ref]          default origin/main
 #
-# Backup first, then the checkout moved to the ref, every image built from it, the schema sequence
-# applied, and the stack recreated where it changed. On success it writes .box-deployed: the commit
+# The checkout moved to the ref, every image built from it, a backup taken with the new backup image
+# right before the schema sequence is applied (the runner refuses an upgrade without one, ADR-0032
+# dec 7), and the stack recreated where it changed. On success it writes .box-deployed: the commit
 # now running and the one it was upgraded from, which scripts/box-e2e.sh and scripts/box-validate.sh
 # read. Refuses a checkout with local changes: what runs must be the commit it names.
 #
 # A full build needs room: one that fills the disk crash-loops the broker. Below BOX_MIN_FREE_GB
 # (default 20) free on Docker's disk it prunes all build cache and dangling images, and refuses if
-# that is still not enough, before the backup or the checkout moves.
+# that is still not enough, before the checkout moves.
 #
 # The infrastructure agent (profile ops-agent) is built and run when the environment enables it, i.e.
 # `.env` sets OPS_AGENT_WEBHOOK_SECRET. The monitoring stack is recreated last: its config files are
@@ -60,8 +61,6 @@ if [ "$(free_gb)" -lt "$min_free" ]; then
 fi
 echo "$(free_gb) GB free"
 
-echo "== backup"
-docker compose --profile backup run --rm --no-deps db-backup
 echo "== checkout $ref"
 git fetch -q origin
 git checkout -q --detach "$ref"
@@ -72,6 +71,8 @@ echo "== build"
 spark_down=1
 docker compose stop "${SPARK[@]}"
 docker compose "${PROFILES[@]}" build
+echo "== backup"
+docker compose --profile backup run --rm --no-deps db-backup
 echo "== schema"
 docker compose up --no-deps --exit-code-from db-migrate db-migrate
 echo "== up"

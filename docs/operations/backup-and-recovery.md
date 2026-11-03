@@ -69,6 +69,7 @@ the newest `RETAIN_PER_DB` per prefix. The bucket is created if absent.
 | `S3_PREFIX` | `timescaledb` | Key prefix for dumps and globals |
 | `DATABASES` | `industryflow mlflow` | Databases to dump |
 | `RETAIN_PER_DB` | `14` | Copies kept per database |
+| `PLATFORM_DATABASE` | `industryflow` | A complete run that dumped it adds a row to its `public.backup_ledger`, which the migration runner reads ([before an upgrade](#before-an-upgrade)) |
 | `METRICS_TEXTFILE_DIR` | unset | Directory for the run's success time, `industryflow_backup_last_success_timestamp_seconds{backup="databases"}` (node-exporter textfile); Compose sets it |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | required | Backup principal |
 | `SOURCE_ENDPOINT_URL` | `S3_ENDPOINT_URL` | Endpoint of the mirrored buckets |
@@ -125,7 +126,7 @@ MinIO root key.
 
 ### Kubernetes (Helm)
 
-CronJob `<release>-db-backup` (`templates/cronjob-db-backup.yaml`).
+CronJob `<release>-db-backup` and pre-upgrade hook Job `<release>-pre-upgrade-backup` (`templates/cronjob-db-backup.yaml`).
 
 | Name | Default | Meaning |
 |---|---|---|
@@ -189,6 +190,18 @@ Each job writes its success time to the `backup-metrics` volume, which node-expo
 `IndustryFlowBackupStale` and `IndustryFlowRestoreRehearsalStale` fire when they stop,
 `IndustryFlowBackupNeverCompleted` and `IndustryFlowRestoreRehearsalNeverPassed` when they never ran
 ([`compose.yml`](../../infrastructure/prometheus/rules/compose.yml)).
+
+### Before an upgrade
+
+`migrate.sh apply` refuses pending scripts on a database holding a tenant or a user unless a backup is
+recorded in its `public.backup_ledger` within `MIGRATE_BACKUP_MAX_AGE_SECONDS`
+([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 7;
+[runner](../../infrastructure/timescaledb/init-scripts/README.md#backup-before-an-upgrade)).
+
+| Deployment | Backup taken by | Without a backup |
+|---|---|---|
+| Compose | `docker compose run --rm --no-deps db-backup`, then `docker compose up db-migrate`; `scripts/box-deploy.sh` runs both in that order | `MIGRATE_WITHOUT_BACKUP=1 docker compose up db-migrate` |
+| Helm | Hook Job `<release>-pre-upgrade-backup` (`helm.sh/hook: pre-upgrade`), before the revision's `db-migrate` Job; `helm upgrade --timeout` must cover one backup run | `dbMigrations.withoutBackup=true`; required when `backup.enabled=false`, the chart refuses to render otherwise |
 
 ### Off-site target
 
@@ -279,7 +292,7 @@ Compare row counts and recent timestamps per tenant with the source, then drop t
 | 2 | Apply `<prefix>/globals/<stamp>.sql` with `psql`: it recreates the runtime roles (`tenant_reader_*`, `tenant_sqlproxy_*`); `role … already exists` errors for the service roles are expected. Roles carry no passwords (`--no-role-passwords`) |
 | 3 | `docker compose run --rm --no-deps --entrypoint db-restore.sh db-backup industryflow latest` |
 | 4 | `docker compose run --rm --no-deps --entrypoint db-restore.sh db-backup mlflow latest` |
-| 5 | `docker compose up db-migrate`: the restored ledger is the backup's; scripts newer than the backup are applied ([ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md) dec 5) |
+| 5 | `docker compose run --rm --no-deps db-backup`, then `docker compose up db-migrate`: the restored ledger is the backup's; scripts newer than the backup are applied ([ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md) dec 5) after a backup of the restored state ([before an upgrade](#before-an-upgrade)) |
 | 6 | Verify row counts and recent timestamps per tenant before cutover |
 
 ### Cold layer

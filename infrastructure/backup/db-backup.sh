@@ -41,6 +41,8 @@
 #   S3_PREFIX        key prefix within the bucket        (default: "timescaledb")
 #   RETAIN_PER_DB    copies to keep per database         (default: 14)
 #   METRICS_TEXTFILE_DIR  node-exporter textfile directory for the run's success time (unset: none)
+#   PLATFORM_DATABASE  the database the migration runner gates (default: "industryflow"); a complete
+#                    run that dumped it records itself there, in public.backup_ledger
 # Object-store mirrors:
 #   SOURCE_ENDPOINT_URL             the mirrored buckets' S3 endpoint (default: S3_ENDPOINT_URL)
 #   SOURCE_ACCESS_KEY_ID SOURCE_SECRET_ACCESS_KEY
@@ -210,6 +212,30 @@ prune() {
   done
 }
 
+# record_run — a complete run that dumped the platform database records itself there, so the migration
+# runner can tell that a backup precedes the upgrade (ADR-0032 dec 7). Written after every dump and
+# mirror is done, so a dump never holds its own record. The ledger, like the schema ledger, belongs to
+# the tool that writes it; no service role is granted it.
+record_run() {
+  local platform="${PLATFORM_DATABASE:-industryflow}"
+  case " ${DATABASES} " in *" ${platform} "*) ;; *)
+    log "${platform} not among the dumped databases — run not recorded for the migration runner"; return 0 ;;
+  esac
+  psql -X -q -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$platform" \
+       -v run="$STAMP" -v databases="$DATABASES" <<'SQL'
+SET client_min_messages = warning;
+CREATE TABLE IF NOT EXISTS public.backup_ledger (
+    run           TEXT PRIMARY KEY,
+    databases     TEXT NOT NULL,
+    completed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE public.backup_ledger IS
+    'ADR-0032 dec 7: every complete backup run, written by the backup job only; read by the migration runner';
+INSERT INTO public.backup_ledger (run, databases) VALUES (:'run', :'databases');
+SQL
+  log "  run recorded in ${platform}.public.backup_ledger"
+}
+
 main() {
   : "${PGHOST:?PGHOST required}"
   : "${PGPORT:=5432}"
@@ -278,6 +304,7 @@ main() {
     log "backup run ${STAMP} INCOMPLETE: ${UNMIRRORED} object(s) not mirrored, see above"
     exit 1
   fi
+  record_run
   write_metric db-backup \
     "# HELP industryflow_backup_last_success_timestamp_seconds When a backup run last completed." \
     "# TYPE industryflow_backup_last_success_timestamp_seconds gauge" \

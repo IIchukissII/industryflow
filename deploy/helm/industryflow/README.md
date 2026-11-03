@@ -24,7 +24,7 @@ Kubernetes packaging for IndustryFlow ([ADR-0009](../../../ADR/ADR-0009-kubernet
 | `infra-minio.yaml` | MinIO StatefulSet | `infra.minio.inCluster` |
 | `infra-mlflow.yaml` | MLflow Deployment | `infra.mlflow.inCluster` |
 | `job-minio-init.yaml` | post-install/upgrade Job running `files/minio-init.sh` | `infra.minio.inCluster` |
-| `cronjob-db-backup.yaml` | Logical DB backup CronJob | `backup.enabled` |
+| `cronjob-db-backup.yaml` | Logical DB backup and restore-rehearsal CronJobs; `<release>-pre-upgrade-backup` hook Job ([ADR-0032](../../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 7) | `backup.enabled` |
 | `cronjob-cold-export.yaml` | Cold-layer export CronJob | `coldExport.enabled` |
 | `cronjob-device-crl-check.yaml` | Device CRL and CA certificate expiry check CronJob | `ingress.enabled`, `ingress.mtls.enabled`, `ingress.mtls.crlCheck.enabled` |
 | `cronjob-device-cert-check.yaml` | Device certificate expiry check CronJob | `ingress.enabled`, `ingress.mtls.enabled`, `ingress.mtls.certCheck.enabled` |
@@ -100,7 +100,7 @@ digest from GHCR over the registry API (`GITHUB_TOKEN` or `gh auth token` for pr
 | Images | `values-digests.yaml` | Install with the generated overlay; never `latest` |
 | Ingress TLS | `ingress.tls.secretName` | Public certificate Secret ([ADR-0004](../../../ADR/ADR-0004-api-authentication-sessions-and-transport.md)) |
 | DB TLS | `tls.db.*` | Secret or cert-manager ([database TLS](../../../docs/operations/tls.md#helm)) |
-| DB schema | `dbMigrations.*` | The `db-migrate` Job applies [the schema sequence](../../../infrastructure/timescaledb/init-scripts/README.md) to the in-cluster or external database on every install and upgrade; each database client's `schema-ready` init container waits up to `dbMigrations.waitSeconds` for a current ledger |
+| DB schema | `dbMigrations.*` | The `db-migrate` Job applies [the schema sequence](../../../infrastructure/timescaledb/init-scripts/README.md) to the in-cluster or external database on every install and upgrade; each database client's `schema-ready` init container waits up to `dbMigrations.waitSeconds` for a current ledger. The `<release>-pre-upgrade-backup` hook backs up first; the Job refuses pending scripts without a backup newer than `dbMigrations.backupMaxAgeSeconds` unless `dbMigrations.withoutBackup` ([before an upgrade](../../../docs/operations/backup-and-recovery.md#before-an-upgrade)) |
 | Spark checkpoints | `apps.spark-*.persistence` | Default is a ReadWriteOnce PVC; needs a default StorageClass or `storageClass` |
 | Object-store principals | `secrets.data.*_ACCESS_KEY` / `*_SECRET_KEY` | One pair per consumer, access keys distinct from the root's. External store: create equivalent principals; the policy table in `infrastructure/minio/minio-init.sh` is the reference |
 | Device mTLS | `ingress.mtls.*` | Device CA Secret with `ca.crt` and `ca.crl` ([device mTLS](../../../docs/operations/device-mtls.md#kubernetes)) |
