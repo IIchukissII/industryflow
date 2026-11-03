@@ -20,9 +20,9 @@ ALERT = {
 
 OLD, NEW = "a" * 40, "0123456789abcdef0123456789abcdef01234567"
 REVISIONS = [  # api-gateway deployed at 09:55, three minutes before the alert's window ends near 10:00
-    {"metric": {"service": "api-gateway", "revision": OLD}, "values": [[1793440800, "1"], [1793443800, "1"]]},
-    {"metric": {"service": "api-gateway", "revision": NEW}, "values": [[1793443920, "1"], [1793444400, "1"]]},
-    {"metric": {"service": "ml-service-api", "revision": NEW}, "values": [[1793440800, "1"], [1793444400, "1"]]},
+    {"metric": {"component": "api-gateway", "revision": OLD}, "values": [[1793440800, "1"], [1793443800, "1"]]},
+    {"metric": {"component": "api-gateway", "revision": NEW}, "values": [[1793443920, "1"], [1793444400, "1"]]},
+    {"metric": {"component": "ml-service-api", "revision": NEW}, "values": [[1793440800, "1"], [1793444400, "1"]]},
 ]
 
 
@@ -34,7 +34,7 @@ class FakeTools:
         self.calls.append((name, arguments))
         if name in self.fail:
             raise ConnectionError("store unreachable")
-        if name == "prometheus_range" and arguments["query"] == graph.REVISIONS_QUERY:
+        if name == "prometheus_range" and graph.REVISIONS_METRIC in arguments["query"]:
             return {"series": REVISIONS}
         if name == "prometheus_range":
             return {"series": [{"metric": {"job": "redis"}, "values": [[1, "10"], [2, "95"]]}]}
@@ -207,7 +207,8 @@ async def test_a_note_without_a_model_still_fills_the_columns(config):
 @pytest.mark.asyncio
 async def test_every_services_revisions_over_the_window_are_evidence(config):
     tools, writer, note = await _run(config)
-    [(_, args)] = [(n, a) for n, a in tools.calls if a.get("query") == graph.REVISIONS_QUERY]
+    [(_, args)] = [(n, a) for n, a in tools.calls if graph.REVISIONS_METRIC in a.get("query", "")]
+    assert args["query"] == graph.revisions_query(int(args["step"].removesuffix("s")))
     assert args["start"] == "2026-10-31T09:30:00Z"  # the alert's window, not only its targets
     prompt = writer.prompts[0]
     line = next(x for x in prompt.splitlines() if "(service revisions)" in x)
@@ -220,7 +221,7 @@ async def test_every_services_revisions_over_the_window_are_evidence(config):
 
 def test_the_revision_summary_says_what_is_missing():
     assert graph._revisions_summary([]) == "no service reported its revision in the window"
-    unknown = [{"metric": {"service": "api-gateway", "revision": "unknown"}, "values": [[1793440800, "1"]]}]
+    unknown = [{"metric": {"component": "api-gateway", "revision": "unknown"}, "values": [[1793440800, "1"]]}]
     assert "revision unknown (built without its commit)" in graph._revisions_summary(unknown)
     assert "some services are not listed" in graph._revisions_summary(REVISIONS, truncated=True)
 
@@ -233,7 +234,24 @@ async def test_the_step_keeps_the_whole_window_within_the_point_limit(config):
 
     import tools as agent_tools
     calls, _, _ = await _run(config)
-    [args] = [a for _, a in calls.calls if a.get("query") == graph.REVISIONS_QUERY]
+    [args] = [a for _, a in calls.calls if graph.REVISIONS_METRIC in a.get("query", "")]
     span = (datetime.fromisoformat(args["end"].replace("Z", "+00:00"))
             - datetime.fromisoformat(args["start"].replace("Z", "+00:00"))).total_seconds()
     assert span / int(args["step"].removesuffix("s")) + 1 <= agent_tools.MAX_POINTS
+
+
+def test_a_rollback_reads_in_the_order_it_happened():
+    a, b = "c03756b6abcd" + "0" * 28, "1511e5861111" + "0" * 28
+    series = [
+        {"metric": {"component": "api-gateway", "revision": a},
+         "values": [[1793440800, "1"], [1793441400, "1"], [1793443200, "1"], [1793443800, "1"]]},
+        {"metric": {"component": "api-gateway", "revision": b}, "values": [[1793442000, "1"], [1793442600, "1"]]},
+    ]
+    text = graph._revisions_summary(series)
+    assert text.startswith("api-gateway: CHANGED in the window: revision c03756b6abcd from")
+    assert text.count(", then ") == 2 and text.index("1511e5861111") < text.rindex("c03756b6abcd")
+
+
+def test_a_revision_shorter_than_a_step_is_still_queried():
+    q = graph.revisions_query(300)
+    assert q == "max by (component, revision) (last_over_time(industryflow_build_info[300s]))"

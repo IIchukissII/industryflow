@@ -6,8 +6,9 @@
 
 The image build passes the commit as the build argument named by ``REVISION_ENV``; the Dockerfile keeps
 it in the environment of the same name. A service that serves metrics calls ``report`` once at import,
-in every worker, and a scrape then reads ``industryflow_build_info{service, revision} 1``. A deploy is
-the series changing its revision. An image built without the argument reports ``unknown``.
+in every worker, and a scrape then reads ``industryflow_build_info{component, revision} 1``. A deploy
+is the series changing its revision. The label is ``component``, not ``service``: a Kubernetes scrape
+sets its own ``service`` target label and would rename this one. An image built without the argument reports ``unknown``.
 """
 from __future__ import annotations
 
@@ -28,8 +29,8 @@ def revision(environ: Mapping[str, str] = os.environ) -> str:
     return value if _REVISION.fullmatch(value) else UNKNOWN
 
 
-def report(service: str, registry: Any = None, environ: Mapping[str, str] = os.environ) -> Any:
-    """Register and set the series for ``service``. Under multiprocess collection every worker writes
+def report(component: str, registry: Any = None, environ: Mapping[str, str] = os.environ) -> Any:
+    """Register and set the series for ``component``. Under multiprocess collection every worker writes
     the same value, and the maximum is what a scrape reads."""
     from prometheus_client import REGISTRY, Gauge
 
@@ -38,6 +39,6 @@ def report(service: str, registry: Any = None, environ: Mapping[str, str] = os.e
     if gauge is None:
         gauge = _gauges[id(target)] = Gauge(
             METRIC, "The source revision this service's image was built from (ADR-0016 dec 8).",
-            ["service", "revision"], registry=target, multiprocess_mode="max")
-    gauge.labels(service=service, revision=revision(environ)).set(1)
+            ["component", "revision"], registry=target, multiprocess_mode="max")
+    gauge.labels(component=component, revision=revision(environ)).set(1)
     return gauge

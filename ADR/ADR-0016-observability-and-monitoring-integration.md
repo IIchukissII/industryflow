@@ -97,6 +97,7 @@ not leave the tenant-isolated path.
 - Every dashboard request through the edge costs one session check at the gateway.
 - The single host holds one more signing key, generated at install and rotated by replacing it.
 - A service that serves no metrics of its own shows a deploy only as a restart.
+- Every deploy of a new commit changes every reporting service's revision, whether its code changed or not.
 
 ## Deferred
 

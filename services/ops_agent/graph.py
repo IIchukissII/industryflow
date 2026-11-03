@@ -30,7 +30,12 @@ MAX_SERVICES = 4
 # The revision each platform service reported over the window (ADR-0016 dec 8, ADR-0046 dec 2): a deploy
 # shortly before the alert is evidence. One series per service and revision; instance labels collapsed.
 REVISIONS_SOURCE = "service revisions"
-REVISIONS_QUERY = "max by (service, revision) (industryflow_build_info)"
+REVISIONS_METRIC = "industryflow_build_info"
+
+
+def revisions_query(step_seconds: int) -> str:
+    """Every point covers its whole step, so a revision that ran for less than one step still shows."""
+    return f"max by (component, revision) (last_over_time({REVISIONS_METRIC}[{step_seconds}s]))"
 REVISION_CHARS = 12  # a full commit id reads as credential-shaped to the redactor; 12 still names it
 
 SYSTEM = """You write incident notes for the operators of an industrial data platform.
@@ -47,8 +52,9 @@ Next step: a reference fix only when the observed items match its symptom, citin
 first thing to check.
 
 The alert's own summary and description are observed: if they say nothing is failing, say so.
-A service whose revision CHANGED shortly before the alert started was deployed then: name it as a
-candidate cause, citing that item, and say whether the other observed items agree.
+A service whose revision CHANGED shortly before the alert started was deployed then. A deploy
+rebuilds every service of the platform, changed code or not, so name it as a candidate cause, citing
+that item, only when the other observed items point at that service.
 
 Rules: use only the items given. Never invent numbers, names or times. Values like <tenant-1> or
 <address-2> are redacted on purpose; keep them as they are. Plain text, no markdown headings,
@@ -181,22 +187,30 @@ def _clock(ts: float) -> str:
 
 
 def _revisions_summary(series: list[dict[str, Any]], truncated: bool = False) -> str:
-    """Per service, each revision it reported and when; a service with two changed in the window."""
-    seen: dict[str, list[tuple[float, float, str]]] = {}
+    """Per service, the revisions it ran in order, as runs of consecutive samples: a deploy followed by
+    a rollback reads A, then B, then A. A service with more than one run changed in the window."""
+    samples: dict[str, list[tuple[float, str]]] = {}
     for s in series:
-        metric, values = s.get("metric", {}), s.get("values", [])
-        if not values or not metric.get("service"):
+        metric = s.get("metric", {})
+        if not metric.get("component"):
             continue
         rev = metric.get("revision", "unknown")
         rev = "unknown (built without its commit)" if rev == "unknown" else rev[:REVISION_CHARS]
-        seen.setdefault(metric["service"], []).append((float(values[0][0]), float(values[-1][0]), rev))
-    if not seen:
+        samples.setdefault(metric["component"], []).extend((float(t), rev) for t, _ in s.get("values", []))
+    if not any(samples.values()):
         return "no service reported its revision in the window"
     parts = []
-    for service in sorted(seen):
-        spans = sorted(seen[service])
-        listed = ", then ".join(f"revision {r} from {_clock(a)} to {_clock(b)}" for a, b, r in spans)
-        parts.append(f"{service}: {'CHANGED in the window: ' if len(spans) > 1 else ''}{listed}")
+    for component in sorted(samples):
+        runs: list[list[Any]] = []  # [revision, first, last]
+        for t, rev in sorted(samples[component]):
+            if runs and runs[-1][0] == rev:
+                runs[-1][2] = t
+            else:
+                runs.append([rev, t, t])
+        if not runs:
+            continue
+        listed = ", then ".join(f"revision {r} from {_clock(a)} to {_clock(b)}" for r, a, b in runs)
+        parts.append(f"{component}: {'CHANGED in the window: ' if len(runs) > 1 else ''}{listed}")
     if truncated:
         parts.append("more series than the query returns; some services are not listed")
     return "; ".join(parts)
@@ -217,7 +231,7 @@ def build(config: Config, tools: Tools, writer: NoteWriter, publisher: Publisher
         # The step keeps the window within the tool's point limit, so the first sample is the window's.
         step = max(60, int((end - start).total_seconds()) // 100 + 1)
         requests.append((REVISIONS_SOURCE, "prometheus_range",
-                         {"query": REVISIONS_QUERY, **window, "step": f"{step}s"}))
+                         {"query": revisions_query(step), **window, "step": f"{step}s"}))
         requests.append(("alert router", "active_alerts", {}))
         requests.append(("alert runbook", "alert_runbook", {"alertname": alert.get("labels", {}).get("alertname", "")}))
         requests.append(("runbooks", "runbook_rows", {"text": match_text(alert)}))

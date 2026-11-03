@@ -30,7 +30,7 @@ def test_the_series_names_the_service_and_its_revision():
     registry = CollectorRegistry()
     build_info.report("api-gateway", registry=registry, environ={build_info.REVISION_ENV: SHA})
     text = generate_latest(registry).decode()
-    assert f'industryflow_build_info{{revision="{SHA}",service="api-gateway"}} 1.0' in text
+    assert f'industryflow_build_info{{component="api-gateway",revision="{SHA}"}} 1.0' in text
 
 
 def test_workers_aggregate_to_one_series(tmp_path):
@@ -46,7 +46,7 @@ def test_workers_aggregate_to_one_series(tmp_path):
     registry = CollectorRegistry()
     multiprocess.MultiProcessCollector(registry, path=str(tmp_path))
     lines = [x for x in generate_latest(registry).decode().splitlines() if x.startswith(build_info.METRIC)]
-    assert lines == [f'industryflow_build_info{{revision="{SHA}",service="ml-service-api"}} 1.0'], lines
+    assert lines == [f'industryflow_build_info{{component="ml-service-api",revision="{SHA}"}} 1.0'], lines
 
 
 def test_reporting_again_reuses_the_series():
