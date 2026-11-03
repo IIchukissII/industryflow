@@ -31,7 +31,10 @@ function SensorRing({ count }) {
       </defs>
       <circle cx="60" cy="60" r="34" fill="url(#eqGlow)" />
       <circle cx="60" cy="60" r="46" fill="none" stroke="#2a3248" strokeWidth="0.8" />
+      {/* A fixed decorative ring: the index is each node's identity. */}
+      {/* eslint-disable-next-line @eslint-react/no-array-index-key */}
       {nodes.map((p, i) => <line key={`l${i}`} x1="60" y1="60" x2={p.x} y2={p.y} stroke="#232a3d" strokeWidth="0.6" />)}
+      {/* eslint-disable-next-line @eslint-react/no-array-index-key */}
       {nodes.map((p, i) => <circle key={`n${i}`} cx={p.x} cy={p.y} r="3" fill="#0d1222" stroke="#5c6478" strokeWidth="1.2" />)}
       <circle cx="60" cy="60" r="2.6" fill="#fff6dc" />
     </svg>

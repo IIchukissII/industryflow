@@ -25,9 +25,12 @@ const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
 // What the rule watches and when it fires, as one sentence: names, with values in mono.
 function RuleSentence({ rule }) {
+  // The parts of one sentence, in a fixed order rebuilt each render: the index is their identity.
+  /* eslint-disable @eslint-react/no-array-index-key */
   return ruleSentenceParts(rule).map((p, i) => (p.mono
     ? <span key={i} className="mono" title={p.title}>{p.t}</span>
     : <span key={i}>{p.t}</span>));
+  /* eslint-enable @eslint-react/no-array-index-key */
 }
 
 function AlertRules() {
