@@ -69,6 +69,7 @@ the newest `RETAIN_PER_DB` per prefix. The bucket is created if absent.
 | `S3_PREFIX` | `timescaledb` | Key prefix for dumps and globals |
 | `DATABASES` | `industryflow mlflow` | Databases to dump |
 | `RETAIN_PER_DB` | `14` | Copies kept per database |
+| `SKIP_WITHOUT_CREDENTIALS` | unset | `1`: exit 0 with a log line when `PGUSER` is unset; the Helm pre-upgrade hook sets it |
 | `PLATFORM_DATABASE` | `industryflow` | A complete run that dumped it adds a row to its `public.backup_ledger`, which the migration runner reads ([before an upgrade](#before-an-upgrade)) |
 | `METRICS_TEXTFILE_DIR` | unset | Directory for the run's success time, `industryflow_backup_last_success_timestamp_seconds{backup="databases"}` (node-exporter textfile); Compose sets it |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | required | Backup principal |
@@ -201,7 +202,9 @@ recorded in its `public.backup_ledger` within `MIGRATE_BACKUP_MAX_AGE_SECONDS`
 | Deployment | Backup taken by | Without a backup |
 |---|---|---|
 | Compose | `docker compose run --rm --no-deps db-backup`, then `docker compose up db-migrate`; `scripts/box-deploy.sh` runs both in that order | `MIGRATE_WITHOUT_BACKUP=1 docker compose up db-migrate` |
-| Helm | Hook Job `<release>-pre-upgrade-backup` (`helm.sh/hook: pre-upgrade`), before the revision's `db-migrate` Job; `helm upgrade --timeout` must cover one backup run | `dbMigrations.withoutBackup=true`; required when `backup.enabled=false`, the chart refuses to render otherwise |
+| Helm | Hook Job `<release>-pre-upgrade-backup` (`helm.sh/hook: pre-upgrade`), before the revision's `db-migrate` Job: the database dumps only, no object mirrors; `helm upgrade --timeout` must cover them. Skipped, with a log line, on the upgrade that sets `backup.enabled=true` (its Secret and principal do not exist yet) | `dbMigrations.withoutBackup=true`; required when `backup.enabled=false`, the chart refuses to render otherwise |
+
+Pre-upgrade dumps are ordinary runs: they count toward `RETAIN_PER_DB`.
 
 ### Off-site target
 

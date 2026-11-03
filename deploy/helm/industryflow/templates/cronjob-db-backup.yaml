@@ -42,9 +42,10 @@ spec:
 {{- end }}
 {{- /*
   ADR-0032 dec 7: a schema rollback is a restore, so every upgrade is preceded by a backup. This hook
-  runs the backup job once before the upgrade applies anything, the db-migrate Job of the new revision
+  dumps the databases once before the upgrade applies anything, the db-migrate Job of the new revision
   included; that Job refuses pending scripts unless a backup is recorded within
-  dbMigrations.backupMaxAgeSeconds. A hook that fails stops the upgrade and is kept for inspection.
+  dbMigrations.backupMaxAgeSeconds. A rollback needs only the dumps, so the object mirrors stay with the
+  scheduled run. A hook that fails stops the upgrade and is kept for inspection.
 */}}
 ---
 apiVersion: batch/v1
@@ -61,7 +62,7 @@ metadata:
 spec:
   backoffLimit: 1
   template:
-    {{- include "industryflow.backupPod" (dict "ctx" . "job" (dict "name" "db-backup" "rehearsal" false)) | nindent 4 }}
+    {{- include "industryflow.backupPod" (dict "ctx" . "job" (dict "name" "db-backup" "rehearsal" false "hook" true)) | nindent 4 }}
 {{- else if not .Values.dbMigrations.withoutBackup }}
 {{- fail "backup.enabled=false leaves every upgrade without the backup the db-migrate Job requires (ADR-0032 dec 7); set dbMigrations.withoutBackup=true to choose that explicitly" }}
 {{- end }}
@@ -117,21 +118,33 @@ spec:
             secretKeyRef:
               name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
               key: DB_USER
+              {{- if $job.hook }}
+              optional: true
+              {{- end }}
         - name: PGPASSWORD
           valueFrom:
             secretKeyRef:
               name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
               key: DB_PASSWORD
+              {{- if $job.hook }}
+              optional: true
+              {{- end }}
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
               name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
               key: BACKUP_STORE_ACCESS_KEY
+              {{- if $job.hook }}
+              optional: true
+              {{- end }}
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
               name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
               key: BACKUP_STORE_SECRET_KEY
+              {{- if $job.hook }}
+              optional: true
+              {{- end }}
         - name: AWS_DEFAULT_REGION
           value: {{ .Values.backup.s3.region | quote }}
         - name: S3_ENDPOINT_URL
@@ -144,6 +157,13 @@ spec:
           value: {{ .Values.backup.databases | quote }}
         - name: RETAIN_PER_DB
           value: {{ .Values.backup.retainPerDatabase | quote }}
+        {{- if $job.hook }}
+        # The upgrade that turns backups on creates the backup Secret and object-store principal only
+        # after this hook: with no credentials there is nothing to back up with yet, and the migrate
+        # Job's own gate still refuses pending scripts without a recorded backup.
+        - name: SKIP_WITHOUT_CREDENTIALS
+          value: "1"
+        {{- end }}
         # Object mirrors (ADR-0032 dec 4, ADR-0038 dec 1-3): read with the backup job's own
         # read-only principal, written with the backup credentials above.
         - name: SOURCE_ENDPOINT_URL
@@ -153,12 +173,18 @@ spec:
             secretKeyRef:
               name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
               key: BACKUP_READ_ACCESS_KEY
+              {{- if $job.hook }}
+              optional: true
+              {{- end }}
         - name: SOURCE_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
               name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "db-backup") }}
               key: BACKUP_READ_SECRET_KEY
-        {{- if and .Values.coldExport.enabled .Values.backup.cold.enabled }}
+              {{- if $job.hook }}
+              optional: true
+              {{- end }}
+        {{- if and .Values.coldExport.enabled .Values.backup.cold.enabled (not $job.hook) }}
         - name: COLD_SOURCE_BUCKET
           value: {{ .Values.coldExport.store.bucket | quote }}
         - name: COLD_SOURCE_ENDPOINT_URL
@@ -166,7 +192,7 @@ spec:
         - name: COLD_BACKUP_PREFIX
           value: {{ .Values.backup.cold.prefix | quote }}
         {{- end }}
-        {{- if .Values.backup.models.enabled }}
+        {{- if and .Values.backup.models.enabled (not $job.hook) }}
         - name: MODEL_SOURCE_BUCKET
           value: {{ .Values.notebookHub.trackingGateway.artifactBucket | quote }}
         - name: MODEL_BACKUP_PREFIX

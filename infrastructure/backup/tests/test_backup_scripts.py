@@ -763,3 +763,15 @@ def test_copy_rows_counts_each_line_of_a_copy_block_as_one_row(env):
                        env=env["env"], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert r.stdout.splitlines() == ["public.a\t2", '"Odd Schema"."t ("\t0']
+
+
+def test_the_hook_of_the_upgrade_enabling_backups_skips_without_credentials(env):
+    e = {k: v for k, v in env["env"].items() if k != "PGUSER"}
+    r = subprocess.run(["bash", str(SCRIPTS / "db-backup.sh")], env={**e, "SKIP_WITHOUT_CREDENTIALS": "1"},
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "no backup credentials yet" in r.stdout
+    assert not (env["tmp"] / "pg_dump.log").exists()
+    # Without the flag a missing credential is a failed run, as before.
+    r = subprocess.run(["bash", str(SCRIPTS / "db-backup.sh")], env=e, capture_output=True, text=True)
+    assert r.returncode != 0

@@ -160,20 +160,26 @@ def _record_backup(stamp):
 
 
 @pytest.fixture
-def upgrade(cur, tenant, tmp_path):
-    """A database holding a tenant, and one script pending: an upgrade."""
-    copy = tmp_path / "scripts"
-    shutil.copytree(SCRIPTS, copy)
-    (copy / PROBE).write_text("-- migration-kind: migration\nSELECT 1;\n")
+def no_backup(cur, tenant):
+    """A database holding a tenant and no recorded backup; earlier records are put back after."""
     cur.execute("SELECT to_regclass('public.backup_ledger') IS NOT NULL")
     if cur.fetchone()[0]:
         cur.execute("ALTER TABLE public.backup_ledger RENAME TO backup_ledger_before_test")
-    yield copy
-    cur.execute("DELETE FROM public.schema_ledger WHERE script = %s", (PROBE,))
+    yield
     cur.execute("DROP TABLE IF EXISTS public.backup_ledger")
     cur.execute("SELECT to_regclass('public.backup_ledger_before_test') IS NOT NULL")
     if cur.fetchone()[0]:
         cur.execute("ALTER TABLE public.backup_ledger_before_test RENAME TO backup_ledger")
+
+
+@pytest.fixture
+def upgrade(cur, no_backup, tmp_path):
+    """The same database with one script pending: an upgrade."""
+    copy = tmp_path / "scripts"
+    shutil.copytree(SCRIPTS, copy)
+    (copy / PROBE).write_text("-- migration-kind: migration\nSELECT 1;\n")
+    yield copy
+    cur.execute("DELETE FROM public.schema_ledger WHERE script = %s", (PROBE,))
 
 
 def _probe_applied(cur):
@@ -212,5 +218,19 @@ def test_the_operator_may_choose_to_upgrade_without_a_backup(cur, upgrade):
     assert _probe_applied(cur)
 
 
-def test_nothing_pending_needs_no_backup(cur, tenant):
-    assert _run("apply").returncode == 0
+def test_nothing_pending_needs_no_backup(cur, no_backup):
+    r = _run("apply")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "0 script(s) applied" in r.stdout
+
+
+def test_a_refused_reapply_leaves_the_ledger_as_it_was(cur, no_backup):
+    name = next(n for n, k in sorted(_kinds().items()) if k == "definition")
+    cur.execute("SELECT script, digest, applied_at FROM public.schema_ledger ORDER BY script")
+    before = cur.fetchall()
+    r = _run("reapply", name)
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "no backup is recorded in this database" in r.stderr
+    cur.execute("SELECT script, digest, applied_at FROM public.schema_ledger ORDER BY script")
+    assert cur.fetchall() == before
+    assert _run("verify").returncode == 0

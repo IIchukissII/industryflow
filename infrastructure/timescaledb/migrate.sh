@@ -162,7 +162,12 @@ apply_locked() {
     exit 2
   fi
   n=0
-  awk -F '\t' '$1 == "apply" || $1 == "reapply"' "$tmp/plan" > "$tmp/pending"
+  # Pending: what the plan says, and the definitions `reapply` names although unchanged ($tmp/force).
+  forced=$(cat "$tmp/force" 2>/dev/null | tr '\n' ' ')
+  awk -F '\t' -v OFS='\t' -v forced="$forced" '
+       BEGIN { n = split(forced, f, " "); for (i = 1; i <= n; i++) force[f[i]] = 1 }
+       $1 == "apply" || $1 == "reapply" { print; next }
+       $1 == "current" && ($2 in force) { $1 = "reapply"; print }' "$tmp/plan" > "$tmp/pending"
   require_backup
   while IFS="$(printf '\t')" read -r action name kind digest; do
     echo "migrate: $action $name ($kind)"
@@ -202,10 +207,9 @@ cmd_reapply() {
     [ -f "$f" ] || die "no script $name in $DIR"
     [ "$(kind_of "$f")" = definition ] || die "$name is not a definition; a migration runs once"
   done
-  # Forgetting the ledger row makes the next run apply it; the run below holds the lock.
-  for name in "$@"; do
-    echo "DELETE FROM public.schema_ledger WHERE script = :'script';" | q -v script="$name"
-  done
+  # The run below applies them under the lock, after the backup gate; the ledger is untouched until a
+  # script has applied.
+  printf '%s\n' "$@" > "$tmp/force"
   cmd_apply
 }
 

@@ -41,6 +41,8 @@
 #   S3_PREFIX        key prefix within the bucket        (default: "timescaledb")
 #   RETAIN_PER_DB    copies to keep per database         (default: 14)
 #   METRICS_TEXTFILE_DIR  node-exporter textfile directory for the run's success time (unset: none)
+#   SKIP_WITHOUT_CREDENTIALS  1: exit 0 with a log line when PGUSER is unset (the pre-upgrade hook of the
+#                    upgrade that enables backups, whose Secret does not exist yet)
 #   PLATFORM_DATABASE  the database the migration runner gates (default: "industryflow"); a complete
 #                    run that dumped it records itself there, in public.backup_ledger
 # Object-store mirrors:
@@ -237,6 +239,10 @@ SQL
 }
 
 main() {
+  if [ "${SKIP_WITHOUT_CREDENTIALS:-}" = 1 ] && [ -z "${PGUSER:-}" ]; then
+    log "no backup credentials yet (this upgrade enables backups); skipped"
+    return 0
+  fi
   : "${PGHOST:?PGHOST required}"
   : "${PGPORT:=5432}"
   : "${PGUSER:?PGUSER required}"
