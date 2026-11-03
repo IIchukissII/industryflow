@@ -6,10 +6,10 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0046 — The infrastructure agent explains platform alerts to operators
 
 - **Status:** Accepted
-- **Date:** 2026-10-31; changed 2026-10-31
+- **Date:** 2026-10-31; changed 2026-11-03
 - **Parent:** [ADR-0045](ADR-0045-agent-runtime.md) (the agent contract)
-- **Related:** [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (dec 1, 4, 5: the
-  operator's stack, its receivers, tenant data kept off it), [ADR-0031](ADR-0031-alerting-http-surface-single-owner.md)
+- **Related:** [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (dec 1, 4, 5, 8: the
+  operator's stack, its receivers, tenant data kept off it, reported revisions), [ADR-0031](ADR-0031-alerting-http-surface-single-owner.md)
   (dec 1: tenant alerts are the gateway's), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (dec 1:
   store classes), [ADR-0043](ADR-0043-platform-switch-operator-control.md) (dec 1: platform scope is
   the operator's), [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (dec 4, 6)
@@ -27,8 +27,9 @@ and user addresses even though tenant data stays off that stack.
 1. **The agent is triggered by the operator's alert router, through a receiver the operator adds, and
    by nothing else.** It writes into the operator's own stack, so it needs no operator address; the
    receiver authenticates with a shared secret.
-2. **Its evidence is the platform plane only:** metrics around the alert, error logs of the alert's
-   targets, the alert router's own alerts, and the matching runbook rows. Tenant alerts and stores stay
+2. **Its evidence is the platform plane only:** metrics around the alert, the source revisions the
+   platform's services reported over the same window (ADR-0016 dec 8), error logs of the alert's targets,
+   the alert router's own alerts, and the matching runbook rows. Tenant alerts and stores stay
    out of reach (ADR-0016 dec 5, ADR-0031 dec 1).
 3. **A note states what happened, the impact, the likely cause with its evidence, and the next step from
    the runbook.** A cause the evidence does not support is reported as unknown.
@@ -78,8 +79,8 @@ and user addresses even though tenant data stays off that stack.
 - The agent's reach is the operator's monitoring plane, so a compromised agent exposes no tenant store.
 
 **Negative**
-- Recent changes are not in the evidence, so a cause introduced by a deploy is seen only through its
-  symptoms.
+- A change to a service that reports no revision, or a change of configuration alone, is seen only
+  through its symptoms.
 - A note can be wrong; it is advice beside the alert, not a diagnosis.
 - Runbook tables gain a consumer, so their shape can no longer change freely.
 - An annotation marks when the note was written, shortly after the alert started, not the start itself.
@@ -88,7 +89,6 @@ and user addresses even though tenant data stays off that stack.
 
 | Open question | Settled by |
 |---|---|
-| Recent changes as evidence | The platform reporting its running release as a metric |
 | An on-demand explanation without an alert | The first request for one |
 | A chat channel as a second output | An operator who supplies one |
 

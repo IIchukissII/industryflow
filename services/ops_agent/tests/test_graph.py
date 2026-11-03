@@ -18,6 +18,14 @@ ALERT = {
 }
 
 
+OLD, NEW = "a" * 40, "0123456789abcdef0123456789abcdef01234567"
+REVISIONS = [  # api-gateway deployed at 09:55, three minutes before the alert's window ends near 10:00
+    {"metric": {"service": "api-gateway", "revision": OLD}, "values": [[1793440800, "1"], [1793443800, "1"]]},
+    {"metric": {"service": "api-gateway", "revision": NEW}, "values": [[1793443920, "1"], [1793444400, "1"]]},
+    {"metric": {"service": "ml-service-api", "revision": NEW}, "values": [[1793440800, "1"], [1793444400, "1"]]},
+]
+
+
 class FakeTools:
     def __init__(self, fail=()):
         self.calls, self.fail = [], fail
@@ -26,6 +34,8 @@ class FakeTools:
         self.calls.append((name, arguments))
         if name in self.fail:
             raise ConnectionError("store unreachable")
+        if name == "prometheus_range" and arguments["query"] == graph.REVISIONS_QUERY:
+            return {"series": REVISIONS}
         if name == "prometheus_range":
             return {"series": [{"metric": {"job": "redis"}, "values": [[1, "10"], [2, "95"]]}]}
         if name == "loki_errors":
@@ -192,3 +202,38 @@ async def test_a_note_carries_its_services_and_sections(config):
 async def test_a_note_without_a_model_still_fills_the_columns(config):
     _, _, note = await _run(config, writer=FakeWriter(fail=True))
     assert note["what"] == note["alert"] and note["cause"].startswith("Unknown")
+
+
+@pytest.mark.asyncio
+async def test_every_services_revisions_over_the_window_are_evidence(config):
+    tools, writer, note = await _run(config)
+    [(_, args)] = [(n, a) for n, a in tools.calls if a.get("query") == graph.REVISIONS_QUERY]
+    assert args["start"] == "2026-10-31T09:30:00Z"  # the alert's window, not only its targets
+    prompt = writer.prompts[0]
+    line = next(x for x in prompt.splitlines() if "(service revisions)" in x)
+    assert "api-gateway: CHANGED in the window: revision aaaaaaaaaaaa from" in line
+    assert ", then revision 0123456789ab from" in line
+    assert "ml-service-api: revision 0123456789ab from" in line and "ml-service-api: CHANGED" not in line
+    # The short revision survives redaction; a full commit id would read as a credential.
+    assert "<secret" not in line
+
+
+def test_the_revision_summary_says_what_is_missing():
+    assert graph._revisions_summary([]) == "no service reported its revision in the window"
+    unknown = [{"metric": {"service": "api-gateway", "revision": "unknown"}, "values": [[1793440800, "1"]]}]
+    assert "revision unknown (built without its commit)" in graph._revisions_summary(unknown)
+    assert "some services are not listed" in graph._revisions_summary(REVISIONS, truncated=True)
+
+
+@pytest.mark.asyncio
+async def test_the_step_keeps_the_whole_window_within_the_point_limit(config):
+    # The tool keeps the newest points only; a window that does not fit loses its start, where the
+    # revision before a deploy is.
+    from datetime import datetime
+
+    import tools as agent_tools
+    calls, _, _ = await _run(config)
+    [args] = [a for _, a in calls.calls if a.get("query") == graph.REVISIONS_QUERY]
+    span = (datetime.fromisoformat(args["end"].replace("Z", "+00:00"))
+            - datetime.fromisoformat(args["start"].replace("Z", "+00:00"))).total_seconds()
+    assert span / int(args["step"].removesuffix("s")) + 1 <= agent_tools.MAX_POINTS

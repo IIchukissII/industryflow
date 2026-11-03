@@ -19,6 +19,9 @@ x-api-gateway-build: &api-gateway-build
   dockerfile: Dockerfile
   additional_contexts:
     contracts: ./libs/industryflow_contracts
+  args: &revision-arg
+    # The commit the image is built from (ADR-0016 dec 8); scripts/box-deploy.sh sets it.
+    INDUSTRYFLOW_REVISION: ${INDUSTRYFLOW_REVISION:-unknown}
 
 # Spark checkpoint on object storage (ADR-0006). The driver reads/writes the same checkpoint as
 # the executors, so on a multi-worker cluster it must live on ONE store visible to all — MinIO
@@ -732,6 +735,7 @@ services:
       dockerfile: Dockerfile
       additional_contexts:
         contracts: ./libs/industryflow_contracts
+      args: *revision-arg
     # No host port: ingestion is reachable only via the mTLS edge (ADR-0002 dec 3).
     expose:
       - "8003"
@@ -877,6 +881,7 @@ services:
       dockerfile: api/Dockerfile
       additional_contexts:
         contracts: ./libs/industryflow_contracts
+      args: *revision-arg
     container_name: industryflow-ml-service-api
     ports:
       - "127.0.0.1:${ML_SERVICE_PORT}:8002"

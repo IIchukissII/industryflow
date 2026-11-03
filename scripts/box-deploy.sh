@@ -68,6 +68,8 @@ git checkout -q --detach "$ref"
 sha="$(git rev-parse HEAD)"
 git log --oneline -1
 echo "== build"
+# The commit each image reports as its revision (ADR-0016 dec 8).
+export INDUSTRYFLOW_REVISION="$sha"
 # The stream engines stop for the build's memory on a small host, and start again below.
 spark_down=1
 docker compose stop "${SPARK[@]}"

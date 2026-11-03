@@ -236,7 +236,10 @@ jobs:
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: ${{ matrix.security_refresh && format('SECURITY_REFRESH={0}', steps.epoch.outputs.day) || '' }}
+          # INDUSTRYFLOW_REVISION: the commit the image reports as its revision (ADR-0016 dec 8).
+          build-args: |
+            INDUSTRYFLOW_REVISION=${{ github.sha }}
+            ${{ matrix.security_refresh && format('SECURITY_REFRESH={0}', steps.epoch.outputs.day) || '' }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 

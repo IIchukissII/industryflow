@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from industryflow_contracts import build_info
+
 from config import get_settings
 from routers import (
     health, measurements, aggregations, websocket, cache,
@@ -133,6 +135,8 @@ async def csrf_protect(request, call_next):
 
 # Prometheus metrics
 Instrumentator().instrument(app).expose(app)
+# The source revision this image was built from (ADR-0016 dec 8).
+build_info.report("api-gateway")
 
 # Authentication routes
 app.include_router(

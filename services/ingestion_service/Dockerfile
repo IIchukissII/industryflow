@@ -44,4 +44,8 @@ USER 10001
 # created above, so importing the app outside this CMD (smoke tests) finds it.
 ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
 ENV INGESTION_WORKERS=1
+# The commit this image is built from, reported as industryflow_build_info (ADR-0016 dec 8). Last, so
+# a new commit rebuilds no earlier layer.
+ARG INDUSTRYFLOW_REVISION=unknown
+ENV INDUSTRYFLOW_REVISION=${INDUSTRYFLOW_REVISION}
 CMD ["sh", "-c", "rm -rf \"$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$PROMETHEUS_MULTIPROC_DIR\" && exec uvicorn main:app --host 0.0.0.0 --port 8003 --workers \"$INGESTION_WORKERS\""]

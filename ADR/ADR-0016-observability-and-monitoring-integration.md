@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0016 — Observability and monitoring integration
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-11-01
+- **Date:** 2026-06-27; changed 2026-11-03
 - **Parent:** ADR-0001
-- **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (self-contained chart; deferred monitoring here), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the tenant-isolated path alerts stay on), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (external traffic only over the TLS edge; sessions), [ADR-0043](ADR-0043-platform-switch-operator-control.md) (the superuser as the one platform-wide authority), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (the same sign-on pattern for the hub)
+- **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (self-contained chart; deferred monitoring here), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the tenant-isolated path alerts stay on), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (external traffic only over the TLS edge; sessions), [ADR-0043](ADR-0043-platform-switch-operator-control.md) (the superuser as the one platform-wide authority), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (the same sign-on pattern for the hub), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (dec 9: a release names images already built)
 
 ## Context
 
@@ -46,6 +46,10 @@ not leave the tenant-isolated path.
    never from a header that network position vouches for; it names the platform user by a stable id, and
    the role it confers is below the dashboards' own administrator, whose login stays on the loopback. A
    write reaches them only from this origin.
+8. **Every platform service that serves metrics reports the source revision its image was built from,
+   as a constant series.** A deploy then shows in the same store, on the same time axis, as the symptoms
+   it may cause. The revision is fixed when the image is built, so the series names what runs, not what
+   a deployment meant to run.
 
 ## Alternatives
 
@@ -73,6 +77,10 @@ not leave the tenant-isolated path.
 | 7 | The assertion naming the user by e-mail | The dashboards match an e-mail against their own accounts first, their administrator's included, and an e-mail can change hands |
 | 7 | A write accepted on the session alone | The dashboards hold no session of their own, so their forgery check never runs; a same-site page could write as the superuser |
 | 7 | An assertion handed to the browser | A token the page can read outlives the request it was minted for; the edge asks for it per request and forwards it |
+| 8 | The release name as the reported version | A release is named after its images are built and names them unchanged (ADR-0026 dec 9), so an image cannot carry it |
+| 8 | The revision read from the deployment when a service starts | States what the deployment meant to run; a service rebuilt or replaced alone would report another image's revision |
+| 8 | A deploy event recorded by the deploy tool | Every way of deploying would have to record it, and an image swapped outside them would leave no trace |
+| 8 | Container restarts as the only sign of a deploy | A restart is not a change; a crash and a deploy look the same |
 
 ## Consequences
 
@@ -88,6 +96,7 @@ not leave the tenant-isolated path.
 - A stolen superuser session also reads every service's metrics and logs while it lives.
 - Every dashboard request through the edge costs one session check at the gateway.
 - The single host holds one more signing key, generated at install and rotated by replacing it.
+- A service that serves no metrics of its own shows a deploy only as a restart.
 
 ## Deferred
 

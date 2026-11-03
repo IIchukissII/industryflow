@@ -8,6 +8,8 @@ High-throughput sensor data ingestion endpoint (Port 8003)
 """
 from fastapi import FastAPI, Depends, HTTPException, status
 from prometheus_fastapi_instrumentator import Instrumentator
+
+from industryflow_contracts import build_info
 from aiokafka import AIOKafkaConsumer
 from datetime import datetime, timezone
 import asyncio
@@ -43,6 +45,8 @@ app = FastAPI(
 # Prometheus metrics at /metrics (request rate/latency/in-flight — item 7). Scraped in-cluster
 # on the service port; the mTLS edge denies /metrics so it is never exposed to devices.
 Instrumentator().instrument(app).expose(app)
+# The source revision this image was built from (ADR-0016 dec 8).
+build_info.report("ingestion-service")
 
 @app.on_event("startup")
 async def startup_event():
