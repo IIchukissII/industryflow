@@ -65,6 +65,11 @@ echo "== checkout $ref"
 git fetch -q origin
 git checkout -q --detach "$ref"
 sha="$(git rev-parse HEAD)"
+# The rest is the deployed commit's own procedure. Bash keeps reading the file it started from, which
+# the checkout has just replaced, so the version being deployed takes over from here.
+if [ "${BOX_DEPLOY_SHA:-}" != "$sha" ]; then
+    BOX_DEPLOY_SHA="$sha" exec scripts/box-deploy.sh "$sha"
+fi
 git log --oneline -1
 echo "== build"
 # The commit each image reports as its revision (ADR-0016 dec 8).
