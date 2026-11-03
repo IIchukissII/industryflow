@@ -48,6 +48,10 @@ spec:
             - { name: PGHOST, value: {{ include "industryflow.dbHost" . | quote }} }
             - { name: PGPORT, value: {{ .Values.infra.timescaledb.port | quote }} }
             - { name: PGDATABASE, value: {{ .Values.infra.timescaledb.database | quote }} }
+            - { name: MIGRATE_BACKUP_MAX_AGE_SECONDS, value: {{ .Values.dbMigrations.backupMaxAgeSeconds | quote }} }
+            {{- if .Values.dbMigrations.withoutBackup }}
+            - { name: MIGRATE_WITHOUT_BACKUP, value: "1" }
+            {{- end }}
             - name: PGUSER
               valueFrom:
                 secretKeyRef: { name: {{ $secret }}, key: DB_USER }

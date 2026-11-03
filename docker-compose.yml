@@ -242,6 +242,11 @@ services:
       NOTEBOOK_HUB_RECLAIM_DB_PASSWORD: ${NOTEBOOK_HUB_RECLAIM_DB_PASSWORD:-}
       # Read-only monitoring role (pg_monitor) the postgres-exporter connects as (ADR-0016 dec 3).
       METRICS_DB_PASSWORD: ${METRICS_DB_PASSWORD}
+      # A pending script on a database holding a tenant or a user needs a backup recorded within this
+      # many seconds (ADR-0032 dec 7): run the backup profile's db-backup first. MIGRATE_WITHOUT_BACKUP=1,
+      # set for one run in the shell and never in .env, is the explicit choice to proceed without one.
+      MIGRATE_BACKUP_MAX_AGE_SECONDS: ${MIGRATE_BACKUP_MAX_AGE_SECONDS:-3600}
+      MIGRATE_WITHOUT_BACKUP: ${MIGRATE_WITHOUT_BACKUP:-}
     volumes:
       - ./infrastructure/timescaledb/migrate.sh:/opt/migrate.sh:ro
       - ./infrastructure/timescaledb/init-scripts:/migrations:ro

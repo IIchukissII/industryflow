@@ -442,7 +442,7 @@ BACKUPS = "http://backup-store:9000"
 
 
 def _backup_run(env, **extra):
-    e = dict(env["env"], DATABASES="industryflow", **extra)
+    e = {**env["env"], "DATABASES": "industryflow", **extra}
     return subprocess.run(["bash", str(SCRIPTS / "db-backup.sh")], env=e, capture_output=True, text=True)
 
 
@@ -460,7 +460,49 @@ def test_the_backup_is_one_plain_dump_per_database(env):
     assert len(_keys(env, "timescaledb/industryflow")) == 1
     [dump] = (env["tmp"] / "pg_dump.log").read_text().splitlines()
     assert dump.startswith("-Fc -Z6 ") and "--snapshot" not in dump
-    assert not env["psql"].exists()
+    # The other sessions are the backup ledger's: made sure of before the dumps, so every dump holds
+    # it, and the run's record after them (ADR-0032 dec 7).
+    ensure, record = env["psql"].read_text().splitlines()
+    assert "-d industryflow" in ensure and "-v run=" not in ensure
+    assert "-d industryflow" in record and "-v run=" in record
+
+
+def _recorded_run(env, **extra):
+    stdin = env["tmp"] / "psql.stdin"
+    r = _backup_run(env, FAKE_PSQL_STDIN_LOG=str(stdin), **extra)
+    return r, (stdin.read_text() if stdin.exists() else "")
+
+
+def test_a_complete_run_records_itself_in_the_platform_database(env):
+    r, script = _recorded_run(env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "INSERT INTO public.backup_ledger (run, databases) VALUES (:'run', :'databases')" in script
+    stamp = _keys(env, "timescaledb/industryflow")[0].rsplit("/", 1)[1].removesuffix(".dump")
+    assert f"-v run={stamp}" in env["psql"].read_text()
+    assert "run recorded in industryflow.public.backup_ledger" in r.stdout
+
+
+def test_the_ledger_exists_before_the_dumps_and_a_failed_run_records_nothing(env):
+    r, script = _recorded_run(env, FAKE_PG_DUMP_FAIL="1")
+    assert r.returncode != 0
+    assert "CREATE TABLE IF NOT EXISTS public.backup_ledger" in script
+    assert "INSERT INTO public.backup_ledger" not in script
+
+
+def test_a_run_without_the_platform_database_records_nothing(env):
+    r, script = _recorded_run(env, DATABASES="mlflow")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert script == "" and not env["psql"].exists()
+    assert "industryflow not among the dumped databases" in r.stdout
+
+
+def test_a_run_that_cannot_record_itself_fails_without_its_metric(env):
+    # The migration runner would not see the backup; the run is not a success.
+    metrics = env["tmp"] / "metrics"
+    metrics.mkdir()
+    r, _ = _recorded_run(env, FAKE_PSQL_STDIN_FAIL="1", METRICS_TEXTFILE_DIR=str(metrics))
+    assert r.returncode != 0
+    assert list(metrics.iterdir()) == []
 
 
 def test_a_successful_backup_writes_its_metric_and_a_failed_one_does_not(env):
@@ -724,3 +766,15 @@ def test_copy_rows_counts_each_line_of_a_copy_block_as_one_row(env):
                        env=env["env"], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert r.stdout.splitlines() == ["public.a\t2", '"Odd Schema"."t ("\t0']
+
+
+def test_the_hook_of_the_upgrade_enabling_backups_skips_without_credentials(env):
+    e = {k: v for k, v in env["env"].items() if k != "PGUSER"}
+    r = subprocess.run(["bash", str(SCRIPTS / "db-backup.sh")], env={**e, "SKIP_WITHOUT_CREDENTIALS": "1"},
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "no backup credentials yet" in r.stdout
+    assert not (env["tmp"] / "pg_dump.log").exists()
+    # Without the flag a missing credential is a failed run, as before.
+    r = subprocess.run(["bash", str(SCRIPTS / "db-backup.sh")], env=e, capture_output=True, text=True)
+    assert r.returncode != 0

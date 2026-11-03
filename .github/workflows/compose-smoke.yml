@@ -169,6 +169,31 @@ jobs:
               chown -R "$HUB_UID:$HUB_UID" /srv/jupyterhub &&
               ls -ld /srv/jupyterhub && ls -l /srv/jupyterhub/jupyterhub.sqlite'
 
+      # ADR-0032 dec 7: a schema rollback is a restore, so the runner refuses to upgrade a database
+      # holding a tenant until a backup is recorded in it. The seeded database holds one and no backup:
+      # the upgrade must be refused and leave the ledger as it was, then pass after the real backup job.
+      # A change that adds no script leaves nothing pending, which the runner rightly lets through, so
+      # a probe migration makes this an upgrade on every run; the stack below applies it.
+      - name: The runner refuses the upgrade until a backup precedes it
+        run: |
+          printf -- '-- migration-kind: migration\n-- CI upgrade probe (compose-smoke.yml)\nSELECT 1;\n' \
+            > infrastructure/timescaledb/init-scripts/999-ci-upgrade-probe.sql
+          docker compose up -d --wait --wait-timeout 300 timescaledb
+          ledger() { docker compose exec -T timescaledb sh -c \
+            'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM public.schema_ledger"' 2>/dev/null || echo none; }
+          before=$(ledger)
+          set +e
+          docker compose run --rm --no-deps db-migrate > /tmp/refused.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/refused.log
+          [ "$rc" = 2 ] || { echo "::error::db-migrate exited $rc on an upgrade with no backup, expected 2"; exit 1; }
+          grep -q "no backup is recorded in this database" /tmp/refused.log \
+            || { echo "::error::db-migrate did not name the missing backup"; exit 1; }
+          [ "$(ledger)" = "$before" ] || { echo "::error::the refused upgrade changed the ledger"; exit 1; }
+          echo "OK    the upgrade without a backup was refused; ledger unchanged ($before)"
+          docker compose --profile backup run --rm db-backup
+
       # --wait blocks until every container with a healthcheck reports healthy, and fails if one exits.
       # A hub that crash-loops on the seeded schema fails HERE, which is the whole purpose of this job.
       #

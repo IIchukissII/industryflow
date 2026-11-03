@@ -636,10 +636,17 @@ config:
 # Platform schema migrations (ADR-0034 dec 4, 7-10): the db-migrate Job applies the pending
 # scripts on every install and upgrade; each database client's schema-ready init container waits
 # up to waitSeconds for the ledger to be current before its service starts.
+#
+# A schema rollback is a restore (ADR-0032 dec 7): the Job refuses pending scripts on a database
+# holding a tenant or a user unless a backup is recorded within backupMaxAgeSeconds. The backup's
+# pre-upgrade hook takes that backup; `helm upgrade --timeout` must cover it. withoutBackup is the
+# operator's explicit choice to upgrade without one, and is required when backup.enabled is false.
 dbMigrations:
   backoffLimit: 2
   ttlSecondsAfterFinished: 86400
   waitSeconds: 600
+  backupMaxAgeSeconds: 3600
+  withoutBackup: false
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }

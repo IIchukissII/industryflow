@@ -40,7 +40,21 @@ every script once. Every script is idempotent.
 | `PGDATABASE` | `industryflow` | Database holding the ledger |
 | `MIGRATIONS_DIR` | `/migrations` | Directory of numbered scripts |
 | `MIGRATE_WAIT_SECONDS` | `300` | How long `apply` waits for the database and `verify --wait` for a current ledger |
+| `MIGRATE_BACKUP_MAX_AGE_SECONDS` | `3600` | Age of the latest recorded backup beyond which `apply` refuses pending scripts ([backup before an upgrade](#backup-before-an-upgrade)) |
+| `MIGRATE_WITHOUT_BACKUP` | unset | `1`: apply pending scripts without a recent backup, logged as a warning |
 | `*_DB_PASSWORD` | | Role passwords read by `00-create-roles.sh` and `13-notebook-sql-proxy-role.sh` ([roles](#roles)) |
+
+### Backup before an upgrade
+
+[ADR-0032](../../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 7.
+
+| Database | Pending scripts are applied when |
+|---|---|
+| No row in `public.companies` or `public."user"` (a fresh install, a retried first run) | Always |
+| A tenant or a user exists | The latest row of `public.backup_ledger` (written by the backup job after every complete run) is at most `MIGRATE_BACKUP_MAX_AGE_SECONDS` old, or `MIGRATE_WITHOUT_BACKUP=1` |
+
+`reapply` is an `apply` and is gated the same way. Procedures per deployment:
+[before an upgrade](../../../docs/operations/backup-and-recovery.md#before-an-upgrade).
 
 ## Scripts
 
@@ -121,7 +135,7 @@ Ingestion has no database role. `tests/config_guards/test_db_connection_budget.p
 
 | Task | Command |
 |---|---|
-| Apply pending scripts (Compose) | `docker compose up db-migrate` |
+| Apply pending scripts (Compose) | `docker compose run --rm --no-deps db-backup`, then `docker compose up db-migrate` |
 | Show the plan (Compose) | `docker compose run --rm db-migrate status` |
 | Create an optional role whose password was set after its script ran (Compose) | `docker compose run --rm db-migrate reapply 00-create-roles.sh 13-notebook-sql-proxy-role.sh 28-schema-ledger-read.sql` |
 | Read the ledger | `SELECT script, kind, applied_at FROM public.schema_ledger ORDER BY script;` |
@@ -140,5 +154,6 @@ Provisioning and deactivating tenants through the API or script:
 | `migrate: refused <script>: no migration-kind header` | New script without a kind | Add `-- migration-kind: migration` or `definition` |
 | A service never starts; `schema-ready` logs `waiting for N pending script(s)` | The `db-migrate` Job failed or has not run | `kubectl logs job/<release>-db-migrate-<revision>` |
 | Clients do not start; `db-migrate` exited non-zero | A script failed | `docker compose logs db-migrate`; fix the script, `docker compose up db-migrate` |
+| `migrate: refused: N pending script(s) and no backup is recorded in this database` (or `… completed Ns ago, more than Ms`) | No recent backup before an upgrade | Run the backup, then `apply` again ([backup before an upgrade](#backup-before-an-upgrade)) |
 | `migrate: cannot read the ledger` from `verify` | The role lacks `SELECT` on the ledger | `reapply 28-schema-ledger-read.sql` |
 | An optional role is missing although its password is set | Its script ran before the password was set | `reapply` the role script ([manual operations](#manual-operations)) |
