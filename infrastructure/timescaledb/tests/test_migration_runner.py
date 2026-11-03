@@ -154,7 +154,7 @@ def _record_backup(stamp):
     """The backup script's own recording step, as a complete run calls it."""
     env = {**os.environ, "PGHOST": os.getenv("PGHOST", "localhost"), "PGPORT": os.getenv("PGPORT", "5432"),
            "PGUSER": os.getenv("PGUSER", "postgres"), "STAMP": stamp, "DATABASES": "industryflow mlflow"}
-    r = subprocess.run(["bash", "-c", f'source "{BACKUP}"; log() {{ echo "$*"; }}; record_run'],
+    r = subprocess.run(["bash", "-c", f'source "{BACKUP}"; log() {{ echo "$*"; }}; ensure_backup_ledger && record_run'],
                        env=env, capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
 

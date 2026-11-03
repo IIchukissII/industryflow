@@ -214,17 +214,20 @@ prune() {
   done
 }
 
-# record_run — a complete run that dumped the platform database records itself there, so the migration
-# runner can tell that a backup precedes the upgrade (ADR-0032 dec 7). Written after every dump and
-# mirror is done, so a dump never holds its own record. The ledger, like the schema ledger, belongs to
-# the tool that writes it; no service role is granted it.
-record_run() {
+# The platform database the migration runner gates, when this run dumps it; empty otherwise.
+platform_database() {
   local platform="${PLATFORM_DATABASE:-industryflow}"
-  case " ${DATABASES} " in *" ${platform} "*) ;; *)
-    log "${platform} not among the dumped databases — run not recorded for the migration runner"; return 0 ;;
-  esac
-  psql -X -q -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$platform" \
-       -v run="$STAMP" -v databases="$DATABASES" <<'SQL'
+  case " ${DATABASES} " in *" ${platform} "*) echo "$platform" ;; esac
+}
+
+# ensure_backup_ledger — the ledger of complete runs exists before anything is dumped, so every dump,
+# the first included, holds it and a restored database has the table its next run records into. Like
+# the schema ledger, it belongs to the tool that writes it; no service role is granted it.
+ensure_backup_ledger() {
+  local platform
+  platform="$(platform_database)"
+  [ -n "$platform" ] || return 0
+  psql -X -q -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$platform" <<'SQL'
 SET client_min_messages = warning;
 CREATE TABLE IF NOT EXISTS public.backup_ledger (
     run           TEXT PRIMARY KEY,
@@ -233,6 +236,21 @@ CREATE TABLE IF NOT EXISTS public.backup_ledger (
 );
 COMMENT ON TABLE public.backup_ledger IS
     'ADR-0032 dec 7: every complete backup run, written by the backup job only; read by the migration runner';
+SQL
+}
+
+# record_run — a complete run that dumped the platform database records itself there, so the migration
+# runner can tell that a backup precedes the upgrade (ADR-0032 dec 7). Written after every dump and
+# mirror is done, so a dump never holds its own record.
+record_run() {
+  local platform
+  platform="$(platform_database)"
+  if [ -z "$platform" ]; then
+    log "${PLATFORM_DATABASE:-industryflow} not among the dumped databases — run not recorded for the migration runner"
+    return 0
+  fi
+  psql -X -q -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$platform" \
+       -v run="$STAMP" -v databases="$DATABASES" <<'SQL'
 INSERT INTO public.backup_ledger (run, databases) VALUES (:'run', :'databases');
 SQL
   log "  run recorded in ${platform}.public.backup_ledger"
@@ -271,6 +289,8 @@ main() {
     log "creating bucket ${S3_BUCKET}"
     aws "${AWS_ARGS[@]}" s3 mb "s3://${S3_BUCKET}" || true
   fi
+
+  ensure_backup_ledger
 
   # Cluster-wide roles and role memberships (object grants live in each database dump) — restored
   # before any per-database dump.

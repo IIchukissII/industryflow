@@ -460,8 +460,10 @@ def test_the_backup_is_one_plain_dump_per_database(env):
     assert len(_keys(env, "timescaledb/industryflow")) == 1
     [dump] = (env["tmp"] / "pg_dump.log").read_text().splitlines()
     assert dump.startswith("-Fc -Z6 ") and "--snapshot" not in dump
-    # The one other session is the run's record, written after every dump (ADR-0032 dec 7).
-    [record] = env["psql"].read_text().splitlines()
+    # The other sessions are the backup ledger's: made sure of before the dumps, so every dump holds
+    # it, and the run's record after them (ADR-0032 dec 7).
+    ensure, record = env["psql"].read_text().splitlines()
+    assert "-d industryflow" in ensure and "-v run=" not in ensure
     assert "-d industryflow" in record and "-v run=" in record
 
 
@@ -480,16 +482,17 @@ def test_a_complete_run_records_itself_in_the_platform_database(env):
     assert "run recorded in industryflow.public.backup_ledger" in r.stdout
 
 
-def test_a_failed_run_records_nothing(env):
+def test_the_ledger_exists_before_the_dumps_and_a_failed_run_records_nothing(env):
     r, script = _recorded_run(env, FAKE_PG_DUMP_FAIL="1")
     assert r.returncode != 0
-    assert script == "" and not env["psql"].exists()
+    assert "CREATE TABLE IF NOT EXISTS public.backup_ledger" in script
+    assert "INSERT INTO public.backup_ledger" not in script
 
 
 def test_a_run_without_the_platform_database_records_nothing(env):
     r, script = _recorded_run(env, DATABASES="mlflow")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert script == ""
+    assert script == "" and not env["psql"].exists()
     assert "industryflow not among the dumped databases" in r.stdout
 
 
