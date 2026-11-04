@@ -47,6 +47,16 @@ spec:
         - targetLabel: platform
           replacement: industryflow
     {{- end }}
+    {{- if $app.buildInfoPort }}
+    - port: build-info
+      path: /metrics
+      interval: {{ $sm.interval }}
+      scrapeTimeout: {{ $sm.scrapeTimeout }}
+      # The label every platform alert rule selects on (infrastructure/prometheus/rules).
+      relabelings:
+        - targetLabel: platform
+          replacement: industryflow
+    {{- end }}
 {{- end }}
 {{- end }}
 {{- range $ex := list "postgres" "redis" "kafka" }}

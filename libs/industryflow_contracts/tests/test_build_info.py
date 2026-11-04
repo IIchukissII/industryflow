@@ -4,8 +4,10 @@
 
 """The build-info series (ADR-0016 dec 8): one constant series per service, naming the commit its
 image was built from, in one worker and aggregated across several."""
+import socket
 import subprocess
 import sys
+import urllib.request
 
 import pytest
 
@@ -54,3 +56,34 @@ def test_reporting_again_reuses_the_series():
     env = {build_info.REVISION_ENV: SHA}
     assert build_info.report("api-gateway", registry=registry, environ=env) is \
         build_info.report("api-gateway", registry=registry, environ=env)
+
+
+def test_a_new_registry_gets_its_own_series():
+    # A collected registry's id() is reused; a cache keyed by it handed the new registry a dead gauge.
+    for _ in range(50):
+        registry = CollectorRegistry()
+        build_info.report("api-gateway", registry=registry, environ={build_info.REVISION_ENV: SHA})
+        assert build_info.METRIC in generate_latest(registry).decode()
+        del registry
+
+
+def test_serve_answers_a_scrape_with_the_series_alone():
+    port = build_info.serve("spark-streaming", environ={build_info.REVISION_ENV: SHA, build_info.SERVE_PORT_ENV: "0"})
+    assert port
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=5) as response:
+        lines = [x for x in response.read().decode().splitlines() if x and not x.startswith("#")]
+    assert lines == [f'industryflow_build_info{{component="spark-streaming",revision="{SHA}"}} 1.0'], lines
+
+
+def test_serve_fails_soft_on_a_taken_port(caplog):
+    with socket.socket() as taken:
+        taken.bind(("0.0.0.0", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        assert build_info.serve("spark-streaming", environ={build_info.SERVE_PORT_ENV: str(port)}) is None
+    assert "not served" in caplog.text
+
+
+def test_serve_fails_soft_on_a_bad_port(caplog):
+    assert build_info.serve("spark-streaming", environ={build_info.SERVE_PORT_ENV: "metrics"}) is None
+    assert "is not a port" in caplog.text

@@ -22,10 +22,10 @@ from _repo import ROOT, load_yaml
 
 ARG = re.compile(r"^ARG SECURITY_REFRESH\b", re.MULTILINE)
 USE = re.compile(r"^RUN echo \"security refresh: \$\{SECURITY_REFRESH\}\"(.*)$", re.MULTILINE)
-PIP = re.compile(r"^RUN\b.*\bpip install\b", re.MULTILINE)
+PIP = re.compile(r"^RUN\b.*\bpip3? install\b", re.MULTILINE)
 APT = re.compile(r"^RUN\b.*\bapt-get upgrade\b", re.MULTILINE)
 APK = re.compile(r"^RUN\b.*\bapk upgrade\b", re.MULTILINE)
-PIP_UPGRADE = "pip install --no-cache-dir --upgrade pip"
+PIP_UPGRADE = re.compile(r"\bpip3? install --no-cache-dir --upgrade pip\b")
 
 MATRIX = load_yaml(".github/workflows/images.yml")["jobs"]["build-scan"]["strategy"]["matrix"]["include"]
 
@@ -61,7 +61,7 @@ def test_an_image_refreshes_exactly_when_a_layer_takes_fixes_at_build(entry):
         "or that layer keeps its cache key"
     )
     if PIP.search(text):
-        assert PIP_UPGRADE in use.group(1), (
+        assert PIP_UPGRADE.search(use.group(1)), (
             f"{entry['file']}: the refreshed layer must upgrade pip, or the base's pip and its vendored "
             "certifi stay as old as the base image"
         )

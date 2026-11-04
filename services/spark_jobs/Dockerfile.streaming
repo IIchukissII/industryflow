@@ -32,11 +32,12 @@ RUN echo "security refresh: ${SECURITY_REFRESH}" && \
     apt-get install -y --no-install-recommends \
         python3-pip \
         curl && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    pip3 install --no-cache-dir --upgrade pip
 
-# Install Python dependencies
-RUN pip3 install --no-cache-dir \
-    psycopg2-binary==2.9.10
+# The runtime Python packages, pinned in requirements.txt.
+COPY requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 # S3A filesystem for an object-storage checkpoint (multi-worker / spark-on-k8s — ADR-0006,
 # docs/architecture/stream-processing.md). Baked in (not --packages) so the versions are pinned
@@ -97,6 +98,13 @@ WORKDIR /app
 # not merely a live process — a job WAITING on the master for resources is unhealthy (healthcheck.py).
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
     CMD ["python3", "/app/spark_streaming/healthcheck.py"]
+
+# The commit this image is built from, reported as industryflow_build_info (ADR-0016 dec 8). Last, so
+# a new commit rebuilds no earlier layer.
+ARG INDUSTRYFLOW_REVISION=unknown
+ENV INDUSTRYFLOW_REVISION=${INDUSTRYFLOW_REVISION}
+# The driver serves that series alone on this port (build_info.serve); Spark's own metrics stay on 4040.
+EXPOSE 9108
 
 # Run the streaming job. The master is NOT set here — the job reads it from SPARK_MASTER
 # (default local[*]) in its SparkSession builder, so the master has one source of truth.

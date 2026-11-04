@@ -58,7 +58,7 @@ observability:
 
 | Object | Rendered for | Template |
 |---|---|---|
-| ServiceMonitor per app | each `apps.<name>` with `enabled` and `metrics: true`: `api-gateway`, `ml-service-api`, `ingestion-service`, `spark-streaming`, `spark-aggregations` (Spark on `metricsPort` `4040`, paths `/metrics/prometheus` and `/metrics/executors/prometheus`) | `observability-servicemonitors.yaml` |
+| ServiceMonitor per app | each `apps.<name>` with `enabled` and `metrics: true`: `api-gateway`, `ml-service-api`, `ingestion-service`, `spark-streaming`, `spark-aggregations` (Spark on `metricsPort` `4040`, paths `/metrics/prometheus` and `/metrics/executors/prometheus`, and the driver revision on `buildInfoPort` `9108`, path `/metrics`) | `observability-servicemonitors.yaml` |
 | ServiceMonitor per exporter | each enabled exporter, port `metrics` | `observability-servicemonitors.yaml` |
 | Target label `platform="industryflow"` | relabeling on every ServiceMonitor endpoint; every platform rule selects on it | `observability-servicemonitors.yaml` |
 | Exporters | `postgres-exporter` (`9187`), `redis-exporter` (`9121`), `kafka-exporter` (`9308`) | `observability-exporters.yaml` |

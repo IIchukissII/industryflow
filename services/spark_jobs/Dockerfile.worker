@@ -8,7 +8,6 @@
 FROM apache/spark:4.1.3-java21-python3
 
 USER root
-RUN pip3 install --no-cache-dir psycopg2-binary==2.9.10
 
 # The executor (here) writes Structured-Streaming state-store deltas to the checkpoint, so when
 # the checkpoint is on object storage it needs the S3A jars on its classpath too — pinned to the
@@ -27,7 +26,12 @@ RUN echo "security refresh: ${SECURITY_REFRESH}" && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends curl && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    pip3 install --no-cache-dir --upgrade pip
+
+# The runtime Python packages, pinned in requirements.txt (the executors' psycopg2).
+COPY requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 # S3A jars, the netty patch set and the removals: patch-spark-jars.sh, shared with the job images.
 COPY patch-spark-jars.sh /tmp/patch-spark-jars.sh

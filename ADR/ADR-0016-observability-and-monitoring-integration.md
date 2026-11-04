@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0016 — Observability and monitoring integration
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-11-03
+- **Date:** 2026-06-27; changed 2026-11-04
 - **Parent:** ADR-0001
 - **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (self-contained chart; deferred monitoring here), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the tenant-isolated path alerts stay on), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (external traffic only over the TLS edge; sessions), [ADR-0043](ADR-0043-platform-switch-operator-control.md) (the superuser as the one platform-wide authority), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (the same sign-on pattern for the hub), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (dec 9: a release names images already built)
 
@@ -46,10 +46,11 @@ not leave the tenant-isolated path.
    never from a header that network position vouches for; it names the platform user by a stable id, and
    the role it confers is below the dashboards' own administrator, whose login stays on the loopback. A
    write reaches them only from this origin.
-8. **Every platform service that serves metrics reports the source revision its image was built from,
-   as a constant series.** A deploy then shows in the same store, on the same time axis, as the symptoms
-   it may cause. The revision is fixed when the image is built, so the series names what runs, not what
-   a deployment meant to run.
+8. **Every image the platform builds that runs platform code and serves metrics reports the source
+   revision it was built from, as a constant series; a process whose metrics cannot carry the series
+   serves it alone on a port of its own.** A deploy then shows in the same store, on the same time axis,
+   as the symptoms it may cause. The revision is fixed when the image is built, so the series names what
+   runs, not what a deployment meant to run; an image the platform does not build has no such revision.
 
 ## Alternatives
 
@@ -81,6 +82,10 @@ not leave the tenant-isolated path.
 | 8 | The revision read from the deployment when a service starts | States what the deployment meant to run; a service rebuilt or replaced alone would report another image's revision |
 | 8 | A deploy event recorded by the deploy tool | Every way of deploying would have to record it, and an image swapped outside them would leave no trace |
 | 8 | Container restarts as the only sign of a deploy | A restart is not a change; a crash and a deploy look the same |
+| 8 | Every service that serves metrics, including the stream-processing cluster's stock master | No build fixes its revision; one stamped from the deployment is the deployment-read revision rejected above |
+| 8 | The stream processors left without the series | Their symptoms (consumer lag, dead letters, missing windows) are the ones a deploy most needs to be read against |
+| 8 | A plugin in the stream processor's runtime emitting the series among its own metrics | Adds a second build toolchain and its supply chain, couples to the processor's upgrades, and still misses the master |
+| 8 | The revision encoded in a metric name of the processor's own metrics and relabelled at the scrape | Those metrics carry no free labels; a name parsed back into a label breaks silently when either side changes |
 
 ## Consequences
 
@@ -97,6 +102,8 @@ not leave the tenant-isolated path.
 - Every dashboard request through the edge costs one session check at the gateway.
 - The single host holds one more signing key, generated at install and rotated by replacing it.
 - A service that serves no metrics of its own shows a deploy only as a restart.
+- The stream-processing cluster's master and workers report no revision; a change to their images shows only through its symptoms.
+- A stream-processing driver opens one more port, for the series alone.
 - Every deploy of a new commit changes every reporting service's revision, whether its code changed or not.
 
 ## Deferred
