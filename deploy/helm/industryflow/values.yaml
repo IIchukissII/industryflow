@@ -211,6 +211,8 @@ apps:
     metricsPort: 4040
     metricsPath: /metrics/prometheus
     metricsExtraPaths: ["/metrics/executors/prometheus"]
+    # The driver's revision, served by the job apart from Spark's metrics (ADR-0016 dec 8).
+    buildInfoPort: 9108
     # Durable Structured-Streaming checkpoint (offsets + state). Without it, a restart
     # reprocesses from scratch / loses exactly-once guarantees (ADR-0006). RWO, single writer.
     persistence:
@@ -241,6 +243,8 @@ apps:
     metricsPort: 4040
     metricsPath: /metrics/prometheus
     metricsExtraPaths: ["/metrics/executors/prometheus"]
+    # The driver's revision, served by the job apart from Spark's metrics (ADR-0016 dec 8).
+    buildInfoPort: 9108
     persistence:
       enabled: true
       mountPath: /opt/spark/checkpoints

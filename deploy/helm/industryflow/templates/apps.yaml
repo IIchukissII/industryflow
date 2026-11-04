@@ -140,6 +140,12 @@ spec:
             - name: metrics
               containerPort: {{ $app.metricsPort }}
             {{- end }}
+            {{- if $app.buildInfoPort }}
+            {{- /* A process that serves its revision apart from its other metrics (a Spark driver:
+                   build_info.serve, ADR-0016 dec 8). */}}
+            - name: build-info
+              containerPort: {{ $app.buildInfoPort }}
+            {{- end }}
           {{- end }}
           {{- if $app.probe }}
           livenessProbe:
@@ -259,6 +265,11 @@ spec:
     - name: metrics
       port: {{ $app.metricsPort }}
       targetPort: {{ $app.metricsPort }}
+    {{- end }}
+    {{- if $app.buildInfoPort }}
+    - name: build-info
+      port: {{ $app.buildInfoPort }}
+      targetPort: {{ $app.buildInfoPort }}
     {{- end }}
 {{- end }}
 {{- if and $res.podDisruptionBudgets.enabled $multiReplica }}

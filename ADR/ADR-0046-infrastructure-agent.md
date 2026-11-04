@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0046 — The infrastructure agent explains platform alerts to operators
 
 - **Status:** Accepted
-- **Date:** 2026-10-31; changed 2026-11-03
+- **Date:** 2026-10-31; changed 2026-11-04
 - **Parent:** [ADR-0045](ADR-0045-agent-runtime.md) (the agent contract)
 - **Related:** [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (dec 1, 4, 5, 8: the
   operator's stack, its receivers, tenant data kept off it, reported revisions), [ADR-0031](ADR-0031-alerting-http-surface-single-owner.md)
@@ -79,8 +79,8 @@ and user addresses even though tenant data stays off that stack.
 - The agent's reach is the operator's monitoring plane, so a compromised agent exposes no tenant store.
 
 **Negative**
-- A change to a service that reports no revision, or a change of configuration alone, is seen only
-  through its symptoms.
+- A change to a service that reports no revision (the stream-processing cluster's master and workers
+  among them), or a change of configuration alone, is seen only through its symptoms.
 - A note can be wrong; it is advice beside the alert, not a diagnosis.
 - Runbook tables gain a consumer, so their shape can no longer change freely.
 - An annotation marks when the note was written, shortly after the alert started, not the start itself.

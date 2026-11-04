@@ -531,6 +531,7 @@ services:
       dockerfile: Dockerfile.streaming
       additional_contexts:
         contracts: ./libs/industryflow_contracts
+      args: *revision-arg
     container_name: industryflow-spark-streaming
     depends_on:
       kafka:
@@ -580,6 +581,7 @@ services:
       dockerfile: Dockerfile.aggregations
       additional_contexts:
         contracts: ./libs/industryflow_contracts
+      args: *revision-arg
     container_name: industryflow-spark-aggregations
     depends_on:
       kafka:

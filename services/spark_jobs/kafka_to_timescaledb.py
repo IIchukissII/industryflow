@@ -17,6 +17,8 @@ from pyspark.sql.functions import broadcast, col
 import logging
 import os
 
+from industryflow_contracts import build_info
+
 from reading_guard import (  # shipped via --py-files
     DEFAULT_DLQ_TOPIC, DEFAULT_SOURCE_TOPIC, SOURCE_COLUMNS, SUSPENDED_TENANT, UNKNOWN_TENANT, canonical_uuid,
     classify_references, company_id_to_schema,
@@ -252,6 +254,10 @@ def main():
     """Main streaming application"""
     logger.info("Starting Kafka to TimescaleDB streaming job...")
     logger.info("Architecture: Schema-per-tenant with dynamic routing")
+
+    # The commit this image was built from, before the session: a deploy shows even if the job fails to
+    # start (ADR-0016 dec 8). Its own port: Spark's servlet metrics carry no labels.
+    build_info.serve("spark-streaming")
 
     # Create Spark session
     spark = create_spark_session()

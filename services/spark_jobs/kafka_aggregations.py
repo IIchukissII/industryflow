@@ -30,6 +30,8 @@ import os
 import psycopg2
 from psycopg2.extras import execute_values
 
+from industryflow_contracts import build_info
+
 from aggregation_windows import AGGREGATION_WINDOWS, table_name, watermark_delay, window_duration
 from reading_guard import (
     DEFAULT_SOURCE_TOPIC, canonical_uuid, classify_references, company_id_to_schema, parse_readings,
@@ -267,6 +269,9 @@ def create_aggregation_stream(spark, granularity):
 
 
 if __name__ == "__main__":
+    # The commit this image was built from, before the session: a deploy shows even if the job fails to
+    # start (ADR-0016 dec 8). Its own port: Spark's servlet metrics carry no labels.
+    build_info.serve("spark-aggregations")
     # The Kafka connector comes from the image's spark-submit `--packages`, pinned to the image's
     # Spark version — not from a coordinate here (scripts/check_spark_version_parity.py).
     builder = SparkSession.builder \
