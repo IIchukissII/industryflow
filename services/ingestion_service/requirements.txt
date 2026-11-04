@@ -7,9 +7,9 @@
 # 6.x could not introspect (every request, including /health, 500'd). Bump them as a pair.
 fastapi==0.162.0
 uvicorn[standard]==0.54.0
-pydantic==2.14.1
+pydantic==2.14.2
 
-aiokafka==0.14.0
+aiokafka==0.15.0
 
 python-snappy==0.7.3
 

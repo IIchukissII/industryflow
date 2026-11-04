@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Async Kafka client
-aiokafka==0.14.0
+aiokafka==0.15.0
 python-snappy==0.7.3
 
 # Database
