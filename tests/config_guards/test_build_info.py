@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from _repo import ROOT, load_yaml
+from _repo import ROOT, find, helm_template, load_yaml
 
 from industryflow_contracts.build_info import DEFAULT_SERVE_PORT
 
@@ -102,6 +102,7 @@ def test_every_served_revision_is_scraped():
     targets = {t for j in jobs if j.get("metrics_path", "/metrics") == "/metrics"
                for c in j.get("static_configs", []) for t in c["targets"]}
     apps = load_yaml("deploy/helm/industryflow/values.yaml")["apps"]
+    chart = helm_template("--set", "observability.serviceMonitors.enabled=true")
     for r in REPORTERS:
         if r["call"] is not SERVE:
             continue
@@ -112,3 +113,13 @@ def test_every_served_revision_is_scraped():
             f"values.yaml apps.{component}: buildInfoPort is not {DEFAULT_SERVE_PORT}"
         assert re.search(rf"^EXPOSE {DEFAULT_SERVE_PORT}$", r["dockerfile"].read_text(), re.M), \
             f"{r['dockerfile'].relative_to(ROOT)}: the port is not exposed"
+        # The chart as rendered: the pod, its Service and its ServiceMonitor each name the port.
+        pod = find(chart, "Deployment", f"-{component}")["spec"]["template"]["spec"]["containers"][0]
+        assert {"name": "build-info", "containerPort": DEFAULT_SERVE_PORT} in pod.get("ports", []), \
+            f"chart: the {component} container does not declare the build-info port"
+        service = find(chart, "Service", f"-{component}")["spec"]["ports"]
+        assert any(p["name"] == "build-info" and p["port"] == DEFAULT_SERVE_PORT for p in service), \
+            f"chart: the {component} Service has no build-info port"
+        endpoints = find(chart, "ServiceMonitor", f"-{component}")["spec"]["endpoints"]
+        assert any(e["port"] == "build-info" and e["path"] == "/metrics" for e in endpoints), \
+            f"chart: the {component} ServiceMonitor does not scrape build-info"

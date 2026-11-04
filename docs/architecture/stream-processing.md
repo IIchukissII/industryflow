@@ -25,8 +25,8 @@ device ──mTLS──▶ ingestion-edge ─▶ ingestion-service ─▶ Kafka 
 | Name | Role | Port | Config |
 |---|---|---|---|
 | `ingestion-service` | Validates the reading, stamps the verified `company_id`, produces to Kafka; rejects a timestamp more than 300 s ahead (HTTP 422) and a suspended tenant (HTTP 403, from `tenant-status`); no database access | 8003 | `services/ingestion_service/` |
-| `spark-streaming` | Upserts raw readings; reads from `earliest` | 4040 (metrics) | `services/spark_jobs/kafka_to_timescaledb.py` |
-| `spark-aggregations` | Windows readings into 1 min / 5 min / 1 h aggregates; reads from `latest` | 4040 (metrics) | `services/spark_jobs/kafka_aggregations.py`, `aggregation_windows.py` |
+| `spark-streaming` | Upserts raw readings; reads from `earliest` | 4040 (metrics), 9108 (revision) | `services/spark_jobs/kafka_to_timescaledb.py` |
+| `spark-aggregations` | Windows readings into 1 min / 5 min / 1 h aggregates; reads from `latest` | 4040 (metrics), 9108 (revision) | `services/spark_jobs/kafka_aggregations.py`, `aggregation_windows.py` |
 | Reading guard | One definition of an unwritable reading, shared by both jobs | | `services/spark_jobs/reading_guard.py` |
 | Window contract | Window widths and allowed lateness | | `libs/industryflow_contracts/industryflow_contracts/windows.py` |
 | `spark-master`, `spark-worker` | Standalone cluster (Compose) | 7077, 8080 | `services/spark_jobs/Dockerfile.worker` |
