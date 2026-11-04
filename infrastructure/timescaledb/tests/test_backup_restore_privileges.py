@@ -14,6 +14,10 @@ reader role, with no access to the data it was restored for.
 
 A dump that references a role the cluster lacks must be refused before the target is touched.
 
+A restored database carries no record of the backup it was restored from: the dump is taken before its
+run is recorded. The migration runner therefore judges it by the backup before that one, and refuses an
+upgrade a backup as recent as its source would have allowed (ADR-0032 dec 7).
+
 Needs the compose stack (TimescaleDB with the init scripts, MinIO, the db-backup image) and docker on
 PATH; db-tenant-isolation.yml provides them. Skips otherwise; with IF_REQUIRE_LIVE_STACK set a skip
 is a failure.
@@ -32,6 +36,9 @@ psycopg2 = pytest.importorskip("psycopg2")
 REPO = Path(__file__).resolve().parents[3]
 SOURCES = ("industryflow", "mlflow")
 RESTORED = {db: f"{db}_restore_privileges_test" for db in SOURCES}
+RUNNER = REPO / "infrastructure" / "timescaledb" / "migrate.sh"
+SCRIPTS = REPO / "infrastructure" / "timescaledb" / "init-scripts"
+PROBE = "999-restored-upgrade-probe.sql"
 REFUSED = "industryflow_restore_refused_test"
 PROBE_ROLE = "restore_probe_missing_role"
 GATEWAY_TABLE = "restore_probe_gateway_owned"
@@ -169,6 +176,8 @@ def stack():
         _drop_database(acur, target)
 
     _backup()
+    cur.execute("SELECT run FROM public.backup_ledger ORDER BY completed_at DESC LIMIT 1")
+    source_run = cur.fetchone()[0]
     restores = {db: _restore(db, target) for db, target in RESTORED.items()}
 
     # A second backup that references a role the cluster then loses, restored over a target that
@@ -184,7 +193,8 @@ def stack():
     kept.close()
     refused = _restore("industryflow", REFUSED)
 
-    yield {"restores": restores, "refused": refused, "schema": schema, "reader": reader}
+    yield {"restores": restores, "refused": refused, "schema": schema, "reader": reader,
+           "source_run": source_run, "source": cur}
 
     for target in (*RESTORED.values(), REFUSED):
         _drop_database(acur, target)
@@ -306,3 +316,37 @@ def test_a_dump_naming_a_missing_role_is_refused_before_the_target_is_touched(st
         assert cur.fetchone() == (True,), "the refused restore dropped or replaced the target database"
     finally:
         conn.close()
+
+
+def test_a_restored_database_does_not_count_as_backed_up(stack, tmp_path):
+    target = RESTORED["industryflow"]
+    assert stack["restores"]["industryflow"].returncode == 0
+    restored = _connect(target)
+    try:
+        rcur = restored.cursor()
+        rcur.execute("SELECT to_regclass('public.backup_ledger') IS NOT NULL")
+        if rcur.fetchone()[0]:
+            rcur.execute("SELECT count(*) FROM public.backup_ledger WHERE run = %s", (stack["source_run"],))
+            assert rcur.fetchone()[0] == 0, "the restored database records the backup it came from"
+
+        # The gate set so that a record of the source backup itself would just pass: every record the
+        # restored database holds is from an earlier run, so it is older and the upgrade is refused.
+        src = stack["source"]
+        src.execute("SELECT floor(extract(epoch FROM now() - completed_at))::bigint FROM public.backup_ledger "
+                    "WHERE run = %s", (stack["source_run"],))
+        max_age = src.fetchone()[0] + 1
+        scripts = tmp_path / "scripts"
+        shutil.copytree(SCRIPTS, scripts)
+        (scripts / PROBE).write_text("-- migration-kind: migration\nSELECT 1;\n")
+        env = {**os.environ, "PGHOST": os.getenv("PGHOST", "localhost"), "PGPORT": os.getenv("PGPORT", "5432"),
+               "PGUSER": os.getenv("PGUSER", os.getenv("DB_USER", "postgres")),
+               "PGPASSWORD": os.getenv("PGPASSWORD", os.getenv("DB_PASSWORD", "postgres")),
+               "PGDATABASE": target, "MIGRATIONS_DIR": str(scripts), "MIGRATE_WAIT_SECONDS": "10",
+               "MIGRATE_BACKUP_MAX_AGE_SECONDS": str(max_age)}
+        r = subprocess.run(["sh", str(RUNNER), "apply"], env=env, capture_output=True, text=True, timeout=600)
+        assert r.returncode == 2, r.stdout + r.stderr
+        assert "no backup is recorded in this database" in r.stderr or f"more than {max_age}s" in r.stderr, r.stderr
+        rcur.execute("SELECT count(*) FROM public.schema_ledger WHERE script = %s", (PROBE,))
+        assert rcur.fetchone()[0] == 0
+    finally:
+        restored.close()

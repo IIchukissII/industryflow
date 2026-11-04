@@ -86,6 +86,29 @@ jobs:
           helm template if deploy/helm/industryflow --set secrets.failOnPlaceholders=false \
             --set backup.enabled=false --set dbMigrations.withoutBackup=true | grep -q 'name: MIGRATE_WITHOUT_BACKUP, value: "1"' \
             || { echo "::error::withoutBackup did not reach the migrate Job"; exit 1; }
+      # The hook backs up the databases only, and skips when the upgrade is the one that creates its
+      # credentials; the scheduled jobs never skip and carry the object mirrors.
+      - name: The upgrade hook skips without credentials and mirrors nothing; the schedules do the reverse
+        run: |
+          out=$(helm template if deploy/helm/industryflow --set secrets.failOnPlaceholders=false \
+            --set coldExport.enabled=true --set backup.cold.enabled=true --set backup.models.enabled=true \
+            --show-only templates/cronjob-db-backup.yaml)
+          doc() { printf '%s\n' "$out" | awk -v name="$1" '/^---/{n++} {d[n]=d[n] $0 "\n"} $0=="  name: " name {k=n} END{printf "%s", d[k]}'; }
+          hook=$(doc if-industryflow-pre-upgrade-backup)
+          printf '%s\n' "$hook" | grep -q 'helm.sh/hook: pre-upgrade' || { echo "::error::hook document not found"; exit 1; }
+          printf '%s\n' "$hook" | grep -q 'name: SKIP_WITHOUT_CREDENTIALS' \
+            || { echo "::error::the hook does not skip an upgrade that creates its credentials"; exit 1; }
+          printf '%s\n' "$hook" | grep -qE 'name: (COLD|MODEL)_SOURCE_BUCKET' \
+            && { echo "::error::the hook mirrors objects; it backs up the databases only"; exit 1; }
+          for job in if-industryflow-db-backup if-industryflow-restore-rehearsal; do
+            cron=$(doc "$job")
+            printf '%s\n' "$cron" | grep -q '^kind: CronJob' || { echo "::error::$job not found"; exit 1; }
+            printf '%s\n' "$cron" | grep -q 'name: SKIP_WITHOUT_CREDENTIALS' \
+              && { echo "::error::$job skips without credentials; a scheduled run must fail"; exit 1; }
+            for v in COLD_SOURCE_BUCKET MODEL_SOURCE_BUCKET; do
+              printf '%s\n' "$cron" | grep -q "name: $v" || { echo "::error::$job carries no $v"; exit 1; }
+            done
+          done
       - name: Fail-closed guard rejects placeholder secrets
         run: |
           if helm template if deploy/helm/industryflow > /dev/null 2>&1; then
