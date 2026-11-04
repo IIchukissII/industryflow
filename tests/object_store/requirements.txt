@@ -4,4 +4,4 @@
 
 pytest==9.2.0
 # Deletes as the consumers send them: a bare DeleteObject, no metadata read first.
-boto3==1.43.120
+boto3==1.43.123
