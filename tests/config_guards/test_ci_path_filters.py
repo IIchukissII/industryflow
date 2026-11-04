@@ -11,6 +11,7 @@ modules, files the chart reads through symlinks) and fails on any consumed path 
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -161,15 +162,20 @@ def test_workflows_that_run_minio_init_watch_its_script():
 
 def test_workflows_that_run_the_backup_image_watch_its_build_context():
     # The restore proof runs the db-backup image's scripts; a filter missing them never re-runs it.
+    # The compose service name as a word; a chart object or template that merely contains it
+    # (`cronjob-db-backup.yaml`, `<release>-db-backup`) renders the chart, not the image.
+    service = re.compile(r"(?<![\w./-])db-backup(?![\w.-])")
     context = _files_under("infrastructure/backup")
-    missed = []
+    missed, running = [], []
     for wf in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
         doc = load_yaml(f".github/workflows/{wf.name}")
         runs = " ".join(s.get("run", "") for j in doc["jobs"].values() for s in j.get("steps", []))
-        if "db-backup" not in runs or "changes" not in doc["jobs"]:
+        if not service.search(runs) or "changes" not in doc["jobs"]:
             continue
+        running.append(wf.name)
         globs = workflow_filter(wf.name)
         missed += [f"{wf.name}: {p}" for p in context if not covered(p, globs)]
+    assert "db-tenant-isolation.yml" in running, running
     assert not missed, "workflows that run the db-backup image but miss its files:\n" + "\n".join(missed)
 
 
