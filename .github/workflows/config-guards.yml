@@ -42,8 +42,8 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
-      MINIO_IMAGE: cgr.dev/chainguard/minio:latest@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82
-      MC_IMAGE: cgr.dev/chainguard/minio-client:latest-dev@sha256:a8a0480cb7356bf1c1f6e348b483a161c727a5c77ca574899e5a045686492bbe
+      MINIO_IMAGE: cgr.dev/chainguard/minio:latest@sha256:3c60a2a8c4d33409a9bc7a623a7fcbfb4605adc3d89422d2f53b3f673a6e5597
+      MC_IMAGE: cgr.dev/chainguard/minio-client:latest-dev@sha256:39768db4c3fa811bc8f2e2a3e0add8ea391648b1c980de179985e1c353dc1805
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -79,7 +79,7 @@ jobs:
     timeout-minutes: 10
     env:
       PROMETHEUS_IMAGE: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
-      ALERTMANAGER_IMAGE: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+      ALERTMANAGER_IMAGE: prom/alertmanager:v0.34.2@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b
     steps:
       - uses: actions/checkout@v7
       - name: Rule unit tests

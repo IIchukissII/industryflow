@@ -329,7 +329,7 @@ infra:
 
   redis:
     inCluster: true
-    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    image: redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     port: 6379
     storage: 2Gi
     # Half the container's memory limit (384Mi): an append-only rewrite forks, and its copy-on-write
@@ -343,7 +343,7 @@ infra:
     inCluster: true
     # Maintained third-party MinIO build (the upstream images were withdrawn). Non-root (65532),
     # distroless. Pinned by immutable digest; the tag is kept for readability.
-    image: cgr.dev/chainguard/minio:latest@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82
+    image: cgr.dev/chainguard/minio:latest@sha256:3c60a2a8c4d33409a9bc7a623a7fcbfb4605adc3d89422d2f53b3f673a6e5597
     apiPort: 9000
     consolePort: 9001
     storage: 20Gi
@@ -370,7 +370,7 @@ objectStore:
   buckets:
     sparkCheckpoint: spark-checkpoints
   # mc image for the bootstrap Job. The -dev variant carries the shell the script needs.
-  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:a8a0480cb7356bf1c1f6e348b483a161c727a5c77ca574899e5a045686492bbe
+  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:39768db4c3fa811bc8f2e2a3e0add8ea391648b1c980de179985e1c353dc1805
 
 # ---------------------------------------------------------------------------
 # Logical database backups (tier-1 DR) — a CronJob dumps each database to S3/MinIO
@@ -779,7 +779,7 @@ ingress:
       caCertWarnDays: 90
       # No successful check for this long raises the alert (two missed 6-hourly runs).
       alertAfterSeconds: 46800
-      image: alpine/openssl:3.5.9@sha256:1c361a204e9791bec6202bccbd1065eafaa65cb5a1a9a06ae000238569fba6a2
+      image: alpine/openssl:3.5.9@sha256:96e53bf9b9041fdc8a33ea61356688506bbddc368c70d6e8a9acdd28475e8537
     # Fails, raising IndustryFlowDeviceCertExpiring (warning: one device, not the fleet), while a
     # device's newest unrevoked certificate is within warnDays of expiry: renewal is owed
     # (ADR-0007 dec 10). Reads issued.tsv and issued.tsv.sig from the device-CA Secret.
@@ -788,7 +788,7 @@ ingress:
       schedule: "47 */6 * * *"
       warnDays: 14
       alertAfterSeconds: 46800
-      image: alpine/openssl:3.5.9@sha256:1c361a204e9791bec6202bccbd1065eafaa65cb5a1a9a06ae000238569fba6a2
+      image: alpine/openssl:3.5.9@sha256:96e53bf9b9041fdc8a33ea61356688506bbddc368c70d6e8a9acdd28475e8537
 
 # ---------------------------------------------------------------------------
 # NetworkPolicy restricting ingestion-service ingress to the cluster TLS edge only
@@ -837,7 +837,7 @@ notebookHub:
   # SSO reverse proxy (ADR-0014): validates the platform session against api-gateway and
   # forwards the verified identity to the hub, overwriting any client-supplied identity.
   ssoProxy:
-    image: nginx:1.31-alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
+    image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
     port: 8080
     # api-gateway endpoint that validates the session cookie and returns the verified identity
     # in X-IF-* response headers (implemented; ADR-0014 handoff contract).
