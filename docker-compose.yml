@@ -260,7 +260,7 @@ services:
 
   # Redis - Caching layer
   redis:
-    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    image: redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     container_name: industryflow-redis
     ports:
       - "127.0.0.1:${REDIS_PORT}:6379"
@@ -287,7 +287,7 @@ services:
   # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
   # CAP_CHOWN, and a no-op when the volume is already owned correctly.
   minio-data-owner:
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:a8a0480cb7356bf1c1f6e348b483a161c727a5c77ca574899e5a045686492bbe
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:39768db4c3fa811bc8f2e2a3e0add8ea391648b1c980de179985e1c353dc1805
     container_name: industryflow-minio-data-owner
     user: "0:0"
     network_mode: none
@@ -310,7 +310,7 @@ services:
   # a maintained third-party build of the same server (ADR-0025 dec 10, ADR-0009). Non-root (65532),
   # distroless: no curl, so the healthcheck speaks HTTP over bash's /dev/tcp.
   minio:
-    image: cgr.dev/chainguard/minio:latest@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82
+    image: cgr.dev/chainguard/minio:latest@sha256:3c60a2a8c4d33409a9bc7a623a7fcbfb4605adc3d89422d2f53b3f673a6e5597
     depends_on:
       minio-data-owner:
         condition: service_completed_successfully
@@ -341,7 +341,7 @@ services:
   # safe on every `up`; the services that need a bucket or principal gate on it completing.
   minio-init:
     # The -dev variant: the init script needs a shell, grep and mktemp, which the minimal one lacks.
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:a8a0480cb7356bf1c1f6e348b483a161c727a5c77ca574899e5a045686492bbe
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:39768db4c3fa811bc8f2e2a3e0add8ea391648b1c980de179985e1c353dc1805
     container_name: industryflow-minio-init
     depends_on:
       minio:
@@ -465,7 +465,7 @@ services:
     # The stock image on the SAME Spark as the job/worker images' base (services/spark_jobs/
     # Dockerfile.*); a master behind its workers is a mixed-version cluster. Guarded by
     # scripts/check_spark_version_parity.py.
-    image: apache/spark:4.1.3-java21-python3@sha256:bf9d035a7c32a8ca46aa58d6348182ffd7d2dff6409206ecfbb3915ff1fef211
+    image: apache/spark:4.1.4-java21-python3@sha256:847f91f8bb2f28d632064dfe632d423020f8fd60b27c7704c0e5bf5b0c6432c7
     container_name: industryflow-spark-master
     ports:
       - "127.0.0.1:7077:7077"
@@ -770,7 +770,7 @@ services:
   # mTLS ingestion edge (ADR-0002): verifies device client certs against the device CA +
   # CRL and forwards the verified identity to ingestion-service (the only way in).
   ingestion-edge:
-    image: nginx:1.31-alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
+    image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
     container_name: industryflow-ingestion-edge
     ports:
       - "${INGESTION_MTLS_PORT:-8443}:8443"
@@ -796,7 +796,7 @@ services:
   # nears expiry, or when a device's renewal is owed (ADR-0007 dec 10). It holds a signing key, so it
   # has no network at all and runs as the CA dir's owner (DEVICE_CA_UID/GID).
   device-crl-refresh:
-    image: alpine/openssl:3.5.9@sha256:1c361a204e9791bec6202bccbd1065eafaa65cb5a1a9a06ae000238569fba6a2
+    image: alpine/openssl:3.5.9@sha256:96e53bf9b9041fdc8a33ea61356688506bbddc368c70d6e8a9acdd28475e8537
     container_name: industryflow-device-crl-refresh
     network_mode: none
     user: "${DEVICE_CA_UID:-1000}:${DEVICE_CA_GID:-1000}"
@@ -1183,7 +1183,7 @@ services:
   # No host port and no cert: it is never reached directly, only through the frontend.
   notebook-sso:
     profiles: ["notebooks"]
-    image: nginx:1.31-alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
+    image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
     container_name: industryflow-notebook-sso
     environment:
       # sso-nginx.conf is a template the image renders at start into /etc/nginx/nginx.conf; the
@@ -1237,7 +1237,7 @@ services:
   # receiver: alerts are visible in its UI and sent nowhere until the operator configures one
   # (ALERTMANAGER_CONFIG, docs/operations/monitoring.md#alert-delivery).
   alertmanager:
-    image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+    image: prom/alertmanager:v0.34.2@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b
     container_name: industryflow-alertmanager
     ports:
       - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
