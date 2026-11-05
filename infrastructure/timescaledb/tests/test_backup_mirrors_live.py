@@ -17,8 +17,8 @@ read back from the store as the stack's root:
   archives leave once the volume has been gone for the retention.
 
 Needs the compose stack (MinIO with minio-init's buckets, the built db-backup image) and docker on
-PATH; db-tenant-isolation.yml provides them. Skips otherwise; with IF_REQUIRE_LIVE_STACK set a skip
-is a failure.
+PATH; db-tenant-isolation.yml provides them. It deletes whatever is ageing in that stack's backups, so
+it runs only with IF_REQUIRE_LIVE_STACK set, and then a missing stack is a failure.
 """
 import hashlib
 import json
@@ -105,13 +105,20 @@ def _in_volume(volume, script):
                    "--entrypoint", "sh", IMAGE, "-c", script)
 
 
-# Every entry's path, type, mode, owner and size, plus each file's bytes and each link's target.
-SNAPSHOT = ("cd /w && find . -mindepth 1 -printf '%P %y %m %U:%G %s %l\\n' | sort"
-            " && find . -type f -exec sha256sum {} + | sort -k2")
+# Every entry's path, type, mode and owner, each file's bytes and each link's target. The image's
+# tools are BusyBox (no `find -printf`), and pipefail keeps a failing step from leaving a short listing.
+SNAPSHOT = ("set -eu -o pipefail; cd /w; find . -mindepth 1 | sort | while IFS= read -r p; do"
+            " stat -c '%n %F %a %u:%g' \"$p\";"
+            " if [ -L \"$p\" ]; then echo \"$p -> $(readlink \"$p\")\"; elif [ -f \"$p\" ]; then sha256sum \"$p\"; fi;"
+            " done")
 
 
 @pytest.fixture(scope="module")
 def stack():
+    if not os.getenv("IF_REQUIRE_LIVE_STACK"):
+        # It writes real backups and ages mirrors and archives on a moved clock: whatever is ageing in
+        # the stack it runs against is deleted. Only a stack marked disposable runs it.
+        pytest.skip("runs only where IF_REQUIRE_LIVE_STACK=1 marks a disposable stack")
     if shutil.which("docker") is None:
         _skip("docker is not on PATH")
     if not (REPO / ".env").exists():
@@ -147,7 +154,7 @@ def mirrored(stack):
     _ok(_compose("db-backup"), "backup")
     yield dict(run=run, root=root, seeded=seeded, staging=staging, backups=backups,
                prefix={models: "models", cold: "cold"}, models=models)
-    # Source and mirror left as consistent as they were: the rehearsal proof samples both.
+    # Source and mirror left as they were before the seeding.
     prefix = {models: "models", cold: "cold"}
     for bucket, key in [*seeded, staging]:
         for b, k in ((bucket, key), (backups, f"{prefix[bucket]}/{key}")):
@@ -214,6 +221,10 @@ def test_a_work_volume_is_archived_restored_and_aged_out(stack, work_volume):
     volume, target = work_volume
     backups = env.get("BACKUP_S3_BUCKET", "industryflow-backups")
     before = _in_volume(volume, SNAPSHOT)
+    for entry in ("./analysis.ipynb regular file 644 1000:100", "./sub directory 755 1000:100",
+                  "./sub/data.csv regular file 600 1000:100", "./link symbolic link 777 1000:100",
+                  "./link -> analysis.ipynb"):
+        assert entry in before.splitlines(), f"the snapshot does not hold {entry!r}:\n{before}"
 
     _ok(_compose("notebook-backup"), "notebook backup")
     archives = root.listing(backups, f"notebooks/{volume}/")
