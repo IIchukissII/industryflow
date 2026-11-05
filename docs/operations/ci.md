@@ -21,12 +21,12 @@ The GitHub Actions workflows, their gate jobs, and the required checks on `main`
 
 | Gate | Workflow file | Gated jobs |
 |---|---|---|
-| `unit-tests-gate` | `unit-tests.yml` | pytest |
+| `unit-tests-gate` | `unit-tests.yml` | pytest (Redis service); `alert-kafka`: the alert worker's consumer loop against the compose Kafka broker |
 | `lint-gate` | `lint.yml` | ruff, exact pins + deps-resolve, eslint, frontend tests (vitest) |
 | `images-gate` | `images.yml` | Spark/JupyterHub version parity, image build + smoke + Trivy, pip-audit / npm audit |
 | `helm-gate` | `helm.yml` | `helm lint` / `helm template`, fail-closed placeholder-secret guard |
 | `compose-smoke-gate` | `compose-smoke.yml` | The stack starts and stays up (unfiltered) |
-| `db-tenant-isolation-gate` | `db-tenant-isolation.yml` | Reader-role cross-tenant isolation |
+| `db-tenant-isolation-gate` | `db-tenant-isolation.yml` | Live stack (`infrastructure/timescaledb/tests`): reader-role isolation, backup restore and rehearsal, object mirrors and notebook archives against MinIO and Docker; SQL-proxy cross-tenant isolation |
 | `cold-layer-integration-gate` | `cold-layer-integration.yml` | Cold layer integration |
 | `tracking-gateway-integration-gate` | `tracking-gateway-integration.yml` | Tracking gateway proofs; upload path's serving half (register and deploy in the real ml_service) |
 | `model-artifact-roundtrip-gate` | `model-artifact-roundtrip.yml` | Parity, model artifact round-trip |
