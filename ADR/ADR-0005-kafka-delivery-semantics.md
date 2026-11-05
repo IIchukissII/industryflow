@@ -67,4 +67,6 @@ no end-to-end guarantee, and exactly-once adds coordination to every stage.
 
 - `services/alert_service/worker/kafka_consumer.py`, `services/alert_service/config.py`: commit,
   retry, dead-letter and cooldown (decisions 2, 3, 6).
+- `services/alert_service/tests/test_kafka_consumer_integration.py`: decisions 2-4 proved against the
+  platform's broker.
 - [docs/operations/dead-letters.md](../docs/operations/dead-letters.md): monitoring and handling of the dead-letter topics.
