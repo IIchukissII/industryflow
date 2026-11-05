@@ -12,6 +12,8 @@
 #     cluster lacks (infrastructure/timescaledb/tests/test_backup_restore_privileges.py);
 #   * that the scheduled restore rehearsal holds a restore to the backup's own row counts and fails
 #     a backup holding other rows (infrastructure/timescaledb/tests/test_restore_rehearsal.py).
+#   * that the backup job's object mirrors and notebook archives copy, restore and age out against
+#     the real MinIO and Docker Engine (infrastructure/timescaledb/tests/test_backup_mirrors_live.py).
 #
 # The scope that ENFORCES isolation (the gateway's search_path routing and the proxy relay) is
 # path-gated in the `changes` job below, not just the DB init scripts — so a change that breaks the
@@ -108,6 +110,12 @@ jobs:
 
       - name: Build the db-backup image (the restore proof runs the real backup and restore scripts)
         run: docker compose --profile backup build db-backup
+
+      # The mirror and notebook-archive proof (test_backup_mirrors_live.py) mirrors these buckets.
+      - name: Start MinIO with its buckets and principals
+        run: |
+          docker compose up -d --wait minio
+          docker compose up minio-init
 
       - uses: actions/setup-python@v7
         with:
