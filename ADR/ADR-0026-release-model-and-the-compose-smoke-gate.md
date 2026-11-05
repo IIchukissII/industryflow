@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0026 — Release model: one trunk and a gate that runs the system
 
 - **Status:** Accepted
-- **Date:** 2026-07-13; changed 2026-10-30
+- **Date:** 2026-07-13; changed 2026-11-05
 - **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (the images certified), [ADR-0017](ADR-0017-database-tls-and-authentication.md) and [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (their "validated on the box" language)
 
 ## Context
@@ -45,9 +45,9 @@ repeatable.
     starting with those the box found failures in.** A tenant's life through deletion, a capability's
     use and its record, a bound configuration, a device's reading through the certificate edge, and
     inference on a deployed model.
-11. **A check of a service's use of a store runs the service's own driver and client against a real
-    server of that store.** Another driver binds parameters another way, and an in-process stand-in has
-    no timeouts or limits, so each passes what the service then fails.
+11. **A check of a service's use of a store or broker runs the service's own driver and client against
+    a real server of it.** Another driver binds parameters another way, and an in-process stand-in has
+    no timeouts, limits or coordinator, so each passes what the service then fails.
 
 ## Alternatives
 
@@ -67,6 +67,7 @@ repeatable.
 | 10 | One journey per decision record | Failures sit where decisions meet, and the suite would grow with every record |
 | 11 | A convenient driver for the database proofs | It cast what the service's driver refuses, and passed a write the service could not make |
 | 11 | An in-process stand-in for the shared store | It has no client timeout, and passed a read the service's client timed out on |
+| 11 | A stand-in for the broker client | It has no group coordinator, so commit, rewind and redelivery behave as the stand-in was written, not as the broker does |
 
 ## Consequences
 
