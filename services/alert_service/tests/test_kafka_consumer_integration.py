@@ -34,6 +34,7 @@ from types import SimpleNamespace
 import pytest
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+from aiokafka.errors import KafkaError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "worker"))
@@ -111,6 +112,12 @@ async def _committed(group, topic):
     await admin.start()
     try:
         offsets = await admin.list_consumer_group_offsets(group)
+    except KafkaError as e:
+        # A group not yet known to its coordinator (a fresh broker still creating the offsets topic,
+        # a member still joining) has committed nothing yet.
+        if getattr(e, "retriable", False):
+            return None
+        raise
     finally:
         await admin.close()
     meta = offsets.get(TopicPartition(topic, 0))
@@ -129,12 +136,14 @@ async def _wait_committed(group, topic, offset):
 async def _records(topic):
     """Every record on the topic's one partition, read without a group."""
     tp = TopicPartition(topic, 0)
-    consumer = AIOKafkaConsumer(bootstrap_servers=BOOTSTRAP, enable_auto_commit=False)
+    # From the earliest offset by reset policy: aiokafka 0.15 drops a seek_to_beginning made after
+    # end_offsets, and the read then starts at the end and sees nothing.
+    consumer = AIOKafkaConsumer(bootstrap_servers=BOOTSTRAP, enable_auto_commit=False,
+                                auto_offset_reset="earliest")
     await consumer.start()
     try:
         consumer.assign([tp])
         end = (await consumer.end_offsets([tp]))[tp]
-        await consumer.seek_to_beginning(tp)
         out = []
         deadline = time.monotonic() + DEADLINE_S
         while len(out) < end and time.monotonic() < deadline:
