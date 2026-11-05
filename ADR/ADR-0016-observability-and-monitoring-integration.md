@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0016 — Observability and monitoring integration
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-11-04
+- **Date:** 2026-06-27; changed 2026-11-05
 - **Parent:** ADR-0001
 - **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (self-contained chart; deferred monitoring here), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the tenant-isolated path alerts stay on), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (external traffic only over the TLS edge; sessions), [ADR-0043](ADR-0043-platform-switch-operator-control.md) (the superuser as the one platform-wide authority), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (the same sign-on pattern for the hub), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (dec 9: a release names images already built)
 
@@ -83,6 +83,7 @@ not leave the tenant-isolated path.
 | 8 | A deploy event recorded by the deploy tool | Every way of deploying would have to record it, and an image swapped outside them would leave no trace |
 | 8 | Container restarts as the only sign of a deploy | A restart is not a change; a crash and a deploy look the same |
 | 8 | Every service that serves metrics, including the stream-processing cluster's stock master | No build fixes its revision; one stamped from the deployment is the deployment-read revision rejected above |
+| 8 | The stream-processing workers reporting the series | A worker runs the stock worker process and executes only code its driver ships, so the driver's series already names that code's revision |
 | 8 | The stream processors left without the series | Their symptoms (consumer lag, dead letters, missing windows) are the ones a deploy most needs to be read against |
 | 8 | A plugin in the stream processor's runtime emitting the series among its own metrics | Adds a second build toolchain and its supply chain, couples to the processor's upgrades, and still misses the master |
 | 8 | The revision encoded in a metric name of the processor's own metrics and relabelled at the scrape | Those metrics carry no free labels; a name parsed back into a label breaks silently when either side changes |

@@ -33,7 +33,7 @@ def _spark_driver(dockerfile: Path) -> dict:
 
 
 # The web services serve /metrics through the instrumentator; each Spark job image runs a Python driver
-# (its CMD ends in a job script). The worker image runs no platform code; the master is the stock image.
+# (its CMD ends in a job script). Every other built image is in EXEMPT below, with its reason.
 REPORTERS = sorted(
     [_web_service(p) for p in ROOT.glob("services/**/main.py")
      if "node_modules" not in p.parts and "Instrumentator" in p.read_text()]
@@ -123,3 +123,63 @@ def test_every_served_revision_is_scraped():
         endpoints = find(chart, "ServiceMonitor", f"-{component}")["spec"]["endpoints"]
         assert any(e["port"] == "build-info" and e["path"] == "/metrics" for e in endpoints), \
             f"chart: the {component} ServiceMonitor does not scrape build-info"
+
+
+# Every image the platform builds that is not a reporter, and why dec 8 does not reach it. A new image
+# is in neither list until someone decides which it is; discovering reporters by how they serve metrics
+# alone would miss one that serves them another way.
+EXEMPT = {
+    "alert-service-detector": "serves no metrics: a Kafka consumer without an HTTP server",
+    "frontend": "serves static files; no metrics",
+    "mlflow": "the stock tracking server; serves no metrics the platform scrapes",
+    "spark-worker": "the stock worker; executors run only code the driver ships, and the driver reports",
+    "notebook-hub": "the stock hub with platform configuration; its own metrics are not scraped",
+    "notebook-sql-proxy": "serves no metrics",
+    "notebook-tracking-gateway": "serves no metrics",
+    "notebook-cold-broker": "serves no metrics",
+    "ops-agent": "serves no metrics",
+    "notebook-authoring": "a user's kernel, not a platform process",
+    "notebook-analytics": "a user's kernel, not a platform process",
+    "db-backup": "one-shot job; its success time reaches the metrics store as a file, not a process",
+    "cold-export": "one-shot job; serves no metrics",
+    "tenant-delete": "one-shot job; serves no metrics",
+    "tracking-collect": "one-shot job on the tracking server's image; serves no metrics",
+}
+
+
+def _built_images() -> dict[str, Path]:
+    """Every image a deployment builds: compose's builds and the CI image matrix, by service name."""
+    built = {}
+    for name, svc in COMPOSE.items():
+        build = svc.get("build")
+        if isinstance(build, dict):
+            built[name] = (ROOT / build["context"] / build.get("dockerfile", "Dockerfile")).resolve()
+    for entry in load_yaml(".github/workflows/images.yml")["jobs"]["build-scan"]["strategy"]["matrix"]["include"]:
+        built.setdefault(entry["name"], (ROOT / entry["file"]).resolve())
+    return built
+
+
+def _reporter_names() -> set[str]:
+    return {name for r in REPORTERS for name in _compose_services(r["dockerfile"])}
+
+
+def test_every_built_image_reports_its_revision_or_is_exempt_by_name():
+    built, reporters = _built_images(), _reporter_names()
+    undecided = sorted(n for n in built if n not in reporters and n not in EXEMPT)
+    assert not undecided, f"built images neither reporting build_info nor exempt (ADR-0016 dec 8): {undecided}"
+    stale = sorted(n for n in EXEMPT if n not in built or n in reporters)
+    assert not stale, f"exempt entries that are not built, or that report: {stale}"
+
+
+def test_no_exempt_image_is_scraped():
+    """An exempt image that is scraped serves metrics after all, so its exemption no longer holds."""
+    jobs = load_yaml("infrastructure/prometheus/prometheus.yml")["scrape_configs"]
+    hosts = {t.rsplit(":", 1)[0] for j in jobs for c in j.get("static_configs", []) for t in c["targets"]}
+    assert not sorted(hosts & EXEMPT.keys()), "compose Prometheus scrapes an exempt image"
+    apps = load_yaml("deploy/helm/industryflow/values.yaml")["apps"]
+    assert not sorted(n for n, a in apps.items() if n in EXEMPT and a.get("metrics")), \
+        "the chart scrapes an exempt image"
+    chart = helm_template("--set", "observability.serviceMonitors.enabled=true")
+    monitored = {d["metadata"]["name"] for d in chart if d.get("kind") in ("ServiceMonitor", "PodMonitor")}
+    assert not sorted(n for n in EXEMPT for m in monitored if m.endswith(f"-{n}")), \
+        "the chart monitors an exempt image"
