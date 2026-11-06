@@ -126,7 +126,8 @@ def test_hub_migrates_its_own_state_db(profile):
 # --------------------------------------------------------------------------------------------------
 # Capability lifecycle (ADR-0015 dec 2, ADR-0012 dec 6): minted per server, refreshed while it is
 # healthy, revoked when it stops or is respawned, and the server stopped once they are revoked from
-# elsewhere. Driven through the real config's hooks and spawner class with a fake store.
+# elsewhere. Driven through the real config's hooks and spawner class, on the Redis adapter over
+# industryflow_contracts.testing's store (test_capabilities._store).
 # --------------------------------------------------------------------------------------------------
 
 import asyncio  # noqa: E402
@@ -135,7 +136,8 @@ import logging  # noqa: E402
 import uuid  # noqa: E402
 
 sys.path.insert(0, str(HUB_DIR / "tests"))
-from test_capabilities import FakeStore  # noqa: E402
+from industryflow_contracts import capability_audit as audit  # noqa: E402
+from test_capabilities import _data, _events, _multis, _redis, _store, _stream, _ttl  # noqa: E402
 
 
 class _User:
@@ -163,13 +165,13 @@ class _Spawner:
 
 def _hub(profile="docker"):
     cfg, ns = _load_ns(profile)
-    store = FakeStore()
+    store = _store()
     ns["_STORE"] = store
     return cfg, ns, store
 
 
 def _handles(store):
-    return {k[len("nbcap:"):] for k in store.data}
+    return {k[len("nbcap:"):] for k in _data(store) if k.startswith("nbcap:")}
 
 
 def _spawn(ns, spawner):
@@ -235,12 +237,14 @@ def test_a_healthy_server_keeps_its_handles_alive():
     _, ns, store = _hub()
     spawner = _Spawner(_User("u-1", str(uuid.uuid4())))
     _spawn(ns, spawner)
-    for key in list(store.ttls):
-        store.ttls[key] = 1  # nearly expired
+    for key in _redis(store).keys("*"):
+        if not key.startswith(b"nbcap-audit"):
+            _redis(store).expire(key, 5)  # nearly expired
     live = ns["with_capability_lifecycle"](_BaseSpawner)(spawner)
 
     assert asyncio.run(live.poll_and_notify()) is None
-    assert all(store.ttls[f"nbcap:{h}"] == ns["CAPABILITY_TTL_SECONDS"] for h in _handles(store))
+    ttl = ns["CAPABILITY_TTL_SECONDS"]
+    assert all(ttl - 1 <= _ttl(store, f"nbcap:{h}") <= ttl for h in _handles(store))
     assert live.notified is False
 
 
@@ -283,7 +287,7 @@ def test_a_store_outage_does_not_stop_servers():
 # --------------------------------------------------------------------------------------------------
 
 def _kinds(store):
-    return [e["kind"] for e in store.events()]
+    return [e["kind"] for e in _events(store)]
 
 
 def test_a_spawn_records_each_mint_and_the_environment_started():
@@ -291,15 +295,22 @@ def test_a_spawn_records_each_mint_and_the_environment_started():
     cid = str(uuid.uuid4())
     spawner = _Spawner(_User("u-1", cid))
     _spawn(ns, spawner)
-    minted = store.events("minted")
+    minted = _events(store, "minted")
     assert {e["audience"] for e in minted} == {"api", "sql"}
-    assert store.transactions == len(minted)  # each mint one transaction with its record
-    (started,) = store.events("environment_started")
+    # Each mint is one MULTI carrying its entry, its index under the user, and its record.
+    multis = _multis(store)
+    assert len(multis) == len(minted)
+    for multi in multis:
+        assert [c for c, _key in multi] == ["HSET", "EXPIRE", "SET", "XADD"]
+        assert multi[0][1] == "nbcap-user:u-1" and multi[2][1].startswith("nbcap:")
+        assert multi[3][1] == audit.STREAM_KEY
+    assert {m[2][1] for m in multis} == {f"nbcap:{h}" for h in _handles(store)}
+    (started,) = _events(store, "environment_started")
     assert (started["user"], started["company_id"], started["plane"]) == ("u-1", cid, "hub")
     assert started["detail"] == "server= profile=authoring"
     assert _kinds(store)[-1] == "environment_started"
     handles = [v for k, v in spawner.environment.items() if k.endswith("_CAPABILITY")]
-    assert handles and all(h not in json.dumps(store.stream) for h in handles)
+    assert handles and all(h not in json.dumps(_stream(store)) for h in handles)
 
 
 def test_stopping_a_server_records_its_revocations_and_the_environment_stopped():
@@ -307,26 +318,26 @@ def test_stopping_a_server_records_its_revocations_and_the_environment_stopped()
     cid = str(uuid.uuid4())
     spawner = _Spawner(_User("u-1", cid))
     _spawn(ns, spawner)
-    ids = {e["handle_id"] for e in store.events("minted")}
+    ids = {e["handle_id"] for e in _events(store, "minted")}
     asyncio.run(cfg.Spawner.post_stop_hook(spawner))
-    revoked = store.events("revoked")
+    revoked = _events(store, "revoked")
     assert {e["handle_id"] for e in revoked} == ids
     assert {e["reason"] for e in revoked} == {"server_stopped"}
-    (stopped,) = store.events("environment_stopped")
+    (stopped,) = _events(store, "environment_stopped")
     assert (stopped["user"], stopped["company_id"], stopped["reason"]) == ("u-1", cid, "server_stopped")
     assert _kinds(store)[-1] == "environment_stopped"
 
     asyncio.run(cfg.Spawner.post_stop_hook(spawner))  # a second stop revokes nothing more
-    assert len(store.events("revoked")) == len(ids)
+    assert len(_events(store, "revoked")) == len(ids)
 
 
 def test_a_respawn_records_what_it_revoked_as_respawn():
     _, ns, store = _hub()
     spawner = _Spawner(_User("u-1", str(uuid.uuid4())))
     _spawn(ns, spawner)
-    first = {e["handle_id"] for e in store.events("minted")}
+    first = {e["handle_id"] for e in _events(store, "minted")}
     _spawn(ns, spawner)  # no stop in between
-    revoked = store.events("revoked")
+    revoked = _events(store, "revoked")
     assert {e["handle_id"] for e in revoked} == first
     assert {e["reason"] for e in revoked} == {"respawn"}
 
@@ -341,14 +352,14 @@ def test_a_server_stopped_because_its_handles_were_revoked_elsewhere_records_why
     cap.revoke_user(store, "u-1")  # the platform's logout
     asyncio.run(live.poll_and_notify())
     asyncio.run(cfg.Spawner.post_stop_hook(live))  # the hub's User.stop, once poll reports it stopped
-    (stopped,) = store.events("environment_stopped")
+    (stopped,) = _events(store, "environment_stopped")
     assert stopped["reason"] == "capabilities_revoked"
     # Recorded revoked once, by whoever removed them, not again by the stop.
-    assert {e["reason"] for e in store.events("revoked")} == {"user_signed_out"}
+    assert {e["reason"] for e in _events(store, "revoked")} == {"user_signed_out"}
 
     asyncio.run(live.start())
     asyncio.run(cfg.Spawner.post_stop_hook(live))  # a later ordinary stop is not mislabelled
-    assert store.events("environment_stopped")[-1]["reason"] == "server_stopped"
+    assert _events(store, "environment_stopped")[-1]["reason"] == "server_stopped"
 
 
 # --------------------------------------------------------------------------------------------------
@@ -429,8 +440,8 @@ def test_a_stop_for_a_changed_identity_records_that_reason():
     _spawn(ns, spawner)
     spawner._stop_reason = "identity_changed"  # what refresh_user leaves before stopping it
     asyncio.run(cfg.Spawner.post_stop_hook(spawner))
-    assert {e["reason"] for e in store.events("revoked")} == {"identity_changed"}
-    assert store.events("environment_stopped")[0]["reason"] == "identity_changed"
+    assert {e["reason"] for e in _events(store, "revoked")} == {"identity_changed"}
+    assert _events(store, "environment_stopped")[0]["reason"] == "identity_changed"
     assert spawner._stop_reason is None
 
 
@@ -442,7 +453,7 @@ def test_a_stop_is_recorded_under_the_tenant_the_server_was_started_for():
     _spawn(ns, spawner)
     spawner.user._state["company_id"] = new
     asyncio.run(cfg.Spawner.post_stop_hook(spawner))
-    assert store.events("environment_stopped")[0]["company_id"] == old
+    assert _events(store, "environment_stopped")[0]["company_id"] == old
 
 
 def test_token_authenticated_api_calls_are_not_judged_by_headers_they_never_carry():
@@ -573,7 +584,7 @@ def test_the_hub_does_not_start_with_an_unknown_authoring_role(value):
 def test_the_configured_mapping_selects_the_spawn_profile(configured, role, profile):
     try:
         _, ns = _load_ns("docker", NOTEBOOK_AUTHORING_ROLES=configured)
-        ns["_STORE"] = FakeStore()
+        ns["_STORE"] = _store()
         spawner = _Spawner(_User("u-1", str(uuid.uuid4()), role=role))
         _spawn(ns, spawner)
         assert spawner.environment["INDUSTRYFLOW_PROFILE"] == profile

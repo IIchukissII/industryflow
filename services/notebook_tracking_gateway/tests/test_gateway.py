@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import gateway  # noqa: E402
-from capability_audit_fake import Capabilities  # noqa: E402
+from capability_store import capabilities  # noqa: E402
 import policy  # noqa: E402
 
 CID = str(uuid.uuid4())
@@ -61,7 +61,7 @@ class FakeStore_:
 
 
 def _client(experiments=None):
-    store = Capabilities({f"{policy._KEY_PREFIX}{HANDLE}": json.dumps(
+    store = capabilities({f"{policy._KEY_PREFIX}{HANDLE}": json.dumps(
         {"user": "ds", "company_id": CID, "audience": "tracking", "read_only": False})}, consumable=False)
     up = FakeUpstream(experiments or {})
     art = FakeStore_()

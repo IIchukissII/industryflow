@@ -8,3 +8,8 @@
 pytest==9.2.0
 pytest-asyncio==1.4.1
 trustme==1.2.1
+# The capability store the tests run on (industryflow_contracts.testing): the service's own client
+# against a real server in CI, fakeredis with Lua locally.
+redis==8.1.0
+fakeredis==2.40.0
+lupa==2.8

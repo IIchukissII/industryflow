@@ -48,6 +48,21 @@ def pytest_runtest_makereport(item, call):
         report.longrepr = f"required integration test SKIPPED: {report.longrepr}{_SKIP_MSG}"
 
 
+@pytest.fixture(autouse=True)
+def _tracking_handles_are_never_consumed():
+    """A store made with ``capability_store.capabilities(consumable=False)`` was asked to remove
+    nothing, and still holds every key it held when made."""
+    from capability_store import NEVER_CONSUMED, keyspace
+
+    NEVER_CONSUMED.clear()
+    yield
+    for store, held, asked in NEVER_CONSUMED:
+        assert not asked, f"this plane never consumes a handle, and asked the store to: {asked}"
+        gone = sorted(held - keyspace(store))
+        assert not gone, f"this plane never consumes a handle, and {gone} are gone"
+    NEVER_CONSUMED.clear()
+
+
 def pytest_collection_modifyitems(config, items):
     if not os.getenv("IF_REQUIRE_LIVE_STACK"):
         return

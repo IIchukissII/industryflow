@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import gateway  # noqa: E402
-from capability_audit_fake import Capabilities  # noqa: E402
+from capability_store import capabilities  # noqa: E402
 import policy  # noqa: E402
 import routes  # noqa: E402
 
@@ -53,7 +53,7 @@ class Upstream:
 
 
 def Store():
-    return Capabilities({f"{policy._KEY_PREFIX}{HANDLE}": json.dumps(
+    return capabilities({f"{policy._KEY_PREFIX}{HANDLE}": json.dumps(
         {"user": "ds", "company_id": CID, "audience": "tracking"})}, consumable=False)
 
 

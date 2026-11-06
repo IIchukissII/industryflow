@@ -23,6 +23,7 @@ import uuid
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute, iter_route_contexts
+from industryflow_contracts import testing
 from fastapi.testclient import TestClient
 from jose import jwt
 
@@ -97,11 +98,11 @@ def secret(monkeypatch):
     monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", INTERNAL)
 
 
-class NoSessionEnded:
-    """A session store with no ended-session record (industryflow_contracts.sessions)."""
-
-    async def get(self, key):
-        return None
+def NoSessionEnded():
+    """A session store with no ended-session record (industryflow_contracts.sessions):
+    industryflow_contracts.testing's, empty, one client per event loop (TestClient runs the app on its
+    own)."""
+    return testing.AnyLoopRedis()
 
 
 def _app(row, rec):

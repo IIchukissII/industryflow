@@ -7,6 +7,7 @@ The operator plane that empties a deleted tenant out of the tracking store (ADR-
 fake MLflow that keeps state: what must be gone is gone, what belongs to anyone else is untouched,
 and only the job's secret reaches it.
 """
+import json
 import os
 import re
 import sys
@@ -18,7 +19,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import gateway  # noqa: E402
-from capability_audit_fake import Capabilities  # noqa: E402
+from capability_store import capabilities  # noqa: E402
 from industryflow_contracts import tenancy  # noqa: E402
 
 CID = str(uuid.uuid4())
@@ -134,7 +135,9 @@ def _seed():
 
 
 def _client(ml, art, token=SECRET):
-    return TestClient(gateway.build_app(Capabilities(consumable=False), ml, art, operator_token=token))
+    # The tenant's live tracking handle: emptying its MLflow state consumes no capability.
+    held = {"nbcap:tr": json.dumps({"user": "ds", "company_id": CID, "audience": "tracking"})}
+    return TestClient(gateway.build_app(capabilities(held, consumable=False), ml, art, operator_token=token))
 
 
 def _empty(client, cid=CID, secret=SECRET):

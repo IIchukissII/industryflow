@@ -10,9 +10,8 @@ refusal by the presented value's digest and never the value (dec 2), and an uplo
 consumption in the same atomic step as the claim that consumes it (dec 3). The operator plane is a
 shared secret, not a capability, and records nothing.
 
-Most of this runs on the dict fake (capability_audit_fake.py). The race runs on a real store (a real
-Redis in CI, industryflow_contracts.testing), so the contract's real Lua decides which of two commits
-holding one handle wins.
+It runs on industryflow_contracts.testing's store (a real Redis in CI, capability_store.py), so the
+contract's real Lua records each event, and decides which of two commits holding one handle wins.
 """
 import asyncio
 import hashlib
@@ -32,7 +31,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import gateway  # noqa: E402
 import policy  # noqa: E402
 import staging  # noqa: E402
-from capability_audit_fake import Capabilities  # noqa: E402
+from capability_store import capabilities, events, stream  # noqa: E402
 
 CID = str(uuid.uuid4())
 TOKEN = policy.tenant_token(CID)
@@ -117,81 +116,81 @@ def _no_handle_in(stream, handle):
 # --- the tracking audience -------------------------------------------------------------------------
 
 def test_a_tracking_handles_first_use_is_recorded_once():
-    caps = Capabilities({f"nbcap:{TR}": _entry("tracking")})
+    caps = capabilities({f"nbcap:{TR}": _entry("tracking")})
     c = _client(caps)
     for _ in range(3):
         assert _track(c, TR).status_code == 200
 
-    [first] = caps.events()
+    [first] = events(caps)
     assert first["kind"] == audit.FIRST_USE and first["plane"] == "tracking_gateway"
     assert (first["handle_id"], first["user"], first["company_id"], first["audience"]) == \
         (HANDLE_ID, "alice", CID, "tracking")
-    _no_handle_in(caps.stream, TR)
+    _no_handle_in(stream(caps), TR)
 
 
 def test_an_entry_minted_before_the_record_is_served_and_has_no_first_use():
-    caps = Capabilities({f"nbcap:{TR}": _entry("tracking", handle_id=None)})
+    caps = capabilities({f"nbcap:{TR}": _entry("tracking", handle_id=None)})
     assert _track(_client(caps), TR).status_code == 200
-    assert caps.events() == []
+    assert events(caps) == []
 
 
 def test_an_unknown_handle_is_recorded_once_by_its_digest_never_the_handle():
-    caps = Capabilities()
+    caps = capabilities()
     c = _client(caps)
     secret = "kernel-secret-" + uuid.uuid4().hex
     assert _track(c, secret).status_code == 401
     assert _track(c, secret).status_code == 401
 
-    refusals = caps.events(audit.REFUSED)
+    refusals = events(caps, audit.REFUSED)
     # Anyone can present an unknown value, so it is recorded once per window (ADR-0042 dec 8).
     assert len(refusals) == 1, "a repeated unknown value is not recorded again in its window"
     for r in refusals:
         assert r["reason"] == "no_entry" and r["plane"] == "tracking_gateway"
         assert r["digest"] == audit.presented_digest(secret)
         assert r["handle_id"] is None
-    _no_handle_in(caps.stream, secret)
+    _no_handle_in(stream(caps), secret)
 
 
 def test_a_wrong_audience_refusal_names_what_the_entry_was():
-    caps = Capabilities({f"nbcap:{UP}": _entry("upload")})
+    caps = capabilities({f"nbcap:{UP}": _entry("upload")})
     assert _track(_client(caps), UP).status_code == 401
-    [r] = caps.events()
+    [r] = events(caps)
     assert r["kind"] == audit.REFUSED and r["reason"] == "wrong_audience"
     assert (r["handle_id"], r["audience"], r["company_id"]) == (HANDLE_ID, "upload", CID)
 
 
 def test_a_suspended_tenants_handle_is_refused_and_recorded():
-    caps = Capabilities({f"nbcap:{TR}": _entry("tracking"), f"nbcap-suspended:{CID}": "1"})
+    caps = capabilities({f"nbcap:{TR}": _entry("tracking"), f"nbcap-suspended:{CID}": "1"})
     assert _track(_client(caps), TR).status_code == 401
-    [r] = caps.events()
+    [r] = events(caps)
     assert r["reason"] == "tenant_suspended" and r["handle_id"] == HANDLE_ID
 
 
 def test_a_request_presenting_no_handle_records_nothing():
-    caps = Capabilities()
+    caps = capabilities()
     assert _client(caps).get("/api/2.0/mlflow/experiments/get-by-name").status_code == 401
-    assert caps.events() == []
+    assert events(caps) == []
 
 
 def test_the_operator_plane_is_not_a_capability_and_records_nothing():
-    caps = Capabilities()
+    caps = capabilities()
     c = _client(caps, operator_token="op-secret")
     assert c.delete(f"/api/2.0/industryflow-operator/tenants/{CID}",
                     headers=_bearer("wrong")).status_code == 401
-    assert caps.events() == []
+    assert events(caps) == []
 
 
 # --- the upload audience ---------------------------------------------------------------------------
 
 def test_an_upload_is_recorded_as_first_use_then_consumption():
-    caps, art = Capabilities({f"nbcap:{UP}": _entry("upload")}), Artifacts()
+    caps, art = capabilities({f"nbcap:{UP}": _entry("upload")}), Artifacts()
     c = _client(caps, art)
     uid = c.post(UPLOAD + "/stage", json={"files": ["MLmodel", "model.skops"]},
                  headers=_bearer(UP)).json()["upload_id"]
     _staged(art, uid)
     assert c.post(UPLOAD + "/commit", json={"upload_id": uid}, headers=_bearer(UP)).status_code == 200
 
-    first, consumed = caps.events()
+    first, consumed = events(caps)
     assert first["kind"] == audit.FIRST_USE and first["audience"] == "upload"
     assert consumed["kind"] == audit.CONSUMED and consumed["plane"] == "tracking_gateway"
     assert (consumed["handle_id"], consumed["user"], consumed["company_id"], consumed["audience"]) == \
@@ -199,16 +198,16 @@ def test_an_upload_is_recorded_as_first_use_then_consumption():
 
     # Spent: presenting it again is a refusal, and consumes nothing more.
     assert c.post(UPLOAD + "/commit", json={"upload_id": uid}, headers=_bearer(UP)).status_code == 401
-    assert len(caps.events(audit.CONSUMED)) == 1
-    assert caps.events()[-1]["reason"] == "no_entry"
-    _no_handle_in(caps.stream, UP)
+    assert len(events(caps, audit.CONSUMED)) == 1
+    assert events(caps)[-1]["reason"] == "no_entry"
+    _no_handle_in(stream(caps), UP)
 
 
 def test_a_tracking_handle_at_the_upload_surface_is_refused_and_recorded():
-    caps = Capabilities({f"nbcap:{TR}": _entry("tracking")}, consumable=False)
+    caps = capabilities({f"nbcap:{TR}": _entry("tracking")}, consumable=False)
     r = _client(caps).post(UPLOAD + "/stage", json={"files": ["MLmodel"]}, headers=_bearer(TR))
     assert r.status_code == 401
-    [e] = caps.events()
+    [e] = events(caps)
     assert e["kind"] == audit.REFUSED and e["reason"] == "wrong_audience" and e["audience"] == "tracking"
 
 
@@ -234,7 +233,7 @@ class _ClaimRace:
 
 @pytest.mark.asyncio
 async def test_two_commits_on_one_handle_one_consumes_and_one_consumption_is_recorded():
-    redis = await testing.async_redis(decode_responses=True)
+    redis = await testing.async_redis()  # as gateway.py connects (bytes back)
     await redis.set(f"nbcap:{UP}", _entry("upload"))
     art = Artifacts()
     uid = staging.new_upload_id()
@@ -247,11 +246,10 @@ async def test_two_commits_on_one_handle_one_consumes_and_one_consumption_is_rec
 
     assert sorted([a.status_code, b.status_code]) == [200, 401], "exactly one caller wins the claim"
     assert await redis.get(f"nbcap:{UP}") is None
-    events = [audit.decode(f) for _id, f in await redis.xrange(audit.STREAM_KEY)]
-    kinds = [e["kind"] for e in events]
+    recorded = await testing.audit_events(redis)
+    kinds = [e["kind"] for e in recorded]
     assert kinds.count(audit.CONSUMED) == 1
     assert kinds.count(audit.FIRST_USE) == 1
-    [lost] = [e for e in events if e["kind"] == audit.REFUSED]
+    [lost] = [e for e in recorded if e["kind"] == audit.REFUSED]
     assert lost["reason"] == "already_consumed" and lost["handle_id"] == HANDLE_ID
-    for _id, f in await redis.xrange(audit.STREAM_KEY):
-        assert all(UP not in v for v in f.values()), "a bearer handle entered the record"
+    _no_handle_in(await testing.audit_stream(redis), UP)

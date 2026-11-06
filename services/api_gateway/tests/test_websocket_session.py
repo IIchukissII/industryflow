@@ -9,9 +9,10 @@ Only the httpOnly access cookie opens a socket (never a ?token= in the URL, whic
 access logs), an inactive user cannot connect, and an open socket ends with its session (ADR-0004
 dec 9): at the access token's expiry, or at its next re-check once its user is deactivated, its
 company is suspended, or the session it was opened in has ended (logout, or all of the user's
-sessions ended). The names cache never crosses tenants.
+sessions ended). The names cache never crosses tenants. The store is industryflow_contracts.testing's
+(a real Redis in CI), one client per event loop: TestClient runs the app on its own.
 """
-from industryflow_contracts import sessions
+from industryflow_contracts import sessions, testing
 import time
 import uuid
 from types import SimpleNamespace
@@ -37,66 +38,10 @@ def _token(user_id, exp_in=600, sid=None, iat=None):
     return jwt.encode(claims, ws.SECRET, algorithm="HS256")
 
 
-class FakeStore:
-    """The shared store's commands the session records use, in memory."""
-
-    def __init__(self):
-        self.kv, self.sets = {}, {}
-
-    async def get(self, key):
-        return self.kv.get(key)
-
-    async def set(self, key, value, ex=None):
-        self.kv[key] = value
-
-    async def getdel(self, key):
-        return self.kv.pop(key, None)
-
-    async def delete(self, *keys):
-        for k in keys:
-            self.kv.pop(k, None)
-
-    async def smembers(self, key):
-        return set(self.sets.get(key, set()))
-
-    async def sadd(self, key, *members):
-        self.sets.setdefault(key, set()).update(members)
-
-    async def srem(self, key, *members):
-        self.sets.get(key, set()).difference_update(members)
-
-    async def expire(self, key, ttl):
-        pass
-
-    async def hkeys(self, key):
-        return []
-
-    def pipeline(self, transaction=True):
-        store = self
-
-        class Pipe:
-            def __init__(self):
-                self.ops = []
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *exc):
-                return False
-
-            def __getattr__(self, name):
-                return lambda *a, **k: self.ops.append((name, a, k))
-
-            async def execute(self):
-                for name, a, k in self.ops:
-                    await getattr(store, name)(*a, **k)
-
-        return Pipe()
-
-
 @pytest.fixture
 def world(monkeypatch):
-    state = SimpleNamespace(users={}, store=FakeStore())
+    # As messaging.redis_client connects.
+    state = SimpleNamespace(users={}, store=testing.AnyLoopRedis(encoding="utf-8", decode_responses=True))
     monkeypatch.setattr(refresh_tokens.redis_client, "redis", state.store)
 
     async def load_active_user(user_id):

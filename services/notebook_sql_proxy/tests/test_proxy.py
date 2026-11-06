@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Tests for the SQL proxy connection orchestration (ADR-0015), with a fake backend/store."""
+"""Tests for the SQL proxy connection orchestration (ADR-0015), with a fake backend; the capability store
+is industryflow_contracts.testing's (a real Redis in CI)."""
 import json
 import os
 import sys
@@ -14,19 +15,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import binding as b  # noqa: E402
 import proxy  # noqa: E402
-from capability_audit_fake import AuditScripts  # noqa: E402
 from industryflow_contracts import capability_audit as audit  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 
-class FakeAsyncStore(AuditScripts):
-    def __init__(self, mapping=None):
-        self.mapping = mapping or {}
-
-    async def get(self, key):
-        return self.mapping.get(key)
-
-    async def delete(self, *keys):
-        return sum(self.mapping.pop(k, None) is not None for k in keys)
+async def _store(entries=()):
+    """The capability store holding ``entries``, connected as server.py connects (bytes back)."""
+    store = await testing.async_redis()
+    for key, value in dict(entries).items():
+        await store.set(key, value)
+    return store
 
 
 class FakeBackend:
@@ -61,7 +59,7 @@ def _sql_record(company_id, handle_id=None, audience="sql"):
 @pytest.mark.asyncio
 async def test_valid_handle_binds_tenant_and_relays():
     cid = str(uuid.uuid4())
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}good": _sql_record(cid)})
+    store = await _store({f"{b._KEY_PREFIX}good": _sql_record(cid)})
     backends = []
 
     def factory(binding):
@@ -82,7 +80,7 @@ async def test_valid_handle_binds_tenant_and_relays():
 
 @pytest.mark.asyncio
 async def test_invalid_handle_opens_no_backend():
-    store = FakeAsyncStore({})  # nothing minted
+    store = await _store({})  # nothing minted
     opened = []
 
     def factory(binding):
@@ -100,7 +98,7 @@ async def test_invalid_handle_opens_no_backend():
 async def test_api_handle_is_rejected_by_sql_proxy():
     cid = str(uuid.uuid4())
     api_rec = json.dumps({"user": "a", "company_id": cid, "audience": "api", "read_only": True})
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}apionly": api_rec})
+    store = await _store({f"{b._KEY_PREFIX}apionly": api_rec})
 
     ok = await proxy.serve_connection("apionly", store, lambda binding: FakeBackend())
     assert ok is False
@@ -122,24 +120,24 @@ async def _served(store, handle="good"):
 
 @pytest.mark.asyncio
 async def test_the_relay_is_handed_a_recheck_that_holds_while_the_handle_does():
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()))})
+    store = await _store({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()))})
     be = await _served(store)
     assert await be.still_authorized() is True
 
 
 @pytest.mark.asyncio
 async def test_the_recheck_fails_once_the_handle_is_revoked():
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()))})
+    store = await _store({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()))})
     be = await _served(store)
-    del store.mapping[f"{b._KEY_PREFIX}good"]  # revocation is deletion (ADR-0015 dec 2)
+    await store.delete(f"{b._KEY_PREFIX}good")  # revocation is deletion (ADR-0015 dec 2)
     assert await be.still_authorized() is False
 
 
 @pytest.mark.asyncio
 async def test_the_recheck_fails_if_the_handle_is_rebound_to_another_tenant():
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()))})
+    store = await _store({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()))})
     be = await _served(store)
-    store.mapping[f"{b._KEY_PREFIX}good"] = _sql_record(str(uuid.uuid4()))
+    await store.set(f"{b._KEY_PREFIX}good", _sql_record(str(uuid.uuid4())))
     assert await be.still_authorized() is False
 
 
@@ -161,47 +159,47 @@ class _RelayUntil(FakeBackend):
                 return
 
 
-def _no_secret_in(store, *secrets):
-    flat = [v for e in store.stream for v in e.values()]
+async def _no_secret_in(store, *secrets):
+    flat = [v for e in await testing.audit_stream(store) for v in e.values()]
     return not any(s in v for s in secrets for v in flat)
 
 
 @pytest.mark.asyncio
 async def test_first_use_is_recorded_once_per_handle_and_sessions_once_per_window_with_a_count():
     cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}secret-good": _sql_record(cid, hid)})
+    store = await _store({f"{b._KEY_PREFIX}secret-good": _sql_record(cid, hid)})
     for _ in range(3):
         assert await proxy.serve_connection("secret-good", store, lambda binding: _RelayUntil()) is True
 
-    [first] = store.events("first_use")
+    [first] = await testing.audit_events(store, "first_use")
     assert (first["plane"], first["handle_id"], first["company_id"], first["user"], first["audience"]) == (
         "sql_proxy", hid, cid, "alice", "sql")
     # A kernel can reconnect at will: one opening and one closing per window, the rest counted
     # (ADR-0042 dec 8), carried by the next window's record.
-    opened, closed = store.events("sql_session_opened"), store.events("sql_session_closed")
+    opened, closed = await testing.audit_events(store, "sql_session_opened"), await testing.audit_events(store, "sql_session_closed")
     assert len(opened) == len(closed) == 1
     assert all(e["handle_id"] == hid and e["company_id"] == cid for e in opened + closed)
     assert [e["reason"] for e in closed] == ["client_closed"]
-    store.markers.clear()  # the window passes
+    await testing.pass_audit_windows(store)  # the window passes
     assert await proxy.serve_connection("secret-good", store, lambda binding: _RelayUntil()) is True
-    assert [e["suppressed"] for e in store.events("sql_session_opened")] == [None, "2"]
+    assert [e["suppressed"] for e in await testing.audit_events(store, "sql_session_opened")] == [None, "2"]
     assert all(e["detail"].startswith("duration_seconds=") for e in closed)
     # Statements are not recorded: the setup statements and the kernel's are both absent.
-    assert not any("SET ROLE" in v for e in store.stream for v in e.values())
-    assert _no_secret_in(store, "secret-good")
+    assert not any("SET ROLE" in v for e in await testing.audit_stream(store) for v in e.values())
+    assert await _no_secret_in(store, "secret-good")
 
 
 @pytest.mark.asyncio
 async def test_refusals_are_recorded_and_an_unknown_value_once_never_by_handle():
     cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
-    store = FakeAsyncStore({
+    store = await _store({
         f"{b._KEY_PREFIX}secret-api": _sql_record(cid, hid, audience="api"),
         f"{b._KEY_PREFIX}secret-bad": "not-json",
     })
     for handle in ("secret-api", "secret-missing", "secret-missing", "secret-bad"):
         assert await proxy.serve_connection(handle, store, lambda binding: FakeBackend()) is False
 
-    refusals = store.events("refused")
+    refusals = await testing.audit_events(store, "refused")
     # An unknown value is recorded once per window by its digest; a real entry's refusal names the
     # entry and carries no digest (ADR-0042 dec 2, 8).
     assert [e["reason"] for e in refusals] == ["wrong_audience", "no_entry", "malformed_entry"]
@@ -210,18 +208,18 @@ async def test_refusals_are_recorded_and_an_unknown_value_once_never_by_handle()
     assert refusals[0]["digest"] is None
     assert refusals[1]["company_id"] is None and refusals[1]["handle_id"] is None
     assert refusals[1]["digest"] == audit.presented_digest("secret-missing") != refusals[2]["digest"]
-    assert store.events("first_use") == [] and store.events("sql_session_opened") == []
-    assert _no_secret_in(store, "secret-api", "secret-missing", "secret-bad")
+    assert await testing.audit_events(store, "first_use") == [] and await testing.audit_events(store, "sql_session_opened") == []
+    assert await _no_secret_in(store, "secret-api", "secret-missing", "secret-bad")
 
 
 @pytest.mark.asyncio
 async def test_a_suspended_tenants_refusal_names_the_tenant(caplog):
     cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}secret-s": _sql_record(cid, hid),
+    store = await _store({f"{b._KEY_PREFIX}secret-s": _sql_record(cid, hid),
                             f"nbcap-suspended:{cid}": "1"})
     with caplog.at_level("INFO", logger="notebook_sql_proxy"):
         assert await proxy.serve_connection("secret-s", store, lambda binding: FakeBackend()) is False
-    [refused] = store.events("refused")
+    [refused] = await testing.audit_events(store, "refused")
     assert (refused["reason"], refused["company_id"], refused["handle_id"]) == ("tenant_suspended", cid, hid)
     # The refusal is logged too, without the handle.
     assert "tenant_suspended" in caplog.text and "secret-s" not in caplog.text
@@ -230,15 +228,15 @@ async def test_a_suspended_tenants_refusal_names_the_tenant(caplog):
 @pytest.mark.asyncio
 async def test_a_session_ended_by_revocation_records_why():
     cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}good": _sql_record(cid, hid)})
+    store = await _store({f"{b._KEY_PREFIX}good": _sql_record(cid, hid)})
 
     class _RevokedMidSession(_RelayUntil):
         async def relay(self, still_authorized):
-            del store.mapping[f"{b._KEY_PREFIX}good"]
+            await store.delete(f"{b._KEY_PREFIX}good")
             await super().relay(still_authorized)
 
     assert await proxy.serve_connection("good", store, lambda binding: _RevokedMidSession(checks=3)) is True
-    [closed] = store.events("sql_session_closed")
+    [closed] = await testing.audit_events(store, "sql_session_closed")
     assert closed["reason"] == "capability_revoked"
     assert "refusal=no_entry" in closed["detail"]
 
@@ -246,7 +244,7 @@ async def test_a_session_ended_by_revocation_records_why():
 @pytest.mark.asyncio
 async def test_a_failed_recheck_and_a_relay_error_are_recorded_as_such():
     cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}good": _sql_record(cid, hid)})
+    store = await _store({f"{b._KEY_PREFIX}good": _sql_record(cid, hid)})
 
     class _StoreDown(_RelayUntil):
         async def relay(self, still_authorized):
@@ -267,12 +265,12 @@ async def test_a_failed_recheck_and_a_relay_error_are_recorded_as_such():
     assert await proxy.serve_connection("good", store, lambda binding: _StoreDown()) is True
     with pytest.raises(ConnectionError):
         await proxy.serve_connection("good", store, lambda binding: _RelayUntil(fail_with=ConnectionError("x")))
-    assert [e["reason"] for e in store.events("sql_session_closed")] == ["recheck_failed", "error"]
+    assert [e["reason"] for e in await testing.audit_events(store, "sql_session_closed")] == ["recheck_failed", "error"]
 
 
 @pytest.mark.asyncio
 async def test_a_backend_that_never_opened_records_no_session():
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()), str(uuid.uuid4()))})
+    store = await _store({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()), str(uuid.uuid4()))})
 
     class _Unreachable(FakeBackend):
         async def connect(self):
@@ -280,21 +278,22 @@ async def test_a_backend_that_never_opened_records_no_session():
 
     with pytest.raises(ConnectionError):
         await proxy.serve_connection("good", store, lambda binding: _Unreachable())
-    assert len(store.events("first_use")) == 1
-    assert store.events("sql_session_opened") == store.events("sql_session_closed") == []
+    assert len(await testing.audit_events(store, "first_use")) == 1
+    assert await testing.audit_events(store, "sql_session_opened") == []
+    assert await testing.audit_events(store, "sql_session_closed") == []
 
 
 @pytest.mark.asyncio
 async def test_a_handle_minted_before_the_record_has_no_first_use_and_no_session_record():
     # Nothing identifies it to bound its sessions by (ADR-0042 dec 8); it is served all the same.
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}old": _sql_record(str(uuid.uuid4()))})
+    store = await _store({f"{b._KEY_PREFIX}old": _sql_record(str(uuid.uuid4()))})
     assert await proxy.serve_connection("old", store, lambda binding: _RelayUntil()) is True
-    assert store.events() == []
+    assert await testing.audit_events(store) == []
 
 
 @pytest.mark.asyncio
 async def test_a_record_that_cannot_be_written_refuses_the_connection():
-    store = FakeAsyncStore({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()), str(uuid.uuid4()))})
+    store = await _store({f"{b._KEY_PREFIX}good": _sql_record(str(uuid.uuid4()), str(uuid.uuid4()))})
 
     async def eval_down(*_args):
         raise ConnectionError("store unreachable")

@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import gateway  # noqa: E402
-from capability_audit_fake import Capabilities  # noqa: E402
+from capability_store import capabilities  # noqa: E402
 import policy  # noqa: E402
 import staging  # noqa: E402
 
@@ -95,9 +95,9 @@ def _client(store, **handles):
         async def call(self, method, endpoint, *, params, body):
             return 200, {}
 
-    capabilities = Capabilities(handles)
-    client = TestClient(gateway.build_app(capabilities, Upstream(), store, bucket="mlflow"))
-    client.capabilities = capabilities
+    caps = capabilities(handles)
+    client = TestClient(gateway.build_app(caps, Upstream(), store, bucket="mlflow"))
+    client.capabilities = caps
     return client
 
 

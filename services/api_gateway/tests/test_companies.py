@@ -8,8 +8,11 @@ Company provisioning goes through the registry's SECURITY DEFINER functions (ADR
 The gateway role may only read public.companies, so every write calls provision_company() or
 update_company() (21-company-provisioning.sql; their DB-side behaviour is proven in
 infrastructure/timescaledb/tests/test_company_provisioning.py). These tests drive the routes with a
-fake session and check who may do what, and what each route asks the database to do.
+fake session and check who may do what, and what each route asks the database to do. The capability
+store is industryflow_contracts.testing's (a real Redis in CI), one client per event loop: TestClient
+runs the app on its own.
 """
+import asyncio
 import datetime
 import os
 import re
@@ -18,6 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from industryflow_contracts import testing
 from sqlalchemy.exc import IntegrityError, InvalidRequestError
 
 import main
@@ -139,23 +143,22 @@ class _OwnTransaction:
         return False
 
 
-class FakeStore:
-    def __init__(self):
-        self.kv = {}
-
-    async def set(self, key, value, ex=None):
-        self.kv[key] = value
-
-    async def delete(self, *keys):
-        for k in keys:
-            self.kv.pop(k, None)
-
-
 @pytest.fixture
 def store(monkeypatch):
-    fake = FakeStore()
-    monkeypatch.setattr(companies.redis_client, "redis", fake)
-    return fake
+    store = testing.AnyLoopRedis(encoding="utf-8", decode_responses=True)  # as messaging.redis_client
+    monkeypatch.setattr(companies.redis_client, "redis", store)
+    return store
+
+
+def _keys(store):
+    async def read():
+        return set(await store.keys("*"))
+
+    return asyncio.run(read())
+
+
+async def _mark(store, key):
+    await store.set(key, "1")
 
 
 @pytest.fixture
@@ -164,7 +167,7 @@ def as_user(monkeypatch, store):
 
     async def revoke_all(user_id):
         # The suspension marker is in place before any session is ended.
-        assert any(k.startswith("nbcap-suspended:") for k in store.kv)
+        assert await store.keys("nbcap-suspended:*")
         revoked.append(user_id)
         return 1
 
@@ -260,7 +263,7 @@ def test_delete_deactivates_company_and_users_and_ends_sessions(as_user):
 def test_delete_marks_the_company_suspended_for_every_capability_plane(as_user, store):
     c, _, _ = as_user(is_superuser=True)
     assert c.delete(f"/api/companies/{OTHER}").status_code == 200
-    assert suspended_key(str(OTHER)) in store.kv
+    assert suspended_key(str(OTHER)) in _keys(store)
 
 
 def test_deactivating_through_update_takes_the_delete_path(as_user, store):
@@ -271,22 +274,22 @@ def test_deactivating_through_update_takes_the_delete_path(as_user, store):
     (sql, params), = _calls(db, "update_company")
     assert params["is_active"] is False
     assert revoked == [str(i) for i in db.user_ids]
-    assert suspended_key(str(OTHER)) in store.kv
+    assert suspended_key(str(OTHER)) in _keys(store)
     assert db.commits == 2  # the suspension, then ending its SQL sessions
 
 
 def test_reactivating_lifts_the_suspension_and_ends_nothing(as_user, store):
-    store.kv[suspended_key(str(OTHER))] = "1"
+    asyncio.run(_mark(store, suspended_key(str(OTHER))))
     c, _, revoked = as_user(is_superuser=True, db=FakeDB(active=False))
     assert c.put(f"/api/companies/{OTHER}", json={"is_active": True}).status_code == 200
-    assert suspended_key(str(OTHER)) not in store.kv
+    assert suspended_key(str(OTHER)) not in _keys(store)
     assert revoked == []
 
 
 def test_renaming_ends_no_session(as_user, store):
     c, _, revoked = as_user(is_superuser=True)
     assert c.put(f"/api/companies/{OTHER}", json={"company_name": "New"}).status_code == 200
-    assert revoked == [] and store.kv == {}
+    assert revoked == [] and _keys(store) == set()
 
 
 def test_superuser_cannot_deactivate_own_company_through_update(as_user):

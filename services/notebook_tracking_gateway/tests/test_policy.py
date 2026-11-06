@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Tests for the tenant-scoping policy of the tracking gateway (ADR-0019)."""
+"""Tests for the tenant-scoping policy of the tracking gateway (ADR-0019), on
+industryflow_contracts.testing's store (a real Redis in CI)."""
 import json
 import os
 import sys
@@ -13,14 +14,15 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import policy as p  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 
-class FakeAsyncStore:
-    def __init__(self, mapping=None):
-        self.mapping = mapping or {}
-
-    async def get(self, key):
-        return self.mapping.get(key)
+async def _store(entries=()):
+    """The capability store holding ``entries``, connected as gateway.py connects (bytes back)."""
+    store = await testing.async_redis()
+    for key, value in dict(entries).items():
+        await store.set(key, value)
+    return store
 
 
 def _rec(company_id, audience="tracking", user="ds"):
@@ -30,7 +32,7 @@ def _rec(company_id, audience="tracking", user="ds"):
 @pytest.mark.asyncio
 async def test_resolve_tracking_handle():
     cid = str(uuid.uuid4())
-    store = FakeAsyncStore({f"{p._KEY_PREFIX}good": _rec(cid)})
+    store = await _store({f"{p._KEY_PREFIX}good": _rec(cid)})
     b = await p.resolve_tracking_binding(store.get, "good")
     assert b is not None and b.company_id == cid and b.user == "ds"
 
@@ -38,13 +40,13 @@ async def test_resolve_tracking_handle():
 @pytest.mark.asyncio
 async def test_non_tracking_audience_denied():
     cid = str(uuid.uuid4())
-    store = FakeAsyncStore({f"{p._KEY_PREFIX}sql": _rec(cid, audience="sql")})
+    store = await _store({f"{p._KEY_PREFIX}sql": _rec(cid, audience="sql")})
     assert await p.resolve_tracking_binding(store.get, "sql") is None
 
 
 @pytest.mark.asyncio
 async def test_absent_empty_malformed_denied():
-    store = FakeAsyncStore({f"{p._KEY_PREFIX}bad": "{not json"})
+    store = await _store({f"{p._KEY_PREFIX}bad": "{not json"})
     assert await p.resolve_tracking_binding(store.get, "missing") is None
     assert await p.resolve_tracking_binding(store.get, "") is None
     assert await p.resolve_tracking_binding(store.get, "bad") is None
@@ -114,9 +116,9 @@ def test_an_encoded_artifact_uri_key_is_not_owned():
 async def test_a_suspended_tenants_handle_is_denied(audience, resolve):
     # ADR-0033 dec 3: while the platform marks the company suspended, none of its handles resolve.
     cid = str(uuid.uuid4())
-    store = FakeAsyncStore({"nbcap:h": _rec(cid, audience=audience)})
+    store = await _store({"nbcap:h": _rec(cid, audience=audience)})
     assert await resolve(store.get, "h") is not None
-    store.mapping[f"nbcap-suspended:{cid}"] = "1"
+    await store.set(f"nbcap-suspended:{cid}", "1")
     assert await resolve(store.get, "h") is None
 
 
@@ -127,7 +129,7 @@ async def test_a_binding_carries_the_entrys_handle_id_and_tolerates_none():
     cid, hid = str(uuid.uuid4()), str(uuid.uuid4())
     with_id = json.dumps({"user": "ds", "company_id": cid, "audience": "tracking", "handle_id": hid})
     bad_id = json.dumps({"user": "ds", "company_id": cid, "audience": "tracking", "handle_id": "x"})
-    store = FakeAsyncStore({f"{p._KEY_PREFIX}a": with_id, f"{p._KEY_PREFIX}b": bad_id,
+    store = await _store({f"{p._KEY_PREFIX}a": with_id, f"{p._KEY_PREFIX}b": bad_id,
                             f"{p._KEY_PREFIX}c": _rec(cid)})
     assert (await p.resolve_tracking_binding(store.get, "a")).handle_id == hid
     assert (await p.resolve_tracking_binding(store.get, "b")).handle_id is None
@@ -137,7 +139,7 @@ async def test_a_binding_carries_the_entrys_handle_id_and_tolerates_none():
 @pytest.mark.asyncio
 async def test_a_refusal_says_why():
     cid = str(uuid.uuid4())
-    store = FakeAsyncStore({f"{p._KEY_PREFIX}up": _rec(cid, audience="upload"),
+    store = await _store({f"{p._KEY_PREFIX}up": _rec(cid, audience="upload"),
                             f"{p._KEY_PREFIX}bad": "{not json",
                             f"{p._KEY_PREFIX}tr": _rec(cid), f"nbcap-suspended:{cid}": "1"})
     reasons = {h: (await p.resolve_tracking_outcome(store.get, h))[1] for h in ("", "missing", "bad", "up", "tr")}
