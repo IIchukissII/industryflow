@@ -43,13 +43,15 @@ def test_the_job_starts_every_store_builds_the_image_and_requires_the_stack():
     ups = "\n".join(line for line in runs.splitlines() if re.search(r"docker compose up\b", line))
     # The job's executors run on the worker, as deployed; without one the application only waits.
     for service in ("kafka", "timescaledb", "minio", "spark-master", "spark-worker"):
-        assert re.search(rf"\b{service}\b", ups), f"the job does not start {service}"
+        assert re.search(rf"(?<![\w-]){service}(?![\w-])", ups), f"the job does not start {service}"
     assert "docker compose run --rm db-migrate" in runs, "the job applies no schema"
-    assert "minio-init" in runs, "the job creates no checkpoint bucket"
+    # An attached `up` exits 0 whatever the one-shot did; `run` exits with it.
+    assert "docker compose run --rm --no-deps minio-init" in runs, "a failed bucket init would pass"
     assert "docker compose build spark-streaming" in runs, "the job does not build the image it runs"
     step = next(s for s in job["steps"] if "pytest" in s.get("run", ""))
     assert PROOF in step["run"]
     assert str(step.get("env", {}).get("IF_REQUIRE_LIVE_STACK")) == "1", "a missing stack would skip"
+    assert job.get("needs") == "changes" and "relevant" in job.get("if", ""), "the job is not path-gated as the gate expects"
 
 
 def test_the_required_gate_reads_the_job():

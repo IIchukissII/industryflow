@@ -3,24 +3,28 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The streaming job against the platform's own broker, database and checkpoint store (ADR-0005
-dec 2-4, ADR-0006 dec 3-4, ADR-0026 dec 11).
+dec 2-3, ADR-0006 dec 3-6, ADR-0026 dec 11).
 
 test_streaming_batch.py injects the lookup, the dead-letter publisher and the writer: it proves the
 routing, not what the broker, the database and the checkpoint do with it. Here the job's own image
 runs its own ``main()`` (``docker compose run spark-streaming``) on its deployed master and worker,
-reading a topic of its own from the earliest offset, checkpointing to the object store and writing over verified TLS
-as its own role. Each outcome is read back from the store it lands in:
+reading a topic of its own from the earliest offset, checkpointing to the object store and writing
+over verified TLS as its own role. Each outcome is read back from the store it lands in:
 
 - a backlog written before the job starts is kept, every reading once (the earliest start), and
   each unwritable reading lands on the dead-letter topic with its reason, never in the table;
-- a job killed mid-stream resumes from its checkpoint, not from the start, and loses nothing and
-  duplicates nothing (dec 2; idempotent write, ADR-0006 dec 3);
-- while the database is down the batch fails and no offset advances: the readings sent during the
-  outage are written once it returns (dec 3; ADR-0006 dec 4).
+- a job killed mid-stream resumes from its object-store checkpoint, not from the start (ADR-0006
+  dec 5), and loses nothing (dec 2); the table's natural key, not the job, is what keeps a replayed
+  reading single (ADR-0006 dec 3);
+- a database that cannot be reached, or a write the database refuses, fails the batch and the job
+  exits (ADR-0006 dec 4, 6) with no offset advanced: the readings of the failed batch are written
+  once the job runs again (dec 3).
 
 Needs the compose stack's kafka, timescaledb (migrated), minio (initialised), spark-master and a
-spark-worker with room for one more application, and the built spark-streaming image. It skips when the database is not reachable; IF_REQUIRE_LIVE_STACK=1, set by
-the CI job that starts them, turns that skip into a failure.
+spark-worker with a free core and executor's memory for one more application (on a host that also
+runs the deployed jobs, stop one of them first), and the built spark-streaming image. The outage
+test stops the database. It skips when the database is not reachable; IF_REQUIRE_LIVE_STACK=1, set
+by the CI job that starts them, turns that skip into a failure.
 """
 import json
 import os
@@ -60,14 +64,16 @@ def _connect():
     )
 
 
-def _wait_for(predicate, what, deadline_s=DEADLINE_S, interval_s=2):
+def _wait_for(predicate, what, deadline_s=DEADLINE_S, interval_s=2, context=None):
+    """``predicate()`` once it is truthy; on timeout a failure carrying ``context()`` (the job's log)."""
     end = time.monotonic() + deadline_s
     while True:
         value = predicate()
         if value:
             return value
         if time.monotonic() > end:
-            pytest.fail(f"timed out after {deadline_s}s waiting for {what}")
+            detail = f":\n{context()[-4000:]}" if context else ""
+            pytest.fail(f"timed out after {deadline_s}s waiting for {what}{detail}")
         time.sleep(interval_s)
 
 
@@ -172,9 +178,15 @@ class Stream:
     def kill(self):
         subprocess.run(["docker", "kill", "-s", "KILL", self.current], check=True, capture_output=True)
 
+    def wait(self, predicate, what, **kw):
+        return _wait_for(predicate, what, context=self.logs if self.runs else None, **kw)
+
     def remove(self):
         for run in range(1, self.runs + 1):
             subprocess.run(["docker", "rm", "-f", f"{self.container}-{run}"], capture_output=True)
+        for topic in (self.topic, self.dlq):
+            _compose("exec", "-T", "kafka", "kafka-topics", "--bootstrap-server", "localhost:9092",
+                     "--delete", "--topic", topic, check=False)
 
     def _select(self, what):
         conn = _connect()
@@ -198,7 +210,7 @@ class Stream:
             if self.state()[0] != "running":
                 pytest.fail(f"the job stopped before writing {n} rows:\n{self.logs()[-4000:]}")
             return self.count() >= n
-        _wait_for(reached, f"{n} rows in {self.tenant['schema']}.sensor_measurements")
+        self.wait(reached, f"{n} rows in {self.tenant['schema']}.sensor_measurements")
 
     def dead_letters(self, expected):
         def read():
@@ -207,7 +219,7 @@ class Stream:
                             "--timeout-ms", "10000", check=False)
             records = [json.loads(line) for line in done.stdout.splitlines() if line.startswith("{")]
             return records if len(records) >= expected else None
-        return _wait_for(read, f"{expected} dead letters on {self.dlq}")
+        return self.wait(read, f"{expected} dead letters on {self.dlq}")
 
     def batch_ids(self, run):
         return [int(b) for b in re.findall(r"Batch (\d+): upserted", self.logs(run))]
@@ -248,7 +260,7 @@ def test_a_killed_job_resumes_from_its_checkpoint_without_loss_or_duplicate(stre
 
     stream.start()
     # Batch 1 starts only once batch 0 is committed, so a kill now has a checkpoint to resume from.
-    _wait_for(lambda: "Batch 1: upserted" in stream.logs(), "the second batch to be written", interval_s=0.5)
+    stream.wait(lambda: "Batch 1: upserted" in stream.logs(), "the second batch to be written", interval_s=0.5)
     stream.kill()
     written_at_kill = stream.count()
     assert 0 < written_at_kill < total, "the kill did not land mid-stream; the proof would see nothing"
@@ -270,7 +282,7 @@ def test_no_offset_advances_while_the_database_is_down(stream):
     _compose("stop", "timescaledb")
     try:
         stream.send(stream.reading(i) for i in range(1, 201))
-        _wait_for(lambda: stream.state()[0] == "exited", "the job to fail its batch while the database is down")
+        stream.wait(lambda: stream.state()[0] == "exited", "the job to fail its batch while the database is down")
         _, code = stream.state()
         assert code != 0, "the job stopped cleanly while its batch could not be written"
     finally:
@@ -288,3 +300,35 @@ def _database_answers():
         return True
     except Exception:  # noqa: BLE001
         return False
+
+
+def test_a_write_the_database_refuses_fails_the_batch_and_advances_no_offset(stream):
+    """The lookup succeeds and the executors' write is refused: the write path's own re-raise."""
+    stream.send([stream.reading(0)])
+    stream.start()
+    stream.wait_rows(1)
+
+    table = f'"{stream.tenant["schema"]}".sensor_measurements'
+    trigger = f"if_stream_it_refuse_{stream.sensor_id.replace('-', '_')}"
+    conn = _connect()
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute(f"CREATE FUNCTION public.{trigger}() RETURNS trigger LANGUAGE plpgsql AS "
+                "$$BEGIN RAISE EXCEPTION 'refused by the proof'; END$$")
+    try:
+        cur.execute(f"CREATE TRIGGER {trigger} BEFORE INSERT ON {table} FOR EACH ROW "
+                    f"WHEN (NEW.sensor_id = '{stream.sensor_id}') EXECUTE FUNCTION public.{trigger}()")
+        stream.send(stream.reading(i) for i in range(1, 51))
+        stream.wait(lambda: stream.state()[0] == "exited", "the job to fail its refused write")
+        _, code = stream.state()
+        assert code != 0, "the job stopped cleanly while its write was refused"
+        assert "refused by the proof" in stream.logs(), "the batch failed, but not on the refused write"
+        assert stream.count() == 1
+    finally:
+        cur.execute(f"DROP TRIGGER IF EXISTS {trigger} ON {table}")
+        cur.execute(f"DROP FUNCTION IF EXISTS public.{trigger}()")
+        conn.close()
+
+    stream.start()
+    stream.wait_rows(51)
+    assert stream.values() == [float(i) for i in range(51)]

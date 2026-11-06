@@ -59,7 +59,7 @@ jobs:
           docker compose run --rm db-migrate
 
       - name: Provision cold bucket + scoped principals (write + read-only)
-        run: docker compose up minio-init
+        run: docker compose run --rm --no-deps minio-init
 
       - name: Build + start the cold-store broker (notebooks profile)
         run: docker compose --profile notebooks up -d --build notebook-cold-broker

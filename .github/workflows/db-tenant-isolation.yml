@@ -115,7 +115,7 @@ jobs:
       - name: Start MinIO with its buckets and principals
         run: |
           docker compose up -d --wait minio
-          docker compose up minio-init
+          docker compose run --rm --no-deps minio-init
 
       - uses: actions/setup-python@v7
         with:

@@ -53,6 +53,8 @@ jobs:
               # checkpoint uses (spark-streaming job).
               - 'infrastructure/timescaledb/**'
               - 'infrastructure/minio/**'
+              # The jobs that start compose services run on its settings (cp .env.example .env).
+              - '.env.example'
               - '.github/workflows/unit-tests.yml'
 
   pytest:
@@ -189,7 +191,7 @@ jobs:
           docker compose up -d --wait zookeeper kafka timescaledb minio
           docker compose up -d --no-deps spark-master spark-worker
           docker compose run --rm db-migrate
-          docker compose up minio-init
+          docker compose run --rm --no-deps minio-init
       - name: Build the streaming image
         run: docker compose build spark-streaming
       - uses: actions/setup-python@v7
