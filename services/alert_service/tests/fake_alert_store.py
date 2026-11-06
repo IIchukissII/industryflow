@@ -7,6 +7,9 @@
 Mirrors the SQL's semantics, so engine tests exercise the durable dedup rather than a recorder:
 a row is suppressed when one in the same scope sits strictly within the window of its event time
 (reported back as prior_at), and an exact (alert_id, triggered_at) replay is a primary-key no-op.
+Every behaviour is a scenario in dedup_scenarios.py, which runs against this fake in
+test_fake_alert_store.py and against the real SQL in
+infrastructure/timescaledb/tests/test_alert_dedup_hypertable.py.
 """
 
 
@@ -17,7 +20,9 @@ class FakeAlertStore:
     @staticmethod
     def _in_scope(row, alert, retrain):
         if retrain:
-            return row.get('model_id') == alert.get('model_id') and row.get('condition') == 'retrain_recommended'
+            # model_id = $n, not IS NOT DISTINCT FROM: a recommendation with no model matches none.
+            return (alert.get('model_id') is not None and row.get('model_id') == alert.get('model_id')
+                    and row.get('condition') == 'retrain_recommended')
         return (
             (row['rule_id'], row.get('sensor_id'), row.get('equipment_id'))
             == (alert['rule_id'], alert.get('sensor_id'), alert.get('equipment_id'))

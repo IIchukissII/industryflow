@@ -57,8 +57,10 @@ jobs:
               - 'services/api_gateway/messaging/capability_audit_drain.py'
               - 'services/api_gateway/routers/capability_use.py'
               - 'services/api_gateway/routers/platform_switches.py'
-              # The engine tests' stand-in for that SQL; test_alert_dedup_hypertable.py holds it to the hypertable.
+              # The engine tests' stand-in for that SQL and the scenario table test_alert_dedup_hypertable.py
+              # runs on both, holding the fake to the hypertable.
               - 'services/alert_service/tests/fake_alert_store.py'
+              - 'services/alert_service/tests/dedup_scenarios.py'
               - 'services/alert_service/worker/tenant_status_publisher.py'
               - 'services/spark_jobs/reading_guard.py'
               - 'libs/industryflow_contracts/**'
