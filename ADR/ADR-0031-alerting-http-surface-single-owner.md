@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0031 — The API gateway as the single owner of the alerting HTTP surface
 
 - **Status:** Accepted
-- **Date:** 2026-10-11; changed 2026-10-17
+- **Date:** 2026-10-11; changed 2026-11-06
 - **Parent:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (one shared tenant-resolution implementation)
 - **Related:** [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (one edge, one session model), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (operator labels and precision), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (the detector consumes and writes alerts without HTTP), [ADR-0021](ADR-0021-model-drift-monitoring.md) (drift alerts share the alert lane), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (each deployable is a scrape target)
 
@@ -25,7 +25,8 @@ then has to be made twice, and the copy no caller exercises is the one that drif
    HTTP through it, behind the one edge (ADR-0004), with the one tenant resolution (ADR-0003).
 2. **The alerting service exposes no HTTP API of its own.** It consumes readings, evaluates rules and
    writes alerts and recommendations (ADR-0005, ADR-0021, ADR-0022), and has no separate HTTP
-   deployable, port, image or scrape target.
+   deployable or image. Its one listener serves the build revision alone (ADR-0016 dec 8) and is no
+   HTTP capability in the sense of decision 3.
 3. **An HTTP capability alerting needs in future is added to the gateway's surface,** not to a separate
    endpoint.
 
@@ -34,6 +35,7 @@ then has to be made twice, and the copy no caller exercises is the one that drif
 | Dec | Rejected alternative | Why rejected |
 |---|---|---|
 | 1 | The alerting service owns its HTTP surface; the gateway proxies to it | Moves tenant resolution and session verification into a second service, and adds a hop for no capability the gateway lacks |
+| 2 | No listener on the worker at all | A deploy of the worker would show only as a restart (ADR-0016 dec 8) |
 | 2 | Keep both surfaces and reconcile them | Two owners of one resource is the condition that produces drift; reconciling once does not stop it recurring |
 
 ## Consequences

@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0016 — Observability and monitoring integration
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-11-05
+- **Date:** 2026-06-27; changed 2026-11-06
 - **Parent:** ADR-0001
 - **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (self-contained chart; deferred monitoring here), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the tenant-isolated path alerts stay on), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (external traffic only over the TLS edge; sessions), [ADR-0043](ADR-0043-platform-switch-operator-control.md) (the superuser as the one platform-wide authority), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (the same sign-on pattern for the hub), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (dec 9: a release names images already built)
 
@@ -51,6 +51,9 @@ not leave the tenant-isolated path.
    serves it alone on a port of its own.** A deploy then shows in the same store, on the same time axis,
    as the symptoms it may cause. The revision is fixed when the image is built, so the series names what
    runs, not what a deployment meant to run; an image the platform does not build has no such revision.
+   A long-lived platform worker that serves no metrics and no HTTP API reports it too, alone on an
+   internal port of its own: nothing else rides on that listener, and it is no part of the worker's
+   liveness.
 
 ## Alternatives
 
@@ -85,6 +88,11 @@ not leave the tenant-isolated path.
 | 8 | Every service that serves metrics, including the stream-processing cluster's stock master | No build fixes its revision; one stamped from the deployment is the deployment-read revision rejected above |
 | 8 | The stream-processing workers reporting the series | A worker runs the stock worker process and executes only code its driver ships, so the driver's series already names that code's revision |
 | 8 | The stream processors left without the series | Their symptoms (consumer lag, dead letters, missing windows) are the ones a deploy most needs to be read against |
+| 8 | A worker that serves no metrics left without the series | The alert worker's symptoms (consumer lag, a stalled tenant-status stream) are alerted on, and its deploys would show only as restarts |
+| 8 | Such a worker serving its full metrics beside the series | A general metrics surface for a process nothing reads it from, and the publisher metric ADR-0033 dec 3 rejects |
+| 8 | The revision in the worker's heartbeat file | A per-container liveness probe reads it, so it never reaches the metrics store, and it ties the revision to liveness |
+| 8 | The revision as a log line | A line parsed back into a label breaks silently when either side changes |
+| 8 | The revision pushed to a push gateway | A pushed series outlives its process, so it states what ran, not what runs |
 | 8 | A plugin in the stream processor's runtime emitting the series among its own metrics | Adds a second build toolchain and its supply chain, couples to the processor's upgrades, and still misses the master |
 | 8 | The revision encoded in a metric name of the processor's own metrics and relabelled at the scrape | Those metrics carry no free labels; a name parsed back into a label breaks silently when either side changes |
 
@@ -102,9 +110,9 @@ not leave the tenant-isolated path.
 - A stolen superuser session also reads every service's metrics and logs while it lives.
 - Every dashboard request through the edge costs one session check at the gateway.
 - The single host holds one more signing key, generated at install and rotated by replacing it.
-- A service that serves no metrics of its own shows a deploy only as a restart.
+- A service exempt from decision 8 shows a deploy only as a restart.
 - The stream-processing cluster's master and workers report no revision; a change to their images shows only through its symptoms.
-- A stream-processing driver opens one more port, for the series alone.
+- A stream-processing driver, and a worker that serves no metrics, opens one more port, for the series alone.
 - Every deploy of a new commit changes every reporting service's revision, whether its code changed or not.
 
 ## Deferred

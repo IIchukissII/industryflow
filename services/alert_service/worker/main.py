@@ -19,6 +19,7 @@ from rules_engine import RulesEngine
 from kafka_consumer import AlertKafkaConsumer
 from feature_store import FeatureStore
 import tenant_status_publisher
+from industryflow_contracts import build_info
 
 # Configure logging
 logging.basicConfig(
@@ -345,4 +346,7 @@ async def main():
 
 
 if __name__ == "__main__":
+    # The commit this image was built from, alone on a port of its own (ADR-0016 dec 8): the worker serves
+    # no other metrics and no HTTP API (ADR-0031 dec 2). It fails soft and is not part of liveness.
+    build_info.serve("alert-service-detector")
     sys.exit(asyncio.run(main()))

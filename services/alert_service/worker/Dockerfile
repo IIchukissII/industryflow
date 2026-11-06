@@ -42,5 +42,12 @@ COPY worker/ .
 RUN useradd -u 10001 -r -s /usr/sbin/nologin appuser
 USER 10001
 
+# The commit this image is built from, reported as industryflow_build_info (ADR-0016 dec 8). Last, so
+# a new commit rebuilds no earlier layer.
+ARG INDUSTRYFLOW_REVISION=unknown
+ENV INDUSTRYFLOW_REVISION=${INDUSTRYFLOW_REVISION}
+# The worker serves that series alone on this port (build_info.serve); nothing else listens.
+EXPOSE 9108
+
 # Run alert detection service
 CMD ["python", "main.py"]

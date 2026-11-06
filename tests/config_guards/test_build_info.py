@@ -4,7 +4,7 @@
 
 """Every image the platform builds that runs platform code and serves metrics reports the revision it
 was built from (ADR-0016 dec 8): the Python web services through their own /metrics, the Spark drivers
-on a port of their own. Each link is a place an omission fails silently: a process that never calls the
+and the long-lived workers that serve no metrics on a port of their own. Each link is a place an omission fails silently: a process that never calls the
 report, a Dockerfile that drops the build argument, a build (compose, CI, the box deploy) that never
 passes it, a scrape (compose Prometheus, the chart) that never reads the port. The series then reads
 `unknown`, or is missing, and a deploy leaves no trace."""
@@ -15,7 +15,7 @@ from pathlib import Path
 
 from _repo import ROOT, find, helm_template, load_yaml
 
-from industryflow_contracts.build_info import DEFAULT_SERVE_PORT
+from industryflow_contracts.build_info import DEFAULT_SERVE_PORT, SERVE_PORT_ENV
 
 COMPOSE = load_yaml("docker-compose.yml")["services"]
 REPORT = re.compile(r'^build_info\.report\("([a-z0-9-]+)"\)$', re.M)
@@ -25,6 +25,10 @@ SPARK = ROOT / "services/spark_jobs"
 
 def _web_service(main: Path) -> dict:
     return {"entry": main, "dockerfile": main.parent / "Dockerfile", "call": REPORT}
+
+
+def _worker(main: Path) -> dict:
+    return {"entry": main, "dockerfile": main.parent / "Dockerfile", "call": SERVE}
 
 
 def _spark_driver(dockerfile: Path) -> dict:
@@ -37,6 +41,8 @@ def _spark_driver(dockerfile: Path) -> dict:
 REPORTERS = sorted(
     [_web_service(p) for p in ROOT.glob("services/**/main.py")
      if "node_modules" not in p.parts and "Instrumentator" in p.read_text()]
+    + [_worker(p) for p in ROOT.glob("services/**/main.py")
+       if "node_modules" not in p.parts and SERVE.search(p.read_text())]
     + [_spark_driver(d) for d in SPARK.glob("Dockerfile.*") if '"--py-files"' in d.read_text()],
     key=lambda r: str(r["entry"]),
 )
@@ -62,7 +68,8 @@ def _component(r: dict) -> str:
 
 def test_reporters_are_found():
     assert sum(r["call"] is REPORT for r in REPORTERS) >= 3, REPORTERS
-    assert {_component(r) for r in REPORTERS if r["call"] is SERVE} == {"spark-streaming", "spark-aggregations"}
+    assert {_component(r) for r in REPORTERS if r["call"] is SERVE} == \
+        {"spark-streaming", "spark-aggregations", "alert-service-detector"}
 
 
 def test_every_reporter_reports_its_revision_under_its_service_name():
@@ -117,6 +124,9 @@ def test_every_served_revision_is_scraped():
         pod = find(chart, "Deployment", f"-{component}")["spec"]["template"]["spec"]["containers"][0]
         assert {"name": "build-info", "containerPort": DEFAULT_SERVE_PORT} in pod.get("ports", []), \
             f"chart: the {component} container does not declare the build-info port"
+        # The process binds the port the chart names, not its own default (build_info.SERVE_PORT_ENV).
+        assert {"name": SERVE_PORT_ENV, "value": str(DEFAULT_SERVE_PORT)} in pod.get("env", []), \
+            f"chart: the {component} container is not told the build-info port ({SERVE_PORT_ENV})"
         service = find(chart, "Service", f"-{component}")["spec"]["ports"]
         assert any(p["name"] == "build-info" and p["port"] == DEFAULT_SERVE_PORT for p in service), \
             f"chart: the {component} Service has no build-info port"
@@ -129,7 +139,6 @@ def test_every_served_revision_is_scraped():
 # is in neither list until someone decides which it is; discovering reporters by how they serve metrics
 # alone would miss one that serves them another way.
 EXEMPT = {
-    "alert-service-detector": "serves no metrics: a Kafka consumer without an HTTP server",
     "frontend": "serves static files; no metrics",
     "mlflow": "the stock tracking server; serves no metrics the platform scrapes",
     "spark-worker": "the stock worker; executors run only code the driver ships, and the driver reports",
@@ -183,3 +192,41 @@ def test_no_exempt_image_is_scraped():
     monitored = {d["metadata"]["name"] for d in chart if d.get("kind") in ("ServiceMonitor", "PodMonitor")}
     assert not sorted(n for n in EXEMPT for m in monitored if m.endswith(f"-{n}")), \
         "the chart monitors an exempt image"
+
+
+def test_a_worker_that_serves_no_metrics_serves_the_series_alone():
+    """A worker reports its revision on its one listener and nothing else rides on it (ADR-0016 dec 8,
+    ADR-0031 dec 2): no other series, no published port, no other Service or scrape port."""
+    apps = load_yaml("deploy/helm/industryflow/values.yaml")["apps"]
+    workers = [r for r in REPORTERS if r["call"] is SERVE and not str(r["entry"]).startswith(str(SPARK))]
+    assert workers, "no worker found: the guard is not looking"
+    for r in workers:
+        component = _component(r)
+        listeners = sorted(f"{p.relative_to(ROOT)}: {m.group(0).strip()}" for p in _image_sources(r)
+                           for m in LISTENER.finditer(p.read_text()))
+        assert not listeners, f"{component}: listens beyond its revision series: {listeners}"
+        assert "ports" not in COMPOSE[component], f"compose {component}: the listener is published beyond the network"
+        app = apps[component]
+        extra = [k for k in ("port", "metricsPort", "metricsExtraPaths") if app.get(k)]
+        assert not extra, f"values.yaml apps.{component}: {extra} beside build-info"
+
+
+# Anything that would serve a second series or a route: a metrics client of its own, an HTTP server.
+LISTENER = re.compile(r"^\s*(?:from|import) (?:prometheus_client|aiohttp\.web|http\.server|socketserver|uvicorn|"
+                      r"fastapi|starlette)\b.*$|^\s*from aiohttp import .*\bweb\b.*$|\bstart_server\(|"
+                      r"\bstart_http_server\(|\bmake_wsgi_app\(|\bmake_asgi_app\(", re.M)
+
+
+def _image_sources(r: dict) -> list[Path]:
+    """Every Python file the worker's image copies from its build context (``COPY <src> <dst>``)."""
+    df = r["dockerfile"]
+    context = ROOT / next(svc["build"]["context"] for svc in COMPOSE.values()
+                          if isinstance(svc.get("build"), dict)
+                          and (ROOT / svc["build"]["context"] / svc["build"].get("dockerfile", "Dockerfile")).resolve() == df.resolve())
+    files = []
+    for src in re.findall(r"^COPY (?!--from)(\S+) \S+$", df.read_text(), re.M):
+        path = context / src
+        files += [p for p in (path.rglob("*.py") if path.is_dir() else [path])
+                  if p.suffix == ".py" and "tests" not in p.parts]
+    assert files, f"{df.relative_to(ROOT)}: no Python sources found — the guard is not looking"
+    return files

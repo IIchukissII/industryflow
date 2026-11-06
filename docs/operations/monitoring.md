@@ -53,6 +53,7 @@ Every target carries the label `platform="industryflow"`, which every platform a
 | `spark-driver` | `spark-streaming:4040`, `spark-aggregations:4040` | `/metrics/prometheus` |
 | `spark-executors` | `spark-streaming:4040`, `spark-aggregations:4040` | `/metrics/executors/prometheus` |
 | `spark-build-info` | `spark-streaming:9108`, `spark-aggregations:9108` | `/metrics` |
+| `alert-worker-build-info` | `alert-service-detector:9108` | `/metrics` |
 | `spark-master` | `spark-master:8080` | `/metrics/master/prometheus` |
 | `loki` | `loki:3100` | `/metrics`; `up{job="loki"}` is Loki's health signal (distroless image, no container healthcheck) |
 | `promtail` | `promtail:9080` | `/metrics` |
@@ -178,7 +179,7 @@ health reaches Grafana as `postgres-exporter` metrics.
 | Source | Metrics |
 |---|---|
 | `api-gateway`, `ml-service-api`, `ingestion-service` (`prometheus-fastapi-instrumentator` defaults) | `http_requests_total{handler,method,status}` (`status` grouped: `2xx`, `5xx`, …), `http_request_duration_seconds{handler,method}`, `http_request_duration_highr_seconds`, `http_request_size_bytes`, `http_response_size_bytes` |
-| `api-gateway`, `ml-service-api`, `ingestion-service`, `spark-streaming`, `spark-aggregations` | `industryflow_build_info{component,revision} 1`: the commit the image was built from (`INDUSTRYFLOW_REVISION` build argument; `unknown` when the build passed none); `component` is the compose service name, since a Kubernetes scrape sets its own `service` label; the Spark drivers serve it alone on port `9108` (`INDUSTRYFLOW_METRICS_PORT`), apart from the `PrometheusServlet`; `spark-master` (stock image) and `spark-worker` report none ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 8) |
+| `api-gateway`, `ml-service-api`, `ingestion-service`, `spark-streaming`, `spark-aggregations`, `alert-service-detector` | `industryflow_build_info{component,revision} 1`: the commit the image was built from (`INDUSTRYFLOW_REVISION` build argument; `unknown` when the build passed none); `component` is the compose service name, since a Kubernetes scrape sets its own `service` label; the Spark drivers serve it alone on port `9108` (`INDUSTRYFLOW_METRICS_PORT`), apart from the `PrometheusServlet`, and `alert-service-detector`, which serves no other metrics, on the same port; `spark-master` (stock image) and `spark-worker` report none ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 8) |
 | `ml-service-api` | `ml_stateful_features_neutralized_total` — see [kill-switch](#runbook-stateful-feature-kill-switch); `ml_stateful_features_unavailable_total` — stateful slots served neutral because their aggregate was unavailable ([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 3) |
 | Spark | Native `PrometheusServlet` driver, executor and master metrics |
 | `cadvisor` | `container_cpu_usage_seconds_total`, `container_memory_usage_bytes`, `container_network_{receive,transmit}_bytes_total`, `container_last_seen` (disk and diskIO metrics disabled) |
