@@ -49,8 +49,10 @@ jobs:
               - 'scripts/seed_users.py'
               - 'scripts/user_admin_db.py'
               - 'infrastructure/backup/**'
-              # The roles and grants the streaming job writes with (spark-streaming job).
+              # The roles and grants the streaming job writes with, and the bucket and principal its
+              # checkpoint uses (spark-streaming job).
               - 'infrastructure/timescaledb/**'
+              - 'infrastructure/minio/**'
               - '.github/workflows/unit-tests.yml'
 
   pytest:
