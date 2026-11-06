@@ -259,7 +259,7 @@ class AlertService:
 
         # Publish every tenant's status for ingestion (ADR-0033 dec 3), on its own timer.
         self.status_task = asyncio.create_task(tenant_status_publisher.run(
-            self.db_pool, self.kafka_consumer.producer.send_and_wait,
+            self.db_pool, self.kafka_consumer.send,
             config.KAFKA_TOPIC_TENANT_STATUS, config.TENANT_STATUS_PUBLISH_SECONDS,
         ))
 

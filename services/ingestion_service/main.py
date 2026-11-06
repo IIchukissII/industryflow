@@ -48,6 +48,20 @@ Instrumentator().instrument(app).expose(app)
 # The source revision this image was built from (ADR-0016 dec 8).
 build_info.report("ingestion-service")
 
+def tenant_status_consumer() -> AIOKafkaConsumer:
+    """An unstarted consumer of the tenant-status stream: outside any group, from the newest offset."""
+    return AIOKafkaConsumer(
+        settings.KAFKA_TOPIC_TENANT_STATUS,
+        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+        group_id=None,
+        enable_auto_commit=False,
+        auto_offset_reset="latest",
+        # The publisher's first send creates the topic; notice it within a status interval or so,
+        # not the client's five-minute default.
+        metadata_max_age_ms=30_000,
+    )
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize connections on startup"""
@@ -65,16 +79,7 @@ async def startup_event():
     # Refuse suspended tenants from the tenant-status stream (ADR-0033 dec 3): a consumer outside
     # any group, from the newest offset, so every replica hears every tenant within one interval.
     global _status_task
-    _status_task = asyncio.create_task(tenant_status.follow(lambda: AIOKafkaConsumer(
-        settings.KAFKA_TOPIC_TENANT_STATUS,
-        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
-        group_id=None,
-        enable_auto_commit=False,
-        auto_offset_reset="latest",
-        # The publisher's first send creates the topic; notice it within a status interval or so,
-        # not the client's five-minute default.
-        metadata_max_age_ms=30_000,
-    )))
+    _status_task = asyncio.create_task(tenant_status.follow(tenant_status_consumer))
     logger.info(f"Tenant status: {settings.KAFKA_TOPIC_TENANT_STATUS}")
 
     logger.info("✅ Ingestion Service started successfully")

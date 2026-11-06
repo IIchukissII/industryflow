@@ -16,6 +16,7 @@ from aiokafka.errors import (
     CommitFailedError,
     IllegalGenerationError,
     KafkaError,
+    OutOfOrderSequenceNumber,
     RebalanceInProgressError,
     UnknownMemberIdError,
 )
@@ -73,6 +74,8 @@ class AlertKafkaConsumer:
         self._heartbeat_file = config.HEARTBEAT_FILE
         # Consecutive batches that could not be handled; drives the exponential backoff.
         self._failed_batches = 0
+        # Serialises replacing a broken producer (send) between the dead-letter and status senders.
+        self._producer_lock = asyncio.Lock()
 
     async def start(self):
         """Initialize Kafka consumer and producer"""
@@ -95,11 +98,7 @@ class AlertKafkaConsumer:
         # so a message is durably replicated before it counts as sent (ADR-0005). No serializer:
         # it sends bytes, and each sender encodes its own contract (the tenant status arrives
         # encoded by industryflow_contracts.tenant_status).
-        self.producer = AIOKafkaProducer(
-            bootstrap_servers=self.config.KAFKA_BOOTSTRAP_SERVERS,
-            acks='all',
-            enable_idempotence=True
-        )
+        self.producer = self._new_producer()
 
         await self.consumer.start()
         await self.producer.start()
@@ -228,7 +227,7 @@ class AlertKafkaConsumer:
         except UnicodeDecodeError:
             original = raw.hex()
         try:
-            await self.producer.send_and_wait(
+            await self.send(
                 self._dlq_topic,
                 # The envelope both dead-letter producers write (docs/operations/dead-letters.md).
                 value=json.dumps({
@@ -277,6 +276,48 @@ class AlertKafkaConsumer:
 
         if triggered_alerts:
             logger.info(f"Triggered {len(triggered_alerts)} alert(s) for company {company_id}")
+
+    def _new_producer(self) -> AIOKafkaProducer:
+        return AIOKafkaProducer(
+            bootstrap_servers=self.config.KAFKA_BOOTSTRAP_SERVERS,
+            acks='all',
+            enable_idempotence=True
+        )
+
+    async def send(self, topic: str, value: bytes, key: Optional[bytes] = None):
+        """Send one message on the worker's producer, the one the dead letters and the tenant-status
+        stream share.
+
+        aiokafka's idempotent producer numbers a batch before it is sent and drops a batch that outlives
+        its timeout with no partition leader, as during a broker restart. The broker then refuses the
+        next number with OutOfOrderSequenceNumber, which ends the producer's sender for good: every
+        later send fails the same way. Such a producer is replaced by a new one, under a new producer
+        id, and the message is sent once more on it."""
+        producer = self.producer
+        try:
+            return await producer.send_and_wait(topic, value=value, key=key)
+        except OutOfOrderSequenceNumber:
+            logger.warning("the Kafka producer lost its sequence; replacing it")
+            await self._replace_producer(producer)
+            return await self.producer.send_and_wait(topic, value=value, key=key)
+
+    async def _replace_producer(self, broken: AIOKafkaProducer) -> None:
+        async with self._producer_lock:
+            if self.producer is not broken:  # another sender replaced it already
+                return
+            # The broken one stays until a new one has started: if the broker refuses the start, the
+            # next send fails the same way and tries again.
+            fresh = self._new_producer()
+            try:
+                await fresh.start()
+            except BaseException:
+                await fresh.stop()
+                raise
+            self.producer = fresh
+            try:
+                await broken.stop()
+            except Exception:  # noqa: BLE001 - its sender has already failed
+                pass
 
     async def stop(self):
         """Stop Kafka consumer and producer"""

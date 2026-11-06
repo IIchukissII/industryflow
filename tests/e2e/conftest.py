@@ -27,7 +27,7 @@ import uuid
 
 import pytest
 
-from harness import Edge, Environment, Secret
+from harness import Edge, Environment, Secret, issue_device
 
 REQUIRED = ("IF_E2E_EDGE", "IF_E2E_INGEST", "IF_E2E_CA", "IF_E2E_SUPERUSER_EMAIL",
             "IF_E2E_SUPERUSER_PASSWORD", "IF_E2E_COMPOSE_DIR", "IF_E2E_WORK", "IF_E2E_AUTHORING_IMAGE")
@@ -97,8 +97,4 @@ def tenant(edge, root, env):
 @pytest.fixture(scope="session")
 def device(env, tenant, settings):
     """A certificate for a device of the run's tenant, as the operator enrols one (scripts/device-ca.sh)."""
-    device_id = f"e2e-dev-{tenant['run']}"
-    env.script("scripts/device-ca.sh", "issue", tenant["company_id"], device_id)
-    base = os.path.join(settings["IF_E2E_COMPOSE_DIR"], "deploy", "device-ca", "devices", tenant["company_id"],
-                        device_id)
-    return os.path.join(base, "current.chain.crt"), os.path.join(base, "current.key")
+    return issue_device(env, settings["IF_E2E_COMPOSE_DIR"], tenant["company_id"], f"e2e-dev-{tenant['run']}")

@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import asyncpg
 import pytest
 from aiokafka import AIOKafkaProducer, TopicPartition
-from aiokafka.errors import CommitFailedError, KafkaError
+from aiokafka.errors import CommitFailedError, KafkaError, OutOfOrderSequenceNumber
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
@@ -310,3 +310,82 @@ def test_the_tenant_status_message_passes_the_producer_unchanged(monkeypatch, tm
     # aiokafka's own serialization step: what send() puts on the wire.
     assert producer._serialize(key, value, []) == (key, value)
     assert tenant_status.decode(value) == ("3926f3d5-d81f-4a81-a54b-b9ba8a3edf89", False)
+
+
+# --- a producer that lost its sequence --------------------------------------------------------------
+
+class SequenceLostProducer(FakeProducer):
+    """An idempotent producer after a broker restart dropped a numbered batch: every send fails alike."""
+
+    def __init__(self):
+        super().__init__()
+        self.stopped = False
+
+    async def send_and_wait(self, topic, value=None, key=None):
+        raise OutOfOrderSequenceNumber()
+
+    async def stop(self):
+        self.stopped = True
+
+
+class StartedProducer(FakeProducer):
+    def __init__(self, start_error=None):
+        super().__init__()
+        self.start_error, self.started, self.stopped = start_error, False, False
+
+    async def start(self):
+        if self.start_error:
+            raise self.start_error
+        self.started = True
+
+    async def stop(self):
+        self.stopped = True
+
+
+def _sequence_lost(tmp_path, monkeypatch, *fresh):
+    c = _consumer([], ScriptedEngine(), tmp_path, KAFKA_BOOTSTRAP_SERVERS="kafka:9092")
+    c.producer = SequenceLostProducer()
+    built = list(fresh)
+    monkeypatch.setattr(c, "_new_producer", lambda: built.pop(0))
+    return c
+
+
+def test_a_producer_that_lost_its_sequence_is_replaced_and_the_message_sent_on_the_new_one(tmp_path, monkeypatch):
+    fresh = StartedProducer()
+    c = _sequence_lost(tmp_path, monkeypatch, fresh)
+    broken = c.producer
+    key, value = tenant_status.encode(CO, False)
+    asyncio.run(c.send("tenant-status", value=value, key=key))
+    assert c.producer is fresh and fresh.started and broken.stopped
+    assert fresh.sent == [("tenant-status", {"company_id": CO, "active": False})]
+
+
+def test_concurrent_senders_replace_a_lost_producer_once(tmp_path, monkeypatch):
+    fresh = StartedProducer()
+    c = _sequence_lost(tmp_path, monkeypatch, fresh)  # a second replacement would find no producer
+
+    async def both():
+        await asyncio.gather(c.send("a", value=b"{}"), c.send("b", value=b"{}"))
+
+    asyncio.run(both())
+    assert c.producer is fresh and sorted(t for t, _ in fresh.sent) == ["a", "b"]
+
+
+def test_a_replacement_the_broker_refuses_keeps_the_old_producer_to_try_again(tmp_path, monkeypatch):
+    refused, fresh = StartedProducer(start_error=KafkaError("broker down")), StartedProducer()
+    c = _sequence_lost(tmp_path, monkeypatch, refused, fresh)
+    broken = c.producer
+    with pytest.raises(KafkaError):
+        asyncio.run(c.send("tenant-status", value=b"{}"))
+    assert c.producer is broken and refused.stopped and not broken.stopped
+    asyncio.run(c.send("tenant-status", value=b"{}"))
+    assert c.producer is fresh and fresh.sent == [("tenant-status", {})]
+
+
+def test_a_dead_letter_survives_a_producer_that_lost_its_sequence(tmp_path, monkeypatch, sleeps):
+    fresh = StartedProducer()
+    c = _sequence_lost(tmp_path, monkeypatch, fresh)
+    c.consumer = FakeConsumer([[_record(0, b"\xff")]], c)
+    _run(c)
+    assert [t for t, _ in fresh.sent] == ["sensor-data-raw.dlq"]
+    assert c.consumer.commits == [{TP: 1}]
