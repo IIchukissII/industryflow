@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The streaming job's real-store proof runs, on the platform's own stores, and its result gates
-(services/spark_jobs/tests/test_streaming_integration.py, ADR-0026 dec 11).
+"""The Spark jobs' real-store proofs run, on the platform's own stores, and their result gates
+(services/spark_jobs/tests/*_integration.py on spark_stack.py, ADR-0026 dec 11).
 
 Every side fails silently: a proof left in the no-stack matrix only skips; a job that stops starting
 a store, building the image or requiring the stack skips or proves nothing; a job the gate does not
@@ -13,7 +13,8 @@ import re
 
 from _repo import ROOT, load_yaml
 
-PROOF = "services/spark_jobs/tests/test_streaming_integration.py"
+TESTS = "services/spark_jobs/tests"
+HELPER = f"{TESTS}/spark_stack.py"
 WORKFLOW = ".github/workflows/unit-tests.yml"
 JOB = "spark-streaming"
 
@@ -26,15 +27,31 @@ def _runs(job):
     return "\n".join(s.get("run", "") for s in job["steps"])
 
 
-def test_the_proof_exists_and_is_an_integration_module():
-    src = (ROOT / PROOF).read_text()
-    assert re.search(r"^pytestmark = pytest\.mark\.integration", src, re.M)
-    assert re.search(r'^REQUIRE_ENV = "IF_REQUIRE_LIVE_STACK"', src, re.M)
+def _proofs():
+    return sorted(
+        p.relative_to(ROOT).as_posix() for p in (ROOT / TESTS).glob("test_*.py")
+        if re.search(r"^pytestmark = pytest\.mark\.integration", p.read_text(), re.M)
+    )
 
 
-def test_the_no_stack_matrix_leaves_the_proof_out():
+def _services(proof):
+    """The compose services a proof runs as its job (spark_stack.Job's service argument)."""
+    return set(re.findall(r'(?:Job|__init__)\(tenant, "([a-z-]+)"', (ROOT / proof).read_text()))
+
+
+def test_both_jobs_have_a_proof_on_the_shared_stack():
+    assert {s for p in _proofs() for s in _services(p)} >= {"spark-streaming", "spark-aggregations"}
+    assert re.search(r'^REQUIRE_ENV = "IF_REQUIRE_LIVE_STACK"', (ROOT / HELPER).read_text(), re.M)
+    for proof in _proofs():
+        src = (ROOT / proof).read_text()
+        # The stack fixture is what turns a missing stack into a failure under the job's env.
+        assert "spark_stack.require_stack()" in src, f"{proof} does not require the stack"
+
+
+def test_the_no_stack_matrix_leaves_every_proof_out():
     entry = next(e for e in _jobs()["pytest"]["strategy"]["matrix"]["include"] if e["service"] == "spark_jobs")
-    assert f"--ignore={PROOF}" in entry.get("args", "")
+    missing = [p for p in _proofs() if f"--ignore={p}" not in entry.get("args", "")]
+    assert not missing, f"would only skip in the no-stack matrix: {missing}"
 
 
 def test_the_job_starts_every_store_builds_the_image_and_requires_the_stack():
@@ -47,9 +64,12 @@ def test_the_job_starts_every_store_builds_the_image_and_requires_the_stack():
     assert "docker compose run --rm db-migrate" in runs, "the job applies no schema"
     # An attached `up` exits 0 whatever the one-shot did; `run` exits with it.
     assert "docker compose run --rm --no-deps minio-init" in runs, "a failed bucket init would pass"
-    assert "docker compose build spark-streaming" in runs, "the job does not build the image it runs"
+    build = next(line for line in runs.splitlines() if "docker compose build" in line)
+    for service in sorted({s for p in _proofs() for s in _services(p)}):
+        assert re.search(rf"(?<![\w-]){service}(?![\w-])", build), f"the job does not build {service}, which a proof runs"
     step = next(s for s in job["steps"] if "pytest" in s.get("run", ""))
-    assert PROOF in step["run"]
+    missing = [p for p in _proofs() if p not in step["run"]]
+    assert not missing, f"the job does not run: {missing}"
     assert str(step.get("env", {}).get("IF_REQUIRE_LIVE_STACK")) == "1", "a missing stack would skip"
     assert job.get("needs") == "changes" and "relevant" in job.get("if", ""), "the job is not path-gated as the gate expects"
 
