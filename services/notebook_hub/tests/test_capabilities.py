@@ -22,7 +22,8 @@ from industryflow_contracts import testing  # noqa: E402
 
 
 def _store():
-    """``RedisCapabilityStore`` on an empty database, counting each MULTI/EXEC its client executes."""
+    """``RedisCapabilityStore`` on an empty database, keeping ``(command, key)`` of what each MULTI/EXEC
+    its client executes carried."""
     client = testing.sync_redis()
     client.multis = []
     pipeline = client.pipeline
@@ -33,7 +34,7 @@ def _store():
 
         def run(*args, **kwargs):
             if transaction:
-                client.multis.append([c[0][0] for c in pipe.command_stack])
+                client.multis.append([(_text(c[0][0]), _text(c[0][1])) for c in pipe.command_stack])
             return execute(*args, **kwargs)
 
         pipe.execute = run
@@ -81,7 +82,8 @@ def _ttl(store, key):
 
 
 def _multis(store):
-    return len(_redis(store).multis)
+    """``[(command, key), ...]`` for each MULTI/EXEC the store's client executed."""
+    return _redis(store).multis
 
 
 def _stream(store):
@@ -307,7 +309,9 @@ def test_a_mint_binds_a_handle_id_and_records_it_in_the_same_transaction():
     cid = str(uuid.uuid4())
     handle = cap.mint(store, user="alice", company_id=cid, audience=cap.AUDIENCE_SQL,
                       ttl_seconds=900, server_name="gpu")
-    assert _multis(store) == 1
+    # One MULTI carrying the index, the entry and the record: they land together or not at all.
+    assert _multis(store) == [[("HSET", "nbcap-user:alice"), ("EXPIRE", "nbcap-user:alice"),
+                               ("SET", f"nbcap:{handle}"), ("XADD", audit.STREAM_KEY)]]
     (minted,) = _events(store, audit.MINTED)
     handle_id = _entry(store, handle)["handle_id"]
     assert str(uuid.UUID(handle_id)) == handle_id

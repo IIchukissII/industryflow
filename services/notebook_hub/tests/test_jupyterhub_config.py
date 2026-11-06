@@ -136,6 +136,7 @@ import logging  # noqa: E402
 import uuid  # noqa: E402
 
 sys.path.insert(0, str(HUB_DIR / "tests"))
+from industryflow_contracts import capability_audit as audit  # noqa: E402
 from test_capabilities import _data, _events, _multis, _redis, _store, _stream, _ttl  # noqa: E402
 
 
@@ -296,7 +297,14 @@ def test_a_spawn_records_each_mint_and_the_environment_started():
     _spawn(ns, spawner)
     minted = _events(store, "minted")
     assert {e["audience"] for e in minted} == {"api", "sql"}
-    assert _multis(store) == len(minted)  # each mint one transaction with its record
+    # Each mint is one MULTI carrying its entry, its index under the user, and its record.
+    multis = _multis(store)
+    assert len(multis) == len(minted)
+    for multi in multis:
+        assert [c for c, _key in multi] == ["HSET", "EXPIRE", "SET", "XADD"]
+        assert multi[0][1] == "nbcap-user:u-1" and multi[2][1].startswith("nbcap:")
+        assert multi[3][1] == audit.STREAM_KEY
+    assert {m[2][1] for m in multis} == {f"nbcap:{h}" for h in _handles(store)}
     (started,) = _events(store, "environment_started")
     assert (started["user"], started["company_id"], started["plane"]) == ("u-1", cid, "hub")
     assert started["detail"] == "server= profile=authoring"

@@ -7,19 +7,39 @@ CI), connected as gateway.py connects (bytes back), one client per event loop si
 the app on its own; and its capability-use record (ADR-0042) read back from the stream."""
 import asyncio
 
+from industryflow_contracts import capability_audit as audit
 from industryflow_contracts import testing
 
-# Stores whose entries the test must find still there when it ends (conftest.py).
+# Stores this plane must not remove anything from, checked when the test ends (conftest.py):
+# ``(store, keys it held when made, every removal asked of it)``.
 NEVER_CONSUMED = []
+REMOVALS = ("delete", "unlink", "getdel", "getex")
 
 
 def capabilities(entries=None, *, consumable=True):
-    """A store holding ``entries``. With ``consumable=False`` a removal of any of them fails the test:
-    the tracking plane never consumes a handle."""
+    """A store holding ``entries``. With ``consumable=False`` any removal asked of it fails the test,
+    whether or not the key was there: the tracking plane never consumes a handle."""
     store = testing.AnyLoopRedis(entries)
     if not consumable:
-        NEVER_CONSUMED.append((store, sorted(entries or {})))
+        asked = []
+
+        def watched(command):
+            async def run(*args, **kwargs):
+                if command != "eval" or args[:1] == (audit.DELETE_RECORDED_SCRIPT,):
+                    asked.append((command, args))
+                return await getattr(store.loop_client(), command)(*args, **kwargs)
+            return run
+
+        for command in (*REMOVALS, "eval"):
+            setattr(store, command, watched(command))
+        NEVER_CONSUMED.append((store, keyspace(store), asked))
     return store
+
+
+def keyspace(store):
+    """The store's keys, not counting the capability-use record's own (its stream and markers)."""
+    with store.sync() as client:
+        return {k.decode() for k in client.keys("*") if not k.startswith(b"nbcap-audit")}
 
 
 def events(store, kind=None):

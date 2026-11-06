@@ -50,16 +50,16 @@ def pytest_runtest_makereport(item, call):
 
 @pytest.fixture(autouse=True)
 def _tracking_handles_are_never_consumed():
-    """Every entry of a store made with ``capability_store.capabilities(consumable=False)`` is still
-    there when the test ends."""
-    from capability_store import NEVER_CONSUMED
+    """A store made with ``capability_store.capabilities(consumable=False)`` was asked to remove
+    nothing, and still holds every key it held when made."""
+    from capability_store import NEVER_CONSUMED, keyspace
 
     NEVER_CONSUMED.clear()
     yield
-    for store, keys in NEVER_CONSUMED:
-        with store.sync() as client:
-            gone = [k for k in keys if not client.exists(k)]
-        assert not gone, f"this plane never consumes a handle, and removed {gone}"
+    for store, held, asked in NEVER_CONSUMED:
+        assert not asked, f"this plane never consumes a handle, and asked the store to: {asked}"
+        gone = sorted(held - keyspace(store))
+        assert not gone, f"this plane never consumes a handle, and {gone} are gone"
     NEVER_CONSUMED.clear()
 
 
