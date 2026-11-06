@@ -121,3 +121,4 @@ not leave the tenant-isolated path.
 - `deploy/helm/industryflow/templates/observability-*.yaml`: decisions 1–2.
 - `services/frontend/grafana.conf.template`: decisions 6–7.
 - `services/api_gateway/routers/dashboards_assertion.py`: decision 7.
+- `tests/config_guards/test_build_info.py`: decision 8.
