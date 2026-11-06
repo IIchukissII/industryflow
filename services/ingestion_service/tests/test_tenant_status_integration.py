@@ -35,7 +35,9 @@ import pytest
 from aiokafka import AIOKafkaProducer
 
 from industryflow_contracts import tenancy, tenant_status as contract
-from real_kafka import BOOTSTRAP, broker_outage, create_topics, records, require_broker, require_outage, unique_topic
+from real_kafka import (  # noqa: F401 - topics_deleted is an autouse fixture
+    BOOTSTRAP, broker_outage, create_topics, records, require_broker, require_outage, topics_deleted, unique_topic,
+)
 
 # The alert worker's modules, after ingestion's own on the path: ingestion's config and main win.
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "alert_service", "worker"))
@@ -99,7 +101,7 @@ def _worker_config(tmp_path):
     sensors = unique_topic("if-alert-unused")
     return SimpleNamespace(
         KAFKA_BOOTSTRAP_SERVERS=BOOTSTRAP, KAFKA_TOPIC_SENSOR_DATA=sensors, KAFKA_GROUP_ID=f"{sensors}-group",
-        KAFKA_TOPIC_DLQ=f"{sensors}.dlq", KAFKA_MAX_RETRIES=1, KAFKA_RETRY_BACKOFF_SECONDS=0.05,
+        KAFKA_TOPIC_DLQ=unique_topic("if-alert-unused-dlq"), KAFKA_MAX_RETRIES=1, KAFKA_RETRY_BACKOFF_SECONDS=0.05,
         KAFKA_MAX_BACKOFF_SECONDS=0.2, HEARTBEAT_FILE=str(tmp_path / "heartbeat"),
     )
 

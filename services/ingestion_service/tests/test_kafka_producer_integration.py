@@ -24,7 +24,9 @@ from urllib.parse import quote
 
 import pytest
 
-from real_kafka import BOOTSTRAP, broker_stopped, records, require_broker, require_outage, unique_topic
+from real_kafka import (  # noqa: F401 - topics_deleted is an autouse fixture
+    BOOTSTRAP, broker_stopped, records, require_broker, require_outage, topics_deleted, unique_topic,
+)
 
 import config
 import kafka_producer

@@ -40,8 +40,9 @@ def _env_names(module: str) -> tuple[str, str]:
     src = (ROOT / module).read_text()
     if re.search(r'^REQUIRE_ENV = "', src, re.M):
         return _module_constant(src, "REQUIRE_ENV"), _module_constant(src, "BOOTSTRAP_ENV")
-    imported = re.search(rf"^from {HELPER} import [^\n]*\brequire_broker\b", src, re.M)
-    assert imported, f"{module} declares no broker requirement the guard can read"
+    imported = re.search(rf"^from {HELPER} import (\([^)]*\)|[^\n]*)", src, re.M)
+    assert imported and re.search(r"\brequire_broker\b", imported.group(1)), \
+        f"{module} declares no broker requirement the guard can read"
     helper = (ROOT / module).parent / f"{HELPER}.py"
     assert helper.exists(), f"{module} imports {HELPER}, which is not beside it"
     src = helper.read_text()
@@ -101,3 +102,16 @@ def test_the_required_gate_reads_the_kafka_job():
     # The result read must be one the failure check actually tests.
     var = re.search(rf'(\w+)="\$\{{\{{ needs\.{JOB}\.result \}}\}}"', script).group(1)
     assert re.search(rf'for r in [^;]*"\${var}"', script), "the gate reads the job's result but never tests it"
+
+
+@pytest.mark.parametrize("service", SERVICES)
+def test_no_real_broker_proof_names_a_topic_the_dead_letter_alert_watches(service):
+    """IndustryFlowDeadLetteredReadings fires on every ".dlq" topic that grows; a proof run against a live
+    broker that wrote one would page the operator."""
+    tests = SERVICES[service][0]
+    # The proofs and the helpers beside them (a helper module, a worker process a proof starts).
+    helpers = [p.relative_to(ROOT).as_posix() for p in (ROOT / tests).glob("*.py")
+               if not p.name.startswith("test_") and p.name != "conftest.py"]
+    files = _integration_modules(tests) + helpers
+    offending = [f for f in files if re.search(r"""[\w}]\.dlq['"]""", (ROOT / f).read_text())]
+    assert not offending, f"a test topic ending .dlq: {offending}"

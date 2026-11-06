@@ -48,6 +48,10 @@ REQUIRE_ENV = "IF_REQUIRE_REAL_KAFKA"
 BOOTSTRAP = os.environ.get(BOOTSTRAP_ENV) or "localhost:9092"
 CO = "0b2f503a-6e59-4f4f-b0cd-b82547a20cf2"
 SENSOR = "11111111-1111-1111-1111-111111111111"
+# A test's dead-letter topic ends "-dlq", never ".dlq": the platform's dead-letter alert
+# (IndustryFlowDeadLetteredReadings) watches every ".dlq" topic, and a proof run against a live broker
+# must not page the operator. The worker takes the name from its config, so the name changes nothing.
+DLQ_SUFFIX = "-dlq"
 # Joining a group waits out the broker's initial rebalance delay, and after a kill, the dead
 # member's session; every wait below is bounded by this.
 DEADLINE_S = 90
@@ -81,10 +85,13 @@ def broker():
 
 @pytest.fixture
 def names():
-    """A topic, its dead-letter topic and a group of their own: tests share no state on the broker."""
+    """A topic, its dead-letter topic and a group of their own: tests share no state on the broker, and
+    leave none behind."""
     topic = f"if-alert-it-{uuid.uuid4().hex[:12]}"
-    asyncio.run(_create_topics(topic, f"{topic}.dlq"))
-    return SimpleNamespace(topic=topic, dlq=f"{topic}.dlq", group=f"{topic}-group")
+    dlq = f"{topic}{DLQ_SUFFIX}"
+    asyncio.run(_create_topics(topic, dlq))
+    yield SimpleNamespace(topic=topic, dlq=dlq, group=f"{topic}-group")
+    asyncio.run(_delete_topics(topic, dlq))
 
 
 async def _create_topics(*topics):
@@ -92,6 +99,15 @@ async def _create_topics(*topics):
     await admin.start()
     try:
         await admin.create_topics([NewTopic(t, num_partitions=1, replication_factor=1) for t in topics])
+    finally:
+        await admin.close()
+
+
+async def _delete_topics(*topics):
+    admin = AIOKafkaAdminClient(bootstrap_servers=BOOTSTRAP)
+    await admin.start()
+    try:
+        await admin.delete_topics(list(topics))
     finally:
         await admin.close()
 
@@ -222,7 +238,7 @@ def test_a_worker_killed_before_its_commit_loses_nothing(names, tmp_path):
         await _produce(names.topic, *(_reading(seq) for seq in (1, 2, 3)))
         worker = subprocess.Popen(
             [sys.executable, os.path.join(HERE, "kafka_crash_worker.py"),
-             BOOTSTRAP, names.topic, names.group, str(log), "4"],
+             BOOTSTRAP, names.topic, names.group, str(log), "4", names.dlq],
         )
         try:
             await _wait_committed(names.group, names.topic, 3)

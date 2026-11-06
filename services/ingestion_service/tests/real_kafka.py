@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """What the ingestion service's real-broker proofs share (ADR-0026 dec 11): where the broker is,
-whether it answers, a topic of each test's own, reading a topic back as the broker holds it, and a
+whether it answers, a topic of each test's own (deleted after the test), reading a topic back as the broker holds it, and a
 real outage of the compose broker (`docker compose stop kafka` in the repository root, under the
 project its .env names, started again whatever the outcome).
 
@@ -50,9 +50,40 @@ def require_broker():
         pytest.skip(f"no Kafka broker at {BOOTSTRAP}")
 
 
+# Every topic name handed out, created explicitly or on first use; topics_deleted removes them.
+_named: set[str] = set()
+
+
 def unique_topic(prefix: str) -> str:
-    """A topic no deployed service reads, so a proof run against a live broker disturbs nothing."""
-    return f"{prefix}-{uuid.uuid4().hex[:12]}"
+    """A topic no deployed service reads, so a proof run against a live broker disturbs nothing. A
+    dead-letter topic is named with a "-dlq" suffix, never ".dlq": the platform's dead-letter alert
+    watches every ".dlq" topic."""
+    name = f"{prefix}-{uuid.uuid4().hex[:12]}"
+    _named.add(name)
+    return name
+
+
+async def delete_topics(*topics):
+    """Delete the topics that exist; a name never created is skipped."""
+    admin = AIOKafkaAdminClient(bootstrap_servers=BOOTSTRAP)
+    await admin.start()
+    try:
+        existing = set(await admin.list_topics())
+        doomed = [t for t in topics if t in existing]
+        if doomed:
+            await admin.delete_topics(doomed)
+    finally:
+        await admin.close()
+
+
+@pytest.fixture(autouse=True)
+def topics_deleted():
+    """Removes, after each test, every topic unique_topic named for it (import it into the module)."""
+    yield
+    names = sorted(_named)
+    _named.clear()
+    if names:
+        asyncio.run(delete_topics(*names))
 
 
 async def create_topics(*topics):
