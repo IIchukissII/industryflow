@@ -49,6 +49,12 @@ jobs:
               - 'scripts/seed_users.py'
               - 'scripts/user_admin_db.py'
               - 'infrastructure/backup/**'
+              # The roles and grants the streaming job writes with, and the bucket and principal its
+              # checkpoint uses (spark-streaming job).
+              - 'infrastructure/timescaledb/**'
+              - 'infrastructure/minio/**'
+              # The jobs that start compose services run on its settings (cp .env.example .env).
+              - '.env.example'
               - '.github/workflows/unit-tests.yml'
 
   pytest:
@@ -96,8 +102,9 @@ jobs:
           # The routing, reading guard and windowing tests run on a local Spark (pyspark from
           # requirements-dev) on the job images' Java (`java`, held equal to their base tag by
           # scripts/check_spark_version_parity.py). test_spark_service.py is a live-stack harness
-          # (TimescaleDB + the running jobs) and would only fail here, so it is excluded.
-          - { service: spark_jobs,          path: services/spark_jobs/tests, args: "--ignore=services/spark_jobs/tests/test_spark_service.py", java: "21" }
+          # (TimescaleDB + the running jobs) and would only fail here, so it is excluded. The
+          # real-store proof (test_streaming_integration.py) runs in the spark-streaming job.
+          - { service: spark_jobs,          path: services/spark_jobs/tests, args: "--ignore=services/spark_jobs/tests/test_spark_service.py --ignore=services/spark_jobs/tests/test_streaming_integration.py", java: "21" }
           # Cold-layer exporter (ADR-0025): orchestration tests drive fakes, no DB/object store.
           # The live proof (test_cold_export_integration.py) is `integration` and excluded here —
           # it needs TimescaleDB + MinIO and would only skip. It runs in cold-layer-integration.yml.
@@ -166,12 +173,57 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  # The streaming job's own image and command against the platform's broker, database and checkpoint
+  # store, all from docker-compose.yml (ADR-0005, ADR-0006, ADR-0026 dec 11): the earliest start, dead
+  # letters, resume after a kill, and no offset advance while the database is down.
+  spark-streaming:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Provide compose env
+        run: cp .env.example .env
+      # `up --wait` returns once a one-shot has started; the one-shots are run to completion.
+      - name: Start Kafka, TimescaleDB, MinIO and Spark; apply the schema; create the buckets
+        run: |
+          docker compose up -d --wait zookeeper kafka timescaledb minio
+          docker compose up -d --no-deps spark-master spark-worker
+          docker compose run --rm db-migrate
+          docker compose run --rm --no-deps minio-init
+      - name: Build the streaming image
+        run: docker compose build spark-streaming
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: pip install -r infrastructure/timescaledb/tests/requirements.txt
+      - name: Run the real-store proof
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGDATABASE: industryflow
+          IF_REQUIRE_LIVE_STACK: "1"
+        run: |
+          export PGPASSWORD="$(grep -E '^DB_PASSWORD=' .env | cut -d= -f2-)"
+          pytest services/spark_jobs/tests/test_streaming_integration.py -m integration -v
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose logs kafka timescaledb minio spark-master spark-worker
+          for c in $(docker ps -aq --filter name=if-stream-it-); do docker logs "$c" 2>&1 | tail -200; done
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
   # Stable aggregate status for branch protection. Always runs; fails only if the matrix actually
   # ran and failed. A skip (irrelevant paths) passes, so this required check never blocks an
   # unrelated PR — while a real unit-test failure still red-gates the merge.
   unit-tests-gate:
     name: unit-tests-gate
-    needs: [changes, pytest, alert-kafka]
+    needs: [changes, pytest, alert-kafka, spark-streaming]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -181,12 +233,13 @@ jobs:
           changes="${{ needs.changes.result }}"
           result="${{ needs.pytest.result }}"
           kafka="${{ needs.alert-kafka.result }}"
-          echo "changes=$changes pytest=$result alert-kafka=$kafka (relevant=${{ needs.changes.outputs.relevant }})"
+          streaming="${{ needs.spark-streaming.result }}"
+          echo "changes=$changes pytest=$result alert-kafka=$kafka spark-streaming=$streaming (relevant=${{ needs.changes.outputs.relevant }})"
           # Fail closed if change-detection broke — we can't prove the tests were unnecessary.
           if [ "$changes" != "success" ]; then
             echo "::error::change-detection job did not succeed ($changes)"; exit 1
           fi
-          for r in "$result" "$kafka"; do
+          for r in "$result" "$kafka" "$streaming"; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
               echo "::error::unit tests did not pass"; exit 1
             fi

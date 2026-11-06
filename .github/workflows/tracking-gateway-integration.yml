@@ -72,7 +72,7 @@ jobs:
           docker compose run --rm db-migrate
 
       - name: Provision buckets (incl. the mlflow artifact bucket)
-        run: docker compose up minio-init
+        run: docker compose run --rm --no-deps minio-init
 
       - name: "Start MLflow (CI TLS override, sslmode=require)"
         run: docker compose -f docker-compose.yml -f docker-compose.ci-notebooks.yml up -d mlflow
@@ -220,7 +220,7 @@ jobs:
           docker compose run --rm db-migrate
 
       - name: Provision buckets (incl. the mlflow artifact bucket)
-        run: docker compose up minio-init
+        run: docker compose run --rm --no-deps minio-init
 
       - name: Build + start MLflow, the API gateway, ml_service and the tracking gateway
         run: |
