@@ -159,7 +159,8 @@ apps:
       limits: { cpu: "1", memory: 1Gi }
 
   alert-service-detector:
-    # Kafka consumer worker — no HTTP port/Service. It verifies no user tokens, so no JWT key.
+    # Kafka consumer worker — no HTTP API. It verifies no user tokens, so no JWT key. Its one listener
+    # serves industryflow_build_info alone (ADR-0016 dec 8): a headless Service and ServiceMonitor for it.
     enabled: true
     image: industryflow-alert-service-detector
     digest: ""
@@ -169,6 +170,8 @@ apps:
     probe: null
     # No HTTP port, so liveness is the consumer loop's heartbeat file (stale = nothing consuming).
     livenessExec: ["python", "healthcheck.py"]
+    metrics: true
+    buildInfoPort: 9108
     resources:
       requests: { cpu: 100m, memory: 256Mi }
       limits: { cpu: 500m, memory: 512Mi }

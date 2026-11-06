@@ -111,6 +111,13 @@ scrape_configs:
       - targets: ['spark-streaming:9108', 'spark-aggregations:9108']
         labels:
           platform: industryflow
+  # The alert worker's revision (ADR-0016 dec 8): its one listener, serving that series alone.
+  - job_name: 'alert-worker-build-info'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['alert-service-detector:9108']
+        labels:
+          platform: industryflow
   - job_name: 'spark-master'
     metrics_path: '/metrics/master/prometheus'
     static_configs:

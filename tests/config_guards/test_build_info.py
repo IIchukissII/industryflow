@@ -4,7 +4,7 @@
 
 """Every image the platform builds that runs platform code and serves metrics reports the revision it
 was built from (ADR-0016 dec 8): the Python web services through their own /metrics, the Spark drivers
-on a port of their own. Each link is a place an omission fails silently: a process that never calls the
+and the long-lived workers that serve no metrics on a port of their own. Each link is a place an omission fails silently: a process that never calls the
 report, a Dockerfile that drops the build argument, a build (compose, CI, the box deploy) that never
 passes it, a scrape (compose Prometheus, the chart) that never reads the port. The series then reads
 `unknown`, or is missing, and a deploy leaves no trace."""
@@ -27,6 +27,10 @@ def _web_service(main: Path) -> dict:
     return {"entry": main, "dockerfile": main.parent / "Dockerfile", "call": REPORT}
 
 
+def _worker(main: Path) -> dict:
+    return {"entry": main, "dockerfile": main.parent / "Dockerfile", "call": SERVE}
+
+
 def _spark_driver(dockerfile: Path) -> dict:
     job = re.findall(r'"/app/spark_streaming/(\w+\.py)"\]', dockerfile.read_text())
     return {"entry": SPARK / job[-1], "dockerfile": dockerfile, "call": SERVE}
@@ -37,6 +41,8 @@ def _spark_driver(dockerfile: Path) -> dict:
 REPORTERS = sorted(
     [_web_service(p) for p in ROOT.glob("services/**/main.py")
      if "node_modules" not in p.parts and "Instrumentator" in p.read_text()]
+    + [_worker(p) for p in ROOT.glob("services/**/main.py")
+       if "node_modules" not in p.parts and SERVE.search(p.read_text())]
     + [_spark_driver(d) for d in SPARK.glob("Dockerfile.*") if '"--py-files"' in d.read_text()],
     key=lambda r: str(r["entry"]),
 )
@@ -62,7 +68,8 @@ def _component(r: dict) -> str:
 
 def test_reporters_are_found():
     assert sum(r["call"] is REPORT for r in REPORTERS) >= 3, REPORTERS
-    assert {_component(r) for r in REPORTERS if r["call"] is SERVE} == {"spark-streaming", "spark-aggregations"}
+    assert {_component(r) for r in REPORTERS if r["call"] is SERVE} == \
+        {"spark-streaming", "spark-aggregations", "alert-service-detector"}
 
 
 def test_every_reporter_reports_its_revision_under_its_service_name():
@@ -129,7 +136,6 @@ def test_every_served_revision_is_scraped():
 # is in neither list until someone decides which it is; discovering reporters by how they serve metrics
 # alone would miss one that serves them another way.
 EXEMPT = {
-    "alert-service-detector": "serves no metrics: a Kafka consumer without an HTTP server",
     "frontend": "serves static files; no metrics",
     "mlflow": "the stock tracking server; serves no metrics the platform scrapes",
     "spark-worker": "the stock worker; executors run only code the driver ships, and the driver reports",
@@ -183,3 +189,19 @@ def test_no_exempt_image_is_scraped():
     monitored = {d["metadata"]["name"] for d in chart if d.get("kind") in ("ServiceMonitor", "PodMonitor")}
     assert not sorted(n for n in EXEMPT for m in monitored if m.endswith(f"-{n}")), \
         "the chart monitors an exempt image"
+
+
+def test_a_worker_that_serves_no_metrics_serves_the_series_alone():
+    """A worker reports its revision on its one listener and nothing else rides on it (ADR-0016 dec 8,
+    ADR-0031 dec 2): no other series, no published port, no other Service or scrape port."""
+    apps = load_yaml("deploy/helm/industryflow/values.yaml")["apps"]
+    workers = [r for r in REPORTERS if r["call"] is SERVE and not str(r["entry"]).startswith(str(SPARK))]
+    assert workers, "no worker found: the guard is not looking"
+    for r in workers:
+        component, code = _component(r), r["entry"].parent
+        others = sorted(str(p.relative_to(ROOT)) for p in code.rglob("*.py")
+                        if "tests" not in p.parts and re.search(r"^\s*(from|import) prometheus_client", p.read_text(), re.M))
+        assert not others, f"{component}: serves metrics beyond the revision series: {others}"
+        assert "ports" not in COMPOSE[component], f"compose {component}: the listener is published beyond the network"
+        app = apps[component]
+        assert not app.get("port") and not app.get("metricsPort"), f"values.yaml apps.{component}: a port beside build-info"

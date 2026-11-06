@@ -60,7 +60,7 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 | 3 | Ingestion reads the capability store's suspension marker | Gives a device-facing service reach to a store that holds every tenant's live handles |
 | 3 | No refusal at ingestion, only at the writers | A suspended tenant's devices keep loading the shared broker for the whole suspension |
 | 3 | Ingestion refuses a tenant whose status has gone stale | A stalled publisher would halt ingestion for every tenant |
-| 3 | The publisher serves a count of failed publishes as a metric | Gives the alert worker the scrape target ADR-0031 dec 2 denies it, for a fact the broker's own offsets carry |
+| 3 | The publisher serves a count of failed publishes as a metric | Gives the alert worker a metric beyond its revision series (ADR-0016 dec 8), for a fact the broker's own offsets carry |
 | 3 | The publisher's health check fails while publishing fails | Restarts the worker without telling anyone; a broker outage would restart every replica at once |
 | 4 | Delete synchronously in the API request | A timeout across stores leaves the partial state decision 4 forbids |
 | 4 | Delete in a background task of the API | Ties the operation's durability to the lifetime of an API process |

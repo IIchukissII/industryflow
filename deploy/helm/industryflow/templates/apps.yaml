@@ -128,7 +128,7 @@ spec:
             {{- include "industryflow.edgeEnv" $root | nindent 12 }}
             {{- end }}
           {{- end }}
-          {{- if or $app.port $app.metricsPort }}
+          {{- if or $app.port $app.metricsPort $app.buildInfoPort }}
           ports:
             {{- if $app.port }}
             - name: http
@@ -237,7 +237,7 @@ spec:
     requests:
       storage: {{ $app.persistence.size }}
 {{- end }}
-{{- if or $app.port $app.metricsPort }}
+{{- if or $app.port $app.metricsPort $app.buildInfoPort }}
 ---
 apiVersion: v1
 kind: Service
