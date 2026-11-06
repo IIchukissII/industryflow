@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0033 — Tenant lifecycle: provisioning through one privileged function, offboarding from every store
 
 - **Status:** Accepted
-- **Date:** 2026-10-24; changed 2026-10-25
+- **Date:** 2026-10-24; changed 2026-11-06
 - **Parent:** ADR-0001
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (schema-per-tenant, the tenant mapping), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (dec 2: suspension ends sessions), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (dec 3: refused readings are dead-lettered), [ADR-0007](ADR-0007-public-key-infrastructure.md) (device revocation), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (tracking store), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (dec 5: per-tenant SQL identity), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md), [ADR-0020](ADR-0020-notebook-per-user-persistence.md), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (tenant data outside the database), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (backups), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (the tenant schema)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (schema-per-tenant, the tenant mapping), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (dec 2: suspension ends sessions), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (dec 3: refused readings are dead-lettered), [ADR-0007](ADR-0007-public-key-infrastructure.md) (device revocation), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (tracking store), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (dec 5: per-tenant SQL identity), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md), [ADR-0020](ADR-0020-notebook-per-user-persistence.md), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (tenant data outside the database), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (backups), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (the tenant schema), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (dec 1: the stalled-stream alert is a platform rule), [ADR-0031](ADR-0031-alerting-http-surface-single-owner.md) (dec 2: the alert worker has no scrape target)
 
 ## Context
 
@@ -26,8 +26,10 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 3. **Offboarding has two steps: suspend, then delete.** *Suspend* is reversible: no session, capability,
    device or database identity of the tenant is honoured or issued, and its open database sessions end.
    Ingestion refuses the tenant's devices from a tenant-status stream the platform publishes on the
-   broker, the only store it reaches, and every component that writes tenant data refuses an inactive
-   tenant's readings from the registry, so a lost or late status fails closed. *Delete* is a
+   broker, the only store it reaches; a status not heard again within a bound is forgotten, so a
+   stalled stream lets devices through rather than halting ingestion, and a stalled stream raises a
+   platform alert. Every component that writes tenant data refuses an inactive tenant's readings from
+   the registry, so a lost or late status still fails closed where data is written. *Delete* is a
    separate, irreversible request, valid only for a suspended tenant.
 4. **Delete removes the tenant from every store that holds its data.** One privileged, resumable operation,
    run by a dedicated operator job and not by the API, removes it store by store and records each removal.
@@ -57,6 +59,9 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 | 3 | Enforce suspension only where access is granted | The writers that read the broker directly would keep accepting the tenant's data |
 | 3 | Ingestion reads the capability store's suspension marker | Gives a device-facing service reach to a store that holds every tenant's live handles |
 | 3 | No refusal at ingestion, only at the writers | A suspended tenant's devices keep loading the shared broker for the whole suspension |
+| 3 | Ingestion refuses a tenant whose status has gone stale | A stalled publisher would halt ingestion for every tenant |
+| 3 | The publisher serves a count of failed publishes as a metric | Gives the alert worker the scrape target ADR-0031 dec 2 denies it, for a fact the broker's own offsets carry |
+| 3 | The publisher's health check fails while publishing fails | Restarts the worker without telling anyone; a broker outage would restart every replica at once |
 | 4 | Delete synchronously in the API request | A timeout across stores leaves the partial state decision 4 forbids |
 | 4 | Delete in a background task of the API | Ties the operation's durability to the lifetime of an API process |
 | 4 | Purge the tracking store's rows directly | Bypasses the store's own lifecycle and risks dangling references in a store all tenants share |
@@ -85,6 +90,7 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 **Negative**
 - Every new tenant-scoped store owes a deletion path.
 - A bug in the privileged functions affects every tenant.
+- While the tenant-status stream is stalled, a suspended tenant's devices load the broker until an operator restores it.
 - The product's delete action suspends; a deletion is requested and carried out by operators.
 - A deletion waits on the device store until an operator revokes the tenant at the device authority.
 - A deleted tenant's data persists in backups and broker retention until each ages it out.
@@ -103,3 +109,4 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 ## References
 
 - [init-scripts README](../infrastructure/timescaledb/init-scripts/README.md) (provisioning); `services/api_gateway/routers/companies.py` (lifecycle actions).
+- `infrastructure/prometheus/rules/platform.yml` (`IndustryFlowTenantStatusStalled`, dec 3); [stream processing](../docs/architecture/stream-processing.md) (the stream's bounds).
