@@ -14,7 +14,7 @@ import sys
 import time
 import uuid
 
-from harness import Secret, equipment, eventually, issue_device, pretty, reading, send_reading
+from harness import Secret, eventually, issue_device, pretty, send_reading
 
 # The shared contract is standard library only; the runner image reads it from the checkout.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "libs", "industryflow_contracts"))
@@ -33,10 +33,12 @@ def test_a_tenant_is_provisioned_used_suspended_and_deleted_from_every_store(edg
                                   "company_id": cid})
     admin = edge.session(email, password)
     admin.get("/api/equipment")
-    eid, sensors = equipment(admin, "cabinet", f"e2e-life-{run}", ["temp_root"])
     device = issue_device(env, settings["IF_E2E_COMPOSE_DIR"], cid, f"e2e-life-dev-{run}")
-    r = send_reading(settings, device, reading(eid, sensors["temp_root"], 1.0))
-    assert r.status_code == 202, r.text[:300]
+    # Probed with a body the schema refuses: ingestion answers the device's identity first (403 for a
+    # suspended tenant) and the body second (422), so no probe reaches the stream, where a suspended
+    # tenant's reading is dead-lettered and alerts the operator.
+    r = send_reading(settings, device, {})
+    assert r.status_code == 422, r.text[:300]
 
     # Suspended: its users and their live sessions are refused at once, its devices once the
     # tenant-status stream carries the suspension to ingestion (ADR-0033 dec 3).
@@ -45,8 +47,8 @@ def test_a_tenant_is_provisioned_used_suspended_and_deleted_from_every_store(edg
     assert edge.login(email, password).status_code in (400, 401, 403)
 
     def refused():
-        r = send_reading(settings, device, reading(eid, sensors["temp_root"], 2.0))
-        assert r.status_code in (202, 403), r.text[:300]
+        r = send_reading(settings, device, {})
+        assert r.status_code in (403, 422), r.text[:300]
         return r.status_code == 403 and r.json().get("detail") == "Tenant suspended"
 
     eventually(refused, timeout=REFUSAL_TIMEOUT, every=2, what="the suspended tenant's device is refused at ingestion")

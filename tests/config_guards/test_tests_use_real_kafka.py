@@ -18,20 +18,34 @@ from _repo import ROOT, load_yaml
 
 WORKFLOW = ".github/workflows/unit-tests.yml"
 JOB = "alert-kafka"
-# Each service's real-broker proofs: its tests directory, the module that declares the broker's
-# environment variables, and the proofs it must hold.
+# Each service's real-broker proofs: its tests directory and the proofs it must hold. A proof names the
+# broker's environment variables itself, or takes them with require_broker from the service's shared
+# helper (HELPER); either way the guard reads the names from the file that declares them.
 SERVICES = {
-    "alert_service": ("services/alert_service/tests", "test_kafka_consumer_integration.py",
-                      ["test_kafka_consumer_integration.py"]),
-    "ingestion_service": ("services/ingestion_service/tests", "real_kafka.py",
+    "alert_service": ("services/alert_service/tests", ["test_kafka_consumer_integration.py"]),
+    "ingestion_service": ("services/ingestion_service/tests",
                           ["test_kafka_producer_integration.py", "test_tenant_status_integration.py"]),
 }
+HELPER = "real_kafka"
 
 
 def _module_constant(src: str, name: str) -> str:
     match = re.search(rf'^{name} = "([^"]+)"', src, re.M)
     assert match, f"no {name} constant"
     return match.group(1)
+
+
+def _env_names(module: str) -> tuple[str, str]:
+    """(REQUIRE_ENV, BOOTSTRAP_ENV) as the module's broker check reads them."""
+    src = (ROOT / module).read_text()
+    if re.search(r'^REQUIRE_ENV = "', src, re.M):
+        return _module_constant(src, "REQUIRE_ENV"), _module_constant(src, "BOOTSTRAP_ENV")
+    imported = re.search(rf"^from {HELPER} import [^\n]*\brequire_broker\b", src, re.M)
+    assert imported, f"{module} declares no broker requirement the guard can read"
+    helper = (ROOT / module).parent / f"{HELPER}.py"
+    assert helper.exists(), f"{module} imports {HELPER}, which is not beside it"
+    src = helper.read_text()
+    return _module_constant(src, "REQUIRE_ENV"), _module_constant(src, "BOOTSTRAP_ENV")
 
 
 def _integration_modules(tests: str) -> list[str]:
@@ -48,7 +62,7 @@ def _jobs():
 
 @pytest.mark.parametrize("service", SERVICES)
 def test_there_are_the_real_broker_proofs(service):
-    tests, _, proofs = SERVICES[service]
+    tests, proofs = SERVICES[service]
     missing = [f"{tests}/{p}" for p in proofs if f"{tests}/{p}" not in _integration_modules(tests)]
     assert not missing, f"not an integration module, or gone: {missing}"
 
@@ -68,16 +82,15 @@ def test_the_kafka_job_starts_the_compose_broker():
 
 @pytest.mark.parametrize("service", SERVICES)
 def test_the_kafka_job_runs_every_real_broker_module_and_requires_the_broker(service):
-    tests, constants, _ = SERVICES[service]
-    modules = _integration_modules(tests)
-    src = (ROOT / tests / constants).read_text()
     steps = [s for s in _jobs()[JOB]["steps"] if "pytest" in s.get("run", "")]
-    missing = [m for m in modules if not any(m in s["run"] for s in steps)]
-    assert not missing, f"the kafka job does not run: {missing}"
-    for step in (s for s in steps if any(m in s["run"] for m in modules)):
-        env = step.get("env", {})
-        assert str(env.get(_module_constant(src, "REQUIRE_ENV"))) == "1", f"a missing broker would skip: {step['name']}"
-        assert env.get(_module_constant(src, "BOOTSTRAP_ENV")) == "localhost:9092", step["name"]
+    for module in _integration_modules(SERVICES[service][0]):
+        running = [s for s in steps if module in s["run"]]
+        assert running, f"the kafka job does not run {module}"
+        require, bootstrap = _env_names(module)
+        for step in running:
+            env = step.get("env", {})
+            assert str(env.get(require)) == "1", f"a missing broker would skip {module}: {step['name']}"
+            assert env.get(bootstrap) == "localhost:9092", f"{module}: {step['name']}"
 
 
 def test_the_required_gate_reads_the_kafka_job():

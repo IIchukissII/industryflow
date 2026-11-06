@@ -15,10 +15,13 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import (
     CommitFailedError,
     IllegalGenerationError,
+    InvalidProducerEpoch,
     KafkaError,
     OutOfOrderSequenceNumber,
+    ProducerFenced,
     RebalanceInProgressError,
     UnknownMemberIdError,
+    UnknownProducerId,
 )
 
 from errors import MessageValidationError, is_infrastructure_error
@@ -29,8 +32,33 @@ logger = logging.getLogger(__name__)
 HANDLED = "handled"          # processed, or dead-lettered: its offset may be committed
 RETRY_BATCH = "retry_batch"  # not handled: rewind to the last commit and try again later
 
+# Errors that stay with the producer id: every later send to the partition fails the same way until a
+# new producer, under a new id, replaces it (send).
+STICKY_PRODUCER_ERRORS = (OutOfOrderSequenceNumber, ProducerFenced, InvalidProducerEpoch, UnknownProducerId)
+# Bounds on one send and on replacing a producer. An idempotent batch is retried until it is written, and
+# a producer whose sender has ended never completes a send; neither may hold a caller for good.
+SEND_TIMEOUT_SECONDS = 60
+PRODUCER_START_TIMEOUT_SECONDS = 30
+PRODUCER_STOP_TIMEOUT_SECONDS = 10
+
+
+def sender_ended(producer) -> bool:
+    """Whether aiokafka's sender task, which delivers every batch, has ended. Once it has, each pending
+    and later send fails or never completes. aiokafka 0.15 exposes no public check; the attribute path
+    is pinned by test_kafka_consumer.py against the real class."""
+    task = getattr(getattr(producer, "_sender", None), "sender_task", None)
+    return task is not None and task.done()
+
+
 # Names this worker in the dead letters it writes, as spark-streaming names itself in its own.
 DEAD_LETTER_CONSUMER = "alert-service-detector"
+
+
+async def _stop_quietly(producer) -> None:
+    try:
+        await asyncio.wait_for(producer.stop(), PRODUCER_STOP_TIMEOUT_SECONDS)
+    except Exception:  # noqa: BLE001 - a broken or unstarted producer; nothing left to save
+        pass
 
 
 def _is_recoverable_commit_error(exc: BaseException) -> bool:
@@ -76,6 +104,7 @@ class AlertKafkaConsumer:
         self._failed_batches = 0
         # Serialises replacing a broken producer (send) between the dead-letter and status senders.
         self._producer_lock = asyncio.Lock()
+        self.producers_replaced = 0
 
     async def start(self):
         """Initialize Kafka consumer and producer"""
@@ -289,35 +318,47 @@ class AlertKafkaConsumer:
         stream share.
 
         aiokafka's idempotent producer numbers a batch before it is sent and drops a batch that outlives
-        its timeout with no partition leader, as during a broker restart. The broker then refuses the
-        next number with OutOfOrderSequenceNumber, which ends the producer's sender for good: every
-        later send fails the same way. Such a producer is replaced by a new one, under a new producer
-        id, and the message is sent once more on it."""
+        its timeout with no partition leader, as during a broker restart. The broker then refuses every
+        later number on that partition with OutOfOrderSequenceNumber: the producer id has lost its
+        sequence there for good. That and the other errors that stay with a producer id
+        (STICKY_PRODUCER_ERRORS), and a producer whose sender task has ended, are cured only by a new
+        producer under a new id: the broken one is replaced and the message sent once more on the new."""
         producer = self.producer
+        if sender_ended(producer):
+            await self._replace_producer(producer, "its sender ended")
+            producer = self.producer
         try:
-            return await producer.send_and_wait(topic, value=value, key=key)
-        except OutOfOrderSequenceNumber:
-            logger.warning("the Kafka producer lost its sequence; replacing it")
-            await self._replace_producer(producer)
-            return await self.producer.send_and_wait(topic, value=value, key=key)
+            return await self._send_on(producer, topic, value, key)
+        except STICKY_PRODUCER_ERRORS as e:
+            reason = type(e).__name__
+        except (asyncio.TimeoutError, KafkaError):
+            if not sender_ended(producer):
+                raise
+            reason = "its sender ended"
+        await self._replace_producer(producer, reason)
+        return await self._send_on(self.producer, topic, value, key)
 
-    async def _replace_producer(self, broken: AIOKafkaProducer) -> None:
+    @staticmethod
+    async def _send_on(producer, topic, value, key):
+        return await asyncio.wait_for(producer.send_and_wait(topic, value=value, key=key), SEND_TIMEOUT_SECONDS)
+
+    async def _replace_producer(self, broken: AIOKafkaProducer, reason: str) -> None:
         async with self._producer_lock:
             if self.producer is not broken:  # another sender replaced it already
                 return
+            logger.warning("replacing the Kafka producer: %s", reason)
             # The broken one stays until a new one has started: if the broker refuses the start, the
             # next send fails the same way and tries again.
             fresh = self._new_producer()
             try:
-                await fresh.start()
+                await asyncio.wait_for(fresh.start(), PRODUCER_START_TIMEOUT_SECONDS)
             except BaseException:
-                await fresh.stop()
+                await _stop_quietly(fresh)
                 raise
             self.producer = fresh
-            try:
-                await broken.stop()
-            except Exception:  # noqa: BLE001 - its sender has already failed
-                pass
+            self.producers_replaced += 1
+            # Its flush can wait on batches its dead sender never delivers.
+            await _stop_quietly(broken)
 
     async def stop(self):
         """Stop Kafka consumer and producer"""

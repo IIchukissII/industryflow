@@ -292,3 +292,26 @@ def test_a_reading_whose_retries_run_out_is_dead_lettered_and_the_next_one_proce
         assert letters[0]["reason"].startswith("retries exhausted") and "rule blew up" in letters[0]["reason"]
 
     asyncio.run(scenario())
+
+
+def test_a_producer_whose_sequence_the_broker_refuses_is_replaced_and_the_message_delivered(names, tmp_path):
+    """The deterministic form of what a broker restart does to the worker's idempotent producer: a
+    numbered batch is lost, here by advancing the producer's sequence past what the broker holds, and
+    the real broker answers the next send with OutOfOrderSequenceNumber. The worker's send replaces
+    the producer and the message is on the topic once; the producer's old id would have refused it
+    for good."""
+    async def scenario():
+        worker = AlertKafkaConsumer(_config(names, tmp_path), Engine())
+        await worker.start()
+        try:
+            await worker.send(names.dlq, value=b'{"n": 1}')
+            broken = worker.producer
+            broken._txn_manager.increment_sequence_number(TopicPartition(names.dlq, 0), 5)
+            await worker.send(names.dlq, value=b'{"n": 2}')
+            assert worker.producer is not broken and worker.producers_replaced == 1
+            await worker.send(names.dlq, value=b'{"n": 3}')
+        finally:
+            await worker.stop()
+        assert [json.loads(r.value)["n"] for r in await _records(names.dlq)] == [1, 2, 3]
+
+    asyncio.run(scenario())

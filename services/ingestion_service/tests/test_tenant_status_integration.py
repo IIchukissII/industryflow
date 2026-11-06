@@ -111,7 +111,7 @@ async def publishing(registry, topic, tmp_path, interval):
     await worker.start()
     task = asyncio.create_task(tenant_status_publisher.run(registry, worker.send, topic, interval))
     try:
-        yield task
+        yield worker
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
@@ -198,8 +198,8 @@ def test_a_follower_started_after_the_publisher_learns_every_tenant_within_one_i
     asyncio.run(scenario())
 
 
-def test_a_message_that_is_not_a_status_is_ignored_and_the_stream_still_followed(topic, tmp_path):
-    cid = str(uuid.uuid4())
+def test_a_message_that_is_not_a_status_is_ignored_and_the_stream_still_followed(topic, tmp_path, caplog):
+    cid, sentinel = str(uuid.uuid4()), str(uuid.uuid4())
     registry = Registry(**{cid: True})
     noise = [b"\xffnot json", b"[]", json.dumps({"company_id": cid, "active": "no"}).encode(),
              json.dumps({"company_id": "not-a-uuid", "active": False}).encode()]
@@ -209,8 +209,15 @@ def test_a_message_that_is_not_a_status_is_ignored_and_the_stream_still_followed
             producer = AIOKafkaProducer(bootstrap_servers=BOOTSTRAP, acks="all")
             await producer.start()
             try:
-                # The follower is at the newest offset before anything is sent.
-                await asyncio.sleep(3)
+                # A status heard proves the follower reads from before the noise: it starts at the
+                # newest offset, so one sent before its position was set would be missed.
+                key, value = contract.encode(sentinel, True)
+                deadline = time.monotonic() + 60
+                while not _heard(sentinel):
+                    assert time.monotonic() < deadline, "the sentinel status was never heard"
+                    assert not follower.done(), follower
+                    await producer.send_and_wait(topic, value=value, key=key)
+                    await asyncio.sleep(0.5)
                 for value in noise:
                     await producer.send_and_wait(topic, value=value, key=cid.encode())
             finally:
@@ -221,29 +228,41 @@ def test_a_message_that_is_not_a_status_is_ignored_and_the_stream_still_followed
                 registry.active[cid] = False
                 await _until(lambda: tenant_status.status.is_suspended(cid), "a later suspension heard",
                              task=follower)
-        assert len(await records(topic)) > len(noise)
 
-    asyncio.run(scenario())
+    with caplog.at_level("WARNING", logger="tenant_status"):
+        asyncio.run(scenario())
+    ignored = [r for r in caplog.records if r.name == "tenant_status" and "not a status" in r.getMessage()]
+    assert len(ignored) == len(noise)
 
 
 def test_publisher_and_follower_outlive_a_broker_outage(topic, tmp_path):
-    """The worker's idempotent producer lost its sequence in a broker restart (a numbered batch expired
-    unsent) and failed every later status with OutOfOrderSequenceNumber until the worker restarted, so
-    ingestion forgot every suspension once the last status went stale."""
+    """Both sides carry on through a real restart of the broker, longer than a send's timeout.
+
+    A restart can leave the worker's idempotent producer without its sequence (a numbered batch expires
+    while the partition has no leader), after which the broker refused every later status with
+    OutOfOrderSequenceNumber until the worker restarted, and ingestion forgot every suspension once the
+    last status went stale. Whether a given restart hits that window depends on timing, so this proves
+    the journey, not the cure: the run logs whether the producer was replaced. The deterministic proof
+    of the replacement against the real broker is
+    services/alert_service/tests/test_kafka_consumer_integration.py
+    (test_a_producer_whose_sequence_the_broker_refuses_is_replaced_and_the_message_delivered); each
+    failure that warrants it is in test_kafka_consumer.py."""
     require_outage()
     cid = str(uuid.uuid4())
     registry = Registry(**{cid: True})
 
     async def scenario():
-        async with following() as follower, publishing(registry, topic, tmp_path, FAST_INTERVAL):
+        async with following() as follower, publishing(registry, topic, tmp_path, FAST_INTERVAL) as worker:
             await _until(lambda: _heard(cid), "the tenant heard before the outage", task=follower)
             async with broker_outage():
                 await asyncio.sleep(OUTAGE_S)
             registry.active[cid] = False
             await _until(lambda: tenant_status.status.is_suspended(cid), "a suspension after the outage heard",
                          timeout=120, task=follower)
+            return worker.producers_replaced
 
-    asyncio.run(scenario())
+    replaced = asyncio.run(scenario())
+    print(f"the outage left the producer replaced {replaced} time(s)")
 
 
 def _headers(pem):
