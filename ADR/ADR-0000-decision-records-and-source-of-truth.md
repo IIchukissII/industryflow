@@ -6,8 +6,10 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0000 — Decision records and the single source of truth
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-11-01
+- **Date:** 2026-06-26; changed 2026-11-06
 - **Parent:** none (governs the form of every other ADR)
+- **Canon:** [IIchukissII/CANON ADR-0000](https://github.com/IIchukissII/CANON/blob/main/ADR-0000-canon.md),
+  refined here for this repository
 
 ## Context
 
@@ -16,49 +18,57 @@ templates and documentation. Without a record of *why* a thing is the way it is,
 re-derives the reason, and the guesses diverge. A fact held in more than one place drifts, and review
 cannot tell which copy is right.
 
+The method common to every project, and to every agent working on one, is the canon. This record
+states only how this repository realises it; where the canon already decides, the decision here
+cites it instead of restating it.
+
 ## Decision
 
-1. **Architectural decisions are recorded as ADRs before they are propagated.** A decision that
-   constrains downstream artifacts (service boundaries, tenancy, data flow, delivery semantics,
-   authentication, storage, observability contracts) is written down before it reaches code. The ADR
-   formalises the outcome of discussion; it never replaces it.
-2. **ADRs own the why; artifacts own the what.** An ADR holds context, the decision, rejected
-   alternatives and consequences. Concrete values (ports, topics, pool sizes, variable names, schemas,
-   image tags) live in the artifact whose job is that value, and the ADR points at it.
-3. **Every fact has exactly one authoritative home.** Another document that needs the value references
-   it. Where artifacts cannot share a fact, a check reads every copy and fails when they disagree; where
-   a copy is not needed, it is replaced by one shared definition.
-4. **Code never silently overrides an ADR.** A divergence is resolved by changing the ADR deliberately
-   or by changing the code.
-5. **An ADR states the decision in force.** A decision that becomes untrue is edited in place to the
-   current truth, with the change date in the header and the change described in its pull request; the
-   replaced choice is recorded among the alternatives with why it is rejected now. History lives in
-   version control, not in the record. A reversed or replaced decision is a new ADR, and the old one is
-   marked superseded.
+1. **Architectural decisions are recorded as ADRs before they are propagated.** *(canon dec 1)* A
+   decision that constrains downstream artifacts (service boundaries, tenancy, data flow, delivery
+   semantics, authentication, storage, observability contracts) is written down before it reaches
+   code. The ADR formalises the outcome of discussion; it never replaces it.
+2. **ADRs own the why; artifacts own the what.** *(canon dec 7, 10)* An ADR holds context, the
+   decision, rejected alternatives and consequences. Concrete values (ports, topics, pool sizes,
+   variable names, schemas, image tags) live in the artifact whose job is that value, and the ADR
+   points at it.
+3. **Every fact has exactly one authoritative home.** *(canon dec 7)* Another document that needs
+   the value references it. Where artifacts cannot share a fact, a check reads every copy and fails
+   when they disagree; where a copy is not needed, it is replaced by one shared definition.
+4. **Code never silently overrides an ADR.** *(canon dec 1)* A divergence is resolved by changing
+   the ADR deliberately or by changing the code.
+5. **An ADR states the decision in force.** *(canon dec 8)* A decision that becomes untrue is edited
+   in place to the current truth, with the change date in the header and the change described in its
+   pull request; the replaced choice is recorded among the alternatives with why it is rejected now.
+   History lives in version control, not in the record. A reversed or replaced decision is a new
+   ADR, and the old one is marked superseded.
 6. **The governance root is not mirrored into the ADRs it governs.** No ADR names this one as its
    parent; the relationship is inherited.
-7. **Status follows a lifecycle, and the maintainer accepts.** `Proposed` while under discussion,
-   `Accepted` once the maintainer judges it binding, `Superseded` when replaced. Acceptance means the
-   decision is settled, not that it is built; acceptance is the merge that sets the status.
-8. **ADRs are numbered and named uniformly.** Files are `ADR-NNNN-kebab-title.md`, numbered in
-   order. ADR-0000 is this root, ADR-0001 the project framing, technical decisions from 0002. A number
-   is never reused; a decision number within an ADR is never renumbered, because code and documents
-   cite it.
-9. **Every ADR has the same compact shape.** A header (status, date, optional parent, related records
-   with the relation), then Context, Decision (numbered), Alternatives (table), Consequences (positive,
-   negative), Deferred (table), References. Alternatives hold every rejected alternative, one row each,
-   with the decision number it lost to. One decision per record, in about a hundred lines; a record
-   that needs more holds several decisions.
-10. **Every cross-reference to a decision is checked mechanically.** A citation of an ADR or of one of
-    its numbered decisions, and a relative link between documents, must resolve; the check runs with
-    the configuration guards on every change. A record compacted or a decision moved elsewhere otherwise
-    leaves its citations pointing at text that no longer says what they claim.
+7. **Status follows a lifecycle, and the maintainer accepts.** *(canon dec 10)* `Proposed` while
+   under discussion, `Accepted` once the maintainer judges it binding, `Superseded` when replaced,
+   `Withdrawn` when abandoned without a replacement. Acceptance means the decision is settled, not
+   that it is built; acceptance is the merge that sets the status.
+8. **ADRs are numbered and named uniformly.** *(canon dec 10)* Files are `ADR-NNNN-kebab-title.md`,
+   numbered in order. ADR-0000 is this root, ADR-0001 the project framing, technical decisions from
+   0002. A number is never reused; a decision number within an ADR is never renumbered, because code
+   and documents cite it.
+9. **Every ADR has the same compact shape.** *(canon dec 10)* A header (status, date, optional
+   parent, related records with the relation), then Context, Decision (numbered), Alternatives
+   (table), Consequences (positive, negative), Deferred (table), References. Alternatives hold every
+   rejected alternative, one row each, with the decision number it lost to. One decision per record,
+   in about a hundred lines; a record that needs more holds several decisions.
+10. **Every cross-reference to a decision is checked mechanically.** *(canon dec 3, 7)* A citation
+    of an ADR or of one of its numbered decisions, and a relative link between documents, must
+    resolve; the check runs with the configuration guards on every change. A record compacted or a
+    decision moved elsewhere otherwise leaves its citations pointing at text that no longer says
+    what they claim.
 
 ## Alternatives
 
 | Dec | Rejected alternative | Why rejected |
 |---|---|---|
-| — | Inheriting another project's decision records by reference | The platform's own decisions would depend on another repository for their source of truth |
+| — | Restating the canon's rules in this record | Two homes for one rule drift apart (canon dec 7, 18) |
+| — | Inheriting another project's decision records by reference | The platform's own decisions would depend on another repository for their source of truth; the canon belongs to no project and is the one record inherited |
 | 1 | Rationale in the README and docs only | Prose that mirrors values without owning them is a duplication source, not a decision record |
 | 1 | Decisions in code comments and commit messages | A cross-cutting decision has no single home; commits are not a body of current decisions |
 | 3 | Several copies with one marked primary | Markers rot; a reader cannot tell a stale copy from a current one |
