@@ -45,9 +45,9 @@ cites it instead of restating it.
 6. **The governance root is not mirrored into the ADRs it governs.** No ADR names this one as its
    parent; the relationship is inherited.
 7. **Status follows a lifecycle, and the maintainer accepts.** *(canon dec 10)* `Proposed` while
-   under discussion, `Accepted` once the maintainer judges it binding, `Superseded` when replaced.
-   Acceptance means the decision is settled, not that it is built; acceptance is the merge that sets
-   the status.
+   under discussion, `Accepted` once the maintainer judges it binding, `Superseded` when replaced,
+   `Withdrawn` when abandoned without a replacement. Acceptance means the decision is settled, not
+   that it is built; acceptance is the merge that sets the status.
 8. **ADRs are numbered and named uniformly.** *(canon dec 10)* Files are `ADR-NNNN-kebab-title.md`,
    numbered in order. ADR-0000 is this root, ADR-0001 the project framing, technical decisions from
    0002. A number is never reused; a decision number within an ADR is never renumbered, because code
