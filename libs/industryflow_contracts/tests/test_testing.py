@@ -15,12 +15,13 @@ def server():
     if url is None:
         pytest.skip("the marker lives on a real server; the fake is new for every test")
     import redis
-    marker = redis.Redis.from_url(url, db=testing.MARKER_DB)
+    base = url.rsplit("/", 1)[0]
+    marker = redis.Redis.from_url(f"{base}/{testing.MARKER_DB}")
     held = marker.exists(testing.MARKER_KEY)
     marker.delete(testing.MARKER_KEY)
-    other = redis.Redis.from_url(url, db=2)
+    other = redis.Redis.from_url(f"{base}/2")
     other.flushdb()
-    yield url.rsplit("/", 1)[0], other
+    yield base, other
     other.flushdb()
     if held:
         marker.set(testing.MARKER_KEY, "1")
@@ -37,6 +38,9 @@ def test_a_database_in_use_on_an_unmarked_server_is_refused_and_kept(server):
 def test_an_empty_database_marks_the_server_and_is_emptied_from_then_on(server):
     base, other = server
     testing._emptied(f"{base}/2")
+    import redis
+    # The marker is in its own database, not the one just emptied.
+    assert redis.Redis.from_url(f"{base}/{testing.MARKER_DB}").exists(testing.MARKER_KEY)
     other.set("left:by-a-test", "1")
     testing._emptied(f"{base}/2")
     assert other.dbsize() == 0

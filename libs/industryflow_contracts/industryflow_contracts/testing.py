@@ -40,10 +40,13 @@ def _emptied(url: str) -> None:
     test server whose database holds keys."""
     import redis
     with redis.Redis.from_url(url) as target:
-        db = target.connection_pool.connection_kwargs.get("db", 0)
-        if db == MARKER_DB:
+        pool = target.connection_pool
+        if pool.connection_kwargs.get("db", 0) == MARKER_DB:
             raise RuntimeError(f"{URL_ENV} names database {MARKER_DB}, which holds the test-server marker")
-        with redis.Redis.from_url(url, db=MARKER_DB) as marker:
+        # The same server and credentials, the marker's database (a URL's path outranks ``db=``).
+        marker_pool = redis.ConnectionPool(connection_class=pool.connection_class,
+                                           **{**pool.connection_kwargs, "db": MARKER_DB})
+        with redis.Redis(connection_pool=marker_pool) as marker:
             if not marker.exists(MARKER_KEY):
                 held = target.dbsize()
                 if held:
