@@ -182,3 +182,33 @@ tests:
               summary: "Capability-use events were dropped from the record"
               description: "Capability-use events were acknowledged without being recorded in the last 15m; the API gateway's logs (capability audit) name each stream id."
               services: "api-gateway"
+
+  # A tenant-status partition that stops carrying statuses raises it, while another still publishes;
+  # a partition that never carried any, and another stack's stalled stream, do not; it clears on resume.
+  - interval: 1m
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{platform="industryflow", topic="tenant-status", partition="0"}'
+        values: '0+6x30 180x15 180+6x20'
+      - series: 'kafka_topic_partition_current_offset{platform="industryflow", topic="tenant-status", partition="1"}'
+        values: '0+6x65'
+      - series: 'kafka_topic_partition_current_offset{platform="industryflow", topic="tenant-status", partition="2"}'
+        values: '0x65'
+      - series: 'kafka_topic_partition_current_offset{platform="other", topic="tenant-status", partition="0"}'
+        values: '0+6x20 120x45'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: IndustryFlowTenantStatusStalled
+        exp_alerts: []
+      - eval_time: 36m
+        alertname: IndustryFlowTenantStatusStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              partition: "0"
+            exp_annotations:
+              summary: "The tenant-status stream has stalled"
+              description: "Partition 0 of tenant-status has carried no status for 5m. Ingestion has forgotten every suspension and lets those devices through; the writers still refuse them: docs/operations/monitoring.md."
+              services: "alert-service-detector, kafka"
+      - eval_time: 50m
+        alertname: IndustryFlowTenantStatusStalled
+        exp_alerts: []

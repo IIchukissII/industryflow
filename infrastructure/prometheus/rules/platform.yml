@@ -67,6 +67,22 @@ groups:
       # the second term raises a dead-letter series that did not exist one window ago, but only while
       # Kafka was already being watched then, so a Prometheus that has just started (or a relabelled
       # series) does not raise letters it has merely not seen before.
+      # The tenant-status stream (ADR-0033 dec 3): a partition that carried statuses within the hour and
+      # none for 5m has stalled, and ingestion has forgotten every suspension it held. Per partition: a
+      # producer can lose one partition's sequence while the others still publish. The topic is the
+      # contract's (industryflow_contracts.tenant_status.DEFAULT_TOPIC; tests/config_guards holds them equal).
+      - alert: IndustryFlowTenantStatusStalled
+        expr: |
+          sum by (partition) (increase(kafka_topic_partition_current_offset{platform="industryflow", topic="tenant-status"}[5m])) == 0
+          and on (partition)
+          sum by (partition) (increase(kafka_topic_partition_current_offset{platform="industryflow", topic="tenant-status"}[1h] offset 5m)) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The tenant-status stream has stalled"
+          description: "Partition {{ $labels.partition }} of tenant-status has carried no status for 5m. Ingestion has forgotten every suspension and lets those devices through; the writers still refuse them: docs/operations/monitoring.md."
+          services: "alert-service-detector, kafka"
       - alert: IndustryFlowCapabilityAuditBacklog
         # The capability-use record's writer is behind (ADR-0042 dec 7): events not yet written are
         # lost if the capability store is. Every gateway replica reports the one consumer group.

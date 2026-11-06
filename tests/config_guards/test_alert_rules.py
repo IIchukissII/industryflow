@@ -107,3 +107,19 @@ def test_every_ci_gate_checks_every_job_it_needs():
                 continue
             loose += [f"{wf.name}:{name}:{n}" for n in needs if f"needs.{n}.result" not in body]
     assert not loose, f"gates that would pass a job they never check: {loose}"
+
+
+def test_the_stalled_stream_rule_watches_the_topic_the_platform_publishes():
+    # The rule names the tenant-status topic; the contract owns it (ADR-0033 dec 3). A rename on either
+    # side, or a deployment that sets another topic, leaves the rule watching a topic nobody writes.
+    from industryflow_contracts import tenant_status
+
+    [rule] = [r for r in _rules() if r.get("alert") == "IndustryFlowTenantStatusStalled"]
+    topics = set(re.findall(r'topic="([^"]+)"', rule["expr"]))
+    assert topics == {tenant_status.DEFAULT_TOPIC}, topics
+    setters = sorted(
+        str(p.relative_to(ROOT)) for p in [ROOT / "docker-compose.yml", ROOT / ".env.example",
+                                           *sorted((ROOT / "deploy" / "helm").rglob("*.yaml"))]
+        if "KAFKA_TOPIC_TENANT_STATUS" in p.read_text()
+    )
+    assert not setters, f"a deployment names its own tenant-status topic; the rule would not see it: {setters}"
