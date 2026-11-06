@@ -110,7 +110,7 @@ not leave the tenant-isolated path.
 - A stolen superuser session also reads every service's metrics and logs while it lives.
 - Every dashboard request through the edge costs one session check at the gateway.
 - The single host holds one more signing key, generated at install and rotated by replacing it.
-- A service that serves no metrics of its own shows a deploy only as a restart.
+- A service exempt from decision 8 shows a deploy only as a restart.
 - The stream-processing cluster's master and workers report no revision; a change to their images shows only through its symptoms.
 - A stream-processing driver, and a worker that serves no metrics, opens one more port, for the series alone.
 - Every deploy of a new commit changes every reporting service's revision, whether its code changed or not.

@@ -5,7 +5,7 @@
 """
 Liveness check for the alert worker (compose healthcheck and the Helm exec livenessProbe).
 
-The worker has no HTTP port, and "PID 1 is still python" says nothing about whether it consumes:
+The worker serves no HTTP API (its one listener serves only its build revision), and "PID 1 is still python" says nothing about whether it consumes:
 a consumer loop can end or hang while the process stays up. The loop touches HEARTBEAT_FILE on
 every poll, so a stale or missing file is exactly "nothing is consuming". Exit 0 when fresh, 1
 otherwise.

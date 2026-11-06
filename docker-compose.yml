@@ -871,7 +871,7 @@ services:
       - industryflow-network
     restart: unless-stopped
     healthcheck:
-      # No HTTP endpoint. The consumer loop touches a heartbeat file on every poll; healthcheck.py
+      # No HTTP API. The consumer loop touches a heartbeat file on every poll; healthcheck.py
       # fails once it is stale, so a loop that died or hung shows unhealthy, not just a live PID.
       test: [ "CMD", "python", "healthcheck.py" ]
       interval: 30s

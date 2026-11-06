@@ -168,7 +168,7 @@ apps:
     replicas: 1
     port: null
     probe: null
-    # No HTTP port, so liveness is the consumer loop's heartbeat file (stale = nothing consuming).
+    # No HTTP API, so liveness is the consumer loop's heartbeat file (stale = nothing consuming).
     livenessExec: ["python", "healthcheck.py"]
     metrics: true
     buildInfoPort: 9108

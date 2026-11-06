@@ -109,8 +109,14 @@ spec:
             - secretRef:
                 name: {{ include "industryflow.workloadSecretName" (dict "ctx" $root "workload" $name) }}
             {{- end }}
-          {{- if or $app.secretEnv $app.edge }}
+          {{- if or $app.secretEnv $app.edge $app.buildInfoPort }}
           env:
+            {{- if $app.buildInfoPort }}
+            {{- /* The port the process serves its revision on is the one the Service and the
+                   ServiceMonitor name (build_info.SERVE_PORT_ENV, ADR-0016 dec 8). */}}
+            - name: INDUSTRYFLOW_METRICS_PORT
+              value: {{ $app.buildInfoPort | quote }}
+            {{- end }}
             {{- /* apps.<name>.secretEnv: env var -> one of the workload's own secretKeys, for a
                    credential the process reads under a name other than its key (e.g. the AWS_*
                    names an S3 client reads, fed from a scoped object-store principal). */}}

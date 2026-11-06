@@ -15,7 +15,7 @@ from pathlib import Path
 
 from _repo import ROOT, find, helm_template, load_yaml
 
-from industryflow_contracts.build_info import DEFAULT_SERVE_PORT
+from industryflow_contracts.build_info import DEFAULT_SERVE_PORT, SERVE_PORT_ENV
 
 COMPOSE = load_yaml("docker-compose.yml")["services"]
 REPORT = re.compile(r'^build_info\.report\("([a-z0-9-]+)"\)$', re.M)
@@ -124,6 +124,9 @@ def test_every_served_revision_is_scraped():
         pod = find(chart, "Deployment", f"-{component}")["spec"]["template"]["spec"]["containers"][0]
         assert {"name": "build-info", "containerPort": DEFAULT_SERVE_PORT} in pod.get("ports", []), \
             f"chart: the {component} container does not declare the build-info port"
+        # The process binds the port the chart names, not its own default (build_info.SERVE_PORT_ENV).
+        assert {"name": SERVE_PORT_ENV, "value": str(DEFAULT_SERVE_PORT)} in pod.get("env", []), \
+            f"chart: the {component} container is not told the build-info port ({SERVE_PORT_ENV})"
         service = find(chart, "Service", f"-{component}")["spec"]["ports"]
         assert any(p["name"] == "build-info" and p["port"] == DEFAULT_SERVE_PORT for p in service), \
             f"chart: the {component} Service has no build-info port"
@@ -198,10 +201,32 @@ def test_a_worker_that_serves_no_metrics_serves_the_series_alone():
     workers = [r for r in REPORTERS if r["call"] is SERVE and not str(r["entry"]).startswith(str(SPARK))]
     assert workers, "no worker found: the guard is not looking"
     for r in workers:
-        component, code = _component(r), r["entry"].parent
-        others = sorted(str(p.relative_to(ROOT)) for p in code.rglob("*.py")
-                        if "tests" not in p.parts and re.search(r"^\s*(from|import) prometheus_client", p.read_text(), re.M))
-        assert not others, f"{component}: serves metrics beyond the revision series: {others}"
+        component = _component(r)
+        listeners = sorted(f"{p.relative_to(ROOT)}: {m.group(0).strip()}" for p in _image_sources(r)
+                           for m in LISTENER.finditer(p.read_text()))
+        assert not listeners, f"{component}: listens beyond its revision series: {listeners}"
         assert "ports" not in COMPOSE[component], f"compose {component}: the listener is published beyond the network"
         app = apps[component]
-        assert not app.get("port") and not app.get("metricsPort"), f"values.yaml apps.{component}: a port beside build-info"
+        extra = [k for k in ("port", "metricsPort", "metricsExtraPaths") if app.get(k)]
+        assert not extra, f"values.yaml apps.{component}: {extra} beside build-info"
+
+
+# Anything that would serve a second series or a route: a metrics client of its own, an HTTP server.
+LISTENER = re.compile(r"^\s*(?:from|import) (?:prometheus_client|aiohttp\.web|http\.server|socketserver|uvicorn|"
+                      r"fastapi|starlette)\b.*$|^\s*from aiohttp import .*\bweb\b.*$|\bstart_server\(|"
+                      r"\bstart_http_server\(|\bmake_wsgi_app\(|\bmake_asgi_app\(", re.M)
+
+
+def _image_sources(r: dict) -> list[Path]:
+    """Every Python file the worker's image copies from its build context (``COPY <src> <dst>``)."""
+    df = r["dockerfile"]
+    context = ROOT / next(svc["build"]["context"] for svc in COMPOSE.values()
+                          if isinstance(svc.get("build"), dict)
+                          and (ROOT / svc["build"]["context"] / svc["build"].get("dockerfile", "Dockerfile")).resolve() == df.resolve())
+    files = []
+    for src in re.findall(r"^COPY (?!--from)(\S+) \S+$", df.read_text(), re.M):
+        path = context / src
+        files += [p for p in (path.rglob("*.py") if path.is_dir() else [path])
+                  if p.suffix == ".py" and "tests" not in p.parts]
+    assert files, f"{df.relative_to(ROOT)}: no Python sources found — the guard is not looking"
+    return files
