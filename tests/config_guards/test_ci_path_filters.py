@@ -195,3 +195,17 @@ def test_db_tenant_isolation_filter_covers_the_sources_its_live_tests_read():
     assert named, "no live DB test reads a service module any more — revisit this guard"
     missed = sorted(p for p in named if not covered(p, globs))
     assert not missed, f"db-tenant-isolation never re-runs when these change: {missed}"
+
+
+def test_the_live_dedup_test_runs_the_shared_scenario_table():
+    # FakeAlertStore is held to save_alert_once's SQL by one scenario table that its unit suite and
+    # this live test both run; a live test that stops loading it checks the fake against nothing.
+    live = "infrastructure/timescaledb/tests/test_alert_dedup_hypertable.py"
+    tree = ast.parse((ROOT / live).read_text())
+    named = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)}
+    used = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    assert "services/alert_service/tests/dedup_scenarios.py" in named, f"{live} no longer loads the table"
+    assert "SCENARIOS" in used, f"{live} no longer runs dedup_scenarios.SCENARIOS"
+    steps = load_yaml(".github/workflows/db-tenant-isolation.yml")["jobs"]["reader-role-isolation"]["steps"]
+    assert any("pytest infrastructure/timescaledb/tests/" in (s.get("run") or "") for s in steps), \
+        "db-tenant-isolation no longer runs the live DB tests"
