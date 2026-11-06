@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import asyncpg
 import pytest
 from aiokafka import AIOKafkaProducer, TopicPartition
-from aiokafka.errors import CommitFailedError, KafkaError
+from aiokafka.errors import CommitFailedError, KafkaError, OutOfOrderSequenceNumber
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
@@ -310,3 +310,163 @@ def test_the_tenant_status_message_passes_the_producer_unchanged(monkeypatch, tm
     # aiokafka's own serialization step: what send() puts on the wire.
     assert producer._serialize(key, value, []) == (key, value)
     assert tenant_status.decode(value) == ("3926f3d5-d81f-4a81-a54b-b9ba8a3edf89", False)
+
+
+# --- a producer whose state is broken ---------------------------------------------------------------
+
+class BrokenProducer(FakeProducer):
+    """A producer whose every send fails alike: a sticky error, or a send that never completes."""
+
+    def __init__(self, error=None, hang=False, sender_done=False, stop_hangs=False):
+        super().__init__()
+        self.error, self.hang, self.stop_hangs, self.stopped = error, hang, stop_hangs, False
+        if sender_done:
+            self._sender = SimpleNamespace(sender_task=SimpleNamespace(done=lambda: True))
+        self.attempts = 0
+
+    async def send_and_wait(self, topic, value=None, key=None):
+        self.attempts += 1
+        if self.hang:
+            await asyncio.Event().wait()
+        raise self.error
+
+    async def stop(self):
+        if self.stop_hangs:
+            await asyncio.Event().wait()
+        self.stopped = True
+
+
+class StartedProducer(FakeProducer):
+    def __init__(self, start_error=None, start_hangs=False):
+        super().__init__()
+        self.start_error, self.start_hangs = start_error, start_hangs
+        self.started = self.stopped = False
+
+    async def start(self):
+        if self.start_hangs:
+            await asyncio.Event().wait()
+        if self.start_error:
+            raise self.start_error
+        self.started = True
+
+    async def stop(self):
+        self.stopped = True
+
+
+def _broken(tmp_path, monkeypatch, broken, *fresh):
+    c = _consumer([], ScriptedEngine(), tmp_path, KAFKA_BOOTSTRAP_SERVERS="kafka:9092")
+    c.producer = broken
+    built = list(fresh)
+    monkeypatch.setattr(c, "_new_producer", lambda: built.pop(0))
+    return c
+
+
+@pytest.mark.parametrize("error", kafka_consumer.STICKY_PRODUCER_ERRORS, ids=lambda e: e.__name__)
+def test_a_producer_with_a_sticky_error_is_replaced_and_the_message_sent_on_the_new_one(tmp_path, monkeypatch, error):
+    fresh = StartedProducer()
+    broken = BrokenProducer(error=error())
+    c = _broken(tmp_path, monkeypatch, broken, fresh)
+    key, value = tenant_status.encode(CO, False)
+    asyncio.run(c.send("tenant-status", value=value, key=key))
+    assert c.producer is fresh and fresh.started and broken.stopped and c.producers_replaced == 1
+    assert fresh.sent == [("tenant-status", {"company_id": CO, "active": False})]
+
+
+def test_a_producer_whose_sender_ended_is_replaced_before_the_send(tmp_path, monkeypatch):
+    fresh = StartedProducer()
+    broken = BrokenProducer(hang=True, sender_done=True)
+    c = _broken(tmp_path, monkeypatch, broken, fresh)
+    asyncio.run(c.send("tenant-status", value=b"{}"))
+    assert broken.attempts == 0 and c.producer is fresh and fresh.sent == [("tenant-status", {})]
+
+
+def test_a_send_on_a_sender_that_ends_meanwhile_is_bounded_and_the_producer_replaced(tmp_path, monkeypatch):
+    monkeypatch.setattr(kafka_consumer, "SEND_TIMEOUT_SECONDS", 0.05)
+    fresh = StartedProducer()
+    broken = BrokenProducer(hang=True)
+    c = _broken(tmp_path, monkeypatch, broken, fresh)
+    real = kafka_consumer.sender_ended
+    monkeypatch.setattr(kafka_consumer, "sender_ended", lambda p: p is broken and broken.attempts > 0 or real(p))
+    asyncio.run(c.send("tenant-status", value=b"{}"))
+    assert broken.attempts == 1 and c.producer is fresh and fresh.sent == [("tenant-status", {})]
+
+
+def test_a_send_that_times_out_on_a_live_producer_fails_and_keeps_the_producer(tmp_path, monkeypatch):
+    monkeypatch.setattr(kafka_consumer, "SEND_TIMEOUT_SECONDS", 0.05)
+    broken = BrokenProducer(hang=True)
+    c = _broken(tmp_path, monkeypatch, broken)  # no new producer to build
+    with pytest.raises(TimeoutError):
+        asyncio.run(c.send("tenant-status", value=b"{}"))
+    assert c.producer is broken and c.producers_replaced == 0
+
+
+def test_a_retriable_failure_is_not_a_reason_to_replace_the_producer(tmp_path, monkeypatch):
+    broken = BrokenProducer(error=KafkaError("broker unavailable"))
+    c = _broken(tmp_path, monkeypatch, broken)
+    with pytest.raises(KafkaError):
+        asyncio.run(c.send("tenant-status", value=b"{}"))
+    assert c.producer is broken
+
+
+def test_concurrent_senders_replace_a_broken_producer_once(tmp_path, monkeypatch):
+    fresh = StartedProducer()
+    c = _broken(tmp_path, monkeypatch, BrokenProducer(error=OutOfOrderSequenceNumber()), fresh)
+
+    async def both():  # a second replacement would find no producer to build
+        await asyncio.gather(c.send("a", value=b"{}"), c.send("b", value=b"{}"))
+
+    asyncio.run(both())
+    assert c.producer is fresh and sorted(t for t, _ in fresh.sent) == ["a", "b"] and c.producers_replaced == 1
+
+
+def test_a_replacement_the_broker_refuses_keeps_the_old_producer_to_try_again(tmp_path, monkeypatch):
+    refused, fresh = StartedProducer(start_error=KafkaError("broker down")), StartedProducer()
+    broken = BrokenProducer(error=OutOfOrderSequenceNumber())
+    c = _broken(tmp_path, monkeypatch, broken, refused, fresh)
+    with pytest.raises(KafkaError):
+        asyncio.run(c.send("tenant-status", value=b"{}"))
+    assert c.producer is broken and refused.stopped and not broken.stopped
+    asyncio.run(c.send("tenant-status", value=b"{}"))
+    assert c.producer is fresh and fresh.sent == [("tenant-status", {})]
+
+
+def test_a_replacement_whose_start_hangs_is_bounded_and_the_old_producer_kept(tmp_path, monkeypatch):
+    monkeypatch.setattr(kafka_consumer, "PRODUCER_START_TIMEOUT_SECONDS", 0.05)
+    hanging = StartedProducer(start_hangs=True)
+    broken = BrokenProducer(error=OutOfOrderSequenceNumber())
+    c = _broken(tmp_path, monkeypatch, broken, hanging)
+    with pytest.raises(TimeoutError):
+        asyncio.run(c.send("tenant-status", value=b"{}"))
+    assert c.producer is broken and hanging.stopped
+
+
+def test_a_broken_producer_whose_stop_hangs_does_not_hold_the_replacement(tmp_path, monkeypatch):
+    monkeypatch.setattr(kafka_consumer, "PRODUCER_STOP_TIMEOUT_SECONDS", 0.05)
+    fresh = StartedProducer()
+    c = _broken(tmp_path, monkeypatch, BrokenProducer(error=OutOfOrderSequenceNumber(), stop_hangs=True), fresh)
+    asyncio.run(asyncio.wait_for(c.send("tenant-status", value=b"{}"), 5))
+    assert c.producer is fresh and fresh.sent == [("tenant-status", {})]
+
+
+def test_a_dead_letter_survives_a_producer_that_lost_its_sequence(tmp_path, monkeypatch, sleeps):
+    fresh = StartedProducer()
+    c = _broken(tmp_path, monkeypatch, BrokenProducer(error=OutOfOrderSequenceNumber()), fresh)
+    c.consumer = FakeConsumer([[_record(0, b"\xff")]], c)
+    _run(c)
+    assert [t for t, _ in fresh.sent] == ["sensor-data-raw.dlq"]
+    assert c.consumer.commits == [{TP: 1}]
+
+
+def test_sender_ended_reads_the_real_producers_sender_task():
+    """sender_ended reads aiokafka internals; an upgrade that moves them must fail here, not silently."""
+    async def check():
+        producer = AIOKafkaProducer(bootstrap_servers="kafka:9092", enable_idempotence=True)
+        assert hasattr(producer._sender, "sender_task")
+        assert not kafka_consumer.sender_ended(producer)
+        task = asyncio.get_running_loop().create_future()
+        task.set_result(None)
+        producer._sender._sender_task = task
+        assert kafka_consumer.sender_ended(producer)
+        await producer.client.close()
+
+    asyncio.run(check())

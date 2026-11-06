@@ -121,7 +121,8 @@ class Stream:
         self.tenant = tenant
         tag = uuid.uuid4().hex[:12]
         self.topic = f"if-stream-it-{tag}"
-        self.dlq = f"{self.topic}.dlq"
+        # "-dlq", never ".dlq": the platform's dead-letter alert watches every ".dlq" topic.
+        self.dlq = f"{self.topic}-dlq"
         self.checkpoint = f"s3a://spark-checkpoints/it-{tag}"
         self.container = f"if-stream-it-{tag}"
         self.base = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=1)

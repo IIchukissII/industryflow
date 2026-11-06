@@ -5,7 +5,7 @@
 """The alert worker's consumer loop as a process the crash proof can kill
 (test_kafka_consumer_integration.py).
 
-    python kafka_crash_worker.py <bootstrap> <topic> <group> <log file> <hang seq>
+    python kafka_crash_worker.py <bootstrap> <topic> <group> <log file> <hang seq> <dead-letter topic>
 
 Each reading the engine is handed is appended to the log file as its `seq`. The reading whose `seq`
 is <hang seq> is logged and then never finishes, so the batch holding it is never committed: the
@@ -35,10 +35,10 @@ class HangingEngine:
         return []
 
 
-async def main(bootstrap, topic, group, log_path, hang_seq):
+async def main(bootstrap, topic, group, log_path, hang_seq, dlq):
     config = SimpleNamespace(
         KAFKA_BOOTSTRAP_SERVERS=bootstrap, KAFKA_TOPIC_SENSOR_DATA=topic, KAFKA_GROUP_ID=group,
-        KAFKA_TOPIC_DLQ=f"{topic}.dlq", KAFKA_MAX_RETRIES=1, KAFKA_RETRY_BACKOFF_SECONDS=0.05,
+        KAFKA_TOPIC_DLQ=dlq, KAFKA_MAX_RETRIES=1, KAFKA_RETRY_BACKOFF_SECONDS=0.05,
         KAFKA_MAX_BACKOFF_SECONDS=0.2, HEARTBEAT_FILE=f"{log_path}.heartbeat",
     )
     consumer = AlertKafkaConsumer(config, HangingEngine(log_path, hang_seq))
@@ -47,5 +47,5 @@ async def main(bootstrap, topic, group, log_path, hang_seq):
 
 
 if __name__ == "__main__":
-    bootstrap, topic, group, log_path, hang_seq = sys.argv[1:6]
-    asyncio.run(main(bootstrap, topic, group, log_path, int(hang_seq)))
+    bootstrap, topic, group, log_path, hang_seq, dlq = sys.argv[1:7]
+    asyncio.run(main(bootstrap, topic, group, log_path, int(hang_seq), dlq))

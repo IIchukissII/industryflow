@@ -77,7 +77,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { service: ingestion_service,   path: services/ingestion_service/tests }
+          # The real-broker proofs of the producer and the tenant-status stream are `integration` and
+          # excluded here — this job runs no broker and they would only skip. They run in alert-kafka.
+          - { service: ingestion_service,   path: services/ingestion_service/tests, args: "--ignore=services/ingestion_service/tests/test_kafka_producer_integration.py --ignore=services/ingestion_service/tests/test_tenant_status_integration.py" }
           - { service: api_gateway,         path: services/api_gateway/tests }
           - { service: notebook_hub,        path: services/notebook_hub/tests }
           # The live cross-tenant isolation proof (test_sql_proxy_integration.py) is marked
@@ -160,12 +162,19 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install dependencies
-        run: pip install ./libs/industryflow_contracts -r services/alert_service/requirements-dev.txt
+        run: pip install ./libs/industryflow_contracts -r services/alert_service/requirements-dev.txt -r services/ingestion_service/requirements-dev.txt
       - name: Run the real-broker proof
         env:
           IF_TEST_KAFKA_BOOTSTRAP: localhost:9092
           IF_REQUIRE_REAL_KAFKA: "1"
         run: pytest services/alert_service/tests/test_kafka_consumer_integration.py -m integration -v
+      # Its own run: both services are flat module trees (config, main), and one process imports one of each.
+      # The producer proof stops and restarts the compose broker.
+      - name: Run the ingestion real-broker proofs
+        env:
+          IF_TEST_KAFKA_BOOTSTRAP: localhost:9092
+          IF_REQUIRE_REAL_KAFKA: "1"
+        run: pytest services/ingestion_service/tests/test_kafka_producer_integration.py services/ingestion_service/tests/test_tenant_status_integration.py -m integration -v
       - name: Dump broker logs on failure
         if: failure()
         run: docker compose logs zookeeper kafka

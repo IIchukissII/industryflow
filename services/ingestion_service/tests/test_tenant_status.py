@@ -108,3 +108,17 @@ def test_the_follower_applies_the_stream_and_reconnects_after_a_failure(monkeypa
         asyncio.run(tenant_status.follow(lambda: next(consumers), retry_seconds=0))
     assert started == [True, False]
     assert tenant_status.status.is_suspended(company_id)
+
+
+def test_a_suspended_tenants_device_is_refused_before_its_body_is_read(client, make_cert):
+    """The identity check answers first: an invalid body from a suspended tenant's device is 403, from an
+    active one's 422. The box journey (tests/e2e/test_tenant_life.py) probes the suspension with such a
+    body, so no probe reading ever reaches the topic and the stream's dead letters."""
+    c, produced = client
+    suspended, active = str(uuid.uuid4()), str(uuid.uuid4())
+    _heard(suspended, False)
+    r = c.post("/ingest", json={}, headers=_headers(make_cert(f"industryflow:tenant/{suspended}/device/d")))
+    assert r.status_code == 403 and r.json()["detail"] == "Tenant suspended"
+    r = c.post("/ingest", json={}, headers=_headers(make_cert(f"industryflow:tenant/{active}/device/d")))
+    assert r.status_code == 422
+    assert produced == []

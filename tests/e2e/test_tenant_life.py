@@ -3,20 +3,29 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """A tenant's life through deletion (ADR-0026 dec 10; ADR-0033): provisioned, used, suspended (its
-users and sessions refused at once), its deletion refused until the suspension is old enough, then
+users and sessions refused at once, its devices at the certificate edge within the tenant-status
+stream's publish interval), its deletion refused until the suspension is old enough, then
 removed from every store by the deletion job and the operator steps it waits on, leaving a tombstone.
 
 The suspension's age is the one thing set from inside: the deletion floor is thirty days of wall
 clock (ADR-0033 dec 7). The job also carries out what earlier runs left requested."""
+import os
+import sys
 import time
 import uuid
 
-from harness import Secret, pretty
+from harness import Secret, eventually, issue_device, pretty, send_reading
+
+# The shared contract is standard library only; the runner image reads it from the checkout.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "libs", "industryflow_contracts"))
+from industryflow_contracts import tenant_status  # noqa: E402
 
 DELETION_TIMEOUT = 1200
+# A suspension reaches ingestion with the next publish of the stream; past a few intervals it never will.
+REFUSAL_TIMEOUT = 3 * tenant_status.PUBLISH_INTERVAL_SECONDS
 
 
-def test_a_tenant_is_provisioned_used_suspended_and_deleted_from_every_store(edge, root, env):
+def test_a_tenant_is_provisioned_used_suspended_and_deleted_from_every_store(edge, root, env, settings):
     run = uuid.uuid4().hex[:8]
     cid = root.post("/api/companies", json={"company_name": f"e2e-life-{run}"}).json()["company_id"]
     email, password = f"e2e-life-{run}@example.com", Secret(f"E2e-{uuid.uuid4().hex}")
@@ -24,11 +33,25 @@ def test_a_tenant_is_provisioned_used_suspended_and_deleted_from_every_store(edg
                                   "company_id": cid})
     admin = edge.session(email, password)
     admin.get("/api/equipment")
+    device = issue_device(env, settings["IF_E2E_COMPOSE_DIR"], cid, f"e2e-life-dev-{run}")
+    # Probed with a body the schema refuses: ingestion answers the device's identity first (403 for a
+    # suspended tenant) and the body second (422), so no probe reaches the stream, where a suspended
+    # tenant's reading is dead-lettered and alerts the operator.
+    r = send_reading(settings, device, {})
+    assert r.status_code == 422, r.text[:300]
 
-    # Suspended: its users and their live sessions are refused at once (ADR-0033 dec 3).
+    # Suspended: its users and their live sessions are refused at once, its devices once the
+    # tenant-status stream carries the suspension to ingestion (ADR-0033 dec 3).
     root.put(f"/api/companies/{cid}", json={"is_active": False})
     admin.get("/api/equipment", expect=(401, 403))
     assert edge.login(email, password).status_code in (400, 401, 403)
+
+    def refused():
+        r = send_reading(settings, device, {})
+        assert r.status_code in (403, 422), r.text[:300]
+        return r.status_code == 403 and r.json().get("detail") == "Tenant suspended"
+
+    eventually(refused, timeout=REFUSAL_TIMEOUT, every=2, what="the suspended tenant's device is refused at ingestion")
 
     # Deletion waits for the suspension's floor (ADR-0033 dec 7), then nothing reactivates it.
     root.post(f"/api/companies/{cid}/deletion", expect=(409,))

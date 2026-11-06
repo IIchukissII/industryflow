@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import ssl
 import subprocess
 import time
@@ -128,6 +129,14 @@ def equipment(session: Session, kind: str, name: str, sensors) -> tuple:
         session.post(f"/api/equipment/{eid}/sensors", json={"sensor_id": ids[sensor], "sensor_name": sensor,
                                                               "sensor_type": "process", "position": position})
     return eid, ids
+
+
+def issue_device(env: Environment, compose_dir: str, company_id: str, device_id: str) -> tuple:
+    """A certificate for a device of the tenant, as the operator enrols one (scripts/device-ca.sh); the
+    (chain, key) pair send_reading presents."""
+    env.script("scripts/device-ca.sh", "issue", company_id, device_id)
+    base = os.path.join(compose_dir, "deploy", "device-ca", "devices", company_id, device_id)
+    return os.path.join(base, "current.chain.crt"), os.path.join(base, "current.key")
 
 
 def send_reading(settings, cert, reading) -> httpx.Response:

@@ -21,7 +21,7 @@ The GitHub Actions workflows, their gate jobs, and the required checks on `main`
 
 | Gate | Workflow file | Gated jobs |
 |---|---|---|
-| `unit-tests-gate` | `unit-tests.yml` | pytest (Redis service); `alert-kafka`: the alert worker's consumer loop against the compose Kafka broker; `spark-streaming`: the streaming job's image against the compose Kafka, TimescaleDB and MinIO |
+| `unit-tests-gate` | `unit-tests.yml` | pytest (Redis service); `alert-kafka`: the alert worker's consumer loop, ingestion's producer (through a broker outage) and the tenant-status stream against the compose Kafka broker; `spark-streaming`: the streaming job's image against the compose Kafka, TimescaleDB and MinIO |
 | `lint-gate` | `lint.yml` | ruff, exact pins + deps-resolve, eslint, frontend tests (vitest) |
 | `images-gate` | `images.yml` | Spark/JupyterHub version parity, image build + smoke + Trivy, pip-audit / npm audit |
 | `helm-gate` | `helm.yml` | `helm lint` / `helm template`, fail-closed placeholder-secret guard |
