@@ -2,11 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The Redis adapter against a real Redis protocol implementation (fakeredis, with Lua).
-
-The other hub tests drive the capability logic through a dict fake, which cannot show that a mint and
-its record are one MULTI or that a revocation runs the contract's script (ADR-0042 dec 3). This
-does: the adapter's own commands, on a server that executes them.
+"""The Redis adapter's own commands, on industryflow_contracts.testing's store (a real Redis in CI):
+a mint and its record are one MULTI, and a revocation runs the contract's script (ADR-0042 dec 3).
 """
 import json
 import os

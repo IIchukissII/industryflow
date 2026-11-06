@@ -128,18 +128,36 @@ def _text(value: Any) -> Any:
     return value.decode() if isinstance(value, (bytes, bytearray)) else value
 
 
+def _entries(raw):
+    return [{_text(k): _text(v) for k, v in fields.items()} for _, fields in raw]
+
+
+def _decoded(entries, kind):
+    from industryflow_contracts import capability_audit as audit
+    return [audit.decode(e) for e in entries if kind is None or e.get("kind") == kind]
+
+
 async def audit_stream(client: Any):
     """Every entry of the capability-use stream, oldest first, as text field/value pairs."""
     from industryflow_contracts import capability_audit as audit
-    return [{_text(k): _text(v) for k, v in fields.items()}
-            for _, fields in await client.xrange(audit.STREAM_KEY)]
+    return _entries(await client.xrange(audit.STREAM_KEY))
 
 
 async def audit_events(client: Any, kind: Any = None):
     """The stream's events as its writer reads them (``capability_audit.decode``), of ``kind`` if
     given."""
+    return _decoded(await audit_stream(client), kind)
+
+
+def sync_audit_stream(client: Any):
+    """``audit_stream`` through a synchronous client."""
     from industryflow_contracts import capability_audit as audit
-    return [audit.decode(e) for e in await audit_stream(client) if kind is None or e.get("kind") == kind]
+    return _entries(client.xrange(audit.STREAM_KEY))
+
+
+def sync_audit_events(client: Any, kind: Any = None):
+    """``audit_events`` through a synchronous client."""
+    return _decoded(sync_audit_stream(client), kind)
 
 
 async def pass_audit_windows(client: Any) -> None:

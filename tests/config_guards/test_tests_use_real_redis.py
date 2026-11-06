@@ -43,9 +43,6 @@ ALLOWED = {
         "a sentinel: a cancel request must never reach the store, and any record it wrote fails the test",
     "services/notebook_tracking_gateway/tests/test_capability_record.py::_ClaimRace":
         "wraps a real client (testing.async_redis) to hold two claims at a barrier and force the race",
-    "services/notebook_hub/tests/test_capabilities.py::FakeStore":
-        "fakes the hub's own CapabilityStore port, not the client; RedisCapabilityStore runs on the real "
-        "store in test_redis_capability_store.py",
 }
 
 SKIP = {"node_modules", ".venv", "venv", "build", "site-packages", ".git"}
