@@ -7,8 +7,9 @@ The ML service re-reads the account behind every token (ADR-0004 dec 2, ADR-0033
 
 A validly signed access token is not enough: a deactivated or deleted user, or a user of a suspended
 company, is refused at once rather than when the token expires, and so is a token whose session has
-ended (industryflow_contracts.sessions). The account store is a fake pool, the session store a
-mapping read the way the contract reads it (only GETs).
+ended (industryflow_contracts.sessions). The account store is a fake pool; the session store is
+industryflow_contracts.testing's (a real Redis in CI), connected as api/main.py connects (bytes back),
+one client per event loop since TestClient runs the app on its own.
 """
 import os
 import sys
@@ -18,6 +19,7 @@ import uuid
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from industryflow_contracts import testing
 from jose import jwt
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
@@ -58,14 +60,9 @@ class FakePool:
         return Conn()
 
 
-class Records:
-    """The session store as the verifier reads it: GETs over the contract's keys."""
-
-    def __init__(self, **kv):
-        self.kv = kv
-
-    async def get(self, key):
-        return self.kv.get(key)
+def Records(**entries):
+    """The session store holding ``entries``."""
+    return testing.AnyLoopRedis(entries)
 
 
 def _client(pool, store="fresh"):
@@ -171,12 +168,12 @@ def _store(**records):
     """A session store holding the gateway's ended-session records, keyed through the contract."""
     from industryflow_contracts import sessions
 
-    kv = {}
+    entries = {}
     if "ended_session" in records:
-        kv[sessions.ended_session_key(records["ended_session"])] = b"1"
+        entries[sessions.ended_session_key(records["ended_session"])] = "1"
     if "all_ended_at" in records:
-        kv[sessions.user_ended_key(str(USER))] = repr(records["all_ended_at"]).encode()
-    return Records(**kv)
+        entries[sessions.user_ended_key(str(USER))] = repr(records["all_ended_at"])
+    return Records(**entries)
 
 
 def test_a_token_of_a_session_ended_by_logout_is_refused():

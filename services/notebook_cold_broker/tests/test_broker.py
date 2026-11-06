@@ -4,32 +4,31 @@
 
 """
 Broker orchestration tests (ADR-0025 dec 5, read side): bearer auth, tenant-prefix scoping,
-read-only presigned-GET redirects, cross-tenant refusal — driven through a fake store + object
-store, no Redis and no S3.
+read-only presigned-GET redirects, cross-tenant refusal — driven through a fake object store (no
+S3) and industryflow_contracts.testing's capability store (a real Redis in CI).
 """
+import asyncio
 import json
 import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from industryflow_contracts import tenancy
+from industryflow_contracts import tenancy, testing
 
 import broker  # noqa: E402
-from capability_audit_fake import AuditScripts
 
 CID = "0b2f503a-6e59-4f4f-b0cd-b82547a20cf2"
 PREFIX = f"tenant_{CID}/"
 
 
-class FakeStore(AuditScripts):
-    def __init__(self, mapping):
-        self._m = mapping
+def _store(entries):
+    """The capability store holding ``entries``, connected as broker.py connects (bytes back): one
+    client per event loop, as TestClient runs the app on its own."""
+    return testing.AnyLoopRedis(entries)
 
-    async def get(self, key):
-        return self._m.get(key)
 
-    async def delete(self, *keys):
-        return sum(self._m.pop(k, None) is not None for k in keys)
+def _events(store, kind=None):
+    return asyncio.run(testing.audit_events(store, kind))
 
 
 class FakeColdStore:
@@ -56,7 +55,7 @@ def _handle(mapping, audience="cold", cid=CID):
 
 
 def _client(store_map, cold, store=None):
-    return TestClient(broker.build_app(store or FakeStore(store_map), cold))
+    return TestClient(broker.build_app(store or _store(store_map), cold))
 
 
 def _auth(tok):
@@ -164,29 +163,29 @@ def test_first_use_is_recorded_once_and_an_unknown_value_once_by_digest():
                                         "handle_id": hid}),
          "nbcap:secret-sql": json.dumps({"user": "u", "company_id": CID, "audience": "sql",
                                          "handle_id": hid})}
-    store = FakeStore(m)
+    store = _store(m)
     c = _client(m, FakeColdStore(), store)
     for tok, status in (("secret-ok", 200), ("secret-ok", 200), ("secret-sql", 401),
                         ("secret-gone", 401), ("secret-gone", 401)):
         assert c.get("/cold/files", headers=_auth(tok)).status_code == status
 
-    [first] = store.events("first_use")
+    [first] = _events(store, "first_use")
     assert (first["plane"], first["handle_id"], first["company_id"], first["user"], first["audience"]) == (
         "cold_broker", hid, CID, "u", "cold")
-    refusals = store.events("refused")
+    refusals = _events(store, "refused")
     # An unknown value once per window by its digest; a real entry's refusal every time, without one
     # (ADR-0042 dec 2, 8).
     assert [e["reason"] for e in refusals] == ["wrong_audience", "no_entry"]
     assert (refusals[0]["company_id"], refusals[0]["audience"]) == (CID, "sql")
     assert refusals[1]["company_id"] is None and refusals[1]["digest"] is not None
     assert refusals[0]["digest"] is None
-    assert not any("secret-" in v for e in store.stream for v in e.values())
+    assert not any("secret-" in v for e in asyncio.run(testing.audit_stream(store)) for v in e.values())
 
 
 def test_a_request_without_a_bearer_and_an_old_handle_record_nothing():
     m = {}; tok = _handle(m)  # minted before the record existed: no handle_id
-    store = FakeStore(m)
+    store = _store(m)
     c = _client(m, FakeColdStore(), store)
     assert c.get("/cold/files").status_code == 401
     assert c.get("/cold/files", headers=_auth(tok)).status_code == 200
-    assert store.events() == []
+    assert _events(store) == []

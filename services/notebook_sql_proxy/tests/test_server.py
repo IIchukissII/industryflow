@@ -8,7 +8,8 @@ asyncio pipes, so the handshake — declining SSL, reading the StartupMessage, r
 password, extracting the capability handle — is validated without a database. The upstream
 ``PostgresBackend`` against a real Postgres is exercised by test_sql_proxy_integration.py; its
 protocol-level behaviour (enrolment on a refused login, cancellation, ending a revoked session) is
-driven against a small fake Postgres in test_backend.py.
+driven against a small fake Postgres in test_backend.py. The capability store is
+industryflow_contracts.testing's (a real Redis in CI).
 """
 import asyncio
 import json
@@ -24,17 +25,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import binding as b  # noqa: E402
 import server  # noqa: E402
 import wire  # noqa: E402
-from capability_audit_fake import AuditScripts  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 
-class _Store(AuditScripts):
-    """The capability store: a handle lookup over a dict, and the record's appends."""
-
-    def __init__(self, mapping=None):
-        self.mapping = mapping or {}
-
-    async def get(self, key):
-        return self.mapping.get(key)
+async def _store(entries=()):
+    """The capability store holding ``entries``, connected as server.py connects (bytes back)."""
+    store = await testing.async_redis()
+    for key, value in dict(entries).items():
+        await store.set(key, value)
+    return store
 
 
 def test_ssl_context_disable_is_none():
@@ -192,7 +191,7 @@ async def test_handle_client_rejects_invalid_handle_without_backend():
     reader.feed_data(wire.build_password_message("not-minted"))
     reader.feed_eof()
 
-    store = _Store()  # nothing minted → deny
+    store = await _store()  # nothing minted → deny
     opened = []
 
     def backend_factory(binding, r, w):
@@ -202,7 +201,7 @@ async def test_handle_client_rejects_invalid_handle_without_backend():
     await server.handle_client(reader, writer, store, backend_factory)
 
     assert opened == []  # the privileged backend is never opened for a refused handle
-    [refused] = store.events("refused")
+    [refused] = await testing.audit_events(store, "refused")
     assert refused["reason"] == "no_entry" and "not-minted" not in refused.values()
     # The kernel received a FATAL ErrorResponse. Skip the AuthenticationCleartextPassword we sent.
     _t, _p, rest = _read_one(transport.buffer)
@@ -224,7 +223,7 @@ async def test_handle_client_authorizes_valid_handle_and_builds_backend():
          "handle_id": str(uuid.uuid4())}
     )
 
-    store = _Store({f"{b._KEY_PREFIX}good": record})
+    store = await _store({f"{b._KEY_PREFIX}good": record})
 
     built = {}
 
@@ -250,7 +249,7 @@ async def test_handle_client_authorizes_valid_handle_and_builds_backend():
 
     await server.handle_client(reader, writer, store, backend_factory)
 
-    assert [e["kind"] for e in store.events()] == ["first_use", "sql_session_opened", "sql_session_closed"]
+    assert [e["kind"] for e in await testing.audit_events(store)] == ["first_use", "sql_session_opened", "sql_session_closed"]
     assert built["connected"] and built["relayed"] and built["closed"]
     assert built["binding"].company_id == cid
     # The tenant's read-only role was assumed before any relay.

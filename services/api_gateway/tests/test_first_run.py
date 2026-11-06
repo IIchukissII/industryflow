@@ -13,6 +13,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi_users.exceptions import InvalidPasswordException
 from fastapi_users.password import PasswordHelper
+from industryflow_contracts import testing
 
 import first_run
 import users
@@ -104,11 +105,11 @@ class _Manager:
 
 @pytest.fixture
 def store(monkeypatch):
-    class NoSessionEnded:
-        async def get(self, key):
-            return None
-
-    monkeypatch.setattr(redis_module.redis_client, "redis", NoSessionEnded())
+    # No session ended: an empty store, as messaging.redis_client connects, one client per event loop
+    # (TestClient runs the app on its own).
+    store = testing.AnyLoopRedis(encoding="utf-8", decode_responses=True)
+    monkeypatch.setattr(redis_module.redis_client, "redis", store)
+    return store
 
 
 _DEFAULT_HASH = PasswordHelper().hash("industryflow")
