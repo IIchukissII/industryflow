@@ -106,7 +106,7 @@ jobs:
           # scripts/check_spark_version_parity.py). test_spark_service.py is a live-stack harness
           # (TimescaleDB + the running jobs) and would only fail here, so it is excluded. The
           # real-store proof (test_streaming_integration.py) runs in the spark-streaming job.
-          - { service: spark_jobs,          path: services/spark_jobs/tests, args: "--ignore=services/spark_jobs/tests/test_spark_service.py --ignore=services/spark_jobs/tests/test_streaming_integration.py", java: "21" }
+          - { service: spark_jobs,          path: services/spark_jobs/tests, args: "--ignore=services/spark_jobs/tests/test_spark_service.py --ignore=services/spark_jobs/tests/test_streaming_integration.py --ignore=services/spark_jobs/tests/test_aggregations_integration.py", java: "21" }
           # Cold-layer exporter (ADR-0025): orchestration tests drive fakes, no DB/object store.
           # The live proof (test_cold_export_integration.py) is `integration` and excluded here —
           # it needs TimescaleDB + MinIO and would only skip. It runs in cold-layer-integration.yml.
@@ -201,13 +201,13 @@ jobs:
           docker compose up -d --no-deps spark-master spark-worker
           docker compose run --rm db-migrate
           docker compose run --rm --no-deps minio-init
-      - name: Build the streaming image
-        run: docker compose build spark-streaming
+      - name: Build the Spark job images
+        run: docker compose build spark-streaming spark-aggregations
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: Install dependencies
-        run: pip install -r infrastructure/timescaledb/tests/requirements.txt
+        run: pip install -r infrastructure/timescaledb/tests/requirements.txt ./libs/industryflow_contracts
       - name: Run the real-store proof
         env:
           PGHOST: localhost
@@ -217,12 +217,12 @@ jobs:
           IF_REQUIRE_LIVE_STACK: "1"
         run: |
           export PGPASSWORD="$(grep -E '^DB_PASSWORD=' .env | cut -d= -f2-)"
-          pytest services/spark_jobs/tests/test_streaming_integration.py -m integration -v
+          pytest services/spark_jobs/tests/test_streaming_integration.py services/spark_jobs/tests/test_aggregations_integration.py -m integration -v
       - name: Dump logs on failure
         if: failure()
         run: |
           docker compose logs kafka timescaledb minio spark-master spark-worker
-          for c in $(docker ps -aq --filter name=if-stream-it-); do docker logs "$c" 2>&1 | tail -200; done
+          for c in $(docker ps -aq --filter name=if-stream-it- --filter name=if-agg-it-); do docker logs "$c" 2>&1 | tail -200; done
       - name: Tear down
         if: always()
         run: docker compose down -v
