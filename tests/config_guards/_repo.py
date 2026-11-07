@@ -79,3 +79,11 @@ def find(docs: list[dict], kind: str, name_suffix: str) -> dict:
         if d.get("kind") == kind and d["metadata"]["name"].endswith(name_suffix):
             return d
     raise AssertionError(f"no {kind} named *{name_suffix} in the render")
+
+
+def gate_tests_every_need(gate: dict) -> bool:
+    """Whether a gate job reads every `needs` result from the context and fails on any failed or
+    cancelled one, so a job added to `needs` cannot be left out of the check."""
+    step = (gate.get("steps") or [{}])[0]
+    reads = str((step.get("env") or {}).get("NEEDS", "")).replace(" ", "") == "${{toJSON(needs)}}"
+    return reads and 'select(.value.result == "failure" or .value.result == "cancelled")' in step.get("run", "")

@@ -7,8 +7,9 @@
 A proof is a test module marked `integration`. Each side of it fails silently: a proof no step
 names never runs; a step that does not set the flag the proof reads turns a missing stack into a
 skip, and so does a module that skips itself at import, which no skip-to-failure hook sees; a path
-filter that misses the proof skips the job when only the proof changed; a job no gate reads can fail
-without blocking; a proof left in the no-stack matrix only skips there, a green that proves nothing.
+filter that misses the proof skips the job when only the proof changed; a job no gate needs, or
+whose result the gate never tests, can fail without blocking; a proof left in the no-stack matrix
+only skips there, a green that proves nothing.
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ import shlex
 import pytest
 import yaml
 
-from _repo import ROOT, covered, load_yaml
+from _repo import ROOT, covered, gate_tests_every_need, load_yaml
 
 MARK = re.compile(r"^pytestmark = (?:\[[^\]]*)?pytest\.mark\.integration", re.M)
 FLAG = re.compile(r"\bIF_REQUIRE_[A-Z_]+\b")
@@ -102,6 +103,12 @@ def _filter_globs(wf_doc: dict, job: dict) -> list[str]:
     return yaml.safe_load(step["with"]["filters"])[group]
 
 
+def _reads_result(gate: dict, name: str) -> bool:
+    """Whether a gate tests the job's result: every `needs` entry at once, or this one by name."""
+    text = "\n".join(str(st.get("run", "")) for st in gate.get("steps") or [])
+    return gate_tests_every_need(gate) or f"needs.{name}.result" in text
+
+
 def _needs(job: dict) -> list[str]:
     needs = job.get("needs") or []
     return [needs] if isinstance(needs, str) else needs
@@ -139,7 +146,7 @@ def test_a_gated_step_runs_the_proof_with_its_flag_set(proof):
         if not wanted & _set_flags(job, step):
             continue
         wf_doc = load_yaml(wf)
-        gated = any(name in _needs(j) and "always()" in str(j.get("if", ""))
+        gated = any(name in _needs(j) and "always()" in str(j.get("if", "")) and _reads_result(j, name)
                     for other, j in wf_doc["jobs"].items() if other != name)
         filtered = "changes" not in _needs(job) or covered(proof, _filter_globs(wf_doc, job))
         if gated and filtered:

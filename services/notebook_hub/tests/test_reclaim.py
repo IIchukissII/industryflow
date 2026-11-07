@@ -123,47 +123,7 @@ def test_kube_names_the_claim_as_kubespawner_does(username, monkeypatch):
     assert reclaim.KubeVolumes(TEMPLATE, namespace="ns").name(username) == asyncio.run(expected())
 
 
-def test_docker_removes_the_containers_still_mounting_the_volume_first():
-    from docker.errors import NotFound
-
-    class Container:
-        def __init__(self, store, cid):
-            self.store, self.cid = store, cid
-
-        def remove(self, force=False):
-            assert force
-            self.store.mounts.pop(self.cid)
-
-    class Volume:
-        def __init__(self, store, name):
-            self.store, self.name = store, name
-
-        def remove(self):
-            if self.name in self.store.mounts.values():
-                raise RuntimeError("409 volume is in use")
-            self.store.volumes.discard(self.name)
-
-    class Client:
-        def __init__(self, name):
-            self.volumes_set, self.mounts = {name}, {"c0ffee": name}
-            self.volumes, self.containers = self, self
-
-        def get(self, name):
-            if name not in self.volumes_set:
-                raise NotFound("no such volume")
-            return Volume(self, name)
-
-        def list(self, all=False, filters=None):
-            return [Container(self, cid) for cid, v in self.mounts.items() if v == filters["volume"]]
-
-        def discard(self, name):
-            self.volumes_set.discard(name)
-
-    client = Client(reclaim.DockerVolumes(TEMPLATE, client=object()).name(USERNAMES[0]))
-    v = reclaim.DockerVolumes(TEMPLATE, client=client)
-    assert v.remains(USERNAMES[0]) is True
-    v.remove(USERNAMES[0])
-    assert client.mounts == {} and v.remains(USERNAMES[0]) is False
+# Removal against the Docker daemon itself: test_reclaim_docker_live.py.
 
 
 def test_kube_counts_a_claim_until_it_is_gone():
