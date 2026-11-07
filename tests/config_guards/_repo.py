@@ -11,6 +11,8 @@ files and answer "does this path filter match that path" — they never encode a
 from __future__ import annotations
 
 import functools
+import json
+import os
 import re
 import shutil
 import subprocess
@@ -79,3 +81,34 @@ def find(docs: list[dict], kind: str, name_suffix: str) -> dict:
         if d.get("kind") == kind and d["metadata"]["name"].endswith(name_suffix):
             return d
     raise AssertionError(f"no {kind} named *{name_suffix} in the render")
+
+
+def gate_tests_every_need(gate: dict) -> bool:
+    """Whether a gate job fails closed on every `needs` result, shown by running its script: all jobs
+    succeeded or skipped passes; any one failed or cancelled, or change detection not succeeding,
+    fails. The gate runs whatever its needs did, and its one step can neither be skipped nor fail
+    softly, so a job added to `needs` cannot be left out of the check."""
+    steps = gate.get("steps") or []
+    if len(steps) != 1 or "always()" not in str(gate.get("if", "")) or gate.get("continue-on-error"):
+        return False
+    step = steps[0]
+    if "if" in step or step.get("continue-on-error"):
+        return False
+    if str((step.get("env") or {}).get("NEEDS", "")).replace(" ", "") != "${{toJSON(needs)}}":
+        return False
+    run, needs = step.get("run", ""), list(gate.get("needs") or [])
+    if "${{" in run:
+        return False  # it reads something besides NEEDS that this run cannot supply
+
+    def exits(results: dict) -> int:
+        env = dict(os.environ, NEEDS=json.dumps({k: {"result": v, "outputs": {}} for k, v in results.items()}))
+        return subprocess.run(["bash", "-e", "-c", run], env=env, capture_output=True, timeout=30).returncode
+
+    ok = {k: "success" for k in needs}
+    if exits(ok) != 0 or exits({**ok, **{k: "skipped" for k in needs if k != "changes"}}) != 0:
+        return False
+    for job in needs:
+        for bad in ("failure", "cancelled") + (("skipped",) if job == "changes" else ()):
+            if exits({**ok, job: bad}) == 0:
+                return False
+    return True

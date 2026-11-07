@@ -83,7 +83,8 @@ jobs:
           # excluded here — this job runs no broker and they would only skip. They run in alert-kafka.
           - { service: ingestion_service,   path: services/ingestion_service/tests, args: "--ignore=services/ingestion_service/tests/test_kafka_producer_integration.py --ignore=services/ingestion_service/tests/test_tenant_status_integration.py" }
           - { service: api_gateway,         path: services/api_gateway/tests }
-          - { service: notebook_hub,        path: services/notebook_hub/tests }
+          # The reclaim's real-Docker proof runs in the hub-docker job.
+          - { service: notebook_hub,        path: services/notebook_hub/tests, args: "--ignore=services/notebook_hub/tests/test_reclaim_docker_live.py" }
           # The live cross-tenant isolation proof (test_sql_proxy_integration.py) is marked
           # `integration` and excluded here — it needs a real stack and would only skip in this
           # no-DB job (a false green). It runs in db-tenant-isolation.yml against a live stack.
@@ -233,31 +234,46 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  # The notebook hub's volume reclaim against the runner's Docker daemon (ADR-0020 dec 6, ADR-0026
+  # dec 11): a mounted volume removed with its container, a neighbour's left alone.
+  hub-docker:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: pip install -r services/notebook_hub/requirements-dev.txt
+      - name: Run the real-Docker proof
+        env:
+          IF_REQUIRE_LIVE_STACK: "1"
+        run: pytest services/notebook_hub/tests/test_reclaim_docker_live.py -m integration -v
+
   # Stable aggregate status for branch protection. Always runs; fails only if the matrix actually
   # ran and failed. A skip (irrelevant paths) passes, so this required check never blocks an
   # unrelated PR — while a real unit-test failure still red-gates the merge.
   unit-tests-gate:
     name: unit-tests-gate
-    needs: [changes, pytest, alert-kafka, spark-streaming]
+    needs: [changes, pytest, alert-kafka, spark-streaming, hub-docker]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - name: Gate on matrix result
+      - name: Gate on every job in needs
+        # Every job in `needs`, read from the context itself, so a job added there cannot be left
+        # out of the check. A skip (no relevant change) passes.
+        env:
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          changes="${{ needs.changes.result }}"
-          result="${{ needs.pytest.result }}"
-          kafka="${{ needs.alert-kafka.result }}"
-          streaming="${{ needs.spark-streaming.result }}"
-          echo "changes=$changes pytest=$result alert-kafka=$kafka spark-streaming=$streaming (relevant=${{ needs.changes.outputs.relevant }})"
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key)=\(.value.result)"'
           # Fail closed if change-detection broke — we can't prove the tests were unnecessary.
-          if [ "$changes" != "success" ]; then
-            echo "::error::change-detection job did not succeed ($changes)"; exit 1
+          if [ "$(echo "$NEEDS" | jq -r '.changes.result')" != success ]; then
+            echo "::error::change-detection job did not succeed"; exit 1
           fi
-          for r in "$result" "$kafka" "$streaming"; do
-            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
-              echo "::error::unit tests did not pass"; exit 1
-            fi
-          done
-          # 'success' (tests ran and passed) or 'skipped' (no relevant changes) both pass.
-          exit 0
+          if echo "$NEEDS" | jq -e 'to_entries | map(select(.value.result == "failure" or .value.result == "cancelled")) | length > 0' >/dev/null; then
+            echo "::error::unit tests did not pass"; exit 1
+          fi

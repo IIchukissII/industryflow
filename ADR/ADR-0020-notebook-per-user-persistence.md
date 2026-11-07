@@ -78,3 +78,4 @@ credentials, make compute long-lived or cross tenants.
 
 - [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): paths, naming, culler scopes.
 - `services/notebook_hub/jupyterhub_config.py`, `services/notebook_hub/Dockerfile.authoring`.
+- `services/notebook_hub/reclaim.py` (dec 6); `services/notebook_hub/tests/test_reclaim_docker_live.py`: removal against a real Docker daemon.
