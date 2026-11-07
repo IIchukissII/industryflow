@@ -76,12 +76,16 @@ spec:
   rules:
     - host: {{ .Values.ingress.mtls.host }}
       http:
+        # Only the device paths, as the compose edge serves them; /metrics and the API docs stay
+        # unreachable to devices (ADR-0002 dec 8).
         paths:
-          - path: /
-            pathType: Prefix
+          {{- range list "/ingest" "/health" "/stats" }}
+          - path: {{ . }}
+            pathType: Exact
             backend:
               service:
-                name: {{ include "industryflow.fullname" . }}-ingestion-service
+                name: {{ include "industryflow.fullname" $ }}-ingestion-service
                 port:
-                  number: {{ (index .Values.apps "ingestion-service").port }}
+                  number: {{ (index $.Values.apps "ingestion-service").port }}
+          {{- end }}
 {{- end }}

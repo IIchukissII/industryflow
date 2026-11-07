@@ -113,6 +113,13 @@ def test_nothing_but_the_device_edge_routes_to_ingestion():
     assert ingest["metadata"]["annotations"]["nginx.ingress.kubernetes.io/auth-tls-verify-client"] == "on"
 
 
+def test_the_device_edge_routes_only_the_device_paths():
+    # A device reaches what the compose edge serves it, never /metrics or the API docs (ADR-0002 dec 8).
+    ingest = find(helm_template("--set", "ingress.mtls.enabled=true"), "Ingress", "-ingest")
+    paths = {(p["path"], p["pathType"]) for rule in ingest["spec"]["rules"] for p in rule["http"]["paths"]}
+    assert paths == {("/ingest", "Exact"), ("/health", "Exact"), ("/stats", "Exact")}, sorted(paths)
+
+
 @pytest.mark.parametrize("dep, extra", [
     ("kafka", ["--set", "infra.kafka.external.bootstrap=broker.example:9092"]),
     ("timescaledb", ["--set", "infra.timescaledb.external.host=db.example"]),
