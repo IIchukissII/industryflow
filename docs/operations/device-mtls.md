@@ -222,7 +222,8 @@ The ingestion service is reachable only from its edge and holds no database role
 | `docker-compose.yml` | Ingestion service publishes no host port; only the edge does |
 | `deploy/helm/industryflow/templates/networkpolicy.yaml` | Ingestion service reachable only from the edge |
 | `deploy/helm/industryflow/templates/ingress.yaml` | Device Ingress routes only the device paths, each `Exact` |
-| `services/ingestion_edge/nginx.conf` | Compose edge: `/metrics` answers 404 |
+| `services/ingestion_edge/nginx.conf` | Compose edge: the same paths, exact; any other answers 404 |
+| `tests/config_guards/test_device_edge_paths.py` | Proof: both edges serve the same device paths |
 
 ## ADR-0002 dec 6
 
