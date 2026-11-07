@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0004 — API authentication, session model and transport security
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-11-01
+- **Date:** 2026-06-26; changed 2026-11-07
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0002](ADR-0002-ingestion-authentication-and-device-identity.md) (shared edge),
   [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant claim),
@@ -24,7 +24,7 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 ## Decision
 
 1. **All external traffic, live sockets included, is TLS-protected; plaintext is redirected.** TLS
-   terminates at the edge shared with ingestion; plaintext is acceptable only for throwaway local
+   terminates at the platform's edge, whose browser and device listeners share one server certificate; plaintext is acceptable only for throwaway local
    development.
 2. **A session is a short-lived JWT access token carrying the tenant claim, plus a rotating,
    server-side refresh credential.** Each refresh claims the credential atomically and issues a
@@ -56,7 +56,7 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
     no channel exists to unlock one, and one source's failures never slow the owner at another.
 11. **A platform with no account gets a superuser at start, held to a password change while its
     password is the published default.** It is created only while no account of any kind exists, in
-    the oldest tenant or a first one; until its holder sets their own password it may read itself,
+    the oldest active tenant or a first one; until its holder sets their own password it may read itself,
     change that password and sign out, and nothing more. A deployment that names its own first
     password is not held.
 
@@ -96,6 +96,7 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 | 11 | Creating the account again whenever it is missing | A removed account would come back with the default password beside other superusers |
 | 11 | Creating it whenever no superuser exists | A populated platform without one would gain a published password beside its tenants' data |
 | 11 | A superuser outside every tenant | Every tenant-scoped page and claim assumes a tenant, which this one would lack |
+| 11 | The oldest tenant, active or not | A suspended tenant refuses every session (ADR-0033 dec 3), so the first superuser could not sign in |
 
 ## Consequences
 

@@ -129,7 +129,7 @@ Deferred cold-layer items and their triggers: [cold layer evolution](cold-layer-
 | ML service request | The `company_id` claim the gateway signs into the access token; a token without a UUID claim answers 401 |
 | Device reading | The URI SAN of the client certificate the edge verified |
 
-A request body's `company_id` is not the tenant for a user caller. The user self-update schema refuses a tenant field.
+A request body's `company_id` is not the tenant for a user caller. A caller presenting `X-Internal-Service-Token` names the tenant in the body's `company_id`, validated as a UUID. The user self-update schema refuses a tenant field.
 
 | Code | Role |
 |---|---|
@@ -138,6 +138,7 @@ A request body's `company_id` is not the tenant for a user caller. The user self
 | `services/api_gateway/schemas.py::UserSelfUpdate` | No tenant field on self-update |
 | `services/api_gateway/routers/user_admin.py` | User administration inside the caller's tenant |
 | `services/ml_service/api/auth.py::company_id_of` | ML service tenant from the token claim |
+| `services/ml_service/api/routers/inference.py::_resolve_company_id` | Internal-service caller names the tenant |
 | `services/ingestion_service/dependencies.py::get_ingestion_identity` | Device tenant from the verified certificate |
 | `services/ml_service/tests/test_tenant_from_token.py` | Proof: the claim is the tenant, a body `company_id` is not |
 | `services/api_gateway/tests/test_user_admin.py` | Proof: self-update and administration stay in the caller's tenant |

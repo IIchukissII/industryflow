@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0013 — Experiment-tracking and model-registry multi-tenancy
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-27
+- **Date:** 2026-06-27; changed 2026-11-07
 - **Parent:** ADR-0001
 - **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (tracking from notebooks, dec 9), [ADR-0012](ADR-0012-notebook-credential-delivery.md) (the capability model applied here), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (tenant-scoped API and UI), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (the gateway that realises this record)
 
@@ -21,7 +21,8 @@ containment at operational cost, not a boundary mediation lacks.
 ## Decision
 
 1. **The tracking server, its backend and the artifact store are internal; untrusted code never holds
-   their credentials or reaches them directly.** An authoring environment tracks with a per-session
+   their credentials, never reaches the tracking server or its backend, and reaches the artifact store
+   only under the grants of decision 3.** An authoring environment tracks with a per-session
    capability (ADR-0012).
 2. **All tenant access to tracking and the registry is mediated by a trusted, tenant-scoping gateway.**
    It forces every operation into the caller's tenant namespace, refuses any that would cross it, and
@@ -41,6 +42,7 @@ containment at operational cost, not a boundary mediation lacks.
 |---|---|---|
 | 1 | The tracking server exposed with its own authorization plugin | Its authorization is per user, not per tenant, and it puts the store on the tenant edge |
 | 1 | Shared store credentials in notebooks, tenants separated by naming | Broad credentials in untrusted code, cross-tenant by default |
+| 1 | Every artifact byte relayed by the gateway | Model-sized transfers through one mediator; a per-object, minutes-long grant reaches only what the gateway checked |
 | 2 | No tracking or registration from notebooks | Removes the core of the authoring profile |
 | 5 | A server, backend and bucket per tenant now | No boundary the gateway lacks, at fleet cost; kept as the hardening path |
 

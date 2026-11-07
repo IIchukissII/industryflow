@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0010 — Extension plugin mechanism: in-process registry and contracts
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-17
+- **Date:** 2026-06-27; changed 2026-11-07
 - **Parent:** ADR-0008
 - **Related:** ADR-0024 (the stateful-class tag), ADR-0028 (the model-adapter contract), ADR-0023
   (the transform context)
@@ -37,8 +37,9 @@ configuration names.
 5. **A reference extension demonstrates the boundary; the platform ships no domain configuration.**
    It carries a domain configuration, a transform and a detector, loaded only when configured.
 6. **The second contract is the anomaly detector.** An asynchronous function of the features, the
-   model, the threshold and the context returns a detection result; inference dispatches the detector
-   a model record names, defaulting to a generic built-in.
+   model, the threshold and the context returns a detection result. Registration records the detector
+   a model names, the compatibility built-in when a kernel-authored model names none; inference
+   dispatches the recorded detector and refuses a record that names none (ADR-0028 dec 1).
 
 ## Alternatives
 
@@ -49,6 +50,7 @@ configuration names.
 | 3 | Keeping that rule and spending 1.0 on the next break | Version 1.0 would mark an accident, not a decision that the contract is done |
 | 4 | Out-of-process transforms | A network hop per feature per reading |
 | 6 | Scoring hardcoded to one library | A new or model-free detector would edit the core |
+| 6 | Inference defaulting to a generic built-in when the record names no detector | It reads an output whose semantics nobody recorded (ADR-0028 dec 2) |
 
 ## Consequences
 

@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0026 — Release model: one trunk and a gate that runs the system
 
 - **Status:** Accepted
-- **Date:** 2026-07-13; changed 2026-11-05
+- **Date:** 2026-07-13; changed 2026-11-07
 - **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (the images certified), [ADR-0017](ADR-0017-database-tls-and-authentication.md) and [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (their "validated on the box" language)
 
 ## Context
@@ -28,7 +28,7 @@ repeatable.
    a service is still restarting after convergence, not whether it ever restarted; the monitoring stack
    and stream engines are outside it.
 4. **The gate exercises the upgrade path.** Stateful components start on synthesised state from the
-   version upgraded from, holding no users or credentials.
+   commit the change merges onto, holding no users or credentials.
 5. **Every image must start, not merely build.** Each image loads the code it serves in its build check.
 6. **The box run is post-merge discovery, not a merge gate.** What it finds becomes a CI check where CI
    can reproduce it, and an end-to-end journey (decision 10) where it cannot.
@@ -57,6 +57,7 @@ repeatable.
 | 3 | Any restart as the failure signal | Fails every cold start that races its dependencies, so the gate is routinely red and ignored |
 | 3 | Zero restarts with longer start-up waits | Tuned to one runner's speed |
 | 3 | Only the targeted live integration proofs | A service outside every slice has no proof |
+| 4 | Synthesised state from the last versioned release | A change would fail on an earlier merge's break; the upgrade across merges is decision 8's |
 | 6 | Tagging box-validated commits | Records a validation, blocks nothing |
 | 6 | Box validation as a merge gate | The run needs the long-lived environment and an upgrade; patches would wait on it |
 | 8 | The suite against a freshly installed environment | Reproduces the whole-stack gate; every failure the box found needed accumulated state |

@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0042 — Capability use is recorded, by the planes that resolve it, into one durable record
 
 - **Status:** Accepted
-- **Date:** 2026-10-29; changed 2026-10-30
+- **Date:** 2026-10-29; changed 2026-11-07
 - **Parent:** [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (the capability and its
   store)
 - **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (dec 2: the
@@ -49,7 +49,7 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 7. **A stream the writer has not drained is bounded and its lag is observable.** Losing the capability
    store loses only what was not yet drained, and the lag alert names that window.
 8. **An event a real entry can repeat at will, a refusal or a SQL session opening or closing, is
-   recorded once per entry, plane and kind in a window, and the next record carries how many were not;
+   recorded once per entry, plane, kind and refusal reason in a window, and the next record carries how many were not;
    a presented value naming no entry, once per plane and value in a window.** A kernel can repeat the
    first with its own handles at request rate, and the count, not each row, is the evidence; anyone
    can present the second, and a repeat says nothing the first did not.
@@ -82,6 +82,7 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 | 8 | Recording a real entry's refusals and SQL sessions every time | One handle repeats them at request rate: the record grows at a kernel's rate, and a stream filling faster than it drains loses other tenants' undrained events to its bound |
 | 8 | Recording only the first in a window, with no count | How often a handle was refused or reconnected is what distinguishes misuse from a mistake |
 | 8 | A larger stream bound | Moves the point at which the flood displaces other events; bounds nothing |
+| 8 | One window per entry, plane and kind, whatever the refusal reason | A second reason inside the window would go unrecorded, and it is different evidence |
 | 9 | A request rate limit at the public edge | Kernels reach the planes inside the network, and it throttles use where only the record needed bounding |
 | 9 | Relying on the per-value window alone | Every random value is new to it |
 | 9 | The connecting peer as the source behind the edge | Every external client is the edge, so one client spends the budget for all of them |

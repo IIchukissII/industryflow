@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0006 — Spark windowing and idempotent writes
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-10-18
+- **Date:** 2026-06-26; changed 2026-11-07
 - **Parent:** ADR-0001
 - **Related:** ADR-0005 (at-least-once), ADR-0023 (features), ADR-0029 (checkpoint cutover), ADR-0009 (Kubernetes)
 
@@ -25,8 +25,9 @@ repeat. Unbounded window state exhausts memory, and model features are computed 
    the latest computation of a window is kept.
 4. **Only infrastructure failures fail the batch; a reading no retry can write is dead-lettered.** A
    malformed, unknown-tenant or unknown-device, or far-future reading goes to the destination of
-   ADR-0005 dec 3, by one shared rule applied before the watermark. The aggregation excludes the same
-   readings without dead-lettering them again, and no write error is swallowed.
+   ADR-0005 dec 3, by one shared rule. The aggregation excludes the same readings without
+   dead-lettering them again: those judged from the reading alone before the watermark, those naming
+   an unknown or inactive tenant, sensor or equipment at write; no write error is swallowed.
 5. **Checkpoints live on durable storage that every node running the query can reach.** With
    executors on several nodes that is the object store; in a single process, a durable single-writer
    volume.
@@ -50,6 +51,7 @@ repeat. Unbounded window state exhausts memory, and model features are computed 
 | 3 | Replace-on-conflict for raw measurements | A later message with the same key rewrites a recorded fact |
 | 4 | Different error policies per job, the aggregation continuing past a write error | Silent data loss under at-least-once delivery |
 | 4 | Fail the batch on every write error and let an operator remove the bad message | One poison reading halts every tenant and returns after every restart |
+| 4 | Every exclusion before the aggregation's watermark | The registry checks are a lookup per tenant per batch, made at write; only a far-future time moves the watermark wrongly, and that check runs before it |
 | 5 | A persistent volume per query, with the storage medium left to deployment | Node-local storage cannot serve a state store written on several nodes |
 | 5 | A per-node checkpoint volume with each stateful query pinned to one node | Forbids a horizontal worker pool and strands the checkpoint with a lost node |
 | 7 | Window width and allowed lateness set per deployment | A deployment change silently changes the meaning of every trained feature |

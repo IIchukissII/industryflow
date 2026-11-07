@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0003 — Tenant-to-schema resolution: verified identity, validated mapping, one implementation
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-10-27
+- **Date:** 2026-06-26; changed 2026-11-07
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0002](ADR-0002-ingestion-authentication-and-device-identity.md) (verified tenant
   on ingestion), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the tenant claim),
@@ -24,7 +24,9 @@ vector; pooled connections outlive requests; a rule implemented per service drif
    requests take it from the authenticated user, device ingestion from the verified certificate.
 2. **The access token carries the tenant as a signed claim.** An unavoidable principal-to-tenant
    lookup is one primary-key query.
-3. **The tenant is never taken from a request body or an unauthenticated header.**
+3. **The tenant is never taken from a request body or an unauthenticated header, except by a platform
+   service that holds every tenant's authority.** A caller authenticated by the interim internal-service
+   credential (ADR-0004, Deferred) names the tenant it acts for, validated under decision 4.
 4. **The tenant identifier is validated as a UUID before any name is derived from it.** Only the
    canonical form of the parsed UUID is used downstream.
 5. **One canonical function maps a validated tenant identifier to its schema name.**
@@ -45,6 +47,7 @@ vector; pooled connections outlive requests; a rule implemented per service drif
 | 1 | Scanning tenant schemas per request until the principal matches | A per-request cost that grows with tenants, holding a pooled connection throughout |
 | 2 | Caching the principal-to-tenant mapping while still scanning | Hides the cost some of the time and keeps the scan as the resolution primitive |
 | 3 | A tenant taken from the request body or a header | A caller can steer a query into another tenant's schema |
+| 3 | No exception: every caller's tenant derived from a user credential | A platform service that scores for every tenant holds no user session; its credential already carries every tenant's authority |
 | 4 | A schema name built by string substitution without validation | A caller-influenced string reaches an SQL statement |
 | 6 | A session-wide search path re-set before each query | The pooled connection keeps the last tenant's path, one forgotten call from cross-tenant exposure |
 | 7 | Resolution implemented separately in each service | Copies drift and carry the same defects |
@@ -59,6 +62,7 @@ vector; pooled connections outlive requests; a rule implemented per service drif
 **Negative**
 - A change to a user's tenant requires a new token (ADR-0004).
 - Every deployable carries the library; the database's copy of the naming rules relies on the check.
+- The interim internal-service credential acts for every tenant until ADR-0004's deferred design replaces it.
 
 ## Deferred
 

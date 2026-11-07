@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0034 — Platform schema migrations: one ordered, idempotent sequence for fresh installs and live tenants
 
 - **Status:** Accepted
-- **Date:** 2026-10-24; changed 2026-10-25
+- **Date:** 2026-10-24; changed 2026-11-07
 - **Parent:** ADR-0001
 - **Related:** [ADR-0017](ADR-0017-database-tls-and-authentication.md) (the runner is a network client), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a change applies once per tenant), [ADR-0008](ADR-0008-extension-and-plugin-interface.md), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extension-owned tables), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (dec 4: upgrade-path gate), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (dec 7: restore as rollback), [ADR-0033](ADR-0033-tenant-lifecycle.md) (provisioning)
 
@@ -32,8 +32,9 @@ once data is written in the new shape.
    start against a database the ledger shows behind, and fresh installs write the same ledger.
 5. **Migrations are forward-only.** There are no down-scripts; the way back is a restore of the backup taken
    before the upgrade.
-6. **The upgrade path is tested.** The release gate applies the pending sequence to state written by the
-   previous release, settling the database under ADR-0026 dec 4.
+6. **The upgrade path is tested.** The whole-stack gate applies the pending sequence to state written by
+   the commit the change merges onto, settling the database under ADR-0026 dec 4; the upgrade across
+   several merges is the box run's (ADR-0026 dec 8).
 7. **A purpose-built runner is the only applier, on fresh and live databases alike.** It runs the scripts
    as written, shell scripts that set role passwords from the deployment's secrets included, so a fresh
    install writes the same ledger an upgrade does; the image's empty-volume init hook runs none of them.
@@ -56,6 +57,7 @@ once data is written in the new shape.
 | 1 | Generate the schema from application models | Several services own the schema, extension objects sit outside any model layer, tenant schemas are created at run time |
 | 4 | Operators apply new scripts by hand | Self-hosters cannot know which scripts their database has had |
 | 5 | Down-migrations for every change | Lossy or untested once data is written through the change |
+| 6 | State written by the last versioned release | The baseline lags the trunk by every unreleased merge, so a change fails on an earlier one's break; that upgrade is the box run's |
 | 7 | A framework with versioned and repeatable scripts | Shell scripts are outside its free edition, secrets would become placeholders, and it adds a runtime and a vendor licence |
 | 7 | A framework built on deploy, revert and verify scripts | Presumes the down-scripts dec 5 rejects |
 | 7 | A framework without re-applied scripts | Cannot express a definition |

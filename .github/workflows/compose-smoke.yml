@@ -86,13 +86,13 @@ jobs:
           dev=deploy/device-ca/devices/00000000-0000-4000-8000-000000000001/smoke-device
           test -f "$dev/current.chain.crt" && test -f "$dev/current.key"
 
-      # ADR-0034 dec 6 (ADR-0026 dec 4): the platform database is seeded by the PREVIOUS release, from
-      # its own commit, with a tenant written through it, so the stack below upgrades real previous
-      # state rather than initialising an empty volume. The previous release keeps this run's .env, as
-      # an operator's does across an upgrade. A previous release without the runner initialised the
+      # ADR-0034 dec 6 (ADR-0026 dec 4): the platform database is seeded by the commit the change merges
+      # onto, from its own compose file, with a tenant written through it, so the stack below upgrades
+      # real previous state rather than initialising an empty volume. The base commit keeps this run's
+      # .env, as an operator's does across an upgrade. A base commit without the runner initialised the
       # database under the image's init hook and left no ledger, which is the first upgrade of every
       # live database; one with the runner left its ledger, which is every upgrade after it.
-      - name: Seed the platform database at the PREVIOUS release (the upgrade path is what breaks)
+      - name: Seed the platform database at the base commit (the upgrade path is what breaks)
         env:
           PREV: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
