@@ -96,6 +96,4 @@ artifact that runs author code on load would grant code execution on the trusted
 
 ## References
 
-- `services/notebook_tracking_gateway/admission.py`, `staging.py`: structural refusal, staging.
-- `services/ml_service/api/uploaded_model.py`, `skops_trust.py`, `load_probe.py`: decisions 4-8.
-- `services/frontend/nginx.conf.template`, `infrastructure/minio/minio-init.sh`: decisions 10 and 2.
+- [Model upload](../docs/architecture/model-upload.md): manual of decisions 2, 4-8, 10.

@@ -70,4 +70,4 @@ Plugin trust and extension-owned tables are deferred in ADR-0008.
 
 ## References
 
-- [docs/operations/extensions.md](../docs/operations/extensions.md); `services/ml_service/api/extensions/` (current version).
+- [docs/operations/extensions.md](../docs/operations/extensions.md): manual of decision 3.

@@ -127,3 +127,37 @@ Code: `services/alert_service/worker/feature_store.py`.
 | `RETRAIN_PRECISION_FLOOR` / `RETRAIN_MIN_LABELS` / `RETRAIN_MIN_DRIFT_ALERTS` | 0.6 / 10 / 2 | Recommendation conditions |
 | `RETRAIN_PRECISION_WINDOW_DAYS` / `RETRAIN_DRIFT_LOOKBACK_HOURS` | 30 / 72 | Recommendation windows |
 | `RETRAIN_RECO_COOLDOWN_SECONDS` / `RETRAIN_RECO_SEVERITY` | 86400 / `high` | Recommendation cooldown, severity |
+
+## ADR-0022 dec 1-3
+
+Labels are written through the alert history API into a per-tenant table; precision is derived on read.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/alerts_history.py` | Labels and label metrics |
+
+## ADR-0022 dec 4, 5
+
+After each drift pass the alert worker evaluates the retrain recommendation, with a per-model cooldown.
+
+| Code | Role |
+|---|---|
+| `services/alert_service/worker/main.py` | Recommendation after the drift pass |
+| `services/alert_service/worker/rules_engine.py` | Recommendation evaluator |
+
+## ADR-0031 dec 1
+
+The gateway serves rules and history (see Endpoints).
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/alert_rules.py` | Alert rules |
+| `services/api_gateway/routers/alerts_history.py` | Alert history, acknowledgement, labels, precision |
+
+## ADR-0031 dec 2
+
+The detection worker serves no HTTP API.
+
+| Code | Role |
+|---|---|
+| `services/alert_service/worker` | Detection worker |

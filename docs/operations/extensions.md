@@ -113,3 +113,19 @@ EXTENSION_MODULES=my_domain.transforms,my_domain.detectors
 
 [`extensions/tep-reference/`](../../extensions/tep-reference/README.md) (module `tep_reference`) is
 loaded only when `EXTENSION_MODULES` names it.
+
+## ADR-0008 dec 6
+
+The reference extension is a separate package that depends on the platform.
+
+| Code | Role |
+|---|---|
+| `extensions/tep-reference` | Reference extension and data producer |
+
+## ADR-0010 dec 3
+
+Each contract carries the extension-API version a plugin declares against.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions` | Registry, contracts and the current extension-API version |

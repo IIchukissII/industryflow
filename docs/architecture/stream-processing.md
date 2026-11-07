@@ -117,3 +117,21 @@ loss.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `NoClassDefFoundError` / `ClassNotFoundException` at submit | Kafka connector or S3A jars mismatched to the Spark/Hadoop version | Align the jar versions in the Spark images with the Spark/Hadoop version |
+
+## ADR-0005 dec 2-4, 6
+
+The alert worker commits an offset only after its write is durable, retries a failure without advancing, dead-letters a message no retry can process, and suppresses a repeated alert within its cooldown.
+
+| Code | Role |
+|---|---|
+| `services/alert_service/worker/kafka_consumer.py` | Manual commit, retry, dead-letter |
+| `services/alert_service/config.py` | Retry, dead-letter and cooldown settings |
+| `services/alert_service/tests/test_kafka_consumer_integration.py` | Decisions 2-4 against the platform's broker |
+
+## ADR-0006 dec 7
+
+Window width and allowed lateness are read from one shared definition by the stream and by every reader of the windows.
+
+| Code | Role |
+|---|---|
+| `libs/industryflow_contracts` | The window contract |

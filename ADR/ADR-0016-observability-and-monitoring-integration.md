@@ -123,10 +123,5 @@ not leave the tenant-isolated path.
 
 ## References
 
-- [docs/operations/monitoring.md](../docs/operations/monitoring.md): toggles, role, install steps.
+- [docs/operations/monitoring.md](../docs/operations/monitoring.md): toggles, role, install steps; manual of decisions 1, 2, 6-8.
 - [deploy/observability/README.md](../deploy/observability/README.md): installing the cluster stack.
-- `infrastructure/prometheus/rules/platform.yml`: the platform rules, decision 1.
-- `deploy/helm/industryflow/templates/observability-*.yaml`: decisions 1–2.
-- `services/frontend/grafana.conf.template`: decisions 6–7.
-- `services/api_gateway/routers/dashboards_assertion.py`: decision 7.
-- `tests/config_guards/test_build_info.py`: decision 8.

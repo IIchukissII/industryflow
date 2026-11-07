@@ -124,3 +124,28 @@ alone is per-tenant.
 Tenant names are 1-255 characters, no control characters, unique
 ([`21-company-provisioning.sql`](../../infrastructure/timescaledb/init-scripts/21-company-provisioning.sql)).
 The gateway's database role cannot write the tenant registry or create schemas directly.
+
+## ADR-0033 dec 3, 6, 7
+
+Suspend and delete are superuser actions on the tenant, recorded (see Tenants).
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/companies.py` | Lifecycle actions |
+| `infrastructure/timescaledb/init-scripts/25-company-deletion.sql` | Lifecycle record, suspension time and the 30-day wait |
+
+## ADR-0033 dec 3
+
+A stalled tenant-status stream, which carries suspension to ingestion, raises an alert.
+
+| Code | Role |
+|---|---|
+| `infrastructure/prometheus/rules/platform.yml` | `IndustryFlowTenantStatusStalled` |
+
+## ADR-0033 dec 4
+
+The tenant-delete job removes the tenant from every store.
+
+| Code | Role |
+|---|---|
+| `services/tenant_delete` | Tenant-delete job |

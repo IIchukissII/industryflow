@@ -195,3 +195,45 @@ kubectl -n <namespace> create secret generic industryflow-device-ca \
 | `device-crl-refresh` exits: device CA not initialized | No `deploy/device-ca/intermediate` | `scripts/device-ca.sh init` |
 | A deletion waits on `device_certificates` | The tenant's devices are not revoked, or the CRL and register were not republished since the request | `scripts/device-ca.sh revoke-tenant <company-uuid>`; on Kubernetes republish the Secret |
 | `tenant-delete` fails: `No such file` for `issued.tsv` | CA files from before the register | `scripts/device-ca.sh crl`; on Kubernetes republish the Secret |
+
+## ADR-0002 dec 2, 3, 5
+
+The edge verifies the client certificate and forwards the verified identity in headers it overwrites; the ingestion service reads tenant and device only from those headers.
+
+| Code | Role |
+|---|---|
+| `services/ingestion_edge` | mTLS termination and identity headers |
+| `services/ingestion_service` | Identity parsing from the edge headers |
+
+## ADR-0002 dec 3, 8
+
+The ingestion service is reachable only from its edge and holds no database role.
+
+| Code | Role |
+|---|---|
+| `docker-compose.yml` | Ingestion service publishes no host port; only the edge does |
+| `deploy/helm/industryflow/templates/networkpolicy.yaml` | Ingestion service reachable only from the edge |
+
+## ADR-0007 dec 3, 5
+
+The CA script issues a URI SAN identity and bounded lifetimes (see CA commands).
+
+| Code | Role |
+|---|---|
+| `scripts/device-ca.sh` | Issuance, lifetimes, identity scheme |
+
+## ADR-0007 dec 6
+
+The deployed edge refuses a revoked device certificate.
+
+| Code | Role |
+|---|---|
+| `tests/e2e/test_device_revocation.py` | A revoked device refused by the deployed edge |
+
+## ADR-0007 dec 8
+
+The edge re-reads a changed revocation list without a restart (see CRL refresh).
+
+| Code | Role |
+|---|---|
+| `services/ingestion_edge/40-crl-reload.sh` | Revocation-list reload |

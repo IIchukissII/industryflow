@@ -336,6 +336,32 @@ docker compose --profile backup run --rm --no-deps --entrypoint notebook-restore
   industryflow-nb-<user> latest
 ```
 
+## ADR-0032 dec 3-7
+
+The backup, restore and rehearsal jobs copy every authoritative store to a separate target and prove the restore.
+
+| Code | Role |
+|---|---|
+| `infrastructure/backup` | Backup, restore and rehearsal scripts |
+
+## ADR-0038 dec 1-3
+
+The backup job mirrors model artifacts with the one read-only principal, leaving the staging area out.
+
+| Code | Role |
+|---|---|
+| `infrastructure/backup/db-backup.sh` | Object mirrors |
+| `infrastructure/minio/minio-init.sh` | `backup-read` principal |
+
+## ADR-0038 dec 4, 5
+
+Each authored work volume is archived and verified per run.
+
+| Code | Role |
+|---|---|
+| `infrastructure/backup/notebook-backup.sh` | Volume archives |
+| `infrastructure/backup/notebook-restore.sh` | Volume restore |
+
 ## Related
 
 | Page | Topic |

@@ -69,5 +69,4 @@ it cannot know which transforms are stateful.
 
 ## References
 
-- [docs/operations/monitoring.md](../docs/operations/monitoring.md): runbook and metric.
-- `services/ml_service/api/feature_engineering/`: `kill_switch.py` (decisions 2, 7), `engine.py` (3–5)
+- [docs/operations/monitoring.md](../docs/operations/monitoring.md): runbook and metric; manual of decisions 2-5, 7.

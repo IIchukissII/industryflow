@@ -59,4 +59,4 @@ development, and must stay generic across industrial domains.
 
 ## References
 
-- `LICENSE`, `LICENSES/`, `REUSE.toml`: licence texts and the header manifest (decision 2).
+- [Licensing](../docs/architecture/licensing.md): manual of decision 2.

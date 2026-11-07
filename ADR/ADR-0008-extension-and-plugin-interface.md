@@ -62,4 +62,4 @@ data, code or entities; each needs a place outside the core, and the platform mu
 
 ## References
 
-- [docs/operations/extensions.md](../docs/operations/extensions.md); `extensions/tep-reference/`.
+- [docs/operations/extensions.md](../docs/operations/extensions.md): manual of decision 6.

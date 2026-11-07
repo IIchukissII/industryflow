@@ -72,5 +72,4 @@ superuser, verified by the API gateway, which serves the other platform operatio
 
 ## References
 
-- `infrastructure/timescaledb/init-scripts/17-stateful-feature-kill-switch.sql`: the switch.
-- [docs/operations/monitoring.md](../docs/operations/monitoring.md): the runbook.
+- [docs/operations/monitoring.md](../docs/operations/monitoring.md): the runbook; manual of decisions 3, 4.

@@ -284,6 +284,78 @@ No shipped rule alerts on the counter.
 | No incident note for a firing alert | The webhook is missing from `ALERTMANAGER_CONFIG`, its secret differs (`401` in `docker compose logs alertmanager`), or the `ops-agent` profile is not up | Add the receiver as in [Infrastructure agent](#infrastructure-agent); `docker compose --profile ops-agent up -d ops-agent` |
 | Incident note reads "The model could not write this note" | The model key is missing or wrong, the endpoint is unreachable, or the model declined; the note's `error` field names it | Set `ANTHROPIC_API_KEY` or `OPS_AGENT_MODEL_BASE_URL` / `OPS_AGENT_MODEL_API_KEY`; `docker compose logs ops-agent` |
 
+## ADR-0016 dec 1, 2
+
+The chart renders scrape targets, platform rules and dashboards as integration objects.
+
+| Code | Role |
+|---|---|
+| `infrastructure/prometheus/rules/platform.yml` | Platform alert rules |
+| `deploy/helm/industryflow/templates` | Observability templates (`observability-*.yaml`) |
+
+## ADR-0016 dec 6, 7
+
+Grafana is served at the edge and signs a platform superuser on from the platform session (see Grafana).
+
+| Code | Role |
+|---|---|
+| `services/frontend/grafana.conf.template` | Grafana at the edge |
+| `services/api_gateway/routers/dashboards_assertion.py` | Sign-on assertion from the platform session |
+
+## ADR-0016 dec 8
+
+Every service exposes its build information.
+
+| Code | Role |
+|---|---|
+| `tests/config_guards/test_build_info.py` | Every image exposes build information |
+
+## ADR-0024 dec 2, 7
+
+The engine reads the switch from the shared schema and keeps the last-known-good value when the read fails (see Runbook: stateful-feature kill-switch).
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/feature_engineering/kill_switch.py` | Switch read, last-known-good |
+
+## ADR-0024 dec 3-5
+
+With the switch on, a stateful feature is null in its slot, checked before the substrate call, and counted.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/feature_engineering/engine.py` | Null-in-slot and degraded-serving metric |
+
+## ADR-0043 dec 3, 4
+
+The gateway flips a switch through one privileged function that records the flip (see Runbook: stateful-feature kill-switch).
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/17-stateful-feature-kill-switch.sql` | The switch |
+| `infrastructure/timescaledb/init-scripts/32-platform-switch-control.sql` | Flip function and flip record |
+
+## ADR-0045 dec 1-6, 8
+
+An agent is its own service: a trigger reaches its graph, deterministic steps gather and redact the evidence, a configured model writes the note from it, and the note says it is generated and names the model. It runs only when the operator enables it (see Infrastructure agent).
+
+| Code | Role |
+|---|---|
+| `services/ops_agent/app.py` | Trigger receiver |
+| `services/ops_agent/graph.py` | Gather, correlate, redact, explain, publish; the generated-note header |
+| `services/ops_agent/tools.py` | Read-only tools over MCP |
+| `services/ops_agent/model.py` | Model over an API, chosen by configuration |
+| `services/ops_agent/redaction.py` | Redaction before the model |
+| `docker-compose.yml` | `ops-agent` profile, off unless enabled |
+
+## ADR-0046 dec 1
+
+The operator adds a receiver for the agent to the alert router (see Infrastructure agent).
+
+| Code | Role |
+|---|---|
+| `infrastructure/alertmanager/alertmanager.yml` | Alert router receivers |
+
 ## Links
 
 - [Prometheus](https://prometheus.io/docs/) · [PromQL](https://prometheus.io/docs/prometheus/latest/querying/basics/) · [Grafana](https://grafana.com/docs/) · [Loki](https://grafana.com/docs/loki/) · [LogQL](https://grafana.com/docs/loki/latest/query/)

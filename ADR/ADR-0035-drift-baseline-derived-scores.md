@@ -96,6 +96,4 @@ judges any other model declaratively, without loading it (ADR-0027 dec 6).
 
 ## References
 
-- `services/ml_service/api/drift/reference_profile.py`: the profile format.
-- `services/ml_service/api/load_probe.py`: the deployment gate's isolated load-and-score.
-- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md#drift-post-apidriftevaluate): baseline and evaluation.
+- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md#drift-post-apidriftevaluate): baseline and evaluation; manual of decisions 1-4.

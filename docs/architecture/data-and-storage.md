@@ -120,3 +120,56 @@ Exporter behaviour per tenant and day:
 | Schema | Derived from `company_id`; a registry `schema_name` that disagrees is refused |
 
 Deferred cold-layer items and their triggers: [cold layer evolution](cold-layer-evolution.md).
+
+## ADR-0003 dec 5, 7
+
+One library function validates the tenant identifier and derives its schema name; every image is built with that library.
+
+| Code | Role |
+|---|---|
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py` | The canonical tenant-to-schema function |
+| `tests/config_guards/test_tenant_contract_copies.py` | No deployable keeps its own copy of the contract |
+| `tests/config_guards/test_images_carry_contracts.py` | Every image that imports the library is built with it |
+
+## ADR-0025 dec 3, 4, 11
+
+The exporter writes, verifies and only then drops; it rewrites no archived part.
+
+| Code | Role |
+|---|---|
+| `services/cold_export` | Cold export job |
+
+## ADR-0025 dec 5
+
+Notebook reads of the cold layer go through a tenant-scoping broker.
+
+| Code | Role |
+|---|---|
+| `services/notebook_cold_broker` | Cold-layer broker |
+
+## ADR-0025 dec 13
+
+The backup job mirrors the cold layer with a read-only principal.
+
+| Code | Role |
+|---|---|
+| `infrastructure/backup/db-backup.sh` | Cold-layer mirror |
+
+## ADR-0039 dec 1
+
+One library test decides tenant ownership of a name or key (see Tenant names).
+
+| Code | Role |
+|---|---|
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py` | Ownership test |
+| `tests/config_guards/test_tenant_contract_copies.py` | No copy of the test |
+
+## ADR-0039 dec 5
+
+Every mediator and read path uses that test.
+
+| Code | Role |
+|---|---|
+| `services/notebook_tracking_gateway` | Tracking gateway |
+| `services/notebook_cold_broker` | Cold-layer broker |
+| `services/ml_service/api` | ML service read paths |

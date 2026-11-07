@@ -64,5 +64,4 @@ Docker host.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): the dual-spawner design.
-- `services/notebook_hub/jupyterhub_config.py`, `docker-compose.yml`, `deploy/helm/industryflow/`.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): the dual-spawner design; manual of decision 1.

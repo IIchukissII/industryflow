@@ -116,6 +116,4 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 
 ## References
 
-- `infrastructure/timescaledb/init-scripts/31-capability-audit.sql`: the table and its writer (dec 4, 6).
-- `libs/industryflow_contracts/industryflow_contracts/capability_audit.py`: the event contract (dec 1–3, 5).
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): the planes and their capabilities.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): the planes and their capabilities; manual of decisions 1-6.

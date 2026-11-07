@@ -89,5 +89,4 @@ by the database that wrote it.
 
 ## References
 
-- [data-and-storage.md](../docs/architecture/data-and-storage.md), [cold-layer-evolution.md](../docs/architecture/cold-layer-evolution.md)
-- `services/cold_export/`, `services/notebook_cold_broker/`, `infrastructure/backup/db-backup.sh`
+- [data-and-storage.md](../docs/architecture/data-and-storage.md), [cold-layer-evolution.md](../docs/architecture/cold-layer-evolution.md): manual of decisions 3-5, 11, 13.

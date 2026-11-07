@@ -72,6 +72,4 @@ disagree about what a feature means. Offline training data cannot read the live 
 
 ## References
 
-- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md); baseline read
-  `services/ml_service/api/feature_engineering/baseline_provider.py`; window contract
-  `libs/industryflow_contracts/`; agreement test `services/ml_service/tests/test_train_serve_agreement.py`
+- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): manual of decisions 2, 9.

@@ -108,5 +108,6 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 
 ## References
 
-- [init-scripts README](../infrastructure/timescaledb/init-scripts/README.md) (provisioning); `services/api_gateway/routers/companies.py` (lifecycle actions).
-- `services/tenant_delete/` (the deletion job, dec 4); `infrastructure/prometheus/rules/platform.yml` (`IndustryFlowTenantStatusStalled`, dec 3); [stream processing](../docs/architecture/stream-processing.md) (the stream's bounds).
+- [init-scripts README](../infrastructure/timescaledb/init-scripts/README.md): manual of decision 1.
+- [stream processing](../docs/architecture/stream-processing.md): the stream's bounds.
+- [User management](../docs/operations/user-management.md): manual of decisions 3, 4, 6, 7.

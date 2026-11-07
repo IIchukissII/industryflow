@@ -73,5 +73,4 @@ highest-throughput path.
 
 ## References
 
-- `services/ingestion_edge/`, `services/ingestion_service/`: the edge and identity parsing.
-- `docker-compose.yml`, `deploy/helm/`: the isolation of decision 3.
+- [Device ingestion over mTLS](../docs/operations/device-mtls.md): manual of decisions 2, 3, 5, 8.

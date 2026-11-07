@@ -92,5 +92,4 @@ owns every refusal and every score's meaning.
 
 ## References
 
-- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): detectors, the served supported set.
-- `services/ml_service/api/load_probe.py`: the deployment gate's isolated load-and-score for uploads.
+- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): detectors, the served supported set; manual of decision 7.

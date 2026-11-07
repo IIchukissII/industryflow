@@ -79,6 +79,4 @@ also holds.
 
 ## References
 
-- `infrastructure/backup/db-backup.sh` (decisions 1-3), `notebook-backup.sh`, `notebook-restore.sh` (4-5).
-- `infrastructure/minio/minio-init.sh` (`backup-read`, decision 3).
-- [docs/operations/backup-and-recovery.md](../docs/operations/backup-and-recovery.md) (procedures, rehearsal).
+- [docs/operations/backup-and-recovery.md](../docs/operations/backup-and-recovery.md) (procedures, rehearsal): manual of decisions 1-5.

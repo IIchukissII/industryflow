@@ -65,5 +65,4 @@ platform has no training service; a notebook trains and registers new versions.
 
 ## References
 
-- [docs/architecture/alerting.md](../docs/architecture/alerting.md): labels, metrics, thresholds.
-- `services/api_gateway/routers/alerts_history.py`, `services/alert_service/worker/`.
+- [docs/architecture/alerting.md](../docs/architecture/alerting.md): labels, metrics, thresholds; manual of decisions 1-5.

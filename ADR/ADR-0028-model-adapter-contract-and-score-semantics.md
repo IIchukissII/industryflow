@@ -13,7 +13,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 ## Context
 
 A detector turns a model's output into a 0–1 anomaly score, and the meaning of that output cannot be
-read from its value: an outlier model's `1` means normal, a classifier's `1` means anomaly, and an
+read from its value: an outlier model's output of one means normal, a classifier's means anomaly, and an
 autoencoder emits no verdict, its signal being reconstruction error. A wrong score feeds alerts that
 operators label. The framework set is open, while the serving image is one pinned stack.
 
@@ -72,6 +72,5 @@ operators label. The framework set is open, while the serving image is one pinne
 
 ## References
 
-- `services/ml_service/api/extensions/`: the vocabulary and built-in detectors.
-- `services/ml_service/api/routers/capabilities.py`: the served supported set.
 - Issue #236: every outlier-model reading scored as an anomaly.
+- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 1, 3, 5.

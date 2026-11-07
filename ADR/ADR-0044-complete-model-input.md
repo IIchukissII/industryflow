@@ -74,5 +74,4 @@ carries partial-batch settings that no part of the platform reads.
 ## References
 
 - [docs/operations/monitoring.md](../docs/operations/monitoring.md): the degraded-serving metrics.
-- `services/ml_service/api/feature_engineering/engine.py` (decisions 1–4),
-  `services/ml_service/api/extensions/builtins.py` (2, 3).
+- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 1-4.

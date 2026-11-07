@@ -153,3 +153,28 @@ curl -k https://<host>/api/measurements/latest -H "Authorization: Bearer $TOKEN"
 | `COMPANY_STATUS_CACHE_SECONDS` | `30` | Tenant active-flag cache: bounds a reactivation, a change made outside the API, and a suspension while the capability store is unreachable |
 | `INTERNAL_SERVICE_TOKEN` | none | Shared secret for `X-Internal-Service-Token` (alert worker → `/api/inference/predict`, `/api/drift/evaluate`); unset, `ml-service-api` refuses internal calls |
 | `NOTEBOOK_SSO_PROXY_SECRET` | none (required, notebooks) | Shared secret for `X-IF-SSO-Proxy-Secret` (notebook SSO proxy → hub); the hub honours the `X-IF-*` identity only with it and does not start without it |
+
+## ADR-0004 dec 2
+
+An access token carries the tenant claim; a refresh claims its credential atomically; every verifier reads the record of ended sessions.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/auth_tokens.py` | Sign-in, refresh rotation, sign-out |
+| `libs/industryflow_contracts/industryflow_contracts/sessions.py` | The record of ended sessions every verifier reads |
+
+## ADR-0004 dec 3
+
+The gateway sets the session cookies httpOnly, Secure, SameSite (see Browser cookies).
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/auth_tokens.py` | Cookie issuance |
+
+## ADR-0004 dec 9
+
+A live socket authenticates with the session and is closed when the session ends (see Websockets).
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/websocket.py` | Socket authentication and session checks |
