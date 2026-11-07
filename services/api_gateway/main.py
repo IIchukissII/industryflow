@@ -12,7 +12,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from industryflow_contracts import build_info
 
-from config import get_settings
+from config import CORS_ALLOW_CREDENTIALS, cors_origin_list, get_settings
 from routers import (
     health, measurements, aggregations, websocket, cache,
     training_data, alerts_history, companies,
@@ -95,10 +95,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    # Explicit origin allowlist (comma-separated in CORS_ORIGINS), never "*" with
-    # credentials (ADR-0004 dec 6). Split the string into a list.
-    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
-    allow_credentials=True,
+    # Explicit origin allowlist (comma-separated in CORS_ORIGINS); Settings refuses "*" while
+    # credentials are allowed (ADR-0004 dec 6).
+    allow_origins=cors_origin_list(settings.CORS_ORIGINS),
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

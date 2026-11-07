@@ -77,6 +77,15 @@ describe('models page', () => {
     expect(screen.getByText('the sample carries prediction scores')).toBeInTheDocument();
   });
 
+  test('a platform model never evaluated for compatibility is marked (ADR-0027 dec 10)', async () => {
+    page();
+    await screen.findByText('bearing-wear');
+    // PLATFORM carries no compatibility_status; the notebook row is not a platform model and is not marked.
+    const marks = screen.getAllByText('Not evaluated');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].closest('tr')).toHaveTextContent('bearing-wear');
+  });
+
   test('a platform model shows the version it was registered under', async () => {
     page();
     const row = (await screen.findByText('bearing-wear')).closest('tr');

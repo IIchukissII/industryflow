@@ -140,6 +140,25 @@ def test_only_a_plain_key_under_the_prefix_is_owned():
         assert not tenancy.owns_key(KEYS, key), key
 
 
+def test_only_one_leading_separator_is_path_syntax():
+    # One leading separator is path syntax (ADR-0039 dec 2); a second is an empty segment.
+    for key in ("//" + KEYS + "x", "///" + KEYS + "x"):
+        assert not tenancy.owns_key(KEYS, key), key
+        with pytest.raises(ValueError):
+            tenancy.scope_key(KEYS, key)
+    with pytest.raises(ValueError):
+        tenancy.scope_key(KEYS, "//")
+    assert tenancy.scope_key(KEYS, "/") == KEYS
+
+
+def test_only_one_trailing_separator_is_a_listing_prefix():
+    # A listing prefix ends in one separator; a second is an empty segment (ADR-0039 dec 2).
+    assert tenancy.scope_key(KEYS, "a/") == KEYS + "a/"
+    for path in ("a//", "a///"):
+        with pytest.raises(ValueError):
+            tenancy.scope_key(KEYS, path)
+
+
 def test_an_encoded_key_with_an_escape_is_refused():
     # Decoded, %2e%2e is `..`: the plain test never saw it.
     assert tenancy.owns_key(KEYS, KEYS + "a%2e%2e/x")

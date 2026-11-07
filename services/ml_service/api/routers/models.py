@@ -328,9 +328,10 @@ def _kernel_detector_or_refuse(named: Optional[str], flavor: Optional[str]) -> s
     """The detector a kernel-authored model is scored by, held to what the registry declares.
 
     `sklearn` when none is named — the compatibility detector every model before ADR-0028 names
-    (ADR-0010 dec 6). A named detector must be loaded in this deployment, and if it declares the
-    flavors it can score, the artifact's flavor must be one of them (ADR-0028 dec 4): otherwise the
-    model would register and then be refused, or worse misread, at its first score.
+    (ADR-0010 dec 6). A named detector must be loaded in this deployment, and the artifact's flavor
+    must be one it declares it can score (ADR-0028 dec 4): otherwise the model would register and
+    then be refused, or worse misread, at its first score. An empty declaration claims nothing, as
+    ``extensions.detectors_for`` reads it, so it scores no flavor.
     """
     name = named or "sklearn"
     capability = next((c for c in extensions.detector_capabilities() if c["name"] == name), None)
@@ -340,7 +341,7 @@ def _kernel_detector_or_refuse(named: Optional[str], flavor: Optional[str]) -> s
             "detectors": extensions.registered_detectors(),
         })
     flavors = capability.get("handles_flavors") or []
-    if flavor and flavors and flavor not in flavors:
+    if flavor and flavor not in flavors:
         raise HTTPException(status_code=422, detail={
             "message": (
                 f"The '{name}' detector does not score `{flavor}` models, so nothing would know what "

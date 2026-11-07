@@ -81,6 +81,16 @@ class Config:
     # here — never an extension directly. Empty = generic built-ins only.
     EXTENSION_MODULES: str = os.getenv('EXTENSION_MODULES', '')
     
+    @staticmethod
+    def cors_origins(value: str) -> list:
+        """The explicit origins a comma-separated ``CORS_ORIGINS`` names (ADR-0004 dec 6). The service
+        sends credentials, so a wildcard is refused rather than answered with the caller's origin."""
+        origins = [o.strip() for o in value.split(',') if o.strip()]
+        if '*' in origins:
+            raise ValueError("CORS_ORIGINS must list explicit origins: '*' is refused because the ML "
+                             "service allows credentials (ADR-0004 dec 6)")
+        return origins
+
     @classmethod
     def validate(cls):
         """Validate that all required configuration is present"""

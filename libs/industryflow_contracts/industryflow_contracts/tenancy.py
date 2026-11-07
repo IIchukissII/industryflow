@@ -161,15 +161,22 @@ def is_plain_key(key: str) -> bool:
             and all(seg not in ("", ".", "..") for seg in key.split("/")))
 
 
+def _without_leading_separator(path: str) -> str:
+    """A caller's path without the one separator that may lead it (ADR-0039 dec 2): that separator is
+    path syntax; a further one is an empty segment, left in place for the plain test to refuse."""
+    return path[1:] if path.startswith("/") else path
+
+
 def owns_key(prefix: str, key, *, encoded: bool = False) -> bool:
     """Whether an object-store key is a plain key under a tenant key prefix.
 
+    One leading separator is path syntax and is dropped; a second is an empty segment and refused.
     ``encoded`` for a key still in its URI-encoded form, which is refused if it carries an escape:
     decoded, it could spell a segment the plain test never saw (ADR-0039 dec 3).
     """
     if not isinstance(key, str):
         return False
-    key = key.lstrip("/")
+    key = _without_leading_separator(key)
     if not key or (encoded and "%" in key):
         return False
     return is_plain_key(key) and key.startswith(prefix)
@@ -179,11 +186,12 @@ def scope_key(prefix: str, path) -> str:
     """Place a caller's path under a tenant key prefix (idempotent), or ``ValueError`` for a path that
     is not plain (ADR-0039 dec 4): prefixing it would not keep it inside the tenant.
 
-    A trailing ``/`` (a listing prefix) is allowed; every other segment must be plain. An empty path
-    is the prefix itself.
+    One leading separator is path syntax and is dropped; a second is an empty segment and refused. One
+    trailing ``/`` (a listing prefix) is allowed, a second is refused; every other segment must be plain. An empty path is
+    the prefix itself.
     """
-    path = (path or "").lstrip("/")
-    if path and not is_plain_key(path.rstrip("/")):
+    path = _without_leading_separator(path or "")
+    if path and not is_plain_key(path[:-1] if path.endswith("/") else path):
         raise ValueError("path is not a plain key")
     return path if path.startswith(prefix) else f"{prefix}{path}"
 

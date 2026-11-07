@@ -293,7 +293,7 @@ The parity script reads the serving pins from the one requirements file the serv
 
 | Model state | Behaviour |
 |---|---|
-| Registered before the gate, no verdict | `compatibility_status` is null; already deployed, it stays served |
+| Registered before the gate, no verdict | `compatibility_status` is null; already deployed, it stays served; the models page marks it `Not evaluated` |
 | Deployed again | The deployment gate evaluates it, records the verdict and refuses it with 409 when `incompatible` |
 
 Every load re-checks the tenant address only, not compatibility.
@@ -303,6 +303,8 @@ Every load re-checks the tenant address only, not compatibility.
 | `infrastructure/timescaledb/init-scripts/18-model-compatibility-status.sql` | Nullable verdict |
 | `services/ml_service/api/routers/models.py::deploy_model` | Verdict at deployment |
 | `services/ml_service/api/model_loader.py::check_address` | Load-time check, without a compatibility verdict |
+| `services/frontend/src/pages/MLModels.jsx` | `Not evaluated` mark on a platform model with no verdict |
+| `services/frontend/src/pages/MLModels.test.jsx` | Proof: a model never evaluated is marked |
 
 ## ADR-0027 dec 12
 
@@ -329,13 +331,14 @@ Detectors register with the score semantics they implement (see Detectors). A de
 
 | Path | Flavor check |
 |---|---|
-| Kernel registration | The named detector, `sklearn` by default, must list the artifact's flavor when it lists any |
+| Kernel registration | The named detector, `sklearn` by default, must list the artifact's flavor; a detector listing none scores no flavor |
 | Upload registration | A detector must implement the declared semantics and list the flavor |
 | Every registration and deployment | The compatibility gate refuses a flavor outside the supported set |
 
 | Code | Role |
 |---|---|
 | `services/ml_service/api/routers/models.py::_kernel_detector_or_refuse` | Kernel detector held to its flavors |
+| `services/ml_service/tests/test_registration_gate_uploaded.py::test_a_kernel_model_naming_a_detector_that_claims_no_flavor_is_refused` | Proof: an empty flavor list claims nothing on the kernel path |
 | `services/ml_service/api/extensions/__init__.py::detectors_for` | Detectors by semantics and flavor |
 | `services/ml_service/api/model_compat.py::_supported_flavor` | Flavor set at the gate |
 

@@ -38,7 +38,7 @@ counts toward its objectives only while its [restore rehearsal](#restore-rehears
 |---|---|---|---|
 | Platform database | One backup interval (`backup.schedule`, default daily) | 1 h | Weekly rehearsal: restore, every table's rows against the rows the dump holds; `industryflow_restore_rehearsal_duration_seconds{database="industryflow"}` |
 | Tracking database | One backup interval | 1 h | As above, `database="mlflow"` |
-| Cold layer | One backup interval for a newly exported day | Copy-back time of the mirror | Weekly rehearsal: sampled objects compared byte for byte with the source |
+| Cold layer | One backup interval for a newly exported day | Copy-back time of the mirror | Weekly rehearsal: every object present at its size, sampled objects compared byte for byte with the source |
 | Model artifacts | One backup interval | Copy-back time of the mirror | As above |
 | Notebook volumes (Compose) | One backup interval | Per volume: one `notebook-restore.sh` run | Weekly rehearsal: every volume's latest archive restored and compared entry by entry |
 
@@ -225,7 +225,7 @@ dec 6). Compose: services `restore-rehearsal` and `notebook-rehearsal`; Helm: Cr
 | 2 | The dump is restored by `db-restore.sh --hold-jobs` into `<db>_rehearsal` on `PGHOST`, the restored TimescaleDB policies unscheduled, and read back the same way (`pg_dump -a`) |
 | 3 | Every table must match: a dumped table missing or with another count fails, as does a restored table with rows the dump does not hold. Compared per physical table (chunks and compressed chunks included) and TimescaleDB's structural catalog (hypertables, chunks, dimensions and slices, chunk constraints, continuous aggregates); what its scheduler writes after a restore and its job configuration are not |
 | 4 | The scratch database is dropped, also after a failure |
-| 5 | Per object mirror: an object held by both at different sizes fails; `REHEARSAL_OBJECT_SAMPLE` objects held at the same size are read from both and compared by SHA-256; a mirror holding none of a non-empty source fails. Cold manifests (rewritten in place) are neither compared nor sampled |
+| 5 | Per object mirror: every source object last modified before the rehearsed backup run started and missing from the mirror or held there at another size fails, named; `REHEARSAL_OBJECT_SAMPLE` objects held at the same size are read from both and compared by SHA-256. Cold manifests (rewritten in place) are neither compared nor sampled |
 | 6 | On a pass: `industryflow_restore_rehearsal_last_success_timestamp_seconds{backup="databases"}` and `industryflow_restore_rehearsal_duration_seconds{database}` |
 
 | Step | `notebook-rehearse.sh` (Compose) |
@@ -366,10 +366,8 @@ Each authored work volume is archived and verified per run.
 
 | Kind | Rehearsal | Compared | Fails when |
 |---|---|---|---|
-| Model mirror | `db-rehearse.sh`, after the database rehearsal | Size of every object both source and mirror hold (staging area excluded); bytes (SHA-256) of a random sample of `REHEARSAL_OBJECT_SAMPLE` objects (default 20) | A shared object differs in size or sampled bytes; the source holds objects and the mirror none |
+| Model mirror | `db-rehearse.sh`, after the database rehearsal | Every source object (staging area excluded) last modified before the rehearsed backup run started, against the mirror: present at the same size; bytes (SHA-256) of a random sample of `REHEARSAL_OBJECT_SAMPLE` objects (default 20) | A source object is missing from the mirror or differs in size or sampled bytes, each named |
 | Work-volume archive | `notebook-rehearse.sh`: each volume's latest archive restored into a scratch volume `rehearsal-<volume>`, then removed | Every entry's path, type, size, owner and mode against the archive | Any entry differs; the scratch prefix names a work volume |
-
-An object the source holds and the mirror lacks fails the model rehearsal only when the mirror holds none of the source.
 
 | Code | Role |
 |---|---|
@@ -378,6 +376,7 @@ An object the source holds and the mirror lacks fails the model rehearsal only w
 | `infrastructure/backup/notebook-restore.sh` | Restore into a target; read back and compare |
 | `docker-compose.yml` | `notebook-rehearsal` service |
 | `infrastructure/backup/tests/test_backup_scripts.py::test_a_mirrored_object_with_other_bytes_fails_the_rehearsal` | Proof: a differing object fails |
+| `infrastructure/backup/tests/test_backup_scripts.py::test_every_source_object_missing_from_the_mirror_fails_the_rehearsal_named` | Proof: an object missing from the mirror fails, named |
 | `infrastructure/backup/tests/test_notebook_backup.py::test_a_rehearsal_restores_every_volumes_latest_archive_into_scratch_and_removes_it` | Proof: volume rehearsal |
 | `infrastructure/backup/tests/test_notebook_backup.py::test_a_restore_that_wrote_less_than_the_archive_fails` | Proof: a short restore fails |
 
