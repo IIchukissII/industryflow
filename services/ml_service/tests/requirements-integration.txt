@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Deps for the live upload-serving proof (test_upload_serving_integration.py), run in a bare container
+# Deps for the live upload-serving and promotion proofs (test_upload_serving_integration.py,
+# test_promotion_integration.py), run in a bare container
 # inside the compose network. It saves real models as an external author would, so the model stack
 # matches the serving image's pins (api/requirements.txt); it shares the model-stack bot group.
 pytest==9.2.0
@@ -13,3 +14,5 @@ scipy==1.18.1
 scikit-learn==1.9.1
 mlflow-skinny==3.17.2
 skops==0.16.0
+# The promotion proof mints the tracking capability as the hub's spawner writes it.
+redis==8.1.0
