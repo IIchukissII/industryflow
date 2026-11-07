@@ -116,12 +116,12 @@ jobs:
           docker network create roundtrip-net
           docker run -d --name roundtrip-minio --network roundtrip-net \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            -p 9000:9000 cgr.dev/chainguard/minio:latest@sha256:3c60a2a8c4d33409a9bc7a623a7fcbfb4605adc3d89422d2f53b3f673a6e5597 server /data
+            -p 9000:9000 cgr.dev/chainguard/minio:latest@sha256:869ca3178831d9f521ea02258a0f0d4fbc1e9f84302e707514e1f861b860865d server /data
           for i in $(seq 1 45); do
             if curl -fsS http://localhost:9000/minio/health/live >/dev/null 2>&1; then break; fi
             sleep 1
           done
-          docker run --rm --network roundtrip-net --entrypoint sh cgr.dev/chainguard/minio-client:latest-dev@sha256:39768db4c3fa811bc8f2e2a3e0add8ea391648b1c980de179985e1c353dc1805 -c \
+          docker run --rm --network roundtrip-net --entrypoint sh cgr.dev/chainguard/minio-client:latest-dev@sha256:fc1752e8f7279a159e851c771ade5252901406da83d72cd29d1a9373cb0c5063 -c \
             "mc alias set m http://roundtrip-minio:9000 minioadmin minioadmin && mc mb -p m/mlflow"
 
       - name: Build and start the MLflow tracking server (the same image the platform runs)
