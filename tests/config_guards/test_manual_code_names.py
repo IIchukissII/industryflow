@@ -2,11 +2,12 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Every code name in a manual's code table exists (ADR-0000 dec 2).
+"""Every code name in a manual's code table exists, and no ADR names code (ADR-0000 dec 2).
 
 A manual names the code that realises each decision, in a code table under a section headed by that
 decision. A renamed file or symbol leaves the manual naming code that is not there, and nothing else
-fails. Form: docs/architecture/decision-records.md.
+fails. The ADR names its manual and never the code, so a path in an ADR is a code piece that belongs
+in the manual. Form: docs/architecture/decision-records.md.
 """
 
 from __future__ import annotations
@@ -76,3 +77,20 @@ def test_every_code_name_exists():
     absent = [f"{rel}:{line}: {name} ({why})"
               for rel, line, name in NAMES if (why := missing(name))]
     assert not absent, "a manual names code that does not exist:\n" + "\n".join(absent)
+
+
+def code_in_adr(text: str):
+    """Backticked names in an ADR that are paths in the repository, or look like one."""
+    return [name for name in NAME.findall(text)
+            if "/" in name or (ROOT / name.split("::")[0]).exists() and name not in {".", ".."}]
+
+
+def test_the_adr_guard_sees_a_path():
+    assert code_in_adr("- `services/ml_service/api/load_probe.py`: x; `LICENSE`; `Proposed`") == [
+        "services/ml_service/api/load_probe.py", "LICENSE"]
+
+
+def test_no_adr_names_code():
+    named = [f"{path.name}: {name}" for path in sorted((ROOT / "ADR").glob("ADR-*.md"))
+             for name in code_in_adr(path.read_text())]
+    assert not named, "an ADR names code; move it to the decision's manual:\n" + "\n".join(named)

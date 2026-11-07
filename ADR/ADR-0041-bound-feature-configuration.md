@@ -73,6 +73,4 @@ at registration (ADR-0028).
 
 ## References
 
-- `infrastructure/timescaledb/init-scripts/30-bound-feature-config.sql`: decisions 2–4.
-- `services/ml_service/api/routers/feature_configs.py`: the refusal reported (decision 3).
-- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): the configuration API.
+- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): the configuration API; manual of decisions 2-4.

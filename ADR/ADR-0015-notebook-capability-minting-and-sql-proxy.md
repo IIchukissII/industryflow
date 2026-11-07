@@ -89,5 +89,4 @@ is one the client can widen again.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): audiences, lifecycle values, SQL proxy.
-- `services/notebook_hub/capabilities.py`, `services/notebook_sql_proxy/`: decisions 1–2, 5–6.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): audiences, lifecycle values, SQL proxy; manual of decisions 1, 2, 4-6.

@@ -94,5 +94,4 @@ and user addresses even though tenant data stays off that stack.
 
 ## References
 
-- `infrastructure/alertmanager/alertmanager.yml`: the receiver the operator adds.
-- [docs/operations/monitoring.md](../docs/operations/monitoring.md): the platform rules and runbooks.
+- [docs/operations/monitoring.md](../docs/operations/monitoring.md): the platform rules and runbooks; manual of decision 1.

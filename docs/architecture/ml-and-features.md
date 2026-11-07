@@ -181,3 +181,137 @@ version.
 | 502 | The tracking server could not be read (registry, run, artifact listing or sample) |
 
 Model training is manual, in notebooks ([notebooks](notebooks.md)); no training service exists.
+
+## ADR-0021 dec 1-3, 5
+
+The alert worker schedules a drift evaluation per statistical rule; the ML service computes data and prediction drift.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/drift` | Drift computation |
+| `services/alert_service/worker/rules_engine.py` | Statistical rule evaluation |
+
+## ADR-0023 dec 2
+
+The baseline is read from the materialized per-tenant aggregate table.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/feature_engineering/baseline_provider.py` | Baseline read |
+
+## ADR-0023 dec 9
+
+Offline training derives the window through the shared window contract.
+
+| Code | Role |
+|---|---|
+| `libs/industryflow_contracts` | Window contract |
+| `services/ml_service/tests/test_train_serve_agreement.py` | Train/serve agreement |
+
+## ADR-0027 dec 5
+
+A parity script compares declared constraints with the image; a round-trip workflow logs, registers and scores a model of each flavor.
+
+| Code | Role |
+|---|---|
+| `scripts/check_model_env_parity.py` | Declared constraints against the image |
+| `.github/workflows/model-artifact-roundtrip.yml` | Empirical round trip |
+
+## ADR-0027 dec 6, 7, 13
+
+Registration and deployment judge compatibility; the serving side grants deserialisation trust by provenance.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/model_compat.py` | Compatibility verdict |
+| `services/ml_service/api/skops_trust.py` | Trusted types by provenance |
+
+## ADR-0028 dec 1, 3
+
+Detectors register with the score semantics they implement (see Detectors).
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions` | Semantics vocabulary and built-in detectors |
+
+## ADR-0028 dec 5
+
+The supported set is read from the registry and served.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/routers/capabilities.py` | Served supported set |
+
+## ADR-0035 dec 1, 4
+
+The sample is stored as a reference profile (see Drift).
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/drift/reference_profile.py` | Profile format |
+
+## ADR-0035 dec 2, 3
+
+The deployment gate scores the sample through the declared detector.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/load_probe.py` | Isolated load-and-score |
+
+## ADR-0036 dec 7
+
+The deployment gate loads and scores an upload in the live runtime.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/load_probe.py` | Isolated load-and-score |
+
+## ADR-0037 dec 2-4, 6
+
+Every serving-side load is data-only; trust is granted by provenance; a model that fails is refused at load.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/skops_trust.py` | Trusted types by provenance |
+| `services/ml_service/api/routers/models.py` | Registration and deployment checks |
+
+## ADR-0037 dec 5
+
+Built-in detectors claim only flavors a data-only loader serves.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/builtins_detectors.py` | Built-in detectors |
+
+## ADR-0040 dec 2, 4
+
+Promotion reads the sample from the run and registers through the same gate (see Promotion).
+
+| Code | Role |
+|---|---|
+| `services/ml_service/tests/test_promotion_integration.py` | Promotion against the live tracking server |
+
+## ADR-0041 dec 2-4
+
+The database refuses a change to, or deletion of, a bound configuration (see Feature configuration).
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/30-bound-feature-config.sql` | Binding rule |
+
+## ADR-0041 dec 3
+
+The API reports the refusal.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/routers/feature_configs.py` | Refusal reported |
+
+## ADR-0044 dec 1-4
+
+The engine refuses a reading with a missing sensor or an uninterpretable definition and fails the score on any other feature failure.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/feature_engineering/engine.py` | Refusals and substitutes |
+| `services/ml_service/api/extensions/builtins.py` | Built-in transforms |

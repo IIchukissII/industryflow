@@ -124,3 +124,38 @@ Pre-signed URL lifetime: [tracking gateway settings](../../services/notebook_tra
 | Uploaded tree-based sklearn models | Refused at deploy, stage `trust` ([ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) dec 13) |
 | Attestation of origin | Not built |
 | Resumable or multipart transfer | Not built ([ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md) dec 10) |
+
+## ADR-0030 dec 2, 4
+
+The gateway refuses an artifact with executable content and stages the upload outside every tenant namespace.
+
+| Code | Role |
+|---|---|
+| `services/notebook_tracking_gateway/admission.py` | Structural refusal |
+| `services/notebook_tracking_gateway/staging.py` | Staging area |
+
+## ADR-0030 dec 2
+
+Only the gateway's principal writes the staging area.
+
+| Code | Role |
+|---|---|
+| `infrastructure/minio/minio-init.sh` | Object-store principals and policies |
+
+## ADR-0030 dec 4-8
+
+Registration judges the upload's declared semantics and requirements, grants trust by provenance and loads it in an isolated probe.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/uploaded_model.py` | Upload registration |
+| `services/ml_service/api/skops_trust.py` | Trusted types by provenance |
+| `services/ml_service/api/load_probe.py` | Isolated load-and-score |
+
+## ADR-0030 dec 10
+
+The edge serves the upload plane.
+
+| Code | Role |
+|---|---|
+| `services/frontend/nginx.conf.template` | Upload routes at the edge |

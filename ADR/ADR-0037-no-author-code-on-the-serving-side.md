@@ -84,5 +84,4 @@ running with cross-tenant reach. Every model registered so far is in a typed, da
 ## References
 
 - [ADR-0030](ADR-0030-externally-authored-model-admission.md) dec 4: the data-only rule.
-- `services/ml_service/api/skops_trust.py`, `services/ml_service/api/routers/models.py`: decisions 2-4, 6.
-- `services/ml_service/api/extensions/builtins_detectors.py`: decision 5.
+- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 2-6.

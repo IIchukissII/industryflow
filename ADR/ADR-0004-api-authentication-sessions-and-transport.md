@@ -133,6 +133,4 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 ## References
 
 - [docs/operations/tls.md](../docs/operations/tls.md): the internal CA and installing its root.
-- `services/api_gateway/routers/auth_tokens.py`, `routers/websocket.py`: sessions and sockets.
-- `libs/industryflow_contracts/industryflow_contracts/sessions.py`: the record of ended sessions every
-  verifier reads.
+- [Authentication](../docs/operations/authentication.md): manual of decisions 2, 3, 9.

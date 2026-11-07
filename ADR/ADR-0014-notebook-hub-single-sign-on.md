@@ -71,5 +71,4 @@ edge already forwards a verified identity that its service trusts only from that
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): request path.
-- `services/notebook_hub/sso-nginx.conf`, `jupyterhub_config.py`; `services/frontend/src/services/session.js`.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): request path; manual of decisions 1-3, 7.

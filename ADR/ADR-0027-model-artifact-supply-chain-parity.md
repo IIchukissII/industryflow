@@ -84,5 +84,4 @@ pinned stack.
 
 ## References
 
-- `scripts/check_model_env_parity.py`, `.github/workflows/model-artifact-roundtrip.yml`: decision 5.
-- `services/ml_service/api/model_compat.py`, `services/ml_service/api/skops_trust.py`: decisions 6-7, 13.
+- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 5-7, 13.

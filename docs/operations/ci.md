@@ -79,3 +79,66 @@ release is cut only from such a commit.
 | Device journey times out | Spark streaming not running | `docker compose up -d spark-master spark-worker spark-streaming` |
 | `box-deploy: … GB free after pruning … refusing` | Docker's disk is full beyond build cache | Free space (old images, volumes of removed services), or deploy with a lower `BOX_MIN_FREE_GB` knowingly |
 | Release fails at `The commit is box-validated` | No `box-e2e` success on that commit | `scripts/box-validate.sh` after deploying it |
+
+## ADR-0026 dec 3, 4
+
+The compose smoke gate starts the whole stack, upgrades it from the previous release and judges liveness over an interval.
+
+| Code | Role |
+|---|---|
+| `.github/workflows/compose-smoke.yml` | Whole-stack gate |
+
+## ADR-0026 dec 5, 7
+
+Every image is built and started; the newest tag tracks the main branch.
+
+| Code | Role |
+|---|---|
+| `.github/workflows/images.yml` | Image build, start and tag |
+| `.github/dependabot.yml` | Dependency updates target the main branch |
+
+## ADR-0026 dec 6
+
+A box finding CI can reproduce becomes a CI check, such as the exit codes of one-shot jobs.
+
+| Code | Role |
+|---|---|
+| `tests/config_guards/test_one_shot_exit_codes.py` | One-shot failures are not exit 0 |
+
+## ADR-0026 dec 8-10
+
+The box run deploys a main commit, runs the end-to-end journeys and records the validated commit (see Box validation and releases).
+
+| Code | Role |
+|---|---|
+| `scripts/box-deploy.sh` | Deploy a commit to the box |
+| `scripts/box-e2e.sh` | Run the journeys |
+| `scripts/box-validate.sh` | Deploy, run and record |
+| `tests/e2e` | End-to-end journeys |
+
+## ADR-0026 dec 9
+
+A release is cut from a box-validated commit.
+
+| Code | Role |
+|---|---|
+| `.github/workflows/release.yml` | Release |
+
+## ADR-0026 dec 11
+
+A proof runs against the real store, never a fake, and its stack is required in CI.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/tests/service_sql.py` | Real-database service SQL |
+| `libs/industryflow_contracts/industryflow_contracts/testing.py` | Shared real-store fixtures |
+| `services/alert_service/tests/test_kafka_consumer_integration.py` | Real Kafka consumer proof |
+| `services/spark_jobs/tests/test_streaming_integration.py` | Real streaming proof |
+| `services/ingestion_service/tests/test_tenant_status_integration.py` | Real tenant-status proof |
+| `services/ingestion_service/tests/test_kafka_producer_integration.py` | Real producer proof |
+| `services/tenant_delete/tests/test_cold_store_live.py` | Real object-store purge proof |
+| `tests/config_guards/test_tests_use_real_redis.py` | No Redis fake |
+| `tests/config_guards/test_tests_use_real_kafka.py` | No Kafka fake |
+| `tests/config_guards/test_streaming_proof_runs.py` | The streaming proof runs |
+| `tests/config_guards/test_integration_proofs_run.py` | Every integration proof runs in a gated step |
+| `tests/config_guards/test_one_shot_exit_codes.py` | One-shot failures are not exit 0 |

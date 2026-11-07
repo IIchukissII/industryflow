@@ -70,6 +70,4 @@ vector; pooled connections outlive requests; a rule implemented per service drif
 
 ## References
 
-- `libs/industryflow_contracts/industryflow_contracts/tenancy.py`: the shared implementation.
-- `tests/config_guards/test_tenant_contract_copies.py`, `test_images_carry_contracts.py`: the checks
-  of decision 7.
+- [Data and storage](../docs/architecture/data-and-storage.md): manual of decisions 5, 7.

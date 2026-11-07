@@ -28,8 +28,8 @@ the test.
 1. **One shared implementation decides whether a name or an object-store key belongs to a tenant.** It
    lives in the tenant-resolution library beside the names it tests; every mediator and read path uses
    it, and the library's check refuses a service that implements it again.
-2. **A key from a caller is tested only once it is plain: no empty, `.` or `..` segment, no
-   backslash and no control character.** Such a key is refused, never normalised; normalising would be
+2. **A key from a caller is tested only once it is plain: no empty, current-directory or
+   parent-directory segment, no backslash and no control character.** Such a key is refused, never normalised; normalising would be
    a second interpretation that the store, a proxy or a client can disagree with, and a line-based
    reader of a listing splits a key holding a control character into another key. A separator leading
    a caller's path is path syntax, not a segment of the key.
@@ -47,10 +47,10 @@ the test.
 |---|---|---|
 | 1 | Each mediator keeps its own test, held equal by review and tests | The copies diverged; each copy's own tests still passed |
 | 1 | The test written into each plane's own decision record | Several homes for one rule (ADR-0000 dec 3); planes drift apart by construction |
-| 2 | Refuse only `..` segments | `.` and empty segments and backslashes are rewritten by common stores, proxies and clients |
+| 2 | Refuse only parent-directory segments | Current-directory and empty segments and backslashes are rewritten by common stores, proxies and clients |
 | 2 | Normalise the key, then test the prefix | Trusts that every later reader normalises the same way |
 | 2 | A plain key that may hold control characters | A tab or newline in one tenant's key splits every line-based listing of the shared store, the backup mirror's included |
-| 3 | Refuse `%` in every key, decoded ones included | Refuses legitimate artifact names; only an encoded key can hide a segment |
+| 3 | Refuse the percent sign in every key, decoded ones included | Refuses legitimate artifact names; only an encoded key can hide a segment |
 | 3 | Decode, then test | Another decode further on could still change the key |
 | 5 | A weaker rule for read-only planes | A read across the boundary is the leak the boundary exists to prevent |
 
@@ -62,7 +62,7 @@ the test.
 
 **Negative**
 - A change to the rule ships to every image that carries the library.
-- Object names with empty, `.` or `..` segments, a backslash or a control character cannot be stored
+- Object names with empty, current-directory or parent-directory segments, a backslash or a control character cannot be stored
   through a mediator.
 
 ## Deferred
@@ -73,7 +73,4 @@ the test.
 
 ## References
 
-- `libs/industryflow_contracts/industryflow_contracts/tenancy.py`: the shared implementation.
-- `tests/config_guards/test_tenant_contract_copies.py`: decision 1's check.
-- `services/notebook_tracking_gateway/`, `services/notebook_cold_broker/`, `services/ml_service/api/`:
-  the mediators and read paths that use it.
+- [Data and storage](../docs/architecture/data-and-storage.md): manual of decisions 1, 5.

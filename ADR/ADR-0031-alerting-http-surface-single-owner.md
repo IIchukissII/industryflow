@@ -57,5 +57,4 @@ then has to be made twice, and the copy no caller exercises is the one that drif
 
 ## References
 
-- `services/api_gateway/routers/`: the alert rule and alert history routes.
-- `services/alert_service/worker/`: the detector, with no HTTP API.
+- [Alerting](../docs/architecture/alerting.md): manual of decisions 1, 2.

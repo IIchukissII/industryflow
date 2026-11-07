@@ -88,4 +88,4 @@ once data is written in the new shape.
 
 ## References
 
-- [init-scripts README](../infrastructure/timescaledb/init-scripts/README.md) (the sequence, the runner, operations); `infrastructure/timescaledb/migrate.sh` (decisions 4, 7-8); `infrastructure/timescaledb/tests/test_tenant_creation_completeness.py` (provisioning half of decision 3's check); `tests/config_guards/test_schema_migrations.py` (decisions 8, 10).
+- [init-scripts README](../infrastructure/timescaledb/init-scripts/README.md): manual of decisions 3, 4, 7, 8, 10.

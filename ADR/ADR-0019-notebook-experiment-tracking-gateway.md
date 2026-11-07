@@ -81,5 +81,4 @@ of the kernel. Artifacts are large, metadata calls small.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): namespace literals, routes.
-- `services/notebook_tracking_gateway/`; read paths in `services/ml_service/api/routers/`.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): namespace literals, routes; manual of decisions 1, 5-7.

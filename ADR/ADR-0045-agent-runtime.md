@@ -85,3 +85,4 @@ authoritative.
 ## References
 
 - [ADR-0046](ADR-0046-infrastructure-agent.md): the first agent.
+- [Monitoring](../docs/operations/monitoring.md): manual of decisions 1-6, 8.

@@ -157,3 +157,35 @@ Provisioning and deactivating tenants through the API or script:
 | `migrate: refused: N pending script(s) and no backup is recorded in this database` (or `… completed Ns ago, more than Ms`) | No recent backup before an upgrade | Run the backup, then `apply` again ([backup before an upgrade](#backup-before-an-upgrade)) |
 | `migrate: cannot read the ledger` from `verify` | The role lacks `SELECT` on the ledger | `reapply 28-schema-ledger-read.sql` |
 | An optional role is missing although its password is set | Its script ran before the password was set | `reapply` the role script ([manual operations](#manual-operations)) |
+
+## ADR-0033 dec 1
+
+One privileged function provisions a tenant (see Roles).
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts` | Provisioning function |
+
+## ADR-0034 dec 3
+
+Provisioning creates every per-tenant table the sequence defines.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/tests/test_tenant_creation_completeness.py` | Provisioning half of the check |
+
+## ADR-0034 dec 4, 7, 8
+
+The runner applies pending scripts in order and records each in the ledger.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/migrate.sh` | Migration runner |
+
+## ADR-0034 dec 8, 10
+
+A released migration is never edited; clients wait for a current ledger.
+
+| Code | Role |
+|---|---|
+| `tests/config_guards/test_schema_migrations.py` | Sequence and ledger guards |

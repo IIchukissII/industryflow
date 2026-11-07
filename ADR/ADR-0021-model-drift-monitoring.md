@@ -65,5 +65,4 @@ the ML service already holds a drift library and the tenant data path.
 ## References
 
 - [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md),
-  [docs/architecture/alerting.md](../docs/architecture/alerting.md): baseline, window, schedule.
-- `services/ml_service/api/drift/`, `services/alert_service/worker/rules_engine.py`.
+  [docs/architecture/alerting.md](../docs/architecture/alerting.md): baseline, window, schedule; manual of decisions 1-3, 5.

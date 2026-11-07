@@ -203,3 +203,113 @@ Proxy and gateway tests: their READMEs.
 |---|
 | Curated Voila dashboard content; locking the analytics server API to render-only |
 | A Kubernetes cluster run of the notebook hub |
+
+## ADR-0013 dec 2, 3
+
+The tracking gateway scopes every tracking, registry and artifact operation to the caller's tenant.
+
+| Code | Role |
+|---|---|
+| `services/notebook_tracking_gateway` | The tenant-scoping gateway |
+
+## ADR-0013 dec 4
+
+Experiments are read through the product, never the tracking server's own UI.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/routers/experiments.py` | Tenant-scoped experiment read |
+| `services/frontend/src/pages/Experiments.jsx` | Experiments page |
+
+## ADR-0014 dec 1-3
+
+The edge asks the platform's session verification on every hub request and forwards the verified identity with a proxy credential; the hub accepts only that.
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/sso-nginx.conf` | Session check and identity forwarding |
+| `services/notebook_hub/jupyterhub_config.py` | Forwarded-identity authenticator |
+
+## ADR-0014 dec 7
+
+Platform sign-out signs out of the hub first.
+
+| Code | Role |
+|---|---|
+| `services/frontend/src/services/session.js` | Chained sign-out |
+
+## ADR-0015 dec 1, 2, 4
+
+The hub mints audience-bound handles into the capability store at spawn; revocation deletes the entry.
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/capabilities.py` | Minting and revocation |
+
+## ADR-0015 dec 5, 6
+
+The SQL proxy resolves the handle and opens the upstream session as the tenant's confined login identity.
+
+| Code | Role |
+|---|---|
+| `services/notebook_sql_proxy` | The SQL proxy |
+
+## ADR-0018 dec 1
+
+Configuration selects the Docker or the Kubernetes spawner (see Deployment profiles).
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py` | Spawner selection |
+| `docker-compose.yml` | Docker spawner deployment |
+| `deploy/helm/industryflow` | Kubernetes spawner deployment |
+
+## ADR-0019 dec 1, 5, 6
+
+The kernel reaches tracking only through the gateway, which namespaces every operation and presigns artifact transfers.
+
+| Code | Role |
+|---|---|
+| `services/notebook_tracking_gateway` | Tracking gateway |
+
+## ADR-0019 dec 7
+
+Trusted platform code reads the tracking server directly.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/routers` | Platform read paths |
+
+## ADR-0020 dec 1, 2
+
+An authoring server mounts one per-user volume at its work subdirectory; idle servers are culled.
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py` | Volume mount and culler |
+| `services/notebook_hub/Dockerfile.authoring` | Authoring image home layout |
+
+## ADR-0020 dec 6
+
+The hub removes a deleted tenant's volumes and records the reclaim.
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/reclaim.py` | Volume reclaim |
+| `services/notebook_hub/tests/test_reclaim_docker_live.py` | Removal against a real Docker daemon |
+
+## ADR-0042 dec 1-3, 5
+
+Each plane appends its event to the stream in the same step as the store change.
+
+| Code | Role |
+|---|---|
+| `libs/industryflow_contracts/industryflow_contracts/capability_audit.py` | Event contract |
+
+## ADR-0042 dec 4, 6
+
+One writer drains the stream into the audit table through a privileged function.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/31-capability-audit.sql` | Table and its writer |

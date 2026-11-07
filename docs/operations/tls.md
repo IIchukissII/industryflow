@@ -114,3 +114,12 @@ Each stage is validated before the next.
 | 1. Server capable | `ssl=on` with the certificate; `pg_hba` stays `host` | Unchanged |
 | 2. Clients verify | Unchanged | `sslmode=verify-full` + `sslrootcert` |
 | 3. Enforce | `host` → `hostssl`, `md5` → `scram-sha-256`; re-hash existing roles with `ALTER ROLE <role> PASSWORD '<same value>'` | Unchanged |
+
+## ADR-0017 dec 1-3, 5
+
+Clients verify the server certificate with SCRAM authentication; the server certificate comes from the internal CA (see Database TLS).
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/config/pg_hba.conf` | TLS-only SCRAM access rules |
+| `deploy/helm/industryflow/templates/db-tls-certificate.yaml` | Database server certificate on Kubernetes |

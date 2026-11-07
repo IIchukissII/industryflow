@@ -27,7 +27,8 @@ A manual section is headed by the decision it follows and ends with a code table
 
 | Code | Role |
 |---|---|
-| `tests/config_guards/test_manual_code_names.py` | Every path and symbol in a manual's code table exists |
+| `tests/config_guards/test_manual_code_names.py::test_every_code_name_exists` | Every path and symbol in a manual's code table exists |
+| `tests/config_guards/test_manual_code_names.py::test_no_adr_names_code` | No ADR names a repository path |
 
 ## ADR-0000 dec 3
 

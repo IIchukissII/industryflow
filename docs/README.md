@@ -26,6 +26,7 @@ Index of every page under `docs/` and of the component READMEs. Decisions live i
 | [alerting](architecture/alerting.md) | Alert API, detection worker, rule types, dedup, operator labels |
 | [notebooks](architecture/notebooks.md) | Notebook hub, profiles, capability handles, planes |
 | [cold layer evolution](architecture/cold-layer-evolution.md) | Cold-layer items deferred to a trigger |
+| [licensing](architecture/licensing.md) | Licence per file kind, licence texts |
 | [decision records](architecture/decision-records.md) | Decision records, their manuals and the guards that keep them consistent |
 
 ## Operations
