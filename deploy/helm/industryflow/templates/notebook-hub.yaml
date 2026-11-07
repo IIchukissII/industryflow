@@ -309,6 +309,22 @@ data:
         default "";
         "10"    "${NOTEBOOK_SSO_PROXY_SECRET}";
     }
+    # The platform's own cookies stay at this proxy (ADR-0014 dec 5): the session check below reads
+    # them, and nothing behind the hub does. chp hands /user/ traffic to the single-user server, where
+    # user code runs, so the access cookie is removed from the Cookie header sent on, and the CSRF
+    # cookie with it.
+    map $http_cookie $if_cookie_no_access {
+        default $http_cookie;
+        "~^(.*?)(?:^|;[ ]*)if_access=[^;]*(.*)$" "$1$2";
+    }
+    map $if_cookie_no_access $if_cookie_no_csrf {
+        default $if_cookie_no_access;
+        "~^(.*?)(?:^|;[ ]*)if_csrf=[^;]*(.*)$" "$1$2";
+    }
+    map $if_cookie_no_csrf $if_hub_cookie {
+        default $if_cookie_no_csrf;
+        "~^;[ ]*(.*)$" "$1";
+    }
     server {
         listen {{ .Values.notebookHub.ssoProxy.port }};
 
@@ -336,6 +352,8 @@ data:
             proxy_set_header X-IF-Role       $if_role;
             # Always set, so a client-supplied value never passes; empty (not sent) off hub routes.
             proxy_set_header X-IF-SSO-Proxy-Secret $if_sso_proxy_secret;
+            # Never the platform's cookies (the maps above).
+            proxy_set_header Cookie $if_hub_cookie;
 
             proxy_pass http://{{ $proxySvc }}:{{ .Values.notebookHub.proxy.port }};
             proxy_http_version 1.1;

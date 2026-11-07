@@ -54,7 +54,7 @@ observability:
       release: monitoring
 ```
 
-## Objects the chart emits
+## Objects the chart emits (ADR-0016 dec 1, 2)
 
 | Object | Rendered for | Template |
 |---|---|---|

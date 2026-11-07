@@ -14,7 +14,7 @@ Device client certificates are a separate PKI ([device mTLS](device-mtls.md)).
 | The edge terminates TLS | [ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) |
 | Database TLS, one internal root for edge and database | [ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md) |
 
-## Edge TLS modes
+## Edge TLS modes (ADR-0004 dec 1)
 
 | Mode | Client trust | Setup |
 |---|---|---|
@@ -24,7 +24,7 @@ Device client certificates are a separate PKI ([device mTLS](device-mtls.md)).
 
 The entrypoint self-signs only when no certificate is present at `/etc/nginx/certs`.
 
-## Issue certificates with the internal CA
+## Issue certificates with the internal CA (ADR-0004 dec 1, ADR-0017 dec 3)
 
 Run on the Compose host (needs `openssl`):
 
@@ -81,7 +81,7 @@ Copy `deploy/certs/ca.crt` to each device.
 | Reissue the edge certificate (new SAN, expiry) | Re-run the script; `docker compose up -d --force-recreate frontend ingestion-edge` | None |
 | Reissue the database certificate (Compose) | Re-run the script; `docker compose up -d --force-recreate db-cert-init`; `docker compose restart timescaledb` | None |
 | Reissue the database certificate (Helm) | Renew or replace the `tls.db.secretName` Secret; restart the TimescaleDB pod | None |
-| Rotate the CA | Delete `deploy/ca/`, re-run the script, recreate the edges and the database as above | Install the new `ca.crt` on every client; restart every database client |
+| Rotate the CA (ADR-0017 dec 3) | Delete `deploy/ca/`, re-run the script, recreate the edges and the database as above | Install the new `ca.crt` on every client; restart every database client |
 
 ## Database TLS
 
@@ -92,7 +92,7 @@ Copy `deploy/certs/ca.crt` to each device.
 | `db-cert-init` (one-shot, runs on every `up`) | Copies `db.crt` / `db.key` / `ca.crt` from `TLS_CERT_DIR` into the `db-certs` volume, owned by uid 70, key `0600`. Without `TLS_CERT_DIR` it keeps an earlier staged certificate, else self-signs one. It publishes the staged CA to the `db-ca` volume |
 | Client CA mount | `${TLS_CERT_DIR:-db-ca}` at `/etc/ssl/industryflow` (read-only) |
 | Client settings | `DB_SSLMODE` (default `verify-full`), `DB_SSLROOTCERT=/etc/ssl/industryflow/ca.crt` |
-| `pg_hba.conf` | `infrastructure/timescaledb/config/pg_hba.conf`, shared with the chart: `hostssl` + `scram-sha-256` on private ranges only; `local … trust` (Unix socket inside the database container) is the only non-TLS path. `metrics_user` (postgres-exporter) has its own `hostssl` rule |
+| `pg_hba.conf` | `infrastructure/timescaledb/config/pg_hba.conf`, shared with the chart: `hostssl` + `scram-sha-256` on private ranges only (ADR-0017 dec 2); `local … trust` (Unix socket inside the database container) is the only non-TLS path (ADR-0017 dec 6). `metrics_user` (postgres-exporter) has its own `hostssl` rule |
 
 ### Helm
 

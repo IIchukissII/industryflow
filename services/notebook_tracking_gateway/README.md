@@ -17,7 +17,7 @@ The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/AD
 | GET | `/api/2.0/mlflow-artifacts/artifacts` | tracking handle | Artifact listing, tenant-scoped |
 | POST | `/api/2.0/industryflow-upload/stage` | upload handle | Stage an externally-authored artifact under `_upload-staging/` ([ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md)) |
 | POST | `/api/2.0/industryflow-upload/commit` | upload handle | Judge and admit into `<tenant>/uploads/`, or discard |
-| DELETE | `/api/2.0/industryflow-operator/tenants/<company_id>` | `TRACKING_OPERATOR_TOKEN` | Empty a deleted tenant ([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) dec 4): delete its registered models, artifacts and staged uploads; rename its experiments to `_deleted.tenant_<…>.<id>` and soft-delete them with their runs and logged models. Answers what remains; experiments count until `infrastructure/mlflow/collect_deleted.py` collects them. Absent when the token is unset |
+| DELETE | `/api/2.0/industryflow-operator/tenants/<company_id>` | `TRACKING_OPERATOR_TOKEN` | Empty a deleted tenant ([ADR-0033 dec 4](../../ADR/ADR-0033-tenant-lifecycle.md)): delete its registered models, artifacts and staged uploads; rename its experiments to `_deleted.tenant_<…>.<id>` and soft-delete them with their runs and logged models. Answers what remains; experiments count until `infrastructure/mlflow/collect_deleted.py` collects them. Absent when the token is unset |
 
 | Rule | Behaviour |
 |---|---|

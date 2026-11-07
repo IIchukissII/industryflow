@@ -26,11 +26,11 @@ The GitHub Actions workflows, their gate jobs, and the required checks on `main`
 | `images-gate` | `images.yml` | Spark/JupyterHub version parity, image build + smoke + Trivy, pip-audit / npm audit |
 | `helm-gate` | `helm.yml` | `helm lint` / `helm template`, fail-closed placeholder-secret guard |
 | `compose-smoke-gate` | `compose-smoke.yml` | The stack starts and stays up (unfiltered) |
-| `db-tenant-isolation-gate` | `db-tenant-isolation.yml` | Live stack (`infrastructure/timescaledb/tests`): reader-role isolation, backup restore and rehearsal, object mirrors and notebook archives against MinIO and Docker; SQL-proxy cross-tenant isolation |
+| `db-tenant-isolation-gate` | `db-tenant-isolation.yml` | Live stack (`infrastructure/timescaledb/tests`, ADR-0026 dec 11): reader-role isolation, backup restore and rehearsal, object mirrors and notebook archives against MinIO and Docker; SQL-proxy cross-tenant isolation |
 | `cold-layer-integration-gate` | `cold-layer-integration.yml` | Live stack: the cold exporter (export, verify, drop), the tenant-delete job's cold purge as its own principal against MinIO, the cold-store broker's reads and isolation |
 | `tracking-gateway-integration-gate` | `tracking-gateway-integration.yml` | Tracking gateway proofs; upload path's serving half (register and deploy in the real ml_service); a notebook-registered version promoted with the sample its run logged |
 | `model-artifact-roundtrip-gate` | `model-artifact-roundtrip.yml` | Parity, model artifact round-trip |
-| `config-guards-gate` | `config-guards.yml` | Silent-omission list guards (`tests/config_guards`, among them: every `integration`-marked proof runs in a gated, path-filtered step that requires its stack, and is left out of the no-stack matrix); object-store principals against a real MinIO; platform alert rules under the pinned `promtool` and `amtool` (unfiltered) |
+| `config-guards-gate` | `config-guards.yml` | Silent-omission list guards (`tests/config_guards`, ADR-0000 dec 3; among them: every `integration`-marked proof runs in a gated, path-filtered step that requires its stack, and is left out of the no-stack matrix); object-store principals against a real MinIO; platform alert rules under the pinned `promtool` and `amtool` (unfiltered) |
 
 ## Changing the list
 
@@ -56,7 +56,7 @@ release is cut only from such a commit.
 | Task | Command |
 |---|---|
 | Deploy a commit by upgrade on the environment's host | `scripts/box-deploy.sh [ref]` (default `origin/main`; disk floor, checkout, then the checked-out version of the script runs the rest: build, backup with the new image, schema, recreate, monitoring stack recreated so its single-file configs are re-read; writes `.box-deployed`). The `ops-agent` profile is built and started when `.env` sets `OPS_AGENT_WEBHOOK_SECRET`. On failure the Spark services it stopped are started again and the deploy exits non-zero. Below `BOX_MIN_FREE_GB` (default `20`) free it prunes all build cache and dangling images, then refuses if still below |
-| Run the suite on the environment's host | `scripts/box-e2e.sh` (from the deployment's checkout; refuses local changes or a stack not deployed from `HEAD`) |
+| Run the suite on the environment's host (ADR-0026 dec 8) | `scripts/box-e2e.sh` (from the deployment's checkout; refuses local changes or a stack not deployed from `HEAD`) |
 | Run it over SSH and post the `box-e2e` commit status | `scripts/box-validate.sh <ssh-target> [compose-dir]` (needs `gh`; refuses an upgrade from a commit without `box-e2e` success) |
 | First validation of an environment | `BOX_FIRST_VALIDATION=1 scripts/box-validate.sh <ssh-target>` |
 | Run one journey | `scripts/box-e2e.sh -k <name>` (arguments go to pytest) |
@@ -64,13 +64,13 @@ release is cut only from such a commit.
 
 | Item | Value |
 |---|---|
-| Suite | `tests/e2e/` (runner image `tests/e2e/Dockerfile`) |
+| Suite | `tests/e2e/` (runner image `tests/e2e/Dockerfile`; ADR-0026 dec 10) |
 | Journeys | Capability use and its record; a device reading through the certificate edge; a revoked device refused there once the edge re-reads its list, another device of the tenant still admitted; a model uploaded, registered on a bound configuration, deployed and scored by its rule; a tenant through deletion; the operator's user CLIs (seeded, listed, password reset with the old session and password refused, deleted); a platform alert explained by the infrastructure agent into a note in Loki, its receiver refusing a caller without the secret (where the agent is off: verified off) |
 | Run's superuser | Created by `box-e2e.sh` in the oldest active tenant, removed before the result line; a run that cannot remove it is `failed` |
 | Run's tenant | Suspended, deletion requested, then its devices revoked (`device-ca.sh revoke-tenant`; the job accepts only a CRL signed no earlier than the second of the request) at the end; the next run's deletion job removes it |
 | Skips | Failures (`IF_E2E_REQUIRE=1`) |
 | Release workflow | `release.yml`: refuses a tag whose commit is not on `main`, has no successful `box-e2e` status, or has no successful `Images` run on `main`; resolves every image of `images.yml` from `:sha-<short>` to its digest, then tags each digest with the version |
-| Precondition | The environment runs the commit under test (`scripts/box-deploy.sh`), with the notebook authoring image and the device CA (`scripts/device-ca.sh init`) |
+| Precondition (ADR-0026 dec 8) | The environment runs the commit under test (`scripts/box-deploy.sh`), with the notebook authoring image and the device CA (`scripts/device-ca.sh init`) |
 | Validated bytes | The environment builds its own images; a release publishes the main pipeline's build of the same commit ([ADR-0026](../../ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md) Consequences) |
 
 | Symptom | Cause | Fix |
@@ -78,7 +78,7 @@ release is cut only from such a commit.
 | `box-e2e: could not remove <email>` | The cleanup could not reach the database | `$RUN api-gateway python /scripts/manage_users.py delete --email <email> --yes` ([user management](user-management.md)) |
 | Device journey times out | Spark streaming not running | `docker compose up -d spark-master spark-worker spark-streaming` |
 | `box-deploy: … GB free after pruning … refusing` | Docker's disk is full beyond build cache | Free space (old images, volumes of removed services), or deploy with a lower `BOX_MIN_FREE_GB` knowingly |
-| Release fails at `The commit is box-validated` | No `box-e2e` success on that commit | `scripts/box-validate.sh` after deploying it |
+| Release fails at `The commit is box-validated` | No `box-e2e` success on that commit (ADR-0026 dec 9) | `scripts/box-validate.sh` after deploying it |
 
 ## ADR-0026 dec 2
 

@@ -13,7 +13,7 @@ Values live in [`docker-compose.yml`](../docker-compose.yml) and [`.env.example`
 | Requirement | Used by |
 |---|---|
 | Docker with Compose v2 | The stack |
-| `openssl` on the host | `scripts/device-ca.sh`, `scripts/gen-internal-ca.sh` |
+| `openssl` on the host | `scripts/device-ca.sh` (device CA, ADR-0007 dec 1), `scripts/gen-internal-ca.sh` (internal CA, ADR-0004 dec 8) |
 | Python 3 with `requests` and `pandas` | The reference data producer |
 | 8 GB+ RAM | The stack |
 
@@ -104,6 +104,8 @@ per-user containers through the Docker socket ([notebooks](architecture/notebook
 Host ports bind to `127.0.0.1`, except `frontend` and `ingestion-edge`, which bind every interface.
 Grafana can also be served by the edge at `/grafana/` ([monitoring](operations/monitoring.md#grafana)).
 From another machine, reach a loopback port through an SSH tunnel (`ssh -L 5000:localhost:5000 <host>`).
+
+### Compose services (ADR-0009 dec 6)
 
 | Name | Role | Port | Config |
 |---|---|---|---|

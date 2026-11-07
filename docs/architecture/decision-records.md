@@ -23,12 +23,14 @@ A manual section is headed by the decision it follows and ends with a code table
 | Section heading | `## ADR-NNNN dec N`, one or more decisions of one ADR (`## ADR-0033 dec 4, 5`) |
 | Body | How the decision works, in tables, without its reasons |
 | Code table | Header `\| Code \| Role \|`; each row names a repository path in backticks, or `path::symbol` for a name inside a file |
+| A path elsewhere in a document | Its table row, or the nearest heading, cites the decision it follows (`ADR-NNNN dec N`) |
 | ADR References | The manual's link; never a path, symbol, endpoint, variable, port, table or command |
 
 | Code | Role |
 |---|---|
 | `tests/config_guards/test_manual_code_names.py::test_every_code_name_exists` | Every path and symbol in a manual's code table exists |
 | `tests/config_guards/test_manual_code_names.py::test_no_adr_names_code` | No ADR names a repository path |
+| `tests/config_guards/test_manual_code_names.py::test_every_path_a_document_names_follows_a_decision` | Every path a document's table names follows a decision |
 
 ## ADR-0000 dec 3
 

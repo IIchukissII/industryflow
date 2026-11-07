@@ -673,6 +673,48 @@ def test_the_secret_is_sent_on_hub_routes_only(where, uri, sent):
     assert (bool(hub.search(uri)) and not ambiguous.search(uri)) is sent
 
 
+
+def _hub_cookie(where):
+    """The Cookie header the proxy sends on, computed by its own three maps (nginx regex maps: the first
+    matching regex wins, else the default)."""
+    conf = SSO_CONFIGS[where]
+    chain = []
+    for source, target in (("http_cookie", "if_cookie_no_access"), ("if_cookie_no_access", "if_cookie_no_csrf"),
+                           ("if_cookie_no_csrf", "if_hub_cookie")):
+        body = re.search(r"map \$%s \$%s \{(.*?)\n\s*\}" % (source, target), conf, re.S).group(1)
+        pattern, value = re.search(r'"~(.*?)" "(.*?)";', body).groups()
+        chain.append((re.compile(pattern), value))
+
+    def send(header):
+        for pattern, value in chain:
+            m = pattern.match(header)
+            if m:
+                header = re.sub(r"\$(\d)", lambda g: m.group(int(g.group(1))), value)
+        return header
+    return send
+
+
+@pytest.mark.parametrize("where", sorted(SSO_CONFIGS))
+def test_the_proxy_sends_the_hub_no_platform_cookie(where):
+    # ADR-0014 dec 5: the session token never reaches the kernel; chp hands /user/ traffic, cookies
+    # included, to the single-user server where user code runs.
+    conf = SSO_CONFIGS[where]
+    assert re.search(r"proxy_set_header\s+Cookie\s+\$if_hub_cookie;", conf)
+    gateway = (REPO / "services/api_gateway").rglob("*.py")
+    names = dict(re.findall(r'^(ACCESS_COOKIE|CSRF_COOKIE) = "([^"]+)"', "\n".join(p.read_text() for p in gateway), re.M))
+    assert set(names) == {"ACCESS_COOKIE", "CSRF_COOKIE"}, names
+    access, csrf = names["ACCESS_COOKIE"], names["CSRF_COOKIE"]
+    send = _hub_cookie(where)
+    hub = "jupyterhub-session-id=s; _xsrf=x"
+    for header in (f"{access}=tok; {hub}; {csrf}=c", f"{hub}; {access}=tok; {csrf}=c",
+                   f"{csrf}=c; {access}=tok; {hub}", f"{access}=tok;{hub};{csrf}=c"):
+        sent = send(header)
+        assert access not in sent and csrf not in sent, (header, sent)
+        assert sent.replace(";", "; ").replace(";  ", "; ") .strip("; ") in (hub, hub.replace("; ", ";")), (header, sent)
+    assert send(f"{access}=tok; {csrf}=c") == ""
+    assert send(hub) == hub
+    assert send(f"x{access}=keep; {hub}") == f"x{access}=keep; {hub}"
+
 # --- reclaim of a deleted tenant's volumes (ADR-0020 dec 6) ---
 
 RECLAIM_ENV = {"NOTEBOOK_RECLAIM_DB_HOST": "timescaledb", "NOTEBOOK_RECLAIM_DB_PASSWORD": "reclaim-secret"}

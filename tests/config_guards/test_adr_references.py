@@ -21,7 +21,7 @@ from _repo import ROOT
 TEXT_SUFFIXES = {".md", ".py", ".sh", ".yml", ".yaml", ".sql", ".ts", ".tsx", ".js", ".conf",
                  ".toml", ".ini", ".j2", ".tpl", ".txt", ".example", ".env", ".dockerfile"}
 CITE = re.compile(
-    r"ADR-(\d{4})\)?,? (?:decisions?|decs?\.?|§) ?"
+    r"ADR-(\d{4})(?:\]\([^)\s]*\))?\)?,? (?:decisions?|decs?\.?|§) ?"
     r"(\d+(?:\s*(?:,|and|-|–)\s*\d+)*)")
 ADR_ID = re.compile(r"\bADR-(\d{4})\b")
 LINK = re.compile(r"\]\(([^)\s#]+)(?:#[^)]*)?\)")

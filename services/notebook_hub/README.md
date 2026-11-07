@@ -20,9 +20,9 @@ session and mints their capability handles. Profiles, handle lifecycle and deplo
 | `jupyterhub_config.py` | Header-trusting authenticator with `refresh_user`, `pre_spawn_hook`, `post_stop_hook`, polling spawner subclass, volume removal on user deletion, idle culler, volume-reclaim service, containment, spawner selection ([ADR-0018](../../ADR/ADR-0018-notebook-hub-spawner-portability.md)) |
 | `sso-nginx.conf` | SSO reverse proxy: validates the platform session against api-gateway, overwrites the identity headers and sets the proxy secret on hub routes |
 | `Dockerfile` | Hub image (JupyterHub + configurable-http-proxy), uid 10001, ports 8000/8081 |
-| `Dockerfile.authoring` | Authoring single-user image: JupyterLab, the `industryflow` client with `[sql,cold]`; build context `clients/python` |
-| `Dockerfile.analytics` | Analytics single-user image: Voila, client without `[sql]`; build context `clients/python` |
-| `tests/` | `test_identity.py`, `test_capabilities.py`, `test_reclaim.py`, `test_jupyterhub_config.py` (loads the config under both spawners) |
+| `Dockerfile.authoring` | Authoring single-user image: JupyterLab, the `industryflow` client with `[sql,cold]`; build context `clients/python` (ADR-0011 dec 5) |
+| `Dockerfile.analytics` | Analytics single-user image: Voila, client without `[sql]`; build context `clients/python` (ADR-0011 dec 5) |
+| `tests/` | `test_identity.py`, `test_capabilities.py`, `test_reclaim.py`, `test_jupyterhub_config.py` (loads the config under both spawners, ADR-0018 dec 1) |
 
 ## Settings
 

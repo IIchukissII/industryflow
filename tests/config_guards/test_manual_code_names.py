@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Every code name in a manual's code table exists, and no ADR names code (ADR-0000 dec 2).
+"""Every code name in a manual's code table exists, every path a document names follows a decision, and
+no ADR names code (ADR-0000 dec 2).
 
 A manual names the code that realises each decision, in a code table under a section headed by that
 decision. A renamed file or symbol leaves the manual naming code that is not there, and nothing else
@@ -47,10 +48,18 @@ def code_names(text: str):
             in_table = False
 
 
+def in_repository(path: str):
+    """The repository path a name spells, or None: an absolute or escaping name is not repository code."""
+    if not path or path.startswith("/"):
+        return None
+    target = (ROOT / path).resolve()
+    return target if target.is_relative_to(ROOT.resolve()) else None
+
+
 def missing(name: str) -> str | None:
     path, _, symbol = name.partition("::")
-    target = ROOT / path
-    if not target.exists():
+    target = in_repository(path)
+    if target is None or not target.exists():
         return "no such path"
     if symbol and not re.search(rf"\b{re.escape(symbol)}\b", target.read_text(errors="replace")):
         return f"no {symbol} in {path}"
@@ -94,3 +103,45 @@ def test_no_adr_names_code():
     named = [f"{path.name}: {name}" for path in sorted((ROOT / "ADR").glob("ADR-*.md"))
              for name in code_in_adr(path.read_text())]
     assert not named, "an ADR names code; move it to the decision's manual:\n" + "\n".join(named)
+
+
+CITATION = re.compile(r"ADR-\d{4}(?:\]\([^)\s]*\))?\)?,? (?:decisions?|decs?\.?) ?\d")
+HEADING = re.compile(r"^(#{2,6}) ")
+
+
+def unfollowed_paths(text: str):
+    """(line, name) for every repository path a table row names outside a decision: not in a
+    `## ADR-NNNN dec N` section, and neither the row nor its nearest heading cites a decision."""
+    headings = {}  # level -> heading line
+    for number, line in enumerate(text.splitlines(), 1):
+        m = HEADING.match(line)
+        if m:
+            level = len(m.group(1))
+            headings = {k: v for k, v in headings.items() if k < level}
+            headings[level] = line
+            continue
+        if not line.startswith("|"):
+            continue
+        if MANUAL_SECTION.match(headings.get(2, "")) or CITATION.search(line):
+            continue
+        nearest = headings[max(headings)] if headings else ""
+        if CITATION.search(nearest):
+            continue
+        for name in NAME.findall(line):
+            target = in_repository(name.split("::")[0].rstrip("/"))
+            if "/" in name and target is not None and target.exists():
+                yield number, name
+
+
+def test_the_document_guard_sees_an_unfollowed_path():
+    page = ("## Components\n\n| Name | Config |\n|---|---|\n| a | `tests/config_guards/_repo.py` `/etc/hosts` |\n"
+            "| b | `tests/config_guards/_repo.py` (ADR-0000 dec 3) |\n"
+            "## ADR-0000 dec 2\n\n| Code | Role |\n|---|---|\n| `tests/config_guards/_repo.py` | x |\n")
+    assert [n for n, _ in unfollowed_paths(page)] == [5]
+
+
+def test_every_path_a_document_names_follows_a_decision():
+    loose = [f"{rel}:{line}: {name}" for rel, text in _manual_files()
+             for line, name in unfollowed_paths(text)]
+    assert not loose, ("a document names code without the decision it follows; put it under its "
+                       "decision's section or cite the decision:\n" + "\n".join(loose))

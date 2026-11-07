@@ -31,9 +31,9 @@ alert worker ─▶ ml-service-api         POST /api/inference/predict (loaded f
 
 | Name | Role | Port | Config |
 |---|---|---|---|
-| `notebook-tracking-gateway` | Stage and commit; the only writer to the artifact store; judges at commit whether loading deserialises author-supplied objects | 5050 | `services/notebook_tracking_gateway/gateway.py`, `staging.py`, `admission.py` |
-| `ml-service-api` | Mints the upload capability handle; at registration, checks the flavor and semantics are servable; at deployment, runs the load-and-score probe | 8002 | `services/ml_service/api/upload_capability.py`, `routers/models.py`, `model_compat.py`, `uploaded_model.py`, `load_probe.py`, `load_probe_worker.py` |
-| Upload wizard | Models page, **Upload model** | | `services/frontend/src/pages/ModelUploadWizard.jsx` |
+| `notebook-tracking-gateway` | Stage and commit; the only writer to the artifact store; judges at commit whether loading deserialises author-supplied objects (ADR-0030 dec 2) | 5050 | `services/notebook_tracking_gateway/gateway.py`, `staging.py`, `admission.py` |
+| `ml-service-api` | Mints the upload capability handle; at registration, checks the flavor and semantics are servable; at deployment, runs the load-and-score probe (ADR-0030 dec 3, 5, 7) | 8002 | `services/ml_service/api/upload_capability.py`, `routers/models.py`, `model_compat.py`, `uploaded_model.py`, `load_probe.py`, `load_probe_worker.py` |
+| Upload wizard | Models page, **Upload model** (ADR-0030 dec 1) | | `services/frontend/src/pages/ModelUploadWizard.jsx` |
 
 ## Locations
 
@@ -113,7 +113,7 @@ Pre-signed URL lifetime: [tracking gateway settings](../../services/notebook_tra
 
 | Item | Detail |
 |---|---|
-| Staging-prefix agreement | Gateway, Compose and chart values checked against each other by `services/notebook_tracking_gateway/tests/test_staging_infra_parity.py` |
+| Staging-prefix agreement | Gateway, Compose and chart values checked against each other by `services/notebook_tracking_gateway/tests/test_staging_infra_parity.py` (ADR-0000 dec 3) |
 | Script 20 on a live database | Backfills `detector = sklearn` for kernel-trained rows only; an upload registered before it must be registered again |
 
 ## Not supported

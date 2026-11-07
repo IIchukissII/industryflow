@@ -39,6 +39,8 @@ Kubernetes packaging for IndustryFlow ([ADR-0009](../../../ADR/ADR-0009-kubernet
 | `observability-dashboards.yaml` | Grafana dashboard ConfigMaps (`files/grafana`) | `observability.dashboards.enabled` |
 | `observability-exporters.yaml` | postgres / redis / kafka exporters | `observability.exporters.<name>.enabled` |
 
+### Compose sources (ADR-0009 dec 6)
+
 `files/` holds symlinks to the compose sources; Helm follows them when it loads the chart.
 
 | Symlink | Target |
@@ -102,7 +104,7 @@ digest from GHCR over the registry API (`GITHUB_TOKEN` or `gh auth token` for pr
 | DB TLS | `tls.db.*` | Secret or cert-manager ([database TLS](../../../docs/operations/tls.md#helm)) |
 | DB schema | `dbMigrations.*` | The `db-migrate` Job applies [the schema sequence](../../../infrastructure/timescaledb/init-scripts/README.md) to the in-cluster or external database on every install and upgrade; each database client's `schema-ready` init container waits up to `dbMigrations.waitSeconds` for a current ledger. The `<release>-pre-upgrade-backup` hook backs up first; the Job refuses pending scripts without a backup newer than `dbMigrations.backupMaxAgeSeconds` unless `dbMigrations.withoutBackup` ([before an upgrade](../../../docs/operations/backup-and-recovery.md#before-an-upgrade)) |
 | Spark checkpoints | `apps.spark-*.persistence` | Default is a ReadWriteOnce PVC; needs a default StorageClass or `storageClass` |
-| Object-store principals | `secrets.data.*_ACCESS_KEY` / `*_SECRET_KEY` | One pair per consumer, access keys distinct from the root's. External store: create equivalent principals; the policy table in `infrastructure/minio/minio-init.sh` is the reference |
+| Object-store principals | `secrets.data.*_ACCESS_KEY` / `*_SECRET_KEY` | One pair per consumer, access keys distinct from the root's. External store: create equivalent principals; the policy table in `infrastructure/minio/minio-init.sh` is the reference (ADR-0025 dec 10, ADR-0030 dec 2, ADR-0038 dec 3) |
 | Device mTLS | `ingress.mtls.*` | Device CA Secret with `ca.crt` and `ca.crl` ([device mTLS](../../../docs/operations/device-mtls.md#kubernetes)) |
 
 ### Object-store principals

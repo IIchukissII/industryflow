@@ -13,7 +13,7 @@ contracts, and loading an extension module
 | Surface | Content | Change needed |
 |---|---|---|
 | Configuration | Feature definitions (`feature_engineering_configs`), sensor mappings, alert rules, per tenant | Data only |
-| Code plugins | Feature transforms and detectors registered through `extensions` (`services/ml_service/api/extensions/`) | An extension module named in `EXTENSION_MODULES` |
+| Code plugins | Feature transforms and detectors registered through `extensions` (`services/ml_service/api/extensions/`) (ADR-0008 dec 3) | An extension module named in `EXTENSION_MODULES` |
 
 The core ships only generic built-ins and never imports a named extension.
 
@@ -105,7 +105,7 @@ EXTENSION_MODULES=my_domain.transforms,my_domain.detectors
 | Loading | `ml-service-api` imports each comma-separated module at startup, which runs its `@register_*` decorators |
 | Import path | The module must be importable by the service (a separate package depending on IndustryFlow) |
 | Version check | The module calls `check_api_version("<target>")` at import. It passes when the major matches `EXTENSION_API_VERSION` and the platform minor is at least the target's; otherwise `ValueError` |
-| `EXTENSION_API_VERSION` | Defined in `services/ml_service/api/extensions/__init__.py`; stability rules in [ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md) dec 3 |
+| `EXTENSION_API_VERSION` | Defined in `services/ml_service/api/extensions/__init__.py`; stability rules in [ADR-0010 dec 3](../../ADR/ADR-0010-extension-plugin-mechanism.md) |
 | Domain data | Extension-owned tables in the tenant schema; no columns on core tables |
 | Dependency direction | Extensions depend on IndustryFlow; the platform never vendors or imports them |
 

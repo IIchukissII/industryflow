@@ -38,8 +38,8 @@ kernel ─▶ api-gateway data API      (X-IF-Capability, audience api)
 
 | Frontend page | Shows | Source |
 |---|---|---|
-| `/notebooks` | `/jupyter/` in an iframe: the role's profile ([profiles](#profiles)), so the `analytics` landing for every role not mapped to authoring | `services/frontend/src/pages/Notebooks.jsx` |
-| `/experiments` | The tenant's experiments and their runs (params, metrics, status, the registered model a run became), read-only, from `/api/experiments` | `services/frontend/src/pages/Experiments.jsx` |
+| `/notebooks` | `/jupyter/` in an iframe: the role's profile ([profiles](#profiles)), so the `analytics` landing for every role not mapped to authoring; framed under the platform's own origin (ADR-0014 dec 6) | `services/frontend/src/pages/Notebooks.jsx` |
+| `/experiments` | The tenant's experiments and their runs (params, metrics, status, the registered model a run became), read-only, from `/api/experiments` (ADR-0013 dec 4) | `services/frontend/src/pages/Experiments.jsx` |
 
 The hub sends `Content-Security-Policy: frame-ancestors 'self'`.
 
@@ -47,13 +47,13 @@ The hub sends `Content-Security-Policy: frame-ancestors 'self'`.
 
 | Name | Role | Port | Config |
 |---|---|---|---|
-| `notebook-sso` | nginx `auth_request` to `/auth/verify`; forwards `X-IF-*`; adds `X-IF-SSO-Proxy-Secret` on hub routes only | 8080 | `services/notebook_hub/sso-nginx.conf` |
+| `notebook-sso` | nginx `auth_request` to `/auth/verify`; forwards `X-IF-*`; adds `X-IF-SSO-Proxy-Secret` on hub routes only (ADR-0014 dec 2, 3) | 8080 | `services/notebook_hub/sso-nginx.conf` |
 | `notebook-hub` | JupyterHub; spawns and culls per-user environments, mints capability handles; login only with the SSO proxy secret | 8000 (chp, platform network only), 8081 (hub API) | [notebook hub](../../services/notebook_hub/README.md) |
-| `notebook-authoring` image | JupyterLab, data-science stack, `industryflow[sql,cold]` client | | `services/notebook_hub/Dockerfile.authoring` |
-| `notebook-analytics` image | Voila, data-API client | | `services/notebook_hub/Dockerfile.analytics` |
+| `notebook-authoring` image | JupyterLab, data-science stack, `industryflow[sql,cold]` client (ADR-0011 dec 5) | | `services/notebook_hub/Dockerfile.authoring` |
+| `notebook-analytics` image | Voila, data-API client (ADR-0011 dec 5) | | `services/notebook_hub/Dockerfile.analytics` |
 | `notebook-sql-proxy` | SQL proxy (Postgres wire) | 6432 | [SQL proxy](../../services/notebook_sql_proxy/README.md) |
 | `notebook-tracking-gateway` | Tracking gateway (MLflow, per-route tenant rules); upload stage and commit | 5050 | [tracking gateway](../../services/notebook_tracking_gateway/README.md) |
-| `notebook-cold-broker` | Cold-store broker: pre-signed GETs for the tenant's cold prefix | 5060 | `services/notebook_cold_broker/` |
+| `notebook-cold-broker` | Cold-store broker: pre-signed GETs for the tenant's cold prefix (ADR-0025 dec 5) | 5060 | `services/notebook_cold_broker/` |
 | Python client | `IndustryFlowClient`, `IndustryFlowSQL`, `IndustryFlowCold`, `SKOPS_TRUSTED_TYPES`, `log_feature_sample` | | [Python client](../../clients/python/README.md) |
 
 ## Profiles
@@ -66,7 +66,7 @@ The hub sends `Content-Security-Policy: frame-ancestors 'self'`.
 Either image falls back to `NOTEBOOK_IMAGE`. Hub settings:
 [notebook hub](../../services/notebook_hub/README.md#settings).
 
-## Capability handles
+## Capability handles (ADR-0015 dec 1-4)
 
 | Audience | Redeemed by | Read-only |
 |---|---|---|
@@ -192,8 +192,8 @@ safe to re-run.
 
 | Test | Proves | Workflow |
 |---|---|---|
-| `infrastructure/timescaledb/tests/test_tenant_reader_isolation.py` | Reader role cannot read another tenant | `db-tenant-isolation.yml` |
-| `infrastructure/timescaledb/tests/test_notebook_sql_login_isolation.py` | Proxy login cannot escape its reader role | `db-tenant-isolation.yml` |
+| `infrastructure/timescaledb/tests/test_tenant_reader_isolation.py` | Reader role cannot read another tenant (ADR-0011 dec 3) | `db-tenant-isolation.yml` |
+| `infrastructure/timescaledb/tests/test_notebook_sql_login_isolation.py` | Proxy login cannot escape its reader role (ADR-0012 dec 4) | `db-tenant-isolation.yml` |
 
 Proxy and gateway tests: their READMEs.
 
@@ -288,6 +288,23 @@ limits, handles and persistence ([profiles](#profiles)). The user is offered no 
 | `services/notebook_hub/jupyterhub_config.py` | Spawner security settings |
 | `deploy/helm/industryflow/templates/networkpolicy.yaml` | Single-user egress allowlist |
 | `docker-compose.yml` | Kernel network membership |
+
+## ADR-0012 dec 1
+
+The spawn hook revokes what an earlier run of the server still holds, then mints one handle per
+audience for the hub's verified user and tenant, with lifetime `NOTEBOOK_CAPABILITY_TTL_SECONDS`,
+recorded against the server. The kernel receives the handles; the capability store is not on the
+kernel network.
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py::bind_identity_and_profile` | Mint at spawn from the verified identity |
+| `services/notebook_hub/jupyterhub_config.py::CAPABILITY_TTL_SECONDS` | Handle lifetime |
+| `services/notebook_hub/capabilities.py::mint` | Entry bound to one user, tenant and audience |
+| `services/notebook_hub/identity.py::pod_environment` | Identity the handles sit beside; no minting credential |
+| `docker-compose.yml` | Kernel network without the capability store |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_capability_minting_hook_is_wired` | Proof: the spawn hook mints |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_a_respawn_revokes_what_the_previous_run_still_held` | Proof: a respawn replaces the handles |
 
 ## ADR-0012 dec 2
 
@@ -412,6 +429,23 @@ from the role in the hub's auth state and mints every handle against the tenant 
 | `docker-compose.yml` | Mapping passed to the hub |
 | `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_hub_does_not_start_with_an_unknown_authoring_role` | Proof: an unknown role stops the hub |
 | `tests/config_guards/test_notebook_roles.py` | Proof: the hub's role set equals the gateway's |
+
+## ADR-0014 dec 5
+
+The hub login yields the forwarded identity only. The spawn hook writes user, tenant and profile into
+the kernel environment beside the minted handles; neither the platform session token nor the SSO
+proxy secret is placed there. The SSO proxy reads the platform cookies (`if_access`, `if_csrf`) for its
+session check and removes them from the Cookie header it sends to the hub and the single-user servers.
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/identity.py::pod_environment` | Identity-only environment |
+| `services/notebook_hub/jupyterhub_config.py::bind_identity_and_profile` | Environment set at spawn |
+| `services/notebook_hub/tests/test_identity.py::test_pod_environment_carries_identity_not_credentials` | Proof: no credential in the identity environment |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_proxy_secret_never_reaches_a_kernel` | Proof: the proxy secret stays out of the environment |
+| `services/notebook_hub/sso-nginx.conf` | Compose: platform cookies removed before the hub |
+| `deploy/helm/industryflow/templates/notebook-hub.yaml` | Kubernetes: the same |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_proxy_sends_the_hub_no_platform_cookie` | Proof: no platform cookie reaches the hub |
 
 ## ADR-0014 dec 7
 

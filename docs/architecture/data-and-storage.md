@@ -46,8 +46,8 @@ executors with `--py-files`.
 
 | Guard | Fails on |
 |---|---|
-| `tests/config_guards/test_tenant_contract_copies.py` | A service or script spelling a tenant name or restating the window contract in code |
-| `tests/config_guards/test_images_carry_contracts.py` | An image whose code imports the package but does not install it |
+| `tests/config_guards/test_tenant_contract_copies.py` | A service or script spelling a tenant name (ADR-0003 dec 7) or restating the window contract (ADR-0006 dec 7) in code |
+| `tests/config_guards/test_images_carry_contracts.py` | An image whose code imports the package but does not install it (ADR-0003 dec 7) |
 
 ## Tables
 
@@ -56,7 +56,7 @@ executors with `--py-files`.
 | Table | Content |
 |---|---|
 | `companies` | `company_id` → `schema_name` registry |
-| `user` | Platform users (fastapi-users; `29-user-table.sql`, mapped by `services/api_gateway/models/user.py`) |
+| `user` | Platform users (fastapi-users; `29-user-table.sql`, ADR-0034 dec 1; mapped by `services/api_gateway/models/user.py`) |
 | `platform_config` | Platform switches (`stateful_features_enabled`, [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) |
 | `cold_export_drops` | Committed cold-export drops |
 | `company_lifecycle_events`, `company_deletions`, `company_deletion_steps` | Tenant lifecycle record and deletion progress ([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md); `25-company-deletion.sql`) |
@@ -100,13 +100,13 @@ Raw `sensor_measurements` older than the export horizon, as Parquet in the objec
 
 | Component | Where |
 |---|---|
-| Exporter (single-node PyArrow) | `services/cold_export/` — `exporter.py` (ordering), `source.py` (database reads, run lock), `store.py` (object store), `naming.py` (paths), `ports.py` |
+| Exporter (single-node PyArrow; ADR-0025 dec 3, 4, 11) | `services/cold_export/` — `exporter.py` (ordering), `source.py` (database reads, run lock), `store.py` (object store), `naming.py` (paths), `ports.py` |
 | Schedule | Helm `cronjob-cold-export.yaml` (`coldExport.schedule`, `concurrencyPolicy: Forbid`); compose `docker compose --profile cold-export up cold-export` |
 | Horizon | `COLD_EXPORT_HORIZON_DAYS` / `coldExport.horizonDays`, default 30 |
 | Bucket | `COLD_STORE_BUCKET` / `coldExport.store.bucket`, default `industryflow-cold` |
 | Database side | `16-cold-layer-raw-retention.sql`: `cold_export_day_fingerprint`, `cold_export_drop_day` (`SECURITY DEFINER`), `public.cold_export_drops` |
 | Object-store principals | Write-scoped exporter principal; read-only broker principal; created by `minio-init` / Helm `job-minio-init.yaml` |
-| Read path | `services/notebook_cold_broker/`, client `industryflow.IndustryFlowCold` ([notebooks](notebooks.md)) |
+| Read path (ADR-0025 dec 5) | `services/notebook_cold_broker/`, client `industryflow.IndustryFlowCold` ([notebooks](notebooks.md)) |
 | Backup | `db-backup` mirrors the cold and artifact buckets (`backup-read` principal; Helm `backup.cold`, `backup.models`); `notebook-backup` archives work volumes; `restore-rehearsal` and `notebook-rehearsal` restore the latest backups into scratch copies weekly ([backup and recovery](../operations/backup-and-recovery.md)) |
 
 Exporter behaviour per tenant and day:
