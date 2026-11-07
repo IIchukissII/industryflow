@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-docker = pytest.importorskip("docker")
+import docker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import reclaim  # noqa: E402
