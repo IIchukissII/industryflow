@@ -41,6 +41,7 @@ jobs:
               - '.github/workflows/tracking-gateway-integration.yml'
             serving:
               - 'services/ml_service/**'
+              - 'clients/python/**'
               - 'services/api_gateway/**'
               - 'services/notebook_tracking_gateway/**'
               - 'libs/industryflow_contracts/**'
@@ -247,7 +248,7 @@ jobs:
 
       # IN-NETWORK: the pre-signed PUTs point at minio:9000. IF_REQUIRE_LIVE_STACK=1 makes a SKIP a
       # FAILURE.
-      - name: Run the upload path's serving-half proof (ADR-0030 dec 4-7)
+      - name: Run the upload path's serving-half and notebook-promotion proofs (ADR-0030 dec 4-7, ADR-0040)
         env:
           IF_UPLOADER_PASSWORD: ${{ steps.uploader.outputs.password }}
         run: |
@@ -258,9 +259,11 @@ jobs:
             -e IF_UPLOADER_EMAIL=ci-uploader@example.com \
             -e IF_UPLOADER_PASSWORD \
             -e IF_UPLOADER_COMPANY_ID=${{ steps.uploader.outputs.company_id }} \
+            -e TRACKING_GATEWAY_URL=http://notebook-tracking-gateway:5050 \
+            -e TRACKING_REDIS_URL=redis://redis:6379/0 \
             python:3.14-slim bash -c "
-              pip install -q -r services/ml_service/tests/requirements-integration.txt &&
-              pytest -p no:cacheprovider services/ml_service/tests/test_upload_serving_integration.py -m integration -v"
+              pip install -q -r services/ml_service/tests/requirements-integration.txt ./clients/python &&
+              pytest -p no:cacheprovider services/ml_service/tests/test_upload_serving_integration.py services/ml_service/tests/test_promotion_integration.py -m integration -v"
 
       - name: Dump service logs on failure
         if: failure()

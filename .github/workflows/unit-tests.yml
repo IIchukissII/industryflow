@@ -102,8 +102,8 @@ jobs:
           # No `-m 'not redis'` here: not one test in the repository carries that marker, so the
           # filter deselected nothing while implying a skipped body of Redis coverage that never
           # existed. The whole suite runs.
-          # The upload path's serving-half proof needs the live stack; it runs in tracking-gateway-integration.yml.
-          - { service: ml_service,          path: services/ml_service/tests, args: "--ignore=services/ml_service/tests/test_upload_serving_integration.py" }
+          # The upload path's serving-half and promotion proofs need the live stack; they run in tracking-gateway-integration.yml.
+          - { service: ml_service,          path: services/ml_service/tests, args: "--ignore=services/ml_service/tests/test_upload_serving_integration.py --ignore=services/ml_service/tests/test_promotion_integration.py" }
           # The routing, reading guard and windowing tests run on a local Spark (pyspark from
           # requirements-dev) on the job images' Java (`java`, held equal to their base tag by
           # scripts/check_spark_version_parity.py). test_spark_service.py is a live-stack harness
