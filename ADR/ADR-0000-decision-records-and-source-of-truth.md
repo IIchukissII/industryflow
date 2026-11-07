@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0000 — Decision records and the single source of truth
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-11-06
+- **Date:** 2026-06-26; changed 2026-11-07
 - **Parent:** none (governs the form of every other ADR)
 - **Canon:** [IIchukissII/CANON ADR-0000](https://github.com/IIchukissII/CANON/blob/main/ADR-0000-canon.md),
   refined here for this repository
@@ -28,10 +28,12 @@ cites it instead of restating it.
    decision that constrains downstream artifacts (service boundaries, tenancy, data flow, delivery
    semantics, authentication, storage, observability contracts) is written down before it reaches
    code. The ADR formalises the outcome of discussion; it never replaces it.
-2. **ADRs own the why; artifacts own the what.** *(canon dec 7, 10)* An ADR holds context, the
-   decision, rejected alternatives and consequences. Concrete values (ports, topics, pool sizes,
-   variable names, schemas, image tags) live in the artifact whose job is that value, and the ADR
-   points at it.
+2. **ADRs own the why, the manual owns the how, artifacts own the what.** *(canon dec 7, 10, 19)*
+   An ADR holds context, the decision, rejected alternatives and consequences, and names its manual:
+   the documentation that states how each decision works and names the code realising it, under the
+   decision it follows. Concrete values (ports, topics, pool sizes, variable names, schemas, image
+   tags) live in the artifact whose job is that value; the manual names that artifact and links to
+   the decision for its reasons, and the ADR names neither.
 3. **Every fact has exactly one authoritative home.** *(canon dec 7)* Another document that needs
    the value references it. Where artifacts cannot share a fact, a check reads every copy and fails
    when they disagree; where a copy is not needed, it is replaced by one shared definition.
@@ -71,6 +73,7 @@ cites it instead of restating it.
 | — | Inheriting another project's decision records by reference | The platform's own decisions would depend on another repository for their source of truth; the canon belongs to no project and is the one record inherited |
 | 1 | Rationale in the README and docs only | Prose that mirrors values without owning them is a duplication source, not a decision record |
 | 1 | Decisions in code comments and commit messages | A cross-cutting decision has no single home; commits are not a body of current decisions |
+| 2 | The ADR points at the artifact that owns a value | The record fills with names that move with the code, and the how has no home between the reason and the form |
 | 3 | Several copies with one marked primary | Markers rot; a reader cannot tell a stale copy from a current one |
 | 5 | A numbered revision block with a supersedes line for every change to a decision | The record grows into its own history, and the decision in force is hard to find |
 | 5 | Labelled status addenda on an accepted record | Outcomes accumulate beside the decision instead of being stated where they belong |
@@ -85,21 +88,21 @@ cites it instead of restating it.
   mechanical review question.
 - A citation that stops resolving fails the change that broke it, not a later reader.
 - A reader sees the decision in force without reading its history.
+- Which artifact owns a fact is answered by the manual of the decision that fact serves.
 
 **Negative**
 - Contributors must keep the why/what split and follow a reference instead of reading a copy.
 - Earlier wording of a decision is found in version control, not in the record.
+- A decision with form needs a manual, kept true against both the record and the code.
 
 ## Deferred
 
 | Open question | Settled by |
 |---|---|
-| A map of which artifact owns which class of fact | The maintainer, when contributors repeatedly ask where a value lives |
 
 ## References
 
 - [GLOSSARY.md](GLOSSARY.md): one definition per cross-cutting term.
 - M. Nygard, "Documenting Architecture Decisions" (2011): the practice this record formalises.
 - MADR (Markdown Any Decision Records): the section lineage.
-- `tests/config_guards/`: the checks that hold unavoidable copies equal (decision 3).
-- `tests/config_guards/test_adr_references.py`: the cross-reference check (decision 10).
+- [Decision records](../docs/architecture/decision-records.md): the manual of this record.
