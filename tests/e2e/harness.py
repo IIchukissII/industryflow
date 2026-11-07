@@ -92,8 +92,12 @@ class Environment:
     def __init__(self, compose_dir: str):
         self.dir = compose_dir
 
-    def run(self, *argv: str, input: Optional[str] = None, timeout: float = 600) -> str:
-        p = subprocess.run(list(argv), cwd=self.dir, input=input, capture_output=True, text=True, timeout=timeout)
+    def run(self, *argv: str, input: Optional[str] = None, timeout: float = 600, env: Optional[dict] = None) -> str:
+        """``env`` adds variables to the command's environment: a secret reaches a container as ``-e NAME``,
+        never on the command line."""
+        environ = {**os.environ, **env} if env else None
+        p = subprocess.run(list(argv), cwd=self.dir, input=input, capture_output=True, text=True, timeout=timeout,
+                           env=environ)
         if p.returncode != 0:
             raise AssertionError(f"{' '.join(argv[:4])} … exited {p.returncode}: {p.stderr[-1500:]}")
         return p.stdout
