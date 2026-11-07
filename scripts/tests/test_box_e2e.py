@@ -26,7 +26,8 @@ echo "$*" >> "$STUB_LOG"
 case "$*" in
   *"manage_users.py delete"*) exit "${STUB_DELETE_RC:-0}" ;;
   *"manage_users.py create"*) cat >/dev/null; exit 0 ;;
-  "exec "*) echo 11111111-2222-3333-4444-555555555555 ;;
+  "exec "*"count(*)"*) echo "${STUB_LEFT:-1}" ;;
+  "exec "*) [ -n "$STUB_NO_TENANT" ] && exit 1; echo 11111111-2222-3333-4444-555555555555 ;;
   "build "*) exit "${STUB_BUILD_RC:-0}" ;;
   "run "*) exit "${STUB_SUITE_RC:-0}" ;;
 esac
@@ -57,9 +58,11 @@ def run(tmp_path):
     _stub(bin_dir / "openssl", "#!/bin/sh\necho 00112233445566778899aabbccddeeff0011223344556677\n")
     log = tmp_path / "docker.log"
 
-    def go(**rcs):
-        env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", STUB_LOG=str(log),
+    def go(left=1, no_tenant=False, **rcs):
+        env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", STUB_LOG=str(log), STUB_LEFT=str(left),
                    **{f"STUB_{k.upper()}_RC": str(v) for k, v in rcs.items()})
+        if no_tenant:
+            env["STUB_NO_TENANT"] = "1"
         done = subprocess.run(["bash", str(repo / "scripts" / "box-e2e.sh")], env=env,
                               capture_output=True, text=True, timeout=60)
         calls = log.read_text().splitlines() if log.exists() else []
@@ -82,8 +85,21 @@ def test_a_superuser_left_behind_fails_the_run_whatever_the_suite_said(run):
     done, results, deletes = run(delete=1)
     assert results == [f"box-e2e {SHA} failed"], done.stdout + done.stderr
     assert done.returncode != 0
-    assert "remove it by hand" in done.stderr
-    assert deletes, "the removal was never tried"
+    assert done.stderr.count("remove it by hand") == 2, "said once at the result, once more by the exit trap's retry"
+    assert len(deletes) == 2
+
+
+def test_a_removed_superuser_whose_sessions_were_not_ended_fails_without_sending_the_operator_to_remove_it(run):
+    done, results, deletes = run(delete=1, left=0)
+    assert results == [f"box-e2e {SHA} failed"], done.stdout + done.stderr
+    assert "ending its sessions failed" in done.stderr and "remove it by hand" not in done.stderr
+    assert len(deletes) == 1, "the account is gone, so the exit trap does not try again"
+
+
+def test_a_run_that_ends_before_creating_its_superuser_removes_nothing(run):
+    done, results, deletes = run(no_tenant=True)
+    assert done.returncode != 0 and results == []
+    assert deletes == [] and "remove it by hand" not in done.stderr
 
 
 def test_a_failing_suite_fails_and_still_removes_its_superuser(run):

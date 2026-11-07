@@ -38,13 +38,26 @@ ENVFILE="$(mktemp /tmp/industryflow-e2e-env.XXXXXX)"
 EMAIL="e2e-root-$(date +%s)@example.com"
 RUN_GW=(docker compose run --rm --no-deps -T -v ./scripts:/scripts:ro -e PYTHONPATH=/app api-gateway)
 
-REMOVED=""
+CREATED="" REMOVED=""
+# The CLI deletes the account, then ends its sessions; it fails if either step does. Whether the
+# account is gone decides what the operator is told.
 remove_superuser() {
-    "${RUN_GW[@]}" python /scripts/manage_users.py delete --email "$EMAIL" --yes >/dev/null && REMOVED=1
+    if "${RUN_GW[@]}" python /scripts/manage_users.py delete --email "$EMAIL" --yes >/dev/null; then
+        REMOVED=1; return 0
+    fi
+    left="$(docker exec industryflow-timescaledb psql -U postgres -d industryflow -tAc \
+        "SELECT count(*) FROM public.\"user\" WHERE email = '$EMAIL'" 2>/dev/null || echo unknown)"
+    if [ "$left" = 0 ]; then
+        REMOVED=1
+        echo "box-e2e: the run's superuser $EMAIL was removed, but ending its sessions failed (above)" >&2
+    else
+        echo "box-e2e: could not remove the run's superuser $EMAIL; remove it by hand" >&2
+    fi
+    return 1
 }
 # A run that ends early still removes its superuser; the result line below waits for the removal.
 cleanup() {
-    [ -n "$REMOVED" ] || remove_superuser || echo "box-e2e: could not remove $EMAIL; remove it by hand" >&2
+    if [ -n "$CREATED" ] && [ -z "$REMOVED" ]; then remove_superuser || true; fi
     rm -rf "$WORK" "$ENVFILE"
 }
 trap cleanup EXIT
@@ -55,6 +68,7 @@ HOME_TENANT="$(docker exec industryflow-timescaledb psql -U postgres -d industry
 PASSWORD="$(openssl rand -hex 24)"
 printf '%s\n' "$PASSWORD" | "${RUN_GW[@]}" python /scripts/manage_users.py create --email "$EMAIL" \
     --company-id "$HOME_TENANT" --role admin --superuser --password-stdin >/dev/null
+CREATED=1
 
 docker build -q -t industryflow-e2e tests/e2e >/dev/null
 # The run's settings, the superuser's password among them, go in a file only this user reads (mktemp
@@ -83,7 +97,6 @@ fi
 # A run that leaves its superuser behind has failed, whatever the suite said: the result line is
 # what scripts/box-validate.sh posts.
 if ! remove_superuser; then
-    echo "box-e2e: could not remove the run's superuser $EMAIL; remove it by hand" >&2
     status=failed
 fi
 echo "box-e2e $SHA $status"
