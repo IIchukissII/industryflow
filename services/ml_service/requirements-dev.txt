@@ -40,7 +40,7 @@ fastapi==0.162.0
 httpx==0.28.1
 python-jose[cryptography]==3.5.0
 asyncpg==0.32.0
-mlflow==3.17.2
+mlflow==3.18.0
 prometheus-client==0.26.0
 # The role guard (test_write_roles.py) enumerates the routes of the real app, so it imports `main`,
 # which instruments it; same pin as serving.

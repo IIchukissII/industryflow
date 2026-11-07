@@ -12,7 +12,7 @@ numpy==2.5.4
 pandas==2.3.3
 scipy==1.18.1
 scikit-learn==1.9.1
-mlflow-skinny==3.17.2
+mlflow-skinny==3.18.0
 skops==0.16.0
 # The promotion proof mints the tracking capability as the hub's spawner writes it.
 redis==8.1.0
