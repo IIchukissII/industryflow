@@ -6,9 +6,9 @@
 
 A proof is a test module marked `integration`. Each side of it fails silently: a proof no step
 names never runs; a step that does not set the flag the proof reads turns a missing stack into a
-skip; a path filter that misses the proof skips the job when only the proof changed; a job no gate
-reads can fail without blocking; a proof left in the no-stack matrix only skips there, a green that
-proves nothing.
+skip, and so does a module that skips itself at import, which no skip-to-failure hook sees; a path
+filter that misses the proof skips the job when only the proof changed; a job no gate reads can fail
+without blocking; a proof left in the no-stack matrix only skips there, a green that proves nothing.
 """
 from __future__ import annotations
 
@@ -28,11 +28,20 @@ CONST = re.compile(r"""^(\w*REQUIRE\w*)\s*=\s*["'](IF_REQUIRE_[A-Z_]+)["']""", r
 WORKFLOWS = sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / ".github" / "workflows").glob("*.yml"))
 
 
+# The box suite has its own runner and require flag (scripts/box-e2e.sh), outside the workflows.
+SCANNED = ("services", "libs", "infrastructure", "scripts", "clients", "extensions", "tests")
+EXCLUDED = ("tests/e2e/",)
+
+
 def _proofs() -> list[str]:
     found = []
-    for path in sorted((ROOT / "services").rglob("test_*.py")):
-        if "node_modules" not in path.parts and MARK.search(path.read_text()):
-            found.append(path.relative_to(ROOT).as_posix())
+    for top in SCANNED:
+        for path in sorted((ROOT / top).rglob("test_*.py")):
+            rel = path.relative_to(ROOT).as_posix()
+            if "node_modules" in path.parts or rel.startswith(EXCLUDED):
+                continue
+            if MARK.search(path.read_text()):
+                found.append(rel)
     return found
 
 
@@ -59,7 +68,8 @@ def _flags(proof: str) -> set[str]:
 
 def _set_flags(job: dict, step: dict) -> set[str]:
     env = {**(job.get("env") or {}), **(step.get("env") or {})}
-    inline = re.findall(r"(IF_REQUIRE_[A-Z_]+)=[\"']?1\b", step.get("run", ""))
+    commands = "\n".join(line for line in step.get("run", "").splitlines() if not line.lstrip().startswith("#"))
+    inline = re.findall(r"(IF_REQUIRE_[A-Z_]+)=[\"']?1\b", commands)
     return {k for k, v in env.items() if str(v) == "1"} | set(inline)
 
 
@@ -109,6 +119,14 @@ def test_the_proofs_are_found():
 @pytest.mark.parametrize("proof", PROOFS)
 def test_the_proof_reads_a_require_flag(proof):
     assert _flags(proof), f"{proof} reads no IF_REQUIRE_* flag: a missing stack can only skip it"
+
+
+@pytest.mark.parametrize("proof", PROOFS)
+def test_the_proof_never_skips_on_a_missing_import(proof):
+    # A module skipped at import is a collection skip: no hook that turns a test's skip into a failure
+    # sees it, and another module in the same pytest call keeps the exit code green. Its step installs
+    # what it imports, so a missing one is an error.
+    assert "importorskip" not in (ROOT / proof).read_text(), f"{proof} skips itself on a missing import"
 
 
 @pytest.mark.parametrize("proof", PROOFS)
