@@ -100,7 +100,8 @@ Self-hosted and managed are a business distinction (ADR-0001 dec 4); the deploym
 
 | Term | Meaning | ADR |
 |---|---|---|
-| ADR | Architecture Decision Record: the decision in force and its rationale; artifacts own the values. Files `ADR/ADR-NNNN-kebab-title.md` | ADR-0000 dec 2, 5, 8 |
+| ADR | Architecture Decision Record: the decision in force and its rationale; its manual owns the how, artifacts own the values. Files `ADR/ADR-NNNN-kebab-title.md` | ADR-0000 dec 2, 5, 8 |
+| Manual | The documentation of a decision: how it works and the code that realises it, under the decision it follows | ADR-0000 dec 2 |
 | Status | Header field: `Proposed`, `Accepted` or `Superseded by ADR-NNNN`; lifecycle only | ADR-0000 dec 7, 9 |
 | Date | Header field: the acceptance date, plus the date of the latest change | ADR-0000 dec 5, 9 |
 | Parent | Header field: the broader ADR this one is decided under; optional. No ADR names ADR-0000 | ADR-0000 dec 6, 9 |
