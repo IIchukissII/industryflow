@@ -104,6 +104,14 @@ def _fetch_capped(url: str, cap: int) -> Optional[bytes]:
         raise
 
 
+def _logged_sample(client: Any, run_id: str) -> bool:
+    """Whether the run logged a feature sample, as the registry lists the run's artifacts. The
+    artifact proxy answers a missing object with a server error, not a 404, so absence is asked of
+    the listing rather than read from a failed download."""
+    folder = drift.FEATURE_SAMPLE_ARTIFACT.rpartition("/")[0]
+    return any(f.path == drift.FEATURE_SAMPLE_ARTIFACT for f in client.list_artifacts(run_id, folder))
+
+
 def _read_sample(run_artifact_uri: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """The feature sample the run logged (ADR-0040 dec 4), as ``(sample, None)``; ``(None, None)`` when
     it logged none; ``(None, reason)`` when what it logged cannot be read as one. Read through the
@@ -270,7 +278,7 @@ async def promote_model_version(
         model_loader.check_admissible(company_id=company_id, mlflow_run_id=mv.run_id, artifact_uri=None)
         run = client.get_run(mv.run_id)
         model = client.get_registered_model(qualified)
-        sample, refusal = _read_sample(run.info.artifact_uri)
+        sample, refusal = _read_sample(run.info.artifact_uri) if _logged_sample(client, mv.run_id) else (None, None)
         return {
             "run_id": mv.run_id,
             "experiment_id": run.info.experiment_id,
