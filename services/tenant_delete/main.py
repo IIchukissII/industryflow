@@ -12,11 +12,11 @@ from __future__ import annotations
 import logging
 import sys
 
-import boto3
 import redis
 
 from .capability_store import CapabilityStore
 from .cold_store import ColdStore
+from .cold_store import client as cold_client
 from .config import load_config
 from .device_certificates import DeviceCertificates
 from .job import broker_step, run
@@ -36,10 +36,7 @@ def main() -> int:
             "broker": broker_step(cfg.broker_retention),
         }
         if cfg.cold is not None:
-            client = boto3.client("s3", endpoint_url=cfg.cold.endpoint, region_name=cfg.cold.region,
-                                  aws_access_key_id=cfg.cold.access_key,
-                                  aws_secret_access_key=cfg.cold.secret_key)
-            steps["cold_layer"] = ColdStore(client, cfg.cold.bucket).purge
+            steps["cold_layer"] = ColdStore(cold_client(cfg.cold), cfg.cold.bucket).purge
         if cfg.tracking is not None:
             steps["tracking_store"] = TrackingStore(cfg.tracking.gateway_url, cfg.tracking.token).purge
         if cfg.device_ca is not None:
