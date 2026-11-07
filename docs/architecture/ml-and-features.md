@@ -170,7 +170,7 @@ version.
 |---|---|
 | Version's run | `mlflow_run_id` (provenance `kernel`), `mlflow_experiment_id`, run metrics as `training_metrics` |
 | Version or model description | `description` |
-| Run artifact `industryflow/feature_sample.json`, at most `MAX_SAMPLE_BYTES` (`drift/reference_profile.py`) | `reference_profile` |
+| Run artifact `industryflow/feature_sample.json`, at most `MAX_SAMPLE_BYTES` (`drift/reference_profile.py`); a run that logged none gives no baseline, which `baseline` states | `reference_profile` |
 
 | Response | Cause |
 |---|---|
@@ -178,5 +178,6 @@ version.
 | 404 | No such version in the caller's tenant, or its run is not one of the tenant's |
 | 409 | That name and version is already a platform model |
 | 422 | The registration gate refused it, an unknown feature config, or a base sensor missing on the equipment |
+| 502 | The tracking server could not be read (registry, run, artifact listing or sample) |
 
 Model training is manual, in notebooks ([notebooks](notebooks.md)); no training service exists.
