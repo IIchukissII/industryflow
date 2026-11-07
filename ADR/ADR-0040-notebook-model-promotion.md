@@ -76,3 +76,4 @@ the notebook.
 - [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): promotion and the
   sample artifact.
 - [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): logging the sample from a notebook.
+- `services/ml_service/tests/test_promotion_integration.py`: promotion against the live tracking server.

@@ -28,7 +28,7 @@ The GitHub Actions workflows, their gate jobs, and the required checks on `main`
 | `compose-smoke-gate` | `compose-smoke.yml` | The stack starts and stays up (unfiltered) |
 | `db-tenant-isolation-gate` | `db-tenant-isolation.yml` | Live stack (`infrastructure/timescaledb/tests`): reader-role isolation, backup restore and rehearsal, object mirrors and notebook archives against MinIO and Docker; SQL-proxy cross-tenant isolation |
 | `cold-layer-integration-gate` | `cold-layer-integration.yml` | Live stack: the cold exporter (export, verify, drop), the tenant-delete job's cold purge as its own principal against MinIO, the cold-store broker's reads and isolation |
-| `tracking-gateway-integration-gate` | `tracking-gateway-integration.yml` | Tracking gateway proofs; upload path's serving half (register and deploy in the real ml_service) |
+| `tracking-gateway-integration-gate` | `tracking-gateway-integration.yml` | Tracking gateway proofs; upload path's serving half (register and deploy in the real ml_service); a notebook-registered version promoted with the sample its run logged |
 | `model-artifact-roundtrip-gate` | `model-artifact-roundtrip.yml` | Parity, model artifact round-trip |
 | `config-guards-gate` | `config-guards.yml` | Silent-omission list guards (`tests/config_guards`, among them: every `integration`-marked proof runs in a gated, path-filtered step that requires its stack, and is left out of the no-stack matrix); object-store principals against a real MinIO; platform alert rules under the pinned `promtool` and `amtool` (unfiltered) |
 

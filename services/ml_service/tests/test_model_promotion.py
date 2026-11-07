@@ -10,6 +10,7 @@ tenant's model and run; the gate's own checks are stubbed as in test_model_admis
 import json
 import os
 import sys
+import urllib.error
 import uuid
 from types import SimpleNamespace
 
@@ -55,10 +56,18 @@ class FakeMlflow:
     def get_registered_model(self, name):
         return SimpleNamespace(description="forecasts VPD")
 
+    def list_artifacts(self, run_id, path=None):
+        """The registry's listing of what the run logged under ``path``."""
+        logged = [SimpleNamespace(path=drift.FEATURE_SAMPLE_ARTIFACT, is_dir=False)] if self.sample_bytes is not None else []
+        return [f for f in logged if path is None or f.path.startswith(path.rstrip("/") + "/")]
+
     def fetch(self, url, cap):
-        """The tracking server's artifact proxy: what the run logged, read at most cap + 1 bytes."""
+        """The tracking server's artifact proxy: what the run logged, read at most cap + 1 bytes. A
+        missing object is a server error there, as the real proxy answers it, not a 404."""
         self.fetched.append(url)
-        return None if self.sample_bytes is None else self.sample_bytes[:cap + 1]
+        if self.sample_bytes is None:
+            raise urllib.error.HTTPError(url, 500, "Internal Server Error", {}, None)
+        return self.sample_bytes[:cap + 1]
 
 
 class FakeRepo:
@@ -154,6 +163,19 @@ def test_the_sample_is_read_from_the_runs_own_artifacts(world):
     assert world.mlflow.fetched == [
         "http://mlflow:5000/api/2.0/mlflow-artifacts/artifacts/"
         + ARTIFACTS.split(":/", 1)[1] + "/industryflow/feature_sample.json"]
+
+
+def test_a_run_stored_where_the_platform_reads_no_sample_says_so_before_anything_is_listed(world, monkeypatch):
+    def unlisted(run_id, path=None):
+        raise AssertionError("the listing would reach a store the platform does not read samples from")
+
+    monkeypatch.setattr(world.mlflow, "get_run", lambda run_id: SimpleNamespace(
+        info=SimpleNamespace(experiment_id="7", artifact_uri="s3://elsewhere/run-mine/artifacts"),
+        data=SimpleNamespace(metrics={})))
+    monkeypatch.setattr(world.mlflow, "list_artifacts", unlisted)
+    r = _promote(world)
+    assert r.status_code == 201, r.text
+    assert "not stored where the platform reads a sample from" in r.json()["baseline"]["reason"]
 
 
 def test_a_run_the_tenant_does_not_own_is_not_read(world):
