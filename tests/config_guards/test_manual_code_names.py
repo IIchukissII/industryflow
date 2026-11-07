@@ -48,10 +48,18 @@ def code_names(text: str):
             in_table = False
 
 
+def in_repository(path: str):
+    """The repository path a name spells, or None: an absolute or escaping name is not repository code."""
+    if not path or path.startswith("/"):
+        return None
+    target = (ROOT / path).resolve()
+    return target if target.is_relative_to(ROOT.resolve()) else None
+
+
 def missing(name: str) -> str | None:
     path, _, symbol = name.partition("::")
-    target = ROOT / path
-    if not target.exists():
+    target = in_repository(path)
+    if target is None or not target.exists():
         return "no such path"
     if symbol and not re.search(rf"\b{re.escape(symbol)}\b", target.read_text(errors="replace")):
         return f"no {symbol} in {path}"
@@ -120,13 +128,13 @@ def unfollowed_paths(text: str):
         if CITATION.search(nearest):
             continue
         for name in NAME.findall(line):
-            path = name.split("::")[0].rstrip("/")
-            if "/" in name and path and (ROOT / path).exists():
+            target = in_repository(name.split("::")[0].rstrip("/"))
+            if "/" in name and target is not None and target.exists():
                 yield number, name
 
 
 def test_the_document_guard_sees_an_unfollowed_path():
-    page = ("## Components\n\n| Name | Config |\n|---|---|\n| a | `tests/config_guards/_repo.py` |\n"
+    page = ("## Components\n\n| Name | Config |\n|---|---|\n| a | `tests/config_guards/_repo.py` `/etc/hosts` |\n"
             "| b | `tests/config_guards/_repo.py` (ADR-0000 dec 3) |\n"
             "## ADR-0000 dec 2\n\n| Code | Role |\n|---|---|\n| `tests/config_guards/_repo.py` | x |\n")
     assert [n for n, _ in unfollowed_paths(page)] == [5]
