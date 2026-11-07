@@ -148,7 +148,7 @@ receivers:
 | Once per firing | A firing (fingerprint and start) is explained once; remembered 7 days, and after a restart the agent finds its earlier note in Loki |
 | Alert storm | At most 5 alerts of one webhook (critical first) and 10 waiting; the rest are logged as not explained |
 | Refuses to start | Webhook secret under 32 characters; `anthropic` without `ANTHROPIC_API_KEY`; `openai-compatible` without `OPS_AGENT_MODEL_BASE_URL` |
-| Kubernetes | `observability.opsAgent` in the chart values (endpoints of your monitoring stack, `secrets.data.OPS_AGENT_WEBHOOK_SECRET`); the webhook URL is the `<release>-ops-agent` Service. With `networkPolicy.enabled`: ingress from `monitoringNamespace` only; egress to DNS, that namespace, HTTPS on public addresses, and `modelEndpoints` (an in-house model server's CIDR and port) |
+| Kubernetes | `observability.opsAgent` in the chart values (endpoints of your monitoring stack, `secrets.data.OPS_AGENT_WEBHOOK_SECRET`); the webhook URL is the `<release>-ops-agent` Service. With `networkPolicy.enabled` (the default): ingress from `observability.monitoringNamespace` only; egress to DNS, that namespace, HTTPS on public addresses, and `modelEndpoints` (an in-house model server's CIDR and port) |
 
 ## Grafana
 
@@ -220,7 +220,7 @@ health reaches Grafana as `postgres-exporter` metrics.
 
 | Promtail job | Source | Labels |
 |---|---|---|
-| `docker` | Docker socket, containers on `industryflow-network`, `industryflow-notebook-kernels` and `industryflow-ops-agent` only | `job="docker"`, `container`, `container_id`, `service`, `project`, `level` (from JSON logs), `environment="production"`, `cluster="industryflow"` |
+| `docker` | Docker socket: containers named `industryflow-*` (every service's `container_name`, `ingestion-service` and the no-network jobs included), and containers on `industryflow-network`, `industryflow-notebook-kernels` or `industryflow-ops-agent` (spawned kernels, `spark-worker`); one target per container | `job="docker"`, `container`, `container_id`, `service`, `project`, `level` (from JSON logs), `environment="production"`, `cluster="industryflow"` |
 | `system` | `/var/log/*log` | `job="varlogs"` |
 
 | Query | LogQL |
@@ -279,7 +279,7 @@ No shipped rule alerts on the counter.
 | Target down in Prometheus | Target unreachable or failing; `curl -s localhost:9090/api/v1/targets \| jq '.data.activeTargets[] \| {job: .labels.job, health, lastError}'` | Fix the target named in `lastError` |
 | Edit to `prometheus.yml` not applied | The single-file bind mount keeps the old inode when an editor replaces the file | `docker exec industryflow-prometheus promtool check config /etc/prometheus/prometheus.yml`; `docker compose restart prometheus` |
 | Dashboards missing | Dashboard files are bind-mounted one by one in `docker-compose.yml`; a new JSON file has no mount | Add its mount, then `docker compose up -d grafana` |
-| No logs in Loki | Container not on `industryflow-network`, `industryflow-notebook-kernels` or `industryflow-ops-agent`, or promtail down (`docker logs industryflow-promtail`) | Attach the container to one of the networks; `curl -s localhost:3100/ready` |
+| No logs in Loki | Container neither named `industryflow-*` nor on `industryflow-network`, `industryflow-notebook-kernels` or `industryflow-ops-agent`, or promtail down (`docker logs industryflow-promtail`) | Give the service a `container_name` `industryflow-<service>`; `curl -s localhost:3100/ready` |
 | `pg_up` is `0` | `metrics_user` has no password, or the CA mount for `verify-full` is missing (`docker logs industryflow-postgres-exporter`) | Set the password as `12-metrics-role.sql` describes; check the CA mount |
 | `redis_up` is `0` | Redis down (`docker exec industryflow-redis redis-cli ping`) | Start `redis`, then the exporter |
 | LogQL parse error | Unquoted label value or range without a unit | `{job="docker"}`, `[5m]` |
@@ -318,6 +318,7 @@ The chart renders scrape targets, platform rules and dashboards as integration o
 |---|---|---|
 | Compose | Prometheus, Loki, Grafana beside the services | `alertmanager`, one receiver `operator` with no delivery; `ALERTMANAGER_CONFIG` names the operator's copy |
 | Kubernetes | The operator's stack; the chart renders `ServiceMonitor`, `PrometheusRule` and dashboard ConfigMaps | The operator's; `observability.*.labels` match its selectors |
+| Kubernetes scrape of ingestion | The `metrics-listener` container in the ingestion pod serves only `/metrics` (from the app on loopback) on port `metrics` (`apps.ingestion-service.metricsListener.port`); its ServiceMonitor scrapes that port, and the NetworkPolicy admits `observability.prometheusPodLabels` pods in `observability.monitoringNamespace` to it alone | — |
 
 | Code | Role |
 |---|---|
@@ -327,6 +328,8 @@ The chart renders scrape targets, platform rules and dashboards as integration o
 | `deploy/helm/industryflow/values.yaml` | Integration-object toggles and selector labels |
 | `deploy/helm/industryflow/files/prometheus-rules.yml` | Platform rules rendered into the `PrometheusRule` |
 | `deploy/helm/industryflow/templates/ops-agent.yaml` | Agent endpoints are the operator's stack |
+| `deploy/helm/industryflow/templates/apps.yaml` | Ingestion's metrics-only listener |
+| `tests/config_guards/test_helm_ingestion_edge_policy.py` | Proof: the listener serves only `/metrics`, is the port scraped, and the only port the monitoring stack reaches |
 | `tests/config_guards/test_alert_rules.py::test_the_chart_renders_the_same_platform_rules` | Proof: one rule set in both lanes |
 
 ## ADR-0016 dec 5
@@ -465,6 +468,8 @@ The operator adds a receiver for the agent to the alert router (see Infrastructu
 | `infrastructure/prometheus/rules/platform.yml` | `services` annotation on every rule |
 | `tests/config_guards/test_rule_services.py` | Proof: every rule names real services |
 | `services/ops_agent/tests/test_tools.py::test_the_tool_set_is_the_monitoring_plane` | Proof: tools reach the monitoring plane only |
+| `infrastructure/promtail/promtail-config.yml` | Every service's logs collected, by container name or network |
+| `tests/config_guards/test_logs_collected.py` | Proof: no Compose service is skipped by the collector |
 
 ## ADR-0046 dec 4
 
@@ -482,7 +487,7 @@ The publisher pushes each note to Loki under `job="ops-agent"`, labelled with `a
 |---|---|
 | Tool subprocess | Gets only the endpoint and path variables, never a secret |
 | Credentials | `OPS_AGENT_WEBHOOK_SECRET`, `OPS_AGENT_MODEL_API_KEY`, `ANTHROPIC_API_KEY` |
-| Kubernetes network | NetworkPolicy: ingress from `monitoringNamespace`; egress to DNS, that namespace, HTTPS on public addresses and `modelEndpoints` |
+| Kubernetes network | NetworkPolicy: ingress from `observability.monitoringNamespace`; egress to DNS, that namespace, HTTPS on public addresses and `modelEndpoints` |
 | Compose network | `industryflow-ops-agent`, its only network, shared with `prometheus`, `loki` and `alertmanager` (which stay on `industryflow-network` too); not `internal`, for a hosted model endpoint |
 
 | Code | Role |

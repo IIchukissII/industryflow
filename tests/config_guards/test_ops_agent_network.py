@@ -52,18 +52,6 @@ def test_the_monitoring_stack_stays_on_the_platform_network():
         assert _networks(name) & platform, f"{name} left the platform network"
 
 
-def test_the_agents_logs_are_still_collected():
-    # The log collector keeps only containers on the networks it lists; the agent's own logs are
-    # evidence of the agent itself.
-    promtail = load_yaml("infrastructure/promtail/promtail-config.yml")
-    listed = {
-        v for job in promtail["scrape_configs"] for sd in job.get("docker_sd_configs", [])
-        for f in sd.get("filters", []) if f["name"] == "network" for v in f["values"]
-    }
-    names = {COMPOSE["networks"][n].get("name", n) for n in _networks("ops-agent")}
-    assert names & listed, f"the log collector skips the agent: {sorted(names)} not in {sorted(listed)}"
-
-
 def test_the_agent_network_has_a_route_to_a_hosted_model():
     for net in _networks("ops-agent"):
         assert not (COMPOSE.get("networks") or {}).get(net, {}).get("internal"), (

@@ -32,6 +32,23 @@ spec:
       ports:
         - protocol: TCP
           port: {{ (index .Values.apps "ingestion-service").port }}
+    {{- with (index .Values.apps "ingestion-service").metricsListener }}
+    {{- $promPods := $.Values.observability.prometheusPodLabels | default dict }}
+    {{- if not $promPods }}
+    {{- fail "observability.prometheusPodLabels is empty: the policy would admit every pod of the monitoring namespace to ingestion's metrics listener" }}
+    {{- end }}
+    # The monitoring stack's Prometheus, to the metrics-only listener and nothing else.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ required "observability.monitoringNamespace is required" $.Values.observability.monitoringNamespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $promPods | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+    {{- end }}
 ---
 # Least privilege (ADR-0002): ingestion is mTLS-only and stateless. Its only egress is to
 # Kafka (produce) and DNS — it must NOT be able to reach TimescaleDB or Redis.

@@ -29,8 +29,9 @@ spec:
     {{- /* A dedicated metricsPort (e.g. Spark's driver-UI :4040 PrometheusServlet) uses its own
            path; otherwise scrape the app's http port at the conventional /metrics. metricsExtraPaths
            adds more endpoints on the same metrics port (e.g. /metrics/executors/prometheus). */}}
+    {{- /* An app with a metricsListener is scraped there only, never on its serving port. */}}
     {{- if or $app.port $app.metricsPort }}
-    - port: {{ if $app.metricsPort }}metrics{{ else }}http{{ end }}
+    - port: {{ if or $app.metricsPort $app.metricsListener }}metrics{{ else }}http{{ end }}
       path: {{ $app.metricsPath | default "/metrics" }}
       interval: {{ $sm.interval }}
       scrapeTimeout: {{ $sm.scrapeTimeout }}

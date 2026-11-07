@@ -15,6 +15,10 @@
 {{- $hpaOn := and $app.hpa $app.hpa.enabled }}
 {{- $res := $root.Values.resilience }}
 {{- $multiReplica := or $hpaOn (gt (int ($app.replicas | default 1)) 1) }}
+{{- $ml := $app.metricsListener }}
+{{- if and $ml $app.metricsPort }}
+{{- fail (printf "apps.%s: metricsListener and metricsPort both name the metrics port" $name) }}
+{{- end }}
 {{- /* Apps that hold a DB role (a *_DB_PASSWORD secret key) talk to TimescaleDB and must mount
        the CA for verify-full (ADR-0017). ingestion (mTLS-only) and the frontend hold none. */}}
 {{- $usesDb := false }}
@@ -206,8 +210,41 @@ spec:
               readOnly: true
             {{- end }}
           {{- end }}
-      {{- if or $hasPVC $writableMounts $dbCa $usesDb }}
+        {{- with $ml }}
+        {{- /* The metrics-only listener (apps.<name>.metricsListener): the app's /metrics from loopback,
+               404 for every other path, on a port of its own, so the scraper never reaches the app's
+               serving port (ADR-0002 dec 3, ADR-0009 dec 5). */}}
+        - name: metrics-listener
+          image: {{ .image | quote }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["nginx", "-c", "/etc/metrics-listener/nginx.conf", "-g", "daemon off;"]
+          {{- if $scOn }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- end }}
+          ports:
+            - name: metrics
+              containerPort: {{ .port }}
+          {{- with .resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - { name: metrics-listener-conf, mountPath: /etc/metrics-listener, readOnly: true }
+            - { name: metrics-listener-tmp, mountPath: /tmp }
+        {{- end }}
+      {{- if or $hasPVC $writableMounts $dbCa $usesDb $ml }}
       volumes:
+        {{- if $ml }}
+        - name: metrics-listener-conf
+          configMap:
+            name: {{ include "industryflow.fullname" $root }}-{{ $name }}-metrics-listener
+        - name: metrics-listener-tmp
+          emptyDir: {}
+        {{- end }}
         {{- if $usesDb }}
         {{- include "industryflow.schemaReadyVolumes" $root | nindent 8 }}
         {{- end }}
@@ -249,6 +286,42 @@ spec:
     requests:
       storage: {{ $app.persistence.size }}
 {{- end }}
+{{- with $ml }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "industryflow.fullname" $root }}-{{ $name }}-metrics-listener
+  labels:
+    {{- include "industryflow.labels" $root | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+data:
+  nginx.conf: |
+    # Metrics-only listener: nothing but /metrics, from the app on loopback (ADR-0009 dec 5).
+    worker_processes 1;
+    pid /tmp/nginx.pid;
+    error_log stderr warn;
+    events { worker_connections 64; }
+    http {
+      access_log off;
+      client_body_temp_path /tmp/client_body;
+      proxy_temp_path /tmp/proxy;
+      fastcgi_temp_path /tmp/fastcgi;
+      uwsgi_temp_path /tmp/uwsgi;
+      scgi_temp_path /tmp/scgi;
+      server_tokens off;
+      server {
+        listen {{ .port }};
+        location = /metrics {
+          limit_except GET { deny all; }
+          proxy_pass http://127.0.0.1:{{ required (printf "apps.%s.metricsListener needs apps.%s.port" $name $name) $app.port }}/metrics;
+          proxy_http_version 1.1;
+          proxy_set_header Connection "";
+        }
+        location / { return 404; }
+      }
+    }
+{{- end }}
 {{- if or $app.port $app.metricsPort $app.buildInfoPort }}
 ---
 apiVersion: v1
@@ -277,6 +350,10 @@ spec:
     - name: metrics
       port: {{ $app.metricsPort }}
       targetPort: {{ $app.metricsPort }}
+    {{- else if $ml }}
+    - name: metrics
+      port: {{ $ml.port }}
+      targetPort: metrics
     {{- end }}
     {{- if $app.buildInfoPort }}
     - name: build-info

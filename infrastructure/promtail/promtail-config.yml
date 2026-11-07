@@ -18,9 +18,17 @@ scrape_configs:
     docker_sd_configs:
       - host: unix:///var/run/docker.sock
         refresh_interval: 5s
-        # This deployment's containers only: the platform's network, the notebook kernels' and the
-        # infrastructure agent's (ADR-0046 dec 7). The socket lists every container on the host,
-        # including other stacks sharing it.
+        # This deployment's containers only, by name: every service's container_name is
+        # industryflow-*, so the services on no shared network (ingestion-service, which only its
+        # edge reaches, ADR-0002 dec 3; the no-network jobs) are collected without joining one. The
+        # socket lists every container on the host, including other stacks sharing it.
+        filters:
+          - name: name
+            values: ['^/?industryflow-']
+      # And by network: the notebook kernels and the scaled spark-worker carry no fixed name. A
+      # container both select is one target (one target group per job, keyed by container id).
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
         filters:
           - name: network
             values: [industryflow-network, industryflow-notebook-kernels, industryflow-ops-agent]

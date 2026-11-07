@@ -191,7 +191,8 @@ With `inCluster: false` the endpoint helper returns `infra.<dep>.external.*` and
 | `<release>-ingestion-from-edge-only` | Admits ingress to ingestion only from pods matching `networkPolicy.ingressControllerPodLabels` (default `app.kubernetes.io/name: ingress-nginx`, `app.kubernetes.io/component: controller`) in the namespace `networkPolicy.ingressControllerNamespace`; empty labels fail the render |
 | `networkPolicy.externalEgress.<dep>` | `[{cidr, port}]` for an external `timescaledb`, `redis`, `kafka`, `minio` or `mlflow`; a restricted workload using an external dependency with no entry fails the render |
 | `ingress.mtls.enabled` | `false` by default: no Ingress routes to ingestion, so it is unreachable rather than reachable without mTLS; enabling it needs the device-CA Secret `ingress.mtls.caSecret` |
-| Ingestion metrics | The ServiceMonitor scrapes ingestion's service port, which the policy closes to the monitoring namespace; the scrape fails while the policy is enforced |
+| Ingestion metrics | A `metrics-listener` container (`apps.ingestion-service.metricsListener`, nginx) serves only `/metrics` from the app on loopback, 404 for every other path; the Service and ServiceMonitor name it as port `metrics` |
+| Ingestion's admitted callers | The controller pods to the app port only; `observability.prometheusPodLabels` pods in `observability.monitoringNamespace` to the metrics port only; empty labels fail the render |
 
 | Code | Role |
 |---|---|
@@ -199,7 +200,9 @@ With `inCluster: false` the endpoint helper returns `infra.<dep>.external.*` and
 | `deploy/helm/industryflow/templates/networkpolicy.yaml` | Ingestion reachable only from the controller pods; per-workload egress |
 | `deploy/helm/industryflow/templates/_helpers.tpl` | `industryflow.egressTo`: in-cluster pod selector or `externalEgress` ipBlocks |
 | `deploy/helm/industryflow/values.yaml` | `ingress.*`, `networkPolicy.*` |
-| `tests/config_guards/test_helm_ingestion_edge_policy.py` | Policy on by default, controller pods only, only the mTLS Ingress routes to ingestion, external egress required |
+| `deploy/helm/industryflow/templates/apps.yaml` | Metrics-only listener container and its ConfigMap |
+| `deploy/helm/industryflow/templates/observability-servicemonitors.yaml` | Scrapes the listener's port |
+| `tests/config_guards/test_helm_ingestion_edge_policy.py` | Policy on by default; controller pods to the app port, Prometheus to the metrics port, nothing else; the listener serves only `/metrics` and is the port scraped; only the mTLS Ingress routes to ingestion; external egress required |
 
 ## Related
 
