@@ -126,11 +126,11 @@ markupsafe==3.0.3
     #   werkzeug
 matplotlib==3.11.0
     # via mlflow
-mlflow==3.17.2
+mlflow==3.18.0
     # via -r requirements.in
-mlflow-skinny==3.17.2
+mlflow-skinny==3.18.0
     # via mlflow
-mlflow-tracing==3.17.2
+mlflow-tracing==3.18.0
     # via mlflow
 multidict==6.7.1
     # via
@@ -210,6 +210,8 @@ python-dateutil==2.9.0.post0
     #   matplotlib
     #   pandas
 python-dotenv==1.2.2
+    # via mlflow-skinny
+python-multipart==0.0.33
     # via mlflow-skinny
 pytz==2026.2
     # via pandas
