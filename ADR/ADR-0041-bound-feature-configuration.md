@@ -73,4 +73,4 @@ at registration (ADR-0028).
 
 ## References
 
-- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): the configuration API; manual of decisions 2-4.
+- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): the configuration API; manual of decisions 1-4.

@@ -115,6 +115,31 @@ Each stage is validated before the next.
 | 2. Clients verify | Unchanged | `sslmode=verify-full` + `sslrootcert` |
 | 3. Enforce | `host` → `hostssl`, `md5` → `scram-sha-256`; re-hash existing roles with `ALTER ROLE <role> PASSWORD '<same value>'` | Unchanged |
 
+## ADR-0004 dec 1
+
+| Lane | TLS terminates at | Plaintext |
+|---|---|---|
+| Compose | The frontend edge on 8443; the ingestion edge for devices, with the same server certificate | 8080 answers 301 to HTTPS, except `/healthz` |
+| Kubernetes | The Ingress, which reaches the edge's 8080 with `X-Forwarded-Proto: https` | Same redirect for any other request on 8080 |
+
+| Setting | Value |
+|---|---|
+| Edge protocols | TLS 1.2, TLS 1.3 |
+| `Strict-Transport-Security` | `max-age=31536000` on every response |
+| Session cookies | `COOKIE_SECURE=true` by default |
+| Compose internal ports | Published on `127.0.0.1` only |
+
+| Code | Role |
+|---|---|
+| `services/frontend/nginx.conf.template` | TLS listener, HTTPS redirect, HSTS |
+| `services/frontend/docker-entrypoint-tls.sh` | Self-signed certificate when none is mounted |
+| `scripts/gen-internal-ca.sh` | Internal-CA server certificate for the edge |
+| `docker-compose.yml` | Loopback-bound internal ports; Secure cookies |
+| `deploy/helm/industryflow/templates/ingress.yaml` | Ingress TLS |
+| `deploy/helm/industryflow/values.yaml` | Secure cookies on Kubernetes |
+| `services/api_gateway/tests/test_db_connection_budget.py::test_cookies_are_secure_by_default` | Proof: cookies Secure in every lane |
+| `.github/workflows/compose-smoke.yml` | Proof: internal ports not reachable from the kernel network's host gateway |
+
 ## ADR-0017 dec 1-3, 5
 
 Clients verify the server certificate with SCRAM authentication; the server certificate comes from the internal CA (see Database TLS).

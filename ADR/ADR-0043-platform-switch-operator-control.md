@@ -72,4 +72,4 @@ superuser, verified by the API gateway, which serves the other platform operatio
 
 ## References
 
-- [docs/operations/monitoring.md](../docs/operations/monitoring.md): the runbook; manual of decisions 3, 4.
+- [docs/operations/monitoring.md](../docs/operations/monitoring.md): the runbook; manual of decisions 1-4.

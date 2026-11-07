@@ -132,5 +132,5 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 
 ## References
 
-- [docs/operations/tls.md](../docs/operations/tls.md): the internal CA and installing its root.
-- [Authentication](../docs/operations/authentication.md): manual of decisions 2, 3, 9.
+- [docs/operations/tls.md](../docs/operations/tls.md): the internal CA and installing its root; manual of decision 1.
+- [Authentication](../docs/operations/authentication.md): manual of decisions 2-7, 9-11.

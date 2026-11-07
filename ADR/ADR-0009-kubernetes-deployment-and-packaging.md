@@ -71,4 +71,4 @@ without a fork, and must never contain secrets.
 ## References
 
 - [deploy/helm/industryflow/README.md](../deploy/helm/industryflow/README.md);
-  [docs/operations/high-availability.md](../docs/operations/high-availability.md).
+  [docs/operations/high-availability.md](../docs/operations/high-availability.md): manual of decisions 3-5.

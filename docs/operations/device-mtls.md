@@ -214,6 +214,24 @@ The ingestion service is reachable only from its edge and holds no database role
 | `docker-compose.yml` | Ingestion service publishes no host port; only the edge does |
 | `deploy/helm/industryflow/templates/networkpolicy.yaml` | Ingestion service reachable only from the edge |
 
+## ADR-0002 dec 6
+
+The ingestion service parses the tenant from the certificate's URI SAN and canonicalises it as a UUID before it routes the write; a tenant that is no UUID is refused with 403.
+
+| Code | Role |
+|---|---|
+| `services/ingestion_service/dependencies.py::_identity_from_client_cert` | SAN parse and UUID validation |
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::canonical_company_id` | Canonical UUID form, `ValueError` otherwise |
+| `services/ingestion_service/tests/test_ingestion_auth.py::test_non_uuid_tenant_is_forbidden` | Proof: a non-UUID tenant is refused |
+
+## ADR-0007 dec 2
+
+`issue` with a CSR signs the device's request; the CA host never sees the device key. Without a CSR it generates a key on the CA host, for test producers only.
+
+| Code | Role |
+|---|---|
+| `scripts/device-ca.sh::cmd_issue` | CSR signing; test-mode key generation |
+
 ## ADR-0007 dec 3, 5
 
 The CA script issues a URI SAN identity and bounded lifetimes (see CA commands).
@@ -221,6 +239,21 @@ The CA script issues a URI SAN identity and bounded lifetimes (see CA commands).
 | Code | Role |
 |---|---|
 | `scripts/device-ca.sh` | Issuance, lifetimes, identity scheme |
+
+## ADR-0007 dec 4
+
+| Step | Mechanism |
+|---|---|
+| Authorize | The operator names the tenant UUID and device id on `issue` |
+| Bind | The CA writes the SAN from those arguments; the CSR's own extensions are not copied |
+| Store | One directory per tenant and device, one file set per serial |
+
+| Code | Role |
+|---|---|
+| `scripts/device-ca.sh::cmd_issue` | SAN written from the operator's tenant and device |
+| `scripts/device-ca.sh::identity_args` | Tenant UUID and device-id checks |
+| `scripts/device-ca.sh::write_int_cnf` | `copy_extensions = none` on signing |
+| `scripts/tests/test_device_ca.py::test_issue_renew_revoke_cross_tenant` | Proof: the same device id under two tenants is two devices |
 
 ## ADR-0007 dec 6
 
@@ -230,6 +263,18 @@ The deployed edge refuses a revoked device certificate.
 |---|---|
 | `tests/e2e/test_device_revocation.py` | A revoked device refused by the deployed edge |
 
+## ADR-0007 dec 7
+
+| Trust direction | Chain | Edge setting |
+|---|---|---|
+| Edge to device (server identity) | Internal CA server certificate | `ssl_certificate` |
+| Device to edge (client identity) | Device CA chain and CRL | `ssl_client_certificate`, `ssl_crl` |
+
+| Code | Role |
+|---|---|
+| `services/ingestion_edge/nginx.conf` | Server certificate and device trust anchors held apart |
+| `docker-compose.yml` | Server certificate and device CA mounted from separate directories |
+
 ## ADR-0007 dec 8
 
 The edge re-reads a changed revocation list without a restart (see CRL refresh).
@@ -237,3 +282,26 @@ The edge re-reads a changed revocation list without a restart (see CRL refresh).
 | Code | Role |
 |---|---|
 | `services/ingestion_edge/40-crl-reload.sh` | Revocation-list reload |
+
+## ADR-0007 dec 10
+
+The expiry watch is described under Expiry watch. `check` fails on a CRL or a CA certificate of the chain inside its window; `check-certs` fails on a device whose newest unrevoked certificate is inside `CERT_WARN_DAYS`, after verifying the register's signature and that it names the published CRL.
+
+| Lane | Watch | Raised as |
+|---|---|---|
+| Kubernetes | `device-crl-check` and `device-cert-check` CronJobs | `IndustryFlowDeviceCrlStale` (critical), `IndustryFlowDeviceCertExpiring` (warning) |
+| Compose | `device-crl-refresh` healthcheck runs `check` and `check-certs` | Container unhealthy, one signal for both |
+
+| Code | Role |
+|---|---|
+| `scripts/device-ca.sh::cmd_check` | CRL and CA-certificate expiry |
+| `scripts/device-ca.sh::cmd_check_certs` | Device renewal owed, from public files only |
+| `deploy/helm/industryflow/files/device-ca.sh` | The same script for the cluster jobs |
+| `deploy/helm/industryflow/templates/cronjob-device-cert-check.yaml` | Device-certificate watch job |
+| `deploy/helm/industryflow/templates/observability-prometheusrules.yaml` | Graded alert rules |
+| `deploy/helm/industryflow/values.yaml` | Watch schedules, windows and alert delays |
+| `docker-compose.yml` | Compose healthcheck |
+| `scripts/tests/test_device_ca.py::test_check_certs_raises_a_device_whose_renewal_is_owed` | Proof: renewal owed raised, renewed device not |
+| `scripts/tests/test_device_ca.py::test_check_certs_reports_an_expired_device_without_failing` | Proof: an expired device is reported, not raised |
+| `scripts/tests/test_device_ca.py::test_check_certs_refuses_a_register_it_cannot_trust` | Proof: an unverified register is refused |
+| `scripts/tests/test_device_ca.py::test_check_raises_a_ca_certificate_close_to_expiry` | Proof: a CA certificate near expiry is raised |

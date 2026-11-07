@@ -116,4 +116,4 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): the planes and their capabilities; manual of decisions 1-6.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): the planes and their capabilities; manual of decisions 1-10.

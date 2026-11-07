@@ -77,4 +77,4 @@ service role could re-scope itself to another tenant.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): components, profiles, request path.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): components, profiles, request path; manual of decisions 1, 3-5, 7.

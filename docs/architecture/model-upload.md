@@ -142,6 +142,31 @@ Only the gateway's principal writes the staging area.
 |---|---|
 | `infrastructure/minio/minio-init.sh` | Object-store principals and policies |
 
+## ADR-0030 dec 3
+
+| Step | Mechanism |
+|---|---|
+| Mint | `POST /api/models/upload-capability` with a verified session and a writing role; `ml-service-api` writes an opaque handle into the shared capability store |
+| Bound facts | User, tenant from the session, audience `upload`, `read_only: false`, `handle_id`; expiry 600 s |
+| Refusals at mint | No user or tenant (400), tenant not a UUID (400), tenant suspended (403), no capability store (501) |
+| Index and record | The handle is indexed under its user and its mint recorded, in one transaction |
+| Resolve | The gateway's upload surface resolves the bearer only as an `upload`-audience entry; any other audience, or none, is 401 |
+| Tracking plane | An `upload` handle does not resolve on the kernels' tracking plane |
+
+The gateway holds no session-signing key.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/upload_capability.py::build_record` | The bound facts; refuses without a user or tenant |
+| `services/ml_service/api/upload_capability.py::AUDIENCE_UPLOAD` | The upload audience |
+| `services/ml_service/api/routers/models.py::mint_upload_capability` | The mint route |
+| `services/ml_service/api/main.py` | Connects the capability store |
+| `services/notebook_tracking_gateway/policy.py::resolve_upload_outcome` | Resolves an upload-audience handle |
+| `services/notebook_tracking_gateway/gateway.py` | `uploader`: 401 unless the bearer is an upload handle |
+| `services/frontend/src/pages/ModelUploadWizard.jsx` | Mints first and keeps the handle in memory only |
+| `services/ml_service/tests/test_upload_capability.py` | Proof: mint binding, expiry, refusals, one-transaction record |
+| `services/notebook_tracking_gateway/tests/test_upload_audience.py` | Proof: upload and tracking audiences are not interchangeable |
+
 ## ADR-0030 dec 4-8
 
 Registration judges the upload's declared semantics and requirements, grants trust by provenance and loads it in an isolated probe.

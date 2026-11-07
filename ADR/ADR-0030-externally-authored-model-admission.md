@@ -96,4 +96,4 @@ artifact that runs author code on load would grant code execution on the trusted
 
 ## References
 
-- [Model upload](../docs/architecture/model-upload.md): manual of decisions 2, 4-8, 10.
+- [Model upload](../docs/architecture/model-upload.md): manual of decisions 2-8, 10.

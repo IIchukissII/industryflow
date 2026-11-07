@@ -293,6 +293,56 @@ The chart renders scrape targets, platform rules and dashboards as integration o
 | `infrastructure/prometheus/rules/platform.yml` | Platform alert rules |
 | `deploy/helm/industryflow/templates` | Observability templates (`observability-*.yaml`) |
 
+## ADR-0016 dec 3
+
+| Lane | Exporter login | TLS |
+|---|---|---|
+| Compose | `metrics_user` with `METRICS_DB_PASSWORD` | `verify-full` |
+| Kubernetes | `metrics_user` with `METRICS_DB_PASSWORD` | `verify-full` |
+
+`metrics_user` holds `pg_monitor` and a connection limit of 5.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/12-metrics-role.sql` | The monitoring role |
+| `docker-compose.yml` | Compose exporter login |
+| `deploy/helm/industryflow/templates/observability-exporters.yaml` | Kubernetes exporter login |
+| `.env.example` | `METRICS_DB_PASSWORD` template |
+| `tests/config_guards/test_compose_db_roles.py::test_postgres_exporter_uses_the_monitoring_role_over_verified_tls` | Proof: no superuser login, TLS verified |
+
+## ADR-0016 dec 4
+
+| Lane | Backend | Alert router |
+|---|---|---|
+| Compose | Prometheus, Loki, Grafana beside the services | `alertmanager`, one receiver `operator` with no delivery; `ALERTMANAGER_CONFIG` names the operator's copy |
+| Kubernetes | The operator's stack; the chart renders `ServiceMonitor`, `PrometheusRule` and dashboard ConfigMaps | The operator's; `observability.*.labels` match its selectors |
+
+| Code | Role |
+|---|---|
+| `infrastructure/prometheus/prometheus.yml` | Firing alerts sent to `alertmanager` |
+| `infrastructure/alertmanager/alertmanager.yml` | Receiver with no delivery as shipped |
+| `docker-compose.yml` | Backend services beside the application |
+| `deploy/helm/industryflow/values.yaml` | Integration-object toggles and selector labels |
+| `deploy/helm/industryflow/files/prometheus-rules.yml` | Platform rules rendered into the `PrometheusRule` |
+| `deploy/helm/industryflow/templates/ops-agent.yaml` | Agent endpoints are the operator's stack |
+| `tests/config_guards/test_alert_rules.py::test_the_chart_renders_the_same_platform_rules` | Proof: one rule set in both lanes |
+
+## ADR-0016 dec 5
+
+| Path | Holds |
+|---|---|
+| Alert worker to the tenant's schema | Tenant alerts ([Alerts](#alerts-1)) |
+| Prometheus and the platform rules | Operational, aggregate series; no tenant value or alert content |
+| Grafana datasources | Prometheus and Loki; no database datasource, and the earlier `TimescaleDB` datasource is deleted at start |
+
+| Code | Role |
+|---|---|
+| `services/alert_service/worker/repository.py` | Alert written to the tenant's store |
+| `infrastructure/prometheus/rules/platform.yml` | Aggregate platform rules |
+| `infrastructure/grafana/provisioning/datasources.yml` | Datasource set; database datasource deleted |
+| `tests/config_guards/test_grafana_datasources.py::test_no_database_datasource_is_provisioned` | Proof: no database datasource |
+| `tests/config_guards/test_compose_db_roles.py::test_grafana_has_no_database_datasource` | Proof: Grafana holds no database password |
+
 ## ADR-0016 dec 6, 7
 
 Grafana is served at the edge and signs a platform superuser on from the platform session (see Grafana).
@@ -310,6 +360,25 @@ Every service exposes its build information.
 |---|---|
 | `tests/config_guards/test_build_info.py` | Every image exposes build information |
 
+## ADR-0024 dec 1
+
+`register_transform` takes `stateful` (default false) and `neutral` (default 0.0); extension API 0.2.0 adds both. The engine asks `is_stateful` by type, so every statistic of a stateful type is governed together.
+
+| Type | Stateful |
+|---|---|
+| `statistical` | Yes |
+| `rolling_stat` | Yes |
+| `identity`, `polynomial`, `interaction`, `deviation` | No |
+| Unregistered | No |
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py::register_transform` | Class tag at registration |
+| `services/ml_service/api/extensions/__init__.py::is_stateful` | Class lookup by type |
+| `services/ml_service/api/extensions/builtins.py` | Built-in transforms and their tags |
+| `services/ml_service/tests/test_stateful_kill_switch.py::test_stateful_transforms_are_tagged` | Proof: stateful types tagged |
+| `services/ml_service/tests/test_stateful_kill_switch.py::test_unknown_type_is_not_stateful` | Proof: unknown type not stateful |
+
 ## ADR-0024 dec 2, 7
 
 The engine reads the switch from the shared schema and keeps the last-known-good value when the read fails (see Runbook: stateful-feature kill-switch).
@@ -325,6 +394,26 @@ With the switch on, a stateful feature is null in its slot, checked before the s
 | Code | Role |
 |---|---|
 | `services/ml_service/api/feature_engineering/engine.py` | Null-in-slot and degraded-serving metric |
+
+## ADR-0024 dec 6
+
+One row, `public.platform_config` key `stateful_features_enabled`, holds the switch for every tenant. It starts `true`; `ml_service_user` has `SELECT` only, so no service changes it.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/17-stateful-feature-kill-switch.sql` | The global row; read-only grant to `ml-service-api` |
+| `services/ml_service/api/feature_engineering/kill_switch.py` | Reads the switch; never writes it |
+
+## ADR-0043 dec 1, 2
+
+The gateway serves listing, flipping and history of a switch; every route takes the superuser gate. `ml-service-api` only reads the switch.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/platform_switches.py` | Switch routes behind `require_superuser` |
+| `services/api_gateway/dependencies.py::require_superuser` | No tenant role passes |
+| `services/api_gateway/tests/test_platform_switches.py::test_no_tenant_role_passes` | Proof: tenant roles refused |
+| `services/api_gateway/tests/test_platform_switches.py::test_every_route_takes_the_superuser_gate` | Proof: every route gated |
 
 ## ADR-0043 dec 3, 4
 
@@ -355,6 +444,102 @@ The operator adds a receiver for the agent to the alert router (see Infrastructu
 | Code | Role |
 |---|---|
 | `infrastructure/alertmanager/alertmanager.yml` | Alert router receivers |
+
+## ADR-0046 dec 2
+
+| Evidence | Tool | Source |
+|---|---|---|
+| The rule's PromQL around the alert | `prometheus_range` | Metrics store |
+| Revisions the services reported | `prometheus_range` on `industryflow_build_info` | Metrics store |
+| Error lines of the rule's `services` and the target's host | `loki_errors` | Log store |
+| Active alerts | `active_alerts` | Alert router |
+| The alert's row; matching symptom rows | `alert_runbook`, `runbook_rows` | Runbooks in the image |
+
+| Code | Role |
+|---|---|
+| `services/ops_agent/tools.py::build_server` | The tool set |
+| `services/ops_agent/graph.py::services_of` | Services whose logs are read |
+| `services/ops_agent/graph.py::revisions_query` | Revision series over the window |
+| `infrastructure/prometheus/rules/platform.yml` | `services` annotation on every rule |
+| `tests/config_guards/test_rule_services.py` | Proof: every rule names real services |
+| `services/ops_agent/tests/test_tools.py::test_the_tool_set_is_the_monitoring_plane` | Proof: tools reach the monitoring plane only |
+
+## ADR-0046 dec 4
+
+The publisher pushes each note to Loki under `job="ops-agent"`, labelled with `alertname` and `severity`, and reads that stream to skip a firing it has already explained.
+
+| Code | Role |
+|---|---|
+| `services/ops_agent/publish.py::LokiPublisher` | Push and lookup on the note stream |
+| `deploy/helm/industryflow/files/grafana/incidents_dashboard.json` | Incidents dashboard over the stream |
+| `services/ops_agent/tests/test_tools.py::test_a_note_is_pushed_to_its_own_log_stream` | Proof: one stream |
+
+## ADR-0046 dec 7
+
+| Reach | Mechanism |
+|---|---|
+| Tool subprocess | Gets only the endpoint and path variables, never a secret |
+| Credentials | `OPS_AGENT_WEBHOOK_SECRET`, `OPS_AGENT_MODEL_API_KEY`, `ANTHROPIC_API_KEY` |
+| Kubernetes network | NetworkPolicy: ingress from `monitoringNamespace`; egress to DNS, that namespace, HTTPS on public addresses and `modelEndpoints` |
+| Compose network | `industryflow-network`, shared with the platform services; no network restriction |
+
+| Code | Role |
+|---|---|
+| `services/ops_agent/app.py::McpTools` | Tool environment without secrets |
+| `services/ops_agent/tools.py` | Metrics store, log store, alert router only |
+| `deploy/helm/industryflow/templates/ops-agent.yaml` | Scoped secret and NetworkPolicy |
+| `docker-compose.yml` | Compose service |
+
+## ADR-0046 dec 8
+
+| Category | Placeholder |
+|---|---|
+| Tenant identifiers (UUIDs, also inside `tenant_<uuid>` names, and 32-hex ids) | `<tenant-N>` |
+| E-mail addresses | `<email-N>` |
+| Network addresses, confirmed by the address parser | `<address-N>` |
+| Credential-shaped strings (bearer and basic values, JWTs, known key prefixes, URL passwords, values of credential-named keys, long hex) | `<secret-N>` |
+
+One `Redactor` serves one note, so a value keeps its placeholder within it; the note records counts per category.
+
+| Code | Role |
+|---|---|
+| `services/ops_agent/redaction.py::Redactor` | Replacement and per-note placeholders |
+| `services/ops_agent/tests/test_redaction.py::test_each_category_is_replaced` | Proof: every category |
+| `services/ops_agent/tests/test_redaction.py::test_a_value_keeps_one_placeholder_within_a_note` | Proof: stable placeholders |
+| `services/ops_agent/tests/test_redaction.py::test_the_record_holds_counts_never_values` | Proof: counts only |
+
+## ADR-0046 dec 9
+
+| Table | Header | Read |
+|---|---|---|
+| Alert table | `Alert \| Fires when \| Handling` | By the alert's exact name |
+| Symptom tables | `Symptom \| Cause \| Fix` | Rows sharing at least two non-stop words with the alert, best three |
+
+The image copies `docs/operations` as the runbooks; CI runs the agent's tests on any change there.
+
+| Code | Role |
+|---|---|
+| `services/ops_agent/runbooks.py::load_alerts` | Alert table by name |
+| `services/ops_agent/runbooks.py::match` | Symptom rows by shared words |
+| `services/ops_agent/Dockerfile` | Runbooks in the image |
+| `.github/workflows/unit-tests.yml` | Tests run on a runbook change |
+| `services/ops_agent/tests/test_runbooks.py::test_every_symptom_table_keeps_the_contract_shape` | Proof: table shape |
+| `services/ops_agent/tests/test_runbooks.py::test_every_platform_rule_has_a_row_in_the_alert_table` | Proof: alert table complete |
+
+## ADR-0046 dec 10
+
+The endpoints default to the Compose service names and are set per deployment; both lanes ship the agent off.
+
+| Lane | Off by default | Endpoints |
+|---|---|---|
+| Compose | Profile `ops-agent` | `prometheus`, `loki`, `alertmanager` |
+| Kubernetes | `observability.opsAgent.enabled: false` | `prometheusUrl`, `lokiUrl`, `alertmanagerUrl`, required when enabled |
+
+| Code | Role |
+|---|---|
+| `services/ops_agent/config.py::Config` | Endpoints from the environment |
+| `deploy/helm/industryflow/templates/ops-agent.yaml` | Refuses to render without the operator's endpoints |
+| `deploy/helm/industryflow/templates/observability-dashboards.yaml` | Incidents dashboard as a ConfigMap |
 
 ## Links
 

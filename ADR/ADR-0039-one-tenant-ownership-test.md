@@ -73,4 +73,4 @@ the test.
 
 ## References
 
-- [Data and storage](../docs/architecture/data-and-storage.md): manual of decisions 1, 5.
+- [Data and storage](../docs/architecture/data-and-storage.md): manual of decisions 1-5.

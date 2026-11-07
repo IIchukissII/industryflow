@@ -89,4 +89,4 @@ sees. A revoked device must lose access at once, and an expired revocation list 
 
 ## References
 
-- [docs/operations/device-mtls.md](../docs/operations/device-mtls.md): manual of decisions 3, 5, 6, 8.
+- [docs/operations/device-mtls.md](../docs/operations/device-mtls.md): manual of decisions 2-8, 10.

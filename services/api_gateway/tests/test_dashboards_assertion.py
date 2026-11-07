@@ -6,7 +6,7 @@
 
 The assertion is verified the way the dashboards verify it: with the public half of the key, the
 expected issuer and audience, and the expiry. The superuser gate is the shared dependency
-(ADR-0043 dec 1), driven here through the real app so the route cannot lose it unnoticed.
+(ADR-0016 dec 7), driven here through the real app so the route cannot lose it unnoticed.
 """
 import os
 import uuid

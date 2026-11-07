@@ -172,7 +172,7 @@ def fresh_ca(tmp_path):
 
 
 def test_check_certs_raises_a_device_whose_renewal_is_owed(fresh_ca):
-    # ADR-0007 dec 5: the check fails on a device's NEWEST unrevoked certificate only. A device
+    # ADR-0007 dec 10: the check fails on a device's NEWEST unrevoked certificate only. A device
     # renewed in time, or revoked, is not owed anything.
     root, run = fresh_ca
     tenant = str(uuid.uuid4())

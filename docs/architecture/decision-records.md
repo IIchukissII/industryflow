@@ -40,6 +40,23 @@ Each unavoidable copy of a fact has a guard that reads every copy and fails when
 | `tests/config_guards/_repo.py` | Shared readers of workflows, compose file and chart; holds no list of its own |
 | `.github/workflows/config-guards.yml` | Runs the guards on every change ([CI](../operations/ci.md)) |
 
+## ADR-0000 dec 8
+
+| Element | Form |
+|---|---|
+| File | `ADR/ADR-NNNN-kebab-title.md`, four-digit number |
+| ADR-0000 | This root |
+| ADR-0001 | The project framing |
+| ADR-0002 onward | Technical decisions, in order |
+| Decision number | The numbered item in the Decision section; stable once cited |
+
+The reference guard keys each record by the number in its file name. It fails on a citation of a decision number the record does not hold; a renumbering that keeps every cited number present passes it.
+
+| Code | Role |
+|---|---|
+| `tests/config_guards/test_adr_references.py::_decisions` | Reads each `ADR-NNNN-*.md` file's numbered decisions, keyed by its number |
+| `tests/config_guards/test_adr_references.py::test_every_cited_decision_exists` | Fails on a citation of a number the record does not hold |
+
 ## ADR-0000 dec 10
 
 | Check | Fails when |

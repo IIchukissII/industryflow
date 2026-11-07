@@ -80,6 +80,16 @@ release is cut only from such a commit.
 | `box-deploy: … GB free after pruning … refusing` | Docker's disk is full beyond build cache | Free space (old images, volumes of removed services), or deploy with a lower `BOX_MIN_FREE_GB` knowingly |
 | Release fails at `The commit is box-validated` | No `box-e2e` success on that commit | `scripts/box-validate.sh` after deploying it |
 
+## ADR-0026 dec 2
+
+A pull request merges into `main` only when every gate in [Required checks on `main`](#required-checks-on-main) passed. Each gate fails when a job it needs failed or was cancelled. `compose-smoke-gate` is the required gate that starts the system. Box validation is a separate commit status, not a required check.
+
+| Code | Role |
+|---|---|
+| `.github/workflows` | One `<name>-gate` job per workflow |
+| `.github/workflows/compose-smoke.yml` | The required gate that starts the system |
+| `tests/config_guards/test_alert_rules.py::test_every_ci_gate_checks_every_job_it_needs` | Proof: no gate passes a job it does not check |
+
 ## ADR-0026 dec 3, 4
 
 The compose smoke gate starts the whole stack, upgrades it from the previous release and judges liveness over an interval.

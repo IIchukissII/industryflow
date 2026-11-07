@@ -10,7 +10,7 @@
 -- Purpose: Extend ml_models with a reference_profile JSONB column — the per-model,
 --          tenant-scoped training-window distribution snapshot that data/prediction
 --          drift is evaluated against. A model with no reference_profile reports
---          "drift unavailable" until retrained with one (ADR-0021 decision 4).
+--          "drift unavailable" until retrained with one (ADR-0035 dec 4).
 
 -- =============================================================================
 -- EXTEND ML MODELS TABLE WITH THE DRIFT REFERENCE PROFILE

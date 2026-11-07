@@ -8,7 +8,7 @@
 # Two-tier hierarchy: an offline root CA signs one online issuing intermediate; the
 # intermediate signs device client certificates. Device identity (tenant + device) is
 # carried in a URI SAN — industryflow:tenant/<company_uuid>/device/<device_id> — read at
-# verification time (ADR-0002 dec 6 / ADR-0007 dec 3). The CA signs CSRs and never holds a
+# verification time (ADR-0002 dec 5 / ADR-0007 dec 3). The CA signs CSRs and never holds a
 # device private key (ADR-0007 dec 2); a device's key stays on the device / secure element.
 #
 # This tool is the operator side of enrollment: it authorizes a CSR for a specific

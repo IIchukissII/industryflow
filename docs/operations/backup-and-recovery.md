@@ -362,6 +362,25 @@ Each authored work volume is archived and verified per run.
 | `infrastructure/backup/notebook-backup.sh` | Volume archives |
 | `infrastructure/backup/notebook-restore.sh` | Volume restore |
 
+## ADR-0038 dec 8
+
+| Kind | Rehearsal | Compared | Fails when |
+|---|---|---|---|
+| Model mirror | `db-rehearse.sh`, after the database rehearsal | Size of every object both source and mirror hold (staging area excluded); bytes (SHA-256) of a random sample of `REHEARSAL_OBJECT_SAMPLE` objects (default 20) | A shared object differs in size or sampled bytes; the source holds objects and the mirror none |
+| Work-volume archive | `notebook-rehearse.sh`: each volume's latest archive restored into a scratch volume `rehearsal-<volume>`, then removed | Every entry's path, type, size, owner and mode against the archive | Any entry differs; the scratch prefix names a work volume |
+
+An object the source holds and the mirror lacks fails the model rehearsal only when the mirror holds none of the source.
+
+| Code | Role |
+|---|---|
+| `infrastructure/backup/db-rehearse.sh` | `rehearse_mirror`: model and cold mirrors |
+| `infrastructure/backup/notebook-rehearse.sh` | `rehearse_main`: volume rehearsal |
+| `infrastructure/backup/notebook-restore.sh` | Restore into a target; read back and compare |
+| `docker-compose.yml` | `notebook-rehearsal` service |
+| `infrastructure/backup/tests/test_backup_scripts.py::test_a_mirrored_object_with_other_bytes_fails_the_rehearsal` | Proof: a differing object fails |
+| `infrastructure/backup/tests/test_notebook_backup.py::test_a_rehearsal_restores_every_volumes_latest_archive_into_scratch_and_removes_it` | Proof: volume rehearsal |
+| `infrastructure/backup/tests/test_notebook_backup.py::test_a_restore_that_wrote_less_than_the_archive_fails` | Proof: a short restore fails |
+
 ## Related
 
 | Page | Topic |

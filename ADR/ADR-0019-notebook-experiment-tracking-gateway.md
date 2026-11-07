@@ -81,4 +81,4 @@ of the kernel. Artifacts are large, metadata calls small.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): namespace literals, routes; manual of decisions 1, 5-7.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): namespace literals, routes; manual of decisions 1, 4-7.

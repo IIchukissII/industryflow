@@ -14,7 +14,7 @@ unit-tested ``identity.py`` + ``capabilities.py``:
     identity headers the proxy forwards, only on requests carrying the proxy's shared secret, and
     runs no login of its own.
   * Role-driven, enforced spawn profiles (ADR-0011 dec 5): profile derived from the verified role.
-  * Identity-only environment (ADR-0012 dec 5): the kernel gets its tenant/identity, never a data
+  * Identity-only environment (ADR-0014 dec 5): the kernel gets its tenant/identity, never a data
     credential — only opaque, per-session, single-tenant capability handles minted here (ADR-0015).
   * Contained per-user environment (ADR-0011 dec 7): non-root, no privilege escalation, dropped
     capabilities, resource limits. Egress is a NetworkPolicy on k8s; on Compose it is a dedicated
@@ -301,7 +301,7 @@ async def bind_identity_and_profile(spawner):
     )
     # The profile is chosen by role, not offered to the user (ADR-0011 dec 5, ADR-0014 dec 4).
     profile = ident.select_profile(who.role, AUTHORING_ROLES)
-    # Identity only — this carries no data credential (ADR-0012 dec 5).
+    # Identity only — this carries no data credential (ADR-0014 dec 5).
     spawner.environment.update(ident.pod_environment(who, profile))
 
     labels = ident.pod_labels(who, profile)
