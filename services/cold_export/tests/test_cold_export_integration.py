@@ -28,8 +28,8 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-psycopg2 = pytest.importorskip("psycopg2")
-pytest.importorskip("pyarrow")
+import psycopg2
+import pyarrow  # noqa: F401 - the proof needs it
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from cold_export.config import DbConfig, ExportConfig, StoreConfig  # noqa: E402

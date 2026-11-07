@@ -102,7 +102,9 @@ repeatable.
 - `tests/e2e/`, `scripts/box-deploy.sh`, `scripts/box-e2e.sh`, `scripts/box-validate.sh` (decisions 8–10)
 - `infrastructure/timescaledb/tests/service_sql.py`, `libs/industryflow_contracts/industryflow_contracts/testing.py` (decision 11)
 - `services/alert_service/tests/test_kafka_consumer_integration.py`, `services/spark_jobs/tests/test_streaming_integration.py`,
-  `services/ingestion_service/tests/test_tenant_status_integration.py`, `test_kafka_producer_integration.py`;
-  guards `tests/config_guards/test_tests_use_real_redis.py`, `test_tests_use_real_kafka.py`, `test_streaming_proof_runs.py` (decision 11)
+  `services/ingestion_service/tests/test_tenant_status_integration.py`, `test_kafka_producer_integration.py`,
+  `services/tenant_delete/tests/test_cold_store_live.py`;
+  guards `tests/config_guards/test_tests_use_real_redis.py`, `test_tests_use_real_kafka.py`, `test_streaming_proof_runs.py`,
+  `test_integration_proofs_run.py` (decision 11)
 - `tests/config_guards/test_one_shot_exit_codes.py` (decisions 6, 11)
 - `.github/dependabot.yml` (decision 7)

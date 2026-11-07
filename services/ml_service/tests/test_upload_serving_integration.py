@@ -24,13 +24,13 @@ import uuid
 
 import pytest
 
-requests = pytest.importorskip("requests")
-pd = pytest.importorskip("pandas")
-pytest.importorskip("skops")
-mlflow_sklearn = pytest.importorskip("mlflow.sklearn")
-models = pytest.importorskip("mlflow.models")
-ensemble = pytest.importorskip("sklearn.ensemble")
-linear_model = pytest.importorskip("sklearn.linear_model")
+import requests
+import pandas as pd
+import skops  # noqa: F401 - the proof needs it
+import mlflow.sklearn as mlflow_sklearn
+import mlflow.models as models
+import sklearn.ensemble as ensemble
+import sklearn.linear_model as linear_model
 
 pytestmark = pytest.mark.integration
 

@@ -38,8 +38,8 @@ import uuid
 
 import pytest
 
-requests = pytest.importorskip("requests")
-redis = pytest.importorskip("redis")
+import requests
+import redis
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
