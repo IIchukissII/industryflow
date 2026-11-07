@@ -65,7 +65,7 @@ release is cut only from such a commit.
 | Item | Value |
 |---|---|
 | Suite | `tests/e2e/` (runner image `tests/e2e/Dockerfile`) |
-| Journeys | Capability use and its record; a device reading through the certificate edge; a model uploaded, registered on a bound configuration, deployed and scored by its rule; a tenant through deletion; the operator's user CLIs (seeded, listed, password reset with the old session and password refused, deleted); a platform alert explained by the infrastructure agent into a note in Loki, its receiver refusing a caller without the secret (where the agent is off: verified off) |
+| Journeys | Capability use and its record; a device reading through the certificate edge; a revoked device refused there once the edge re-reads its list, another device of the tenant still admitted; a model uploaded, registered on a bound configuration, deployed and scored by its rule; a tenant through deletion; the operator's user CLIs (seeded, listed, password reset with the old session and password refused, deleted); a platform alert explained by the infrastructure agent into a note in Loki, its receiver refusing a caller without the secret (where the agent is off: verified off) |
 | Run's superuser | Created by `box-e2e.sh` in the oldest active tenant, removed before the result line; a run that cannot remove it is `failed` |
 | Run's tenant | Suspended, deletion requested, then its devices revoked (`device-ca.sh revoke-tenant`; the job accepts only a CRL signed no earlier than the second of the request) at the end; the next run's deletion job removes it |
 | Skips | Failures (`IF_E2E_REQUIRE=1`) |

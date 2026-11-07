@@ -90,3 +90,4 @@ sees. A revoked device must lose access at once, and an expired revocation list 
 ## References
 
 - [docs/operations/device-mtls.md](../docs/operations/device-mtls.md); `scripts/device-ca.sh` (lifetimes, identity scheme).
+- `services/ingestion_edge/40-crl-reload.sh` (dec 8, the edge re-reads a changed list); `tests/e2e/test_device_revocation.py` (dec 6, a revoked device refused by the deployed edge).
