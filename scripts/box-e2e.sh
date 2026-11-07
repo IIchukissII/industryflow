@@ -8,8 +8,9 @@
 #
 #   scripts/box-e2e.sh
 #
-# It builds the suite's runner image, creates a platform superuser for the run (removed on exit,
-# whatever the outcome), runs every journey with skips counted as failures, and ends with one line:
+# It builds the suite's runner image, creates a platform superuser for the run (removed whatever the
+# outcome; a run that cannot remove it fails), runs every journey with skips counted as failures, and
+# ends with one line:
 #   box-e2e <commit> passed|failed
 # scripts/box-validate.sh runs it over SSH and posts that result as the commit's status.
 #
@@ -37,9 +38,13 @@ ENVFILE="$(mktemp /tmp/industryflow-e2e-env.XXXXXX)"
 EMAIL="e2e-root-$(date +%s)@example.com"
 RUN_GW=(docker compose run --rm --no-deps -T -v ./scripts:/scripts:ro -e PYTHONPATH=/app api-gateway)
 
+REMOVED=""
+remove_superuser() {
+    "${RUN_GW[@]}" python /scripts/manage_users.py delete --email "$EMAIL" --yes >/dev/null && REMOVED=1
+}
+# A run that ends early still removes its superuser; the result line below waits for the removal.
 cleanup() {
-    "${RUN_GW[@]}" python /scripts/manage_users.py delete --email "$EMAIL" --yes >/dev/null 2>&1 || \
-        echo "box-e2e: could not remove $EMAIL; remove it by hand" >&2
+    [ -n "$REMOVED" ] || remove_superuser || echo "box-e2e: could not remove $EMAIL; remove it by hand" >&2
     rm -rf "$WORK" "$ENVFILE"
 }
 trap cleanup EXIT
@@ -74,6 +79,12 @@ if docker run --rm \
     --env-file "$ENVFILE" \
     industryflow-e2e tests/e2e -p no:cacheprovider -v --tb=short "$@"; then
     status=passed
+fi
+# A run that leaves its superuser behind has failed, whatever the suite said: the result line is
+# what scripts/box-validate.sh posts.
+if ! remove_superuser; then
+    echo "box-e2e: could not remove the run's superuser $EMAIL; remove it by hand" >&2
+    status=failed
 fi
 echo "box-e2e $SHA $status"
 [ "$status" = passed ]
