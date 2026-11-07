@@ -32,9 +32,9 @@ import uuid
 
 import pytest
 
-requests = pytest.importorskip("requests")
-redis = pytest.importorskip("redis")
-boto3 = pytest.importorskip("boto3")
+import requests
+import redis
+import boto3
 from botocore.client import Config  # noqa: E402
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

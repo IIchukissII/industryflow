@@ -34,8 +34,8 @@ import uuid
 
 import pytest
 
-psycopg2 = pytest.importorskip("psycopg2")
-redis = pytest.importorskip("redis")
+import psycopg2
+import redis
 from psycopg2 import errors  # noqa: E402
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

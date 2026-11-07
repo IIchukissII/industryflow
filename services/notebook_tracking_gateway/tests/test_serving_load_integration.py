@@ -24,8 +24,8 @@ import uuid
 
 import pytest
 
-requests = pytest.importorskip("requests")
-redis = pytest.importorskip("redis")
+import requests
+import redis
 
 pytestmark = pytest.mark.integration
 
@@ -83,8 +83,8 @@ def test_a_caller_chosen_artifact_location_is_not_recorded(handle_for):
 
 
 def test_a_gateway_logged_model_loads_from_the_tracking_server(handle_for, monkeypatch):
-    mlflow = pytest.importorskip("mlflow")
-    np = pytest.importorskip("numpy")
+    import mlflow
+    import numpy as np
     from sklearn.linear_model import LinearRegression
 
     cid = str(uuid.uuid4())

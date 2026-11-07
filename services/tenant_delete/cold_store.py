@@ -12,11 +12,18 @@ the objects one backup retention period longer (ADR-0032 dec 4).
 """
 from __future__ import annotations
 
+import boto3
 from industryflow_contracts import tenancy
 
 from .job import Removal
 
 _BATCH = 1000  # the most keys one DeleteObjects request takes
+
+
+def client(cfg):
+    """The job's S3 client on the cold layer, as its principal (config.ColdConfig)."""
+    return boto3.client("s3", endpoint_url=cfg.endpoint, region_name=cfg.region,
+                        aws_access_key_id=cfg.access_key, aws_secret_access_key=cfg.secret_key)
 
 
 class ColdStore:

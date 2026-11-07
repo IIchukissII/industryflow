@@ -86,10 +86,10 @@ jobs:
           # `integration` and excluded here — it needs a real stack and would only skip in this
           # no-DB job (a false green). It runs in db-tenant-isolation.yml against a live stack.
           - { service: notebook_sql_proxy,  path: services/notebook_sql_proxy/tests, args: "--ignore=services/notebook_sql_proxy/tests/test_sql_proxy_integration.py" }
-          # The live proof (test_tracking_gateway_integration.py) is `integration` and excluded here
-          # — it needs a real MLflow + MinIO + Redis and would only skip. It runs in
-          # tracking-gateway-integration.yml against a live stack.
-          - { service: notebook_tracking_gateway, path: services/notebook_tracking_gateway/tests, args: "--ignore=services/notebook_tracking_gateway/tests/test_tracking_gateway_integration.py" }
+          # The live proofs (test_*_integration.py, by the same pattern the live job runs, and
+          # test_offboarding_live.py) are `integration` and excluded here — they need a real MLflow +
+          # MinIO + Redis and would only skip. They run in tracking-gateway-integration.yml.
+          - { service: notebook_tracking_gateway, path: services/notebook_tracking_gateway/tests, args: "--ignore-glob=services/notebook_tracking_gateway/tests/test_*_integration.py --ignore=services/notebook_tracking_gateway/tests/test_offboarding_live.py" }
           # The live end-to-end proof (test_cold_broker_integration.py) is marked `integration` and
           # excluded here — it needs a real broker + MinIO + Redis and would only skip in this
           # no-infra job (a false green). It runs in cold-layer-integration.yml against a live stack.
@@ -100,7 +100,8 @@ jobs:
           # No `-m 'not redis'` here: not one test in the repository carries that marker, so the
           # filter deselected nothing while implying a skipped body of Redis coverage that never
           # existed. The whole suite runs.
-          - { service: ml_service,          path: services/ml_service/tests }
+          # The upload path's serving-half proof needs the live stack; it runs in tracking-gateway-integration.yml.
+          - { service: ml_service,          path: services/ml_service/tests, args: "--ignore=services/ml_service/tests/test_upload_serving_integration.py" }
           # The routing, reading guard and windowing tests run on a local Spark (pyspark from
           # requirements-dev) on the job images' Java (`java`, held equal to their base tag by
           # scripts/check_spark_version_parity.py). test_spark_service.py is a live-stack harness
@@ -111,7 +112,8 @@ jobs:
           # The live proof (test_cold_export_integration.py) is `integration` and excluded here —
           # it needs TimescaleDB + MinIO and would only skip. It runs in cold-layer-integration.yml.
           - { service: cold_export,         path: services/cold_export/tests, args: "--ignore=services/cold_export/tests/test_cold_export_integration.py" }
-          - { service: tenant_delete,         path: services/tenant_delete/tests }
+          # The cold purge's live proof (test_cold_store_live.py) needs MinIO and runs in cold-layer-integration.yml.
+          - { service: tenant_delete,         path: services/tenant_delete/tests, args: "--ignore=services/tenant_delete/tests/test_cold_store_live.py" }
           # The infrastructure agent (ADR-0046): stores and model faked; its tool server also runs as
           # a real stdio subprocess. It reads the runbooks under docs/operations.
           - { service: ops_agent,           path: services/ops_agent/tests }

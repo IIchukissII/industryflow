@@ -20,8 +20,8 @@ import uuid
 
 import pytest
 
-requests = pytest.importorskip("requests")
-redis = pytest.importorskip("redis")
+import requests
+import redis
 
 pytestmark = pytest.mark.integration
 
