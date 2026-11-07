@@ -14,7 +14,7 @@ import re
 
 import pytest
 
-from _repo import ROOT, load_yaml
+from _repo import gate_tests_every_need, ROOT, load_yaml
 
 WORKFLOW = ".github/workflows/unit-tests.yml"
 JOB = "alert-kafka"
@@ -97,11 +97,7 @@ def test_the_kafka_job_runs_every_real_broker_module_and_requires_the_broker(ser
 def test_the_required_gate_reads_the_kafka_job():
     gate = _jobs()["unit-tests-gate"]
     assert JOB in gate["needs"]
-    script = gate["steps"][0]["run"]
-    assert f"needs.{JOB}.result" in script
-    # The result read must be one the failure check actually tests.
-    var = re.search(rf'(\w+)="\$\{{\{{ needs\.{JOB}\.result \}}\}}"', script).group(1)
-    assert re.search(rf'for r in [^;]*"\${var}"', script), "the gate reads the job's result but never tests it"
+    assert gate_tests_every_need(gate), "the gate does not test every result in needs"
 
 
 @pytest.mark.parametrize("service", SERVICES)

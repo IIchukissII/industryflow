@@ -56,9 +56,6 @@ ALLOWED = {
     "services/ml_service/tests/test_upload_capability.py::FakeStore": (
         {"set"}, "the upload minter's own one-call port (key, value, ttl_seconds, event), not the client; "
                  "the route's real MULTI runs on testing.redis_pair in the same module"),
-    "services/notebook_hub/tests/test_reclaim.py::"
-    "test_docker_removes_the_containers_still_mounting_the_volume_first.Client": (
-        {"get"}, "the Docker client's volumes.get(name), not the store"),
 }
 
 SKIP = {"node_modules", ".venv", "venv", "build", "site-packages", ".git", ".claude"}
