@@ -165,6 +165,19 @@ def test_the_sample_is_read_from_the_runs_own_artifacts(world):
         + ARTIFACTS.split(":/", 1)[1] + "/industryflow/feature_sample.json"]
 
 
+def test_a_run_stored_where_the_platform_reads_no_sample_says_so_before_anything_is_listed(world, monkeypatch):
+    def unlisted(run_id, path=None):
+        raise AssertionError("the listing would reach a store the platform does not read samples from")
+
+    monkeypatch.setattr(world.mlflow, "get_run", lambda run_id: SimpleNamespace(
+        info=SimpleNamespace(experiment_id="7", artifact_uri="s3://elsewhere/run-mine/artifacts"),
+        data=SimpleNamespace(metrics={})))
+    monkeypatch.setattr(world.mlflow, "list_artifacts", unlisted)
+    r = _promote(world)
+    assert r.status_code == 201, r.text
+    assert "not stored where the platform reads a sample from" in r.json()["baseline"]["reason"]
+
+
 def test_a_run_the_tenant_does_not_own_is_not_read(world):
     # The registry version names a run outside the caller's experiments: nothing of it is read.
     world.owned = False
