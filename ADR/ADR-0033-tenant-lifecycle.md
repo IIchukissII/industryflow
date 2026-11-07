@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0033 — Tenant lifecycle: provisioning through one privileged function, offboarding from every store
 
 - **Status:** Accepted
-- **Date:** 2026-10-24; changed 2026-11-06
+- **Date:** 2026-10-24; changed 2026-11-07
 - **Parent:** ADR-0001
 - **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (schema-per-tenant, the tenant mapping), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (dec 2: suspension ends sessions), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (dec 3: refused readings are dead-lettered), [ADR-0007](ADR-0007-public-key-infrastructure.md) (device revocation), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (tracking store), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (dec 5: per-tenant SQL identity), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md), [ADR-0020](ADR-0020-notebook-per-user-persistence.md), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (tenant data outside the database), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (backups), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (the tenant schema), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (dec 1: the stalled-stream alert is a platform rule), [ADR-0031](ADR-0031-alerting-http-surface-single-owner.md) (dec 2: the alert worker serves no API and no metric beyond its revision)
 
@@ -45,7 +45,7 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 7. **Delete is an explicit operator request after at least 30 days of suspension.** Nothing schedules it;
    the wait leaves a mistaken suspension recoverable.
 8. **A deleted tenant's registry entry stays, as a tombstone.** It anchors the deletion record, keeps the
-   identifier from reuse, and lets every verifier refuse the tenant as deleted rather than unknown.
+   identifier from reuse, and lets every verifier refuse the tenant as a known, inactive one rather than an unknown one.
 
 ## Alternatives
 
@@ -80,6 +80,7 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 | 7 | Scheduled deletion when the wait ends | Makes an irreversible action happen without a decision |
 | 7 | Delete immediately on request | Leaves no way back from a mistaken suspension |
 | 8 | Remove the registry entry once every store is empty | Loses the deletion record's anchor and makes a deleted tenant indistinguishable from an unknown one |
+| 8 | A refusal of its own for a deleted tenant at every verifier | Every verifier already refuses an inactive tenant; a second state changes no refusal |
 
 ## Consequences
 

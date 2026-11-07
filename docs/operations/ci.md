@@ -92,7 +92,7 @@ A pull request merges into `main` only when every gate in [Required checks on `m
 
 ## ADR-0026 dec 3, 4
 
-The compose smoke gate starts the whole stack, upgrades it from the previous release and judges liveness over an interval.
+The compose smoke gate starts the whole stack, upgrades it from the commit the change merges onto and judges liveness over an interval.
 
 | Code | Role |
 |---|---|

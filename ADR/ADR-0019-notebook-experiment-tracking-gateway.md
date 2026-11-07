@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0019 — Notebook experiment-tracking gateway and the tracking capability
 
 - **Status:** Accepted
-- **Date:** 2026-06-28; changed 2026-10-27
+- **Date:** 2026-06-28; changed 2026-11-07
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (the
   gateway this makes concrete), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md)
@@ -31,7 +31,9 @@ of the kernel. Artifacts are large, metadata calls small.
 3. **The spawner mints the tracking handle, for the authoring profile only.** The kernel cannot mint,
    refresh or widen it.
 4. **The kernel presents the capability as the tracking client's bearer token.** The gateway resolves
-   it in the capability store, the lookup revocation empties, and proxies with its own principal.
+   it in the capability store, the lookup revocation empties, and proxies as itself: the capability goes
+   no further than the gateway, which reaches the internal tracking server from its trusted position and
+   the store with its own credential.
 5. **The gateway forces every tracking, registry and artifact operation into the caller's tenant
    namespace and refuses any that would cross it.** Names carry a prefix built from the tenant's
    immutable identifier, stripped on read, and artifacts sit under a per-tenant object-store prefix.
