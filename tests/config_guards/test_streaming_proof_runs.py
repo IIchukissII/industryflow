@@ -11,7 +11,7 @@ read can fail without blocking a merge.
 """
 import re
 
-from _repo import ROOT, load_yaml
+from _repo import ROOT, gate_tests_every_need, load_yaml
 
 TESTS = "services/spark_jobs/tests"
 HELPER = f"{TESTS}/spark_stack.py"
@@ -77,7 +77,4 @@ def test_the_job_starts_every_store_builds_the_image_and_requires_the_stack():
 def test_the_required_gate_reads_the_job():
     gate = _jobs()["unit-tests-gate"]
     assert JOB in gate["needs"]
-    script = gate["steps"][0]["run"]
-    match = re.search(rf'(\w+)="\$\{{\{{ needs\.{JOB}\.result \}}\}}"', script)
-    assert match, "the gate never reads the job's result"
-    assert re.search(rf'for r in [^;]*"\${match.group(1)}"', script), "the gate reads the result but never tests it"
+    assert gate_tests_every_need(gate), "the gate does not test every result in needs"
