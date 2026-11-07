@@ -89,7 +89,8 @@ TOGGLES = {
     "everything": ["--set", "notebookHub.enabled=true", "--set", "tenantDelete.enabled=true",
                    "--set", "coldExport.enabled=true"],
     "external-db": ["--set", "infra.timescaledb.inCluster=false",
-                    "--set", "infra.timescaledb.external.host=db.example"],
+                    "--set", "infra.timescaledb.external.host=db.example",
+                    "--set-json", 'networkPolicy.externalEgress.timescaledb=[{"cidr":"192.0.2.10/32","port":5432}]'],
     "no-db-tls": ["--set", "tls.db.enabled=false", "--set", "notebookHub.enabled=true",
                   "--set", "tenantDelete.enabled=true"],
 }

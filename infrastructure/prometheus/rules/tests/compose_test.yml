@@ -89,3 +89,84 @@ tests:
               summary: "No restore rehearsal has passed recently"
               description: "No databases restore rehearsal has passed in the last nine days; its backups count toward no recovery objective until one does. Its output names the table or object that differed: docs/operations/backup-and-recovery.md."
               services: "restore-rehearsal, notebook-rehearsal, timescaledb, minio"
+
+  # The device CA watch is graded by what it refuses (ADR-0007 dec 10): a CRL or CA certificate check
+  # that stops passing is critical, a device renewal owed is a warning, each 13h after its last pass;
+  # a check that keeps passing raises nothing.
+  - interval: 1h
+    input_series:
+      # `check` passes every 6h throughout.
+      - series: 'industryflow_device_ca_check_last_success_timestamp_seconds{platform="industryflow", check="crl"}'
+        values: '0x5 21600x5 43200x5 64800x5 86400x5 108000x5 129600x5 151200x5'
+      # `check-certs` passes at t=0, never again.
+      - series: 'industryflow_device_ca_check_last_success_timestamp_seconds{platform="industryflow", check="certs"}'
+        values: '0x47'
+    alert_rule_test:
+      - eval_time: 12h
+        alertname: IndustryFlowDeviceCertExpiring
+        exp_alerts: []
+      - eval_time: 14h
+        alertname: IndustryFlowDeviceCertExpiring
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "A device certificate is close to expiry"
+              description: "No device-certificate check has passed for 13h; docker logs industryflow-device-crl-refresh names the device. Renew it (docs/operations/device-mtls.md); an expired certificate is refused at ingestion."
+              services: "device-crl-refresh"
+      - eval_time: 14h
+        alertname: IndustryFlowDeviceCrlStale
+        exp_alerts: []
+      - eval_time: 40h
+        alertname: IndustryFlowDeviceCrlStale
+        exp_alerts: []
+
+  # The CRL check stops passing: critical, and the device check keeping on passing does not hide it.
+  - interval: 1h
+    input_series:
+      - series: 'industryflow_device_ca_check_last_success_timestamp_seconds{platform="industryflow", check="crl"}'
+        values: '0x47'
+      - series: 'industryflow_device_ca_check_last_success_timestamp_seconds{platform="industryflow", check="certs"}'
+        values: '0x5 21600x5 43200x5 64800x5 86400x5 108000x5 129600x5 151200x5'
+      - series: 'industryflow_device_ca_check_last_success_timestamp_seconds{platform="other", check="crl"}'
+        values: '172800x47'
+    alert_rule_test:
+      - eval_time: 12h
+        alertname: IndustryFlowDeviceCrlStale
+        exp_alerts: []
+      - eval_time: 14h
+        alertname: IndustryFlowDeviceCrlStale
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "Device CRL or CA certificate is close to expiry"
+              description: "No device CA check has passed for 13h; docker logs industryflow-device-crl-refresh names the CRL or certificate. Re-sign the CRL or replace the CA certificate (docs/operations/device-mtls.md). Once either expires, every device is refused at ingestion."
+              services: "device-crl-refresh, ingestion-edge"
+      - eval_time: 14h
+        alertname: IndustryFlowDeviceCertExpiring
+        exp_alerts: []
+
+  # A deployment on which neither check has ever passed is raised 13h on, each at its own grade.
+  - interval: 1h
+    input_series:
+      - series: 'up{platform="industryflow", job="node-exporter"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 12h
+        alertname: IndustryFlowDeviceCrlStale
+        exp_alerts: []
+      - eval_time: 14h
+        alertname: IndustryFlowDeviceCrlStale
+        exp_alerts:
+          - exp_labels: {severity: critical, platform: industryflow, check: crl}
+            exp_annotations:
+              summary: "Device CRL or CA certificate is close to expiry"
+              description: "No device CA check has ever passed on this deployment; docker logs industryflow-device-crl-refresh names the CRL or certificate, or says the device CA is not initialized (docs/operations/device-mtls.md)."
+              services: "device-crl-refresh, ingestion-edge"
+      - eval_time: 14h
+        alertname: IndustryFlowDeviceCertExpiring
+        exp_alerts:
+          - exp_labels: {severity: warning, platform: industryflow, check: certs}
+            exp_annotations:
+              summary: "A device certificate is close to expiry"
+              description: "No device-certificate check has ever passed on this deployment; docker logs industryflow-device-crl-refresh names the device or the register error (docs/operations/device-mtls.md)."
+              services: "device-crl-refresh"

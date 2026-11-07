@@ -2,8 +2,9 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Rules on series only a Docker-host deployment has: the backup and rehearsal jobs' success times,
-# which they write to node-exporter's textfile directory (backup-metrics volume). The chart raises the
+# Rules on series only a Docker-host deployment has: the backup and rehearsal jobs' and the device CA
+# watch's success times, which they write to node-exporter's textfile directories (backup-metrics and
+# device-ca-metrics volumes). The chart raises the
 # same alerts from its CronJobs' status (templates/observability-prometheusrules.yaml) and does not
 # load this file.
 groups:
@@ -46,3 +47,44 @@ groups:
           summary: "No restore rehearsal has ever passed"
           description: "No database restore rehearsal has passed on this deployment, so its backups count toward no recovery objective. Run restore-rehearsal and schedule it: docs/operations/backup-and-recovery.md#restore-rehearsal."
           services: "restore-rehearsal, timescaledb, minio"
+      # ADR-0007 dec 8, 10: an expiring device CRL or CA certificate makes the edge refuse every device.
+      # device-crl-refresh records each passing `check`; two missed six-hourly checks raise it, as the
+      # chart's rule does from its CronJob. Keyed on the last success, so it clears on the next pass.
+      - alert: IndustryFlowDeviceCrlStale
+        expr: time() - max(industryflow_device_ca_check_last_success_timestamp_seconds{platform="industryflow", check="crl"}) > 46800
+        labels:
+          severity: critical
+        annotations:
+          summary: "Device CRL or CA certificate is close to expiry"
+          description: "No device CA check has passed for 13h; docker logs industryflow-device-crl-refresh names the CRL or certificate. Re-sign the CRL or replace the CA certificate (docs/operations/device-mtls.md). Once either expires, every device is refused at ingestion."
+          services: "device-crl-refresh, ingestion-edge"
+      # A deployment on which the check has never passed (no device CA, or inside a window from the
+      # start) has no series at all; measured from then, as the chart's from its job's creation.
+      - alert: IndustryFlowDeviceCrlStale
+        expr: absent(industryflow_device_ca_check_last_success_timestamp_seconds{platform="industryflow", check="crl"})
+        for: 13h
+        labels:
+          severity: critical
+        annotations:
+          summary: "Device CRL or CA certificate is close to expiry"
+          description: "No device CA check has ever passed on this deployment; docker logs industryflow-device-crl-refresh names the CRL or certificate, or says the device CA is not initialized (docs/operations/device-mtls.md)."
+          services: "device-crl-refresh, ingestion-edge"
+      # ADR-0007 dec 10: a device whose newest unrevoked certificate nears expiry owes a renewal. One
+      # device, not the fleet, so a warning; keyed on the last passing `check-certs` like the CRL rule.
+      - alert: IndustryFlowDeviceCertExpiring
+        expr: time() - max(industryflow_device_ca_check_last_success_timestamp_seconds{platform="industryflow", check="certs"}) > 46800
+        labels:
+          severity: warning
+        annotations:
+          summary: "A device certificate is close to expiry"
+          description: "No device-certificate check has passed for 13h; docker logs industryflow-device-crl-refresh names the device. Renew it (docs/operations/device-mtls.md); an expired certificate is refused at ingestion."
+          services: "device-crl-refresh"
+      - alert: IndustryFlowDeviceCertExpiring
+        expr: absent(industryflow_device_ca_check_last_success_timestamp_seconds{platform="industryflow", check="certs"})
+        for: 13h
+        labels:
+          severity: warning
+        annotations:
+          summary: "A device certificate is close to expiry"
+          description: "No device-certificate check has ever passed on this deployment; docker logs industryflow-device-crl-refresh names the device or the register error (docs/operations/device-mtls.md)."
+          services: "device-crl-refresh"

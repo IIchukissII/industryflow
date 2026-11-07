@@ -276,7 +276,7 @@ limits, handles and persistence ([profiles](#profiles)). The user is offered no 
 
 | Containment | Compose | Kubernetes |
 |---|---|---|
-| Egress | Network `industryflow-notebook-kernels` ([ADR-0018 dec 4](#adr-0018-dec-3-4)) | NetworkPolicy `notebook-singleuser-egress`: DNS, hub API, API gateway, SQL proxy, tracking gateway, cold broker (with cold export), MinIO (in cluster) |
+| Egress | Network `industryflow-notebook-kernels` ([ADR-0018 dec 4](#adr-0018-dec-3-4)) | NetworkPolicy `notebook-singleuser-egress`: DNS, hub API, API gateway, SQL proxy, tracking gateway, cold broker (with cold export), MinIO (in cluster, or `networkPolicy.externalEgress.minio`) |
 | Process | uid `1000:1000`, all capabilities dropped, `no-new-privileges` | uid 1000, `runAsNonRoot`, no privilege escalation, all capabilities dropped |
 | Resources | CPU and memory per profile | CPU and memory per profile |
 | Ephemerality | Container removed at stop | Pod removed at stop |

@@ -149,7 +149,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ $agent.monitoringNamespace }}
+              kubernetes.io/metadata.name: {{ required "observability.monitoringNamespace is required" .Values.observability.monitoringNamespace }}
       ports:
         - port: {{ $agent.port }}
   egress:
@@ -159,7 +159,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ $agent.monitoringNamespace }}
+              kubernetes.io/metadata.name: {{ required "observability.monitoringNamespace is required" .Values.observability.monitoringNamespace }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

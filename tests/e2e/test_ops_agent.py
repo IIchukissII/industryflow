@@ -21,7 +21,7 @@ NOTE_TIMEOUT = 240  # the router's group wait (30 s) plus the agent's evidence a
 
 def _router(env, *argv: str) -> str:
     """A command inside the alert router's container: it has amtool and wget, and reaches the log store
-    and the agent on the platform network (the log store's own image has no shell)."""
+    and the agent on the agent's network (the log store's own image has no shell)."""
     return env.run("docker", "exec", "industryflow-alertmanager", *argv)
 
 

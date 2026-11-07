@@ -95,7 +95,7 @@ digest from GHCR over the registry API (`GITHUB_TOKEN` or `gh auth token` for pr
 
 | Item | Keys | Requirement |
 |---|---|---|
-| Secrets | `secrets.data`, `secrets.create`, `secrets.existingSecret` | Replace every `CHANGE_ME` from a secrets backend, or `secrets.create=false` + `existingSecret` (every workload then references that one Secret). Rendering fails on a placeholder while `secrets.failOnPlaceholders=true` |
+| Secrets | `secrets.data`, `secrets.create`, `secrets.existingSecret` | Replace every `CHANGE_ME` from a secrets backend, or `secrets.create=false` + `existingSecret` (every workload then reads only its own keys from that one Secret). Rendering fails on a placeholder while `secrets.failOnPlaceholders=true` |
 | DB roles | `secrets.data.*_DB_PASSWORD`, `config.*_DB_USER` | Each service connects as its own role; the `db-migrate` Job creates the roles from these passwords |
 | Images | `values-digests.yaml` | Install with the generated overlay; never `latest` |
 | Ingress TLS | `ingress.tls.secretName` | Public certificate Secret ([ADR-0004](../../../ADR/ADR-0004-api-authentication-sessions-and-transport.md)) |
@@ -165,14 +165,17 @@ With `inCluster: false` the endpoint helper returns `infra.<dep>.external.*` and
 | Secret values | `secrets.data`, supplied at install from outside the chart |
 | Placeholder | A value starting `CHANGE_ME` or `changeme` fails the render while `secrets.failOnPlaceholders=true` |
 | Scoping | One Secret per workload, `<release>-<workload>-secrets`, holding only `apps.<name>.secretKeys` or the infra key list |
-| `secrets.existingSecret` | Every workload references that one Secret; no scoping and no placeholder check in the chart |
+| Key delivery | Each key a workload uses is one `secretKeyRef` by name; no workload takes a Secret by `envFrom` |
+| `secrets.existingSecret` | Every workload references that one Secret, by `secretKeyRef` to its own keys only; the chart renders no Secret and so no placeholder check |
 
 | Code | Role |
 |---|---|
 | `deploy/helm/industryflow/templates/configmap.yaml` | The shared ConfigMap |
 | `deploy/helm/industryflow/templates/secret.yaml` | Placeholder refusal; scoped Secrets per workload |
 | `deploy/helm/industryflow/templates/_helpers.tpl` | `industryflow.scopedSecret`, `industryflow.workloadSecretName` |
-| `deploy/helm/industryflow/templates/apps.yaml` | Mounts the ConfigMap and the workload's own Secret |
+| `deploy/helm/industryflow/templates/apps.yaml` | Mounts the ConfigMap; one `secretKeyRef` per `apps.<name>.secretKeys` entry |
+| `deploy/helm/industryflow/templates/infra-mlflow.yaml` | Tracking server: one `secretKeyRef` per key it uses |
+| `tests/config_guards/test_helm_secret_scoping.py` | No `envFrom` Secret; the same keys per workload with and without `existingSecret`; placeholder refusal |
 | `deploy/helm/industryflow/values.yaml` | `secrets.*` and per-app `secretKeys` |
 
 ## ADR-0009 dec 5
@@ -182,13 +185,24 @@ With `inCluster: false` the endpoint helper returns `infra.<dep>.external.*` and
 | `<release>` | Each enabled app's `ingress.host` | Terminates HTTPS with `ingress.tls.secretName` |
 | `<release>-ingest` | `ingress.mtls.host` | Verifies device client certificates against `ingress.mtls.caSecret`; passes the verified certificate to ingestion |
 
-The NetworkPolicy `<release>-ingestion-from-edge-only` admits ingress to ingestion only from the namespace `networkPolicy.ingressControllerNamespace`. It renders only with `networkPolicy.enabled`, which defaults to `false`; the mTLS Ingress renders only with `ingress.mtls.enabled`, which defaults to `false`.
+| Element | Value |
+|---|---|
+| `networkPolicy.enabled` | `true` by default; a CNI without NetworkPolicy support ignores the policies |
+| `<release>-ingestion-from-edge-only` | Admits ingress to ingestion only from pods matching `networkPolicy.ingressControllerPodLabels` (default `app.kubernetes.io/name: ingress-nginx`, `app.kubernetes.io/component: controller`) in the namespace `networkPolicy.ingressControllerNamespace`; empty labels fail the render |
+| `networkPolicy.externalEgress.<dep>` | `[{cidr, port}]` for an external `timescaledb`, `redis`, `kafka`, `minio` or `mlflow`; a restricted workload using an external dependency with no entry fails the render |
+| `ingress.mtls.enabled` | `false` by default: no Ingress routes to ingestion, so it is unreachable rather than reachable without mTLS; enabling it needs the device-CA Secret `ingress.mtls.caSecret` |
+| Ingestion metrics | A `metrics-listener` container (`apps.ingestion-service.metricsListener`, nginx) serves only `/metrics` from the app on loopback, 404 for every other path; the Service and ServiceMonitor name it as port `metrics` |
+| Ingestion's admitted callers | The controller pods to the app port only; `observability.prometheusPodLabels` pods in `observability.monitoringNamespace` to the metrics port only; empty labels fail the render |
 
 | Code | Role |
 |---|---|
 | `deploy/helm/industryflow/templates/ingress.yaml` | HTTPS Ingress and device mTLS Ingress |
-| `deploy/helm/industryflow/templates/networkpolicy.yaml` | Ingestion reachable only from the controller namespace |
+| `deploy/helm/industryflow/templates/networkpolicy.yaml` | Ingestion reachable only from the controller pods; per-workload egress |
+| `deploy/helm/industryflow/templates/_helpers.tpl` | `industryflow.egressTo`: in-cluster pod selector or `externalEgress` ipBlocks |
 | `deploy/helm/industryflow/values.yaml` | `ingress.*`, `networkPolicy.*` |
+| `deploy/helm/industryflow/templates/apps.yaml` | Metrics-only listener container and its ConfigMap |
+| `deploy/helm/industryflow/templates/observability-servicemonitors.yaml` | Scrapes the listener's port |
+| `tests/config_guards/test_helm_ingestion_edge_policy.py` | Policy on by default; controller pods to the app port, Prometheus to the metrics port, nothing else; the listener serves only `/metrics` and is the port scraped; only the mTLS Ingress routes to ingestion; external egress required |
 
 ## Related
 

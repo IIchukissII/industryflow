@@ -182,8 +182,16 @@ apps:
     digest: ""
     # mTLS-only, holds no DB role and no app secrets (ADR-0002) — gets no Secret.
     secretKeys: []
-    # /metrics on the service port → a ServiceMonitor (scraped in-cluster, not via the edge).
+    # Scraped through a metrics-only listener in the pod, never on the device port, which only the
+    # ingress controller reaches (ADR-0002 dec 3, ADR-0009 dec 5): it serves /metrics from the app on
+    # loopback and 404 for everything else, as compose's edge does. The same nginx build as there.
     metrics: true
+    metricsListener:
+      port: 9003
+      image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { cpu: 100m, memory: 64Mi }
     replicas: 2
     port: 8003
     probe: { path: /health, port: 8003 }
@@ -486,6 +494,15 @@ tenantDelete:
 # the operator is installed. This keeps a plain `helm install` working without the CRDs.
 # ---------------------------------------------------------------------------
 observability:
+  # Namespace of the operator's monitoring stack (ADR-0016 dec 4), as the NetworkPolicies name it: its
+  # Prometheus scrapes ingestion's metrics-only listener, and the infrastructure agent accepts webhooks
+  # from it and reaches it.
+  monitoringNamespace: monitoring
+  # Labels of that stack's Prometheus pods, the only ones admitted to ingestion's metrics listener;
+  # empty fails the render (it would admit every pod of the namespace). The default is the label the
+  # Prometheus Operator sets.
+  prometheusPodLabels:
+    app.kubernetes.io/name: prometheus
   serviceMonitors:
     enabled: false
     interval: 30s
@@ -515,9 +532,8 @@ observability:
     prometheusUrl: ""
     lokiUrl: ""
     alertmanagerUrl: ""
-    # Namespace of that stack: the only source the agent accepts webhooks from, and a destination
-    # of its egress.
-    monitoringNamespace: monitoring
+    # The stack's namespace is observability.monitoringNamespace: the only source the agent accepts
+    # webhooks from, and a destination of its egress.
     # How a service's logs are selected; `%s` is the workload name (app.kubernetes.io/name). Empty:
     # {namespace="<release namespace>", app="%s"}, the labels the loki-stack collector sets.
     logSelector: ""
@@ -794,13 +810,28 @@ ingress:
       image: alpine/openssl:3.5.9@sha256:96e53bf9b9041fdc8a33ea61356688506bbddc368c70d6e8a9acdd28475e8537
 
 # ---------------------------------------------------------------------------
-# NetworkPolicy restricting ingestion-service ingress to the cluster TLS edge only
-# (ADR-0002 dec 3 — the service must be reachable only via the proxy). The selector for
-# the ingress controller is environment-specific; default targets the common label.
+# NetworkPolicies: ingestion-service admits only the cluster TLS edge, the ingress controller's own
+# pods (ADR-0009 dec 5, ADR-0002 dec 3), and each restricted workload reaches only what it uses. On by
+# default; a cluster whose CNI does not enforce NetworkPolicy ignores them. The controller selector
+# is environment-specific; the default is the ingress-nginx controller's labels.
 # ---------------------------------------------------------------------------
 networkPolicy:
-  enabled: false
+  enabled: true
   ingressControllerNamespace: ingress-nginx
+  # Labels of the controller pods inside that namespace; empty fails the render (it would admit
+  # every pod of the namespace).
+  ingressControllerPodLabels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+  # An external datastore (infra.<dep>.inCluster=false) has no pods to select: list its addresses,
+  # e.g. timescaledb: [{cidr: <db-ip>/32, port: 5432}]. A restricted workload that uses an external
+  # dependency with no entry here fails the render.
+  externalEgress:
+    timescaledb: []
+    redis: []
+    kafka: []
+    minio: []
+    mlflow: []
 
 # Embedded notebooks (ADR-0011/0012/0014). When enabled this renders the hub runtime (hub +
 # configurable-http-proxy + RBAC), the SSO reverse proxy that performs the ADR-0014 handoff,

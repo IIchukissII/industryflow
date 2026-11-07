@@ -155,6 +155,17 @@ services:
     network_mode: none
     restart: "no"
 
+  # The device CA watch's success times (device-crl-refresh, ADR-0007 dec 10), written as the CA dir's
+  # owner; a volume of their own, so the watch cannot write the backup jobs' series.
+  device-ca-metrics-init:
+    image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+    container_name: industryflow-device-ca-metrics-init
+    command: ["sh", "-ec", "chown ${DEVICE_CA_UID:-1000}:${DEVICE_CA_GID:-1000} /m && chmod 0755 /m"]
+    volumes:
+      - device-ca-metrics:/m
+    network_mode: none
+    restart: "no"
+
   # The key the gateway signs the dashboards' sign-on assertion with (ADR-0016 dec 7), generated once
   # and kept; its public half is re-derived from it on every run (services/api_gateway/dashboards_key.py).
   # The gateway's own image, which carries the crypto library, as root (to hand the private half to
@@ -792,9 +803,13 @@ services:
   # Re-signs the issuing intermediate's CRL before it expires (ADR-0007 dec 8). An expired CRL
   # makes the edge refuse EVERY device. It uses only the intermediate key, which already lives in
   # this host's CA dir; the root key is never needed (its CRL is re-signed at the root ceremony,
-  # `device-ca.sh root-crl`). The healthcheck goes unhealthy when either CRL or a CA certificate
-  # nears expiry, or when a device's renewal is owed (ADR-0007 dec 10). It holds a signing key, so it
-  # has no network at all and runs as the CA dir's owner (DEVICE_CA_UID/GID).
+  # `device-ca.sh root-crl`). The expiry watch is graded by what it refuses (ADR-0007 dec 10), as the
+  # chart's two CronJobs are: every DEVICE_CA_CHECK_SECONDS it runs `check` (a CRL or CA certificate:
+  # every device) and `check-certs` (one device's renewal owed) apart, and records each one's last
+  # success for node-exporter's textfile collector (device-ca-metrics volume);
+  # infrastructure/prometheus/rules/compose.yml raises IndustryFlowDeviceCrlStale (critical) and
+  # IndustryFlowDeviceCertExpiring (warning) from them. The healthcheck is `check` alone. It holds a
+  # signing key, so it has no network at all and runs as the CA dir's owner (DEVICE_CA_UID/GID).
   device-crl-refresh:
     image: alpine/openssl:3.5.9@sha256:96e53bf9b9041fdc8a33ea61356688506bbddc368c70d6e8a9acdd28475e8537
     container_name: industryflow-device-crl-refresh
@@ -803,24 +818,42 @@ services:
     environment:
       DEVICE_CA_DIR: /ca
       CRL_REFRESH_SECONDS: ${DEVICE_CRL_REFRESH_SECONDS:-86400}
+      CHECK_SECONDS: ${DEVICE_CA_CHECK_SECONDS:-21600}
     entrypoint: ["sh", "-ec"]
     command:
       - |
         [ -d /ca/intermediate ] || { echo "device CA not initialized: run scripts/device-ca.sh init" >&2; exit 1; }
+        # A check's last success, written whole so a scrape never reads half a file.
+        mark() {
+          printf '%s\n' \
+            "# HELP industryflow_device_ca_check_last_success_timestamp_seconds When a device CA expiry check last passed." \
+            "# TYPE industryflow_device_ca_check_last_success_timestamp_seconds gauge" \
+            "industryflow_device_ca_check_last_success_timestamp_seconds{check=\"$$1\"} $$(date -u +%s)" \
+            > "/metrics/.device-ca-$$1.prom.tmp" && mv -f "/metrics/.device-ca-$$1.prom.tmp" "/metrics/device-ca-$$1.prom"
+        }
+        signed=0
         while true; do
-          sh /opt/device-ca.sh crl || echo "CRL re-sign FAILED" >&2
-          sh /opt/device-ca.sh check-certs || true
-          sleep "$$CRL_REFRESH_SECONDS"
+          now=$$(date -u +%s)
+          if [ $$((now - signed)) -ge "$$CRL_REFRESH_SECONDS" ]; then
+            if sh /opt/device-ca.sh crl; then signed=$$now; else echo "CRL re-sign FAILED" >&2; fi
+          fi
+          if sh /opt/device-ca.sh check; then mark crl || echo "check metric write FAILED" >&2; fi
+          if sh /opt/device-ca.sh check-certs; then mark certs || echo "check metric write FAILED" >&2; fi
+          sleep "$$CHECK_SECONDS"
         done
     healthcheck:
-      test: ["CMD-SHELL", "sh /opt/device-ca.sh check && sh /opt/device-ca.sh check-certs"]
+      test: ["CMD-SHELL", "sh /opt/device-ca.sh check"]
       interval: 1h
       timeout: 30s
       start_period: 1m
       retries: 1
+    depends_on:
+      device-ca-metrics-init:
+        condition: service_completed_successfully
     volumes:
       - "${DEVICE_CA_DIR:-./deploy/device-ca}:/ca"
       - ./scripts/device-ca.sh:/opt/device-ca.sh:ro
+      - device-ca-metrics:/metrics
     restart: unless-stopped
 
   # ==========================================================================
@@ -1227,6 +1260,7 @@ services:
       - prometheus-data:/prometheus
     networks:
       - industryflow-network
+      - ops-agent
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
@@ -1250,6 +1284,7 @@ services:
       - alertmanager-data:/alertmanager
     networks:
       - industryflow-network
+      - ops-agent
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
@@ -1288,8 +1323,10 @@ services:
       - prometheus
       - loki
       - alertmanager
+    # Its own network, shared only with Prometheus, Loki and Alertmanager (ADR-0046 dec 7); not
+    # internal, for a hosted model endpoint.
     networks:
-      - industryflow-network
+      - ops-agent
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8095/healthz', timeout=3)"]
@@ -1327,13 +1364,18 @@ services:
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
       # The backup and rehearsal jobs' success times (infrastructure/prometheus/rules/compose.yml).
       - '--collector.textfile.directory=/textfile'
+      # The device CA watch's success times (device-crl-refresh, same rules file).
+      - '--collector.textfile.directory=/textfile-device-ca'
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:ro
       - backup-metrics:/textfile:ro
+      - device-ca-metrics:/textfile-device-ca:ro
     depends_on:
       backup-metrics-init:
+        condition: service_completed_successfully
+      device-ca-metrics-init:
         condition: service_completed_successfully
     ports:
       - "127.0.0.1:9100:9100"
@@ -1459,6 +1501,7 @@ services:
       - loki-data:/loki
     networks:
       - industryflow-network
+      - ops-agent
     restart: unless-stopped
     # No healthcheck: the Loki 3 image is distroless (no shell, no wget) and its binary has no health
     # subcommand, so any in-container probe reports unhealthy forever. Prometheus scrapes it instead
@@ -1777,6 +1820,9 @@ volumes:
   # The backup and rehearsal jobs' success times, read by node-exporter's textfile collector.
   backup-metrics:
     name: industryflow-backup-metrics
+  # The device CA expiry checks' success times (device-crl-refresh), read by the same collector.
+  device-ca-metrics:
+    name: industryflow-device-ca-metrics
 
 # ==========================================================================
 # NETWORKS
@@ -1807,3 +1853,9 @@ networks:
     name: industryflow-ingestion-back
     driver: bridge
     internal: true
+  # The infrastructure agent's reach (ADR-0046 dec 7): the metrics store, the log store and the alert
+  # router, which also delivers its webhook here. No platform service is on it. Not `internal`: the
+  # model endpoint may be a hosted API or a model server elsewhere on the operator's network.
+  ops-agent:
+    name: industryflow-ops-agent
+    driver: bridge
