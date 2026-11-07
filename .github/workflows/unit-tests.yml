@@ -44,6 +44,8 @@ jobs:
               - 'scripts/tests/test_device_ca.py'
               - 'scripts/dead-letters.sh'
               - 'scripts/tests/test_dead_letters.py'
+              - 'scripts/box-e2e.sh'
+              - 'scripts/tests/test_box_e2e.py'
               # The user CLIs are tested in services/api_gateway/tests/test_user_scripts.py.
               - 'scripts/manage_users.py'
               - 'scripts/seed_users.py'
@@ -125,6 +127,8 @@ jobs:
           - { service: device_ca,           path: scripts/tests/test_device_ca.py, install: "pip install -r scripts/ci/requirements.txt" }
           # Dead-letter inspection and replay, against stand-in Kafka console tools.
           - { service: dead_letters,        path: scripts/tests/test_dead_letters.py, install: "pip install -r scripts/ci/requirements.txt" }
+          # The end-to-end run's result line, against stand-in git and docker.
+          - { service: box_e2e,             path: scripts/tests/test_box_e2e.py, install: "pip install -r scripts/ci/requirements.txt" }
           # The shared contracts package itself. The repository-wide guards that every service takes
           # its tenant names and window contract from it live in tests/config_guards.
           - { service: contracts,           path: libs/industryflow_contracts/tests, install: "pip install './libs/industryflow_contracts[dev]'" }
