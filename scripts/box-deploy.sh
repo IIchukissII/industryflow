@@ -18,8 +18,10 @@
 # that is still not enough, before the checkout moves.
 #
 # The infrastructure agent (profile ops-agent) is built and run when the environment enables it, i.e.
-# `.env` sets OPS_AGENT_WEBHOOK_SECRET. The monitoring stack is recreated last: its config files are
-# single-file mounts, which keep the file the checkout replaced until the container is recreated.
+# `.env` sets OPS_AGENT_WEBHOOK_SECRET. A single-file mount keeps the file the checkout replaced until
+# its container is recreated, so every running service that mounts a file the deploy changed is
+# recreated (scripts/compose_file_mounts.py); the monitoring stack is recreated last whatever changed,
+# since it also reads directories of rules and dashboards.
 #
 # A failure never leaves the stream engines stopped: they are started again on any exit.
 set -euo pipefail
@@ -89,6 +91,18 @@ docker compose up -d --no-deps --force-recreate ingestion-edge
 docker compose exec -T frontend nginx -s reload
 docker compose start "${SPARK[@]}"
 spark_down=0
+echo "== single-file configs"
+# A service that mounts a file this deploy changed still holds the replaced file: recreate it.
+changed="$(mktemp)"
+if [ -n "$from" ]; then git diff --name-only "$from" "$sha" > "$changed"; else git ls-files > "$changed"; fi
+mapfile -t stale < <(docker compose "${UP_PROFILES[@]}" config --format json \
+    | python3 scripts/compose_file_mounts.py "$PWD" "$changed" \
+    | grep -Fx -f <(docker compose "${UP_PROFILES[@]}" ps --services --status running) || true)
+rm -f "$changed"
+if [ "${#stale[@]}" -gt 0 ]; then
+    echo "recreating ${stale[*]}"
+    docker compose "${UP_PROFILES[@]}" up -d --no-deps --force-recreate "${stale[@]}"
+fi
 echo "== monitoring config"
 docker compose up -d --no-deps --force-recreate prometheus alertmanager grafana
 printf 'deployed=%s\nfrom=%s\nat=%s\n' "$sha" "${from:-}" "$(date -u +%FT%TZ)" > .box-deployed
