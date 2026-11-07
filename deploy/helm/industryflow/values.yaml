@@ -794,13 +794,28 @@ ingress:
       image: alpine/openssl:3.5.9@sha256:96e53bf9b9041fdc8a33ea61356688506bbddc368c70d6e8a9acdd28475e8537
 
 # ---------------------------------------------------------------------------
-# NetworkPolicy restricting ingestion-service ingress to the cluster TLS edge only
-# (ADR-0002 dec 3 — the service must be reachable only via the proxy). The selector for
-# the ingress controller is environment-specific; default targets the common label.
+# NetworkPolicies: ingestion-service admits only the cluster TLS edge, the ingress controller's own
+# pods (ADR-0009 dec 5, ADR-0002 dec 3), and each restricted workload reaches only what it uses. On by
+# default; a cluster whose CNI does not enforce NetworkPolicy ignores them. The controller selector
+# is environment-specific; the default is the ingress-nginx controller's labels.
 # ---------------------------------------------------------------------------
 networkPolicy:
-  enabled: false
+  enabled: true
   ingressControllerNamespace: ingress-nginx
+  # Labels of the controller pods inside that namespace; empty fails the render (it would admit
+  # every pod of the namespace).
+  ingressControllerPodLabels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+  # An external datastore (infra.<dep>.inCluster=false) has no pods to select: list its addresses,
+  # e.g. timescaledb: [{cidr: <db-ip>/32, port: 5432}]. A restricted workload that uses an external
+  # dependency with no entry here fails the render.
+  externalEgress:
+    timescaledb: []
+    redis: []
+    kafka: []
+    minio: []
+    mlflow: []
 
 # Embedded notebooks (ADR-0011/0012/0014). When enabled this renders the hub runtime (hub +
 # configurable-http-proxy + RBAC), the SSO reverse proxy that performs the ADR-0014 handoff,

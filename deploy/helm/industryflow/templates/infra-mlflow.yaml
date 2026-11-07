@@ -67,13 +67,11 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "industryflow.fullname" . }}-config
-            - secretRef:
-                name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "mlflow") }}
           # The same server flags compose runs: the backend store in the DB (not the image's local
           # default, which a pod restart erases), artifacts proxied to the object store, and clients
           # handed `mlflow-artifacts:` so they never need an object-store credential (ADR-0019).
-          # $(VAR)s are expanded by Kubernetes from the env below and the envFrom sources; no secret
-          # goes in the args (tests/config_guards/test_no_secret_on_argv.py).
+          # $(VAR)s are expanded by Kubernetes from the env below and the ConfigMap; each secret key is
+          # named in env, never the whole Secret (ADR-0009 dec 4); no secret goes in the args (tests/config_guards/test_no_secret_on_argv.py).
           args:
             - mlflow
             - server

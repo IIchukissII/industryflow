@@ -105,12 +105,18 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "industryflow.fullname" $root }}-config
-            {{- if $app.secretKeys }}
-            - secretRef:
-                name: {{ include "industryflow.workloadSecretName" (dict "ctx" $root "workload" $name) }}
-            {{- end }}
-          {{- if or $app.secretEnv $app.edge $app.buildInfoPort }}
+          {{- if or $app.secretKeys $app.secretEnv $app.edge $app.buildInfoPort }}
           env:
+            {{- /* ADR-0009 dec 4: each of the workload's own secretKeys by name, never a whole
+                   Secret by envFrom, so an existingSecret holding every credential still hands this
+                   pod only its own keys. */}}
+            {{- range $key := ($app.secretKeys | default list) }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "industryflow.workloadSecretName" (dict "ctx" $root "workload" $name) }}
+                  key: {{ $key }}
+            {{- end }}
             {{- if $app.buildInfoPort }}
             {{- /* The port the process serves its revision on is the one the Service and the
                    ServiceMonitor name (build_info.SERVE_PORT_ENV, ADR-0016 dec 8). */}}

@@ -86,10 +86,12 @@ All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 
 Every approaching expiry is raised in advance, graded by what it refuses ([ADR-0007](../../ADR/ADR-0007-public-key-infrastructure.md) dec 10).
 
-| Expiring | Refuses | Raised by | Severity |
-|---|---|---|---|
-| A CRL or a CA certificate of the chain | Every device | `check` | Critical |
-| A device's newest unrevoked certificate | That device | `check-certs` | Warning |
+| Expiring | Refuses | Raised by | Alert | Severity |
+|---|---|---|---|---|
+| A CRL or a CA certificate of the chain | Every device | `check` | `IndustryFlowDeviceCrlStale` | Critical |
+| A device's newest unrevoked certificate | That device | `check-certs` | `IndustryFlowDeviceCertExpiring` | Warning |
+
+Each alert fires when its check has not passed for 13h (two missed six-hourly runs), or has never passed for 13h, on both deployments.
 
 `check-certs` reads only public files: `issued.tsv`, its signature, the CRL bundle and the chain.
 
@@ -153,11 +155,16 @@ point; the edge holds the CRL locally ([ADR-0007](../../ADR/ADR-0007-public-key-
 
 ### Compose
 
-`device-crl-refresh` runs `device-ca.sh crl` every `DEVICE_CRL_REFRESH_SECONDS` (default `86400`),
-with no network, as `DEVICE_CA_UID`:`DEVICE_CA_GID` (default `1000:1000`, the CA directory's owner).
-After each re-sign it logs `device-ca.sh check-certs`. Its healthcheck runs `check` and `check-certs`
-hourly; `docker compose ps` shows it **unhealthy** when a CRL, a CA certificate or a device certificate
-is inside its warning window. `docker logs industryflow-device-crl-refresh` names the device.
+`device-crl-refresh` runs with no network, as `DEVICE_CA_UID`:`DEVICE_CA_GID` (default `1000:1000`,
+the CA directory's owner).
+
+| Step | Every | Result |
+|---|---|---|
+| `device-ca.sh crl` | `DEVICE_CRL_REFRESH_SECONDS` (default `86400`); retried at the next check after a failure | Re-signed CRL |
+| `device-ca.sh check`, then `check-certs`, apart | `DEVICE_CA_CHECK_SECONDS` (default `21600`) | Each pass writes `industryflow_device_ca_check_last_success_timestamp_seconds{check="crl"}` or `{check="certs"}` to the `device-ca-metrics` volume, read by node-exporter's textfile collector |
+| Healthcheck: `check` | 1h | **unhealthy** in `docker compose ps` while a CRL or a CA certificate is inside its window |
+
+The alerts are in `infrastructure/prometheus/rules/compose.yml`. `docker logs industryflow-device-crl-refresh` names the CRL, certificate or device.
 
 ### Kubernetes
 
@@ -190,7 +197,8 @@ kubectl -n <namespace> create secret generic industryflow-device-ca \
 |---|---|---|
 | Every device refused | A CRL expired | `device-ca.sh crl` (and `root-crl` if the root CRL expired); on Kubernetes republish the Secret |
 | `device-ca.sh check` warns on the root CRL far ahead of the yearly ceremony | Root CRL signed with a shorter validity than `ROOT_CRL_DAYS` | `scripts/device-ca.sh root-crl`, then `docker compose up -d device-crl-refresh ingestion-edge` |
-| `device-crl-refresh` unhealthy, CRLs fresh | A device certificate or a CA certificate is inside its warning window | Renew the device named in the log (`issue` with its CSR); for a CA certificate, the root ceremony |
+| `device-crl-refresh` unhealthy, CRLs fresh | A CA certificate is inside its warning window | The root ceremony, named in the log |
+| `IndustryFlowDeviceCertExpiring` firing | A device's newest unrevoked certificate is inside `CERT_WARN_DAYS` | Renew the device named in the log (`issue` with its CSR) |
 | `check-certs` fails: register names CRL X, published CRL is Y | The CRL and the register were published separately | Publish `ca.crl`, `issued.tsv` and `issued.tsv.sig` together |
 | `device-crl-refresh` exits: device CA not initialized | No `deploy/device-ca/intermediate` | `scripts/device-ca.sh init` |
 | A deletion waits on `device_certificates` | The tenant's devices are not revoked, or the CRL and register were not republished since the request | `scripts/device-ca.sh revoke-tenant <company-uuid>`; on Kubernetes republish the Secret |
@@ -290,7 +298,7 @@ The expiry watch is described under Expiry watch. `check` fails on a CRL or a CA
 | Lane | Watch | Raised as |
 |---|---|---|
 | Kubernetes | `device-crl-check` and `device-cert-check` CronJobs | `IndustryFlowDeviceCrlStale` (critical), `IndustryFlowDeviceCertExpiring` (warning) |
-| Compose | `device-crl-refresh` healthcheck runs `check` and `check-certs` | Container unhealthy, one signal for both |
+| Compose | `device-crl-refresh` runs `check` and `check-certs` apart and records each one's last pass for node-exporter | `IndustryFlowDeviceCrlStale` (critical), `IndustryFlowDeviceCertExpiring` (warning) |
 
 | Code | Role |
 |---|---|
@@ -300,7 +308,10 @@ The expiry watch is described under Expiry watch. `check` fails on a CRL or a CA
 | `deploy/helm/industryflow/templates/cronjob-device-cert-check.yaml` | Device-certificate watch job |
 | `deploy/helm/industryflow/templates/observability-prometheusrules.yaml` | Graded alert rules |
 | `deploy/helm/industryflow/values.yaml` | Watch schedules, windows and alert delays |
-| `docker-compose.yml` | Compose healthcheck |
+| `docker-compose.yml` | `device-crl-refresh` checks and success times; `device-ca-metrics` volume read by `node-exporter` |
+| `infrastructure/prometheus/rules/compose.yml` | Graded alert rules on Compose |
+| `infrastructure/prometheus/rules/tests/compose_test.yml` | Proof: each grade fires 13h after its check stops passing, and the other does not |
+| `tests/config_guards/test_device_ca_expiry_grading.py` | Proof: checks apart, collected, raised at the chart's severities |
 | `scripts/tests/test_device_ca.py::test_check_certs_raises_a_device_whose_renewal_is_owed` | Proof: renewal owed raised, renewed device not |
 | `scripts/tests/test_device_ca.py::test_check_certs_reports_an_expired_device_without_failing` | Proof: an expired device is reported, not raised |
 | `scripts/tests/test_device_ca.py::test_check_certs_refuses_a_register_it_cannot_trust` | Proof: an unverified register is refused |

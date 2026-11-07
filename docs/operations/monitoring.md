@@ -64,7 +64,7 @@ Every target carries the label `platform="industryflow"`, which every platform a
 | Rules file | Loaded by |
 |---|---|
 | [`platform.yml`](../../infrastructure/prometheus/rules/platform.yml) | Compose, and the chart's PrometheusRule ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 1) |
-| [`compose.yml`](../../infrastructure/prometheus/rules/compose.yml) | Compose only: the backup and rehearsal jobs' success times, from node-exporter's textfile collector (`backup-metrics` volume). The chart raises the same alerts from its CronJobs ([chart rules](../../deploy/observability/README.md#platform-alert-rules)) |
+| [`compose.yml`](../../infrastructure/prometheus/rules/compose.yml) | Compose only: the backup and rehearsal jobs' and the device CA watch's success times, from node-exporter's textfile collector (`backup-metrics` and `device-ca-metrics` volumes). The chart raises the same alerts from its CronJobs ([chart rules](../../deploy/observability/README.md#platform-alert-rules)) |
 
 | Alert | Fires when | Handling |
 |---|---|---|
@@ -80,6 +80,8 @@ Every target carries the label `platform="industryflow"`, which every platform a
 | `IndustryFlowBackupNeverCompleted` | No database backup has ever completed, for a day (Compose) | Run and schedule `db-backup`: [running backups](backup-and-recovery.md#running-backups) |
 | `IndustryFlowRestoreRehearsalStale` | No restore rehearsal has passed for nine days (Compose) | [Restore rehearsal](backup-and-recovery.md#restore-rehearsal); its output names the table or object that differed |
 | `IndustryFlowRestoreRehearsalNeverPassed` | No database restore rehearsal has ever passed, for a week (Compose) | Run and schedule `restore-rehearsal`: [restore rehearsal](backup-and-recovery.md#restore-rehearsal) |
+| `IndustryFlowDeviceCrlStale` | No device CA `check` (CRLs and CA certificates) has passed for 13h, or none ever has; once one expires every device is refused (Compose; the chart raises it from `device-crl-check`) | `docker logs industryflow-device-crl-refresh` names it; [expiry watch](device-mtls.md#expiry-watch) |
+| `IndustryFlowDeviceCertExpiring` | No `check-certs` has passed for 13h, or none ever has: a device's renewal is owed (Compose; the chart raises it from `device-cert-check`) | `docker logs industryflow-device-crl-refresh` names the device; renew it ([expiry watch](device-mtls.md#expiry-watch)) |
 | `IndustryFlowCapabilityEventsDropped` | The writer acknowledged a capability-use event it could not record (unreadable, or refused by the database) | The API gateway's logs (`capability audit`) name each stream id; [capability-use record](../architecture/notebooks.md#capability-use-record) |
 
 | Where to see firing alerts | Address |
@@ -218,7 +220,7 @@ health reaches Grafana as `postgres-exporter` metrics.
 
 | Promtail job | Source | Labels |
 |---|---|---|
-| `docker` | Docker socket, containers on `industryflow-network` and `industryflow-notebook-kernels` only | `job="docker"`, `container`, `container_id`, `service`, `project`, `level` (from JSON logs), `environment="production"`, `cluster="industryflow"` |
+| `docker` | Docker socket, containers on `industryflow-network`, `industryflow-notebook-kernels` and `industryflow-ops-agent` only | `job="docker"`, `container`, `container_id`, `service`, `project`, `level` (from JSON logs), `environment="production"`, `cluster="industryflow"` |
 | `system` | `/var/log/*log` | `job="varlogs"` |
 
 | Query | LogQL |
@@ -277,7 +279,7 @@ No shipped rule alerts on the counter.
 | Target down in Prometheus | Target unreachable or failing; `curl -s localhost:9090/api/v1/targets \| jq '.data.activeTargets[] \| {job: .labels.job, health, lastError}'` | Fix the target named in `lastError` |
 | Edit to `prometheus.yml` not applied | The single-file bind mount keeps the old inode when an editor replaces the file | `docker exec industryflow-prometheus promtool check config /etc/prometheus/prometheus.yml`; `docker compose restart prometheus` |
 | Dashboards missing | Dashboard files are bind-mounted one by one in `docker-compose.yml`; a new JSON file has no mount | Add its mount, then `docker compose up -d grafana` |
-| No logs in Loki | Container not on `industryflow-network` or `industryflow-notebook-kernels`, or promtail down (`docker logs industryflow-promtail`) | Attach the container to one of the networks; `curl -s localhost:3100/ready` |
+| No logs in Loki | Container not on `industryflow-network`, `industryflow-notebook-kernels` or `industryflow-ops-agent`, or promtail down (`docker logs industryflow-promtail`) | Attach the container to one of the networks; `curl -s localhost:3100/ready` |
 | `pg_up` is `0` | `metrics_user` has no password, or the CA mount for `verify-full` is missing (`docker logs industryflow-postgres-exporter`) | Set the password as `12-metrics-role.sql` describes; check the CA mount |
 | `redis_up` is `0` | Redis down (`docker exec industryflow-redis redis-cli ping`) | Start `redis`, then the exporter |
 | LogQL parse error | Unquoted label value or range without a unit | `{job="docker"}`, `[5m]` |
@@ -481,14 +483,15 @@ The publisher pushes each note to Loki under `job="ops-agent"`, labelled with `a
 | Tool subprocess | Gets only the endpoint and path variables, never a secret |
 | Credentials | `OPS_AGENT_WEBHOOK_SECRET`, `OPS_AGENT_MODEL_API_KEY`, `ANTHROPIC_API_KEY` |
 | Kubernetes network | NetworkPolicy: ingress from `monitoringNamespace`; egress to DNS, that namespace, HTTPS on public addresses and `modelEndpoints` |
-| Compose network | `industryflow-network`, shared with the platform services; no network restriction |
+| Compose network | `industryflow-ops-agent`, its only network, shared with `prometheus`, `loki` and `alertmanager` (which stay on `industryflow-network` too); not `internal`, for a hosted model endpoint |
 
 | Code | Role |
 |---|---|
 | `services/ops_agent/app.py::McpTools` | Tool environment without secrets |
 | `services/ops_agent/tools.py` | Metrics store, log store, alert router only |
 | `deploy/helm/industryflow/templates/ops-agent.yaml` | Scoped secret and NetworkPolicy |
-| `docker-compose.yml` | Compose service |
+| `docker-compose.yml` | Compose service and its network |
+| `tests/config_guards/test_ops_agent_network.py` | Proof: the agent shares a network only with the monitoring stack |
 
 ## ADR-0046 dec 8
 

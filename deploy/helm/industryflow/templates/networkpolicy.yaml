@@ -2,7 +2,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 {{- if and .Values.networkPolicy.enabled (index .Values.apps "ingestion-service").enabled }}
 # Restrict ingestion-service ingress to the cluster TLS edge (the ingress controller) so the
-# verified-identity headers cannot be spoofed by any other pod (ADR-0002 dec 3).
+# verified-identity headers cannot be spoofed by any other pod (ADR-0002 dec 3, ADR-0009 dec 5): the
+# controller's pods, selected by namespace AND pod labels, not every pod of its namespace.
+{{- $controllerPods := .Values.networkPolicy.ingressControllerPodLabels | default dict }}
+{{- if not $controllerPods }}
+{{- fail "networkPolicy.ingressControllerPodLabels is empty: the policy would admit every pod of the controller's namespace (ADR-0009 dec 5)" }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -20,14 +25,16 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }}
+              kubernetes.io/metadata.name: {{ required "networkPolicy.ingressControllerNamespace is required" .Values.networkPolicy.ingressControllerNamespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $controllerPods | nindent 14 }}
       ports:
         - protocol: TCP
           port: {{ (index .Values.apps "ingestion-service").port }}
 ---
 # Least privilege (ADR-0002): ingestion is mTLS-only and stateless. Its only egress is to
-# Kafka (produce) and DNS — it must NOT be able to reach TimescaleDB or Redis, even though
-# the shared Secret hands every pod the DB credentials.
+# Kafka (produce) and DNS — it must NOT be able to reach TimescaleDB or Redis.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -49,13 +56,7 @@ spec:
         - protocol: TCP
           port: 53
     # Kafka brokers only.
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: kafka
-      ports:
-        - protocol: TCP
-          port: {{ .Values.infra.kafka.port }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "kafka" "name" "kafka" "port" .Values.infra.kafka.port) | trim | nindent 4 }}
 {{- end }}
 {{- if and .Values.networkPolicy.enabled (index .Values.apps "api-gateway").enabled }}
 ---
@@ -82,21 +83,9 @@ spec:
         - protocol: TCP
           port: 53
     # TimescaleDB.
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: timescaledb
-      ports:
-        - protocol: TCP
-          port: {{ .Values.infra.timescaledb.port }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "timescaledb" "name" "timescaledb" "port" .Values.infra.timescaledb.port) | trim | nindent 4 }}
     # Redis.
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: redis
-      ports:
-        - protocol: TCP
-          port: {{ .Values.infra.redis.port }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "redis" "name" "redis" "port" .Values.infra.redis.port) | trim | nindent 4 }}
 {{- end }}
 {{- if and .Values.networkPolicy.enabled .Values.notebookHub.enabled }}
 ---
@@ -170,19 +159,11 @@ spec:
         - protocol: TCP
           port: {{ .Values.notebookHub.coldBroker.port }}
     {{- end }}
-    {{- if .Values.infra.minio.inCluster }}
     # The object store, for the pre-signed GET itself — both the tracking gateway (artifacts,
     # ADR-0019) and the cold broker (Parquet, ADR-0025) 307-redirect the kernel straight here so the
     # bytes move directly. The URLs are signed + tenant-scoped; the pod holds no object-store
     # credential, so reachability alone grants nothing.
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: minio
-      ports:
-        - protocol: TCP
-          port: {{ .Values.infra.minio.apiPort }}
-    {{- end }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "minio" "name" "minio" "port" .Values.infra.minio.apiPort) | trim | nindent 4 }}
 ---
 # Who may reach the hub (ADR-0014 dec 3): chp (routing browser traffic) and the single-user pods
 # (the hub API they need). The SSO proxy's secret is the control on the login route; this narrows
@@ -268,31 +249,9 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: redis
-      ports:
-        - protocol: TCP
-          port: {{ .Values.infra.redis.port }}
-    {{- if .Values.infra.mlflow.inCluster }}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: mlflow
-      ports:
-        - protocol: TCP
-          port: {{ .Values.infra.mlflow.port }}
-    {{- end }}
-    {{- if .Values.infra.minio.inCluster }}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: minio
-      ports:
-        - protocol: TCP
-          port: {{ .Values.infra.minio.apiPort }}
-    {{- end }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "redis" "name" "redis" "port" .Values.infra.redis.port) | trim | nindent 4 }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "mlflow" "name" "mlflow" "port" .Values.infra.mlflow.port) | trim | nindent 4 }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "minio" "name" "minio" "port" .Values.infra.minio.apiPort) | trim | nindent 4 }}
 {{- end }}
 ---
 {{- if .Values.coldExport.enabled }}
@@ -317,22 +276,8 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: redis
-      ports:
-        - protocol: TCP
-          port: {{ .Values.infra.redis.port }}
-    {{- if .Values.infra.minio.inCluster }}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: minio
-      ports:
-        - protocol: TCP
-          port: {{ .Values.infra.minio.apiPort }}
-    {{- end }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "redis" "name" "redis" "port" .Values.infra.redis.port) | trim | nindent 4 }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "minio" "name" "minio" "port" .Values.infra.minio.apiPort) | trim | nindent 4 }}
 {{- end }}
 ---
 # The SQL proxy reaches only TimescaleDB (privileged login) and Redis (capability lookup), plus
@@ -355,22 +300,6 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    {{- if .Values.infra.timescaledb.inCluster }}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: timescaledb
-      ports:
-        - protocol: TCP
-          port: {{ .Values.infra.timescaledb.port }}
-    {{- end }}
-    {{- if .Values.infra.redis.inCluster }}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: redis
-      ports:
-        - protocol: TCP
-          port: {{ .Values.infra.redis.port }}
-    {{- end }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "timescaledb" "name" "timescaledb" "port" .Values.infra.timescaledb.port) | trim | nindent 4 }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "redis" "name" "redis" "port" .Values.infra.redis.port) | trim | nindent 4 }}
 {{- end }}
