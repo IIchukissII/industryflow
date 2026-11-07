@@ -278,7 +278,12 @@ async def promote_model_version(
         model_loader.check_admissible(company_id=company_id, mlflow_run_id=mv.run_id, artifact_uri=None)
         run = client.get_run(mv.run_id)
         model = client.get_registered_model(qualified)
-        sample, refusal = _read_sample(run.info.artifact_uri) if _logged_sample(client, mv.run_id) else (None, None)
+        # Where the platform cannot read a sample from, the refusal says so before anything is listed.
+        stored = urllib.parse.urlparse(run.info.artifact_uri or "").scheme == "mlflow-artifacts"
+        if stored and not _logged_sample(client, mv.run_id):
+            sample, refusal = None, None
+        else:
+            sample, refusal = _read_sample(run.info.artifact_uri)
         return {
             "run_id": mv.run_id,
             "experiment_id": run.info.experiment_id,

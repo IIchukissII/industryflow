@@ -20,13 +20,13 @@ import uuid
 
 import pytest
 
-requests = pytest.importorskip("requests")
-pd = pytest.importorskip("pandas")
-redis = pytest.importorskip("redis")
-mlflow = pytest.importorskip("mlflow")
-mlflow_sklearn = pytest.importorskip("mlflow.sklearn")
-linear_model = pytest.importorskip("sklearn.linear_model")
-industryflow = pytest.importorskip("industryflow")
+import requests
+import pandas as pd
+import redis
+import mlflow
+import mlflow.sklearn as mlflow_sklearn
+import sklearn.linear_model as linear_model
+import industryflow
 
 pytestmark = pytest.mark.integration
 
