@@ -64,4 +64,4 @@ containment at operational cost, not a boundary mediation lacks.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): gateway naming, artifact locations; manual of decisions 2-4.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): gateway naming, artifact locations; manual of decisions 1-4.

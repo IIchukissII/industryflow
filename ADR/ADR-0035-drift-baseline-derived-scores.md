@@ -96,4 +96,4 @@ judges any other model declaratively, without loading it (ADR-0027 dec 6).
 
 ## References
 
-- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md#drift-post-apidriftevaluate): baseline and evaluation; manual of decisions 1-4.
+- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md#drift-post-apidriftevaluate): baseline and evaluation; manual of decisions 1-8.

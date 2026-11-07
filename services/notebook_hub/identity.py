@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Notebook hub identity and spawn-profile logic (ADR-0014, ADR-0011 dec 5, ADR-0012 dec 5).
+Notebook hub identity and spawn-profile logic (ADR-0014, ADR-0011 dec 5, ADR-0014 dec 5).
 
 Pure, dependency-free decision logic so it can be unit-tested without a hub or a cluster:
 
@@ -12,7 +12,7 @@ Pure, dependency-free decision logic so it can be unit-tested without a hub or a
   * derive the pod labels and environment that bind the environment to its tenant.
 
 It deliberately holds NO data credential: the environment carries identity only; what the
-kernel may reach is minted separately by the spawner (ADR-0012 dec 5). jupyterhub_config.py
+kernel may reach is minted separately by the spawner (ADR-0012 dec 1). jupyterhub_config.py
 wires JupyterHub/KubeSpawner around this module.
 """
 from __future__ import annotations
@@ -213,7 +213,7 @@ def pod_labels(identity: Identity, profile: str) -> dict[str, str]:
 
 
 def pod_environment(identity: Identity, profile: str) -> dict[str, str]:
-    """Identity-only environment for the kernel. NOT a data credential (ADR-0012 dec 5)."""
+    """Identity-only environment for the kernel. NOT a data credential (ADR-0014 dec 5)."""
     return {
         "INDUSTRYFLOW_USER": identity.user,
         "INDUSTRYFLOW_COMPANY_ID": identity.company_id,

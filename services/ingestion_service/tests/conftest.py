@@ -68,7 +68,7 @@ def make_cert():
 @pytest.fixture
 def sample_body():
     """A minimal valid /ingest body. Note: it carries no company_id — the tenant is only
-    ever taken from the verified certificate (ADR-0002 dec 6)."""
+    ever taken from the verified certificate (ADR-0002 dec 5)."""
     import uuid
 
     return {

@@ -171,6 +171,93 @@ The gateway sets the session cookies httpOnly, Secure, SameSite (see Browser coo
 |---|---|
 | `services/api_gateway/routers/auth_tokens.py` | Cookie issuance |
 
+## ADR-0004 dec 4
+
+Every gateway route depends on the session principal, except the ones below.
+
+| Unauthenticated route | Exposes |
+|---|---|
+| `/health` | Gateway and database liveness |
+| `/` | API name, version and route index |
+| `/auth/login`, `/auth/jwt/login`, `/auth/refresh`, `/auth/logout` | Credential exchange |
+| `/ws/sensors[/{equipment_id}]` | Handshake only; the socket authenticates from the cookie before it streams |
+
+There is no public registration route. `ml-service-api` resolves the tenant of an inference request from a user token or the internal service token, never from an unauthenticated body.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/main.py` | Router set; no registration router |
+| `services/api_gateway/users.py::current_active_user` | Session principal every data route depends on |
+| `services/api_gateway/routers/user_admin.py` | Self-service and user administration behind a session |
+| `services/ml_service/api/routers/inference.py::_resolve_company_id` | Authenticated tenant for inference |
+| `services/api_gateway/tests/test_user_admin.py::test_public_registration_is_gone` | Proof: no registration route |
+| `services/api_gateway/tests/test_user_admin.py::test_user_admin_routes_require_a_session` | Proof: user routes answer 401 without a session |
+
+## ADR-0004 dec 5
+
+| Principal | Scope |
+|---|---|
+| `observer`, `engineer`, `admin` | The tenant of the account's `company_id`; `observer` reads only |
+| Superuser (`is_superuser`) | Every tenant and the platform; passes every role gate |
+
+| Rule | Mechanism |
+|---|---|
+| Tenant of a request | The account's `company_id`, never a request field |
+| Tenant admin creates a user | Into the admin's own company; a `company_id` in the body is honoured only for a superuser |
+| `company_id`, `is_superuser` on a user | Changed by a superuser only |
+| Self-update | Email and password only; unknown fields refused |
+| Company create, activation change, delete, deletion request | Superuser only; a tenant admin may rename their own company |
+| Seeded superuser | Only with `ADMIN_USER_<n>_SUPERUSER` set; the `admin` role grants none |
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/dependencies.py::require_role` | Role gate |
+| `services/api_gateway/dependencies.py::require_superuser` | Superuser gate |
+| `services/api_gateway/dependencies.py::get_writer_with_company` | Writer gate for tenant data |
+| `services/api_gateway/schemas.py::AdminUserCreate` | Create body; `company_id` for a superuser only |
+| `services/api_gateway/schemas.py::AdminUserUpdate` | Admin update body |
+| `services/api_gateway/routers/user_admin.py::_refuse_superuser_only` | Superuser-only fields refused for a tenant admin |
+| `services/api_gateway/routers/user_admin.py::_target_in_scope` | Target user inside the admin's tenant |
+| `services/api_gateway/routers/companies.py::_require_superuser` | Company provisioning gate |
+| `services/api_gateway/routers/companies.py::_assert_own_company` | Tenant admin limited to its own company |
+| `services/ml_service/api/auth.py::require_writer` | Writer gate in `ml-service-api` |
+| `scripts/seed_users.py` | Superuser only on explicit request |
+| `services/api_gateway/tests/test_user_admin.py::test_admin_cannot_touch_another_tenants_user` | Proof: admin stays in its tenant |
+| `services/api_gateway/tests/test_companies.py::test_tenant_admin_cannot_provision` | Proof: provisioning is superuser-only |
+| `services/api_gateway/tests/test_write_roles.py::test_every_tenant_write_route_is_gated` | Proof: every write route is gated |
+| `services/ml_service/tests/test_write_roles.py` | Proof: `observer` gets 403 on `ml-service-api` writes |
+
+## ADR-0004 dec 6
+
+| Channel | Check |
+|---|---|
+| HTTP | `CORSMiddleware` with `allow_origins` from `CORS_ORIGINS` and credentials allowed |
+| Socket handshake | `Origin` absent, in `CORS_ORIGINS`, or equal to the addressed host; else close 1008 |
+
+No code refuses `*` in `CORS_ORIGINS`.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/main.py` | HTTP origin allowlist |
+| `services/api_gateway/routers/websocket.py::origin_allowed` | Socket origin check |
+| `services/api_gateway/tests/test_websocket_session.py::test_foreign_origin_is_refused_even_with_a_valid_cookie` | Proof: a foreign origin is refused |
+| `services/api_gateway/tests/test_websocket_session.py::test_lookalike_origin_is_refused` | Proof: a lookalike origin is refused |
+
+## ADR-0004 dec 7
+
+| Secret | Handling |
+|---|---|
+| Password-reset and verification tokens | Not logged; only the event is |
+| First-run superuser password | Not logged; the log names address, tenant and whether a change is required |
+| Access token on a socket | Not accepted in the URL, so it never reaches access logs |
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/users.py::on_after_forgot_password` | Reset event logged without the token |
+| `services/api_gateway/users.py::on_after_request_verify` | Verification event logged without the token |
+| `services/api_gateway/first_run.py::ensure_first_superuser` | Creation logged without the password |
+| `services/api_gateway/tests/test_websocket_session.py::test_token_in_the_url_is_not_accepted` | Proof: a URL token is refused |
+
 ## ADR-0004 dec 9
 
 A live socket authenticates with the session and is closed when the session ends (see Websockets).
@@ -178,3 +265,59 @@ A live socket authenticates with the session and is closed when the session ends
 | Code | Role |
 |---|---|
 | `services/api_gateway/routers/websocket.py` | Socket authentication and session checks |
+
+## ADR-0004 dec 10
+
+The limits are described under Sign-in throttling.
+
+| Step | Mechanism |
+|---|---|
+| Reserve | One atomic store script counts the attempt as a failure, or returns the remaining wait |
+| Inside the wait | **429**; the password is not checked |
+| Success | Clears the source's count |
+| Password change or reset | Clears every source's count for the address |
+| Store unreadable | **503** |
+| Edge | `limit_req` on the two sign-in paths, keyed by client address when `EDGE_SIGN_IN_PER_SOURCE=on` |
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/sign_in_throttle.py::RESERVE_SCRIPT` | Atomic count and wait |
+| `services/api_gateway/users.py::authenticate` | Throttle before the password check |
+| `services/api_gateway/config.py` | `SIGN_IN_THROTTLE` |
+| `services/frontend/nginx.conf.template` | Per-source edge limit |
+| `services/frontend/docker-entrypoint-edge.sh` | `EDGE_SIGN_IN_PER_SOURCE` validated at start |
+| `docker-compose.yml` | Both limits on |
+| `deploy/helm/industryflow/templates/_helpers.tpl` | Edge limit off behind the Ingress |
+| `deploy/helm/industryflow/values.yaml` | Gateway limit off behind the Ingress |
+| `services/api_gateway/tests/test_sign_in_throttle.py::test_one_source_slowing_an_account_does_not_slow_its_owner` | Proof: no lock-out from another source |
+| `services/api_gateway/tests/test_sign_in_throttle.py::test_guesses_sent_at_once_are_refused_all_but_one` | Proof: counted before the check |
+| `services/api_gateway/tests/test_sign_in_throttle.py::test_inside_the_wait_the_password_is_not_checked` | Proof: refused unchecked |
+| `tests/e2e/test_session_end.py::test_wrong_passwords_slow_that_account_and_no_other` | Proof: deployed gateway slows one account only |
+
+## ADR-0004 dec 11
+
+| Step | Mechanism |
+|---|---|
+| Start | The gateway takes an advisory lock and checks `public."user"`; any row means nothing is created |
+| Tenant | The oldest active company, else one provisioned as `PLATFORM_ADMIN_TENANT` (default `Default`) |
+| Account | Superuser `PLATFORM_ADMIN_EMAIL` (default `admin@example.com`) with `PLATFORM_ADMIN_PASSWORD` |
+| Hold | `password_change_required` is set only when the password is the published default |
+| While held | Only `GET`/`PATCH /users/me` and sign-out pass; every other request gets 403 `PASSWORD_CHANGE_REQUIRED`; no socket opens; `ml-service-api` refuses the account |
+| Release | A new password, neither the current one nor the default in any case or spacing, clears the hold in the same write |
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/first_run.py::ensure_first_superuser` | Creation under the lock, only on an empty platform |
+| `services/api_gateway/main.py` | First-run task at start; request recorded for the hold check |
+| `services/api_gateway/users.py::PASSWORD_CHANGE_ALLOWED` | What a held account may do |
+| `services/api_gateway/users.py::validate_password` | The default and the current password refused as the new one |
+| `services/api_gateway/models/user.py` | `password_change_required` column |
+| `infrastructure/timescaledb/init-scripts/34-user-password-change-required.sql` | Column migration |
+| `services/api_gateway/routers/websocket.py` | No socket for a held account |
+| `services/ml_service/api/auth.py::_usable_account` | Held account refused by `ml-service-api` |
+| `scripts/user_admin_db.py` | The CLI takes the same lock |
+| `services/frontend/src/pages/FirstPasswordChange.jsx` | Password-change page for a held account |
+| `services/api_gateway/tests/test_first_run.py::test_nothing_is_created_on_a_platform_that_has_any_account` | Proof: populated platform gains nothing |
+| `services/api_gateway/tests/test_first_run.py::test_a_password_the_deployment_chose_is_not_forced` | Proof: a chosen password is not held |
+| `services/api_gateway/tests/test_first_run.py::test_through_the_app_a_held_account_reads_itself_and_nothing_else` | Proof: the hold through the app |
+| `tests/e2e/test_first_run.py::test_a_held_account_must_change_its_password_before_anything_else` | Proof: on the deployed platform |

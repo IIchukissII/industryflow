@@ -181,7 +181,7 @@ async def _evaluate_or_reject(
     """Evaluate the artifact against this environment, and refuse it if we cannot honour it.
 
     One comparison, called at the two gates that admit a model, with different status codes because
-    they mean different things (ADR-0027 dec 5):
+    they mean different things (ADR-0027 dec 6):
 
       422 at registration — the artifact was never servable here. The author is present; they can fix
           their environment and log again.
@@ -486,7 +486,7 @@ async def _bind_inputs_and_baseline(payload: Dict[str, Any], company_id: str, re
 
 async def register_model(payload: Dict[str, Any], company_id: str, repository, *,
                          sample_refusal: Optional[str] = None) -> Dict[str, Any]:
-    """The registration gate (ADR-0027 dec 5), for every path that creates a platform model: the
+    """The registration gate (ADR-0027 dec 6), for every path that creates a platform model: the
     registration request and the promotion of a notebook-registered version (ADR-0040 dec 2)."""
 
     # Read where it came from; never ask (ADR-0030 dec 8).
@@ -721,7 +721,7 @@ async def deploy_model(
     if not model_data:
         raise HTTPException(status_code=404, detail="Model not found")
 
-    # ADR-0027 dec 5 — the SECOND gate, and the one that actually protects what gets served.
+    # ADR-0027 dec 6 — the SECOND gate, and the one that actually protects what gets served.
     #
     # A model can sit unpromoted for weeks while this image is rebuilt underneath it, so the verdict
     # taken at registration EXPIRES. Only this gate is positioned to know that. It is also where a

@@ -128,6 +128,76 @@ The alert worker commits an offset only after its write is durable, retries a fa
 | `services/alert_service/config.py` | Retry, dead-letter and cooldown settings |
 | `services/alert_service/tests/test_kafka_consumer_integration.py` | Decisions 2-4 against the platform's broker |
 
+## ADR-0005 dec 5
+
+Every producer sets `acks=all`; the client retries within its delivery timeout. An ingestion send that still fails answers 503 and is not counted as sent.
+
+| Code | Role |
+|---|---|
+| `services/ingestion_service/kafka_producer.py::AsyncKafkaProducerSingleton` | Ingestion producer |
+| `services/spark_jobs/reading_guard.py::publish_dead_letters` | Dead-letter writer |
+| `services/alert_service/worker/kafka_consumer.py` | Alert worker producer (`acks='all'`, idempotence on) |
+| `services/ingestion_service/tests/test_kafka_producer_integration.py` | Proof: a broker outage answers 503, the next reading is delivered once |
+
+## ADR-0006 dec 1, 2
+
+Each granularity's query declares `withWatermark("time", <allowed lateness>)` and writes in append mode: a window's row is emitted once, when the watermark passes its end. `UNIQUE (time, sensor_id, equipment_id)` holds one row per window and series.
+
+| Code | Role |
+|---|---|
+| `services/spark_jobs/kafka_aggregations.py::aggregate_readings` | Watermark and window |
+| `services/spark_jobs/kafka_aggregations.py::create_aggregation_stream` | Append-mode query |
+| `services/spark_jobs/aggregation_windows.py::watermark_delay` | Allowed lateness from the window contract |
+| `services/spark_jobs/tests/test_aggregations_integration.py::test_a_window_is_written_once_the_watermark_passes_it_and_a_late_reading_changes_nothing` | Proof |
+
+## ADR-0006 dec 3
+
+| Table | Write |
+|---|---|
+| `sensor_measurements` | `ON CONFLICT (time, sensor_id) DO NOTHING` |
+| `sensor_aggregations_*` | `ON CONFLICT (time, sensor_id, equipment_id) DO UPDATE` |
+
+| Code | Role |
+|---|---|
+| `services/spark_jobs/kafka_to_timescaledb.py::_make_measurement_upsert` | First write wins |
+| `services/spark_jobs/kafka_aggregations.py::_upsert_values` | Replace on conflict |
+| `services/spark_jobs/tests/test_streaming_integration.py::test_a_killed_job_resumes_from_its_checkpoint_without_loss_or_duplicate` | Proof: a redelivered reading stays single |
+
+## ADR-0006 dec 4
+
+See [Unwritable readings](#unwritable-readings). A database or Kafka error re-raises and fails the batch.
+
+| Code | Role |
+|---|---|
+| `services/spark_jobs/reading_guard.py::rejection_reason` | Stateless rule shared by both jobs |
+| `services/spark_jobs/reading_guard.py::classify_references` | Tenant, sensor and equipment rule shared by both jobs |
+| `services/spark_jobs/kafka_to_timescaledb.py::process_batch` | Dead-letters first, then writes; re-raises a write failure |
+| `services/spark_jobs/kafka_aggregations.py::write_aggregations_to_db` | Excludes refused keys; re-raises any other failure |
+| `services/spark_jobs/tests/test_reading_guard.py` | Proof: which readings are writable |
+| `services/spark_jobs/tests/test_streaming_batch.py` | Proof: batch routing |
+| `services/spark_jobs/tests/test_aggregations.py::test_a_future_timestamp_does_not_close_live_windows` | Proof: rejected readings do not move the watermark |
+
+## ADR-0006 dec 5
+
+See [Checkpoints](#checkpoints). An `s3a://` `CHECKPOINT_LOCATION` enables S3A.
+
+| Code | Role |
+|---|---|
+| `services/spark_jobs/kafka_to_timescaledb.py::configure_s3a` | S3A checkpoint (measurements) |
+| `services/spark_jobs/kafka_aggregations.py::configure_s3a` | S3A checkpoint (aggregations) |
+| `services/spark_jobs/tests/test_aggregations_integration.py::test_a_killed_job_resumes_its_open_window_and_counts_each_reading_once` | Proof: window state resumes from the object store |
+
+## ADR-0006 dec 6
+
+The measurements job waits on `awaitTermination()`, the aggregation job on `awaitAnyTermination()`; a failed query raises and the process exits.
+
+| Code | Role |
+|---|---|
+| `services/spark_jobs/kafka_to_timescaledb.py::main` | Measurements job |
+| `services/spark_jobs/kafka_aggregations.py` | Aggregation job |
+| `services/spark_jobs/tests/test_streaming_integration.py::test_no_offset_advances_while_the_database_is_down` | Proof: the job exits, no offset advances |
+| `services/spark_jobs/tests/test_aggregations_integration.py::test_a_database_outage_fails_the_batch_and_the_window_is_written_on_restart` | Proof |
+
 ## ADR-0006 dec 7
 
 Window width and allowed lateness are read from one shared definition by the stream and by every reader of the windows.
@@ -135,3 +205,13 @@ Window width and allowed lateness are read from one shared definition by the str
 | Code | Role |
 |---|---|
 | `libs/industryflow_contracts` | The window contract |
+
+## ADR-0006 dec 8
+
+The aggregation job sets `spark.sql.shuffle.partitions` from `SPARK_SQL_SHUFFLE_PARTITIONS` (Compose: `SPARK_AGG_STATE_PARTITIONS`, default 2) and names each query's checkpoint `<table>-p<N>`.
+
+| Code | Role |
+|---|---|
+| `services/spark_jobs/kafka_aggregations.py::state_partitions` | Partition count |
+| `services/spark_jobs/kafka_aggregations.py::checkpoint_path` | Checkpoint keyed by the count |
+| `services/spark_jobs/tests/test_aggregations.py::test_a_changed_partition_count_gets_its_own_checkpoint` | Proof |

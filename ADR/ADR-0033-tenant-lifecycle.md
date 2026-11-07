@@ -108,6 +108,6 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 
 ## References
 
-- [init-scripts README](../infrastructure/timescaledb/init-scripts/README.md): manual of decision 1.
+- [init-scripts README](../infrastructure/timescaledb/init-scripts/README.md): manual of decisions 1, 8.
 - [stream processing](../docs/architecture/stream-processing.md): the stream's bounds.
 - [User management](../docs/operations/user-management.md): manual of decisions 3, 4, 6, 7.

@@ -111,7 +111,7 @@ def test_pod_environment_carries_identity_not_credentials():
         "INDUSTRYFLOW_COMPANY_ID": cid,
         "INDUSTRYFLOW_PROFILE": ident.PROFILE_AUTHORING,
     }
-    # No data credential is ever placed in the environment (ADR-0012 dec 5).
+    # No data credential is ever placed in the environment (ADR-0014 dec 5).
     joined = " ".join(k.lower() for k in env).replace("_", "")
     assert "password" not in joined and "token" not in joined and "secret" not in joined
 

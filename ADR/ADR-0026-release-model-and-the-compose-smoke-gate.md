@@ -96,4 +96,4 @@ repeatable.
 
 ## References
 
-- [CI and required checks](../docs/operations/ci.md): manual of decisions 3-11.
+- [CI and required checks](../docs/operations/ci.md): manual of decisions 2-11.

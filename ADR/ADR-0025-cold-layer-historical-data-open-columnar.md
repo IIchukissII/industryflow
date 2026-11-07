@@ -89,4 +89,4 @@ by the database that wrote it.
 
 ## References
 
-- [data-and-storage.md](../docs/architecture/data-and-storage.md), [cold-layer-evolution.md](../docs/architecture/cold-layer-evolution.md): manual of decisions 3-5, 11, 13.
+- [data-and-storage.md](../docs/architecture/data-and-storage.md), [cold-layer-evolution.md](../docs/architecture/cold-layer-evolution.md): manual of decisions 1-6, 10, 11, 13, 14.

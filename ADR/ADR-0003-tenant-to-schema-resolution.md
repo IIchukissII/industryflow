@@ -70,4 +70,4 @@ vector; pooled connections outlive requests; a rule implemented per service drif
 
 ## References
 
-- [Data and storage](../docs/architecture/data-and-storage.md): manual of decisions 5, 7.
+- [Data and storage](../docs/architecture/data-and-storage.md): manual of decisions 1-7.

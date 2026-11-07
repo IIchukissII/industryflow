@@ -114,6 +114,15 @@ EXTENSION_MODULES=my_domain.transforms,my_domain.detectors
 [`extensions/tep-reference/`](../../extensions/tep-reference/README.md) (module `tep_reference`) is
 loaded only when `EXTENSION_MODULES` names it.
 
+## ADR-0008 dec 1
+
+The core defines the plugin contracts in one package; an extension registers into them and edits no core file. Core rules name no framework or domain.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py` | The contracts: registries, decorators, context and result types |
+| `services/notebook_tracking_gateway/tests/test_admission.py::test_admits_a_safe_format_the_rule_has_never_heard_of` | Proof: the structural admission rule names no framework |
+
 ## ADR-0008 dec 6
 
 The reference extension is a separate package that depends on the platform.
@@ -122,6 +131,35 @@ The reference extension is a separate package that depends on the platform.
 |---|---|
 | `extensions/tep-reference` | Reference extension and data producer |
 
+## ADR-0010 dec 1
+
+| Step | Mechanism |
+|---|---|
+| Discovery | At startup the service imports each module named in `EXTENSION_MODULES` |
+| Registration | The module's `@register_transform` / `@register_detector` decorators write into the in-process registries |
+| Duplicate | A different function under a registered name raises `ValueError` |
+| Lookup | The feature engine and inference resolve a name through `get_transform` / `get_detector` |
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py::load_extension_modules` | Imports the configured modules |
+| `services/ml_service/api/extensions/__init__.py::register_transform` | Transform registry; refuses a second function under one name |
+| `services/ml_service/api/extensions/__init__.py::register_detector` | Detector registry; refuses a second function under one name |
+| `services/ml_service/api/main.py` | Loads `EXTENSION_MODULES` at startup |
+| `services/ml_service/api/config.py::EXTENSION_MODULES` | The configured module list |
+
+## ADR-0010 dec 2
+
+A transform is `async (transformation, sensor_data, ctx) -> float`. The feature engine looks up each configured `type` in the registry and calls it; an unknown type is refused when the configuration is written and when an engine is built from it. The generic transforms register on package import.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py::TransformFn` | The contract signature |
+| `services/ml_service/api/extensions/__init__.py::TransformContext` | The runtime context |
+| `services/ml_service/api/extensions/builtins.py` | Built-ins: `identity`, `polynomial`, `interaction`, `deviation`, `statistical` |
+| `services/ml_service/api/feature_engineering/engine.py` | Dispatch by `type` through `get_transform` |
+| `services/ml_service/tests/test_unknown_transform.py` | Proof: an unknown type is refused |
+
 ## ADR-0010 dec 3
 
 Each contract carries the extension-API version a plugin declares against.
@@ -129,3 +167,43 @@ Each contract carries the extension-API version a plugin declares against.
 | Code | Role |
 |---|---|
 | `services/ml_service/api/extensions` | Registry, contracts and the current extension-API version |
+
+## ADR-0010 dec 5
+
+| Part | File |
+|---|---|
+| Domain configuration | `extensions/tep-reference/tep_reactor_config.json` |
+| Transform | `tep_reactor_pressure_margin` |
+| Detector | `tep_rule` (model-free) |
+
+The module declares its target extension-API version and is imported only when `EXTENSION_MODULES` names `tep_reference`. No platform code imports it.
+
+| Code | Role |
+|---|---|
+| `extensions/tep-reference/tep_reference.py` | Reference transform and detector |
+| `extensions/tep-reference/tep_reactor_config.json` | Reference domain configuration |
+
+## ADR-0010 dec 6
+
+A detector is `async (features, model, threshold, ctx) -> DetectionResult`. Each model record carries a `detector` column; inference dispatches the detector it names.
+
+| Case | Result |
+|---|---|
+| Kernel-authored model registered without a detector | Recorded as `sklearn`, the generic built-in |
+| Uploaded model | Recorded as the detector matching its declared semantics (ADR-0028) |
+| Record with no detector at inference | Refused with 422; no default at serving |
+| Record naming a detector not loaded | 500 |
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py::DetectorContext` | The runtime context |
+| `services/ml_service/api/extensions/__init__.py::DetectionResult` | The detection result |
+| `services/ml_service/api/extensions/builtins_detectors.py` | Built-in detectors |
+| `services/ml_service/api/routers/models.py::_kernel_detector_or_refuse` | Default `sklearn` at registration; refuses an unloaded or flavor-mismatched detector |
+| `services/ml_service/api/routers/inference.py::detector_for` | Resolves the record's detector; refuses a record without one |
+| `services/ml_service/api/repository.py` | Writes and reads the `detector` column |
+| `infrastructure/timescaledb/init-scripts/20-model-detector.sql` | Adds the `detector` column per tenant; backfills kernel rows with `sklearn` |
+| `services/ml_service/tests/test_inference_dispatch.py::test_the_model_is_scored_by_the_detector_its_record_names` | Proof: dispatch by the record |
+| `services/ml_service/tests/test_inference_dispatch.py::test_a_record_with_no_detector_is_refused_not_defaulted` | Proof: no serving default |
+| `services/ml_service/tests/test_registration_gate_uploaded.py::test_a_kernel_model_defaults_to_the_compatibility_detector` | Proof: registration default |
+| `services/ml_service/tests/test_repository_model_columns.py::test_the_detector_round_trips` | Proof: the column round-trips |

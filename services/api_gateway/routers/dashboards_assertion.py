@@ -5,7 +5,7 @@
 """The dashboards' sign-on assertion (ADR-0016 dec 7).
 
 The edge issues an ``auth_request`` here on every request to the dashboards it serves, and forwards
-the assertion this returns to them. Only a platform superuser gets one (ADR-0043 dec 1): the session
+the assertion this returns to them. Only a platform superuser gets one (ADR-0016 dec 7): the session
 dependency answers 401 without a session and 403 for anyone else, and the edge refuses the request
 on either. The dashboards verify the signature, issuer, audience and expiry with the public half of
 the key, so an identity header that only network position vouches for signs no one in.

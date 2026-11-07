@@ -128,7 +128,7 @@ async def ingest_sensor_data(
 ) -> SensorDataResponse:
     """
     Ingest sensor data. The company_id comes from the verified device certificate — it is
-    never taken from the request body (ADR-0002 dec 6).
+    never taken from the request body (ADR-0002 dec 5).
     """
     try:
         company_id_str = identity["company_id"]

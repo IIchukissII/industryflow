@@ -121,15 +121,73 @@ Exporter behaviour per tenant and day:
 
 Deferred cold-layer items and their triggers: [cold layer evolution](cold-layer-evolution.md).
 
-## ADR-0003 dec 5, 7
+## ADR-0003 dec 1-3
 
-One library function validates the tenant identifier and derives its schema name; every image is built with that library.
+| Caller | Tenant taken from |
+|---|---|
+| Gateway request | The authenticated user's `company_id`, read with the user by primary key |
+| ML service request | The `company_id` claim the gateway signs into the access token; a token without a UUID claim answers 401 |
+| Device reading | The URI SAN of the client certificate the edge verified |
+
+A request body's `company_id` is not the tenant for a user caller. The user self-update schema refuses a tenant field.
 
 | Code | Role |
 |---|---|
+| `services/api_gateway/users.py::CompanyClaimJWTStrategy` | Signs `company_id` into the access token |
+| `services/api_gateway/dependencies.py::get_current_user_with_company` | Gateway tenant from the authenticated user |
+| `services/api_gateway/schemas.py::UserSelfUpdate` | No tenant field on self-update |
+| `services/api_gateway/routers/user_admin.py` | User administration inside the caller's tenant |
+| `services/ml_service/api/auth.py::company_id_of` | ML service tenant from the token claim |
+| `services/ingestion_service/dependencies.py::get_ingestion_identity` | Device tenant from the verified certificate |
+| `services/ml_service/tests/test_tenant_from_token.py` | Proof: the claim is the tenant, a body `company_id` is not |
+| `services/api_gateway/tests/test_user_admin.py` | Proof: self-update and administration stay in the caller's tenant |
+
+## ADR-0003 dec 4, 5, 7
+
+Every function of the library parses the tenant identifier as a UUID and builds names from its canonical string; a non-UUID raises `ValueError`. Every image is built with that library.
+
+| Code | Role |
+|---|---|
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::canonical_company_id` | UUID validation and canonical form |
 | `libs/industryflow_contracts/industryflow_contracts/tenancy.py` | The canonical tenant-to-schema function |
+| `libs/industryflow_contracts/tests/test_tenancy.py` | Proof: a non-UUID never becomes a name; every spelling of one tenant yields one name |
 | `tests/config_guards/test_tenant_contract_copies.py` | No deployable keeps its own copy of the contract |
 | `tests/config_guards/test_images_carry_contracts.py` | Every image that imports the library is built with it |
+
+## ADR-0003 dec 6
+
+Each tenant-scoped query runs in a transaction that sets the path with `SET LOCAL search_path` or `set_config('search_path', …, true)`; the connection returns to the pool without it.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/dependencies.py::get_db_with_tenant` | Gateway session per user |
+| `services/api_gateway/dependencies.py::get_tenant_db` | Gateway session per session or capability |
+| `services/ml_service/api/repository.py::tenant_connection` | ML service pooled connection |
+| `services/alert_service/worker/repository.py::AlertRepository` | Alert worker pooled connection (`_tenant`) |
+| `services/ml_service/api/feature_engineering/baseline_provider.py::AggregateBaselineProvider` | Baseline read |
+| `services/ml_service/tests/test_silent_omission_guards.py::test_nothing_in_the_service_sets_a_session_scoped_search_path` | Proof: no session-scoped path in the ML service |
+| `services/alert_service/tests/test_repository_sql.py::test_search_path_is_only_ever_set_transaction_locally` | Proof: alert worker |
+| `infrastructure/timescaledb/tests/test_alert_dedup_live.py` | Proof: no tenant path survives the checkout on a real database |
+
+## ADR-0025 dec 1
+
+Raw readings are kept as Parquet (format 2.6, zstd) in the cold bucket; no expiry applies to it. Notebook readers fetch the files directly with pre-signed reads.
+
+| Code | Role |
+|---|---|
+| `services/cold_export/store.py::PARQUET_FORMAT_VERSION` | Parquet encoding contract |
+| `clients/python/industryflow/cold.py::IndustryFlowCold` | Reads a tenant's Parquet as DataFrames |
+| `services/cold_export/tests/test_parquet_compat.py` | Proof: archived files still read across a pyarrow upgrade |
+
+## ADR-0025 dec 2
+
+`sensor_measurements` has no retention policy; the cold exporter drops a day past the horizon (`COLD_EXPORT_HORIZON_DAYS`, default 30) after its export.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/04-complete-tenant-creation.sql::create_base_tables` | Raw table without a retention policy |
+| `infrastructure/timescaledb/init-scripts/16-cold-layer-raw-retention.sql::ensure_cold_export_access` | Removes a raw retention policy on existing tenants |
+| `services/cold_export/config.py::load_config` | Export horizon |
 
 ## ADR-0025 dec 3, 4, 11
 
@@ -147,6 +205,30 @@ Notebook reads of the cold layer go through a tenant-scoping broker.
 |---|---|
 | `services/notebook_cold_broker` | Cold-layer broker |
 
+## ADR-0025 dec 6
+
+| Level | Form |
+|---|---|
+| Directory | `<tenant prefix>/year=YYYY/month=MM/day=DD/`, by event time |
+| Rows in a part | Ordered by `equipment_id`, then `time` |
+
+| Code | Role |
+|---|---|
+| `services/cold_export/naming.py::day_partition` | Day directory |
+| `services/cold_export/source.py` | Reads a day `ORDER BY equipment_id, time` |
+| `services/cold_export/exporter.py::_without_archived` | Re-sorts a later part after the join |
+
+## ADR-0025 dec 10
+
+The cold layer uses the platform's MinIO server; `minio-init` adds the cold bucket and its principals.
+
+| Code | Role |
+|---|---|
+| `services/cold_export/config.py::StoreConfig` | Endpoint defaults to the platform's object store |
+| `services/cold_export/store.py::S3ColdStore` | Exporter's object-store adapter |
+| `infrastructure/minio/minio-init.sh` | Cold bucket principals (Compose) |
+| `deploy/helm/industryflow/files/minio-init.sh` | Cold bucket principals (Helm) |
+
 ## ADR-0025 dec 13
 
 The backup job mirrors the cold layer with a read-only principal.
@@ -155,13 +237,42 @@ The backup job mirrors the cold layer with a read-only principal.
 |---|---|
 | `infrastructure/backup/db-backup.sh` | Cold-layer mirror |
 
-## ADR-0039 dec 1
+## ADR-0025 dec 14
+
+| Principal | Cold-bucket verbs |
+|---|---|
+| `cold-export-rw` | List, put, get; no delete |
+| `cold-broker-ro`, `backup-read` | List, get |
+| `tenant-delete-cold` | List and delete under `tenant_*`; no get, no put |
+
+The tenant-delete job lists `tenant_<uuid>/` and deletes in batches until the listing is empty.
+
+| Code | Role |
+|---|---|
+| `services/tenant_delete/cold_store.py::ColdStore` | Purge of a tenant's cold objects |
+| `services/tenant_delete/config.py::ColdConfig` | The job's cold principal |
+| `infrastructure/minio/minio-init.sh` | `delete_policy` for the tenant-delete principal |
+| `tests/config_guards/test_object_store_principals.py::test_only_the_tenant_delete_job_deletes_in_the_cold_bucket_and_it_sees_nothing` | Proof: no other principal deletes in the cold bucket |
+| `tests/object_store/test_scoped_principals.py` | Proof: each principal is refused outside its scope on a real store |
+| `services/tenant_delete/tests/test_cold_store_live.py` | Proof: purge on a real MinIO removes only the tenant's objects |
+
+## ADR-0039 dec 1-4
 
 One library test decides tenant ownership of a name or key (see Tenant names).
+
+| Function | Rule |
+|---|---|
+| `is_plain_key` | No empty, `.` or `..` segment, no backslash, no control character |
+| `owns_key` | Leading `/` stripped; plain and under the prefix; with `encoded=True`, a key holding `%` is refused |
+| `scope_key` | Places a plain path under the prefix (idempotent), keeps a trailing `/`; any other path raises `ValueError` |
 
 | Code | Role |
 |---|---|
 | `libs/industryflow_contracts/industryflow_contracts/tenancy.py` | Ownership test |
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::scope_key` | Placing a caller's path |
+| `services/notebook_cold_broker/policy.py::scope_key` | Cold broker binds it to the caller's tenant |
+| `services/notebook_tracking_gateway/policy.py::owns_artifact_key` | Tracking gateway tests an encoded artifact key |
+| `libs/industryflow_contracts/tests/test_tenancy.py::test_what_scope_key_places_owns_key_accepts` | Proof: placing and testing agree |
 | `tests/config_guards/test_tenant_contract_copies.py` | No copy of the test |
 
 ## ADR-0039 dec 5

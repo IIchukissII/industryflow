@@ -166,6 +166,46 @@ One privileged function provisions a tenant (see Roles).
 |---|---|
 | `infrastructure/timescaledb/init-scripts` | Provisioning function |
 
+## ADR-0033 dec 8
+
+`complete_company_deletion()` drops the tenant's schema, roles, users and export rows, then sets `companies.is_active = false` and `deleted_at`; the `public.companies` row stays. The tenant-delete job keeps the tenant's suspension marker in the capability store. Verifiers refuse the tenant as inactive and by that marker; none reads `deleted_at`.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/25-company-deletion.sql` | `companies.deleted_at` |
+| `infrastructure/timescaledb/init-scripts/26-company-deletion-job.sql` | `complete_company_deletion()`: tombstone |
+| `services/tenant_delete/capability_store.py::CapabilityStore` | Purges the tenant's keys; keeps the suspension marker |
+| `infrastructure/timescaledb/tests/test_company_deletion_job.py::test_completion_empties_the_database_and_leaves_the_tombstone` | Proof: the row stays |
+| `services/tenant_delete/tests/test_capability_store.py::test_the_suspension_marker_stays_and_is_restored_if_lost` | Proof: the marker stays |
+
+## ADR-0034 dec 1
+
+The numbered scripts in this directory, in filename order, are the whole platform schema (see Scripts). Each declares its kind in a header.
+
+| Kind | Holds | After release |
+|---|---|---|
+| `migration` | A one-time change; no function definition | Never edited |
+| `definition` | Provisioning, the functions it calls, the roles list | Replaced in place; re-applied on change |
+
+No service creates a table at startup; the `public."user"` table is defined by `29-user-table.sql` and later scripts.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts` | The sequence |
+| `tests/config_guards/test_schema_migrations.py::test_every_script_declares_its_kind` | Proof: one kind per script |
+| `tests/config_guards/test_schema_migrations.py::test_a_migration_defines_no_function` | Proof: functions live in definitions |
+| `services/api_gateway/tests/test_user_table_definition.py::test_the_gateway_creates_no_table_at_startup` | Proof: the gateway defines no table |
+| `services/api_gateway/tests/test_user_table_definition.py::test_every_mapped_column_is_defined_by_the_schema_sequence` | Proof: the ORM model matches the scripts |
+
+## ADR-0034 dec 2
+
+Scripts converge: `CREATE ... IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `CREATE OR REPLACE FUNCTION`, and per-tenant loops over every existing tenant schema.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts` | Idempotent scripts |
+| `infrastructure/timescaledb/tests/test_migration_runner.py::test_every_script_applies_again_over_live_tenants` | Proof: every script re-applies over live tenants |
+
 ## ADR-0034 dec 3
 
 Provisioning creates every per-tenant table the sequence defines.
@@ -182,6 +222,25 @@ The runner applies pending scripts in order and records each in the ledger.
 |---|---|
 | `infrastructure/timescaledb/migrate.sh` | Migration runner |
 
+## ADR-0034 dec 5
+
+The sequence has no down-scripts. On a database holding a tenant or a user, `migrate.sh apply` refuses pending scripts unless a backup is recorded within `MIGRATE_BACKUP_MAX_AGE_SECONDS`, or `MIGRATE_WITHOUT_BACKUP=1` (see [Backup before an upgrade](#backup-before-an-upgrade)). The backup job does not wait for the runner.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/migrate.sh` | `require_backup`: the backup gate |
+| `tests/config_guards/test_schema_migrations.py::COMPOSE_UNGATED` | The backup is not gated on the ledger |
+| `infrastructure/timescaledb/tests/test_migration_runner.py::test_an_upgrade_without_a_recorded_backup_is_refused` | Proof: no backup, no upgrade |
+| `infrastructure/timescaledb/tests/test_migration_runner.py::test_an_upgrade_right_after_a_backup_applies` | Proof: a recent backup admits the upgrade |
+
+## ADR-0034 dec 6
+
+The compose smoke gate seeds the platform database from the base commit of the change (pull request base, or the previous `main` commit on push), from that commit's own compose file. It provisions one tenant there, stops that stack keeping its volumes, then starts the stack under test on them. A base commit without the runner initialises under the image's init hook and leaves no ledger.
+
+| Code | Role |
+|---|---|
+| `.github/workflows/compose-smoke.yml` | Seed at the base commit; upgrade on its volumes |
+
 ## ADR-0034 dec 8, 10
 
 A released migration is never edited; clients wait for a current ledger.
@@ -189,3 +248,23 @@ A released migration is never edited; clients wait for a current ledger.
 | Code | Role |
 |---|---|
 | `tests/config_guards/test_schema_migrations.py` | Sequence and ledger guards |
+
+## ADR-0034 dec 9
+
+| Item | Compose | Helm |
+|---|---|---|
+| Runner | `db-migrate` service | `<release>-db-migrate-<revision>` Job |
+| Connects as | `DB_USER` (database owner) over TCP, `PGSSLMODE` default `verify-full` | `DB_USER` over TCP to `industryflow.dbHost`, `tls.db.sslmode` |
+| Holds | Owner password and every `*_DB_PASSWORD` the role scripts read | Owner password and `industryflow.timescaledbRoleKeys` |
+| Database server holds | Owner password only | Owner password only |
+
+| Code | Role |
+|---|---|
+| `docker-compose.yml` | `db-migrate` environment |
+| `deploy/helm/industryflow/templates/job-db-migrate.yaml` | The Job's connection and role passwords |
+| `deploy/helm/industryflow/templates/_helpers.tpl` | `industryflow.timescaledbRoleKeys`: the one list of role passwords |
+| `deploy/helm/industryflow/templates/configmap-db-migrations.yaml` | Scripts and runner for the Job |
+| `infrastructure/timescaledb/migrate.sh` | The runner |
+| `tests/config_guards/test_compose_db_roles.py::test_the_database_container_holds_no_role_password` | Proof: Compose server holds no role password |
+| `tests/config_guards/test_helm_db_role_passwords.py::test_the_database_server_holds_no_role_password` | Proof: chart server holds no role password |
+| `tests/config_guards/test_helm_db_role_passwords.py::test_the_secret_and_the_container_carry_the_same_role_passwords` | Proof: the Job receives every role password |

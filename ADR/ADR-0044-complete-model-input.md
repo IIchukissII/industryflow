@@ -74,4 +74,4 @@ carries partial-batch settings that no part of the platform reads.
 ## References
 
 - [docs/operations/monitoring.md](../docs/operations/monitoring.md): the degraded-serving metrics.
-- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 1-4.
+- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 1-5.

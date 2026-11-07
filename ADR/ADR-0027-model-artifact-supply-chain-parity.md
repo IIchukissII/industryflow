@@ -84,4 +84,4 @@ pinned stack.
 
 ## References
 
-- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 5-7, 13.
+- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 1-10, 12, 13.

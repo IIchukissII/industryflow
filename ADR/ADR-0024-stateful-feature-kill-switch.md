@@ -69,4 +69,4 @@ it cannot know which transforms are stateful.
 
 ## References
 
-- [docs/operations/monitoring.md](../docs/operations/monitoring.md): runbook and metric; manual of decisions 2-5, 7.
+- [docs/operations/monitoring.md](../docs/operations/monitoring.md): runbook and metric; manual of decisions 1-7.

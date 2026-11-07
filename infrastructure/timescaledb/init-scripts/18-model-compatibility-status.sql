@@ -58,7 +58,7 @@ BEGIN
     ', p_schema_name);
 
     -- When the verdict was reached. It EXPIRES: the serving image can be rebuilt underneath a
-    -- model that is sitting unpromoted, which is precisely why ADR-0027 dec 5 re-checks at
+    -- model that is sitting unpromoted, which is precisely why ADR-0027 dec 6 re-checks at
     -- deployment instead of trusting the verdict taken at registration.
     EXECUTE format('
         ALTER TABLE %I.ml_models

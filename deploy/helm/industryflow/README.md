@@ -136,6 +136,60 @@ Moving the Structured-Streaming checkpoint off the PVC ([ADR-0006](../../../ADR/
 Open per [ADR-0009](../../../ADR/ADR-0009-kubernetes-deployment-and-packaging.md) *Deferred decisions*: stateful operators, autoscaling policy, secrets backend,
 Spark on Kubernetes. The notebook stack (`notebookHub`) renders but is not run on a cluster.
 
+## ADR-0009 dec 3
+
+| Dependency | `inCluster: true` renders |
+|---|---|
+| `timescaledb` | StatefulSet + Service |
+| `kafka` | ZooKeeper and Kafka StatefulSets + Services |
+| `redis` | StatefulSet + Service |
+| `minio` | StatefulSet + Service |
+| `mlflow` | Deployment + Service (stateless, ADR-0009 dec 2) |
+
+With `inCluster: false` the endpoint helper returns `infra.<dep>.external.*` and rendering fails when it is empty.
+
+| Code | Role |
+|---|---|
+| `deploy/helm/industryflow/values.yaml` | `infra.<dep>.inCluster` toggles and `external.*` endpoints |
+| `deploy/helm/industryflow/templates/infra-timescaledb.yaml` | Database StatefulSet |
+| `deploy/helm/industryflow/templates/infra-kafka.yaml` | Coordinator and broker StatefulSets |
+| `deploy/helm/industryflow/templates/infra-redis.yaml` | Key-value store StatefulSet |
+| `deploy/helm/industryflow/templates/infra-minio.yaml` | Object store StatefulSet |
+| `deploy/helm/industryflow/templates/_helpers.tpl` | `industryflow.dbHost`, `kafkaBootstrap`, `redisHost`, `minioEndpoint`, `mlflowUri`: in-cluster or required external endpoint |
+
+## ADR-0009 dec 4
+
+| Element | Mechanism |
+|---|---|
+| Configuration | `config` renders one ConfigMap; every app takes it by `envFrom` |
+| Secret values | `secrets.data`, supplied at install from outside the chart |
+| Placeholder | A value starting `CHANGE_ME` or `changeme` fails the render while `secrets.failOnPlaceholders=true` |
+| Scoping | One Secret per workload, `<release>-<workload>-secrets`, holding only `apps.<name>.secretKeys` or the infra key list |
+| `secrets.existingSecret` | Every workload references that one Secret; no scoping and no placeholder check in the chart |
+
+| Code | Role |
+|---|---|
+| `deploy/helm/industryflow/templates/configmap.yaml` | The shared ConfigMap |
+| `deploy/helm/industryflow/templates/secret.yaml` | Placeholder refusal; scoped Secrets per workload |
+| `deploy/helm/industryflow/templates/_helpers.tpl` | `industryflow.scopedSecret`, `industryflow.workloadSecretName` |
+| `deploy/helm/industryflow/templates/apps.yaml` | Mounts the ConfigMap and the workload's own Secret |
+| `deploy/helm/industryflow/values.yaml` | `secrets.*` and per-app `secretKeys` |
+
+## ADR-0009 dec 5
+
+| Ingress | Host | Controller does |
+|---|---|---|
+| `<release>` | Each enabled app's `ingress.host` | Terminates HTTPS with `ingress.tls.secretName` |
+| `<release>-ingest` | `ingress.mtls.host` | Verifies device client certificates against `ingress.mtls.caSecret`; passes the verified certificate to ingestion |
+
+The NetworkPolicy `<release>-ingestion-from-edge-only` admits ingress to ingestion only from the namespace `networkPolicy.ingressControllerNamespace`. It renders only with `networkPolicy.enabled`, which defaults to `false`; the mTLS Ingress renders only with `ingress.mtls.enabled`, which defaults to `false`.
+
+| Code | Role |
+|---|---|
+| `deploy/helm/industryflow/templates/ingress.yaml` | HTTPS Ingress and device mTLS Ingress |
+| `deploy/helm/industryflow/templates/networkpolicy.yaml` | Ingestion reachable only from the controller namespace |
+| `deploy/helm/industryflow/values.yaml` | `ingress.*`, `networkPolicy.*` |
+
 ## Related
 
 | Page | Topic |

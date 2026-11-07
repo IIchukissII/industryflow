@@ -80,4 +80,4 @@ repeat. Unbounded window state exhausts memory, and model features are computed 
 
 ## References
 
-- [docs/architecture/stream-processing.md](../docs/architecture/stream-processing.md): manual of decision 7.
+- [docs/architecture/stream-processing.md](../docs/architecture/stream-processing.md): manual of decisions 1-8.

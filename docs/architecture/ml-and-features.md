@@ -199,6 +199,24 @@ The baseline is read from the materialized per-tenant aggregate table.
 |---|---|
 | `services/ml_service/api/feature_engineering/baseline_provider.py` | Baseline read |
 
+## ADR-0023 dec 7
+
+| Store | Holds | Bound |
+|---|---|---|
+| ML service baseline cache | Returned aggregate means, keyed by tenant schema, equipment, sensor and window | TTL `BASELINE_CACHE_TTL` (5 s), `BASELINE_CACHE_MAX_ENTRIES` (4096), least recently used evicted |
+| Alert worker latest-value store (Redis) | Recent readings per tenant, equipment and sensor; ML rules read the latest of each as one snapshot | `FEATURE_MAX_AGE_SECONDS` (300 s) per reading |
+| ML service capability store (Redis) | Upload-capability bindings only; no feature data | — |
+
+The `statistical` transform reads its window mean and deviation from the aggregate; no windowing runs on the serving side.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/feature_engineering/baseline_provider.py::AggregateBaselineProvider` | Aggregate read behind the bounded cache |
+| `services/ml_service/api/extensions/builtins.py::statistical` | Window statistics from the aggregate |
+| `services/alert_service/worker/feature_store.py::FeatureStore` | Latest-value snapshot store |
+| `services/ml_service/api/config.py::CAPABILITY_REDIS_URL` | Capability store, not a feature store |
+| `services/ml_service/tests/test_statistical_baseline.py` | Proof: aggregate-backed baseline and cache bound |
+
 ## ADR-0023 dec 9
 
 Offline training derives the window through the shared window contract.
@@ -207,6 +225,32 @@ Offline training derives the window through the shared window contract.
 |---|---|
 | `libs/industryflow_contracts` | Window contract |
 | `services/ml_service/tests/test_train_serve_agreement.py` | Train/serve agreement |
+
+## ADR-0027 dec 1-4
+
+The compatibility gate reads the artifact's flavor and pinned requirements from its metadata, without loading it, and compares them with the installed distributions.
+
+| Check | Refuses when |
+|---|---|
+| Flavor | The flavor is neither an in-process loader nor claimed by a loaded detector, or its framework is not installed |
+| Flavor framework and serialisers | Declared but not installed |
+| numpy | Major differs |
+| scikit-learn | Major.minor differs |
+| skops, xgboost | Major differs, or serving is older than the declared version |
+| pandas | Never at the gate; bound at build time by the parity script |
+| Any other declared package | Never; recorded only |
+
+The verdict is `compatible`, `patch_drift` or `incompatible`; a refusal carries its reasons and the per-library faults. The supported flavor set is the in-process loaders plus the flavors loaded detectors claim; an upload's flavor is matched against the detector registry.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/model_compat.py::evaluate` | Verdict against the installed environment |
+| `services/ml_service/api/model_compat.py::SERIALIZATION_CRITICAL` | Version rules per library |
+| `services/ml_service/api/model_compat.py::_supported_flavor` | Supported flavor set: loaders plus detector claims |
+| `services/ml_service/api/uploaded_model.py::judge_semantics` | Upload flavor matched against the detector registry |
+| `services/frontend/src/pages/ModelUploadWizard.jsx::refusalText` | Refusal reason shown to the uploader |
+| `services/ml_service/tests/test_model_compat.py` | Proof: version rules, unsupported framework refused |
+| `services/ml_service/tests/test_uploaded_model.py::test_the_rule_asks_the_registry_and_keeps_no_list_of_its_own` | Proof: an installed adapter widens the set without code change |
 
 ## ADR-0027 dec 5
 
@@ -226,13 +270,74 @@ Registration and deployment judge compatibility; the serving side grants deseria
 | `services/ml_service/api/model_compat.py` | Compatibility verdict |
 | `services/ml_service/api/skops_trust.py` | Trusted types by provenance |
 
-## ADR-0028 dec 1, 3
+## ADR-0027 dec 8
 
-Detectors register with the score semantics they implement (see Detectors).
+The verdict is stored on the model record and shown on the models page as a badge and a parity ledger; the alert service and the retrain recommendation never read it.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/18-model-compatibility-status.sql` | Verdict, detail and check time on `ml_models` |
+| `services/frontend/src/pages/MLModels.jsx::ParityLedger` | Verdict shown on the model |
+
+## ADR-0027 dec 9
+
+The parity script reads the serving pins from the one requirements file the serving Dockerfile copies; no other manifest exists.
+
+| Code | Role |
+|---|---|
+| `scripts/check_model_env_parity.py::serving_requirements_path` | Serving pins from the image's own COPY |
+| `services/ml_service/api/requirements.txt` | The serving image's manifest |
+| `scripts/tests/test_model_env_parity.py::test_the_phantom_is_gone_and_stays_gone` | Proof: no uninstalled manifest |
+
+## ADR-0027 dec 10
+
+| Model state | Behaviour |
+|---|---|
+| Registered before the gate, no verdict | `compatibility_status` is null; already deployed, it stays served |
+| Deployed again | The deployment gate evaluates it, records the verdict and refuses it with 409 when `incompatible` |
+
+Every load re-checks the tenant address only, not compatibility.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/18-model-compatibility-status.sql` | Nullable verdict |
+| `services/ml_service/api/routers/models.py::deploy_model` | Verdict at deployment |
+| `services/ml_service/api/model_loader.py::check_address` | Load-time check, without a compatibility verdict |
+
+## ADR-0027 dec 12
+
+The parity script compares the authoring kernel with the serving image; the analytics kernel image is not read.
+
+| Code | Role |
+|---|---|
+| `scripts/check_model_env_parity.py::KERNEL_DOCKERFILE` | Authoring kernel as the training end |
+
+## ADR-0028 dec 1-3
+
+Detectors register with the score semantics they implement (see Detectors). A detector that cannot establish its model's semantics raises `UninterpretableModel`; inference answers 422 and scores nothing. A model record with no detector is refused at scoring.
 
 | Code | Role |
 |---|---|
 | `services/ml_service/api/extensions` | Semantics vocabulary and built-in detectors |
+| `services/ml_service/api/extensions/__init__.py::UninterpretableModel` | Refusal to score |
+| `services/ml_service/api/routers/inference.py` | Dispatch on the recorded detector; refusal as 422 |
+| `services/ml_service/api/uploaded_model.py::judge_semantics` | Upload without declared semantics refused |
+| `infrastructure/timescaledb/init-scripts/20-model-detector.sql` | Detector recorded on the model |
+| `services/ml_service/tests/test_detectors.py::TestAFloatIsNotADeclaration` | Proof: a float output is not read as a score |
+
+## ADR-0028 dec 4
+
+| Path | Flavor check |
+|---|---|
+| Kernel registration | The named detector, `sklearn` by default, must list the artifact's flavor when it lists any |
+| Upload registration | A detector must implement the declared semantics and list the flavor |
+| Every registration and deployment | The compatibility gate refuses a flavor outside the supported set |
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/routers/models.py::_kernel_detector_or_refuse` | Kernel detector held to its flavors |
+| `services/ml_service/api/extensions/__init__.py::detectors_for` | Detectors by semantics and flavor |
+| `services/ml_service/api/model_compat.py::_supported_flavor` | Flavor set at the gate |
 
 ## ADR-0028 dec 5
 
@@ -241,6 +346,16 @@ The supported set is read from the registry and served.
 | Code | Role |
 |---|---|
 | `services/ml_service/api/routers/capabilities.py` | Served supported set |
+
+## ADR-0028 dec 7
+
+No out-of-process runtime is built. A flavor whose framework the serving image does not install is refused at the compatibility gate and listed under `unservable_flavors` in `GET /api/ml/capabilities`.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/model_compat.py::FLAVOR_LIBRARY` | Framework each flavor needs |
+| `services/ml_service/api/routers/capabilities.py::get_capabilities` | Unservable flavors named |
+| `services/ml_service/tests/test_model_compat.py::test_a_torch_model_is_refused_honestly_not_served_badly` | Proof: a torch artifact is refused |
 
 ## ADR-0035 dec 1, 4
 
@@ -257,6 +372,59 @@ The deployment gate scores the sample through the declared detector.
 | Code | Role |
 |---|---|
 | `services/ml_service/api/load_probe.py` | Isolated load-and-score |
+
+## ADR-0035 dec 5
+
+| Sample outcome at the gate | Stored profile |
+|---|---|
+| Scored | `prediction_baseline.origin` = `derived`, with the time |
+| Detector refuses, scoring fails or stalls, no complete row, no feature configuration | `prediction_baseline.origin` = null, with the reason; data drift still runs |
+
+The load verdict is read before the sample's outcome, so a sample never fails a deployment. The detector context carries the model's `reconstruction_scale`. Drift evaluation returns `prediction_drift_reason` when there is no prediction baseline.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/baseline_gate.py::Plan` | Scores or the reason there are none |
+| `services/ml_service/api/drift/reference_profile.py::without_prediction_baseline` | Data-drift-only profile |
+| `services/ml_service/api/load_probe.py::_result` | Load verdict before the sample's outcome |
+| `services/ml_service/tests/test_load_probe.py::test_a_sample_that_stalls_after_a_good_load_is_not_a_refusal` | Proof: a stalled sample is not a refusal |
+| `services/ml_service/tests/test_model_admission.py::test_a_detector_that_cannot_score_the_sample_leaves_data_drift_only` | Proof: data drift only |
+
+## ADR-0035 dec 6
+
+Direct registration, upload and promotion all pass the sample through the same acceptance step. The upload wizard sends the chosen sample file as `reference_profile` with the feature configuration.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/routers/models.py::_bind_inputs_and_baseline` | One acceptance step for every path |
+| `services/frontend/src/pages/ModelUploadWizard.jsx` | Sample sent with an upload |
+
+## ADR-0035 dec 7
+
+A profile with a `prediction_column` and no `prediction_baseline` holds supplied scores. Its state reads `supplied`; the models page shows it. The next deployment replaces the supplied scores with derived ones.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/drift/reference_profile.py::baseline_state` | `supplied` state |
+| `services/frontend/src/pages/MLModels.jsx::baselineText` | State shown on the model |
+| `services/ml_service/tests/test_drift_reference_profile.py::test_the_baseline_says_what_monitoring_can_do` | Proof: a legacy profile reads `supplied` |
+
+## ADR-0035 dec 8
+
+| Bound | Value | Where |
+|---|---|---|
+| Rows stored and scored | `DEFAULT_MAX_SAMPLE_ROWS` (5000), evenly down-sampled | Acceptance on every path; again at the deployment gate |
+| Sample read from a run | `MAX_SAMPLE_BYTES` (16 MiB); a larger file is not read | Promotion |
+| Registration request body | 16 MiB | Edge proxy, `/api/models` |
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/drift/reference_profile.py::accepted_sample` | Row bound and down-sample |
+| `services/ml_service/api/baseline_gate.py::plan` | Bound applied before scoring |
+| `services/ml_service/api/routers/registered_models.py::_read_sample` | Size-bounded read from a run |
+| `services/frontend/nginx.conf.template` | Body size at the edge |
+| `services/ml_service/tests/test_drift_reference_profile.py::test_an_accepted_sample_is_bounded_in_rows_on_every_path` | Proof: row bound on every path |
+| `services/ml_service/tests/test_model_admission.py::test_a_sample_stored_before_the_bound_is_scored_and_stored_at_it` | Proof: gate scores at the bound |
 
 ## ADR-0036 dec 7
 
@@ -283,21 +451,25 @@ Built-in detectors claim only flavors a data-only loader serves.
 |---|---|
 | `services/ml_service/api/extensions/builtins_detectors.py` | Built-in detectors |
 
-## ADR-0040 dec 2, 4
+## ADR-0040 dec 2-4
 
-Promotion reads the sample from the run and registers through the same gate (see Promotion).
+Promotion reads the sample from the run and registers through the same gate (see Promotion). The promotion request carries the feature configuration, equipment and detector the user chose; the run supplies only its metrics, description and sample. The form offers the loaded detectors, `sklearn` by default.
 
 | Code | Role |
 |---|---|
+| `services/ml_service/api/routers/registered_models.py::PromoteRequest` | The user's choices |
+| `services/ml_service/api/routers/registered_models.py::promote_model_version` | Registration from the run |
 | `services/ml_service/tests/test_promotion_integration.py` | Promotion against the live tracking server |
 
-## ADR-0041 dec 2-4
+## ADR-0041 dec 1-4
 
-The database refuses a change to, or deletion of, a bound configuration (see Feature configuration).
+The database refuses a change to, or deletion of, a bound configuration (see Feature configuration). A trigger on `ml_models` refuses any change of a model's `feature_config_id` and takes a share lock on the configuration it binds.
 
 | Code | Role |
 |---|---|
 | `infrastructure/timescaledb/init-scripts/30-bound-feature-config.sql` | Binding rule |
+| `infrastructure/timescaledb/init-scripts/30-bound-feature-config.sql::hold_feature_config_binding` | Binding fixed at registration |
+| `infrastructure/timescaledb/tests/test_bound_feature_config.py::test_a_binding_is_fixed` | Proof: a binding cannot change |
 
 ## ADR-0041 dec 3
 
@@ -307,11 +479,12 @@ The API reports the refusal.
 |---|---|
 | `services/ml_service/api/routers/feature_configs.py` | Refusal reported |
 
-## ADR-0044 dec 1-4
+## ADR-0044 dec 1-5
 
-The engine refuses a reading with a missing sensor or an uninterpretable definition and fails the score on any other feature failure.
+The engine refuses a reading with a missing sensor or an uninterpretable definition and fails the score on any other feature failure. No partial-scoring path exists; the equipment table has no partial-batch columns.
 
 | Code | Role |
 |---|---|
 | `services/ml_service/api/feature_engineering/engine.py` | Refusals and substitutes |
 | `services/ml_service/api/extensions/builtins.py` | Built-in transforms |
+| `infrastructure/timescaledb/init-scripts/33-equipment-batch-settings-removed.sql` | Partial-batch columns dropped from every tenant |

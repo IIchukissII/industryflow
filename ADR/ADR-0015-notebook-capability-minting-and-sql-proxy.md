@@ -89,4 +89,4 @@ is one the client can widen again.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): audiences, lifecycle values, SQL proxy; manual of decisions 1, 2, 4-6.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): audiences, lifecycle values, SQL proxy; manual of decisions 1-8.
