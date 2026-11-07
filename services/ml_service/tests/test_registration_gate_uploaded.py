@@ -219,6 +219,16 @@ def test_a_kernel_model_naming_a_detector_for_another_flavor_is_refused(client, 
     assert client.repo.created == []
 
 
+def test_a_kernel_model_naming_a_detector_that_claims_no_flavor_is_refused(client, monkeypatch):
+    """An empty ``handles_flavors`` claims nothing, as ``detectors_for`` reads it (ADR-0028 dec 4)."""
+    real = extensions.detector_capabilities()
+    monkeypatch.setattr(extensions, "detector_capabilities",
+                        lambda: real + [{"name": "claims-nothing", "handles_flavors": []}])
+    r = client.post("/api/models", json=_body(mlflow_run_id="run-1", detector="claims-nothing"))
+    assert r.status_code == 422, r.text
+    assert client.repo.created == []
+
+
 def test_the_description_is_written(client):
     """It is read, shown, and called load-bearing for an upload — and nothing wrote it."""
     client.post("/api/models", json=_body(mlflow_run_id="run-1", description="predicts bearing wear"))

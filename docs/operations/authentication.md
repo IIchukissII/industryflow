@@ -148,7 +148,7 @@ curl -k https://<host>/api/measurements/latest -H "Authorization: Bearer $TOKEN"
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Refresh-token lifetime |
 | `COOKIE_SECURE` | `true` | `Secure` flag on the cookies |
 | `COOKIE_SAMESITE` | `lax` | `SameSite` on the cookies |
-| `CORS_ORIGINS` | none (required) | Allowed origins, comma-separated; also the websocket `Origin` allowlist |
+| `CORS_ORIGINS` | none (required) | Allowed origins, comma-separated, never `*`; also the websocket `Origin` allowlist |
 | `WS_SESSION_RECHECK_SECONDS` | `60` | Open-socket session re-check |
 | `COMPANY_STATUS_CACHE_SECONDS` | `30` | Tenant active-flag cache: bounds a reactivation, a change made outside the API, and a suspension while the capability store is unreachable |
 | `INTERNAL_SERVICE_TOKEN` | none | Shared secret for `X-Internal-Service-Token` (alert worker → `/api/inference/predict`, `/api/drift/evaluate`); unset, `ml-service-api` refuses internal calls |
@@ -231,14 +231,17 @@ There is no public registration route. `ml-service-api` resolves the tenant of a
 
 | Channel | Check |
 |---|---|
+| Startup | A `*` entry in `CORS_ORIGINS` fails the settings while credentials are allowed |
 | HTTP | `CORSMiddleware` with `allow_origins` from `CORS_ORIGINS` and credentials allowed |
 | Socket handshake | `Origin` absent, in `CORS_ORIGINS`, or equal to the addressed host; else close 1008 |
 
-No code refuses `*` in `CORS_ORIGINS`.
-
 | Code | Role |
 |---|---|
+| `services/api_gateway/config.py::Settings` | Refuses a wildcard origin while credentials are allowed |
 | `services/api_gateway/main.py` | HTTP origin allowlist |
+| `services/ml_service/api/config.py::cors_origins` | ML service: the same refusal |
+| `services/ml_service/tests/test_cors_origins.py` | Proof: the ML service refuses a wildcard |
+| `services/api_gateway/tests/test_cors_origins.py::test_a_wildcard_origin_is_refused_at_startup` | Proof: a wildcard origin fails startup |
 | `services/api_gateway/routers/websocket.py::origin_allowed` | Socket origin check |
 | `services/api_gateway/tests/test_websocket_session.py::test_foreign_origin_is_refused_even_with_a_valid_cookie` | Proof: a foreign origin is refused |
 | `services/api_gateway/tests/test_websocket_session.py::test_lookalike_origin_is_refused` | Proof: a lookalike origin is refused |

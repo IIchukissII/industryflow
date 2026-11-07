@@ -10,6 +10,7 @@ stores is exercised as one. Only the subcommands the backup scripts use are impl
 is appended to ``$FAKE_S3_ROOT/calls.log`` with the access key it ran under, so a test can tell which
 principal touched which store — and that no credential travelled on argv.
 """
+import datetime
 import json
 import os
 import sys
@@ -45,8 +46,12 @@ def main(argv):
             if bucket.exists() else []
         keys = [k for k in keys if k.startswith(prefix)]
         if opt("--output") == "json":
-            # The CLI prints null for a query over an empty listing.
-            print(json.dumps([[k, (bucket / k).stat().st_size] for k in keys] or None))
+            # The CLI prints null for a query over an empty listing; LastModified as the CLI prints it.
+            def row(k):
+                st = (bucket / k).stat()
+                when = datetime.datetime.fromtimestamp(st.st_mtime, datetime.timezone.utc)
+                return [k, st.st_size] + ([when.isoformat()] if "LastModified" in (query or "") else [])
+            print(json.dumps([row(k) for k in keys] or None))
         elif not keys:
             print("None")
         elif query == "Contents[].[Key,Size]":

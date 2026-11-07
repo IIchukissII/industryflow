@@ -264,8 +264,8 @@ One library test decides tenant ownership of a name or key (see Tenant names).
 | Function | Rule |
 |---|---|
 | `is_plain_key` | No empty, `.` or `..` segment, no backslash, no control character |
-| `owns_key` | Leading `/` stripped; plain and under the prefix; with `encoded=True`, a key holding `%` is refused |
-| `scope_key` | Places a plain path under the prefix (idempotent), keeps a trailing `/`; any other path raises `ValueError` |
+| `owns_key` | One leading `/` dropped as path syntax, a second refused as an empty segment; plain and under the prefix; with `encoded=True`, a key holding `%` is refused |
+| `scope_key` | Drops one leading `/` as `owns_key` does; places a plain path under the prefix (idempotent), keeps one trailing `/`; a second trailing `/` or any other path raises `ValueError` |
 
 | Code | Role |
 |---|---|
@@ -274,6 +274,7 @@ One library test decides tenant ownership of a name or key (see Tenant names).
 | `services/notebook_cold_broker/policy.py::scope_key` | Cold broker binds it to the caller's tenant |
 | `services/notebook_tracking_gateway/policy.py::owns_artifact_key` | Tracking gateway tests an encoded artifact key |
 | `libs/industryflow_contracts/tests/test_tenancy.py::test_what_scope_key_places_owns_key_accepts` | Proof: placing and testing agree |
+| `libs/industryflow_contracts/tests/test_tenancy.py::test_only_one_leading_separator_is_path_syntax` | Proof: a second leading `/` is refused |
 | `tests/config_guards/test_tenant_contract_copies.py` | No copy of the test |
 
 ## ADR-0039 dec 5

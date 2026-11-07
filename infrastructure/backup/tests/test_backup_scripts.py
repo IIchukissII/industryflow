@@ -105,10 +105,15 @@ def _store(env, endpoint):
     return env["s3"] / endpoint.split("://", 1)[-1].replace(":", "_").replace("/", "_")
 
 
-def _put(env, endpoint, bucket, key, data: bytes):
+# Objects are written before the backup run of STAMP unless a test says otherwise.
+BEFORE_THE_RUN = 1767225600  # 2026-01-01T00:00:00Z
+
+
+def _put(env, endpoint, bucket, key, data: bytes, modified: int = BEFORE_THE_RUN):
     path = _store(env, endpoint) / bucket / key
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
+    os.utime(path, (modified, modified))
 
 
 def _calls(env):
@@ -697,6 +702,29 @@ def test_a_mirror_holding_none_of_the_source_fails_the_rehearsal(env):
     assert "the mirror holds none of them" in r.stdout
 
 
+def test_every_source_object_missing_from_the_mirror_fails_the_rehearsal_named(env):
+    """Object for object (ADR-0038 dec 8): a mirror holding some of the source is not the source."""
+    _backed_up(env)
+    _mirrored_pair(env, MODEL, b"skops", b"skops")
+    lost = MODEL.replace("model.skops", "MLmodel")
+    _put(env, ART, "mlflow", lost, b"flavors")
+    r = _rehearse(env, MODEL_SOURCE_BUCKET="mlflow", SOURCE_ENDPOINT_URL=ART)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert f"model mirror: FAILED, {lost} is missing from the mirror" in r.stdout
+    assert MODEL + " " not in r.stdout  # the object the mirror holds is not reported
+
+
+def test_an_object_written_after_the_rehearsed_run_is_not_required_in_the_mirror(env):
+    """The run of the rehearsed dump could not copy what the source gained after it started."""
+    _backed_up(env)
+    _mirrored_pair(env, MODEL, b"skops", b"skops")
+    later = MODEL.replace("model.skops", "MLmodel")
+    _put(env, ART, "mlflow", later, b"flavors", modified=1767232800)  # 2026-01-01T02:00:00Z, the run
+    r = _rehearse(env, MODEL_SOURCE_BUCKET="mlflow", SOURCE_ENDPOINT_URL=ART)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert later not in r.stdout
+
+
 def test_a_rewritten_cold_manifest_is_not_sampled(env):
     _backed_up(env)
     _mirrored_pair(env, "tenant_x/2026/01/01/_manifest.json", b"{new}", b"{old}", prefix="cold",
@@ -748,7 +776,7 @@ def test_a_mirrored_object_of_another_size_fails_the_rehearsal(env):
     _mirrored_pair(env, UPLOAD, b"skops", b"skops")
     r = _rehearse(env, MODEL_SOURCE_BUCKET="mlflow", SOURCE_ENDPOINT_URL=ART)
     assert r.returncode == 1, r.stdout + r.stderr
-    assert "1 object(s) differ in size from the source" in r.stdout and MODEL in r.stdout
+    assert f"model mirror: FAILED, {MODEL} differs in size between the source and the mirror" in r.stdout
 
 
 def test_a_rewritten_manifest_of_another_size_is_not_a_size_failure(env):

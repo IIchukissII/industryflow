@@ -49,6 +49,7 @@ rehearse_database() {
   if [ -z "$stamp" ]; then
     log "${db}: FAILED, no backup to rehearse"; FAILED=1; return
   fi
+  [[ "$stamp" > "$REHEARSED_RUN" ]] && REHEARSED_RUN="$stamp"
   # What the backup holds, read from the dump itself.
   if ! aws "${AWS_ARGS[@]}" s3 cp "s3://${S3_BUCKET}/${S3_PREFIX}/${db}/${stamp}.dump" \
          "${WORKDIR}/${db}.dump" --only-show-errors \
@@ -102,28 +103,48 @@ drop_scratch() {
     || { log "could not drop the scratch database '${1}'"; FAILED=1; }
 }
 
+# The newest run whose dump is rehearsed, as <YYYYMMDD>T<HHMMSS>Z; empty when none was found.
+REHEARSED_RUN=""
+
+# _list_sizes_since <bucket> <run stamp> — "<key>\t<size>" of every source object last modified before
+# that run started (every object when the stamp is empty): the objects that run's mirror listed.
+_list_sizes_since() {
+  local cutoff=""
+  [ -n "$2" ] && cutoff="${2:0:4}-${2:4:2}-${2:6:2}T${2:9:2}:${2:11:2}:${2:13:2}"
+  _src_aws s3api list-objects-v2 --bucket "$1" --query 'Contents[].[Key,Size,LastModified]' --output json \
+    | jq -r --arg c "$cutoff" '(. // [])[] | select(.[0] | test("\\p{Cc}") | not)
+                               | select($c == "" or (.[2] | .[0:19]) < $c) | "\(.[0])\t\(.[1])"'
+}
+
 # rehearse_mirror <label> <source bucket> <mirror prefix> <exclude prefix> <skipped glob>
-# An object both sides hold at different sizes fails: the backup re-copies such an object every run, so
-# one still differing after it is a mirror that does not hold the source. Then a random sample of the
-# objects both hold at the same size is read from each side and compared byte for byte. Keys matching
-# the glob are rewritten in place at the source (a manifest) and may legitimately be newer there, so
-# they are neither compared nor sampled.
+# The mirror is compared object for object (ADR-0038 dec 8): every source object the rehearsed run
+# listed (one modified before it started) must be in the mirror at the same size, and each one missing
+# or at another size fails, named. The backup copies an object
+# the mirror lacks or holds at another size every run, so one still missing or differing after it is a
+# mirror that does not hold the source. Then a random sample of the objects both hold at the same size
+# is read from each side and compared byte for byte. Keys matching the glob are rewritten in place at
+# the source (a manifest) and may legitimately be newer there, so they are neither compared nor sampled.
 rehearse_mirror() {
-  local label="$1" source="$2" prefix="$3" exclude="$4" skip="$5" key size n=0 a b
+  local label="$1" source="$2" prefix="$3" exclude="$4" skip="$5" key size why n=0 a b
   _list_sizes _src_aws "$source" "" \
     | awk -F'\t' -v x="$exclude" 'x == "" || index($1, x) != 1' > "${WORKDIR}/${label}.source"
+  _list_sizes_since "$source" "$REHEARSED_RUN" \
+    | awk -F'\t' -v x="$exclude" 'x == "" || index($1, x) != 1' > "${WORKDIR}/${label}.listed"
   _list_sizes _dst_aws "$S3_BUCKET" "${prefix}/" \
     | awk -F'\t' -v p="${prefix}/" '{ print substr($1, length(p) + 1) "\t" $2 }' > "${WORKDIR}/${label}.mirror"
-  awk -F'\t' 'FILENAME == ARGV[1] { m[$1] = $2; next } ($1 in m) && m[$1] != $2 { print $1 }' \
-      "${WORKDIR}/${label}.mirror" "${WORKDIR}/${label}.source" \
-    | while IFS= read -r key; do
+  awk -F'\t' 'FILENAME == ARGV[1] { m[$1] = $2; next }
+              !($1 in m) { print $1 "\tis missing from the mirror"; next }
+              m[$1] != $2 { print $1 "\tdiffers in size between the source and the mirror" }' \
+      "${WORKDIR}/${label}.mirror" "${WORKDIR}/${label}.listed" \
+    | while IFS=$'\t' read -r key why; do
         # shellcheck disable=SC2053  # the glob is a pattern
         [ -n "$skip" ] && [[ "$key" == $skip ]] && continue
-        printf '%s\n' "$key"
-      done > "${WORKDIR}/${label}.sizes"
-  if [ -s "${WORKDIR}/${label}.sizes" ]; then
-    log "${label} mirror: FAILED, $(wc -l < "${WORKDIR}/${label}.sizes") object(s) differ in size from the source, e.g.:"
-    head -n 10 "${WORKDIR}/${label}.sizes"
+        printf '%s\t%s\n' "$key" "$why"
+      done > "${WORKDIR}/${label}.unequal"
+  if [ -s "${WORKDIR}/${label}.unequal" ]; then
+    while IFS=$'\t' read -r key why; do
+      log "${label} mirror: FAILED, ${key} ${why}"
+    done < "${WORKDIR}/${label}.unequal"
     FAILED=1
   fi
   awk -F'\t' 'FILENAME == ARGV[1] { m[$1] = $2; next } ($1 in m) && m[$1] == $2' \

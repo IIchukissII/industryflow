@@ -4,9 +4,15 @@
 
 from typing import Optional
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from sqlalchemy.engine import URL
+
+# The gateway's CORS policy sends credentials (the session cookie), so its origin allowlist may never
+# hold the wildcard (ADR-0004 dec 6).
+CORS_ALLOW_CREDENTIALS = True
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
@@ -58,8 +64,19 @@ class Settings(BaseSettings):
     PLATFORM_ADMIN_PASSWORD: Optional[str] = None
     PLATFORM_ADMIN_TENANT: Optional[str] = None
 
-    # CORS Configuration
+    # CORS Configuration: an explicit origin allowlist, comma-separated (ADR-0004 dec 6)
     CORS_ORIGINS: str
+
+    @field_validator("CORS_ORIGINS")
+    @classmethod
+    def _no_wildcard_origin_with_credentials(cls, value: str) -> str:
+        """Refuse ``*`` in the allowlist while credentials are allowed, at startup (ADR-0004 dec 6)."""
+        if CORS_ALLOW_CREDENTIALS and "*" in cors_origin_list(value):
+            raise ValueError(
+                "CORS_ORIGINS must list explicit origins: '*' is refused because the gateway "
+                "allows credentials (ADR-0004 dec 6)"
+            )
+        return value
 
     @property
     def database_url(self) -> URL:
@@ -79,6 +96,11 @@ class Settings(BaseSettings):
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
+
+def cors_origin_list(value: str) -> list[str]:
+    """The origins a comma-separated ``CORS_ORIGINS`` value names."""
+    return [o.strip() for o in value.split(",") if o.strip()]
+
 
 @lru_cache()
 def get_settings() -> Settings:

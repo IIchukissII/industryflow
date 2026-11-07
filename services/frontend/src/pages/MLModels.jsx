@@ -165,6 +165,14 @@ const COMPAT = {
   },
 };
 
+// A platform model with no verdict was registered before the contract (ADR-0027 dec 10): it is served,
+// and marked, because "never evaluated" is not "fine". Neutral, not a finding; deploying it again
+// evaluates it.
+const NOT_EVALUATED = {
+  label: 'Not evaluated',
+  title: 'Registered before the compatibility contract: served, but never checked against this serving environment. Deploying it again evaluates it (ADR-0027).',
+};
+
 /**
  * The two manifests, reconciled line by line.
  *
@@ -409,14 +417,20 @@ function MLModels() {
                               <Icon name="refresh" size={11} /> Retrain
                             </span>
                           )}
-                          {/* Only a FINDING earns a row badge. A model in parity is the expected case
-                              and stays quiet; its verdict is in the drawer for anyone who looks. */}
+                          {/* Only a FINDING earns a toned row badge. A model in parity is the expected
+                              case and stays quiet; its verdict is in the drawer for anyone who looks.
+                              A platform model never evaluated gets a neutral mark (ADR-0027 dec 10). */}
                           {(m.compatibility === 'incompatible' || m.compatibility === 'patch_drift') && (
                             <span
                               className={`badge ${COMPAT[m.compatibility].pill} mdl-flag`}
                               title={COMPAT[m.compatibility].title}
                             >
                               <Icon name="alert" size={11} /> {COMPAT[m.compatibility].label}
+                            </span>
+                          )}
+                          {m.registry === 'platform' && m.compatibility === null && (
+                            <span className="badge mdl-flag" title={NOT_EVALUATED.title}>
+                              <Icon name="help" size={11} /> {NOT_EVALUATED.label}
                             </span>
                           )}
                         </td>
