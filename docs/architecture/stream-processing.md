@@ -24,12 +24,12 @@ device ──mTLS──▶ ingestion-edge ─▶ ingestion-service ─▶ Kafka 
 
 | Name | Role | Port | Config |
 |---|---|---|---|
-| `ingestion-service` | Validates the reading, stamps the verified `company_id`, produces to Kafka; rejects a timestamp more than 300 s ahead (HTTP 422) and a suspended tenant (HTTP 403, from `tenant-status`); no database access | 8003 | `services/ingestion_service/` |
-| `spark-streaming` | Upserts raw readings; reads from `earliest` | 4040 (metrics), 9108 (revision) | `services/spark_jobs/kafka_to_timescaledb.py` |
-| `spark-aggregations` | Windows readings into 1 min / 5 min / 1 h aggregates; reads from `latest` | 4040 (metrics), 9108 (revision) | `services/spark_jobs/kafka_aggregations.py`, `aggregation_windows.py` |
-| Reading guard | One definition of an unwritable reading, shared by both jobs | | `services/spark_jobs/reading_guard.py` |
-| Window contract | Window widths and allowed lateness | | `libs/industryflow_contracts/industryflow_contracts/windows.py` |
-| `spark-master`, `spark-worker` | Standalone cluster (Compose) | 7077, 8080 | `services/spark_jobs/Dockerfile.worker` |
+| `ingestion-service` | Validates the reading, stamps the verified `company_id`, produces to Kafka; rejects a timestamp more than 300 s ahead (HTTP 422) and a suspended tenant (HTTP 403, from `tenant-status`; ADR-0033 dec 3); no database access (ADR-0002 dec 5, 8) | 8003 | `services/ingestion_service/` |
+| `spark-streaming` | Upserts raw readings (ADR-0006 dec 3); reads from `earliest` (ADR-0005 dec 4) | 4040 (metrics), 9108 (revision) | `services/spark_jobs/kafka_to_timescaledb.py` |
+| `spark-aggregations` | Windows readings into 1 min / 5 min / 1 h aggregates (ADR-0006 dec 1, 2); reads from `latest` (ADR-0005 dec 4) | 4040 (metrics), 9108 (revision) | `services/spark_jobs/kafka_aggregations.py`, `aggregation_windows.py` |
+| Reading guard | One definition of an unwritable reading, shared by both jobs (ADR-0006 dec 4) | | `services/spark_jobs/reading_guard.py` |
+| Window contract | Window widths and allowed lateness (ADR-0006 dec 7) | | `libs/industryflow_contracts/industryflow_contracts/windows.py` |
+| `spark-master`, `spark-worker` | Standalone cluster (Compose); executors reach the object-store checkpoint (ADR-0006 dec 5) | 7077, 8080 | `services/spark_jobs/Dockerfile.worker` |
 
 ## Kafka topics
 
@@ -38,7 +38,7 @@ device ──mTLS──▶ ingestion-edge ─▶ ingestion-service ─▶ Kafka 
 | `sensor-data-raw` | `ingestion-service` | `spark-streaming`, `spark-aggregations`, `alert-service-detector` | `KAFKA_TOPIC_SENSOR_DATA` |
 | `sensor-data-raw.measurements.dlq` | `spark-streaming` | Operators | `KAFKA_TOPIC_MEASUREMENTS_DLQ` |
 | `<KAFKA_TOPIC_SENSOR_DATA>.dlq` | `alert-service-detector` | Operators | `KAFKA_TOPIC_DLQ` ([alerting](alerting.md)) |
-| `tenant-status` | `alert-service-detector`: every registered tenant's status every `TENANT_STATUS_PUBLISH_SECONDS` (10 s) | `ingestion-service`, outside any group, from `latest`; a status unheard for 60 s is forgotten | `KAFKA_TOPIC_TENANT_STATUS` ([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) dec 3; message in `libs/industryflow_contracts/industryflow_contracts/tenant_status.py`) |
+| `tenant-status` | `alert-service-detector`: every registered tenant's status every `TENANT_STATUS_PUBLISH_SECONDS` (10 s) | `ingestion-service`, outside any group, from `latest`; a status unheard for 60 s is forgotten | `KAFKA_TOPIC_TENANT_STATUS` ([ADR-0033 dec 3](../../ADR/ADR-0033-tenant-lifecycle.md); message in `libs/industryflow_contracts/industryflow_contracts/tenant_status.py`) |
 
 A letter on a `*.dlq` topic fires `IndustryFlowDeadLetteredReadings` on Compose and Kubernetes
 ([monitoring](../operations/monitoring.md#alerts)); inspection and replay:

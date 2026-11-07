@@ -21,10 +21,10 @@ The alert API, the detection worker, rule types, deduplication and operator labe
 
 | Name | Role | Port | Config |
 |---|---|---|---|
-| `api-gateway` | Rule CRUD, alert history, acknowledge, labels, precision | 8000 | `services/api_gateway/routers/alert_rules.py`, `alerts_history.py` |
-| `alert-service-detector` | Kafka consumer on `KAFKA_TOPIC_SENSOR_DATA`; evaluates rules, writes `alerts` | 9108, `industryflow_build_info` only ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 8) | `services/alert_service/config.py`, `worker/` |
-| `ml-service-api` | Scores `ml` rules, computes drift ([ML and features](ml-and-features.md)) | 8002 | `services/ml_service/` |
-| Alerts page | Acknowledge, label (Real / False / Unsure); label precision over 30 days in the 24-hour summary | | `services/frontend/src/pages/AlertHistory.jsx` |
+| `api-gateway` | Rule CRUD, alert history, acknowledge, labels, precision (ADR-0031 dec 1) | 8000 | `services/api_gateway/routers/alert_rules.py`, `alerts_history.py` |
+| `alert-service-detector` | Kafka consumer on `KAFKA_TOPIC_SENSOR_DATA`; evaluates rules, writes `alerts`; no HTTP API (ADR-0031 dec 2) | 9108, `industryflow_build_info` only ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 8) | `services/alert_service/config.py`, `worker/` |
+| `ml-service-api` | Scores `ml` rules, computes drift (ADR-0021 dec 3; [ML and features](ml-and-features.md)) | 8002 | `services/ml_service/` |
+| Alerts page | Acknowledge, label (Real / False / Unsure); label precision over 30 days in the 24-hour summary (ADR-0022 dec 1, 3) | | `services/frontend/src/pages/AlertHistory.jsx` |
 
 ## Endpoints
 

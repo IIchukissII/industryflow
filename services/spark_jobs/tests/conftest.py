@@ -8,8 +8,8 @@ Test config for the Spark jobs: the job directory on the path, and one local Spa
 The jobs' routing and windowing run on a real local Spark (pyspark from requirements-dev.txt, and a
 JDK — CI's runner provides one). Kafka and TimescaleDB are not needed: the batch routing takes its
 database lookups, dead-letter publisher and writer as arguments, and the streaming tests read from a
-file source. test_spark_service.py is a live-stack harness (TimescaleDB + running jobs); CI runs this
-directory with it --ignore'd.
+file source. The real-store proofs (test_streaming_integration.py, test_aggregations_integration.py)
+run in CI's spark-streaming job.
 """
 import os
 import sys

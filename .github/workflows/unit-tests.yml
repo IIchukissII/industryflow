@@ -107,10 +107,9 @@ jobs:
           - { service: ml_service,          path: services/ml_service/tests, args: "--ignore=services/ml_service/tests/test_upload_serving_integration.py --ignore=services/ml_service/tests/test_promotion_integration.py" }
           # The routing, reading guard and windowing tests run on a local Spark (pyspark from
           # requirements-dev) on the job images' Java (`java`, held equal to their base tag by
-          # scripts/check_spark_version_parity.py). test_spark_service.py is a live-stack harness
-          # (TimescaleDB + the running jobs) and would only fail here, so it is excluded. The
-          # real-store proof (test_streaming_integration.py) runs in the spark-streaming job.
-          - { service: spark_jobs,          path: services/spark_jobs/tests, args: "--ignore=services/spark_jobs/tests/test_spark_service.py --ignore=services/spark_jobs/tests/test_streaming_integration.py --ignore=services/spark_jobs/tests/test_aggregations_integration.py", java: "21" }
+          # scripts/check_spark_version_parity.py). The real-store proofs (test_streaming_integration.py,
+          # test_aggregations_integration.py) run in the spark-streaming job.
+          - { service: spark_jobs,          path: services/spark_jobs/tests, args: "--ignore=services/spark_jobs/tests/test_streaming_integration.py --ignore=services/spark_jobs/tests/test_aggregations_integration.py", java: "21" }
           # Cold-layer exporter (ADR-0025): orchestration tests drive fakes, no DB/object store.
           # The live proof (test_cold_export_integration.py) is `integration` and excluded here —
           # it needs TimescaleDB + MinIO and would only skip. It runs in cold-layer-integration.yml.
