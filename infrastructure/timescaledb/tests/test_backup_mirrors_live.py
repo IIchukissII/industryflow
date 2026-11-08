@@ -4,12 +4,13 @@
 
 """
 The backup job's object mirrors and notebook archives against a real MinIO and Docker Engine
-(ADR-0038 dec 1, 3-5; ADR-0032 dec 4; infrastructure/backup/db-backup.sh, notebook-backup.sh).
+(ADR-0038 dec 1, 3-5; ADR-0032 dec 3-7; infrastructure/backup/db-backup.sh, notebook-backup.sh).
 
 infrastructure/backup/tests runs these scripts against a stand-in `aws` and Engine API; here the
 compose stack's own db-backup and notebook-backup run, with their own principals, and each result is
 read back from the store as the stack's root:
 
+- each database's dumps and the globals are kept to the newest RETAIN_PER_DB under their own prefix;
 - every model and cold object is mirrored with the same bytes, upload staging left out;
 - the documented copy-back of the model mirror reproduces the source's keys and sizes;
 - an object gone from the source stays mirrored until the retention has passed, then leaves;
@@ -201,6 +202,31 @@ def test_an_object_gone_from_the_source_leaves_the_mirror_after_the_retention(mi
     assert root.listing(backups, f"models/{gone}") == {}, "still mirrored after the retention"
     assert f"models/{kept}" in root.listing(backups, f"models/{kept}")
     assert gone not in root.get(backups, "models/_absent.tsv").decode()
+
+
+def test_dumps_and_globals_are_kept_to_the_newest_under_each_prefix(stack):
+    # Under a prefix of its own, so the stack's own dumps (the restore proofs read them) are untouched.
+    env, root = stack
+    backups = env.get("BACKUP_S3_BUCKET", "industryflow-backups")
+    prefix = f"ci-retention-{uuid.uuid4().hex[:10]}"
+    old = ("20200101T020000Z", "20200102T020000Z", "20200103T020000Z")
+    for stamp in old:
+        root.put(backups, f"{prefix}/industryflow/{stamp}.dump", b"old")
+        root.put(backups, f"{prefix}/globals/{stamp}.sql", b"old")
+    root.put(backups, f"{prefix}/industryflow_old/{old[0]}.dump", b"another prefix")
+    try:
+        r = _ok(_compose("-e", f"S3_PREFIX={prefix}", "-e", "RETAIN_PER_DB=2", "-e", "DATABASES=industryflow",
+                         "db-backup"), "backup with a retention of 2")
+        dumps, globals_ = (sorted(root.listing(backups, f"{prefix}/{p}/")) for p in ("industryflow", "globals"))
+        assert len(dumps) == 2 and dumps[0] == f"{prefix}/industryflow/{old[2]}.dump", (dumps, r.stdout)
+        assert len(globals_) == 2 and globals_[0] == f"{prefix}/globals/{old[2]}.sql", globals_
+        new = dumps[1].rsplit("/", 1)[1].removesuffix(".dump")
+        assert new > old[2] and globals_[1] == f"{prefix}/globals/{new}.sql"
+        assert root.get(backups, dumps[1]) != b"old", "the run's own dump was not kept"
+        assert list(root.listing(backups, f"{prefix}/industryflow_old/")) == [f"{prefix}/industryflow_old/{old[0]}.dump"]
+    finally:
+        for key in root.listing(backups, f"{prefix}/"):
+            root.rm(backups, key)
 
 
 @pytest.fixture

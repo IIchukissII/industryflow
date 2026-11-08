@@ -29,14 +29,14 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, ConfigDict
 
-from baseline_gate import score_rows
 from drift import (
     align_readings, baseline_state, compute_drift, prediction_column_refusal, DEFAULT_DRIFT_SHARE_THRESHOLD,
     MIN_ROWS,
 )
-from extensions import DetectorContext, UninterpretableModel, detector_context_fields
+from extensions import UninterpretableModel
 from feature_engineering import FeatureEngineeringEngine, FeatureRefused
-from .inference import _resolve_company_id, detector_for, load_model_or_refuse
+import scoring
+from .inference import _resolve_company_id, load_model_or_refuse
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,10 @@ async def _current_predictions(
                       f"need >= {MIN_ROWS}")
 
     try:
-        _, detector = detector_for(model)
+        scoring.detector_name(model)
+    except scoring.Unscorable as exc:
+        return None, f"the model cannot be scored: {exc}"
+    try:
         loaded = await load_model_or_refuse(company_id, model)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else exc.detail.get("message", str(exc.detail))
@@ -116,9 +119,11 @@ async def _current_predictions(
         logger.warning("Prediction drift not scored for model %s: %s", model.get("id"), exc, exc_info=True)
         return None, f"the model cannot be scored: {type(exc).__name__}: {exc}"
 
-    ctx = DetectorContext(**detector_context_fields(model, engine.get_feature_names(), equipment_id))
     try:
-        scores = await asyncio.to_thread(score_rows, rows, loaded, detector, ctx)
+        spec = scoring.Scoring.of(model, engine.get_feature_names(), equipment_id)
+        scores = await asyncio.to_thread(scoring.scores_blocking, spec, loaded, rows)
+    except scoring.Unscorable as exc:
+        return None, f"the model cannot be scored: {exc}"
     except UninterpretableModel as exc:
         return None, f"the model's output cannot be interpreted: {exc}"
     return scores, None

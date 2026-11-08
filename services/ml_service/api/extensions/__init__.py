@@ -12,7 +12,6 @@ a hardcoded branch. The core imports only its own generic built-ins plus whateve
 operator names in EXTENSION_MODULES — never a named extension directly.
 """
 import importlib
-import json
 import logging
 import math
 from dataclasses import dataclass, field
@@ -169,31 +168,6 @@ class DetectorContext:
     # catastrophic for one model and unremarkable for another, so the scale is a property of the model,
     # never a platform constant. Absent -> the autoencoder detector refuses rather than inventing one.
     reconstruction_scale: Any = None
-
-
-def detector_context_fields(model: Dict[str, Any], feature_names: List[str], equipment_id: Any = None) -> Dict[str, Any]:
-    """The fields of the DetectorContext a model's detector is called with. Every scoring path —
-    inference, drift and the baseline gate — builds its context here, so a detector meets the same
-    context on each, and none leaves a field it declares unset (ADR-0010 dec 6).
-
-    The reconstruction scale rides in the model's training metrics; where it lives in the schema is
-    still open (ADR-0028 Deferred). Metrics that are not a JSON object carry no scale, and the one
-    detector that needs it refuses without one."""
-    metrics = model.get("training_metrics") or {}
-    if isinstance(metrics, str):
-        try:
-            metrics = json.loads(metrics)
-        except ValueError:
-            metrics = None
-    if not isinstance(metrics, dict):
-        logger.warning("model %s: training metrics are not a JSON object; no reconstruction scale",
-                       model.get("model_id") or model.get("id"))
-        metrics = {}
-    return {
-        "feature_names": list(feature_names),
-        "equipment_id": equipment_id,
-        "reconstruction_scale": metrics.get("reconstruction_scale"),
-    }
 
 
 # The scale every detector's score is declared on (ADR-0028 dec 1): bounded, 0 normal, 1 anomalous.

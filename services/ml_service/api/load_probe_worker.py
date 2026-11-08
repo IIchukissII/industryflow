@@ -124,26 +124,19 @@ def score_sample(model, sample: dict) -> dict:
     The detector is the platform's or an operator extension's, loaded as the service loads it; the rows
     were engineered by the service from the model's feature configuration.
     """
-    import asyncio
     import os
 
     import numpy as np
 
     import extensions
+    import scoring
 
     try:
         extensions.load_extension_modules(
             [m for m in os.environ.get("EXTENSION_MODULES", "").split(",") if m.strip()])
-        detector = extensions.get_detector(sample.get("detector") or "")
-        if detector is None:
-            return {"sample_error": f"no detector named {sample.get('detector')!r} is loaded"}
-        ctx = extensions.DetectorContext(**(sample.get("context") or {}))
+        spec = scoring.Scoring.from_json(sample.get("scoring") or {})
         rows = [np.asarray(r, dtype="float64").reshape(1, -1) for r in sample.get("rows") or []]
-
-        async def run():
-            return [(await detector(row, model, 0.5, ctx)).score for row in rows]
-
-        return {"scores": [float(v) for v in asyncio.run(run())]}
+        return {"scores": scoring.scores_blocking(spec, model, rows)}
     except Exception as exc:  # noqa: BLE001 — the reason is reported, the verdict on the load stands
         return {"sample_error": f"{type(exc).__name__}: {exc}"}
 

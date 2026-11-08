@@ -129,6 +129,8 @@ age_out_gone() {
 main() {
   : "${S3_BUCKET:?S3_BUCKET required}" "${NOTEBOOK_HELPER_IMAGE:?NOTEBOOK_HELPER_IMAGE required}"
   [ -n "$VOLUME_PREFIX" ] || { log "NOTEBOOK_VOLUME_TEMPLATE has no fixed prefix"; exit 2; }
+  require_count RETAIN_PER_VOLUME "$RETAIN" || exit 2
+  require_count MIRROR_RETAIN_DAYS "$RETAIN_DAYS" || exit 2
   export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
   local stamp vol size have n=0
   stamp="${NOTEBOOK_BACKUP_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
