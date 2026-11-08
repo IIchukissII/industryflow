@@ -36,7 +36,7 @@ method returns the builder and raises `ValueError` if the feature name already e
 | `add_ratio(sensor1, sensor2, name=None)` | `interaction`, `operation: ratio` | `<sensor1>_<sensor2>_ratio` |
 | `add_difference(sensor1, sensor2, name=None)` | `interaction`, `operation: difference` | `<sensor1>_<sensor2>_diff` |
 | `add_product(sensor1, sensor2, name=None)` | `interaction`, `operation: product` | `<sensor1>_<sensor2>_product` |
-| `add_deviation(sensor, granularity="1min", name=None)` | `statistical`, `stat_type: deviation_from_window_mean` | `<sensor>_deviation` |
+| `add_deviation(sensor, granularity, name=None)` | `statistical`, `stat_type: deviation_from_window_mean` | `<sensor>_deviation` |
 | `add_custom(feature_name, transformation)` | the given dict, with `name` set | `feature_name` |
 
 | Method | Returns |
@@ -62,14 +62,14 @@ method returns the builder and raises `ValueError` if the feature name already e
 A `statistical` feature at serve time reads the newest closed window of `sensor_aggregations_<granularity>`.
 `offline_baseline` computes the same value per row from history, causally, so training and serving
 agree. Granularities and their width/lateness come from `industryflow_contracts.windows`
-(`1min`, `5min`, `1hour`; default `1min`).
+(`1min`, `5min`, `1hour`); every call names one.
 
 | Name | Signature / value | Returns |
 |---|---|---|
-| `add_window_features` | `(df, sensor_cols, *, granularity="1min", stats=("deviation_from_window_mean",), timestamp_col="timestamp", group_cols=())` | `(df, transformations)`: one column per (sensor, stat) plus the matching config entries; row order preserved |
-| `feature_config` | `(sensor, stat_type, granularity="1min", name=None)` | One `statistical` transformation dict |
-| `window_index` | `(timestamps, granularity="1min")` | Tumbling-window index per timestamp |
-| `latest_written_window` | `(timestamps, granularity="1min")` | Index of the newest window the Spark job has written at each timestamp |
+| `add_window_features` | `(df, sensor_cols, *, granularity, stats=("deviation_from_window_mean",), timestamp_col="timestamp", group_cols=())` | `(df, transformations)`: one column per (sensor, stat) plus the matching config entries; row order preserved |
+| `feature_config` | `(sensor, stat_type, granularity, name=None)` | One `statistical` transformation dict |
+| `window_index` | `(timestamps, granularity)` | Tumbling-window index per timestamp |
+| `latest_written_window` | `(timestamps, granularity)` | Index of the newest window the Spark job has written at each timestamp |
 | `GRANULARITY_SECONDS` | `dict[str, int]` | Window width per granularity |
 | `WATERMARK_SECONDS` | `dict[str, int]` | Allowed lateness per granularity |
 

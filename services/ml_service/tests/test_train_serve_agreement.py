@@ -118,7 +118,6 @@ def test_granularities_agree_between_training_and_serving():
     side understands — skew reintroduced by omission. This fails CI instead.
     """
     assert set(offline_baseline.GRANULARITY_SECONDS) == set(baseline_provider._AGG_TABLES)
-    assert offline_baseline.DEFAULT_GRANULARITY == baseline_provider.DEFAULT_GRANULARITY
 
 
 def test_window_and_lateness_agree_with_the_spark_job():
@@ -162,7 +161,7 @@ def test_emitted_config_names_a_stat_type_serving_implements():
     from extensions import builtins  # noqa: PLC0415
 
     for stat_type in ("deviation_from_window_mean", "window_mean", "window_std"):
-        config = offline_baseline.feature_config("xmeas_1", stat_type)
+        config = offline_baseline.feature_config("xmeas_1", stat_type, "1min")
         assert config["params"]["stat_type"] in builtins._STAT_TYPES
         assert config["params"]["granularity"] in baseline_provider._AGG_TABLES
         assert config["type"] == "statistical"
@@ -182,7 +181,7 @@ async def test_offline_feature_equals_what_serving_computes(stat_type, suffix):
     engineered, _ = offline_baseline.add_window_features(
         df.copy(), ["xmeas_1"], granularity="1min", stats=(stat_type,),
     )
-    transformation = offline_baseline.feature_config("xmeas_1", stat_type)
+    transformation = offline_baseline.feature_config("xmeas_1", stat_type, "1min")
 
     # Agreement on a column of zeros is agreement on nothing: if the windowing collapsed (every row
     # in one bucket, so every baseline is the cold-start neutral), both sides would return 0.0 and
@@ -210,16 +209,16 @@ async def test_cold_start_rows_agree_on_neutral():
     """A history's first window has no closed predecessor. Training must record the same neutral the
     serving transform degrades to, or the model learns a value inference never produces."""
     df = _frame(n_samples=90)
-    engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"])
-    first_window = engineered[offline_baseline.window_index(engineered["timestamp"]) ==
-                              offline_baseline.window_index(engineered["timestamp"]).min()]
+    engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"], granularity="1min")
+    first_window = engineered[offline_baseline.window_index(engineered["timestamp"], "1min") ==
+                              offline_baseline.window_index(engineered["timestamp"], "1min").min()]
 
     assert not first_window.empty
     assert (first_window["xmeas_1_deviation"] == 0.0).all()
 
     row = first_window.iloc[0]
     served = await _served(
-        offline_baseline.feature_config("xmeas_1", "deviation_from_window_mean"),
+        offline_baseline.feature_config("xmeas_1", "deviation_from_window_mean", "1min"),
         {"xmeas_1": row["xmeas_1"]}, _ProviderOver(df, now=row["timestamp"]),
     )
     assert served == 0.0
@@ -234,12 +233,12 @@ def test_offline_feature_is_causal():
     replaced failed exactly here — it averaged everything, so every row moved.
     """
     df = _frame(n_samples=180)
-    engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"])
+    engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"], granularity="1min")
 
     tampered = df.copy()
     last_sample = tampered["sample"].max()
     tampered.loc[tampered["sample"] == last_sample, "xmeas_1"] += 1000.0
-    engineered_after, _ = offline_baseline.add_window_features(tampered, ["xmeas_1"])
+    engineered_after, _ = offline_baseline.add_window_features(tampered, ["xmeas_1"], granularity="1min")
 
     early = engineered["sample"] < last_sample
     pd.testing.assert_series_equal(
@@ -253,14 +252,14 @@ def test_equipment_histories_do_not_leak_into_each_other():
     one equipment's samples must never form another's baseline."""
     df = _frame(n_samples=120, equipments=("eq-1", "eq-2"))
     engineered, _ = offline_baseline.add_window_features(
-        df.copy(), ["xmeas_1"], group_cols=GROUP_COLS,
+        df.copy(), ["xmeas_1"], granularity="1min", group_cols=GROUP_COLS,
     )
 
     for equipment in ("eq-1", "eq-2"):
         rows = engineered[engineered["equipment_id"] == equipment]
         first_window = rows[
-            offline_baseline.window_index(rows["timestamp"]) ==
-            offline_baseline.window_index(rows["timestamp"]).min()
+            offline_baseline.window_index(rows["timestamp"], "1min") ==
+            offline_baseline.window_index(rows["timestamp"], "1min").min()
         ]
         # If eq-2 borrowed eq-1's windows, its first window would have a baseline and be non-zero.
         assert (first_window["xmeas_1_deviation"] == 0.0).all()
@@ -271,13 +270,13 @@ def test_unknown_group_column_is_rejected():
     cross-equipment leak above, arriving quietly. Fail instead."""
     df = _frame(n_samples=70)
     with pytest.raises(ValueError, match="group column"):
-        offline_baseline.add_window_features(df, ["xmeas_1"], group_cols=["simulation_run"])
+        offline_baseline.add_window_features(df, ["xmeas_1"], granularity="1min", group_cols=["simulation_run"])
 
 
 def test_row_order_is_preserved():
     """The helper sorts internally to compute causally; it must hand rows back in the caller's
     order, or the features would be silently misaligned with the labels."""
     df = _frame(n_samples=70)
-    engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"])
+    engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"], granularity="1min")
     pd.testing.assert_series_equal(engineered["sample"], df["sample"])
     pd.testing.assert_series_equal(engineered["xmeas_1"], df["xmeas_1"])
