@@ -15,8 +15,7 @@ One chart, `industryflow`, packages the platform for Kubernetes. The notebook st
 |---|---|
 | `deploy/helm/industryflow/Chart.yaml` | The chart |
 | `deploy/helm/industryflow/values.yaml` | Defaults and per-dependency toggles |
-| `deploy/helm/industryflow/values-digests.yaml` | Generated first-party digest overlay |
-| `scripts/pin-image-digests.sh` | Generates the digest overlay |
+| `scripts/pin-image-digests.sh` | Generates the first-party digest overlay (git-ignored) |
 | `tests/config_guards/test_image_pins.py::test_every_chart_third_party_image_is_pinned_by_digest` | Every third-party image pinned by digest |
 
 ### Templates
