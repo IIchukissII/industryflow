@@ -43,7 +43,8 @@ async def pressure_margin(transformation, sensor_data, ctx):
 
 @register_transform("pressure_baseline", stateful=True, neutral=0.0)
 async def pressure_baseline(transformation, sensor_data, ctx):
-    baseline = await ctx.baseline_provider.compute_baseline(...)
+    baseline = await ctx.baseline_provider.compute_baseline(
+        ctx.company_id, ctx.equipment_id, transformation["sensor"], transformation["params"]["granularity"])
     if baseline is None:
         raise StatefulUnavailable("no closed window yet")
     return baseline["mean"]
@@ -56,10 +57,17 @@ A transform never returns a substitute value ([ADR-0044](../../ADR/ADR-0044-comp
 | `sensor_value(sensor_data, name)` | The only way to read a sensor; raises `MissingSensors` for an absent or non-finite value | `422` naming the sensors |
 | `InvalidFeature(feature, reason)` | The definition cannot be interpreted (missing or unknown parameter) | `422` |
 | `StatefulUnavailable(reason)` | A `stateful=True` transform's store cannot supply the value | Slot takes `neutral`; `degraded: true`, named in `neutralized_features` |
+| A computed value that is not a finite number | — | `500`; the score fails |
 | Any other exception | — | `500`; the score fails |
 
 The engine refuses a reading lacking any `base_sensors` entry, or any sensor a feature names in
-`sensor` / `sensors`, before a transform runs.
+`sensor` / `sensors`, before a transform runs; with a `stateful=True` feature in the configuration, a
+reading that names no valid `equipment_id` is refused too (`422`), whatever the kill-switch says.
+
+`ctx.baseline_provider.compute_baseline(company_id, equipment_id, sensor, granularity)` returns
+`{"mean", "std"}`, or `None` when its store cannot supply one; the window is required and must be one
+declared in `industryflow_contracts.windows`, and a window or ids it cannot read raise `ValueError`
+(extension API 0.5.0).
 
 | Tag | Meaning |
 |---|---|

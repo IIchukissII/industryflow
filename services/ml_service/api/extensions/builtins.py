@@ -74,7 +74,11 @@ async def interaction(transformation, sensor_data, ctx):
     a = sensor_value(sensor_data, sensors[0])
     b = sensor_value(sensor_data, sensors[1])
     if operation == "ratio":
-        return a / (b + 1e-8)
+        if b == 0:
+            # The quotient does not exist; a nudged denominator would serve a huge number as an
+            # ordinary feature (ADR-0044 dec 4).
+            raise ZeroDivisionError(f"feature '{transformation.get('name')}': ratio of {sensors[0]} to {sensors[1]}, which is 0")
+        return a / b
     if operation == "difference":
         return a - b
     if operation == "product":
@@ -133,27 +137,26 @@ async def statistical(transformation, sensor_data, ctx):
             f"stat_type {stat_type!r} is not one of {', '.join(_STAT_TYPES)}",
         )
 
-    # Which aggregate window is the baseline is domain configuration (ADR-0001), not a platform
-    # constant: read it from params, the shared contract's default when it names none. A window the
-    # contract does not declare is a defect of the definition, refused here rather than served as an
-    # unavailable baseline (ADR-0044 dec 2, 3).
+    # Which aggregate window is the baseline is domain configuration (ADR-0001), named by the
+    # definition: one of the windows the shared contract declares, with no default. Any other value
+    # is a defect of the definition, refused rather than served as an unavailable baseline
+    # (ADR-0044 dec 2, 3).
     granularity = params.get("granularity")
-    if granularity is not None and granularity not in windows.WINDOWS:
+    if granularity not in windows.WINDOWS:
         raise InvalidFeature(transformation.get("name"),
                              f"params.granularity {granularity!r} is not one of {', '.join(windows.WINDOWS)}")
     provider = ctx.baseline_provider
     # The reading is checked before the aggregate, so an incomplete one is refused rather than
     # reported as a degraded store.
     current = sensor_value(sensor_data, sensor) if stat_type == "deviation_from_window_mean" else None
-    if not (provider and ctx.equipment_id and ctx.company_id):
+    if not provider:
         raise StatefulUnavailable(f"no baseline source for {sensor}")
-    try:
-        baseline = await provider.compute_baseline(
-            company_id=ctx.company_id, equipment_id=ctx.equipment_id,
-            sensor_name=sensor, granularity=granularity,
-        )
-    except Exception as e:
-        raise StatefulUnavailable(f"baseline read failed for {sensor}: {e}") from e
+    # The provider answers None when its store cannot supply the baseline; anything it raises is a
+    # defect, not an outage, and is not served neutral (ADR-0044 dec 3, 4).
+    baseline = await provider.compute_baseline(
+        company_id=ctx.company_id, equipment_id=ctx.equipment_id,
+        sensor_name=sensor, granularity=granularity,
+    )
     if baseline is None:
         raise StatefulUnavailable(f"no closed aggregate window yet for {sensor}")
 

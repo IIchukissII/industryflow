@@ -206,8 +206,7 @@ class FeatureConfigBuilder:
         self._feature_names.add(feature_name)
         return self
 
-    def add_deviation(self, sensor: str, granularity: str = "1min",
-                      name: Optional[str] = None) -> 'FeatureConfigBuilder':
+    def add_deviation(self, sensor: str, granularity: str, name: Optional[str] = None) -> 'FeatureConfigBuilder':
         """
         Add a windowed deviation feature: sensor value minus the mean of its most recent closed
         aggregate window (ADR-0023). Training must re-derive the same window offline — see

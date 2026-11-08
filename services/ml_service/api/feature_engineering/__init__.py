@@ -9,8 +9,8 @@ Flexible, configuration-driven feature engineering for multiple equipment types
 from .baseline_provider import AggregateBaselineProvider
 from extensions import FeatureRefused, MissingSensors
 
-from .engine import FeatureEngineeringEngine, UnknownTransform
+from .engine import FeatureEngineeringEngine, MissingEquipment, NonFiniteFeature, UnknownTransform
 from .kill_switch import StatefulFeatureSwitch
 
-__all__ = ['AggregateBaselineProvider', 'FeatureEngineeringEngine', 'FeatureRefused', 'MissingSensors',
-           'StatefulFeatureSwitch', 'UnknownTransform']
+__all__ = ['AggregateBaselineProvider', 'FeatureEngineeringEngine', 'FeatureRefused', 'MissingEquipment',
+           'MissingSensors', 'NonFiniteFeature', 'StatefulFeatureSwitch', 'UnknownTransform']

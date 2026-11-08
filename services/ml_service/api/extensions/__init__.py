@@ -30,7 +30,10 @@ logger = logging.getLogger(__name__)
 # a transform refuses or reports instead of returning a substitute, and the engine no longer turns
 # an exception into zero. Within 0.x a minor bump may break (ADR-0010 dec 3); this one does for a
 # transform that relied on that conversion.
-EXTENSION_API_VERSION = "0.4.0"
+# 0.5.0 breaks: the baseline provider handed to transforms (`compute_baseline`, `compute_rolling_mean`)
+# takes the window as a required argument, and raises for a window the contract does not declare or
+# ids that are not ids; it no longer defaults the window or answers None for either (ADR-0044 dec 2).
+EXTENSION_API_VERSION = "0.5.0"
 
 
 @dataclass

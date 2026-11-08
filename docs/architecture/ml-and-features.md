@@ -81,16 +81,17 @@ config.
 | `polynomial` | no | `sensor`, numeric `params.power` |
 | `interaction` | no | `sensors` (2), `params.operation`: `ratio`, `difference`, `product` or `sum` |
 | `deviation` | no | `sensor`, numeric `params.baseline` |
-| `statistical` | yes | `sensor`, `params.stat_type`; `params.granularity` optional, one of the windows in `industryflow_contracts.windows` |
+| `statistical` | yes | `sensor`, `params.stat_type`, `params.granularity`: one of the windows in `industryflow_contracts.windows` |
 | `rolling_stat` | yes; not implemented, a feature using it is refused | — |
 
 A definition missing a named parameter, naming one of the wrong kind or a non-finite number, or whose
 `params` is not an object, is refused with `422`; no default stands in for it
 ([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 2).
 
-Stateful transforms read their baseline window from `params.granularity` (default `1min`, declared in
-`industryflow_contracts.windows`); a window it does not declare is refused, not served as an
-unavailable baseline.
+A stateful feature reads the baseline of the reading's equipment in the window `params.granularity`
+names; a reading naming no valid `equipment_id` is refused with `422`. A ratio whose denominator is
+`0`, or any computed value that is not a finite number, fails the score with `500`
+([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 1, 4).
 
 ## Detectors
 
@@ -498,3 +499,5 @@ The engine refuses a reading with a missing sensor or an uninterpretable definit
 | `infrastructure/timescaledb/init-scripts/33-equipment-batch-settings-removed.sql` | Partial-batch columns dropped from every tenant |
 | `services/ml_service/tests/test_inference_dispatch.py::test_a_builtin_definition_missing_its_parameter_is_a_422` | Proof: dec 2 for every built-in parameter |
 | `services/ml_service/tests/test_inference_dispatch.py::test_a_feature_that_fails_to_compute_fails_the_score` | Proof: dec 4 |
+| `services/ml_service/tests/test_inference_dispatch.py::test_a_stateful_feature_for_a_reading_naming_no_equipment_is_a_422` | Proof: dec 1 for the equipment |
+| `services/ml_service/tests/test_inference_dispatch.py::test_a_feature_that_is_not_a_finite_number_fails_the_score` | Proof: dec 4 for non-finite values |
