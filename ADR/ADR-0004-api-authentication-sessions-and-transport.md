@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0004 — API authentication, session model and transport security
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-11-07
+- **Date:** 2026-06-26; changed 2026-11-08
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0002](ADR-0002-ingestion-authentication-and-device-identity.md) (shared edge),
   [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant claim),
@@ -52,8 +52,10 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 10. **Password guessing is slowed per account and source, never locked out.** Consecutive failures
     for one account from one source wait exponentially longer, up to a cap; each attempt is counted
     before its password is checked, and one inside the wait is refused unchecked. Where the edge sees
-    the clients' own addresses it also limits each source across accounts. No account is locked, as
-    no channel exists to unlock one, and one source's failures never slow the owner at another.
+    the clients' own addresses it also limits each source across accounts; a deployment serves only the
+    address families its edge sees that way, and an IPv6 network allotted to one host counts as one
+    source. No account is locked, as no channel exists to unlock one, and one source's failures never
+    slow the owner at another.
 11. **A platform with no account gets a superuser at start, held to a password change while its
     password is the published default.** It is created only while no account of any kind exists, in
     the oldest active tenant or a first one; until its holder sets their own password it may read itself,
@@ -90,6 +92,7 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 | 10 | A per-account limit across sources on top | Whoever holds it at its cap locks the owner out the same way |
 | 10 | Checking the wait and counting the failure as separate steps | Guesses sent at the same moment all pass the check |
 | 10 | Counting failures only for existing accounts | The difference in answers reveals which addresses have accounts |
+| 10 | Serving IPv6 through an edge that sees IPv6 clients by a relay's address | Every IPv6 client shares one source, so one slows every other's sign-in |
 | 11 | Creating the first superuser only by a command run inside the platform | A first sign-in needs shell access and a tenant made by hand first |
 | 11 | A published default password with a change the holder may skip | The well-known password stays valid against cross-tenant authority |
 | 11 | A generated first password written to the log or the console | A secret in the log stays readable wherever the log goes |
@@ -115,8 +118,8 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
   HTTP exception.
 - An access token is not revoked individually; a password change logs out every device.
 - Every authenticated request reads the session store, and none is served while it is unreachable.
-- An attacker with many source addresses gets that handful from each of them; an IPv6 network
-  allotted to one host counts as one source.
+- An attacker with many source addresses gets that handful from each of them.
+- The compose deployment answers browsers on IPv4 only, and clients on its own host count as one source.
 - A refresh whose answer is lost, retried after the grace, ends its own session.
 - Until its holder first signs in, a platform started with the defaults answers to a published password.
 - A stolen refresh credential used within the grace after a rotation is not detected.
@@ -130,6 +133,7 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 | Internal service-to-service authentication | An ADR, when an internal call carries tenant authority beyond the interim mechanism |
 | E-mail delivery of reset and verification credentials | The first deployment that enables self-service reset |
 | Slowing password guessing behind a proxy that hides client addresses (neither limit applies there) | The first deployment behind a Kubernetes Ingress |
+| Browser clients over IPv6 on the compose deployment (their addresses kept, the edge counting a host's network as one source) | The first compose deployment that must serve them |
 
 ## References
 
