@@ -29,7 +29,8 @@ import upload_capability
 import uploaded_model
 import drift
 from repository import FeatureConfigChanged
-from .inference import detector_for, load_model_or_refuse
+import scoring
+from .inference import load_model_or_refuse
 
 logger = logging.getLogger(__name__)
 
@@ -744,16 +745,17 @@ async def deploy_model(
 
         # And the detector it names must still be loaded here (an extension can be removed between
         # registration and deployment). Without it the model would deploy and then fail every score.
-        detector = model_data.get("detector")
-        if not detector or extensions.get_detector(detector) is None:
+        try:
+            scoring.detector_name(model_data)
+        except scoring.Unscorable as exc:
             raise HTTPException(status_code=409, detail={
                 "message": (
                     "This model names no detector this deployment has loaded, so nothing here can "
                     "say what its output means and it will not be deployed (ADR-0028)."
-                    + ("" if detector else " Register it again to record one.")
+                    + (" Register it again to record one." if isinstance(exc, scoring.NoDetector) else "")
                 ),
-                "detector": detector,
-            })
+                "detector": model_data.get("detector"),
+            }) from exc
 
         await _refuse_author_code_or_reject(
             model_data.get("mlflow_run_id"), model_data.get("artifact_uri"), on_refused=409,
@@ -829,8 +831,7 @@ async def deploy_model(
                     "message": "This model does not load in this serving environment, so it will not be deployed.",
                     "error": f"{type(exc).__name__}: {exc}",
                 }) from exc
-            _, detector_fn = detector_for(model_data)
-            derived_profile = await baseline_gate.score_in_process(sample_plan, loaded, detector_fn)
+            derived_profile = await baseline_gate.score_in_process(sample_plan, loaded)
 
         if derived_profile is not None:
             await repository.update_model_reference_profile(

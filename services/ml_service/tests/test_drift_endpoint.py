@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
 import extensions.builtins_detectors  # noqa: F401,E402  (registers the built-ins)
 from drift import align_readings, build_reference_profile, compute_drift, with_derived_scores  # noqa: E402
+import scoring  # noqa: E402
 from routers import drift as drift_router  # noqa: E402
 
 CID = str(uuid.uuid4())
@@ -207,7 +208,7 @@ def test_a_reference_of_labels_is_not_a_prediction_baseline(evaluate, monkeypatc
     model = _model(rng)
     model["reference_profile"]["sample"]["prediction_score"] = rng.choice([-1.0, 1.0], size=N).tolist()
     scored = []
-    monkeypatch.setattr(drift_router, "score_rows", lambda *a: scored.append(a) or [])
+    monkeypatch.setattr(scoring, "scores_blocking", lambda *a: scored.append(a) or [])
     res = evaluate(model, _fleet(rng))
     assert res["status"] == "ok", res
     assert res["data_drift"]["n_columns"] == 2
@@ -291,7 +292,7 @@ def test_the_deploy_gate_scores_with_the_feature_names_in_the_context():
              "training_metrics": '{"reconstruction_scale": 0.75}'}
     planned = asyncio.run(baseline_gate.plan(object(), Repo(), CID, model))
     assert planned.reason is None, planned.reason
-    ctx = planned.detector_context()
-    assert (ctx.feature_names, ctx.equipment_id, ctx.reconstruction_scale) == (["a", "b"], "eq-2", 0.75)
-    # The context also travels to the isolated probe as JSON.
-    assert json.loads(json.dumps(planned.for_probe()["context"]))["feature_names"] == ["a", "b"]
+    assert planned.spec == scoring.Scoring("direct", ["a", "b"], "eq-2", 0.75)
+    # The same scoring travels to the isolated probe as JSON.
+    sent = json.loads(json.dumps(planned.for_probe()["scoring"]))
+    assert scoring.Scoring.from_json(sent) == planned.spec
