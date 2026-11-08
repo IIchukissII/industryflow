@@ -34,6 +34,14 @@ compared_tables() {
                { print }' | sort
 }
 
+# require_count <name> <value> — fails unless the value is a whole number of at least 1. A retention of
+# 0 would delete the copy the run has just written; one that is not a number would delete by accident.
+require_count() {
+  [[ "$2" =~ ^[1-9][0-9]*$ ]] && return 0
+  echo "$1 must be a whole number of at least 1, not '$2'" >&2
+  return 1
+}
+
 # write_metric <file stem> <metric lines...>
 # Writes a node-exporter textfile (<METRICS_TEXTFILE_DIR>/<stem>.prom) atomically: a scrape sees the
 # old file or the new one, never half of one. Does nothing when METRICS_TEXTFILE_DIR is unset (on

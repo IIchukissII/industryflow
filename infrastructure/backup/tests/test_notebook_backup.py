@@ -99,6 +99,26 @@ def test_archives_are_kept_by_count(env):
     assert _archives(env, ALICE) == ["20261025T020000Z.tar.gz", "20261026T020000Z.tar.gz"]
 
 
+@pytest.mark.parametrize("name, value", [("RETAIN_PER_VOLUME", "0"), ("RETAIN_PER_VOLUME", "x"),
+                                         ("MIRROR_RETAIN_DAYS", "0")])
+def test_a_retention_below_one_is_refused_before_anything_is_archived(env, name, value):
+    # A retention of 0 would delete the archive the run has just written.
+    _volume(env, ALICE, {"a.ipynb": b"1"})
+    r = _backup(env, "20261026T020000Z", **{name: value})
+    assert r.returncode == 2
+    assert f"{name} must be a whole number of at least 1, not '{value}'" in r.stderr
+    assert _archives(env, ALICE) == []
+
+
+def test_a_target_that_cannot_be_listed_fails_the_notebook_backup(env, tmp_path):
+    metrics = tmp_path / "metrics"
+    metrics.mkdir()
+    _volume(env, ALICE, {"a.ipynb": b"1"})
+    r = _backup(env, "20261026T020000Z", FAKE_S3_FAIL_LIST="1", METRICS_TEXTFILE_DIR=str(metrics))
+    assert r.returncode != 0
+    assert list(metrics.iterdir()) == []
+
+
 def test_a_gone_volume_keeps_its_archives_one_retention_then_loses_them(env):
     # ADR-0038 dec 4 / ADR-0033 dec 4: a deleted tenant's notebooks do not outlive the retention.
     root = _volume(env, ALICE, {"a.ipynb": b"1"})
