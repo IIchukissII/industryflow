@@ -115,7 +115,8 @@ def test_dedup_cache_is_bounded():
     engine = RulesEngine({CO: []}, alert_repo=FakeAlertStore(), dedup_cache_max=3)
     for i in range(10):
         alert = {"company_id": CO, "rule_id": f"r{i}", "sensor_id": SENSOR, "triggered_at": T0,
-                 "detection_type": "threshold", "severity": "low", "message": "m"}
+                 "detection_type": "threshold", "severity": "low", "message": "m",
+                 "degraded": False, "neutralized_features": []}
         assert asyncio.run(engine._emit(alert))
 
     assert len(engine._last_emit) == 3

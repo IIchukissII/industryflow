@@ -264,7 +264,7 @@ and each stateful slot whose aggregate read fails takes the same neutral value, 
 | State | `GET /api/platform/switches` |
 | Who flipped it, when | `GET /api/platform/switches/stateful_features_enabled/changes` (`public.platform_config_changes`, append-only) |
 | Takes effect | within `STATEFUL_SWITCH_CACHE_TTL` seconds (default `5`); no restart |
-| Confirm, response | `POST /api/inference/predict` returns `degraded: true` and `neutralized_features` |
+| Confirm, alerts | ML alerts raised meanwhile carry `degraded: true` and `neutralized_features` (`GET /api/alerts`) |
 | Confirm, metric | `rate(ml_stateful_features_neutralized_total[5m])` > 0; `0` in normal operation |
 
 `ml_service_user` holds `SELECT` only on `public.platform_config`; the service never writes the flag.

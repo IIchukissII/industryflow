@@ -82,6 +82,7 @@ async def _run():
                     "triggered_at": t0 + timedelta(seconds=i), "rule_id": rule_id,
                     "sensor_id": sensor_id, "equipment_id": None, "detection_type": "threshold",
                     "severity": "high", "message": f"writer {i}",
+                    "degraded": False, "neutralized_features": [],
                 }
 
             results = await asyncio.gather(*(

@@ -204,6 +204,7 @@ def materialise(scenario: Scenario, base: datetime, company_id: str):
             "condition": "retrain_recommended" if retrain else None,
             "detection_type": "statistical" if retrain else "threshold",
             "severity": "high", "message": scenario.name,
+            "degraded": False, "neutralized_features": [],
         }
         expected = (step.inserted, None if step.prior is None else base + step.prior)
         calls.append((alert, timedelta(seconds=step.window), retrain, expected))

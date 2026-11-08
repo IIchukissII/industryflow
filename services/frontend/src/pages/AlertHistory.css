@@ -91,3 +91,10 @@
   .alh-alert-right { grid-column: 2; justify-content: flex-start; }
   .alh-alert.is-open { padding: 16px; }
 }
+
+/* A degraded score (ADR-0044 dec 3): a quiet line in the warning tone, below the meta. */
+.alh-alert-degraded {
+  margin-top: 2px;
+  font-size: 0.82rem;
+  color: var(--warn);
+}

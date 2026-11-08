@@ -79,7 +79,7 @@ class Pool:
 def _alert(**over):
     alert = {"company_id": CO, "alert_id": "a", "triggered_at": datetime(2026, 10, 13, tzinfo=timezone.utc),
              "rule_id": RULE, "sensor_id": SENSOR, "equipment_id": None, "detection_type": "threshold",
-             "severity": "high", "message": "m"}
+             "severity": "high", "message": "m", "degraded": False, "neutralized_features": []}
     alert.update(over)
     return alert
 
@@ -181,3 +181,13 @@ def test_rules_load_only_for_tenants_the_registry_holds_as_active():
     assert "FROM public.companies c" in sql
     assert "JOIN information_schema.schemata s ON s.schema_name = c.schema_name" in sql
     assert "WHERE c.is_active" in sql
+
+
+
+def test_every_alert_must_say_whether_its_score_was_degraded():
+    # ADR-0044 dec 3: an alert that omits it is refused at the write, not stored as "unknown".
+    import pytest
+    alert = _alert()
+    del alert["degraded"]
+    with pytest.raises(KeyError, match="degraded"):
+        asyncio.run(AlertRepository(Pool()).save_alert_once(alert, window=timedelta(seconds=300)))

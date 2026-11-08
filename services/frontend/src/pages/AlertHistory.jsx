@@ -211,6 +211,7 @@ function AlertHistory() {
   const lastDayTotal = hourlyData.counts.reduce((n, c) => n + c, 0);
   const precision = metrics?.overall?.precision;
   const labelled = metrics?.overall?.labeled_total || 0;
+  const labelledDegraded = metrics?.degraded?.labeled_total || 0;
 
   if (loading) return <div className="alh-state"><span className="sdot pending" /> Loading alerts</div>;
   if (error) return <div className="alh-state"><Icon name="alert" size={20} color="var(--crit)" /> {error}</div>;
@@ -227,6 +228,14 @@ function AlertHistory() {
             <>, anomaly score <span className="mono">{alert.anomaly_score.toFixed(3)}</span></>
           )}
         </div>
+        {alert.degraded && (
+          // ADR-0044 dec 3: scored with stateful features neutralized; its label is counted apart.
+          <div className="alh-alert-degraded">
+            Degraded score: {(alert.neutralized_features || []).length
+              ? <>scored without <span className="mono">{alert.neutralized_features.join(', ')}</span></>
+              : 'scored with stateful features neutralized'}, so it reads lower-confidence.
+          </div>
+        )}
       </div>
       <div className="alh-alert-right">
         {!alert.acknowledged && writable && (
@@ -261,7 +270,8 @@ function AlertHistory() {
             <p>
               {lastDayTotal} fired, {open.length} open.{' '}
               {precision != null
-                ? <>Labels put precision at <span className="mono">{Math.round(precision * 100)}%</span> over 30 days ({labelled} labelled).</>
+                ? <>Labels put precision at <span className="mono">{Math.round(precision * 100)}%</span> over 30 days ({labelled} labelled
+                    {labelledDegraded > 0 && <>; {labelledDegraded} on degraded alerts counted apart</>}).</>
                 : 'Label alerts as real or false to measure precision.'}
             </p>
             <PrecisionSparkline series={metrics?.series} />

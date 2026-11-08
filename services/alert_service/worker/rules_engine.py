@@ -563,7 +563,10 @@ class RulesEngine:
             'threshold_value': threshold_value,
             'condition': condition_str,
             'severity': rule.get('severity', 'medium'),
-            'message': f"Threshold alert: {rule['name']} - Value {value:.2f} is {condition_str.replace('_', ' ')}"
+            'message': f"Threshold alert: {rule['name']} - Value {value:.2f} is {condition_str.replace('_', ' ')}",
+            # Computed from the reading alone; no feature was neutralized.
+            'degraded': False,
+            'neutralized_features': [],
         }
 
         logger.info(f"Threshold alert triggered: {alert['message']}")
@@ -633,14 +636,11 @@ class RulesEngine:
 
             message = (f"ML anomaly detected: {rule['name']} - Anomaly score {anomaly_score:.4f} "
                        f"exceeds threshold {anomaly_threshold}")
-            # ADR-0024 dec 5: a score computed with the stateful feature class neutralized is
-            # lower-confidence, and the operator labelling this alert (ADR-0022) must see that.
-            neutralized = list(result.get('neutralized_features') or [])
+            # ADR-0044 dec 3: a score computed with stateful features neutralized is recorded on the
+            # alert as data, so the operator labelling it, precision and the retrain trigger can tell
+            # it apart (ADR-0022 dec 2-4).
+            neutralized = [str(f) for f in result.get('neutralized_features') or []]
             degraded = bool(result.get('degraded')) or bool(neutralized)
-            if degraded:
-                detail = f": {', '.join(map(str, neutralized))}" if neutralized else ""
-                message += (f" [DEGRADED: scored with stateful features neutralized{detail}; "
-                            f"treat as lower-confidence]")
 
             alert = {
                 'company_id': company_id,
@@ -814,6 +814,9 @@ class RulesEngine:
             'condition': 'drift',
             'severity': rule.get('severity', 'medium'),
             'message': message,
+            # Drift and retrain verdicts score no stateful feature.
+            'degraded': False,
+            'neutralized_features': [],
         }
         return alert
 
@@ -904,4 +907,7 @@ class RulesEngine:
             'condition': 'retrain_recommended',
             'severity': severity,
             'message': message,
+            # Drift and retrain verdicts score no stateful feature.
+            'degraded': False,
+            'neutralized_features': [],
         }

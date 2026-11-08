@@ -61,6 +61,7 @@ def _alert(company_id, rule_id, at, *, message="dedup"):
         "company_id": str(company_id), "alert_id": str(uuid.uuid4()), "triggered_at": at,
         "rule_id": rule_id, "sensor_id": str(uuid.uuid4()), "equipment_id": None,
         "detection_type": "threshold", "severity": "high", "message": message,
+        "degraded": False, "neutralized_features": [],
     }
 
 
