@@ -10,11 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 import uuid
 
-# How far ahead of this service's clock a reading's timestamp may be. A reading stamped further in
-# the future is a device clock fault, and once on the stream it would drag the aggregation watermark
-# ahead and close every live window early. The Spark jobs apply the same bound
-# (services/spark_jobs/reading_guard.py; a test holds the two equal).
-MAX_FUTURE_SKEW_SECONDS = 300
+from industryflow_contracts.readings import MAX_FUTURE_SKEW_SECONDS
 
 class SensorDataInput(BaseModel):
     """

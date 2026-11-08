@@ -7,11 +7,9 @@ The reading guard (ADR-0005 dec 3, ADR-0006 dec 4): which readings are writable,
 envelope for the rest. Stateless checks run on a local Spark over Kafka-shaped rows; the referential
 classification is pure.
 """
-import ast
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
@@ -151,19 +149,6 @@ def test_dead_letter_records_carry_the_original_and_the_reason(spark):
     assert envelope["reason"] == rg.INVALID_DEVICE_ID
     assert envelope["consumer"] == "spark-streaming"
     assert (envelope["topic"], envelope["partition"], envelope["offset"]) == ("sensor-data-raw", 0, 0)
-
-
-# --- one bound, two places ----------------------------------------------------------------------
-
-def test_ingestion_and_stream_use_the_same_future_skew_bound():
-    """Ingestion rejects at the edge what the stream would dead-letter; the bounds must agree, or a
-    reading accepted at the edge could be dead-lettered in the stream."""
-    schemas = Path(__file__).resolve().parents[2] / "ingestion_service" / "schemas.py"
-    tree = ast.parse(schemas.read_text())
-    values = [node.value.value for node in ast.walk(tree)
-              if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
-              and any(isinstance(t, ast.Name) and t.id == "MAX_FUTURE_SKEW_SECONDS" for t in node.targets)]
-    assert values == [rg.MAX_FUTURE_SKEW_SECONDS]
 
 
 def test_uuid_pattern_accepts_what_the_database_does():

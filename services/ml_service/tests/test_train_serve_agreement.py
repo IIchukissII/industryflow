@@ -65,7 +65,7 @@ def _frame(n_samples=600, interval_seconds=1, equipments=("eq-1",)):
                 "sample": i + 1,
                 "timestamp": base + pd.Timedelta(seconds=i * interval_seconds),
                 # A value that varies within and across windows, so a wrong window is a wrong number.
-                "xmeas_1": 70.0 + i * 0.1 + n + 1,
+                "pressure": 70.0 + i * 0.1 + n + 1,
             })
     return pd.DataFrame(rows).sample(frac=1, random_state=7).reset_index(drop=True)
 
@@ -80,7 +80,7 @@ class _ProviderOver:
     its end, and a window with no samples is never written.
     """
 
-    def __init__(self, df, now, granularity="1min", sensor="xmeas_1", equipment="eq-1"):
+    def __init__(self, df, now, granularity="1min", sensor="pressure", equipment="eq-1"):
         width = aggregation_windows.AGGREGATION_WINDOWS[granularity][1]
         written_up_to = aggregation_windows.latest_emitted_window(int(now.timestamp()), granularity)
         mine = df[df["equipment_id"] == equipment]
@@ -161,7 +161,7 @@ def test_emitted_config_names_a_stat_type_serving_implements():
     from extensions import builtins  # noqa: PLC0415
 
     for stat_type in ("deviation_from_window_mean", "window_mean", "window_std"):
-        config = offline_baseline.feature_config("xmeas_1", stat_type, "1min")
+        config = offline_baseline.feature_config("pressure", stat_type, "1min")
         assert config["params"]["stat_type"] in builtins._STAT_TYPES
         assert config["params"]["granularity"] in baseline_provider._AGG_TABLES
         assert config["type"] == "statistical"
@@ -179,14 +179,14 @@ async def test_offline_feature_equals_what_serving_computes(stat_type, suffix):
     """The heart of it: same row, same data — the offline column and the live transform agree."""
     df = _frame()
     engineered, _ = offline_baseline.add_window_features(
-        df.copy(), ["xmeas_1"], granularity="1min", stats=(stat_type,),
+        df.copy(), ["pressure"], granularity="1min", stats=(stat_type,),
     )
-    transformation = offline_baseline.feature_config("xmeas_1", stat_type, "1min")
+    transformation = offline_baseline.feature_config("pressure", stat_type, "1min")
 
     # Agreement on a column of zeros is agreement on nothing: if the windowing collapsed (every row
     # in one bucket, so every baseline is the cold-start neutral), both sides would return 0.0 and
     # this test would pass while proving nothing. Demand a live signal before believing the match.
-    feature = engineered[f"xmeas_1{suffix}"]
+    feature = engineered[f"pressure{suffix}"]
     assert (feature != 0.0).sum() > len(df) // 2, "windowing collapsed — the comparison is vacuous"
     assert feature.round(6).nunique() > 1
 
@@ -195,10 +195,10 @@ async def test_offline_feature_equals_what_serving_computes(stat_type, suffix):
         # Serve this row as if it had just arrived: the provider answers with the window closed
         # before the row's own timestamp, which is what inference would read.
         provider = _ProviderOver(df, now=row["timestamp"])
-        served = await _served(transformation, {"xmeas_1": row["xmeas_1"]}, provider)
-        assert served == pytest.approx(row[f"xmeas_1{suffix}"]), (
+        served = await _served(transformation, {"pressure": row["pressure"]}, provider)
+        assert served == pytest.approx(row[f"pressure{suffix}"]), (
             f"train/serve skew at sample {row['sample']}: "
-            f"offline={row[f'xmeas_1{suffix}']} served={served}"
+            f"offline={row[f'pressure{suffix}']} served={served}"
         )
         checked += 1
     assert checked == len(df)
@@ -209,17 +209,17 @@ async def test_cold_start_rows_agree_on_neutral():
     """A history's first window has no closed predecessor. Training must record the same neutral the
     serving transform degrades to, or the model learns a value inference never produces."""
     df = _frame(n_samples=90)
-    engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"], granularity="1min")
+    engineered, _ = offline_baseline.add_window_features(df.copy(), ["pressure"], granularity="1min")
     first_window = engineered[offline_baseline.window_index(engineered["timestamp"], "1min") ==
                               offline_baseline.window_index(engineered["timestamp"], "1min").min()]
 
     assert not first_window.empty
-    assert (first_window["xmeas_1_deviation"] == 0.0).all()
+    assert (first_window["pressure_deviation"] == 0.0).all()
 
     row = first_window.iloc[0]
     served = await _served(
-        offline_baseline.feature_config("xmeas_1", "deviation_from_window_mean", "1min"),
-        {"xmeas_1": row["xmeas_1"]}, _ProviderOver(df, now=row["timestamp"]),
+        offline_baseline.feature_config("pressure", "deviation_from_window_mean", "1min"),
+        {"pressure": row["pressure"]}, _ProviderOver(df, now=row["timestamp"]),
     )
     assert served == 0.0
 
@@ -233,17 +233,17 @@ def test_offline_feature_is_causal():
     replaced failed exactly here — it averaged everything, so every row moved.
     """
     df = _frame(n_samples=180)
-    engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"], granularity="1min")
+    engineered, _ = offline_baseline.add_window_features(df.copy(), ["pressure"], granularity="1min")
 
     tampered = df.copy()
     last_sample = tampered["sample"].max()
-    tampered.loc[tampered["sample"] == last_sample, "xmeas_1"] += 1000.0
-    engineered_after, _ = offline_baseline.add_window_features(tampered, ["xmeas_1"], granularity="1min")
+    tampered.loc[tampered["sample"] == last_sample, "pressure"] += 1000.0
+    engineered_after, _ = offline_baseline.add_window_features(tampered, ["pressure"], granularity="1min")
 
     early = engineered["sample"] < last_sample
     pd.testing.assert_series_equal(
-        engineered.loc[early, "xmeas_1_deviation"],
-        engineered_after.loc[early, "xmeas_1_deviation"],
+        engineered.loc[early, "pressure_deviation"],
+        engineered_after.loc[early, "pressure_deviation"],
     )
 
 
@@ -252,7 +252,7 @@ def test_equipment_histories_do_not_leak_into_each_other():
     one equipment's samples must never form another's baseline."""
     df = _frame(n_samples=120, equipments=("eq-1", "eq-2"))
     engineered, _ = offline_baseline.add_window_features(
-        df.copy(), ["xmeas_1"], granularity="1min", group_cols=GROUP_COLS,
+        df.copy(), ["pressure"], granularity="1min", group_cols=GROUP_COLS,
     )
 
     for equipment in ("eq-1", "eq-2"):
@@ -262,7 +262,7 @@ def test_equipment_histories_do_not_leak_into_each_other():
             offline_baseline.window_index(rows["timestamp"], "1min").min()
         ]
         # If eq-2 borrowed eq-1's windows, its first window would have a baseline and be non-zero.
-        assert (first_window["xmeas_1_deviation"] == 0.0).all()
+        assert (first_window["pressure_deviation"] == 0.0).all()
 
 
 def test_unknown_group_column_is_rejected():
@@ -270,13 +270,13 @@ def test_unknown_group_column_is_rejected():
     cross-equipment leak above, arriving quietly. Fail instead."""
     df = _frame(n_samples=70)
     with pytest.raises(ValueError, match="group column"):
-        offline_baseline.add_window_features(df, ["xmeas_1"], granularity="1min", group_cols=["simulation_run"])
+        offline_baseline.add_window_features(df, ["pressure"], granularity="1min", group_cols=["batch"])
 
 
 def test_row_order_is_preserved():
     """The helper sorts internally to compute causally; it must hand rows back in the caller's
     order, or the features would be silently misaligned with the labels."""
     df = _frame(n_samples=70)
-    engineered, _ = offline_baseline.add_window_features(df.copy(), ["xmeas_1"], granularity="1min")
+    engineered, _ = offline_baseline.add_window_features(df.copy(), ["pressure"], granularity="1min")
     pd.testing.assert_series_equal(engineered["sample"], df["sample"])
-    pd.testing.assert_series_equal(engineered["xmeas_1"], df["xmeas_1"])
+    pd.testing.assert_series_equal(engineered["pressure"], df["pressure"])

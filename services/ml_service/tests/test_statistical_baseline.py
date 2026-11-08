@@ -48,7 +48,7 @@ class _FakeProvider:
 
 
 def _transform(granularity="1min", stat_type="deviation_from_window_mean"):
-    t = {"name": "xmeas_1_deviation", "type": "statistical", "sensor": "xmeas_1",
+    t = {"name": "pressure_deviation", "type": "statistical", "sensor": "pressure",
          "params": {"stat_type": stat_type}}
     if granularity is not None:
         t["params"]["granularity"] = granularity
@@ -62,7 +62,7 @@ def _ctx(provider, equipment_id=EQUIPMENT_ID, company_id=COMPANY_ID):
 
 @pytest.mark.asyncio
 async def test_deviation_happy_path():
-    result = await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0)))
+    result = await STATISTICAL(_transform(), {"pressure": 72.5}, _ctx(_FakeProvider(mean=70.0)))
     assert result == pytest.approx(2.5)
 
 
@@ -71,19 +71,19 @@ async def test_a_provider_that_raises_is_not_served_neutral():
     """The provider answers None when its store cannot supply a baseline; what it raises is a defect,
     which fails the score rather than taking the neutral (ADR-0044 dec 3, 4)."""
     with pytest.raises(RuntimeError, match="provider error"):
-        await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(_FakeProvider(raises=True)))
+        await STATISTICAL(_transform(), {"pressure": 72.5}, _ctx(_FakeProvider(raises=True)))
 
 
 @pytest.mark.asyncio
 async def test_unavailable_when_no_baseline():
     with pytest.raises(StatefulUnavailable):
-        await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=None)))
+        await STATISTICAL(_transform(), {"pressure": 72.5}, _ctx(_FakeProvider(mean=None)))
 
 
 @pytest.mark.asyncio
 async def test_unavailable_when_no_provider():
     with pytest.raises(StatefulUnavailable):
-        await STATISTICAL(_transform(), {"xmeas_1": 72.5}, _ctx(None))
+        await STATISTICAL(_transform(), {"pressure": 72.5}, _ctx(None))
 
 
 @pytest.mark.parametrize("granularity", [None, "", "5mins", "1 min"])
@@ -92,31 +92,31 @@ async def test_a_window_the_contract_does_not_declare_is_refused(granularity):
     """No default window: a definition names one of the declared windows (ADR-0044 dec 2)."""
     provider = _FakeProvider(mean=70.0)
     with pytest.raises(InvalidFeature, match="params.granularity"):
-        await STATISTICAL(_transform(granularity=granularity), {"xmeas_1": 72.5}, _ctx(provider))
+        await STATISTICAL(_transform(granularity=granularity), {"pressure": 72.5}, _ctx(provider))
     assert provider.calls == []
 
 
 @pytest.mark.asyncio
 async def test_granularity_passed_through():
     provider = _FakeProvider(mean=0.0)
-    await STATISTICAL(_transform(granularity="5min"), {"xmeas_1": 1.0}, _ctx(provider))
+    await STATISTICAL(_transform(granularity="5min"), {"pressure": 1.0}, _ctx(provider))
     assert provider.calls[0]["granularity"] == "5min"
     assert provider.calls[0]["company_id"] == COMPANY_ID
 
 
 @pytest.mark.asyncio
 async def test_unknown_stat_type_is_refused():
-    t = {"name": "x", "type": "statistical", "sensor": "xmeas_1",
+    t = {"name": "x", "type": "statistical", "sensor": "pressure",
          "params": {"stat_type": "nope"}}
     with pytest.raises(InvalidFeature, match="nope"):
-        await STATISTICAL(t, {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0)))
+        await STATISTICAL(t, {"pressure": 72.5}, _ctx(_FakeProvider(mean=70.0)))
 
 
 @pytest.mark.asyncio
 async def test_legacy_stat_type_still_resolves():
     """Configs naming the legacy stat_type keep working — the rename is not a silent break."""
     result = await STATISTICAL(_transform(stat_type="deviation_from_run_mean"),
-                               {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0)))
+                               {"pressure": 72.5}, _ctx(_FakeProvider(mean=70.0)))
     assert result == pytest.approx(2.5)
 
 
@@ -128,23 +128,23 @@ async def test_missing_stat_type_is_refused():
     stat_type at all, so they fell through to the deviation default — serving a *deviation* into a
     slot the model expected to hold a mean.
     """
-    t = {"name": "xmeas_1_run_mean", "type": "statistical", "sensor": "xmeas_1",
-         "params": {"operation": "mean", "groupby": "simulationRun"}}
+    t = {"name": "pressure_run_mean", "type": "statistical", "sensor": "pressure",
+         "params": {"operation": "mean", "groupby": "batch"}}
     with pytest.raises(InvalidFeature):
-        await STATISTICAL(t, {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0)))
+        await STATISTICAL(t, {"pressure": 72.5}, _ctx(_FakeProvider(mean=70.0)))
 
 
 @pytest.mark.asyncio
 async def test_window_mean_returns_the_mean():
     result = await STATISTICAL(_transform(stat_type="window_mean"),
-                               {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0, std=1.5)))
+                               {"pressure": 72.5}, _ctx(_FakeProvider(mean=70.0, std=1.5)))
     assert result == pytest.approx(70.0)
 
 
 @pytest.mark.asyncio
 async def test_window_std_returns_the_std():
     result = await STATISTICAL(_transform(stat_type="window_std"),
-                               {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0, std=1.5)))
+                               {"pressure": 72.5}, _ctx(_FakeProvider(mean=70.0, std=1.5)))
     assert result == pytest.approx(1.5)
 
 
@@ -152,7 +152,7 @@ async def test_window_std_returns_the_std():
 async def test_window_std_neutral_when_single_sample_window():
     """A one-sample window has no stddev; 'no spread' is 0.0, not the raw value."""
     result = await STATISTICAL(_transform(stat_type="window_std"),
-                               {"xmeas_1": 72.5}, _ctx(_FakeProvider(mean=70.0, std=None)))
+                               {"pressure": 72.5}, _ctx(_FakeProvider(mean=70.0, std=None)))
     assert result == 0.0
 
 
@@ -224,7 +224,7 @@ class _FakePool:
 async def test_provider_returns_avg_value():
     pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
     provider = AggregateBaselineProvider(pool)
-    mean = await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "xmeas_1", "1min")
+    mean = await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
     assert mean == 70.0
 
 
@@ -232,7 +232,7 @@ async def test_provider_returns_avg_value():
 async def test_provider_returns_mean_and_std():
     pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
     provider = AggregateBaselineProvider(pool)
-    baseline = await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "xmeas_1", "1min")
+    baseline = await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
     assert baseline == {"mean": 70.0, "std": 1.5}
 
 
@@ -241,7 +241,7 @@ async def test_provider_std_may_be_none():
     """A single-sample window has avg but no stddev — a present baseline with a null std."""
     pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": None}))
     provider = AggregateBaselineProvider(pool)
-    baseline = await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "xmeas_1", "1min")
+    baseline = await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
     assert baseline == {"mean": 70.0, "std": None}
 
 
@@ -249,7 +249,7 @@ async def test_provider_std_may_be_none():
 async def test_provider_selects_table_by_granularity():
     pool = _FakePool(_FakeConn(row={"avg_value": 1.0, "stddev_value": 0.5}))
     provider = AggregateBaselineProvider(pool)
-    await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "xmeas_1", granularity="5min")
+    await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", granularity="5min")
     assert any("sensor_aggregations_5min" in sql for sql in pool.conn.fetched)
 
 
@@ -265,8 +265,8 @@ def test_the_provider_has_no_default_window():
 async def test_provider_caches_within_ttl():
     pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
     provider = AggregateBaselineProvider(pool, cache_ttl_seconds=60.0)
-    await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "xmeas_1", "1min")
-    await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "xmeas_1", "1min")
+    await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
+    await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
     assert pool.acquire_count == 1  # second call served from cache
 
 
@@ -275,7 +275,7 @@ async def test_provider_unknown_granularity_raises_without_the_db():
     pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
     provider = AggregateBaselineProvider(pool)
     with pytest.raises(ValueError, match="7min"):
-        await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "xmeas_1", granularity="7min")
+        await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", granularity="7min")
     assert pool.acquire_count == 0
 
 
@@ -284,7 +284,7 @@ async def test_provider_invalid_company_id_raises_without_the_db():
     pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
     provider = AggregateBaselineProvider(pool)
     with pytest.raises(ValueError):
-        await provider.compute_rolling_mean("not-a-uuid", EQUIPMENT_ID, "xmeas_1", "1min")
+        await provider.compute_rolling_mean("not-a-uuid", EQUIPMENT_ID, "pressure", "1min")
     assert pool.acquire_count == 0
 
 
@@ -292,7 +292,7 @@ async def test_provider_invalid_company_id_raises_without_the_db():
 async def test_provider_db_error_is_none():
     pool = _FakePool(_FakeConn(raise_on_fetch=True))
     provider = AggregateBaselineProvider(pool)
-    mean = await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "xmeas_1", "1min")
+    mean = await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
     assert mean is None
 
 
@@ -300,7 +300,7 @@ async def test_provider_db_error_is_none():
 async def test_provider_no_row_is_none():
     pool = _FakePool(_FakeConn(row=None))
     provider = AggregateBaselineProvider(pool)
-    mean = await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "xmeas_1", "1min")
+    mean = await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
     assert mean is None
 
 
@@ -312,7 +312,7 @@ async def test_provider_sets_the_tenant_path_transaction_locally():
     for whoever borrows it next. It must be SET LOCAL (set_config(..., true)) inside a transaction."""
     pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
     provider = AggregateBaselineProvider(pool)
-    await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "xmeas_1", "1min")
+    await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
     (sql, args, in_tx), = pool.conn.executed
     assert "set_config('search_path', $1, true)" in sql
     assert args[0].startswith("tenant_")
@@ -328,7 +328,7 @@ async def test_the_cache_is_bounded():
     provider = AggregateBaselineProvider(pool, cache_ttl_seconds=60.0, cache_max_entries=8)
     import uuid as _uuid
     for _ in range(50):
-        await provider.compute_baseline(COMPANY_ID, str(_uuid.uuid4()), "xmeas_1", "1min")
+        await provider.compute_baseline(COMPANY_ID, str(_uuid.uuid4()), "pressure", "1min")
     assert len(provider._cache) == 8
 
 
@@ -352,8 +352,8 @@ async def test_the_cache_is_keyed_by_tenant():
     pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
     provider = AggregateBaselineProvider(pool, cache_ttl_seconds=60.0)
     other = "660e8400-e29b-41d4-a716-446655440000"
-    await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "xmeas_1", "1min")
-    await provider.compute_baseline(other, EQUIPMENT_ID, "xmeas_1", "1min")
+    await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
+    await provider.compute_baseline(other, EQUIPMENT_ID, "pressure", "1min")
     assert pool.acquire_count == 2
     paths = [args[0] for _, args, _ in pool.conn.executed]
     assert len(set(paths)) == 2
@@ -364,6 +364,6 @@ async def test_a_value_that_is_not_an_equipment_id_is_neither_queried_nor_cached
     pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": 1.5}))
     provider = AggregateBaselineProvider(pool)
     with pytest.raises(ValueError):
-        await provider.compute_baseline(COMPANY_ID, "'; drop table x; --", "xmeas_1", "1min")
+        await provider.compute_baseline(COMPANY_ID, "'; drop table x; --", "pressure", "1min")
     assert pool.acquire_count == 0
     assert len(provider._cache) == 0

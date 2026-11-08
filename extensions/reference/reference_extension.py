@@ -12,7 +12,7 @@ from extensions import (DIRECT_SCORE, DetectionResult, InvalidFeature, Uninterpr
                         register_detector, register_transform, sensor_value)
 
 # The extension API this module is written against (ADR-0010 dec 3).
-check_api_version("0.4.0")
+check_api_version("0.5.0")
 
 # The feature the detector scores, and the headroom below which it scores at all: the pump's own
 # operating envelope, which belongs to this domain, not to the platform.

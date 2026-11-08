@@ -43,3 +43,14 @@ def test_the_endpoint_refuses_a_future_reading_and_produces_nothing(client, make
     r = c.post("/ingest", json=body, headers={"x-client-verify": "SUCCESS", "x-client-cert": quote(pem)})
     assert r.status_code == 422
     assert produced == []
+
+
+def test_the_readings_contract_is_what_ingestion_accepts():
+    # A device builds its body from industryflow_contracts.readings; ingestion validates it here.
+    from industryflow_contracts import readings
+
+    assert set(SensorDataInput.model_fields) == set(readings.REQUIRED_FIELDS + readings.OPTIONAL_FIELDS)
+    assert {n for n, f in SensorDataInput.model_fields.items() if f.is_required()} == set(readings.REQUIRED_FIELDS)
+    body = readings.reading(timestamp=datetime.now(timezone.utc).isoformat(), sensor_id=str(uuid.uuid4()),
+                            equipment_id=str(uuid.uuid4()), site_id="site", value=1.5, unit="bar", quality_code=0)
+    assert SensorDataInput.model_validate(body).value == 1.5

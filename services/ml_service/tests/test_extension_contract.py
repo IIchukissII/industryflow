@@ -68,7 +68,7 @@ def test_the_configured_extension_registers_and_is_listed():
     assert {"reference_pressure_margin", "identity"} <= set(out["transforms"])
     assert out["detectors"]["reference_margin_rule"] == {"name": "reference_margin_rule", "semantics": "direct_score",
                                                          "handles_flavors": []}
-    assert out["api"] == "0.4.0"
+    assert out["api"] == "0.5.0"
 
 
 @pytest.mark.parametrize("modules, accepted", [("reference_extension", True), ("", False)])
@@ -144,8 +144,8 @@ def test_a_definition_the_transform_cannot_interpret_is_refused(definition, reas
     assert reason in out.get("refused", ""), out
 
 
-@pytest.mark.parametrize("target, loads", [("0.4.0", True), ("0.3.9", True), ("0.5.0", False),
-                                           ("1.0.0", False), ("1.4.0", False), ("four", False)])
+@pytest.mark.parametrize("target, loads", [("0.5.0", True), ("0.4.9", True), ("0.6.0", False),
+                                           ("1.0.0", False), ("1.5.0", False), ("four", False)])
 def test_an_extension_is_loaded_only_against_a_compatible_api(tmp_path, target, loads):
     # ADR-0010 dec 3: the major matches and the target minor is not above the platform's.
     (tmp_path / "versioned_ext.py").write_text(textwrap.dedent(f"""

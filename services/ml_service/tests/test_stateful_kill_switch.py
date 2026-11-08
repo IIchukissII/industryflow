@@ -33,16 +33,16 @@ COMPANY_ID = "11111111-2222-3333-4444-555555555555"
 EQUIPMENT_ID = "550e8400-e29b-41d4-a716-446655440100"
 
 FEATURE_CONFIG = {
-    "base_sensors": ["xmeas_1"],
+    "base_sensors": ["pressure"],
     "transformations": [
-        {"name": "xmeas_1_identity", "type": "identity", "sensor": "xmeas_1"},
-        {"name": "xmeas_1_squared", "type": "polynomial", "sensor": "xmeas_1",
+        {"name": "pressure_identity", "type": "identity", "sensor": "pressure"},
+        {"name": "pressure_squared", "type": "polynomial", "sensor": "pressure",
          "params": {"power": 2}},
-        {"name": "xmeas_1_deviation", "type": "statistical", "sensor": "xmeas_1",
+        {"name": "pressure_deviation", "type": "statistical", "sensor": "pressure",
          "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}},
     ],
 }
-SENSOR_DATA = {"xmeas_1": 72.5}
+SENSOR_DATA = {"pressure": 72.5}
 
 
 class _CountingProvider:
@@ -102,10 +102,11 @@ def test_extension_api_version_bumped_minor():
 
     0.2.0 added ADR-0024's `stateful`/`neutral` transform tags, 0.3.0 ADR-0028's detector
     declarations, 0.4.0 ADR-0044's refusals (`sensor_value`, `StatefulUnavailable`): the engine no
-    longer turns a transform's exception into zero, which within 0.x a minor may change.
+    longer turns a transform's exception into zero, which within 0.x a minor may change. 0.5.0 makes
+    the baseline provider's window required (ADR-0044 dec 2).
     """
     major, minor, _ = EXTENSION_API_VERSION.split(".")
-    assert (int(major), int(minor)) == (0, 4)
+    assert (int(major), int(minor)) == (0, 5)
 
 
 # --------------------------------------------------------------- null-in-slot, and ZERO calls
@@ -129,7 +130,7 @@ async def test_switch_off_neutralizes_the_slot_and_makes_zero_substrate_calls():
     features = await engine.transform(SENSOR_DATA)
 
     assert provider.calls == 0, "a killed class must issue ZERO substrate calls, not neutralized ones"
-    assert engine.neutralized_features == ["xmeas_1_deviation"]
+    assert engine.neutralized_features == ["pressure_deviation"]
     # Stateless features are untouched; only the stateful slot goes neutral.
     assert features.tolist() == [[72.5, 72.5 ** 2, 0.0]]
 
@@ -144,7 +145,7 @@ async def test_switch_off_preserves_vector_shape_and_order():
     assert on.shape == off.shape == (1, 3)
     engine = _engine(_CountingProvider(), _Switch(enabled=False))
     await engine.transform(SENSOR_DATA)
-    assert engine.get_feature_names() == ["xmeas_1_identity", "xmeas_1_squared", "xmeas_1_deviation"]
+    assert engine.get_feature_names() == ["pressure_identity", "pressure_squared", "pressure_deviation"]
 
 
 @pytest.mark.asyncio

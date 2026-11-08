@@ -70,7 +70,7 @@ printf '%s\n' "$PASSWORD" | "${RUN_GW[@]}" python /scripts/manage_users.py creat
     --company-id "$HOME_TENANT" --role admin --superuser --password-stdin >/dev/null
 CREATED=1
 
-docker build -q -t industryflow-e2e tests/e2e >/dev/null
+docker build -q --build-context contracts=libs/industryflow_contracts -t industryflow-e2e tests/e2e >/dev/null
 # The run's settings, the superuser's password among them, go in a file only this user reads (mktemp
 # creates it 0600, outside the shared work directory): never on a command line.
 cat > "$ENVFILE" <<VARS
