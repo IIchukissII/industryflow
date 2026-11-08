@@ -9,10 +9,10 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-10-31; changed 2026-10-31
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md) (dec 1: observability and analytics are in
   scope)
-- **Related:** [ADR-0036](ADR-0036-out-of-process-model-runtime.md) (dec 1: a separate service, deployed
-  only where it is wanted), [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (dec 4, 6:
-  injected secrets, Compose and Helm), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md)
-  (dec 4, 7: authenticated endpoints, no secrets in logs), [ADR-0046](ADR-0046-infrastructure-agent.md)
+- **Related:** [ADR-0036](ADR-0036-out-of-process-model-runtime-for-frameworks-the-serving-image-does-not-carry.md) (dec 1: a separate service, deployed
+  only where it is wanted), [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (dec 4, 6:
+  injected secrets, Compose and Helm), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md)
+  (dec 4, 7: authenticated endpoints, no secrets in logs), [ADR-0046](ADR-0046-the-infrastructure-agent-explains-platform-alerts-to-operators.md)
   (the first agent)
 
 ## Context
@@ -84,5 +84,5 @@ authoritative.
 
 ## References
 
-- [ADR-0046](ADR-0046-infrastructure-agent.md): the first agent.
+- [ADR-0046](ADR-0046-the-infrastructure-agent-explains-platform-alerts-to-operators.md): the first agent.
 - [Monitoring](../docs/operations/monitoring.md): manual of decisions 1-6, 8.

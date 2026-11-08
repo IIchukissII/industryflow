@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-27; changed 2026-11-07
 - **Parent:** ADR-0001
-- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (tracking from notebooks, dec 9), [ADR-0012](ADR-0012-notebook-credential-delivery.md) (the capability model applied here), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (tenant-scoped API and UI), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (the gateway that realises this record)
+- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (tracking from notebooks, dec 9), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) (the capability model applied here), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (tenant-scoped API and UI), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (the gateway that realises this record)
 
 ## Context
 

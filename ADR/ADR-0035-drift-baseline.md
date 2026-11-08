@@ -7,13 +7,13 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-25; changed 2026-10-29
-- **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring.md)
-- **Related:** [ADR-0021](ADR-0021-model-drift-monitoring.md) (dec 4: the baseline decision this
-  replaces), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (the declared detector that
-  scores), [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (dec 6: the deployment gate),
-  [ADR-0030](ADR-0030-externally-authored-model-admission.md) (dec 7: uploads scored at that gate; dec 8:
-  a declared baseline or visibly un-monitorable), [ADR-0040](ADR-0040-notebook-model-promotion.md)
-  (dec 4: how a notebook supplies its sample), [ADR-0041](ADR-0041-bound-feature-configuration.md) (the
+- **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md)
+- **Related:** [ADR-0021](ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md) (dec 4: the baseline decision this
+  replaces), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (the declared detector that
+  scores), [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) (dec 6: the deployment gate),
+  [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 7: uploads scored at that gate; dec 8:
+  a declared baseline or visibly un-monitorable), [ADR-0040](ADR-0040-a-notebook-registered-model-version-becomes-a-platform-model-by-promotion.md)
+  (dec 4: how a notebook supplies its sample), [ADR-0041](ADR-0041-a-model-s-feature-configuration-is-fixed-once-bound.md) (the
   bound inputs a sample matches stay fixed)
 
 ## Context

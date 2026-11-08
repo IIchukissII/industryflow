@@ -12,9 +12,9 @@ the object store. Scripts, roles and grants: [schema scripts](../../infrastructu
 |---|---|
 | Schema-per-tenant; tenant resolved from a verified identity, applied with `SET LOCAL search_path` in a transaction | [ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md) |
 | Idempotent writes against `UNIQUE` keys | [ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) |
-| Cold layer, export → verify → drop, raw retention owned by the exporter | [ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md) |
+| Cold layer, export → verify → drop, raw retention owned by the exporter | [ADR-0025](../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) |
 | Tenant provisioning | [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) |
-| Applying init-script changes to a live database | [ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
+| Applying init-script changes to a live database | [ADR-0034](../../ADR/ADR-0034-platform-schema-migrations.md) |
 
 ## Tenant identity sources
 
@@ -60,8 +60,8 @@ executors with `--py-files`.
 | `platform_config` | Platform switches (`stateful_features_enabled`, [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) |
 | `cold_export_drops` | Committed cold-export drops |
 | `company_lifecycle_events`, `company_deletions`, `company_deletion_steps` | Tenant lifecycle record and deletion progress ([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md); `25-company-deletion.sql`) |
-| `capability_use_events` | Capability-use record, append-only, outlives tenants ([ADR-0042](../../ADR/ADR-0042-capability-use-audit.md); [record](notebooks.md#capability-use-record)) |
-| `schema_ledger` | Applied schema scripts and digests (`migrate.sh`, [ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md)) |
+| `capability_use_events` | Capability-use record, append-only, outlives tenants ([ADR-0042](../../ADR/ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md); [record](notebooks.md#capability-use-record)) |
+| `schema_ledger` | Applied schema scripts and digests (`migrate.sh`, [ADR-0034](../../ADR/ADR-0034-platform-schema-migrations.md)) |
 
 Per tenant schema, created by `create_tenant_schema()`:
 
@@ -78,7 +78,7 @@ Per tenant schema, created by `create_tenant_schema()`:
 | `alert_labels` | | | | |
 | `ml_models` | | `UNIQUE (model_name, model_version)`; `feature_config_id` → `feature_engineering_configs` `ON DELETE RESTRICT` | | |
 | `model_predictions` | `timestamp`, 7 d | | `model_id`, 30 d | 180 d |
-| `feature_engineering_configs` | | A config a model binds keeps `base_sensors`, `transformations` ([ADR-0041](../../ADR/ADR-0041-bound-feature-configuration.md)) | | |
+| `feature_engineering_configs` | | A config a model binds keeps `base_sensors`, `transformations` ([ADR-0041](../../ADR/ADR-0041-a-model-s-feature-configuration-is-fixed-once-bound.md)) | | |
 
 `sensors` naming columns:
 

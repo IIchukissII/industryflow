@@ -9,10 +9,10 @@ The alert API, the detection worker, rule types, deduplication and operator labe
 
 | Decision | ADR |
 |---|---|
-| The API gateway is the only alerting HTTP surface | [ADR-0031](../../ADR/ADR-0031-alerting-http-surface-single-owner.md) |
+| The API gateway is the only alerting HTTP surface | [ADR-0031](../../ADR/ADR-0031-the-api-gateway-as-the-single-owner-of-the-alerting-http-surface.md) |
 | At-least-once consumption, dead-letter | [ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md) |
 | Tenant resolution | [ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md) |
-| Model drift (`statistical` rules) | [ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md) |
+| Model drift (`statistical` rules) | [ADR-0021](../../ADR/ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md) |
 | Operator labels, precision, retrain recommendation | [ADR-0022](../../ADR/ADR-0022-concept-drift-operator-feedback.md) |
 | Redis latest-value snapshot for ML rules | [ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md) |
 | Degraded scores under the stateful-feature kill-switch | [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md) |

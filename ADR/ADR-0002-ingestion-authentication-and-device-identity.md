@@ -9,8 +9,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-06-26; changed 2026-10-17
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (consumes the verified tenant),
-  [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the API trust domain),
-  [ADR-0007](ADR-0007-public-key-infrastructure.md) (the device PKI)
+  [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (the API trust domain),
+  [ADR-0007](ADR-0007-device-certificate-authority.md) (the device PKI)
 
 ## Context
 

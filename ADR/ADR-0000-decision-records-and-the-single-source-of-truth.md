@@ -51,9 +51,9 @@ cites it instead of restating it.
    `Withdrawn` when abandoned without a replacement. Acceptance means the decision is settled, not
    that it is built; acceptance is the merge that sets the status.
 8. **ADRs are numbered and named uniformly.** *(canon dec 10)* Files are `ADR-NNNN-kebab-title.md`,
-   numbered in order. ADR-0000 is this root, ADR-0001 the project framing, technical decisions from
-   0002. A number is never reused; a decision number within an ADR is never renumbered, because code
-   and documents cite it.
+   numbered in order. ADR-0000 is this root, ADR-0001 the project framing, technical decisions
+   from 0002. A number is never reused; a decision number within an ADR is never renumbered,
+   because code and documents cite it.
 9. **Every ADR has the same compact shape.** *(canon dec 10)* A header (status, date, optional
    parent, related records with the relation), then Context, Decision (numbered), Alternatives
    (table), Consequences (positive, negative), Deferred (table), References. Alternatives hold every

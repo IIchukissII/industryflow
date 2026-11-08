@@ -7,13 +7,13 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-25
-- **Parent:** [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md)
-- **Related:** [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (dec 7: the boundary
-  this record settles), [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (declare, satisfy or
-  refuse; the gates), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (dec 4: no author code
+- **Parent:** [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md)
+- **Related:** [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (dec 7: the boundary
+  this record settles), [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) (declare, satisfy or
+  refuse; the gates), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 4: no author code
   on load; the upload path), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (dec 3: outages are
-  retried), [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (toggles, network policy),
-  [ADR-0035](ADR-0035-drift-baseline-derived-scores.md) (baseline scores derived at the gate)
+  retried), [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (toggles, network policy),
+  [ADR-0035](ADR-0035-drift-baseline.md) (baseline scores derived at the gate)
 
 ## Context
 

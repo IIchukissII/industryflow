@@ -9,8 +9,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-06-26; changed 2026-11-07
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0002](ADR-0002-ingestion-authentication-and-device-identity.md) (verified tenant
-  on ingestion), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the tenant claim),
-  [ADR-0039](ADR-0039-one-tenant-ownership-test.md) (the ownership test the library holds)
+  on ingestion), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (the tenant claim),
+  [ADR-0039](ADR-0039-one-test-of-tenant-ownership-for-names-and-object-store-keys.md) (the ownership test the library holds)
 
 ## Context
 

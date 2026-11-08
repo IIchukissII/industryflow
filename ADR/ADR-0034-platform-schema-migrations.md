@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-10-24; changed 2026-11-07
 - **Parent:** ADR-0001
-- **Related:** [ADR-0017](ADR-0017-database-tls-and-authentication.md) (the runner is a network client), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a change applies once per tenant), [ADR-0008](ADR-0008-extension-and-plugin-interface.md), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extension-owned tables), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (dec 4: upgrade-path gate), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (dec 7: restore as rollback), [ADR-0033](ADR-0033-tenant-lifecycle.md) (provisioning)
+- **Related:** [ADR-0017](ADR-0017-database-tls-and-authentication.md) (the runner is a network client), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a change applies once per tenant), [ADR-0008](ADR-0008-extension-interface-for-a-domain-generic-core.md), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extension-owned tables), [ADR-0026](ADR-0026-release-model.md) (dec 4: upgrade-path gate), [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (dec 7: restore as rollback), [ADR-0033](ADR-0033-tenant-lifecycle.md) (provisioning)
 
 ## Context
 

@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # SQL proxy
 
-The SQL proxy for authoring notebooks ([ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md) dec 5-6): a kernel connects with its SQL-audience capability handle as the password, and the proxy relays its session as that tenant's own login after `SET ROLE tenant_reader_<uuid>`. The kernel holds no database password ([ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md) dec 2).
+The SQL proxy for authoring notebooks ([ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) dec 5-6): a kernel connects with its SQL-audience capability handle as the password, and the proxy relays its session as that tenant's own login after `SET ROLE tenant_reader_<uuid>`. The kernel holds no database password ([ADR-0012](../../ADR/ADR-0012-per-session-credential-delivery-for-notebook-environments.md) dec 2).
 
 ## Database principals
 
@@ -24,7 +24,7 @@ filtering is relied on.
 | Enrolment | When the database refuses a tenant login (never enrolled, or key rotated), the proxy opens a session as `notebook_sql_proxy`, calls `notebook_sql_proxy_enrol(<tenant>, <verifier>)`, closes it, retries once |
 | Revocation | Every `SQL_PROXY_REVALIDATE_SECONDS` each session re-resolves its handle; a handle that no longer resolves to the same binding, or a store that cannot answer, closes the session |
 | Cancellation | The kernel gets a proxy-issued `BackendKeyData`; a `CancelRequest` quoting it is forwarded to the upstream session over TLS. Keys are process-local: one replica |
-| Capability-use record ([ADR-0042](../../ADR/ADR-0042-capability-use-audit.md)) | Appended to the capability store's `nbcap-audit` stream: a handle's `first_use` (once per handle), every `refused` (with its reason and a short digest, never the handle), `sql_session_opened`, `sql_session_closed` (`client_closed`, `capability_revoked`, `recheck_failed`, `error`; duration in `detail`). Statements are not recorded. A first use or refusal that cannot be recorded refuses the connection. A refusal is also logged, without the handle |
+| Capability-use record ([ADR-0042](../../ADR/ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md)) | Appended to the capability store's `nbcap-audit` stream: a handle's `first_use` (once per handle), every `refused` (with its reason and a short digest, never the handle), `sql_session_opened`, `sql_session_closed` (`client_closed`, `capability_revoked`, `recheck_failed`, `error`; duration in `detail`). Statements are not recorded. A first use or refusal that cannot be recorded refuses the connection. A refusal is also logged, without the handle |
 
 The roles and functions are created by
 [`13-notebook-sql-proxy-role.sh`](../../infrastructure/timescaledb/init-scripts/13-notebook-sql-proxy-role.sh).

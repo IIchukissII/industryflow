@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Reference extension
 
 The extension that demonstrates the boundary of [ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)
-dec 5 and [ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md) dec 6: one domain
+dec 5 and [ADR-0008](../../ADR/ADR-0008-extension-interface-for-a-domain-generic-core.md) dec 6: one domain
 configuration, one transform and one detector, registered through the extension contract without
 editing the core. The domain is a fictional pump.
 
@@ -19,8 +19,8 @@ editing the core. The domain is a fictional pump.
 
 | Kind | Name | Behaviour |
 |---|---|---|
-| Feature transform | `reference_pressure_margin` | `params.limit` minus the reading of `sensor`; a definition naming neither is refused ([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 2) |
-| Detector | `reference_margin_rule` | Model-free, `direct_score`: the `pressure_margin` feature scored 0 at 2 bar of headroom or more, 1 at or past the limit, linear between; features without it are refused ([ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) dec 2) |
+| Feature transform | `reference_pressure_margin` | `params.limit` minus the reading of `sensor`; a definition naming neither is refused ([ADR-0044](../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) dec 2) |
+| Detector | `reference_margin_rule` | Model-free, `direct_score`: the `pressure_margin` feature scored 0 at 2 bar of headroom or more, 1 at or past the limit, linear between; features without it are refused ([ADR-0028](../../ADR/ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) dec 2) |
 
 ## The pump
 

@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-07-15; changed 2026-10-17
 - **Parent:** [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (idempotent sinks, bounded state, durable checkpoints)
-- **Related:** [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (at-least-once, so re-reading the source is safe), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (per-image smoke and box run), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (aggregate tables that see a gap on reset), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (cold layer, untouched by either path)
+- **Related:** [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (at-least-once, so re-reading the source is safe), [ADR-0026](ADR-0026-release-model.md) (per-image smoke and box run), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (aggregate tables that see a gap on reset), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (cold layer, untouched by either path)
 
 ## Context
 

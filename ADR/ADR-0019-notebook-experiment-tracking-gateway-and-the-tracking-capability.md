@@ -8,11 +8,11 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-28; changed 2026-11-07
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
-- **Related:** [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (the
-  gateway this makes concrete), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md)
+- **Related:** [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md) (the
+  gateway this makes concrete), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md)
   (handles and audiences), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md)
-  (the tracking gate), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (hub identity),
-  [ADR-0039](ADR-0039-one-tenant-ownership-test.md) (the one implementation of decision 5's test)
+  (the tracking gate), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (hub identity),
+  [ADR-0039](ADR-0039-one-test-of-tenant-ownership-for-names-and-object-store-keys.md) (the one implementation of decision 5's test)
 
 ## Context
 

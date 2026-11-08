@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-27; changed 2026-10-29
 - **Parent:** ADR-0001
-- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (the kernel invariants delivered here), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the session a capability must not impersonate), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability form, minting, SQL proxy), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) and [ADR-0030](ADR-0030-externally-authored-model-admission.md) (writing planes), [ADR-0042](ADR-0042-capability-use-audit.md) (the capability-use record)
+- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (the kernel invariants delivered here), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (the session a capability must not impersonate), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capability form, minting, SQL proxy), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) and [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (writing planes), [ADR-0042](ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md) (the capability-use record)
 
 ## Context
 

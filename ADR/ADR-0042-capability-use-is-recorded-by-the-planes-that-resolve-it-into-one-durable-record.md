@@ -7,12 +7,12 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-29; changed 2026-11-07
-- **Parent:** [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (the capability and its
+- **Parent:** [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (the capability and its
   store)
 - **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (dec 2: the
-  kernel is untrusted), [ADR-0012](ADR-0012-notebook-credential-delivery.md) (dec 1: per-session
-  credentials), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (dec 3: the upload audience),
-  [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (dec 1: the capability store is derivable),
+  kernel is untrusted), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) (dec 1: per-session
+  credentials), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 3: the upload audience),
+  [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (dec 1: the capability store is derivable),
   [ADR-0033](ADR-0033-tenant-lifecycle.md) (dec 6: the lifecycle record that outlives a tenant),
   [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (no log backend is shipped)
 

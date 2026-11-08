@@ -7,16 +7,16 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-28
-- **Parent:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (dec 9: the kernel registers
+- **Parent:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (dec 9: the kernel registers
   model versions in its tenant)
 - **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (dec 2: the
-  kernel is untrusted), [ADR-0012](ADR-0012-notebook-credential-delivery.md) (dec 1: kernel credentials),
-  [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (dec 5: the writing role),
-  [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (dec 5: the registration gate),
-  [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (dec 1: the detector declares),
-  [ADR-0030](ADR-0030-externally-authored-model-admission.md) (dec 8: provenance),
-  [ADR-0035](ADR-0035-drift-baseline-derived-scores.md) (dec 1, 4, 6: the supplied sample),
-  [ADR-0039](ADR-0039-one-tenant-ownership-test.md) (the tenant's registry names)
+  kernel is untrusted), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) (dec 1: kernel credentials),
+  [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (dec 5: the writing role),
+  [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) (dec 5: the registration gate),
+  [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (dec 1: the detector declares),
+  [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 8: provenance),
+  [ADR-0035](ADR-0035-drift-baseline.md) (dec 1, 4, 6: the supplied sample),
+  [ADR-0039](ADR-0039-one-test-of-tenant-ownership-for-names-and-object-store-keys.md) (the tenant's registry names)
 
 ## Context
 

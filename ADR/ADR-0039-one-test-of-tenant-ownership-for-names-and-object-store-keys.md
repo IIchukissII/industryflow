@@ -8,9 +8,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-10-27; changed 2026-10-28
 - **Parent:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (dec 7: the shared library)
-- **Related:** [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) (dec 2, 4:
-  mediation and read paths), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (dec 5, 7:
-  the namespace rule, applied by the gateway and the read paths), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md)
+- **Related:** [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md) (dec 2, 4:
+  mediation and read paths), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (dec 5, 7:
+  the namespace rule, applied by the gateway and the read paths), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md)
   (dec 5: tenant isolation in the cold store)
 
 ## Context

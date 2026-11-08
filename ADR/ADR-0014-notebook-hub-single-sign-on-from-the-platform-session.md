@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-27; changed 2026-10-17
 - **Parent:** ADR-0001
-- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (no second login, dec 8; role profiles, dec 5), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (the session and its one verification), [ADR-0002](ADR-0002-ingestion-authentication-and-device-identity.md) (the verified-identity forwarding pattern), [ADR-0012](ADR-0012-notebook-credential-delivery.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (what is minted after sign-on)
+- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (no second login, dec 8; role profiles, dec 5), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (the session and its one verification), [ADR-0002](ADR-0002-ingestion-authentication-and-device-identity.md) (the verified-identity forwarding pattern), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (what is minted after sign-on)
 
 ## Context
 

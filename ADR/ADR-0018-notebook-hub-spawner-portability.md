@@ -8,10 +8,10 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-28; changed 2026-10-17
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md)
-- **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (deployment shapes, per-pod
-  egress), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (SSO),
-  [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capabilities, SQL proxy),
-  [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (smoke gate)
+- **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (deployment shapes, per-pod
+  egress), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (SSO),
+  [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capabilities, SQL proxy),
+  [ADR-0026](ADR-0026-release-model.md) (smoke gate)
 
 ## Context
 

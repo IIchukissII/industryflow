@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Frontend
 
-The web app: a React single-page app built with Vite, served by the nginx edge same-origin with the API ([ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md), [ADR-0009](../../ADR/ADR-0009-kubernetes-deployment-and-packaging.md)).
+The web app: a React single-page app built with Vite, served by the nginx edge same-origin with the API ([ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md), [ADR-0009](../../ADR/ADR-0009-kubernetes-deployment-packaged-with-helm.md)).
 
 ## Commands
 

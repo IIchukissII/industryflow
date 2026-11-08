@@ -11,15 +11,15 @@ handles.
 | Decision | ADR |
 |---|---|
 | Notebooks as untrusted, per-user, tenant-bound environments; role profiles | [ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) |
-| No durable credential in the kernel; per-tenant read-only role | [ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md) |
-| Tenant-namespaced tracking and registry | [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) |
-| Notebook SSO from the platform session; single origin | [ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on.md) |
-| Capability minting, audiences, SQL proxy | [ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md) |
+| No durable credential in the kernel; per-tenant read-only role | [ADR-0012](../../ADR/ADR-0012-per-session-credential-delivery-for-notebook-environments.md) |
+| Tenant-namespaced tracking and registry | [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md) |
+| Notebook SSO from the platform session; single origin | [ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) |
+| Capability minting, audiences, SQL proxy | [ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) |
 | Database TLS (`verify-full`) | [ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md) |
 | KubeSpawner / DockerSpawner, Compose non-parity | [ADR-0018](../../ADR/ADR-0018-notebook-hub-spawner-portability.md) |
-| Tracking gateway, default-deny routes, direct artifact bytes | [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md) |
-| Per-user persistence, idle reclamation | [ADR-0020](../../ADR/ADR-0020-notebook-per-user-persistence.md) |
-| Cold-layer read path | [ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md) dec 5 |
+| Tracking gateway, default-deny routes, direct artifact bytes | [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) |
+| Per-user persistence, idle reclamation | [ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md) |
+| Cold-layer read path | [ADR-0025](../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) dec 5 |
 
 ## Request path
 
@@ -87,7 +87,7 @@ Either image falls back to `NOTEBOOK_IMAGE`. Hub settings:
 
 ## Capability-use record
 
-[ADR-0042](../../ADR/ADR-0042-capability-use-audit.md). Planes append events to the stream
+[ADR-0042](../../ADR/ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md). Planes append events to the stream
 `nbcap-audit` in the capability store, atomically with the store change they describe; the API
 gateway's writer (`services/api_gateway/messaging/capability_audit_drain.py`, consumer group
 `capability-audit-writer`) drains it into `public.capability_use_events` through
@@ -186,7 +186,7 @@ safe to re-run.
 | Hub service | Does | Token scopes |
 |---|---|---|
 | `idle-culler` | Stops idle servers | `list:users`, `read:users:activity`, `read:servers`, `delete:servers` |
-| `volume-reclaim` | For each deletion awaiting it, deletes the tenant's users from the hub (each spawner's `delete_forever` removes the user's volume or PVC), checks the Docker volume or PVC by the spawner's own name for it and removes any left behind, then records `notebook_volumes` only when none remains; database role `notebook_hub_reclaim_user` ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-persistence.md) dec 6). Runs when `NOTEBOOK_RECLAIM_DB_PASSWORD` is set | `delete:users` |
+| `volume-reclaim` | For each deletion awaiting it, deletes the tenant's users from the hub (each spawner's `delete_forever` removes the user's volume or PVC), checks the Docker volume or PVC by the spawner's own name for it and removes any left behind, then records `notebook_volumes` only when none remains; database role `notebook_hub_reclaim_user` ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md) dec 6). Runs when `NOTEBOOK_RECLAIM_DB_PASSWORD` is set | `delete:users` |
 
 ## Isolation tests
 
@@ -210,7 +210,7 @@ Proxy and gateway tests: their READMEs.
 |---|---|
 | Spawn | On demand, one server per user, from the hub's verified identity |
 | Limits | CPU and memory per profile: analytics 0.5 CPU, 1G; authoring 2 CPU, 4G |
-| Ephemerality | DockerSpawner removes the container when its server stops; only `<home>/work` of an authoring user persists ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-persistence.md)) |
+| Ephemerality | DockerSpawner removes the container when its server stops; only `<home>/work` of an authoring user persists ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md)) |
 | Idle reclamation | Hub service `idle-culler` stops servers idle past `NOTEBOOK_IDLE_TIMEOUT_SECONDS` (3600), checked every `NOTEBOOK_CULL_EVERY_SECONDS` (300) |
 
 | Code | Role |

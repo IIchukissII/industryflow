@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # TimescaleDB schema scripts
 
 The platform schema sequence for the `industryflow` and `mlflow` databases, the runner that applies it,
-the roles it creates and their operations ([ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md)).
+the roles it creates and their operations ([ADR-0034](../../../ADR/ADR-0034-platform-schema-migrations.md)).
 The tables they create: [data and storage](../../../docs/architecture/data-and-storage.md#tables).
 
 ## Execution
@@ -46,7 +46,7 @@ every script once. Every script is idempotent.
 
 ### Backup before an upgrade
 
-[ADR-0032](../../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 7.
+[ADR-0032](../../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) dec 7.
 
 | Database | Pending scripts are applied when |
 |---|---|
@@ -69,33 +69,33 @@ every script once. Every script is idempotent.
 | `05-grant-mlflow-permissions.sql` | `mlflow_user` privileges on the `mlflow` database | |
 | `06-feature-engineering-tables.sql` | `feature_engineering_configs`; `ml_models.feature_config_id`, `equipment_type`; backfill | |
 | `08-ml-alert-permissions-migration.sql` | `alert_service_user` `SELECT` on `feature_engineering_configs`, `ml_models`; backfill | |
-| `09-tenant-reader-roles-migration.sql` | `ensure_tenant_reader_role()`; backfill of `tenant_reader_<uuid>` | [ADR-0012](../../../ADR/ADR-0012-notebook-credential-delivery.md) |
+| `09-tenant-reader-roles-migration.sql` | `ensure_tenant_reader_role()`; backfill of `tenant_reader_<uuid>` | [ADR-0012](../../../ADR/ADR-0012-per-session-credential-delivery-for-notebook-environments.md) |
 | `10-spark-aggregation-update-grant.sql` | `spark_streaming_user` `UPDATE` on tenant tables; backfill | [ADR-0006](../../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) |
 | `11-alert-connection-limit.sql` | `alert_service_user` `CONNECTION LIMIT 50` | |
 | `12-metrics-role.sql` | `metrics_user` (`pg_monitor`) | [ADR-0016](../../../ADR/ADR-0016-observability-and-monitoring-integration.md) |
-| `13-notebook-sql-proxy-role.sh` | `tenant_sqlproxy_<uuid>` logins, `notebook_sql_tenants`, `notebook_sql_proxy`, `ensure_tenant_sql_login()`, `notebook_sql_proxy_enrol()`, `tenant_is_suspended()` | [ADR-0015](../../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md) |
-| `14-model-drift-reference-profile.sql` | `ml_models.reference_profile` | [ADR-0021](../../../ADR/ADR-0021-model-drift-monitoring.md) |
+| `13-notebook-sql-proxy-role.sh` | `tenant_sqlproxy_<uuid>` logins, `notebook_sql_tenants`, `notebook_sql_proxy`, `ensure_tenant_sql_login()`, `notebook_sql_proxy_enrol()`, `tenant_is_suspended()` | [ADR-0015](../../../ADR/ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) |
+| `14-model-drift-reference-profile.sql` | `ml_models.reference_profile` | [ADR-0021](../../../ADR/ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md) |
 | `15-alert-labels.sql` | `alert_labels` | [ADR-0022](../../../ADR/ADR-0022-concept-drift-operator-feedback.md) |
-| `16-cold-layer-raw-retention.sql` | `public.cold_export_drops`, `cold_export_day_fingerprint()`, `cold_export_drop_day()`, `ensure_cold_export_access()`; removes raw retention timers | [ADR-0025](../../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md) |
+| `16-cold-layer-raw-retention.sql` | `public.cold_export_drops`, `cold_export_day_fingerprint()`, `cold_export_drop_day()`, `ensure_cold_export_access()`; removes raw retention timers | [ADR-0025](../../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) |
 | `17-stateful-feature-kill-switch.sql` | `public.platform_config`, row `stateful_features_enabled` | [ADR-0024](../../../ADR/ADR-0024-stateful-feature-kill-switch.md) |
-| `18-model-compatibility-status.sql` | `ml_models.compatibility_status`, `compatibility_detail`, `compatibility_checked_at` | [ADR-0027](../../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) |
-| `19-model-provenance.sql` | `ml_models.provenance`, `artifact_uri` | [ADR-0030](../../../ADR/ADR-0030-externally-authored-model-admission.md) |
-| `20-model-detector.sql` | `ml_models.detector` | [ADR-0028](../../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) |
+| `18-model-compatibility-status.sql` | `ml_models.compatibility_status`, `compatibility_detail`, `compatibility_checked_at` | [ADR-0027](../../../ADR/ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) |
+| `19-model-provenance.sql` | `ml_models.provenance`, `artifact_uri` | [ADR-0030](../../../ADR/ADR-0030-admission-of-externally-authored-models.md) |
+| `20-model-detector.sql` | `ml_models.detector` | [ADR-0028](../../../ADR/ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) |
 | `21-company-provisioning.sql` | `provision_company()`, `update_company()` (keeps `suspended_at`; refuses a company with a deletion request), `end_suspended_tenant_sql_sessions()`, `company_provisioning_guard()` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
-| `22-sensor-display-name.sql` | `add_display_name_column_to_sensors()`: `sensors.display_name`; backfill over existing tenants | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
-| `23-sensor-latest-reading-index.sql` | `add_latest_reading_index_to_sensor_measurements()`: index `sensor_measurements (sensor_id, time DESC)`; backfill over existing tenants | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
+| `22-sensor-display-name.sql` | `add_display_name_column_to_sensors()`: `sensors.display_name`; backfill over existing tenants | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migrations.md) |
+| `23-sensor-latest-reading-index.sql` | `add_latest_reading_index_to_sensor_measurements()`: index `sensor_measurements (sensor_id, time DESC)`; backfill over existing tenants | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migrations.md) |
 | `24-writers-read-tenant-status.sql` | `spark_streaming_user`, `alert_service_user` `SELECT (schema_name, is_active)` on `public.companies` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 | `25-company-deletion.sql` | `companies.suspended_at`, `deleted_at`; `company_lifecycle_events`, `record_company_lifecycle()`; `company_deletions`, `company_deletion_steps`, `request_company_deletion()`, `company_deletion_wait()` | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
 | `26-company-deletion-job.sql` | `company_deletion_required_stores()`, `pending_company_deletions()`, `company_deletion_user_ids()`, `record_company_deletion_step()`, `complete_company_deletion()` (drops the tenant's schema, roles, users and export rows; tombstone); EXECUTE for `tenant_delete_user` only | [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) |
-| `27-notebook-volume-reclaim.sql` | `pending_notebook_volume_reclaims()` (pending deletions whose volumes are not recorded, with their users), `record_notebook_volumes_reclaimed()` (records `notebook_volumes` only); EXECUTE for `notebook_hub_reclaim_user` only | [ADR-0020](../../../ADR/ADR-0020-notebook-per-user-persistence.md) |
-| `28-schema-ledger-read.sql` | `SELECT` on `public.schema_ledger` for the service roles (the `schema-ready` check) | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
-| `29-user-table.sql` | `public."user"` (owner: database owner; DML for `api_gateway_user`, `SELECT` for `alert_service_user`, `ml_service_user`); `CREATE` on `public` revoked from `api_gateway_user` and `PUBLIC` | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migration-strategy.md) |
-| `30-bound-feature-config.sql` | `add_bound_feature_config_rules()`: `ml_models.feature_config_id` `ON DELETE RESTRICT`; triggers refusing a change to a bound config's `base_sensors`/`transformations` and to a model's binding; backfill | [ADR-0041](../../../ADR/ADR-0041-bound-feature-configuration.md) |
-| `31-capability-audit.sql` | `public.capability_use_events`; `record_capability_use()` (writer), `expire_capability_use()` (retention, ≥ 30 days); `SELECT` and both functions for `api_gateway_user` only | [ADR-0042](../../../ADR/ADR-0042-capability-use-audit.md) |
-| `32-platform-switch-control.sql` | `public.platform_config_changes`; `set_platform_switch()` (the one writer of a platform switch, records each flip); `EXECUTE` and `SELECT` on both tables for `api_gateway_user` only | [ADR-0043](../../../ADR/ADR-0043-platform-switch-operator-control.md) |
-| `33-equipment-batch-settings-removed.sql` | Drops `batch_timeout_seconds`, `require_complete_batch`, `min_sensors_for_partial` from every tenant's `equipment` | [ADR-0044](../../../ADR/ADR-0044-complete-model-input.md) dec 5 |
-| `34-user-password-change-required.sql` | `public."user".password_change_required` (default false): an account must set its password before anything else | [ADR-0004](../../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) dec 11 |
-| `35-degraded-alerts.sql` | `add_degraded_columns_to_alerts()`: `alerts.degraded`, `alerts.neutralized_features`, `alert_labels.degraded`; over existing tenants | [ADR-0044](../../../ADR/ADR-0044-complete-model-input.md) dec 3, [ADR-0022](../../../ADR/ADR-0022-concept-drift-operator-feedback.md) dec 2 |
+| `27-notebook-volume-reclaim.sql` | `pending_notebook_volume_reclaims()` (pending deletions whose volumes are not recorded, with their users), `record_notebook_volumes_reclaimed()` (records `notebook_volumes` only); EXECUTE for `notebook_hub_reclaim_user` only | [ADR-0020](../../../ADR/ADR-0020-notebook-per-user-work-persistence.md) |
+| `28-schema-ledger-read.sql` | `SELECT` on `public.schema_ledger` for the service roles (the `schema-ready` check) | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migrations.md) |
+| `29-user-table.sql` | `public."user"` (owner: database owner; DML for `api_gateway_user`, `SELECT` for `alert_service_user`, `ml_service_user`); `CREATE` on `public` revoked from `api_gateway_user` and `PUBLIC` | [ADR-0034](../../../ADR/ADR-0034-platform-schema-migrations.md) |
+| `30-bound-feature-config.sql` | `add_bound_feature_config_rules()`: `ml_models.feature_config_id` `ON DELETE RESTRICT`; triggers refusing a change to a bound config's `base_sensors`/`transformations` and to a model's binding; backfill | [ADR-0041](../../../ADR/ADR-0041-a-model-s-feature-configuration-is-fixed-once-bound.md) |
+| `31-capability-audit.sql` | `public.capability_use_events`; `record_capability_use()` (writer), `expire_capability_use()` (retention, ≥ 30 days); `SELECT` and both functions for `api_gateway_user` only | [ADR-0042](../../../ADR/ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md) |
+| `32-platform-switch-control.sql` | `public.platform_config_changes`; `set_platform_switch()` (the one writer of a platform switch, records each flip); `EXECUTE` and `SELECT` on both tables for `api_gateway_user` only | [ADR-0043](../../../ADR/ADR-0043-a-platform-switch-is-flipped-by-a-platform-superuser-through-the-api-gateway-and-every-flip-is-recorded.md) |
+| `33-equipment-batch-settings-removed.sql` | Drops `batch_timeout_seconds`, `require_complete_batch`, `min_sensors_for_partial` from every tenant's `equipment` | [ADR-0044](../../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) dec 5 |
+| `34-user-password-change-required.sql` | `public."user".password_change_required` (default false): an account must set its password before anything else | [ADR-0004](../../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) dec 11 |
+| `35-degraded-alerts.sql` | `add_degraded_columns_to_alerts()`: `alerts.degraded`, `alerts.neutralized_features`, `alert_labels.degraded`; over existing tenants | [ADR-0044](../../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) dec 3, [ADR-0022](../../../ADR/ADR-0022-concept-drift-operator-feedback.md) dec 2 |
 
 `create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22, 23 and 35.
 The per-tenant definitions also apply themselves to every existing tenant schema (ADR-0034 dec 3).

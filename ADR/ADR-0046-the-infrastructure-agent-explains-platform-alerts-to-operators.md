@@ -7,12 +7,12 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-31; changed 2026-11-04
-- **Parent:** [ADR-0045](ADR-0045-agent-runtime.md) (the agent contract)
+- **Parent:** [ADR-0045](ADR-0045-agents.md) (the agent contract)
 - **Related:** [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (dec 1, 4, 5, 8: the
-  operator's stack, its receivers, tenant data kept off it, reported revisions), [ADR-0031](ADR-0031-alerting-http-surface-single-owner.md)
-  (dec 1: tenant alerts are the gateway's), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (dec 1:
-  store classes), [ADR-0043](ADR-0043-platform-switch-operator-control.md) (dec 1: platform scope is
-  the operator's), [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (dec 4, 6)
+  operator's stack, its receivers, tenant data kept off it, reported revisions), [ADR-0031](ADR-0031-the-api-gateway-as-the-single-owner-of-the-alerting-http-surface.md)
+  (dec 1: tenant alerts are the gateway's), [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (dec 1:
+  store classes), [ADR-0043](ADR-0043-a-platform-switch-is-flipped-by-a-platform-superuser-through-the-api-gateway-and-every-flip-is-recorded.md) (dec 1: platform scope is
+  the operator's), [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (dec 4, 6)
 
 ## Context
 

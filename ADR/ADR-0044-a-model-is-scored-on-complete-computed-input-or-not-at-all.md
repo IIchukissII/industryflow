@@ -10,10 +10,10 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Parent:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (one computation of a
   feature for training and serving)
 - **Related:** [ADR-0024](ADR-0024-stateful-feature-kill-switch.md) (dec 3, 5: the neutral values it
-  permits and their visibility), [ADR-0041](ADR-0041-bound-feature-configuration.md) (dec 2: the bound
-  inputs), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (dec 2: refusing over
+  permits and their visibility), [ADR-0041](ADR-0041-a-model-s-feature-configuration-is-fixed-once-bound.md) (dec 2: the bound
+  inputs), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (dec 2: refusing over
   guessing), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (dec 3: the transform contract),
-  [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (the schema change),
+  [ADR-0034](ADR-0034-platform-schema-migrations.md) (the schema change),
   [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (dec 2-4: degraded alerts in labels and precision)
 
 ## Context

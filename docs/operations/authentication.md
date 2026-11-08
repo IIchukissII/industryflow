@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Authentication
 
 How users, API clients and services authenticate to the API gateway: platform sessions, tokens and
-revocation ([ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md)).
+revocation ([ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md)).
 
 | Domain | Mechanism | Page |
 |---|---|---|
@@ -64,7 +64,7 @@ Downstream services read the tenant from the `company_id` claim
 | Refresh | The token is claimed atomically (single use) and replaced; an unknown token is rejected (401) |
 | A claimed refresh token presented again within `ROTATION_GRACE_SECONDS` (10 s) | Answered with the successor already issued, if still unused (another tab refreshing at once) |
 | A claimed refresh token presented again later | **401**; its session is ended: its live refresh token, its access tokens and the user's capability handles |
-| Logout (`/auth/logout`, `/auth/jwt/logout`) | The session of the refresh token sent and of the access token presented is recorded as ended, the refresh token revoked; the user's capability handles, notebook and model upload, are revoked ([ADR-0012](../../ADR/ADR-0012-notebook-credential-delivery.md)) |
+| Logout (`/auth/logout`, `/auth/jwt/logout`) | The session of the refresh token sent and of the access token presented is recorded as ended, the refresh token revoked; the user's capability handles, notebook and model upload, are revoked ([ADR-0012](../../ADR/ADR-0012-per-session-credential-delivery-for-notebook-environments.md)) |
 | Password change or reset, user moved to another company, deactivated or deleted, tenant deactivated | All of the user's sessions and capability handles are revoked |
 | `manage_users.py reset-password` or `delete` | The same; the command exits non-zero if the session store cannot be reached |
 | Password set in the database directly | Existing sessions fail at their next refresh (fingerprint mismatch) |
@@ -88,7 +88,7 @@ or refresh in that window waits it out (at most 3 s).
 ## Sign-in throttling
 
 Password sign-in (`/auth/login`, `/auth/jwt/login`) is slowed, never locked
-([ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) dec 10).
+([ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) dec 10).
 
 | Limit | Where | Behaviour |
 |---|---|---|
@@ -120,7 +120,7 @@ refresh, on a socket and on a capability handle
 | POST | `/auth/refresh` | Refresh token (cookie or body) | Rotates the session |
 | POST | `/auth/logout` | Refresh token | Revokes it, clears the cookies (204) |
 | POST | `/auth/jwt/login` | Form `username`, `password` | Access token only (fastapi-users) |
-| GET | `/auth/verify` | session | 204 with `X-IF-User` / `X-IF-Company-Id` / `X-IF-Role` for the notebook SSO proxy ([ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on.md)) |
+| GET | `/auth/verify` | session | 204 with `X-IF-User` / `X-IF-Company-Id` / `X-IF-Role` for the notebook SSO proxy ([ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md)) |
 | GET, PATCH | `/users/me` | session | Current user (`password_change_required` when held to a change); change own email or password |
 | GET, POST, PATCH, DELETE | `/api/users[/{id}]` | `admin` | [User management](user-management.md) |
 

@@ -105,8 +105,8 @@ integration: nothing is sent.
 
 The `ops-agent` service receives Alertmanager's webhook, gathers evidence for each firing platform
 alert and has a model write a short note: what happened, impact, likely cause with evidence, next
-step from the runbooks ([ADR-0045](../../ADR/ADR-0045-agent-runtime.md),
-[ADR-0046](../../ADR/ADR-0046-infrastructure-agent.md)). Notes are generated text, marked with the
+step from the runbooks ([ADR-0045](../../ADR/ADR-0045-agents.md),
+[ADR-0046](../../ADR/ADR-0046-the-infrastructure-agent-explains-platform-alerts-to-operators.md)). Notes are generated text, marked with the
 model that wrote them; advice beside the alert, not a diagnosis.
 
 | Step | Action |
@@ -182,7 +182,7 @@ health reaches Grafana as `postgres-exporter` metrics.
 |---|---|
 | `api-gateway`, `ml-service-api`, `ingestion-service` (`prometheus-fastapi-instrumentator` defaults) | `http_requests_total{handler,method,status}` (`status` grouped: `2xx`, `5xx`, …), `http_request_duration_seconds{handler,method}`, `http_request_duration_highr_seconds`, `http_request_size_bytes`, `http_response_size_bytes` |
 | `api-gateway`, `ml-service-api`, `ingestion-service`, `spark-streaming`, `spark-aggregations`, `alert-service-detector` | `industryflow_build_info{component,revision} 1`: the commit the image was built from (`INDUSTRYFLOW_REVISION` build argument; `unknown` when the build passed none); `component` is the compose service name, since a Kubernetes scrape sets its own `service` label; the Spark drivers serve it alone on port `9108` (`INDUSTRYFLOW_METRICS_PORT`), apart from the `PrometheusServlet`, and `alert-service-detector`, which serves no other metrics, on the same port; `spark-master` (stock image) and `spark-worker` report none ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 8) |
-| `ml-service-api` | `ml_stateful_features_neutralized_total` — see [kill-switch](#runbook-stateful-feature-kill-switch); `ml_stateful_features_unavailable_total` — stateful slots served neutral because their aggregate was unavailable ([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 3) |
+| `ml-service-api` | `ml_stateful_features_neutralized_total` — see [kill-switch](#runbook-stateful-feature-kill-switch); `ml_stateful_features_unavailable_total` — stateful slots served neutral because their aggregate was unavailable ([ADR-0044](../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) dec 3) |
 | Spark | Native `PrometheusServlet` driver, executor and master metrics |
 | `cadvisor` | `container_cpu_usage_seconds_total`, `container_memory_usage_bytes`, `container_network_{receive,transmit}_bytes_total`, `container_last_seen` (disk and diskIO metrics disabled) |
 | `node-exporter` | `node_cpu_seconds_total`, `node_memory_*`, `node_filesystem_*`, `node_network_*` |
@@ -258,7 +258,7 @@ and each stateful slot whose aggregate read fails takes the same neutral value, 
 
 | Task | Command / signal |
 |---|---|
-| Who | A platform superuser ([ADR-0043](../../ADR/ADR-0043-platform-switch-operator-control.md)); no tenant role |
+| Who | A platform superuser ([ADR-0043](../../ADR/ADR-0043-a-platform-switch-is-flipped-by-a-platform-superuser-through-the-api-gateway-and-every-flip-is-recorded.md)); no tenant role |
 | Turn off (neutralize) | `PUT /api/platform/switches/stateful_features_enabled` with `{"value": false}` |
 | Turn back on | same with `{"value": true}` |
 | State | `GET /api/platform/switches` |

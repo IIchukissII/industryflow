@@ -8,9 +8,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-27; changed 2026-10-17
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
-- **Related:** [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (edge TLS and its
-  internal CA), [ADR-0007](ADR-0007-public-key-infrastructure.md) (device PKI, a separate root),
-  [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (deployment shapes)
+- **Related:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (edge TLS and its
+  internal CA), [ADR-0007](ADR-0007-device-certificate-authority.md) (device PKI, a separate root),
+  [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (deployment shapes)
 
 ## Context
 

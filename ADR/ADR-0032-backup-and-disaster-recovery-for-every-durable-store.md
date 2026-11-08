@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-10-24; changed 2026-11-03
 - **Parent:** ADR-0001
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a backup holds every tenant), [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capability store, dec 7), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (notebook volumes), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (cold layer, the only copy of raw history; dec 13 its mirror), [ADR-0029](ADR-0029-spark-major-upgrade-checkpoint-cutover.md) (checkpoints), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (forward-only migrations), [ADR-0038](ADR-0038-model-and-notebook-backup.md) (model and notebook mechanism)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a backup holds every tenant), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capability store, dec 7), [ADR-0020](ADR-0020-notebook-per-user-work-persistence.md) (notebook volumes), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (cold layer, the only copy of raw history; dec 13 its mirror), [ADR-0029](ADR-0029-spark-major-upgrades.md) (checkpoints), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion), [ADR-0034](ADR-0034-platform-schema-migrations.md) (forward-only migrations), [ADR-0038](ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md) (model and notebook mechanism)
 
 ## Context
 

@@ -7,7 +7,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-07-13; changed 2026-11-07
-- **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (the images certified), [ADR-0017](ADR-0017-database-tls-and-authentication.md) and [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (their "validated on the box" language)
+- **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (the images certified), [ADR-0017](ADR-0017-database-tls-and-authentication.md) and [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (their "validated on the box" language)
 
 ## Context
 

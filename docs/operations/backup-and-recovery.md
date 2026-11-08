@@ -6,8 +6,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Backup and disaster recovery
 
 What the backup jobs copy, where to, and how to restore it. Store classification, the failure-domain
-rule and restore rehearsal: [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md); models and
-notebooks: [ADR-0038](../../ADR/ADR-0038-model-and-notebook-backup.md).
+rule and restore rehearsal: [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md); models and
+notebooks: [ADR-0038](../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md).
 
 ## Coverage
 
@@ -16,20 +16,20 @@ notebooks: [ADR-0038](../../ADR/ADR-0038-model-and-notebook-backup.md).
 | Platform database (`industryflow`) | Yes | `pg_dump -Fc -Z6`, scheduled |
 | Tracking database (`mlflow`) | Yes | `pg_dump -Fc -Z6`, scheduled |
 | Cluster globals (roles) | Yes | `pg_dumpall --globals-only --no-role-passwords` |
-| Cold layer ([ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md)) | Yes | Object mirror, same run |
+| Cold layer ([ADR-0025](../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md)) | Yes | Object mirror, same run |
 | Model artifacts (artifact bucket, upload staging excluded) | Yes | Object mirror, same run |
-| Notebook work volumes ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-persistence.md)), Compose | Yes | `notebook-backup`: one archive per volume |
-| Notebook work volumes, Kubernetes | No | The cluster's volume snapshots ([ADR-0038](../../ADR/ADR-0038-model-and-notebook-backup.md) dec 6); not built while the hub has no cluster |
+| Notebook work volumes ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md)), Compose | Yes | `notebook-backup`: one archive per volume |
+| Notebook work volumes, Kubernetes | No | The cluster's volume snapshots ([ADR-0038](../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md) dec 6); not built while the hub has no cluster |
 | Notebook hub database | No | Derivable: users and servers return from the platform session |
-| Continuous WAL archiving / point-in-time recovery | No | Deferred in [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) |
+| Continuous WAL archiving / point-in-time recovery | No | Deferred in [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) |
 
 The default target is the deployment's own MinIO: that is undo, not disaster recovery, until the
-target is a separate failure domain ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md)
+target is a separate failure domain ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md)
 dec 3; [off-site target](#off-site-target)).
 
 ## Recovery objectives
 
-Per authoritative store ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 2). A store
+Per authoritative store ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) dec 2). A store
 counts toward its objectives only while its [restore rehearsal](#restore-rehearsal) passes (dec 6);
 `IndustryFlowRestoreRehearsalStale` fires when none has for nine days, and on Compose
 `IndustryFlowRestoreRehearsalNeverPassed` when none ever has.
@@ -89,7 +89,7 @@ and writes no metric. The bucket is created if absent.
 | Property | Behaviour |
 |---|---|
 | Incremental | An object is copied when the mirror lacks it or holds a different size; every cold `_manifest.json` is re-copied each run |
-| Ageing | An object a source no longer holds stays for `MIRROR_RETAIN_DAYS` after it was first seen missing, then is deleted ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 4); first-missing times in `<prefix>/_absent.tsv` |
+| Ageing | An object a source no longer holds stays for `MIRROR_RETAIN_DAYS` after it was first seen missing, then is deleted ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) dec 4); first-missing times in `<prefix>/_absent.tsv` |
 | Empty source | When a source lists nothing but its mirror holds objects, ageing is skipped for that run |
 | Verified | Each copied object's size is read back; a mismatch fails the run |
 | Principals | Sources read with `backup-read` (get/list on the artifact and cold buckets, held by the backup job only); mirrors written with the backup principal, which cannot read either source |
@@ -197,7 +197,7 @@ Each job writes its success time to the `backup-metrics` volume, which node-expo
 
 `migrate.sh apply` refuses pending scripts on a database holding a tenant or a user unless a backup is
 recorded in its `public.backup_ledger` within `MIGRATE_BACKUP_MAX_AGE_SECONDS`
-([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md) dec 7;
+([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) dec 7;
 [runner](../../infrastructure/timescaledb/init-scripts/README.md#backup-before-an-upgrade)).
 
 | Deployment | Backup taken by | Without a backup |
@@ -216,7 +216,7 @@ Pre-upgrade dumps are ordinary runs: they count toward `RETAIN_PER_DB`.
 
 ## Restore rehearsal
 
-Scheduled proof that the latest backup restores ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery.md)
+Scheduled proof that the latest backup restores ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md)
 dec 6). Compose: services `restore-rehearsal` and `notebook-rehearsal`; Helm: CronJob
 `<release>-restore-rehearsal`.
 
@@ -296,7 +296,7 @@ Compare row counts and recent timestamps per tenant with the source, then drop t
 | 2 | Apply `<prefix>/globals/<stamp>.sql` with `psql`: it recreates the runtime roles (`tenant_reader_*`, `tenant_sqlproxy_*`); `role … already exists` errors for the service roles are expected. Roles carry no passwords (`--no-role-passwords`) |
 | 3 | `docker compose run --rm --no-deps --entrypoint db-restore.sh db-backup industryflow latest` |
 | 4 | `docker compose run --rm --no-deps --entrypoint db-restore.sh db-backup mlflow latest` |
-| 5 | `docker compose run --rm --no-deps db-backup`, then `docker compose up db-migrate`: the restored ledger is the backup's; scripts newer than the backup are applied ([ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md) dec 5) after a backup of the restored state ([before an upgrade](#before-an-upgrade)) |
+| 5 | `docker compose run --rm --no-deps db-backup`, then `docker compose up db-migrate`: the restored ledger is the backup's; scripts newer than the backup are applied ([ADR-0034](../../ADR/ADR-0034-platform-schema-migrations.md) dec 5) after a backup of the restored state ([before an upgrade](#before-an-upgrade)) |
 | 6 | Verify row counts and recent timestamps per tenant before cutover |
 
 ### Cold layer
@@ -387,4 +387,4 @@ Each authored work volume is archived and verified per run.
 |---|---|
 | [high availability](high-availability.md) | Replication and HA of the stateful backends |
 | [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) | Deleting a tenant from backups |
-| [ADR-0034](../../ADR/ADR-0034-platform-schema-migration-strategy.md) | A schema rollback is a restore |
+| [ADR-0034](../../ADR/ADR-0034-platform-schema-migrations.md) | A schema rollback is a restore |

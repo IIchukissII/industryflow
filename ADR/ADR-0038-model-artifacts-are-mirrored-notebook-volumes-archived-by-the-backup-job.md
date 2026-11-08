@@ -7,13 +7,13 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-26
-- **Parent:** [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (its deferred mechanism for model
+- **Parent:** [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (its deferred mechanism for model
   artifacts and authored notebooks)
-- **Related:** [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (dec 5-6: per-user volumes, owned
-  and named by the hub), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (dec 10: the upload
+- **Related:** [ADR-0020](ADR-0020-notebook-per-user-work-persistence.md) (dec 5-6: per-user volumes, owned
+  and named by the hub), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 10: the upload
   staging area), [ADR-0033](ADR-0033-tenant-lifecycle.md) (dec 4: deleted tenants leave backups by
-  ageing), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md) (the cold mirror this follows),
-  [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (the hub keeps no user store)
+  ageing), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (the cold mirror this follows),
+  [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (the hub keeps no user store)
 
 ## Context
 

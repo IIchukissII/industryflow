@@ -11,7 +11,7 @@ Device client certificates are a separate PKI ([device mTLS](device-mtls.md)).
 
 | Decision | ADR |
 |---|---|
-| The edge terminates TLS | [ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) |
+| The edge terminates TLS | [ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) |
 | Database TLS, one internal root for edge and database | [ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md) |
 
 ## Edge TLS modes (ADR-0004 dec 1)

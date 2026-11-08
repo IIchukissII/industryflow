@@ -30,7 +30,7 @@ serves the full reference at `/docs` and `/openapi.json`; ports: [components](..
 | GET | `/health` | none | Liveness |
 
 The gateway is the only HTTP surface for alert rules and alert history
-([ADR-0031](../../ADR/ADR-0031-alerting-http-surface-single-owner.md)).
+([ADR-0031](../../ADR/ADR-0031-the-api-gateway-as-the-single-owner-of-the-alerting-http-surface.md)).
 
 ## ML service and ingestion endpoints
 
@@ -51,7 +51,7 @@ The browser reaches every API same-origin through the HTTPS edge
 | `/api/2.0/industryflow-upload/` | Tracking gateway ([model upload](../architecture/model-upload.md)) |
 | `/mlflow/_upload-staging/` | Object store, pre-signed requests only |
 | `/api/`, `/auth/`, `/users/`, `/health`, `/docs`, `/openapi.json`, `/ws/` | `api-gateway` |
-| `/jupyter/` | Notebook SSO → notebook hub ([ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on.md)) |
+| `/jupyter/` | Notebook SSO → notebook hub ([ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md)) |
 | `/grafana/` | Grafana, only when `EDGE_GRAFANA` is set; signed on from a superuser session ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 6-7) |
 | `/` | The single-page app |
 
@@ -59,9 +59,9 @@ The browser reaches every API same-origin through the HTTPS edge
 
 | Topic | Rule | Source |
 |---|---|---|
-| Transport | HTTPS for external traffic; websocket over `wss://` | [ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) |
+| Transport | HTTPS for external traffic; websocket over `wss://` | [ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) |
 | Browser auth | httpOnly cookies + double-submit CSRF (`X-CSRF-Token`) | [authentication](../operations/authentication.md#browser-cookies) |
 | API client auth | `Authorization: Bearer <access token>` | [authentication](../operations/authentication.md#tokens) |
-| Notebook auth | Capability handle in `X-IF-Capability` | [ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md) |
+| Notebook auth | Capability handle in `X-IF-Capability` | [ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) |
 | Service to service | `X-Internal-Service-Token` | [authentication](../operations/authentication.md#configuration) |
 | Tenancy | Tenant resolved from the verified identity (JWT claim, capability handle, device-certificate SAN); a `company_id` in a request body is ignored, except on internal-token calls to `/api/inference/predict` and `/api/drift/evaluate` | [ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md) |

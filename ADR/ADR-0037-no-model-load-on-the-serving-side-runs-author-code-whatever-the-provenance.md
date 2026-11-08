@@ -7,13 +7,13 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-26
-- **Parent:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (its deferred executable
+- **Parent:** [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) (its deferred executable
   serialisation for kernel-authored artifacts)
 - **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (dec 2: the
-  kernel is untrusted), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (dec 4: the data-only
-  rule this extends; dec 8: provenance), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md)
-  (flavors a detector claims), [ADR-0036](ADR-0036-out-of-process-model-runtime.md) (dec 5: exported
-  graphs only), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (the kernel's path to the
+  kernel is untrusted), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 4: the data-only
+  rule this extends; dec 8: provenance), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md)
+  (flavors a detector claims), [ADR-0036](ADR-0036-out-of-process-model-runtime-for-frameworks-the-serving-image-does-not-carry.md) (dec 5: exported
+  graphs only), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (the kernel's path to the
   registry)
 
 ## Context
@@ -83,5 +83,5 @@ running with cross-tenant reach. Every model registered so far is in a typed, da
 
 ## References
 
-- [ADR-0030](ADR-0030-externally-authored-model-admission.md) dec 4: the data-only rule.
+- [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) dec 4: the data-only rule.
 - [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 2-6.

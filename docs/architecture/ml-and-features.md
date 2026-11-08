@@ -10,17 +10,17 @@ Feature configurations, the model registry, inference, detectors and drift in `m
 
 | Decision | ADR |
 |---|---|
-| Extension contract and mechanism (transforms, detectors) | [ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md), [ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md) |
-| Window baselines read from the Spark aggregates; neutral value on a missing baseline | [ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md), [ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 3 |
-| A reading lacking an input, or a definition that cannot be computed, is refused; no substitute values | [ADR-0044](../../ADR/ADR-0044-complete-model-input.md) |
+| Extension contract and mechanism (transforms, detectors) | [ADR-0008](../../ADR/ADR-0008-extension-interface-for-a-domain-generic-core.md), [ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md) |
+| Window baselines read from the Spark aggregates; neutral value on a missing baseline | [ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md), [ADR-0044](../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) dec 3 |
+| A reading lacking an input, or a definition that cannot be computed, is refused; no substitute values | [ADR-0044](../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) |
 | Stateful-feature kill-switch | [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md) |
-| Artifact formats, supported flavor set, skops trust by provenance | [ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) |
-| Out-of-process runtime for torch/GPU (not built) | [ADR-0036](../../ADR/ADR-0036-out-of-process-model-runtime.md) |
-| Score semantics declared, never inferred; detector recorded at registration | [ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) |
-| Model tracking and registry per tenant | [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md), [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md) |
-| Drift monitoring | [ADR-0021](../../ADR/ADR-0021-model-drift-monitoring.md); baseline [ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md) |
+| Artifact formats, supported flavor set, skops trust by provenance | [ADR-0027](../../ADR/ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) |
+| Out-of-process runtime for torch/GPU (not built) | [ADR-0036](../../ADR/ADR-0036-out-of-process-model-runtime-for-frameworks-the-serving-image-does-not-carry.md) |
+| Score semantics declared, never inferred; detector recorded at registration | [ADR-0028](../../ADR/ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) |
+| Model tracking and registry per tenant | [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md), [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) |
+| Drift monitoring | [ADR-0021](../../ADR/ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md); baseline [ADR-0035](../../ADR/ADR-0035-drift-baseline.md) |
 | Operator feedback and retrain recommendation | [ADR-0022](../../ADR/ADR-0022-concept-drift-operator-feedback.md), [alerting](alerting.md) |
-| Externally-authored models | [ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md), [model upload](model-upload.md) |
+| Externally-authored models | [ADR-0030](../../ADR/ADR-0030-admission-of-externally-authored-models.md), [model upload](model-upload.md) |
 
 ## Code
 
@@ -50,7 +50,7 @@ has role `engineer` or `admin`, or is a superuser, else **403**
 | GET | `/api/feature-configs` | token | List |
 | POST | `/api/feature-configs` | writer | Create |
 | GET | `/api/feature-configs/{config_id}` | token | Read |
-| PUT, DELETE | `/api/feature-configs/{config_id}` | writer | Replace, delete; a config a model binds keeps `base_sensors` and `transformations` and is not deleted: **409** naming the models ([ADR-0041](../../ADR/ADR-0041-bound-feature-configuration.md)) |
+| PUT, DELETE | `/api/feature-configs/{config_id}` | writer | Replace, delete; a config a model binds keeps `base_sensors` and `transformations` and is not deleted: **409** naming the models ([ADR-0041](../../ADR/ADR-0041-a-model-s-feature-configuration-is-fixed-once-bound.md)) |
 | GET | `/api/feature-configs/equipment/{equipment_type}` | token | By equipment type |
 | GET | `/api/models` | token | List |
 | POST | `/api/models` | writer | Register |
@@ -86,12 +86,12 @@ config.
 
 A definition missing a named parameter, naming one of the wrong kind or a non-finite number, or whose
 `params` is not an object, is refused with `422`; no default stands in for it
-([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 2).
+([ADR-0044](../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) dec 2).
 
 A stateful feature reads the baseline of the reading's equipment in the window `params.granularity`
 names; a reading naming no valid `equipment_id` is refused with `422`. A ratio whose denominator is
 `0`, or any computed value that is not a finite number, fails the score with `500`
-([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 1, 4).
+([ADR-0044](../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) dec 1, 4).
 
 ## Detectors
 
@@ -106,7 +106,7 @@ names; a reading naming no valid `equipment_id` is refused with `422`. A ratio w
 
 Every detector runs in-process. Frameworks the serving image does not carry (torch, GPU) are refused at
 the gate; serving them in a separate runtime from an ONNX export is accepted but not built
-([ADR-0036](../../ADR/ADR-0036-out-of-process-model-runtime.md)).
+([ADR-0036](../../ADR/ADR-0036-out-of-process-model-runtime-for-frameworks-the-serving-image-does-not-carry.md)).
 
 ## Model record (`ml_models`)
 
@@ -136,14 +136,14 @@ Kernel-trained tree-based sklearn models need the skops grant at log time:
 A served model, kernel-authored or uploaded, loads through `mlflow.sklearn` (skops) or `mlflow.xgboost`
 (native booster) only; a pickle, a custom `mlflow.pyfunc` model or shipped code is refused at
 registration (422), deployment (409) and every load
-([ADR-0037](../../ADR/ADR-0037-no-author-code-on-the-serving-side.md)).
+([ADR-0037](../../ADR/ADR-0037-no-model-load-on-the-serving-side-runs-author-code-whatever-the-provenance.md)).
 
 ## Drift (`POST /api/drift/evaluate`)
 
 | Item | Detail |
 |---|---|
-| Feature sample | Supplied at registration: `reference_profile` in `POST /api/models` (the upload wizard's sample file), or the run's `industryflow/feature_sample.json` at promotion; format and row bound (`DEFAULT_MAX_SAMPLE_ROWS`, a longer sample evenly down-sampled on every path, [ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md) dec 8) `drift/reference_profile.py` |
-| Accepted when | Its columns are exactly the bound feature config's base sensors and it carries no scores; otherwise the model registers without a baseline and `baseline.reason` says why ([ADR-0035](../../ADR/ADR-0035-drift-baseline-derived-scores.md)) |
+| Feature sample | Supplied at registration: `reference_profile` in `POST /api/models` (the upload wizard's sample file), or the run's `industryflow/feature_sample.json` at promotion; format and row bound (`DEFAULT_MAX_SAMPLE_ROWS`, a longer sample evenly down-sampled on every path, [ADR-0035](../../ADR/ADR-0035-drift-baseline.md) dec 8) `drift/reference_profile.py` |
+| Accepted when | Its columns are exactly the bound feature config's base sensors and it carries no scores; otherwise the model registers without a baseline and `baseline.reason` says why ([ADR-0035](../../ADR/ADR-0035-drift-baseline.md)) |
 | Prediction scores | Derived at every deployment to `production`/`active`: each complete sample row through the feature config and the model's detector, in the probe's load for an upload and serving's load otherwise |
 | Detector cannot score the sample | Deployment proceeds; data drift only, with the reason |
 | Current window | Trailing window of the model's `sensor_ids`, aligned to instants where every compared sensor reported |
@@ -162,14 +162,14 @@ registration (422), deployment (409) and every load
 ## Promotion
 
 `POST /api/registered-models/{name}/versions/{version}/promote` registers a notebook-registered version as
-a platform model ([ADR-0040](../../ADR/ADR-0040-notebook-model-promotion.md)). The Models page offers it per
+a platform model ([ADR-0040](../../ADR/ADR-0040-a-notebook-registered-model-version-becomes-a-platform-model-by-promotion.md)). The Models page offers it per
 version.
 
 | Body field | Default | Meaning |
 |---|---|---|
 | `feature_config_id` | required | The model's inputs |
 | `equipment_id` | none | Equipment whose sensors drift reads; every base sensor must exist on it |
-| `detector` | `sklearn` | What the output means ([ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md)) |
+| `detector` | `sklearn` | What the output means ([ADR-0028](../../ADR/ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md)) |
 | `model_type` | `anomaly_detection` | Free-text type |
 
 | Taken from the registry | Into |

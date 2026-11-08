@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-07-14; changed 2026-10-25
 - **Parent:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (its deferred model-adapter contract)
-- **Related:** [ADR-0027](ADR-0027-model-artifact-supply-chain-parity.md) (the gate that refuses what the environment cannot honour), [ADR-0008](ADR-0008-extension-and-plugin-interface.md) (in-process default), [ADR-0021](ADR-0021-model-drift-monitoring.md) (alerts on these scores), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (uploads declare semantics), [ADR-0036](ADR-0036-out-of-process-model-runtime.md) (the out-of-process runtime)
+- **Related:** [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) (the gate that refuses what the environment cannot honour), [ADR-0008](ADR-0008-extension-interface-for-a-domain-generic-core.md) (in-process default), [ADR-0021](ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md) (alerts on these scores), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (uploads declare semantics), [ADR-0036](ADR-0036-out-of-process-model-runtime-for-frameworks-the-serving-image-does-not-carry.md) (the out-of-process runtime)
 
 ## Context
 
