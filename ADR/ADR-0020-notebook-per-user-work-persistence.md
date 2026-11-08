@@ -76,4 +76,6 @@ credentials, make compute long-lived or cross tenants.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): paths, naming, culler scopes; manual of decisions 1, 2, 6.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): paths, naming, culler scopes;
+  manual of decisions 1-6.
+- [Notebook hub](../services/notebook_hub/README.md): manual of decision 6.

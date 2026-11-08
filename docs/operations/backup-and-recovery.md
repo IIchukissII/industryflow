@@ -5,11 +5,11 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Backup and disaster recovery
 
-What the backup jobs copy, where to, and how to restore it. Store classification, the failure-domain
-rule and restore rehearsal: [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md); models and
-notebooks: [ADR-0038](../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md).
+The manual of [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md), [ADR-0038](../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md): what the backup jobs copy, where to, how a restore is rehearsed, and how to restore.
 
-## Coverage
+## ADR-0032 dec 1
+
+### Coverage
 
 | Store | Backed up | Mechanism |
 |---|---|---|
@@ -20,32 +20,11 @@ notebooks: [ADR-0038](../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-v
 | Model artifacts (artifact bucket, upload staging excluded) | Yes | Object mirror, same run |
 | Notebook work volumes ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md)), Compose | Yes | `notebook-backup`: one archive per volume |
 | Notebook work volumes, Kubernetes | No | The cluster's volume snapshots ([ADR-0038](../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md) dec 6); not built while the hub has no cluster |
-| Notebook hub database | No | Derivable: users and servers return from the platform session |
+| Notebook hub database | No | Derivable: users and servers return from the platform session ([ADR-0038](../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md) dec 7) |
+| Capability store, broker topics, streaming checkpoints, caches | No | Derivable; no backup job reads them |
 | Continuous WAL archiving / point-in-time recovery | No | Deferred in [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) |
 
-The default target is the deployment's own MinIO: that is undo, not disaster recovery, until the
-target is a separate failure domain ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md)
-dec 3; [off-site target](#off-site-target)).
-
-## Recovery objectives
-
-Per authoritative store ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) dec 2). A store
-counts toward its objectives only while its [restore rehearsal](#restore-rehearsal) passes (dec 6);
-`IndustryFlowRestoreRehearsalStale` fires when none has for nine days, and on Compose
-`IndustryFlowRestoreRehearsalNeverPassed` when none ever has.
-
-| Store | Recovery point | Recovery time | Proven by |
-|---|---|---|---|
-| Platform database | One backup interval (`backup.schedule`, default daily) | 1 h | Weekly rehearsal: restore, every table's rows against the rows the dump holds; `industryflow_restore_rehearsal_duration_seconds{database="industryflow"}` |
-| Tracking database | One backup interval | 1 h | As above, `database="mlflow"` |
-| Cold layer | One backup interval for a newly exported day | Copy-back time of the mirror | Weekly rehearsal: every object present at its size, sampled objects compared byte for byte with the source |
-| Model artifacts | One backup interval | Copy-back time of the mirror | As above |
-| Notebook volumes (Compose) | One backup interval | Per volume: one `notebook-restore.sh` run | Weekly rehearsal: every volume's latest archive restored and compared entry by entry |
-
-Reference measurement, 4-core 8 GB node, 70 MB platform database: a [full recovery](#full-recovery)
-from an empty server (steps 1-5) takes about 30 s; the rehearsal's restore 6-9 s.
-
-## Backup job
+### Backup job
 
 Image `infrastructure/backup/` (`postgres:15-alpine` + `aws-cli`, uid 10001), entrypoint
 `db-backup.sh`.
@@ -84,49 +63,9 @@ and writes no metric. The bucket is created if absent.
 | `MODEL_BACKUP_PREFIX` | `models` | Model mirror prefix in `S3_BUCKET` |
 | `MODEL_SOURCE_EXCLUDE_PREFIX` | `_upload-staging/` | Key prefix left out of the model mirror |
 
-### Object mirrors (cold layer, model artifacts)
+### Running backups
 
-| Property | Behaviour |
-|---|---|
-| Incremental | An object is copied when the mirror lacks it or holds a different size; every cold `_manifest.json` is re-copied each run |
-| Ageing | An object a source no longer holds stays for `MIRROR_RETAIN_DAYS` after it was first seen missing, then is deleted ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) dec 4); first-missing times in `<prefix>/_absent.tsv` |
-| Empty source | When a source lists nothing but its mirror holds objects, ageing is skipped for that run |
-| Verified | Each copied object's size is read back; a mismatch fails the run |
-| Principals | Sources read with `backup-read` (get/list on the artifact and cold buckets, held by the backup job only); mirrors written with the backup principal, which cannot read either source |
-| Staging | The model mirror leaves out `MODEL_SOURCE_EXCLUDE_PREFIX` (unadmitted uploads, which expire) |
-| Cross-store | Objects stream through the job, so source and target may be different stores |
-
-### Notebook archives (Compose)
-
-Service `notebook-backup` (same image, entrypoint `notebook-backup.sh`, `backup` profile).
-
-| Property | Behaviour |
-|---|---|
-| Volumes | Every Docker volume whose name starts with the fixed part of `NOTEBOOK_VOLUME_TEMPLATE` (default `industryflow-nb-{username}`, the hub's) |
-| Read | Through the Docker Engine API: a container created from `NOTEBOOK_HELPER_IMAGE`, never started, no network, read-only root, the volume mounted read-only; its mount fetched as a tar, gzip'd; the container removed |
-| Verified | Archive tested (`gzip -t`, `tar -t`); uploaded size read back |
-| Retention | Newest `RETAIN_PER_VOLUME` archives per volume; a volume that no longer exists loses its archives `MIRROR_RETAIN_DAYS` after its newest |
-| Consistency | Crash-consistent: a volume in use is archived as it is |
-| Holds | The Docker socket (docker group via `DOCKER_GID`) and the backup principal; no database or source-bucket credential |
-
-| Name | Default | Meaning |
-|---|---|---|
-| `S3_BUCKET`, `S3_ENDPOINT_URL`, `AWS_*` | as the backup job | Target and backup principal |
-| `NOTEBOOK_HELPER_IMAGE` | required (`industryflow-db-backup` in Compose) | Image the reading containers are created from |
-| `NOTEBOOK_VOLUME_TEMPLATE` | `industryflow-nb-{username}` | The hub's volume name |
-| `NOTEBOOK_BACKUP_PREFIX` | `notebooks` | Key prefix in `S3_BUCKET` |
-| `RETAIN_PER_VOLUME` | `RETAIN_PER_DB`, else `14` | Archives kept per volume; at least 1 |
-| `DOCKER_SOCKET` | `/var/run/docker.sock` | Engine API socket |
-
-### Object-store principal
-
-Against the in-stack MinIO the job uses the `db-backup` principal (read/write/delete on the backup
-bucket only), created with the bucket by `infrastructure/minio/minio-init.sh`. It never holds the
-MinIO root key.
-
-## Running backups
-
-### Kubernetes (Helm)
+#### Kubernetes (Helm)
 
 CronJob `<release>-db-backup` and pre-upgrade hook Job `<release>-pre-upgrade-backup` (`templates/cronjob-db-backup.yaml`).
 
@@ -155,7 +94,7 @@ kubectl -n <namespace> create job --from=cronjob/<release>-db-backup db-backup-m
 kubectl -n <namespace> logs -f job/db-backup-manual-1
 ```
 
-### Docker Compose
+#### Docker Compose
 
 `db-backup` is in the `backup` profile and does not start with `up`. Each `.env` variable sets the
 job variable named in *Meaning*.
@@ -193,19 +132,41 @@ Each job writes its success time to the `backup-metrics` volume, which node-expo
 `IndustryFlowBackupNeverCompleted` and `IndustryFlowRestoreRehearsalNeverPassed` when they never ran
 ([`compose.yml`](../../infrastructure/prometheus/rules/compose.yml)).
 
-### Before an upgrade
+| Code | Role |
+|---|---|
+| `infrastructure/backup/db-backup.sh::main` | Dumps the databases and globals; mirrors the cold layer and model artifacts |
+| `infrastructure/backup/notebook-backup.sh::main` | Archives the notebook work volumes |
+| `infrastructure/backup/Dockerfile` | The backup image |
+| `deploy/helm/industryflow/templates/cronjob-db-backup.yaml` | Backup CronJob |
+| `docker-compose.yml` | `db-backup` and `notebook-backup` services |
 
-`migrate.sh apply` refuses pending scripts on a database holding a tenant or a user unless a backup is
-recorded in its `public.backup_ledger` within `MIGRATE_BACKUP_MAX_AGE_SECONDS`
-([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) dec 7;
-[runner](../../infrastructure/timescaledb/init-scripts/README.md#backup-before-an-upgrade)).
+## ADR-0032 dec 2
 
-| Deployment | Backup taken by | Without a backup |
-|---|---|---|
-| Compose | `docker compose run --rm --no-deps db-backup`, then `docker compose up db-migrate`; `scripts/box-deploy.sh` runs both in that order (ADR-0032 dec 7) | `MIGRATE_WITHOUT_BACKUP=1 docker compose up db-migrate` |
-| Helm | Hook Job `<release>-pre-upgrade-backup` (`helm.sh/hook: pre-upgrade`), before the revision's `db-migrate` Job: the database dumps only, no object mirrors; `helm upgrade --timeout` must cover them. Skipped, with a log line, on the upgrade that sets `backup.enabled=true` (its Secret and principal do not exist yet) | `dbMigrations.withoutBackup=true`; required when `backup.enabled=false`, the chart refuses to render otherwise |
+Per authoritative store. A store
+counts toward its objectives only while its [restore rehearsal](#restore-rehearsal) passes ([ADR-0032 dec 6](#adr-0032-dec-6));
+`IndustryFlowRestoreRehearsalStale` fires when none has for nine days, and on Compose
+`IndustryFlowRestoreRehearsalNeverPassed` when none ever has.
 
-Pre-upgrade dumps are ordinary runs: they count toward `RETAIN_PER_DB`.
+| Store | Recovery point | Recovery time | Proven by |
+|---|---|---|---|
+| Platform database | One backup interval (`backup.schedule`, default daily) | 1 h | Weekly rehearsal: restore, every table's rows against the rows the dump holds; `industryflow_restore_rehearsal_duration_seconds{database="industryflow"}` |
+| Tracking database | One backup interval | 1 h | As above, `database="mlflow"` |
+| Cold layer | One backup interval for a newly exported day | Copy-back time of the mirror | Weekly rehearsal: every object present at its size, sampled objects compared byte for byte with the source |
+| Model artifacts | One backup interval | Copy-back time of the mirror | As above |
+| Notebook volumes (Compose) | One backup interval | Per volume: one `notebook-restore.sh` run | Weekly rehearsal: every volume's latest archive restored and compared entry by entry |
+
+Reference measurement, 4-core 8 GB node, 70 MB platform database: a [full recovery](#full-recovery)
+from an empty server (steps 1-5) takes about 30 s; the rehearsal's restore 6-9 s.
+
+| Code | Role |
+|---|---|
+| `infrastructure/prometheus/rules/compose.yml` | `IndustryFlowRestoreRehearsalStale`, `IndustryFlowRestoreRehearsalNeverPassed` (Compose) |
+| `deploy/helm/industryflow/templates/observability-prometheusrules.yaml` | `IndustryFlowRestoreRehearsalStale` (Helm) |
+
+## ADR-0032 dec 3
+
+The default target is the deployment's own MinIO: that is undo, not disaster recovery, until the
+target is a separate failure domain ([off-site target](#off-site-target)).
 
 ### Off-site target
 
@@ -214,10 +175,50 @@ Pre-upgrade dumps are ordinary runs: they count toward `RETAIN_PER_DB`.
 | Helm | `backup.s3.endpoint`, `backup.s3.bucket`, and that bucket's keys as `BACKUP_STORE_ACCESS_KEY` / `BACKUP_STORE_SECRET_KEY` |
 | Compose | `BACKUP_S3_BUCKET` and `BACKUP_STORE_*` in `.env`; the endpoint per run: `docker compose run --rm --no-deps -e S3_ENDPOINT_URL=https://<s3-endpoint> db-backup` (the service otherwise uses `MINIO_ENDPOINT`) |
 
-## Restore rehearsal
+| Code | Role |
+|---|---|
+| `deploy/helm/industryflow/values.yaml` | `backup.s3.*`: the backup target |
+| `docker-compose.yml` | `db-backup`: `S3_BUCKET` and endpoint from `.env` |
 
-Scheduled proof that the latest backup restores ([ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md)
-dec 6). Compose: services `restore-rehearsal` and `notebook-rehearsal`; Helm: CronJob
+## ADR-0032 dec 4
+
+### Object mirrors (cold layer, model artifacts)
+
+| Property | Behaviour |
+|---|---|
+| Incremental | An object is copied when the mirror lacks it or holds a different size; every cold `_manifest.json` is re-copied each run |
+| Ageing | An object a source no longer holds stays for `MIRROR_RETAIN_DAYS` after it was first seen missing, then is deleted; first-missing times in `<prefix>/_absent.tsv` |
+| Empty source | When a source lists nothing but its mirror holds objects, ageing is skipped for that run |
+| Verified | Each copied object's size is read back; a mismatch fails the run |
+| Principals | Sources read with `backup-read` (get/list on the artifact and cold buckets, held by the backup job only); mirrors written with the backup principal, which cannot read either source |
+| Staging | The model mirror leaves out `MODEL_SOURCE_EXCLUDE_PREFIX` (unadmitted uploads, which expire) |
+| Cross-store | Objects stream through the job, so source and target may be different stores |
+
+| Code | Role |
+|---|---|
+| `infrastructure/backup/db-backup.sh::mirror_cold_bucket` | Cold mirror |
+| `infrastructure/backup/db-backup.sh::mirror_bucket` | Incremental copy, size read back |
+| `infrastructure/backup/db-backup.sh::age_out_mirror` | Ageing of objects gone from the source |
+
+## ADR-0032 dec 5
+
+### Object-store principal
+
+Against the in-stack MinIO the job uses the `db-backup` principal (read/write/delete on the backup
+bucket only), created with the bucket by `infrastructure/minio/minio-init.sh`. It never holds the
+MinIO root key.
+
+| Code | Role |
+|---|---|
+| `infrastructure/minio/minio-init.sh` | `db-backup` principal: read/write/delete on the backup bucket only |
+
+## ADR-0032 dec 6
+
+The backup, restore and rehearsal jobs copy every authoritative store to a separate target and prove the restore.
+
+### Restore rehearsal
+
+Scheduled proof that the latest backup restores. Compose: services `restore-rehearsal` and `notebook-rehearsal`; Helm: CronJob
 `<release>-restore-rehearsal`.
 
 | Step | `db-rehearse.sh` |
@@ -245,7 +246,7 @@ dec 6). Compose: services `restore-rehearsal` and `notebook-rehearsal`; Helm: Cr
 The rehearsal proves a backup restores to exactly the rows it holds; it does not compare the backup
 with the live database.
 
-## Restoring
+### Restoring
 
 `db-restore.sh <database> [<stamp>|latest] [--target <db>] [--hold-jobs]` (same image) downloads one
 dump (`latest`: the newest `.dump`) and:
@@ -271,7 +272,7 @@ It exits non-zero on any `pg_restore` error other than the expected `timescaledb
 collision, or when no statement error was reported but `pg_restore` failed. A failed restore is
 incomplete; do not cut over to it.
 
-### Rehearsal into a scratch database
+#### Rehearsal into a scratch database
 
 ```bash
 # Compose
@@ -288,7 +289,7 @@ kubectl -n <namespace> logs -f job/db-restore-test
 
 Compare row counts and recent timestamps per tenant with the source, then drop the scratch database.
 
-### Full recovery
+#### Full recovery
 
 | Step | Action |
 |---|---|
@@ -299,7 +300,7 @@ Compare row counts and recent timestamps per tenant with the source, then drop t
 | 5 | `docker compose run --rm --no-deps db-backup`, then `docker compose up db-migrate`: the restored ledger is the backup's; scripts newer than the backup are applied ([ADR-0034](../../ADR/ADR-0034-platform-schema-migrations.md) dec 5) after a backup of the restored state ([before an upgrade](#before-an-upgrade)) |
 | 6 | Verify row counts and recent timestamps per tenant before cutover |
 
-### Cold layer
+#### Cold layer
 
 With the cold exporter stopped, copy the mirror back with the same keys:
 
@@ -309,7 +310,7 @@ aws s3 sync s3://<backup-bucket>/cold/ s3://<cold-bucket>/
 
 Manifests return with their parts, so readers see the same verified days.
 
-### Model artifacts
+#### Model artifacts
 
 With the tracking gateway stopped, copy the mirror back with the same keys:
 
@@ -320,7 +321,7 @@ aws s3 sync s3://<backup-bucket>/models/ s3://<artifact-bucket>/ --exclude '_abs
 Rehearsal: sync into a scratch bucket and compare `aws s3 ls --recursive` listings (key, size) with the
 source.
 
-### Notebook volumes (Compose)
+#### Notebook volumes (Compose)
 
 `notebook-restore.sh <volume> [<stamp>|latest] [--target <volume>]` creates the target volume, writes the
 archive into it through the Engine API (owners and modes as archived), reads it back and fails on any
@@ -337,13 +338,36 @@ docker compose --profile backup run --rm --no-deps --entrypoint notebook-restore
   industryflow-nb-<user> latest
 ```
 
-## ADR-0032 dec 3-7
+| Code | Role |
+|---|---|
+| `infrastructure/backup/db-rehearse.sh::rehearse_database` | Database rehearsal |
+| `infrastructure/backup/db-rehearse.sh::rehearse_mirror` | Object-mirror rehearsal |
+| `infrastructure/backup/db-restore.sh::main` | Restore of one dump |
+| `infrastructure/backup/backup-lib.sh::copy_rows` | Row counts per table from a dump |
+| `deploy/helm/industryflow/templates/cronjob-db-backup.yaml` | `<release>-restore-rehearsal` CronJob |
+| `docker-compose.yml` | `restore-rehearsal` service |
 
-The backup, restore and rehearsal jobs copy every authoritative store to a separate target and prove the restore.
+## ADR-0032 dec 7
+
+### Before an upgrade
+
+`migrate.sh apply` refuses pending scripts on a database holding a tenant or a user unless a backup is
+recorded in its `public.backup_ledger` within `MIGRATE_BACKUP_MAX_AGE_SECONDS`
+([runner](../../infrastructure/timescaledb/init-scripts/README.md#backup-before-an-upgrade)).
+
+| Deployment | Backup taken by | Without a backup |
+|---|---|---|
+| Compose | `docker compose run --rm --no-deps db-backup`, then `docker compose up db-migrate`; `scripts/box-deploy.sh` runs both in that order | `MIGRATE_WITHOUT_BACKUP=1 docker compose up db-migrate` |
+| Helm | Hook Job `<release>-pre-upgrade-backup` (`helm.sh/hook: pre-upgrade`), before the revision's `db-migrate` Job: the database dumps only, no object mirrors; `helm upgrade --timeout` must cover them. Skipped, with a log line, on the upgrade that sets `backup.enabled=true` (its Secret and principal do not exist yet) | `dbMigrations.withoutBackup=true`; required when `backup.enabled=false`, the chart refuses to render otherwise |
+
+Pre-upgrade dumps are ordinary runs: they count toward `RETAIN_PER_DB`.
 
 | Code | Role |
 |---|---|
-| `infrastructure/backup` | Backup, restore and rehearsal scripts |
+| `infrastructure/backup/db-backup.sh::record_run` | Records a complete run in `public.backup_ledger` |
+| `infrastructure/timescaledb/migrate.sh::require_backup` | Refuses pending scripts without a recent recorded backup |
+| `deploy/helm/industryflow/templates/cronjob-db-backup.yaml` | `<release>-pre-upgrade-backup` hook Job |
+| `scripts/box-deploy.sh` | Backup, then migration, on a Compose deploy |
 
 ## ADR-0038 dec 1-3
 
@@ -363,6 +387,41 @@ Each authored work volume is archived and verified per run.
 | `infrastructure/backup/notebook-backup.sh` | Volume archives |
 | `infrastructure/backup/notebook-restore.sh` | Volume restore |
 
+### Notebook archives (Compose)
+
+Service `notebook-backup` (same image, entrypoint `notebook-backup.sh`, `backup` profile).
+
+| Property | Behaviour |
+|---|---|
+| Volumes | Every Docker volume whose name starts with the fixed part of `NOTEBOOK_VOLUME_TEMPLATE` (default `industryflow-nb-{username}`, the hub's) |
+| Read | Through the Docker Engine API: a container created from `NOTEBOOK_HELPER_IMAGE`, never started, no network, read-only root, the volume mounted read-only; its mount fetched as a tar, gzip'd; the container removed |
+| Verified | Archive tested (`gzip -t`, `tar -t`); uploaded size read back |
+| Retention | Newest `RETAIN_PER_VOLUME` archives per volume; a volume that no longer exists loses its archives `MIRROR_RETAIN_DAYS` after its newest |
+| Consistency | Crash-consistent: a volume in use is archived as it is |
+| Holds | The Docker socket (docker group via `DOCKER_GID`) and the backup principal; no database or source-bucket credential |
+
+| Name | Default | Meaning |
+|---|---|---|
+| `S3_BUCKET`, `S3_ENDPOINT_URL`, `AWS_*` | as the backup job | Target and backup principal |
+| `NOTEBOOK_HELPER_IMAGE` | required (`industryflow-db-backup` in Compose) | Image the reading containers are created from |
+| `NOTEBOOK_VOLUME_TEMPLATE` | `industryflow-nb-{username}` | The hub's volume name |
+| `NOTEBOOK_BACKUP_PREFIX` | `notebooks` | Key prefix in `S3_BUCKET` |
+| `RETAIN_PER_VOLUME` | `RETAIN_PER_DB`, else `14` | Archives kept per volume; at least 1 |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | Engine API socket |
+
+## ADR-0038 dec 6
+
+Not yet realised.
+
+## ADR-0038 dec 7
+
+The hub's own database (SQLite under `/srv/jupyterhub`, the `notebook-hub-data` volume in Compose) is in no backup: it is not among `DATABASES`, and its volume name is outside the work-volume prefix `notebook-backup` archives.
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/Dockerfile` | Hub state under `/srv/jupyterhub` |
+| `infrastructure/backup/notebook-backup.sh::work_volumes` | Archives only volumes with the work-volume prefix |
+
 ## ADR-0038 dec 8
 
 | Kind | Rehearsal | Compared | Fails when |
@@ -381,10 +440,4 @@ Each authored work volume is archived and verified per run.
 | `infrastructure/backup/tests/test_notebook_backup.py::test_a_rehearsal_restores_every_volumes_latest_archive_into_scratch_and_removes_it` | Proof: volume rehearsal |
 | `infrastructure/backup/tests/test_notebook_backup.py::test_a_restore_that_wrote_less_than_the_archive_fails` | Proof: a short restore fails |
 
-## Related
-
-| Page | Topic |
-|---|---|
-| [high availability](high-availability.md) | Replication and HA of the stateful backends |
-| [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) | Deleting a tenant from backups |
-| [ADR-0034](../../ADR/ADR-0034-platform-schema-migrations.md) | A schema rollback is a restore |
+Links: [high availability](high-availability.md) (replication and HA of the stateful backends); [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) (deleting a tenant from backups); [ADR-0034](../../ADR/ADR-0034-platform-schema-migrations.md) (a schema rollback is a restore).

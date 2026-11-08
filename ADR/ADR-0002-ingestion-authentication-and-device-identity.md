@@ -73,4 +73,4 @@ highest-throughput path.
 
 ## References
 
-- [Device ingestion over mTLS](../docs/operations/device-mtls.md): manual of decisions 2, 3, 5, 6, 8.
+- [Device ingestion over mTLS](../docs/operations/device-mtls.md): manual of decisions 1-8.

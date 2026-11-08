@@ -78,4 +78,5 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 
 ## References
 
-- [docs/operations/backup-and-recovery.md](../docs/operations/backup-and-recovery.md): manual of decisions 3-7.
+- [docs/operations/backup-and-recovery.md](../docs/operations/backup-and-recovery.md): manual of
+  decisions 1-7.

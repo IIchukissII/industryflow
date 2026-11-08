@@ -5,16 +5,49 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # TLS and the internal CA
 
-Server certificates for the HTTPS edge and for TimescaleDB, issued by the internal edge+DB CA; with no
-CA-issued database certificate supplied, TimescaleDB self-signs one ([ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md) dec 3).
+The manual of [ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md), [ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md): server certificates for the HTTPS edge and for TimescaleDB, the internal CA that issues them, and database TLS.
+
 Device client certificates are a separate PKI ([device mTLS](device-mtls.md)).
 
-| Decision | ADR |
-|---|---|
-| The edge terminates TLS | [ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) |
-| Database TLS, one internal root for edge and database | [ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md) |
+## ADR-0004 dec 1
 
-## Edge TLS modes (ADR-0004 dec 1)
+| Lane | TLS terminates at | Plaintext |
+|---|---|---|
+| Compose | The frontend edge on 8443; the ingestion edge for devices, with the same server certificate | 8080 answers 301 to HTTPS, except `/healthz` |
+| Kubernetes | The Ingress, which reaches the edge's 8080 with `X-Forwarded-Proto: https` | Same redirect for any other request on 8080 |
+
+| Setting | Value |
+|---|---|
+| Edge protocols | TLS 1.2, TLS 1.3 |
+| `Strict-Transport-Security` | `max-age=31536000` on every response |
+| Session cookies | `COOKIE_SECURE=true` by default |
+| Compose internal ports | Published on `127.0.0.1` only |
+
+| Code | Role |
+|---|---|
+| `services/frontend/nginx.conf.template` | TLS listener, HTTPS redirect, HSTS |
+| `services/frontend/docker-entrypoint-tls.sh` | Self-signed certificate when none is mounted |
+| `scripts/gen-internal-ca.sh` | Internal-CA server certificate for the edge |
+| `docker-compose.yml` | Loopback-bound internal ports; Secure cookies |
+| `deploy/helm/industryflow/templates/ingress.yaml` | Ingress TLS |
+| `deploy/helm/industryflow/values.yaml` | Secure cookies on Kubernetes |
+| `services/api_gateway/tests/test_db_connection_budget.py::test_cookies_are_secure_by_default` | Proof: cookies Secure in every lane |
+| `.github/workflows/compose-smoke.yml` | Proof: internal ports not reachable from the kernel network's host gateway |
+
+## ADR-0004 dec 8
+
+| Deployment | Edge certificate issuer |
+|---|---|
+| Compose (self-hosted) | The internal CA from `scripts/gen-internal-ca.sh`, which also signs the database certificate; self-signed until one is supplied |
+| Kubernetes | The Secret `ingress.tls.secretName` (default `industryflow-tls`); the chart provisions no ACME issuer |
+
+| Code | Role |
+|---|---|
+| `scripts/gen-internal-ca.sh` | Internal root, edge and database certificates |
+| `services/frontend/docker-entrypoint-tls.sh` | Self-signed fallback |
+| `deploy/helm/industryflow/templates/ingress.yaml` | Ingress TLS from `ingress.tls.secretName` |
+
+### Edge TLS modes
 
 | Mode | Client trust | Setup |
 |---|---|---|
@@ -24,7 +57,7 @@ Device client certificates are a separate PKI ([device mTLS](device-mtls.md)).
 
 The entrypoint self-signs only when no certificate is present at `/etc/nginx/certs`.
 
-## Issue certificates with the internal CA (ADR-0004 dec 1, ADR-0017 dec 3)
+### Issue certificates with the internal CA
 
 Run on the Compose host (needs `openssl`):
 
@@ -55,7 +88,7 @@ docker compose up -d --build frontend ingestion-edge
 Both directories are git-ignored. The root CA is reused on later runs; only the leaf certificates are
 reissued. If the script cannot `chgrp` the key, run `sudo chgrp 101 deploy/certs/tls.key`.
 
-## Install the CA root on clients
+### Install the CA root on clients
 
 Copy `deploy/certs/ca.crt` to each device.
 
@@ -66,7 +99,7 @@ Copy `deploy/certs/ca.crt` to each device.
 | Windows | `certutil -addstore -f Root ca.crt` (elevated) |
 | Firefox (own store) | Settings → Privacy & Security → *View Certificates* → *Authorities* → *Import* → trust for websites |
 
-## Name resolution
+### Name resolution
 
 | Address | Requirement |
 |---|---|
@@ -74,7 +107,7 @@ Copy `deploy/certs/ca.crt` to each device.
 | `https://<host-ip>` | The IP is in the certificate SAN (auto-detected or in `CERT_SAN`) |
 | Hosts file | `<host-ip> industryflow.local` |
 
-## Rotation
+### Rotation
 
 | Task | Steps | Client action |
 |---|---|---|
@@ -83,16 +116,54 @@ Copy `deploy/certs/ca.crt` to each device.
 | Reissue the database certificate (Helm) | Renew or replace the `tls.db.secretName` Secret; restart the TimescaleDB pod | None |
 | Rotate the CA (ADR-0017 dec 3) | Delete `deploy/ca/`, re-run the script, recreate the edges and the database as above | Install the new `ca.crt` on every client; restart every database client |
 
-## Database TLS
+## ADR-0017 dec 1-3, 5
 
-### Compose
+Clients verify the server certificate (`verify-full`) and authenticate with SCRAM; the server certificate comes from the internal CA ([ADR-0004 dec 8](#adr-0004-dec-8)), else `db-cert-init` self-signs one.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/config/pg_hba.conf` | TLS-only SCRAM access rules |
+| `deploy/helm/industryflow/templates/db-tls-certificate.yaml` | Database server certificate on Kubernetes |
+
+### Database TLS
 
 | Element | Behaviour |
 |---|---|
-| `db-cert-init` (one-shot, runs on every `up`) | Copies `db.crt` / `db.key` / `ca.crt` from `TLS_CERT_DIR` into the `db-certs` volume, owned by uid 70, key `0600`. Without `TLS_CERT_DIR` it keeps an earlier staged certificate, else self-signs one. It publishes the staged CA to the `db-ca` volume |
 | Client CA mount | `${TLS_CERT_DIR:-db-ca}` at `/etc/ssl/industryflow` (read-only) |
 | Client settings | `DB_SSLMODE` (default `verify-full`), `DB_SSLROOTCERT=/etc/ssl/industryflow/ca.crt` |
-| `pg_hba.conf` | `infrastructure/timescaledb/config/pg_hba.conf`, shared with the chart: `hostssl` + `scram-sha-256` on private ranges only (ADR-0017 dec 2); `local … trust` (Unix socket inside the database container) is the only non-TLS path (ADR-0017 dec 6). `metrics_user` (postgres-exporter) has its own `hostssl` rule |
+| `pg_hba.conf` | `infrastructure/timescaledb/config/pg_hba.conf`, shared with the chart: `hostssl` + `scram-sha-256` on private ranges only. `metrics_user` (postgres-exporter) has its own `hostssl` rule |
+
+### Staged enablement on an existing deployment
+
+Each stage is validated before the next.
+
+| Stage | Server | Clients |
+|---|---|---|
+| 1. Server capable | `ssl=on` with the certificate; `pg_hba` stays `host` | Unchanged |
+| 2. Clients verify | Unchanged | `sslmode=verify-full` + `sslrootcert` |
+| 3. Enforce | `host` → `hostssl`, `md5` → `scram-sha-256`; re-hash existing roles with `ALTER ROLE <role> PASSWORD '<same value>'` | Unchanged |
+
+## ADR-0017 dec 4
+
+| Lane | Staging step |
+|---|---|
+| Compose | `db-cert-init` (one-shot, runs on every `up`) copies `db.crt` / `db.key` / `ca.crt` from `TLS_CERT_DIR` into the `db-certs` volume, owned by uid 70, key `0600`. Without `TLS_CERT_DIR` it keeps an earlier staged certificate, else self-signs one. It publishes the staged CA to the `db-ca` volume |
+| Kubernetes | The TimescaleDB pod's `db-cert-init` initContainer copies the Secret's files, key `0600`, owned by `tls.db.postgresUser` (default `999`) |
+
+| Code | Role |
+|---|---|
+| `docker-compose.yml` | `db-cert-init` one-shot before TimescaleDB |
+| `deploy/helm/industryflow/templates/infra-timescaledb.yaml` | `db-cert-init` initContainer |
+
+## ADR-0017 dec 6
+
+`local … trust` in `pg_hba.conf` (the Unix socket inside the database container) is the only non-TLS path. The device and API edges keep their own certificates (ADR-0004 dec 1).
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/config/pg_hba.conf` | `local` trust; every TCP rule `hostssl` |
+
+## ADR-0017 dec 7
 
 ### Helm
 
@@ -105,46 +176,11 @@ Copy `deploy/certs/ca.crt` to each device.
 Without the Secret and without cert-manager, the database and its clients stay pending; `NOTES.txt`
 reports it.
 
-### Staged enablement on an existing deployment
-
-Each stage is validated before the next.
-
-| Stage | Server | Clients |
-|---|---|---|
-| 1. Server capable | `ssl=on` with the certificate; `pg_hba` stays `host` | Unchanged |
-| 2. Clients verify | Unchanged | `sslmode=verify-full` + `sslrootcert` |
-| 3. Enforce | `host` → `hostssl`, `md5` → `scram-sha-256`; re-hash existing roles with `ALTER ROLE <role> PASSWORD '<same value>'` | Unchanged |
-
-## ADR-0004 dec 1
-
-| Lane | TLS terminates at | Plaintext |
-|---|---|---|
-| Compose | The frontend edge on 8443; the ingestion edge for devices, with the same server certificate | 8080 answers 301 to HTTPS, except `/healthz` |
-| Kubernetes | The Ingress, which reaches the edge's 8080 with `X-Forwarded-Proto: https` | Same redirect for any other request on 8080 |
-
-| Setting | Value |
-|---|---|
-| Edge protocols | TLS 1.2, TLS 1.3 |
-| `Strict-Transport-Security` | `max-age=31536000` on every response |
-| Session cookies | `COOKIE_SECURE=true` by default |
-| Compose internal ports | Published on `127.0.0.1` only |
+With `tls.db.enabled`, the postgres-exporter connects with `sslmode` from `tls.db.sslmode` and the mounted `ca.crt`.
 
 | Code | Role |
 |---|---|
-| `services/frontend/nginx.conf.template` | TLS listener, HTTPS redirect, HSTS |
-| `services/frontend/docker-entrypoint-tls.sh` | Self-signed certificate when none is mounted |
-| `scripts/gen-internal-ca.sh` | Internal-CA server certificate for the edge |
-| `docker-compose.yml` | Loopback-bound internal ports; Secure cookies |
-| `deploy/helm/industryflow/templates/ingress.yaml` | Ingress TLS |
-| `deploy/helm/industryflow/values.yaml` | Secure cookies on Kubernetes |
-| `services/api_gateway/tests/test_db_connection_budget.py::test_cookies_are_secure_by_default` | Proof: cookies Secure in every lane |
-| `.github/workflows/compose-smoke.yml` | Proof: internal ports not reachable from the kernel network's host gateway |
-
-## ADR-0017 dec 1-3, 5
-
-Clients verify the server certificate with SCRAM authentication; the server certificate comes from the internal CA (see Database TLS).
-
-| Code | Role |
-|---|---|
-| `infrastructure/timescaledb/config/pg_hba.conf` | TLS-only SCRAM access rules |
-| `deploy/helm/industryflow/templates/db-tls-certificate.yaml` | Database server certificate on Kubernetes |
+| `deploy/helm/industryflow/templates/db-tls-certificate.yaml` | cert-manager issuers and the server certificate |
+| `deploy/helm/industryflow/templates/infra-timescaledb.yaml` | Certificate, key and root mounted on the database |
+| `deploy/helm/industryflow/templates/apps.yaml` | Only `ca.crt` mounted on each application client |
+| `deploy/helm/industryflow/templates/observability-exporters.yaml` | Exporter over TLS |

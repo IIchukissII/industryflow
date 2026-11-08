@@ -5,19 +5,32 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # CI and required checks
 
-The GitHub Actions workflows, their gate jobs, and the required checks on `main`
-([ADR-0026](../../ADR/ADR-0026-release-model.md)).
+The manual of [ADR-0026](../../ADR/ADR-0026-release-model.md): the GitHub Actions workflows, their gate jobs, the required checks on `main`, box validation and releases.
 
-## Gate convention
+## ADR-0026 dec 1, 2
+
+`main` is the only long-lived branch. Its branch protection requires every gate in [required checks on `main`](#required-checks-on-main), for administrators too, and refuses force pushes; a change reaches it by pull request. A pull request merges into `main` only when every one of those gates passed. Each gate fails when a job it needs failed or was cancelled. `compose-smoke-gate` is the required gate that starts the system. Box validation is a separate commit status, not a required check.
+
+| Code | Role |
+|---|---|
+| `.github/workflows/unit-tests.yml` | A gated workflow: `pull_request` and `push` to `main`, ending in `unit-tests-gate` |
+| `.github/workflows/compose-smoke.yml` | The required gate that starts the system |
+| `tests/config_guards/test_alert_rules.py::test_every_ci_gate_checks_every_job_it_needs` | Proof: no gate passes a job it does not check |
+
+| Trigger | Workflows |
+|---|---|
+| `pull_request`, `push` to `main` | Every gated workflow |
+| `push` of a `v*` tag | `release.yml` |
+
+### Gate convention
 
 | Rule | Detail |
 |---|---|
-| Triggers | Every workflow runs on `pull_request` and on `push` to `main` |
 | One gate per workflow | Each workflow ends in a `<name>-gate` job with `if: always()`, so it always reports a status |
 | Path-filtered workflows | A `changes` job (`dorny/paths-filter`) decides whether the workflow's paths changed. Unchanged: the work is skipped and the gate passes. Changed: the gate fails when any gated job failed or was cancelled, or when `changes` itself did not succeed |
 | Unfiltered workflows | `compose-smoke.yml` and `config-guards.yml` have no `changes` job; their jobs run on every PR and the gate passes only when all of them succeeded |
 
-## Required checks on `main`
+### Required checks on `main`
 
 | Gate | Workflow file | Gated jobs |
 |---|---|---|
@@ -32,7 +45,7 @@ The GitHub Actions workflows, their gate jobs, and the required checks on `main`
 | `model-artifact-roundtrip-gate` | `model-artifact-roundtrip.yml` | Parity, model artifact round-trip |
 | `config-guards-gate` | `config-guards.yml` | Silent-omission list guards (`tests/config_guards`, ADR-0000 dec 3; among them: every `integration`-marked proof runs in a gated, path-filtered step that requires its stack, and is left out of the no-stack matrix); object-store principals against a real MinIO; platform alert rules under the pinned `promtool` and `amtool` (unfiltered) |
 
-## Changing the list
+### Changing the list
 
 The list is enforced only in the repository's branch-protection settings. A new workflow ends in a
 gate, and that gate is added to this table and to branch protection in the same change:
@@ -46,7 +59,45 @@ gh api -X PATCH repos/<owner>/<repo>/branches/main/protection/required_status_ch
   tracking-gateway-integration-gate model-artifact-roundtrip-gate config-guards-gate)
 ```
 
-## Box validation and releases
+## ADR-0026 dec 3, 4
+
+The compose smoke gate starts the whole stack, upgrades it from the commit the change merges onto and judges liveness over an interval.
+
+| Code | Role |
+|---|---|
+| `.github/workflows/compose-smoke.yml` | Whole-stack gate |
+
+## ADR-0026 dec 5, 7
+
+Every image is built and started; the newest tag tracks the main branch.
+
+| Code | Role |
+|---|---|
+| `.github/workflows/images.yml` | Image build, start and tag |
+| `.github/dependabot.yml` | Dependency updates target the main branch |
+
+## ADR-0026 dec 6
+
+A box finding CI can reproduce becomes a CI check, such as the exit codes of one-shot jobs.
+
+| Code | Role |
+|---|---|
+| `tests/config_guards/test_one_shot_exit_codes.py` | One-shot failures are not exit 0 |
+
+## ADR-0026 dec 8-10
+
+The box run deploys a main commit, runs the end-to-end journeys and records the validated commit; a release is cut only from a box-validated commit (dec 9).
+
+| Code | Role |
+|---|---|
+| `scripts/box-deploy.sh` | Deploy a commit to the box |
+| `scripts/box-e2e.sh` | Run the journeys |
+| `scripts/box-validate.sh` | Deploy, run and record |
+| `tests/e2e/harness.py` | The journeys' reach: the public edge as a signed-in user, and the environment's host |
+| `tests/e2e/test_tenant_life.py` | One journey: a tenant through deletion |
+| `.github/workflows/release.yml` | Release from a box-validated commit |
+
+### Box validation and releases
 
 A commit on `main` is box-validated when the long-lived environment runs it, deployed by upgrade from
 the last box-validated commit, and the end-to-end suite passed there
@@ -79,60 +130,6 @@ release is cut only from such a commit.
 | Device journey times out | Spark streaming not running | `docker compose up -d spark-master spark-worker spark-streaming` |
 | `box-deploy: … GB free after pruning … refusing` | Docker's disk is full beyond build cache | Free space (old images, volumes of removed services), or deploy with a lower `BOX_MIN_FREE_GB` knowingly |
 | Release fails at `The commit is box-validated` | No `box-e2e` success on that commit (ADR-0026 dec 9) | `scripts/box-validate.sh` after deploying it |
-
-## ADR-0026 dec 2
-
-A pull request merges into `main` only when every gate in [Required checks on `main`](#required-checks-on-main) passed. Each gate fails when a job it needs failed or was cancelled. `compose-smoke-gate` is the required gate that starts the system. Box validation is a separate commit status, not a required check.
-
-| Code | Role |
-|---|---|
-| `.github/workflows` | One `<name>-gate` job per workflow |
-| `.github/workflows/compose-smoke.yml` | The required gate that starts the system |
-| `tests/config_guards/test_alert_rules.py::test_every_ci_gate_checks_every_job_it_needs` | Proof: no gate passes a job it does not check |
-
-## ADR-0026 dec 3, 4
-
-The compose smoke gate starts the whole stack, upgrades it from the commit the change merges onto and judges liveness over an interval.
-
-| Code | Role |
-|---|---|
-| `.github/workflows/compose-smoke.yml` | Whole-stack gate |
-
-## ADR-0026 dec 5, 7
-
-Every image is built and started; the newest tag tracks the main branch.
-
-| Code | Role |
-|---|---|
-| `.github/workflows/images.yml` | Image build, start and tag |
-| `.github/dependabot.yml` | Dependency updates target the main branch |
-
-## ADR-0026 dec 6
-
-A box finding CI can reproduce becomes a CI check, such as the exit codes of one-shot jobs.
-
-| Code | Role |
-|---|---|
-| `tests/config_guards/test_one_shot_exit_codes.py` | One-shot failures are not exit 0 |
-
-## ADR-0026 dec 8-10
-
-The box run deploys a main commit, runs the end-to-end journeys and records the validated commit (see Box validation and releases).
-
-| Code | Role |
-|---|---|
-| `scripts/box-deploy.sh` | Deploy a commit to the box |
-| `scripts/box-e2e.sh` | Run the journeys |
-| `scripts/box-validate.sh` | Deploy, run and record |
-| `tests/e2e` | End-to-end journeys |
-
-## ADR-0026 dec 9
-
-A release is cut from a box-validated commit.
-
-| Code | Role |
-|---|---|
-| `.github/workflows/release.yml` | Release |
 
 ## ADR-0026 dec 11
 

@@ -84,4 +84,4 @@ running with cross-tenant reach. Every model registered so far is in a typed, da
 ## References
 
 - [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) dec 4: the data-only rule.
-- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 2-6.
+- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 1-7.

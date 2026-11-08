@@ -5,58 +5,30 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # TimescaleDB schema scripts
 
-The platform schema sequence for the `industryflow` and `mlflow` databases, the runner that applies it,
-the roles it creates and their operations ([ADR-0034](../../../ADR/ADR-0034-platform-schema-migrations.md)).
+The manual of [ADR-0034](../../../ADR/ADR-0034-platform-schema-migrations.md), [ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md): the platform schema sequence for the `industryflow` and `mlflow` databases, the runner that applies it, the roles it creates, their operations, and tenant provisioning and its tombstone.
+
 The tables they create: [data and storage](../../../docs/architecture/data-and-storage.md#tables).
 
-## Execution
+## ADR-0034 dec 1
 
-`../migrate.sh` is the only applier, on an empty and a live database alike. It applies every pending
-script in filename order and records each in `public.schema_ledger`.
+The numbered scripts in this directory, in filename order, are the whole platform schema. Each declares its kind in a header.
 
-| Deployment | Runner | Clients wait by |
+| Kind | Holds | After release |
 |---|---|---|
-| Compose | `db-migrate` one-shot service, on every `up` | `depends_on: db-migrate: service_completed_successfully` (all but `db-backup`) |
-| Helm | `<release>-db-migrate-<revision>` Job, on every install and upgrade; scripts from the `<release>-db-migrations` ConfigMap (`files/db-migrations`, `files/migrate.sh` symlinks) | `schema-ready` init container: `migrate.sh verify --wait` as the client's own role |
+| `migration` | A one-time change; no function definition | Never edited |
+| `definition` | Provisioning, the functions it calls, the roles list | Replaced in place; re-applied on change |
 
-| Kind (header `-- migration-kind:` / `# migration-kind:`) | Applied | When its digest changes |
-|---|---|---|
-| `migration` | Once | Refused: a migration is never edited after release; add a new script |
-| `definition` (provisioning, the functions it calls, the roles list) | Once, and again on change | Re-applied |
+No service creates a table at startup; the `public."user"` table is defined by `29-user-table.sql` and later scripts.
 
-A script without a kind is refused. A database with no ledger (initialised before the runner) applies
-every script once. Every script is idempotent.
-
-| Runner command | Effect |
+| Code | Role |
 |---|---|
-| `migrate.sh apply` | Apply pending scripts under an advisory lock; non-zero on a refused or failing script |
-| `migrate.sh verify [--wait]` | Read-only: `0` current, `1` pending, `2` refused; `--wait` retries for `MIGRATE_WAIT_SECONDS` |
-| `migrate.sh status` | Print each script's action, kind and name |
-| `migrate.sh reapply <definition>...` | Apply named definitions again although unchanged, then anything pending |
+| `infrastructure/timescaledb/migrate.sh::scripts` | The sequence: every numbered `.sql` and `.sh` script, in filename order |
+| `tests/config_guards/test_schema_migrations.py::test_every_script_declares_its_kind` | Proof: one kind per script |
+| `tests/config_guards/test_schema_migrations.py::test_a_migration_defines_no_function` | Proof: functions live in definitions |
+| `services/api_gateway/tests/test_user_table_definition.py::test_the_gateway_creates_no_table_at_startup` | Proof: the gateway defines no table |
+| `services/api_gateway/tests/test_user_table_definition.py::test_every_mapped_column_is_defined_by_the_schema_sequence` | Proof: the ORM model matches the scripts |
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGSSLMODE`, `PGSSLROOTCERT` | libpq | Connection; `apply` needs the database owner |
-| `PGDATABASE` | `industryflow` | Database holding the ledger |
-| `MIGRATIONS_DIR` | `/migrations` | Directory of numbered scripts |
-| `MIGRATE_WAIT_SECONDS` | `300` | How long `apply` waits for the database and `verify --wait` for a current ledger |
-| `MIGRATE_BACKUP_MAX_AGE_SECONDS` | `3600` | Age of the latest recorded backup beyond which `apply` refuses pending scripts ([backup before an upgrade](#backup-before-an-upgrade)) |
-| `MIGRATE_WITHOUT_BACKUP` | unset | `1`: apply pending scripts without a recent backup, logged as a warning |
-| `*_DB_PASSWORD` | | Role passwords read by `00-create-roles.sh` and `13-notebook-sql-proxy-role.sh` ([roles](#roles)) |
-
-### Backup before an upgrade
-
-[ADR-0032](../../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) dec 7.
-
-| Database | Pending scripts are applied when |
-|---|---|
-| No row in `public.companies` or `public."user"` (a fresh install, a retried first run) | Always |
-| A tenant or a user exists | The latest row of `public.backup_ledger` (written by the backup job after every complete run) is at most `MIGRATE_BACKUP_MAX_AGE_SECONDS` old, or `MIGRATE_WITHOUT_BACKUP=1` |
-
-`reapply` is an `apply` and is gated the same way. Procedures per deployment:
-[before an upgrade](../../../docs/operations/backup-and-recovery.md#before-an-upgrade).
-
-## Scripts
+### Scripts
 
 | Script | Creates or changes | Decision |
 |---|---|---|
@@ -97,43 +69,72 @@ every script once. Every script is idempotent.
 | `34-user-password-change-required.sql` | `public."user".password_change_required` (default false): an account must set its password before anything else | [ADR-0004](../../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) dec 11 |
 | `35-degraded-alerts.sql` | `add_degraded_columns_to_alerts()`: `alerts.degraded`, `alerts.neutralized_features`, `alert_labels.degraded`; over existing tenants | [ADR-0044](../../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) dec 3, [ADR-0022](../../../ADR/ADR-0022-concept-drift-operator-feedback.md) dec 2 |
 
-`create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22, 23 and 35.
-The per-tenant definitions also apply themselves to every existing tenant schema (ADR-0034 dec 3).
+## ADR-0034 dec 2
 
-## Roles
+Scripts converge: `CREATE ... IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `CREATE OR REPLACE FUNCTION`, and per-tenant loops over every existing tenant schema.
 
-| Role | Used by | Access | Connection limit |
-|---|---|---|---|
-| `api_gateway_user` | `api-gateway` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT` on `public.companies`; `EXECUTE` on `provision_company()`, `update_company()`, `end_suspended_tenant_sql_sessions()`, `set_platform_switch()`; `SELECT` on `public.platform_config` and its record of changes | 50 |
-| `spark_streaming_user` | `spark-streaming`, `spark-aggregations` | `SELECT/INSERT/UPDATE` on tenant tables; `SELECT (schema_name, is_active)` on `public.companies` | 50 |
-| `alert_service_user` | `alert-service-detector` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT (schema_name, is_active)` on `public.companies` | 50 |
-| `tenant_delete_user` | `tenant-delete` | EXECUTE on the deletion functions of script 26; no table privilege | 2 |
-| `notebook_hub_reclaim_user` | `notebook-hub` (volume reclaim) | EXECUTE on the functions of script 27; no table privilege | 2 |
-| `ml_service_user` | `ml-service-api` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT` on `public.companies`, `public.platform_config` | 10 |
-| `mlflow_user` | `mlflow` | `mlflow` database | 20 |
-| `metrics_user` | `postgres-exporter` | `pg_monitor` | 5 |
-| `cold_export_user` | `cold-export` | `SELECT` on `sensor_measurements`, `public.companies`; `EXECUTE` on `cold_export_day_fingerprint()`, `cold_export_drop_day()` | 5 |
-| `tenant_reader_<uuid>` | SQL proxy, via `SET ROLE` | `NOLOGIN`; `SELECT` on its own tenant schema | |
-| `tenant_sqlproxy_<uuid>` | SQL proxy, one login per tenant | `LOGIN NOINHERIT`; member of its `tenant_reader_<uuid>` and `notebook_sql_tenants` | 20 |
-| `notebook_sql_proxy` | SQL proxy enrolment | `EXECUTE` on `notebook_sql_proxy_enrol()`; member of nothing | 5 |
-
-Ingestion has no database role. `tests/config_guards/test_db_connection_budget.py` checks that
-`max_connections` covers the sum of the limits.
-
-| Password variable | Role |
+| Code | Role |
 |---|---|
-| `API_GATEWAY_DB_PASSWORD` | `api_gateway_user` |
-| `SPARK_STREAMING_DB_PASSWORD` | `spark_streaming_user` |
-| `ALERT_SERVICE_DB_PASSWORD` | `alert_service_user` |
-| `TENANT_DELETE_DB_PASSWORD` | `tenant_delete_user` |
-| `NOTEBOOK_HUB_RECLAIM_DB_PASSWORD` | `notebook_hub_reclaim_user` |
-| `ML_SERVICE_DB_PASSWORD` | `ml_service_user` |
-| `MLFLOW_DB_PASSWORD` | `mlflow_user` |
-| `METRICS_DB_PASSWORD` | `metrics_user` |
-| `COLD_EXPORT_DB_PASSWORD` | `cold_export_user` (may be unset; role still created) |
-| `NOTEBOOK_SQL_PROXY_DB_PASSWORD` | `notebook_sql_proxy` (role created only when set) |
+| `infrastructure/timescaledb/init-scripts/22-sensor-display-name.sql` | Example: `ADD COLUMN IF NOT EXISTS`, applied over every existing tenant schema |
+| `infrastructure/timescaledb/tests/test_migration_runner.py::test_every_script_applies_again_over_live_tenants` | Proof: every script re-applies over live tenants |
 
-## Manual operations
+## ADR-0034 dec 3
+
+Provisioning creates every per-tenant table the sequence defines. `create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22, 23 and 35; the per-tenant definitions also apply themselves to every existing tenant schema.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/04-complete-tenant-creation.sql::create_tenant_schema` | Provisioning: calls every per-schema function |
+| `infrastructure/timescaledb/tests/test_tenant_creation_completeness.py` | Provisioning half of the check |
+
+## ADR-0034 dec 4, 7, 8
+
+The runner applies pending scripts in order and records each in the ledger.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/migrate.sh` | Migration runner |
+| `infrastructure/timescaledb/migrate.sh::kind_of` | Reads a script's `migration-kind` header |
+| `infrastructure/timescaledb/migrate.sh::ensure_ledger` | Creates `public.schema_ledger` |
+| `infrastructure/timescaledb/migrate.sh::cmd_apply` | `apply` |
+| `infrastructure/timescaledb/migrate.sh::cmd_verify` | `verify` |
+
+### Execution
+
+`../migrate.sh` is the only applier, on an empty and a live database alike. It applies every pending
+script in filename order and records each in `public.schema_ledger`.
+
+| Deployment | Runner | Clients wait by |
+|---|---|---|
+| Compose | `db-migrate` one-shot service, on every `up` | `depends_on: db-migrate: service_completed_successfully` (all but `db-backup`) |
+| Helm | `<release>-db-migrate-<revision>` Job, on every install and upgrade; scripts from the `<release>-db-migrations` ConfigMap (`files/db-migrations`, `files/migrate.sh` symlinks) | `schema-ready` init container: `migrate.sh verify --wait` as the client's own role |
+
+| Kind (header `-- migration-kind:` / `# migration-kind:`) | Applied | When its digest changes |
+|---|---|---|
+| `migration` | Once | Refused: a migration is never edited after release; add a new script |
+| `definition` (provisioning, the functions it calls, the roles list) | Once, and again on change | Re-applied |
+
+A script without a kind is refused. A database with no ledger (initialised before the runner) applies
+every script once. Every script is idempotent.
+
+| Runner command | Effect |
+|---|---|
+| `migrate.sh apply` | Apply pending scripts under an advisory lock; non-zero on a refused or failing script |
+| `migrate.sh verify [--wait]` | Read-only: `0` current, `1` pending, `2` refused; `--wait` retries for `MIGRATE_WAIT_SECONDS` |
+| `migrate.sh status` | Print each script's action, kind and name |
+| `migrate.sh reapply <definition>...` | Apply named definitions again although unchanged, then anything pending |
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGSSLMODE`, `PGSSLROOTCERT` | libpq | Connection; `apply` needs the database owner |
+| `PGDATABASE` | `industryflow` | Database holding the ledger |
+| `MIGRATIONS_DIR` | `/migrations` | Directory of numbered scripts |
+| `MIGRATE_WAIT_SECONDS` | `300` | How long `apply` waits for the database and `verify --wait` for a current ledger |
+| `MIGRATE_BACKUP_MAX_AGE_SECONDS` | `3600` | Age of the latest recorded backup beyond which `apply` refuses pending scripts ([backup before an upgrade](#backup-before-an-upgrade)) |
+| `MIGRATE_WITHOUT_BACKUP` | unset | `1`: apply pending scripts without a recent backup, logged as a warning |
+| `*_DB_PASSWORD` | | Role passwords read by `00-create-roles.sh` and `13-notebook-sql-proxy-role.sh` ([roles](#roles)) |
+
+### Manual operations
 
 | Task | Command |
 |---|---|
@@ -148,7 +149,7 @@ Ingestion has no database role. `tests/config_guards/test_db_connection_budget.p
 Provisioning and deactivating tenants through the API or script:
 [user management](../../../docs/operations/user-management.md#tenants).
 
-## Troubleshooting
+### Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -160,73 +161,9 @@ Provisioning and deactivating tenants through the API or script:
 | `migrate: cannot read the ledger` from `verify` | The role lacks `SELECT` on the ledger | `reapply 28-schema-ledger-read.sql` |
 | An optional role is missing although its password is set | Its script ran before the password was set | `reapply` the role script ([manual operations](#manual-operations)) |
 
-## ADR-0033 dec 1
-
-One privileged function provisions a tenant (see Roles).
-
-| Code | Role |
-|---|---|
-| `infrastructure/timescaledb/init-scripts` | Provisioning function |
-
-## ADR-0033 dec 8
-
-`complete_company_deletion()` drops the tenant's schema, roles, users and export rows, then sets `companies.is_active = false` and `deleted_at`; the `public.companies` row stays. The tenant-delete job keeps the tenant's suspension marker in the capability store. Verifiers refuse the tenant as inactive and by that marker; none reads `deleted_at`.
-
-| Code | Role |
-|---|---|
-| `infrastructure/timescaledb/init-scripts/25-company-deletion.sql` | `companies.deleted_at` |
-| `infrastructure/timescaledb/init-scripts/26-company-deletion-job.sql` | `complete_company_deletion()`: tombstone |
-| `services/tenant_delete/capability_store.py::CapabilityStore` | Purges the tenant's keys; keeps the suspension marker |
-| `infrastructure/timescaledb/tests/test_company_deletion_job.py::test_completion_empties_the_database_and_leaves_the_tombstone` | Proof: the row stays |
-| `services/tenant_delete/tests/test_capability_store.py::test_the_suspension_marker_stays_and_is_restored_if_lost` | Proof: the marker stays |
-
-## ADR-0034 dec 1
-
-The numbered scripts in this directory, in filename order, are the whole platform schema (see Scripts). Each declares its kind in a header.
-
-| Kind | Holds | After release |
-|---|---|---|
-| `migration` | A one-time change; no function definition | Never edited |
-| `definition` | Provisioning, the functions it calls, the roles list | Replaced in place; re-applied on change |
-
-No service creates a table at startup; the `public."user"` table is defined by `29-user-table.sql` and later scripts.
-
-| Code | Role |
-|---|---|
-| `infrastructure/timescaledb/init-scripts` | The sequence |
-| `tests/config_guards/test_schema_migrations.py::test_every_script_declares_its_kind` | Proof: one kind per script |
-| `tests/config_guards/test_schema_migrations.py::test_a_migration_defines_no_function` | Proof: functions live in definitions |
-| `services/api_gateway/tests/test_user_table_definition.py::test_the_gateway_creates_no_table_at_startup` | Proof: the gateway defines no table |
-| `services/api_gateway/tests/test_user_table_definition.py::test_every_mapped_column_is_defined_by_the_schema_sequence` | Proof: the ORM model matches the scripts |
-
-## ADR-0034 dec 2
-
-Scripts converge: `CREATE ... IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `CREATE OR REPLACE FUNCTION`, and per-tenant loops over every existing tenant schema.
-
-| Code | Role |
-|---|---|
-| `infrastructure/timescaledb/init-scripts` | Idempotent scripts |
-| `infrastructure/timescaledb/tests/test_migration_runner.py::test_every_script_applies_again_over_live_tenants` | Proof: every script re-applies over live tenants |
-
-## ADR-0034 dec 3
-
-Provisioning creates every per-tenant table the sequence defines.
-
-| Code | Role |
-|---|---|
-| `infrastructure/timescaledb/tests/test_tenant_creation_completeness.py` | Provisioning half of the check |
-
-## ADR-0034 dec 4, 7, 8
-
-The runner applies pending scripts in order and records each in the ledger.
-
-| Code | Role |
-|---|---|
-| `infrastructure/timescaledb/migrate.sh` | Migration runner |
-
 ## ADR-0034 dec 5
 
-The sequence has no down-scripts. On a database holding a tenant or a user, `migrate.sh apply` refuses pending scripts unless a backup is recorded within `MIGRATE_BACKUP_MAX_AGE_SECONDS`, or `MIGRATE_WITHOUT_BACKUP=1` (see [Backup before an upgrade](#backup-before-an-upgrade)). The backup job does not wait for the runner.
+The sequence has no down-scripts. On a database holding a tenant or a user, `migrate.sh apply` refuses pending scripts unless a backup is recorded within `MIGRATE_BACKUP_MAX_AGE_SECONDS`, or `MIGRATE_WITHOUT_BACKUP=1`. The backup job does not wait for the runner.
 
 | Code | Role |
 |---|---|
@@ -234,6 +171,18 @@ The sequence has no down-scripts. On a database holding a tenant or a user, `mig
 | `tests/config_guards/test_schema_migrations.py::COMPOSE_UNGATED` | The backup is not gated on the ledger |
 | `infrastructure/timescaledb/tests/test_migration_runner.py::test_an_upgrade_without_a_recorded_backup_is_refused` | Proof: no backup, no upgrade |
 | `infrastructure/timescaledb/tests/test_migration_runner.py::test_an_upgrade_right_after_a_backup_applies` | Proof: a recent backup admits the upgrade |
+
+### Backup before an upgrade
+
+[ADR-0032](../../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) dec 7.
+
+| Database | Pending scripts are applied when |
+|---|---|
+| No row in `public.companies` or `public."user"` (a fresh install, a retried first run) | Always |
+| A tenant or a user exists | The latest row of `public.backup_ledger` (written by the backup job after every complete run) is at most `MIGRATE_BACKUP_MAX_AGE_SECONDS` old, or `MIGRATE_WITHOUT_BACKUP=1` |
+
+`reapply` is an `apply` and is gated the same way. Procedures per deployment:
+[before an upgrade](../../../docs/operations/backup-and-recovery.md#before-an-upgrade).
 
 ## ADR-0034 dec 6
 
@@ -270,3 +219,57 @@ A released migration is never edited; clients wait for a current ledger.
 | `tests/config_guards/test_compose_db_roles.py::test_the_database_container_holds_no_role_password` | Proof: Compose server holds no role password |
 | `tests/config_guards/test_helm_db_role_passwords.py::test_the_database_server_holds_no_role_password` | Proof: chart server holds no role password |
 | `tests/config_guards/test_helm_db_role_passwords.py::test_the_secret_and_the_container_carry_the_same_role_passwords` | Proof: the Job receives every role password |
+
+### Roles
+
+| Role | Used by | Access | Connection limit |
+|---|---|---|---|
+| `api_gateway_user` | `api-gateway` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT` on `public.companies`; `EXECUTE` on `provision_company()`, `update_company()`, `end_suspended_tenant_sql_sessions()`, `set_platform_switch()`; `SELECT` on `public.platform_config` and its record of changes | 50 |
+| `spark_streaming_user` | `spark-streaming`, `spark-aggregations` | `SELECT/INSERT/UPDATE` on tenant tables; `SELECT (schema_name, is_active)` on `public.companies` | 50 |
+| `alert_service_user` | `alert-service-detector` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT (schema_name, is_active)` on `public.companies` | 50 |
+| `tenant_delete_user` | `tenant-delete` | EXECUTE on the deletion functions of script 26; no table privilege | 2 |
+| `notebook_hub_reclaim_user` | `notebook-hub` (volume reclaim) | EXECUTE on the functions of script 27; no table privilege | 2 |
+| `ml_service_user` | `ml-service-api` | `SELECT/INSERT/UPDATE/DELETE` on tenant tables; `SELECT` on `public.companies`, `public.platform_config` | 10 |
+| `mlflow_user` | `mlflow` | `mlflow` database | 20 |
+| `metrics_user` | `postgres-exporter` | `pg_monitor` | 5 |
+| `cold_export_user` | `cold-export` | `SELECT` on `sensor_measurements`, `public.companies`; `EXECUTE` on `cold_export_day_fingerprint()`, `cold_export_drop_day()` | 5 |
+| `tenant_reader_<uuid>` | SQL proxy, via `SET ROLE` | `NOLOGIN`; `SELECT` on its own tenant schema | |
+| `tenant_sqlproxy_<uuid>` | SQL proxy, one login per tenant | `LOGIN NOINHERIT`; member of its `tenant_reader_<uuid>` and `notebook_sql_tenants` | 20 |
+| `notebook_sql_proxy` | SQL proxy enrolment | `EXECUTE` on `notebook_sql_proxy_enrol()`; member of nothing | 5 |
+
+Ingestion has no database role. `tests/config_guards/test_db_connection_budget.py` checks that
+`max_connections` covers the sum of the limits.
+
+| Password variable | Role |
+|---|---|
+| `API_GATEWAY_DB_PASSWORD` | `api_gateway_user` |
+| `SPARK_STREAMING_DB_PASSWORD` | `spark_streaming_user` |
+| `ALERT_SERVICE_DB_PASSWORD` | `alert_service_user` |
+| `TENANT_DELETE_DB_PASSWORD` | `tenant_delete_user` |
+| `NOTEBOOK_HUB_RECLAIM_DB_PASSWORD` | `notebook_hub_reclaim_user` |
+| `ML_SERVICE_DB_PASSWORD` | `ml_service_user` |
+| `MLFLOW_DB_PASSWORD` | `mlflow_user` |
+| `METRICS_DB_PASSWORD` | `metrics_user` |
+| `COLD_EXPORT_DB_PASSWORD` | `cold_export_user` (may be unset; role still created) |
+| `NOTEBOOK_SQL_PROXY_DB_PASSWORD` | `notebook_sql_proxy` (role created only when set) |
+
+## ADR-0033 dec 1
+
+One privileged function, `provision_company()` (SECURITY DEFINER), provisions a tenant; `api_gateway_user` holds only `EXECUTE` on it.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/21-company-provisioning.sql::provision_company` | Provisioning function; `EXECUTE` for `api_gateway_user` only |
+| `infrastructure/timescaledb/init-scripts/04-complete-tenant-creation.sql::create_tenant_schema` | Schema, tables, grants and read-only role it calls |
+
+## ADR-0033 dec 8
+
+`complete_company_deletion()` drops the tenant's schema, roles, users and export rows, then sets `companies.is_active = false` and `deleted_at`; the `public.companies` row stays. The tenant-delete job keeps the tenant's suspension marker in the capability store. Verifiers refuse the tenant as inactive and by that marker; none reads `deleted_at`.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/25-company-deletion.sql` | `companies.deleted_at` |
+| `infrastructure/timescaledb/init-scripts/26-company-deletion-job.sql` | `complete_company_deletion()`: tombstone |
+| `services/tenant_delete/capability_store.py::CapabilityStore` | Purges the tenant's keys; keeps the suspension marker |
+| `infrastructure/timescaledb/tests/test_company_deletion_job.py::test_completion_empties_the_database_and_leaves_the_tombstone` | Proof: the row stays |
+| `services/tenant_delete/tests/test_capability_store.py::test_the_suspension_marker_stays_and_is_restored_if_lost` | Proof: the marker stays |

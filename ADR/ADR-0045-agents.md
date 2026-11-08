@@ -85,4 +85,4 @@ authoritative.
 ## References
 
 - [ADR-0046](ADR-0046-the-infrastructure-agent-explains-platform-alerts-to-operators.md): the first agent.
-- [Monitoring](../docs/operations/monitoring.md): manual of decisions 1-6, 8.
+- [Monitoring](../docs/operations/monitoring.md): manual of decisions 1-8.

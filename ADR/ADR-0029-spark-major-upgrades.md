@@ -67,5 +67,5 @@ only by running it; on 3.5 → 4.1 the checkpoint resumes, offsets and state bot
 ## References
 
 - [docs/architecture/stream-processing.md](../docs/architecture/stream-processing.md): checkpoint
-  locations and the upgrade procedure.
+  locations and the upgrade procedure; manual of decisions 1-4.
 - Issue #243: the Spark 3.5 → 4.1 migration whose box run established resume.

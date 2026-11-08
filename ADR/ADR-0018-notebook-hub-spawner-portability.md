@@ -64,4 +64,6 @@ Docker host.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): the dual-spawner design; manual of decisions 1, 3-5.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): the dual-spawner design;
+  manual of decisions 1-5.
+- [Notebook hub](../services/notebook_hub/README.md): manual of decision 1.

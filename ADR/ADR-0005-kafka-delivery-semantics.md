@@ -65,5 +65,6 @@ no end-to-end guarantee, and exactly-once adds coordination to every stage.
 
 ## References
 
-- [docs/operations/dead-letters.md](../docs/operations/dead-letters.md): monitoring and handling of the dead-letter topics.
-- [Stream processing](../docs/architecture/stream-processing.md): manual of decisions 2-6.
+- [docs/operations/dead-letters.md](../docs/operations/dead-letters.md): monitoring and handling of
+  the dead-letter topics; manual of decision 3.
+- [Stream processing](../docs/architecture/stream-processing.md): manual of decisions 1-6.

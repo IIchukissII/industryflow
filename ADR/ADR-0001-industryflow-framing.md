@@ -59,4 +59,4 @@ development, and must stay generic across industrial domains.
 
 ## References
 
-- [Licensing](../docs/architecture/licensing.md): manual of decision 2.
+- [Licensing](../docs/architecture/licensing.md): manual of decisions 1-7.

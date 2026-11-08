@@ -5,45 +5,26 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Embedded notebooks
 
-The notebook hub, its per-user environments, and the planes a kernel reaches through capability
-handles.
+The manual of [ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md), [ADR-0012](../../ADR/ADR-0012-per-session-credential-delivery-for-notebook-environments.md), [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md), [ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md), [ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md), [ADR-0018](../../ADR/ADR-0018-notebook-hub-spawner-portability.md), [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md), [ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md), [ADR-0025](../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md), [ADR-0040](../../ADR/ADR-0040-a-notebook-registered-model-version-becomes-a-platform-model-by-promotion.md), [ADR-0042](../../ADR/ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md): the notebook hub, its per-user environments, the planes a kernel reaches through capability handles, and the record of their use.
 
-| Decision | ADR |
+## ADR-0011 dec 1
+
+| Element | Form |
 |---|---|
-| Notebooks as untrusted, per-user, tenant-bound environments; role profiles | [ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) |
-| No durable credential in the kernel; per-tenant read-only role | [ADR-0012](../../ADR/ADR-0012-per-session-credential-delivery-for-notebook-environments.md) |
-| Tenant-namespaced tracking and registry | [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md) |
-| Notebook SSO from the platform session; single origin | [ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) |
-| Capability minting, audiences, SQL proxy | [ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) |
-| Database TLS (`verify-full`) | [ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md) |
-| KubeSpawner / DockerSpawner, Compose non-parity | [ADR-0018](../../ADR/ADR-0018-notebook-hub-spawner-portability.md) |
-| Tracking gateway, default-deny routes, direct artifact bytes | [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) |
-| Per-user persistence, idle reclamation | [ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md) |
-| Cold-layer read path | [ADR-0025](../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) dec 5 |
+| Spawn | On demand, one server per user, from the hub's verified identity |
+| Limits | CPU and memory per profile: analytics 0.5 CPU, 1G; authoring 2 CPU, 4G |
+| Ephemerality | DockerSpawner removes the container when its server stops; only `<home>/work` of an authoring user persists ([ADR-0020 dec 1, 2](#adr-0020-dec-1-2)) |
+| Idle reclamation | Hub service `idle-culler` stops servers idle past `NOTEBOOK_IDLE_TIMEOUT_SECONDS` (3600), checked every `NOTEBOOK_CULL_EVERY_SECONDS` (300) |
 
-## Request path
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py::bind_identity_and_profile` | Per-user spawn and its limits |
+| `services/notebook_hub/jupyterhub_config.py::PROFILE_RESOURCES` | CPU and memory per profile |
+| `services/notebook_hub/jupyterhub_config.py::IDLE_TIMEOUT_SECONDS` | Culler timeout; the `idle-culler` service and its scoped token |
+| `services/notebook_hub/requirements.txt` | `jupyterhub-idle-culler` pin |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_idle_culler_service_survives` | Proof: the culler service is configured |
 
-```
-browser ─▶ frontend edge /jupyter/ ─▶ notebook-sso ──auth_request──▶ api-gateway GET /auth/verify
-                                          │ X-IF-* identity (client-supplied values overwritten)
-                                          ▼
-                                    notebook-hub ──spawns──▶ per-user environment (profile by role)
-                                          │ mints capability handles
-                                          ▼
-kernel ─▶ api-gateway data API      (X-IF-Capability, audience api)
-       ─▶ notebook-sql-proxy        (audience sql)      ─▶ TimescaleDB as tenant_sqlproxy_<uuid>, SET ROLE tenant_reader_<uuid>
-       ─▶ notebook-tracking-gateway (audience tracking) ─▶ MLflow, tenant-namespaced; artifacts by pre-signed URL
-       ─▶ notebook-cold-broker      (audience cold)     ─▶ pre-signed GETs under tenant_<uuid>/
-```
-
-| Frontend page | Shows | Source |
-|---|---|---|
-| `/notebooks` | `/jupyter/` in an iframe: the role's profile ([profiles](#profiles)), so the `analytics` landing for every role not mapped to authoring; framed under the platform's own origin (ADR-0014 dec 6) | `services/frontend/src/pages/Notebooks.jsx` |
-| `/experiments` | The tenant's experiments and their runs (params, metrics, status, the registered model a run became), read-only, from `/api/experiments` (ADR-0013 dec 4) | `services/frontend/src/pages/Experiments.jsx` |
-
-The hub sends `Content-Security-Policy: frame-ancestors 'self'`.
-
-## Components
+### Components
 
 | Name | Role | Port | Config |
 |---|---|---|---|
@@ -53,81 +34,24 @@ The hub sends `Content-Security-Policy: frame-ancestors 'self'`.
 | `notebook-analytics` image | Voila, data-API client (ADR-0011 dec 5) | | `services/notebook_hub/Dockerfile.analytics` |
 | `notebook-sql-proxy` | SQL proxy (Postgres wire) | 6432 | [SQL proxy](../../services/notebook_sql_proxy/README.md) |
 | `notebook-tracking-gateway` | Tracking gateway (MLflow, per-route tenant rules); upload stage and commit | 5050 | [tracking gateway](../../services/notebook_tracking_gateway/README.md) |
-| `notebook-cold-broker` | Cold-store broker: pre-signed GETs for the tenant's cold prefix (ADR-0025 dec 5) | 5060 | `services/notebook_cold_broker/` |
+| `notebook-cold-broker` | Cold-store broker: pre-signed GETs for the tenant's cold prefix ([ADR-0025 dec 5](#adr-0025-dec-5)) | 5060 | `services/notebook_cold_broker/` |
 | Python client | `IndustryFlowClient`, `IndustryFlowSQL`, `IndustryFlowCold`, `SKOPS_TRUSTED_TYPES`, `log_feature_sample` | | [Python client](../../clients/python/README.md) |
 
-## Profiles
+## ADR-0011 dec 2
 
-| Profile | Roles (`NOTEBOOK_AUTHORING_ROLES`, default) | Image | Landing | Capability handles | Persistence |
-|---|---|---|---|---|---|
-| `authoring` | `admin`, `engineer` | `NOTEBOOK_IMAGE_AUTHORING` | JupyterLab | api, sql; tracking when `INDUSTRYFLOW_TRACKING_URL` is set; cold when `INDUSTRYFLOW_COLD_BROKER_URL` is set | Per-user volume `NOTEBOOK_VOLUME_TEMPLATE` at `<home>/work`; a PVC on Kubernetes |
-| `analytics` | Every other role | `NOTEBOOK_IMAGE_ANALYTICS` | `/voila` | api | None |
+The kernel's environment holds its identity and its per-session handles, nothing else. The credentials
+a plane needs upstream stay with its mediator: the SQL proxy derives the tenant login's password from
+`SQL_PROXY_TENANT_LOGIN_KEY`, the tracking gateway holds `TRACKING_S3_*`, the cold broker holds
+`COLD_READ_*`.
 
-Either image falls back to `NOTEBOOK_IMAGE`. Hub settings:
-[notebook hub](../../services/notebook_hub/README.md#settings).
-
-## Capability handles (ADR-0015 dec 1-4)
-
-| Audience | Redeemed by | Read-only |
-|---|---|---|
-| `api` | `services/api_gateway/capability_auth.py` | yes |
-| `sql` | `services/notebook_sql_proxy/binding.py` | yes |
-| `tracking` | `services/notebook_tracking_gateway/` | no |
-| `cold` | `services/notebook_cold_broker/` | yes |
-
-| Event | Effect |
+| Code | Role |
 |---|---|
-| Spawn | Handles of an earlier run of the server are revoked; one handle per audience is minted with lifetime `NOTEBOOK_CAPABILITY_TTL_SECONDS` and recorded in `nbcap-user:<user>` |
-| Spawner poll, server healthy | Lifetime extended |
-| Server stops (user, culler, hub logout) | `post_stop_hook` revokes its handles |
-| Platform logout | The frontend logs out of the hub first (`shutdown_on_logout` stops the server); `/auth/logout` revokes all the user's handles; a server whose handles are all revoked stops at its next poll |
-| Login (`/hub/login`) | Refused (401) unless `X-IF-SSO-Proxy-Secret` matches `NOTEBOOK_SSO_PROXY_SECRET` |
-| Hub request after `NOTEBOOK_AUTH_REFRESH_SECONDS`, and before a spawn | Hub login compared with the forwarded identity (identity headers without the proxy secret count as none): a different user ends the login; the same user with another tenant or role ends it and stops their servers |
-| Open SQL session | Re-checked every `SQL_PROXY_REVALIDATE_SECONDS`; closed once the handle is revoked |
+| `services/notebook_hub/identity.py::pod_environment` | Identity-only environment |
+| `services/notebook_hub/jupyterhub_config.py::bind_identity_and_profile` | Handles and URLs added at spawn |
+| `services/notebook_hub/tests/test_identity.py::test_pod_environment_carries_identity_not_credentials` | Proof: no credential in the identity environment |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_proxy_secret_never_reaches_a_kernel` | Proof: the proxy secret stays out of the environment |
 
-## Capability-use record
-
-[ADR-0042](../../ADR/ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md). Planes append events to the stream
-`nbcap-audit` in the capability store, atomically with the store change they describe; the API
-gateway's writer (`services/api_gateway/messaging/capability_audit_drain.py`, consumer group
-`capability-audit-writer`) drains it into `public.capability_use_events` through
-`record_capability_use()`. Contract: `libs/industryflow_contracts/industryflow_contracts/capability_audit.py`.
-
-| Event | Recorded by | When |
-|---|---|---|
-| `minted` | hub, ml-service (upload) | With the mint, in one transaction |
-| `first_use` | each plane that redeems a handle | Its first use of the handle (marker `nbcap-audit-seen:<plane>:<handle_id>`, 7 days) |
-| `refused` | each plane that redeems a handle | A refusal naming a real entry: once per `handle_id`, plane and reason per 5 minutes (`nbcap-audit-repeat:`), the rest counted (`nbcap-audit-repeats:`, 7 days) into the next record's `suppressed`. A value naming none: once per plane and digest per hour (`nbcap-audit-refused:`), at most 60 per plane and source address per minute (`nbcap-audit-source:`), `detail` = `source=<address>` |
-| `revoked` | hub, API gateway (logout), tenant delete | With the removal, only if it removed a live entry |
-| `consumed` | tracking gateway (upload) | With the claim of a single-use upload handle |
-| `environment_started`, `environment_stopped` | hub | Server spawn and stop |
-| `sql_session_opened`, `sql_session_closed` | SQL proxy | Session start and end, once per `handle_id` and kind per 5 minutes, the rest counted like a refusal's; none for a handle with no `handle_id`; statements are not recorded |
-
-| Column | Meaning |
-|---|---|
-| `handle_id` | Non-secret identifier bound into the handle's entry at mint; a handle minted before the record has none |
-| `digest` | First 16 hex of SHA-256 of a presented value that named no entry; absent otherwise |
-| `reason`, `detail` | Why it was refused, revoked or closed; the server or session |
-| `suppressed` | How many of the same event the entry repeated, unrecorded, since its last record |
-| Source address | The client address the edge reported (`X-Real-IP`) when the peer is one of `EDGE_PROXY_PEERS`; the connecting peer otherwise |
-
-| Read | Who |
-|---|---|
-| `GET /api/capability-use?company_id=&handle_id=&since=&before_id=&limit=` | Superuser: any tenant or all; tenant `admin`: their own tenant only |
-
-| Setting (API gateway) | Default | Meaning |
-|---|---|---|
-| `CAPABILITY_AUDIT_RETENTION_DAYS` | `365` | Rows older are expired hourly by `expire_capability_use()`; the database refuses fewer than 30 |
-| `EDGE_PROXY_PEERS` (also tracking gateway) | compose `frontend`; Helm empty | The edge's addresses, networks or host names. Only addresses no kernel can hold: on Kubernetes not the pod network (kernel pods share it) and not a Service name (its ClusterIP is never the peer); empty is safe |
-
-| Metric / alert | Meaning |
-|---|---|
-| `capability_audit_backlog` | Events in the stream not yet written (written ones are deleted from it) |
-| `capability_audit_events_total{result}` | `written`, `unreadable` (skipped), `refused` (by the database, skipped), `retry` |
-| `IndustryFlowCapabilityAuditBacklog` | Backlog above 1000 for 15m ([monitoring](../operations/monitoring.md)) |
-| `IndustryFlowCapabilityEventsDropped` | An `unreadable` or `refused` event in 15m ([monitoring](../operations/monitoring.md)) |
-
-## Kernel environment
+### Kernel environment
 
 | Name | Profile | Meaning |
 |---|---|---|
@@ -141,85 +65,6 @@ gateway's writer (`services/api_gateway/messaging/capability_audit_drain.py`, co
 A URL variable is set only when the hub has it configured; the tracking and cold handles are minted
 only then. Outside a hub-spawned kernel, `IndustryFlowSQL.from_env()` and `IndustryFlowCold.from_env()`
 raise.
-
-## Planes
-
-| Plane | Mediator | Detail |
-|---|---|---|
-| Data API | `api-gateway` | Read endpoints accept an `api` handle and run read-only ([endpoints](../api/README.md#api-gateway-endpoints)) |
-| SQL | SQL proxy | [principals and mechanism](../../services/notebook_sql_proxy/README.md#database-principals) |
-| Tracking | Tracking gateway | [endpoints and rules](../../services/notebook_tracking_gateway/README.md#endpoints) |
-| Cold history | Cold-store broker | [cold layer](data-and-storage.md#cold-layer) |
-| Model upload | `ml-service-api`, tracking gateway | [model upload](model-upload.md) |
-
-A model a kernel registers is not served until a user with a writing role promotes a version from the
-Models page ([promotion](ml-and-features.md#promotion)). Its drift baseline is the feature sample logged
-in the same run:
-
-```python
-with mlflow.start_run():
-    mlflow.sklearn.log_model(model, name="model", registered_model_name="vpd-regressor")
-    industryflow.log_feature_sample(train[["temp", "humidity"]])  # columns = the feature config's base sensors
-```
-
-Experiments recorded at `mlflow-artifacts:/<id>` (created before the tracking gateway set the
-location) are rewritten by:
-
-```bash
-docker compose exec -T mlflow python - < scripts/migrate_tenant_artifact_locations.py           # dry run
-docker compose exec -T mlflow python - --apply < scripts/migrate_tenant_artifact_locations.py   # write
-```
-
-It rewrites only experiments whose objects are all under the tenant prefix, moves no object, and is
-safe to re-run.
-
-## Deployment profiles
-
-| | Compose (DockerSpawner) | Kubernetes (KubeSpawner) |
-|---|---|---|
-| Environment | Per-user container | Per-user pod |
-| Egress | Network `industryflow-notebook-kernels`, shared with `notebook-hub`, `api-gateway`, `notebook-sql-proxy`, `notebook-tracking-gateway`, `notebook-cold-broker`, `minio` | Single-user egress NetworkPolicy (`networkpolicy.yaml`) |
-| Docker access | Hub in supplementary group `DOCKER_GID` | RBAC for pods and PVCs (`notebook-hub.yaml`) |
-| Enable | [getting started, step 6](../getting-started.md#6-notebooks-optional-profile) | `notebookHub.enabled: true`, `notebookHub.baseUrl: /jupyter/`, `notebookHub.authoringRoles` |
-| Validation | Compose smoke checks the kernel network on every PR | Renders and lints in CI; not run on a cluster |
-
-| Hub service | Does | Token scopes |
-|---|---|---|
-| `idle-culler` | Stops idle servers | `list:users`, `read:users:activity`, `read:servers`, `delete:servers` |
-| `volume-reclaim` | For each deletion awaiting it, deletes the tenant's users from the hub (each spawner's `delete_forever` removes the user's volume or PVC), checks the Docker volume or PVC by the spawner's own name for it and removes any left behind, then records `notebook_volumes` only when none remains; database role `notebook_hub_reclaim_user` ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md) dec 6). Runs when `NOTEBOOK_RECLAIM_DB_PASSWORD` is set | `delete:users` |
-
-## Isolation tests
-
-| Test | Proves | Workflow |
-|---|---|---|
-| `infrastructure/timescaledb/tests/test_tenant_reader_isolation.py` | Reader role cannot read another tenant (ADR-0011 dec 3) | `db-tenant-isolation.yml` |
-| `infrastructure/timescaledb/tests/test_notebook_sql_login_isolation.py` | Proxy login cannot escape its reader role (ADR-0012 dec 4) | `db-tenant-isolation.yml` |
-
-Proxy and gateway tests: their READMEs.
-
-## Not built
-
-| Item |
-|---|
-| Curated Voila dashboard content; locking the analytics server API to render-only |
-| A Kubernetes cluster run of the notebook hub |
-
-## ADR-0011 dec 1
-
-| Element | Form |
-|---|---|
-| Spawn | On demand, one server per user, from the hub's verified identity |
-| Limits | CPU and memory per profile: analytics 0.5 CPU, 1G; authoring 2 CPU, 4G |
-| Ephemerality | DockerSpawner removes the container when its server stops; only `<home>/work` of an authoring user persists ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md)) |
-| Idle reclamation | Hub service `idle-culler` stops servers idle past `NOTEBOOK_IDLE_TIMEOUT_SECONDS` (3600), checked every `NOTEBOOK_CULL_EVERY_SECONDS` (300) |
-
-| Code | Role |
-|---|---|
-| `services/notebook_hub/jupyterhub_config.py::bind_identity_and_profile` | Per-user spawn and its limits |
-| `services/notebook_hub/jupyterhub_config.py::PROFILE_RESOURCES` | CPU and memory per profile |
-| `services/notebook_hub/jupyterhub_config.py::IDLE_TIMEOUT_SECONDS` | Culler timeout; the `idle-culler` service and its scoped token |
-| `services/notebook_hub/requirements.txt` | `jupyterhub-idle-culler` pin |
-| `services/notebook_hub/tests/test_jupyterhub_config.py::test_idle_culler_service_survives` | Proof: the culler service is configured |
 
 ## ADR-0011 dec 3
 
@@ -237,6 +82,15 @@ it for existing schemas. A query on another tenant's schema fails at the grant.
 | `infrastructure/timescaledb/tests/test_tenant_reader_isolation.py::test_reader_cannot_read_another_tenant` | Proof: cross-tenant read refused |
 | `infrastructure/timescaledb/tests/test_tenant_reader_isolation.py::test_reader_cannot_write_its_own_tenant` | Proof: read-only |
 | `.github/workflows/db-tenant-isolation.yml` | Runs the proofs against a real database |
+
+### Isolation tests
+
+| Test | Proves | Workflow |
+|---|---|---|
+| `infrastructure/timescaledb/tests/test_tenant_reader_isolation.py` | Reader role cannot read another tenant (ADR-0011 dec 3) | `db-tenant-isolation.yml` |
+| `infrastructure/timescaledb/tests/test_notebook_sql_login_isolation.py` | Proxy login cannot escape its reader role (ADR-0012 dec 4) | `db-tenant-isolation.yml` |
+
+Proxy and gateway tests: their READMEs.
 
 ## ADR-0011 dec 4
 
@@ -272,6 +126,36 @@ limits, handles and persistence ([profiles](#profiles)). The user is offered no 
 | `scripts/check_model_env_parity.py::KERNEL_DOCKERFILE` | The authoring kernel's pins, held to serving's |
 | `services/notebook_hub/tests/test_identity.py::test_other_roles_get_readonly_analytics` | Proof: an unmapped role gets analytics |
 
+### Profiles
+
+| Profile | Roles (`NOTEBOOK_AUTHORING_ROLES`, default) | Image | Landing | Capability handles | Persistence |
+|---|---|---|---|---|---|
+| `authoring` | `admin`, `engineer` | `NOTEBOOK_IMAGE_AUTHORING` | JupyterLab | api, sql; tracking when `INDUSTRYFLOW_TRACKING_URL` is set; cold when `INDUSTRYFLOW_COLD_BROKER_URL` is set | Per-user volume `NOTEBOOK_VOLUME_TEMPLATE` at `<home>/work`; a PVC on Kubernetes |
+| `analytics` | Every other role | `NOTEBOOK_IMAGE_ANALYTICS` | `/voila` | api | None |
+
+Either image falls back to `NOTEBOOK_IMAGE`. Hub settings:
+[notebook hub](../../services/notebook_hub/README.md#settings).
+
+### Not built
+
+| Item |
+|---|
+| Curated Voila dashboard content; locking the analytics server API to render-only |
+
+## ADR-0011 dec 6
+
+Only the authoring profile is minted a `sql` handle. The kernel sends it as the Postgres password to
+`notebook-sql-proxy`, which opens the upstream session as `tenant_sqlproxy_<uuid>` and `SET ROLE`s into
+`tenant_reader_<uuid>`; the login's password is derived inside the proxy and never reaches the kernel.
+Principals: [ADR-0012 dec 4](#adr-0012-dec-4).
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py::bind_identity_and_profile` | `sql` handle for authoring only |
+| `services/notebook_sql_proxy/proxy.py::serve_connection` | Handle in, tenant session out |
+| `services/notebook_sql_proxy/binding.py::tenant_login_password` | Login password, proxy only |
+| `services/notebook_sql_proxy/binding.py::session_setup_statements` | `SET ROLE` into the reader |
+
 ## ADR-0011 dec 7
 
 | Containment | Compose | Kubernetes |
@@ -288,6 +172,48 @@ limits, handles and persistence ([profiles](#profiles)). The user is offered no 
 | `services/notebook_hub/jupyterhub_config.py` | Spawner security settings |
 | `deploy/helm/industryflow/templates/networkpolicy.yaml` | Single-user egress allowlist |
 | `docker-compose.yml` | Kernel network membership |
+
+## ADR-0011 dec 8
+
+The frontend edge serves the hub at `/jupyter/` of the platform's own origin, through `notebook-sso`;
+neither `notebook-sso` nor `notebook-hub` has a host port. The hub has no login form and no user store:
+`/hub/login` establishes a login from the forwarded identity only when the proxy secret is present
+([ADR-0014 dec 1-3](#adr-0014-dec-1-3)).
+
+| Code | Role |
+|---|---|
+| `services/frontend/nginx.conf.template` | `location /jupyter/` to the SSO proxy |
+| `services/notebook_hub/sso-nginx.conf` | Session check against `/auth/verify` |
+| `services/notebook_hub/jupyterhub_config.py::ProxyHeaderAuthenticator` | Login from the forwarded identity |
+| `docker-compose.yml` | `notebook-sso` and `notebook-hub` without host ports |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_hub_authenticates_from_the_platform_session` | Proof: the hub's authenticator is the forwarded-identity one |
+
+### Request path
+
+```
+browser ─▶ frontend edge /jupyter/ ─▶ notebook-sso ──auth_request──▶ api-gateway GET /auth/verify
+                                          │ X-IF-* identity (client-supplied values overwritten)
+                                          ▼
+                                    notebook-hub ──spawns──▶ per-user environment (profile by role)
+                                          │ mints capability handles
+                                          ▼
+kernel ─▶ api-gateway data API      (X-IF-Capability, audience api)
+       ─▶ notebook-sql-proxy        (audience sql)      ─▶ TimescaleDB as tenant_sqlproxy_<uuid>, SET ROLE tenant_reader_<uuid>
+       ─▶ notebook-tracking-gateway (audience tracking) ─▶ MLflow, tenant-namespaced; artifacts by pre-signed URL
+       ─▶ notebook-cold-broker      (audience cold)     ─▶ pre-signed GETs under tenant_<uuid>/
+```
+
+## ADR-0011 dec 9
+
+An authoring kernel tracks with its own `tracking` handle and `MLFLOW_TRACKING_URI` set to the tracking
+gateway, both only when the hub has `INDUSTRYFLOW_TRACKING_URL`. It holds no tracking-store or
+object-store credential and has no route to MLflow ([ADR-0013 dec 1](#adr-0013-dec-1)). The gateway:
+[ADR-0019 dec 1, 5, 6](#adr-0019-dec-1-5-6).
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py::bind_identity_and_profile` | Tracking handle and URI, authoring only |
+| `services/notebook_tracking_gateway/gateway.py::build_app` | The tenant-confining gateway |
 
 ## ADR-0012 dec 1
 
@@ -320,6 +246,22 @@ kernel network.
 | `clients/python/industryflow/cold.py::IndustryFlowCold` | Cold client, handle only |
 | `services/notebook_cold_broker/broker.py` | Pre-signed GETs for the handle's tenant |
 | `services/notebook_hub/tests/test_identity.py::test_pod_environment_carries_identity_not_credentials` | Proof: no credential in the identity environment |
+
+## ADR-0012 dec 3
+
+Every profile is minted an `api` handle. The kernel sends it in `X-IF-Capability`, a header apart from
+the session cookie. The API gateway reads that header in `resolve_tenant_context` only, used by the
+measurement, aggregation and training-data routers: a request with no session resolves the handle for
+audience `api`, takes user and tenant from the entry, and runs read-only; no handle, or one that does
+not resolve, is 401.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/dependencies.py::CAPABILITY_HEADER` | `X-IF-Capability` |
+| `services/api_gateway/dependencies.py::resolve_tenant_context` | Session, else the `api` handle |
+| `services/api_gateway/capability_auth.py::resolve_capability_outcome` | Audience-checked resolution |
+| `services/api_gateway/routers/measurements.py` | A data route that accepts the handle |
+| `services/api_gateway/tests/test_capability_auth.py::test_wrong_audience_denies` | Proof: another audience's handle is refused |
 
 ## ADR-0012 dec 4
 
@@ -390,19 +332,39 @@ them. The kernel reaches the artifact store only by a gateway-signed URL.
 ## ADR-0013 dec 2, 3
 
 The tracking gateway scopes every tracking, registry and artifact operation to the caller's tenant.
+Routes, rules and settings: [tracking gateway](../../services/notebook_tracking_gateway/README.md#endpoints).
 
 | Code | Role |
 |---|---|
-| `services/notebook_tracking_gateway` | The tenant-scoping gateway |
+| `services/notebook_tracking_gateway/gateway.py::build_app` | The tenant-scoping gateway |
+| `services/notebook_tracking_gateway/routes.py::ROUTES` | Default-deny route table and each route's tenant rule |
+| `services/notebook_tracking_gateway/policy.py::scope_artifact_key` | Artifact key under the tenant prefix |
 
 ## ADR-0013 dec 4
 
 Experiments are read through the product, never the tracking server's own UI.
 
+| Frontend page | Shows | Source |
+|---|---|---|
+| `/experiments` | The tenant's experiments and their runs (params, metrics, status, the registered model a run became), read-only, from `/api/experiments` | `services/frontend/src/pages/Experiments.jsx` |
+
 | Code | Role |
 |---|---|
 | `services/ml_service/api/routers/experiments.py` | Tenant-scoped experiment read |
 | `services/frontend/src/pages/Experiments.jsx` | Experiments page |
+
+## ADR-0013 dec 5
+
+One MLflow server, one backend database (`mlflow`) and one artifact bucket (`TRACKING_ARTIFACT_BUCKET`,
+`mlflow` in Compose) serve every tenant. Tenants are kept apart inside them by the name prefix
+`tenant_<uuid>.` and the artifact key prefix `tenant_<uuid>/`. A server, backend or bucket per tenant
+is not built.
+
+| Code | Role |
+|---|---|
+| `docker-compose.yml` | The one MLflow server, its backend and bucket |
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::mlflow_name_prefix` | Tenant name prefix |
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::mlflow_artifact_prefix` | Tenant artifact prefix |
 
 ## ADR-0014 dec 1-3
 
@@ -447,6 +409,22 @@ session check and removes them from the Cookie header it sends to the hub and th
 | `deploy/helm/industryflow/templates/notebook-hub.yaml` | Kubernetes: the same |
 | `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_proxy_sends_the_hub_no_platform_cookie` | Proof: no platform cookie reaches the hub |
 
+## ADR-0014 dec 6
+
+The hub is mounted under `/jupyter/` (`NOTEBOOK_BASE_URL`) of the platform's origin, behind the
+frontend edge ([ADR-0011 dec 8](#adr-0011-dec-8)). The hub and every single-user server send
+`Content-Security-Policy: frame-ancestors 'self'`.
+
+| Frontend page | Shows | Source |
+|---|---|---|
+| `/notebooks` | `/jupyter/` in an iframe: the role's profile ([profiles](#profiles)), so the `analytics` landing for every role not mapped to authoring; framed under the platform's own origin | `services/frontend/src/pages/Notebooks.jsx` |
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py::_FRAME_CSP` | Framing by the same origin only, hub and single-user servers |
+| `services/frontend/nginx.conf.template` | `/jupyter/` on the platform origin |
+| `services/frontend/src/pages/Notebooks.jsx` | The embedding page |
+
 ## ADR-0014 dec 7
 
 Platform sign-out signs out of the hub first.
@@ -472,13 +450,45 @@ resolves `tracking` and `upload` separately and applies upload admission to `upl
 | `services/notebook_hub/tests/test_capabilities.py` | Proof: a handle resolves for its own audience only |
 | `services/notebook_tracking_gateway/tests/test_upload_audience.py` | Proof: tracking and upload handles do not cross |
 
+### Audiences
+
+| Audience | Redeemed by | Read-only |
+|---|---|---|
+| `api` | `services/api_gateway/capability_auth.py` | yes |
+| `sql` | `services/notebook_sql_proxy/binding.py` | yes |
+| `tracking` | `services/notebook_tracking_gateway/` | no |
+| `cold` | `services/notebook_cold_broker/` | yes |
+
+### Handle lifecycle
+
+| Event | Effect |
+|---|---|
+| Spawn | Handles of an earlier run of the server are revoked; one handle per audience is minted with lifetime `NOTEBOOK_CAPABILITY_TTL_SECONDS` and recorded in `nbcap-user:<user>` |
+| Spawner poll, server healthy | Lifetime extended |
+| Server stops (user, culler, hub logout) | `post_stop_hook` revokes its handles |
+| Platform logout | The frontend logs out of the hub first (`shutdown_on_logout` stops the server); `/auth/logout` revokes all the user's handles; a server whose handles are all revoked stops at its next poll |
+| Login (`/hub/login`) | Refused (401) unless `X-IF-SSO-Proxy-Secret` matches `NOTEBOOK_SSO_PROXY_SECRET` |
+| Hub request after `NOTEBOOK_AUTH_REFRESH_SECONDS`, and before a spawn | Hub login compared with the forwarded identity (identity headers without the proxy secret count as none): a different user ends the login; the same user with another tenant or role ends it and stops their servers |
+| Open SQL session | Re-checked every `SQL_PROXY_REVALIDATE_SECONDS`; closed once the handle is revoked |
+
+### Planes
+
+| Plane | Mediator | Detail |
+|---|---|---|
+| Data API | `api-gateway` | Read endpoints accept an `api` handle and run read-only ([endpoints](../api/README.md#api-gateway-endpoints)) |
+| SQL | SQL proxy | [principals and mechanism](../../services/notebook_sql_proxy/README.md#database-principals) |
+| Tracking | Tracking gateway | [endpoints and rules](../../services/notebook_tracking_gateway/README.md#endpoints) |
+| Cold history | Cold-store broker | [cold layer](data-and-storage.md#cold-layer) |
+| Model upload | `ml-service-api`, tracking gateway | [model upload](model-upload.md) |
+
 ## ADR-0015 dec 5, 6
 
 The SQL proxy resolves the handle and opens the upstream session as the tenant's confined login identity.
 
 | Code | Role |
 |---|---|
-| `services/notebook_sql_proxy` | The SQL proxy |
+| `services/notebook_sql_proxy/proxy.py::serve_connection` | One upstream session per kernel connection |
+| `services/notebook_sql_proxy/binding.py::session_setup_statements` | The session's role |
 
 ## ADR-0015 dec 7, 8
 
@@ -502,13 +512,44 @@ The SQL proxy resolves the handle and opens the upstream session as the tenant's
 
 ## ADR-0018 dec 1
 
-Configuration selects the Docker or the Kubernetes spawner (see Deployment profiles).
+Configuration selects the Docker or the Kubernetes spawner (`NOTEBOOK_SPAWNER`, [deployment profiles](#deployment-profiles)).
 
 | Code | Role |
 |---|---|
-| `services/notebook_hub/jupyterhub_config.py` | Spawner selection |
+| `services/notebook_hub/jupyterhub_config.py::SPAWNER` | Spawner selection |
 | `docker-compose.yml` | Docker spawner deployment |
-| `deploy/helm/industryflow` | Kubernetes spawner deployment |
+| `deploy/helm/industryflow/templates/notebook-hub.yaml` | Kubernetes spawner deployment |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_both_spawner_profiles_load` | Proof: both profiles load |
+
+### Deployment profiles
+
+| | Compose (DockerSpawner) | Kubernetes (KubeSpawner) |
+|---|---|---|
+| Environment | Per-user container | Per-user pod |
+| Egress | Network `industryflow-notebook-kernels`, shared with `notebook-hub`, `api-gateway`, `notebook-sql-proxy`, `notebook-tracking-gateway`, `notebook-cold-broker`, `minio` | Single-user egress NetworkPolicy (`networkpolicy.yaml`) |
+| Docker access | Hub in supplementary group `DOCKER_GID` | RBAC for pods and PVCs (`notebook-hub.yaml`) |
+| Enable | [getting started, step 6](../getting-started.md#6-notebooks-optional-profile) | `notebookHub.enabled: true`, `notebookHub.baseUrl: /jupyter/`, `notebookHub.authoringRoles` |
+| Validation | Compose smoke checks the kernel network on every PR | Renders and lints in CI; not run on a cluster |
+
+### Not built
+
+| Item |
+|---|
+| A Kubernetes cluster run of the notebook hub |
+
+## ADR-0018 dec 2
+
+Identity, profile, limits, handles and their lifecycle are set above the spawner: the same
+`bind_identity_and_profile` is the `pre_spawn_hook` of both spawners, the same capability lifecycle
+wraps both spawner classes, and `post_stop_hook` revokes for either. Only how labels, volumes and
+security settings are attached differs per spawner.
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py::bind_identity_and_profile` | One spawn hook for both spawners |
+| `services/notebook_hub/jupyterhub_config.py::with_capability_lifecycle` | One lifecycle for both spawner classes |
+| `services/notebook_hub/jupyterhub_config.py::revoke_server_capabilities` | Revocation at stop, either spawner |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_capability_minting_hook_is_wired` | Proof: both spawners mint through the hook |
 
 ## ADR-0018 dec 3, 4
 
@@ -538,11 +579,43 @@ surface.
 
 ## ADR-0019 dec 1, 5, 6
 
-The kernel reaches tracking only through the gateway, which namespaces every operation and presigns artifact transfers.
+The kernel reaches tracking only through the gateway, which namespaces every operation and presigns
+artifact transfers. Routes, rules and settings:
+[tracking gateway](../../services/notebook_tracking_gateway/README.md#endpoints).
 
 | Code | Role |
 |---|---|
-| `services/notebook_tracking_gateway` | Tracking gateway |
+| `services/notebook_tracking_gateway/gateway.py::build_app` | Tracking gateway |
+| `services/notebook_tracking_gateway/routes.py::ROUTES` | Forwarded routes, default deny |
+| `services/notebook_tracking_gateway/policy.py::experiment_artifact_location` | Tenant-prefixed artifact location of a new experiment |
+
+### Artifact location migration
+
+Experiments recorded at `mlflow-artifacts:/<id>` (created before the tracking gateway set the
+location) are rewritten by:
+
+```bash
+docker compose exec -T mlflow python - < scripts/migrate_tenant_artifact_locations.py           # dry run
+docker compose exec -T mlflow python - --apply < scripts/migrate_tenant_artifact_locations.py   # write
+```
+
+It rewrites only experiments whose objects are all under the tenant prefix, moves no object, and is
+safe to re-run.
+
+## ADR-0019 dec 2, 3
+
+`tracking` is an audience of its own: a `tracking` entry resolves at the tracking gateway only, and the
+gateway resolves no other audience as tracking. The spawn hook mints it for the authoring profile only,
+and only when `INDUSTRYFLOW_TRACKING_URL` is set; the kernel holds no minting credential
+([ADR-0012 dec 1](#adr-0012-dec-1)).
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/capabilities.py::AUDIENCE_TRACKING` | The audience |
+| `services/notebook_tracking_gateway/policy.py::AUDIENCE_TRACKING` | The gateway's copy |
+| `services/notebook_hub/jupyterhub_config.py::bind_identity_and_profile` | Minted for authoring only |
+| `services/notebook_hub/tests/test_capabilities.py::test_tracking_audience_is_read_write_and_distinct` | Proof: a tracking handle resolves for tracking only |
+| `services/notebook_tracking_gateway/tests/test_policy.py::test_non_tracking_audience_denied` | Proof: another audience's handle is refused at the gateway |
 
 ## ADR-0019 dec 4
 
@@ -563,25 +636,113 @@ Trusted platform code reads the tracking server directly.
 
 | Code | Role |
 |---|---|
-| `services/ml_service/api/routers` | Platform read paths |
+| `services/ml_service/api/routers/experiments.py` | Experiments and runs, session-scoped |
+| `services/ml_service/api/routers/registered_models.py` | Registered models, session-scoped |
+| `services/ml_service/api/mlflow_namespace.py` | Tenant name rule of the read paths |
+
+## ADR-0019 dec 8, 9
+
+A `tracking` entry holds the same bound facts as every entry ([ADR-0012 dec 5](#adr-0012-dec-5)); the
+object-store principal is the gateway's (`TRACKING_S3_*`). The route table forwards experiment, run,
+logging, registered-model and model-version routes, each under its tenant rule, so an authoring kernel
+logs runs, reads its runs and registers model versions in its own namespace; every other route is 403.
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/capabilities.py::mint` | Entry of bound facts only |
+| `services/notebook_hub/tests/test_capabilities.py::test_store_holds_no_database_secret` | Proof: no secret in an entry |
+| `services/notebook_tracking_gateway/routes.py::ROUTES` | What an authoring kernel may call |
+| `services/notebook_tracking_gateway/tests/test_route_ownership.py::test_routes_without_a_rule_are_refused_and_never_forwarded` | Proof: unlisted routes refused |
+| `services/notebook_tracking_gateway/tests/test_route_ownership.py::test_registry_writes_cannot_name_another_tenants_model` | Proof: registry writes stay in the tenant |
 
 ## ADR-0020 dec 1, 2
 
 An authoring server mounts one per-user volume at its work subdirectory; idle servers are culled.
+
+| Hub service | Does | Token scopes |
+|---|---|---|
+| `idle-culler` | Stops idle servers | `list:users`, `read:users:activity`, `read:servers`, `delete:servers` |
 
 | Code | Role |
 |---|---|
 | `services/notebook_hub/jupyterhub_config.py` | Volume mount and culler |
 | `services/notebook_hub/Dockerfile.authoring` | Authoring image home layout |
 
+## ADR-0020 dec 3
+
+Handles exist only in the spawned server's environment. They are not written to the work volume, and
+every spawn revokes the previous run's handles and mints new ones ([ADR-0012 dec 1](#adr-0012-dec-1)).
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py::bind_identity_and_profile` | Handles into the environment; the volume mounted at `<home>/work` only |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_a_respawn_revokes_what_the_previous_run_still_held` | Proof: a respawn replaces the handles |
+
+## ADR-0020 dec 4
+
+The hub configures no `admin_users`, and its login handler's auth model carries no `admin` field, so no
+platform role, `admin` included, is a hub administrator. Servers start on a visit and stop by the user,
+the culler or sign-out; a deleted tenant's users are removed by `volume-reclaim`.
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py::_ProxyHeaderLoginHandler` | Hub user from the forwarded identity, never an admin |
+
+## ADR-0020 dec 5
+
+| | Compose (DockerSpawner) | Kubernetes (KubeSpawner) |
+|---|---|---|
+| Volume | Named volume `NOTEBOOK_VOLUME_TEMPLATE` | PVC `NOTEBOOK_VOLUME_TEMPLATE`, `NOTEBOOK_STORAGE_CAPACITY` (2Gi), ensured at spawn |
+| Mount | `<home>/work` | `<home>/work` |
+| Ownership | `work/` created in the image, owned by uid 1000 | The same; `fs_gid` 1000 |
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py::NB_WORK_DIR` | The one mount path |
+| `services/notebook_hub/jupyterhub_config.py::NB_VOLUME_TEMPLATE` | The one volume name |
+| `services/notebook_hub/Dockerfile.authoring` | `work/` owned by the non-root user |
+
 ## ADR-0020 dec 6
 
 The hub removes a deleted tenant's volumes and records the reclaim.
+
+| Hub service | Does | Token scopes |
+|---|---|---|
+| `volume-reclaim` | For each deletion awaiting it, deletes the tenant's users from the hub (each spawner's `delete_forever` removes the user's volume or PVC), checks the Docker volume or PVC by the spawner's own name for it and removes any left behind, then records `notebook_volumes` only when none remains; database role `notebook_hub_reclaim_user`. Runs when `NOTEBOOK_RECLAIM_DB_PASSWORD` is set | `delete:users` |
 
 | Code | Role |
 |---|---|
 | `services/notebook_hub/reclaim.py` | Volume reclaim |
 | `services/notebook_hub/tests/test_reclaim_docker_live.py` | Removal against a real Docker daemon |
+
+## ADR-0025 dec 5
+
+An authoring kernel gets a `cold` handle when the hub has `INDUSTRYFLOW_COLD_BROKER_URL`. The broker
+resolves it to one tenant and returns pre-signed GETs under that tenant's cold prefix. Layout and
+export: [cold layer](data-and-storage.md#cold-layer).
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py::bind_identity_and_profile` | `cold` handle for authoring only |
+| `services/notebook_cold_broker/broker.py::build_app` | Pre-signed GETs |
+| `services/notebook_cold_broker/policy.py::scope_key` | Key under the tenant prefix |
+| `clients/python/industryflow/cold.py::IndustryFlowCold` | Kernel client |
+
+## ADR-0040 dec 1, 4
+
+A model a kernel registers is not served until a user with a writing role promotes a version from the
+Models page ([promotion](ml-and-features.md#promotion)). Its drift baseline is the feature sample logged
+in the same run:
+
+```python
+with mlflow.start_run():
+    mlflow.sklearn.log_model(model, name="model", registered_model_name="vpd-regressor")
+    industryflow.log_feature_sample(train[["temp", "humidity"]])  # columns = the feature config's base sensors
+```
+
+| Code | Role |
+|---|---|
+| `clients/python/industryflow/drift.py::log_feature_sample` | Logs the sample from the kernel |
 
 ## ADR-0042 dec 1-3, 5
 
@@ -591,9 +752,38 @@ Each plane appends its event to the stream in the same step as the store change.
 |---|---|
 | `libs/industryflow_contracts/industryflow_contracts/capability_audit.py` | Event contract |
 
+### Capability-use record
+
+Planes append events to the stream `nbcap-audit` in the capability store, atomically with the store
+change they describe; the API gateway's writer (`services/api_gateway/messaging/capability_audit_drain.py`,
+consumer group `capability-audit-writer`) drains it into `public.capability_use_events` through
+`record_capability_use()`. Contract: `libs/industryflow_contracts/industryflow_contracts/capability_audit.py`.
+
+| Event | Recorded by | When |
+|---|---|---|
+| `minted` | hub, ml-service (upload) | With the mint, in one transaction |
+| `first_use` | each plane that redeems a handle | Its first use of the handle (marker `nbcap-audit-seen:<plane>:<handle_id>`, 7 days) |
+| `refused` | each plane that redeems a handle | A refusal naming a real entry: once per `handle_id`, plane and reason per 5 minutes (`nbcap-audit-repeat:`), the rest counted (`nbcap-audit-repeats:`, 7 days) into the next record's `suppressed`. A value naming none: once per plane and digest per hour (`nbcap-audit-refused:`), at most 60 per plane and source address per minute (`nbcap-audit-source:`), `detail` = `source=<address>` |
+| `revoked` | hub, API gateway (logout), tenant delete | With the removal, only if it removed a live entry |
+| `consumed` | tracking gateway (upload) | With the claim of a single-use upload handle |
+| `environment_started`, `environment_stopped` | hub | Server spawn and stop |
+| `sql_session_opened`, `sql_session_closed` | SQL proxy | Session start and end, once per `handle_id` and kind per 5 minutes, the rest counted like a refusal's; none for a handle with no `handle_id`; statements are not recorded |
+
+| Column | Meaning |
+|---|---|
+| `handle_id` | Non-secret identifier bound into the handle's entry at mint; a handle minted before the record has none |
+| `digest` | First 16 hex of SHA-256 of a presented value that named no entry; absent otherwise |
+| `reason`, `detail` | Why it was refused, revoked or closed; the server or session |
+| `suppressed` | How many of the same event the entry repeated, unrecorded, since its last record |
+| Source address | The client address the edge reported (`X-Real-IP`) when the peer is one of `EDGE_PROXY_PEERS`; the connecting peer otherwise |
+
 ## ADR-0042 dec 4, 6
 
 One writer drains the stream into the audit table through a privileged function.
+
+| Read | Who |
+|---|---|
+| `GET /api/capability-use?company_id=&handle_id=&since=&before_id=&limit=` | Superuser: any tenant or all; tenant `admin`: their own tenant only |
 
 | Code | Role |
 |---|---|
@@ -601,8 +791,14 @@ One writer drains the stream into the audit table through a privileged function.
 
 ## ADR-0042 dec 7
 
-Every append trims the stream to about 100 000 entries; the writer deletes what it has written. The
-backlog and its alerts: [capability-use record](#capability-use-record).
+Every append trims the stream to about 100 000 entries; the writer deletes what it has written.
+
+| Metric / alert | Meaning |
+|---|---|
+| `capability_audit_backlog` | Events in the stream not yet written (written ones are deleted from it) |
+| `capability_audit_events_total{result}` | `written`, `unreadable` (skipped), `refused` (by the database, skipped), `retry` |
+| `IndustryFlowCapabilityAuditBacklog` | Backlog above 1000 for 15m ([monitoring](../operations/monitoring.md)) |
+| `IndustryFlowCapabilityEventsDropped` | An `unreadable` or `refused` event in 15m ([monitoring](../operations/monitoring.md)) |
 
 | Code | Role |
 |---|---|
@@ -624,6 +820,10 @@ backlog and its alerts: [capability-use record](#capability-use-record).
 
 The source address is `X-Real-IP` when the peer is in `EDGE_PROXY_PEERS`, the connecting peer otherwise.
 
+| Setting | Default | Meaning |
+|---|---|---|
+| `EDGE_PROXY_PEERS` (API gateway, tracking gateway) | compose `frontend`; Helm empty | The edge's addresses, networks or host names. Only addresses no kernel can hold: on Kubernetes not the pod network (kernel pods share it) and not a Service name (its ClusterIP is never the peer); empty is safe |
+
 | Code | Role |
 |---|---|
 | `libs/industryflow_contracts/industryflow_contracts/capability_audit.py::REPEAT_SCRIPT` | Per-entry window and count |
@@ -644,6 +844,10 @@ The source address is `X-Real-IP` when the peer is in `EDGE_PROXY_PEERS`, the co
 The writer calls `expire_capability_use(CAPABILITY_AUDIT_RETENTION_DAYS)` hourly (default 365); the
 function refuses fewer than 30 days, whoever calls it.
 
+| Setting (API gateway) | Default | Meaning |
+|---|---|---|
+| `CAPABILITY_AUDIT_RETENTION_DAYS` | `365` | Rows older are expired hourly by `expire_capability_use()`; the database refuses fewer than 30 |
+
 | Code | Role |
 |---|---|
 | `infrastructure/timescaledb/init-scripts/31-capability-audit.sql::expire_capability_use` | Expiry with the floor |
@@ -651,3 +855,5 @@ function refuses fewer than 30 days, whoever calls it.
 | `deploy/helm/industryflow/values.yaml` | Retention setting |
 | `docker-compose.yml` | Retention setting |
 | `infrastructure/timescaledb/tests/test_capability_audit.py::test_retention_removes_only_what_is_older_than_its_period_and_never_under_the_floor` | Proof: period and floor |
+
+Links: [database TLS](../operations/tls.md) ([ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md), `verify-full`).

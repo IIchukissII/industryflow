@@ -57,4 +57,4 @@ then has to be made twice, and the copy no caller exercises is the one that drif
 
 ## References
 
-- [Alerting](../docs/architecture/alerting.md): manual of decisions 1, 2.
+- [Alerting](../docs/architecture/alerting.md): manual of decisions 1-3.

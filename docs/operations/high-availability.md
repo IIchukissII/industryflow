@@ -5,11 +5,11 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # High availability and resilience
 
-Disruption budgets, spreading and autoscaling of the stateless tier in the Helm chart, and the
-single instances of the stateful backends. Packaging and the deferred stateful-operator decision:
-[ADR-0009](../../ADR/ADR-0009-kubernetes-deployment-packaged-with-helm.md).
+The manual of [ADR-0009](../../ADR/ADR-0009-kubernetes-deployment-packaged-with-helm.md): disruption budgets, spreading and autoscaling of the stateless tier in the Helm chart, and the single instances of the stateful backends.
 
-## Stateless tier (Helm)
+## ADR-0009 dec 2
+
+### Stateless tier (Helm)
 
 | Mechanism | Values | Behaviour |
 |---|---|---|
@@ -36,7 +36,14 @@ lag-based autoscaler; KEDA on `kafka_consumergroup_lag` (kafka-exporter,
 [ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md)) is a cluster add-on.
 Consumer parallelism is bounded by the topic's partition count.
 
-## Stateful backends
+| Code | Role |
+|---|---|
+| `deploy/helm/industryflow/templates/apps.yaml` | PodDisruptionBudget, anti-affinity and HorizontalPodAutoscaler per app |
+| `deploy/helm/industryflow/values.yaml` | `resilience.*`, `apps.<name>.replicas`, `apps.<name>.hpa` |
+
+## ADR-0009 dec 3
+
+### Stateful backends
 
 Each runs as one instance in both Compose and the chart.
 
@@ -48,3 +55,10 @@ Each runs as one instance in both Compose and the chart.
 | MinIO | Single | Distributed MinIO with erasure coding, or managed S3 |
 | Spark (Compose) | Master + worker pool (`SPARK_WORKER_REPLICAS` or `--scale spark-worker=N`) | Shared S3A checkpoint ([checkpoints](../architecture/stream-processing.md#checkpoints)) |
 | Spark (Helm) | One driver per job, local mode | Checkpoint on the object store ([checkpoints](../architecture/stream-processing.md#checkpoints)) |
+
+| Code | Role |
+|---|---|
+| `deploy/helm/industryflow/templates/infra-timescaledb.yaml` | Single-primary database StatefulSet |
+| `deploy/helm/industryflow/templates/infra-kafka.yaml` | Single ZooKeeper and single broker StatefulSets |
+| `deploy/helm/industryflow/templates/infra-redis.yaml` | Single key-value store StatefulSet |
+| `deploy/helm/industryflow/templates/infra-minio.yaml` | Single object store StatefulSet |

@@ -5,16 +5,33 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Device ingestion over mTLS
 
-Device authentication to ingestion with client certificates from the Device CA, and operation of the
-CA, enrollment, revocation and CRL refresh. The browser-facing server certificate is a separate PKI
-([TLS](tls.md)).
+The manual of [ADR-0002](../../ADR/ADR-0002-ingestion-authentication-and-device-identity.md), [ADR-0007](../../ADR/ADR-0007-device-certificate-authority.md): device authentication to ingestion with client certificates from the Device CA, and the CA's enrollment, revocation, CRL refresh and expiry watch.
 
-| Decision | ADR |
+## ADR-0002 dec 1
+
+| Trust domain | Mechanism | Manual |
+|---|---|---|
+| Device ingestion | Client certificate from the Device CA, verified by the ingestion edge | This page |
+| HTTP API | JWT access token | [Authentication](authentication.md) |
+
+The ingestion service holds no JWT secret; its write routes depend only on the edge-verified certificate.
+
+| Code | Role |
 |---|---|
-| mTLS, device identity | [ADR-0002](../../ADR/ADR-0002-ingestion-authentication-and-device-identity.md) |
-| Device CA, CRL | [ADR-0007](../../ADR/ADR-0007-device-certificate-authority.md) |
+| `services/ingestion_edge/nginx.conf` | `ssl_verify_client on` on the device listener |
+| `services/ingestion_service/dependencies.py::get_ingestion_identity` | The only identity of an ingested write |
+| `services/api_gateway/users.py::CompanyClaimJWTStrategy` | JWT for the HTTP API |
 
-## Request path
+## ADR-0002 dec 2, 3, 5
+
+The edge verifies the client certificate and forwards the verified identity in headers it overwrites; the ingestion service reads tenant and device only from those headers.
+
+| Code | Role |
+|---|---|
+| `services/ingestion_edge/nginx.conf` | mTLS termination and identity headers |
+| `services/ingestion_service/dependencies.py::get_ingestion_identity` | Identity parsing from the edge headers |
+
+### Request path
 
 ```
 device ──mTLS (client cert)──▶ ingestion edge ──verified cert──▶ ingestion-service ──▶ Kafka
@@ -37,7 +54,27 @@ request carrying the other one's headers.
 | Compose | `ingestion-edge` (nginx, host port `INGESTION_MTLS_PORT`) | `x-client` | `X-Client-Verify`, `X-Client-Cert` |
 | Kubernetes | ingress-nginx, second Ingress (`ingress.mtls.enabled`) | `ssl-client` | `ssl-client-verify`, `ssl-client-cert` |
 
-## CA commands
+## ADR-0002 dec 3, 8
+
+The ingestion service is reachable only from its edge and holds no database role. The edge serves devices `/ingest`, `/health` and `/stats`, never `/metrics`.
+
+| Code | Role |
+|---|---|
+| `docker-compose.yml` | Ingestion service publishes no host port; only the edge does |
+| `deploy/helm/industryflow/templates/networkpolicy.yaml` | Ingestion service reachable only from the edge |
+| `deploy/helm/industryflow/templates/ingress.yaml` | Device Ingress routes only the device paths, each `Exact` |
+| `services/ingestion_edge/nginx.conf` | Compose edge: the same paths, exact; any other answers 404 |
+| `tests/config_guards/test_device_edge_paths.py` | Proof: both edges serve the same device paths |
+
+## ADR-0002 dec 4
+
+IndustryFlow runs the Device CA with `scripts/device-ca.sh`; its hierarchy, issuance, lifetime and revocation are the [ADR-0007](../../ADR/ADR-0007-device-certificate-authority.md) sections below.
+
+| Code | Role |
+|---|---|
+| `scripts/device-ca.sh` | The Device CA: init, issue, revoke, CRL, register, checks |
+
+### CA commands
 
 All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 
@@ -74,7 +111,76 @@ All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 | `CA_CERT_WARN_DAYS` | `90` | Warning window for the intermediate and root certificates (`check`) |
 | `CERT_WARN_DAYS` | `14` | Warning window for a device's newest unrevoked certificate (`check-certs`) |
 
-## Enrollment
+## ADR-0002 dec 5, 7
+
+A reading's body carries no tenant; producers present a device certificate from the device CA and verify the edge.
+
+| Code | Role |
+|---|---|
+| `libs/industryflow_contracts/industryflow_contracts/readings.py` | The reading's shape, the clock-skew bound, the device side of mutual TLS |
+| `clients/device/stream_readings.py` | Sample device |
+| `tests/performance/loadgen.py` | Load generator |
+| `tests/e2e/harness.py::send_reading` | End-to-end journeys' device |
+| `services/ingestion_service/tests/test_schemas.py::test_the_readings_contract_is_what_ingestion_accepts` | Proof: ingestion accepts the contract's reading |
+| `clients/device/tests/test_stream_readings.py` | Proof: the sample device over real mutual TLS, both refusals |
+
+## ADR-0002 dec 6
+
+The ingestion service parses the tenant from the certificate's URI SAN and canonicalises it as a UUID before it routes the write; a tenant that is no UUID is refused with 403.
+
+| Code | Role |
+|---|---|
+| `services/ingestion_service/dependencies.py::_identity_from_client_cert` | SAN parse and UUID validation |
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::canonical_company_id` | Canonical UUID form, `ValueError` otherwise |
+| `services/ingestion_service/tests/test_ingestion_auth.py::test_non_uuid_tenant_is_forbidden` | Proof: a non-UUID tenant is refused |
+
+## ADR-0007 dec 1
+
+| Tier | Key | Signs | Validity |
+|---|---|---|---|
+| Root | `root/root.key`, RSA 4096; kept offline | The intermediate and the root CRL | `ROOT_DAYS` |
+| Issuing intermediate | `intermediate/intermediate.key`, RSA 4096; `pathlen:0` | Device certificates, the intermediate CRL and the issued register | `INT_DAYS` |
+
+`crl` re-signs only the intermediate's CRL and needs no root key; `root-crl` needs the root key.
+
+| Code | Role |
+|---|---|
+| `scripts/device-ca.sh::cmd_init` | Root and intermediate generation; the verify chain |
+| `scripts/device-ca.sh::cmd_crl` | Routine CRL from the intermediate alone |
+| `scripts/device-ca.sh::cmd_root_crl` | Root CRL at the offline ceremony |
+
+## ADR-0007 dec 2
+
+`issue` with a CSR signs the device's request; the CA host never sees the device key. Without a CSR it generates a key on the CA host, for test producers only.
+
+| Code | Role |
+|---|---|
+| `scripts/device-ca.sh::cmd_issue` | CSR signing; test-mode key generation |
+
+## ADR-0007 dec 3, 5
+
+The CA script issues a URI SAN identity and bounded lifetimes (see [CA commands](#ca-commands)).
+
+| Code | Role |
+|---|---|
+| `scripts/device-ca.sh` | Issuance, lifetimes, identity scheme |
+
+## ADR-0007 dec 4
+
+| Step | Mechanism |
+|---|---|
+| Authorize | The operator names the tenant UUID and device id on `issue` |
+| Bind | The CA writes the SAN from those arguments; the CSR's own extensions are not copied |
+| Store | One directory per tenant and device, one file set per serial |
+
+| Code | Role |
+|---|---|
+| `scripts/device-ca.sh::cmd_issue` | SAN written from the operator's tenant and device |
+| `scripts/device-ca.sh::identity_args` | Tenant UUID and device-id checks |
+| `scripts/device-ca.sh::write_int_cnf` | `copy_extensions = none` on signing |
+| `scripts/tests/test_device_ca.py::test_issue_renew_revoke_cross_tenant` | Proof: the same device id under two tenants is two devices |
+
+### Enrollment
 
 | Rule | Detail |
 |---|---|
@@ -82,32 +188,15 @@ All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 | Real devices | Key generated on the device or secure element; only the CSR reaches the CA |
 | Renewal | Issuing again adds a new serial and moves `current.*`; nothing is overwritten |
 
-## Expiry watch
+## ADR-0007 dec 6
 
-Every approaching expiry is raised in advance, graded by what it refuses ([ADR-0007](../../ADR/ADR-0007-device-certificate-authority.md) dec 10).
+The deployed edge refuses a revoked device certificate.
 
-| Expiring | Refuses | Raised by | Alert | Severity |
-|---|---|---|---|---|
-| A CRL or a CA certificate of the chain | Every device | `check` | `IndustryFlowDeviceCrlStale` | Critical |
-| A device's newest unrevoked certificate | That device | `check-certs` | `IndustryFlowDeviceCertExpiring` | Warning |
-
-Each alert fires when its check has not passed for 13h (two missed six-hourly runs), or has never passed for 13h, on both deployments.
-
-`check-certs` reads only public files: `issued.tsv`, its signature, the CRL bundle and the chain.
-
-| Case | Result |
+| Code | Role |
 |---|---|
-| Register signature does not verify against the intermediate | Error |
-| Register names a CRL number other than the published intermediate CRL's | Error: republish both together |
-| Device renewed (a newer unrevoked certificate is valid beyond the window) | Not raised |
-| Device revoked | Not raised |
-| Every certificate of a device expired | Printed as `expired:`; not raised. Revoke it if it is decommissioned |
-| Newest unrevoked certificate inside `CERT_WARN_DAYS` | `EXPIRING:` line naming tenant and device; non-zero exit |
-| Same `device_id`, two tenants | Two separate devices |
+| `tests/e2e/test_device_revocation.py` | A revoked device refused by the deployed edge |
 
-Sample device against the edge: [getting started, step 5](../getting-started.md#5-stream-test-data).
-
-## Revocation
+### Revocation
 
 `revoke` revokes every still-valid certificate of that tenant's device, renewals included, matched by
 the SAN identity; another tenant's device with the same `device_id` is untouched. `revoke-tenant`
@@ -117,36 +206,30 @@ revokes nothing.
 `issue`, `revoke`, `revoke-tenant` and `crl` each re-sign the intermediate's CRL and rewrite the
 issued register beside it.
 
-### Deleted tenants
+## ADR-0007 dec 7
 
-The `tenant-delete` job records `device_certificates` only when, from the chain, the CRL bundle and
-the issued register (no key), all of these hold
-([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) dec 4):
+The browser-facing server certificate is a separate PKI ([TLS](tls.md)).
 
-| Check | Fails as |
+| Trust direction | Chain | Edge setting |
+|---|---|---|
+| Edge to device (server identity) | Internal CA server certificate | `ssl_certificate` |
+| Device to edge (client identity) | Device CA chain and CRL | `ssl_client_certificate`, `ssl_crl` |
+
+| Code | Role |
 |---|---|
-| The chain is one intermediate signed by its root; the intermediate's CRL and the register verify against it | Job error |
-| The intermediate's CRL has not expired | Job error |
-| The register names the published CRL's number | Waiting |
-| That CRL was signed no earlier than the second the deletion was requested (a CRL's time has one-second resolution) | Waiting |
-| Every unexpired certificate of the tenant in the register is on that CRL | Waiting; the log names the serials |
+| `services/ingestion_edge/nginx.conf` | Server certificate and device trust anchors held apart |
+| `docker-compose.yml` | Server certificate and device CA mounted from separate directories |
 
-An expired certificate needs no revocation. A tenant with no certificate is recorded at once.
+## ADR-0007 dec 8
 
-| Deployment | Operator step |
+The edge re-reads a changed revocation list without a restart.
+
+| Code | Role |
 |---|---|
-| Compose | `scripts/device-ca.sh revoke-tenant <company-uuid>`, then run `tenant-delete` again. The job mounts `ca-chain.crt` and `crl/` read-only |
-| Kubernetes | `revoke-tenant` on the CA host, then publish the Secret with the register (below). The job mounts the Secret at `/etc/industryflow/device-ca` when `ingress.mtls.enabled` |
-
-| Deployment | Takes effect |
-|---|---|
-| Compose | The edge polls the CRL file (`CRL_RELOAD_INTERVAL_SECONDS`, default `60`) and reloads nginx on change |
-| Kubernetes | After the new CRL is published to the device-CA Secret (below) |
-
-## CRL refresh
+| `services/ingestion_edge/40-crl-reload.sh` | Revocation-list reload |
 
 An expired CRL makes the edge refuse every device. Device certificates carry no CRL distribution
-point; the edge holds the CRL locally ([ADR-0007](../../ADR/ADR-0007-device-certificate-authority.md) dec 8).
+point; the edge holds the CRL locally.
 
 | CRL | Lists | Re-signed by | Where |
 |---|---|---|---|
@@ -191,7 +274,7 @@ kubectl -n <namespace> create secret generic industryflow-device-ca \
 | `ingress.mtls.certCheck.warnDays` | `14` | Device-certificate warning window |
 | `ingress.mtls.certCheck.alertAfterSeconds` | `46800` | No successful check for this long (since creation, before the first success) fires `IndustryFlowDeviceCertExpiring` (warning) |
 
-## Troubleshooting
+### Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -204,112 +287,48 @@ kubectl -n <namespace> create secret generic industryflow-device-ca \
 | A deletion waits on `device_certificates` | The tenant's devices are not revoked, or the CRL and register were not republished since the request | `scripts/device-ca.sh revoke-tenant <company-uuid>`; on Kubernetes republish the Secret |
 | `tenant-delete` fails: `No such file` for `issued.tsv` | CA files from before the register | `scripts/device-ca.sh crl`; on Kubernetes republish the Secret |
 
-## ADR-0002 dec 2, 3, 5
+## ADR-0007 dec 9
 
-The edge verifies the client certificate and forwards the verified identity in headers it overwrites; the ingestion service reads tenant and device only from those headers.
-
-| Code | Role |
-|---|---|
-| `services/ingestion_edge` | mTLS termination and identity headers |
-| `services/ingestion_service` | Identity parsing from the edge headers |
-
-## ADR-0002 dec 3, 8
-
-The ingestion service is reachable only from its edge and holds no database role. The edge serves devices `/ingest`, `/health` and `/stats`, never `/metrics`.
+`issue`, `revoke`, `revoke-tenant` and `crl` write the issued register `crl/issued.tsv` beside the intermediate CRL, with its signature `crl/issued.tsv.sig` (see [CA commands](#ca-commands)). `revoke-tenant` revokes a whole tenant.
 
 | Code | Role |
 |---|---|
-| `docker-compose.yml` | Ingestion service publishes no host port; only the edge does |
-| `deploy/helm/industryflow/templates/networkpolicy.yaml` | Ingestion service reachable only from the edge |
-| `deploy/helm/industryflow/templates/ingress.yaml` | Device Ingress routes only the device paths, each `Exact` |
-| `services/ingestion_edge/nginx.conf` | Compose edge: the same paths, exact; any other answers 404 |
-| `tests/config_guards/test_device_edge_paths.py` | Proof: both edges serve the same device paths |
+| `scripts/device-ca.sh::write_register` | Register naming the CRL number, signed with the issuing key |
+| `scripts/device-ca.sh::cmd_revoke_tenant` | Every device of a tenant revoked by one command |
+| `services/tenant_delete/device_certificates.py::DeviceCertificates` | Verifier from public files only |
+| `scripts/tests/test_device_ca.py::test_revoke_tenant_revokes_every_device_of_that_tenant_only` | Proof: one tenant revoked, no other |
+| `services/tenant_delete/tests/test_device_certificates.py::test_an_edited_register_is_refused` | Proof: an edited register is refused |
+| `services/tenant_delete/tests/test_device_certificates.py::test_a_register_of_another_crl_is_waited_on` | Proof: a register of another CRL is waited on |
 
-## ADR-0002 dec 5, 7
+### Deleted tenants
 
-A reading's body carries no tenant; producers present a device certificate from the device CA and verify the edge.
+The `tenant-delete` job records `device_certificates` only when, from the chain, the CRL bundle and
+the issued register (no key), all of these hold
+([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) dec 4):
 
-| Code | Role |
+| Check | Fails as |
 |---|---|
-| `libs/industryflow_contracts/industryflow_contracts/readings.py` | The reading's shape, the clock-skew bound, the device side of mutual TLS |
-| `clients/device/stream_readings.py` | Sample device |
-| `tests/performance/loadgen.py` | Load generator |
-| `tests/e2e/harness.py::send_reading` | End-to-end journeys' device |
-| `services/ingestion_service/tests/test_schemas.py::test_the_readings_contract_is_what_ingestion_accepts` | Proof: ingestion accepts the contract's reading |
-| `clients/device/tests/test_stream_readings.py` | Proof: the sample device over real mutual TLS, both refusals |
+| The chain is one intermediate signed by its root; the intermediate's CRL and the register verify against it | Job error |
+| The intermediate's CRL has not expired | Job error |
+| The register names the published CRL's number | Waiting |
+| That CRL was signed no earlier than the second the deletion was requested (a CRL's time has one-second resolution) | Waiting |
+| Every unexpired certificate of the tenant in the register is on that CRL | Waiting; the log names the serials |
 
-## ADR-0002 dec 6
+An expired certificate needs no revocation. A tenant with no certificate is recorded at once.
 
-The ingestion service parses the tenant from the certificate's URI SAN and canonicalises it as a UUID before it routes the write; a tenant that is no UUID is refused with 403.
-
-| Code | Role |
+| Deployment | Operator step |
 |---|---|
-| `services/ingestion_service/dependencies.py::_identity_from_client_cert` | SAN parse and UUID validation |
-| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::canonical_company_id` | Canonical UUID form, `ValueError` otherwise |
-| `services/ingestion_service/tests/test_ingestion_auth.py::test_non_uuid_tenant_is_forbidden` | Proof: a non-UUID tenant is refused |
+| Compose | `scripts/device-ca.sh revoke-tenant <company-uuid>`, then run `tenant-delete` again. The job mounts `ca-chain.crt` and `crl/` read-only |
+| Kubernetes | `revoke-tenant` on the CA host, then publish the Secret with the register (below). The job mounts the Secret at `/etc/industryflow/device-ca` when `ingress.mtls.enabled` |
 
-## ADR-0007 dec 2
-
-`issue` with a CSR signs the device's request; the CA host never sees the device key. Without a CSR it generates a key on the CA host, for test producers only.
-
-| Code | Role |
+| Deployment | Takes effect |
 |---|---|
-| `scripts/device-ca.sh::cmd_issue` | CSR signing; test-mode key generation |
-
-## ADR-0007 dec 3, 5
-
-The CA script issues a URI SAN identity and bounded lifetimes (see CA commands).
-
-| Code | Role |
-|---|---|
-| `scripts/device-ca.sh` | Issuance, lifetimes, identity scheme |
-
-## ADR-0007 dec 4
-
-| Step | Mechanism |
-|---|---|
-| Authorize | The operator names the tenant UUID and device id on `issue` |
-| Bind | The CA writes the SAN from those arguments; the CSR's own extensions are not copied |
-| Store | One directory per tenant and device, one file set per serial |
-
-| Code | Role |
-|---|---|
-| `scripts/device-ca.sh::cmd_issue` | SAN written from the operator's tenant and device |
-| `scripts/device-ca.sh::identity_args` | Tenant UUID and device-id checks |
-| `scripts/device-ca.sh::write_int_cnf` | `copy_extensions = none` on signing |
-| `scripts/tests/test_device_ca.py::test_issue_renew_revoke_cross_tenant` | Proof: the same device id under two tenants is two devices |
-
-## ADR-0007 dec 6
-
-The deployed edge refuses a revoked device certificate.
-
-| Code | Role |
-|---|---|
-| `tests/e2e/test_device_revocation.py` | A revoked device refused by the deployed edge |
-
-## ADR-0007 dec 7
-
-| Trust direction | Chain | Edge setting |
-|---|---|---|
-| Edge to device (server identity) | Internal CA server certificate | `ssl_certificate` |
-| Device to edge (client identity) | Device CA chain and CRL | `ssl_client_certificate`, `ssl_crl` |
-
-| Code | Role |
-|---|---|
-| `services/ingestion_edge/nginx.conf` | Server certificate and device trust anchors held apart |
-| `docker-compose.yml` | Server certificate and device CA mounted from separate directories |
-
-## ADR-0007 dec 8
-
-The edge re-reads a changed revocation list without a restart (see CRL refresh).
-
-| Code | Role |
-|---|---|
-| `services/ingestion_edge/40-crl-reload.sh` | Revocation-list reload |
+| Compose | The edge polls the CRL file (`CRL_RELOAD_INTERVAL_SECONDS`, default `60`) and reloads nginx on change |
+| Kubernetes | After the new CRL is published to the device-CA Secret (below) |
 
 ## ADR-0007 dec 10
 
-The expiry watch is described under Expiry watch. `check` fails on a CRL or a CA certificate of the chain inside its window; `check-certs` fails on a device whose newest unrevoked certificate is inside `CERT_WARN_DAYS`, after verifying the register's signature and that it names the published CRL.
+`check` fails on a CRL or a CA certificate of the chain inside its window; `check-certs` fails on a device whose newest unrevoked certificate is inside `CERT_WARN_DAYS`, after verifying the register's signature and that it names the published CRL.
 
 | Lane | Watch | Raised as |
 |---|---|---|
@@ -320,7 +339,8 @@ The expiry watch is described under Expiry watch. `check` fails on a CRL or a CA
 |---|---|
 | `scripts/device-ca.sh::cmd_check` | CRL and CA-certificate expiry |
 | `scripts/device-ca.sh::cmd_check_certs` | Device renewal owed, from public files only |
-| `deploy/helm/industryflow/files/device-ca.sh` | The same script for the cluster jobs |
+| `scripts/device-ca.sh` | The same script for the cluster jobs; the chart's `files/device-ca.sh` links to it |
+| `deploy/helm/industryflow/templates/cronjob-device-crl-check.yaml` | CRL and CA-certificate watch job |
 | `deploy/helm/industryflow/templates/cronjob-device-cert-check.yaml` | Device-certificate watch job |
 | `deploy/helm/industryflow/templates/observability-prometheusrules.yaml` | Graded alert rules |
 | `deploy/helm/industryflow/values.yaml` | Watch schedules, windows and alert delays |
@@ -332,3 +352,28 @@ The expiry watch is described under Expiry watch. `check` fails on a CRL or a CA
 | `scripts/tests/test_device_ca.py::test_check_certs_reports_an_expired_device_without_failing` | Proof: an expired device is reported, not raised |
 | `scripts/tests/test_device_ca.py::test_check_certs_refuses_a_register_it_cannot_trust` | Proof: an unverified register is refused |
 | `scripts/tests/test_device_ca.py::test_check_raises_a_ca_certificate_close_to_expiry` | Proof: a CA certificate near expiry is raised |
+
+### Expiry watch
+
+Every approaching expiry is raised in advance, graded by what it refuses.
+
+| Expiring | Refuses | Raised by | Alert | Severity |
+|---|---|---|---|---|
+| A CRL or a CA certificate of the chain | Every device | `check` | `IndustryFlowDeviceCrlStale` | Critical |
+| A device's newest unrevoked certificate | That device | `check-certs` | `IndustryFlowDeviceCertExpiring` | Warning |
+
+Each alert fires when its check has not passed for 13h (two missed six-hourly runs), or has never passed for 13h, on both deployments.
+
+`check-certs` reads only public files: `issued.tsv`, its signature, the CRL bundle and the chain.
+
+| Case | Result |
+|---|---|
+| Register signature does not verify against the intermediate | Error |
+| Register names a CRL number other than the published intermediate CRL's | Error: republish both together |
+| Device renewed (a newer unrevoked certificate is valid beyond the window) | Not raised |
+| Device revoked | Not raised |
+| Every certificate of a device expired | Printed as `expired:`; not raised. Revoke it if it is decommissioned |
+| Newest unrevoked certificate inside `CERT_WARN_DAYS` | `EXPIRING:` line naming tenant and device; non-zero exit |
+| Same `device_id`, two tenants | Two separate devices |
+
+Sample device against the edge: [getting started, step 5](../getting-started.md#5-stream-test-data).

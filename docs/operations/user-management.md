@@ -5,27 +5,20 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # User management
 
-Roles, tenant scoping, and the API and CLI for managing users and tenants. Sign-in and sessions:
-[authentication](authentication.md).
+The manual of [ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md), [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md): roles, tenant scoping, the first-run superuser, the API and CLI for managing users, and the tenant lifecycle.
 
-| Decision | ADR |
+## ADR-0004 dec 5
+
+| Code | Role |
 |---|---|
-| Role and tenant scoping | [ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) dec 5 |
-| Tenant lifecycle | [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) |
-| First-run superuser | [ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) dec 11 |
+| `services/api_gateway/dependencies.py::require_role` | Role gate; a superuser passes any |
+| `services/api_gateway/routers/user_admin.py` | User administration, scoped to the caller's company |
+| `services/api_gateway/routers/companies.py` | Company endpoints, scoped to the caller's company |
+| `infrastructure/timescaledb/init-scripts/29-user-table.sql` | `check_role` constraint |
+| `scripts/manage_users.py` | User CLI |
+| `scripts/seed_users.py` | Seeds users from the environment |
 
-## First-run superuser
-
-| Fact | Detail |
-|---|---|
-| Created | At gateway start, only while the platform has no account at all; in the oldest active tenant, or a new one (`PLATFORM_ADMIN_TENANT`, default `Default`). Retried in the background after a failure. A platform with users but no superuser gets one from the CLI |
-| Credentials | `PLATFORM_ADMIN_EMAIL` (default `admin@example.com`), `PLATFORM_ADMIN_PASSWORD` (default `industryflow`) |
-| Held to a change | With the default password: until the holder sets their own, every request answers **403** `PASSWORD_CHANGE_REQUIRED` except `GET`/`PATCH /users/me` and logout, and a socket handshake is closed **1008**; the current password and the default (any case, surrounding spaces) are refused as the new one; a new password has at least 8 characters |
-| Helm | `config.PLATFORM_ADMIN_EMAIL` and `config.PLATFORM_ADMIN_TENANT` in values; the chart passes no password, so its first run uses the default and is held |
-| Afterwards | An ordinary superuser; e-mail and password change in Settings (`PATCH /users/me`) |
-| Log | `first-run superuser created: email=… company_id=… tenant_provisioned=… password_change_required=…` (never the password) |
-
-## Roles
+### Roles
 
 | Role | Scope |
 |---|---|
@@ -38,7 +31,7 @@ Roles, tenant scoping, and the API and CLI for managing users and tenants. Sign-
 `is_superuser` is a separate flag. Every route that changes tenant data needs `engineer` or `admin`;
 an `observer` gets **403**. There is no self-registration.
 
-## Tenant scoping
+### Tenant scoping
 
 | Endpoint | Per-tenant admin | Superuser |
 |---|---|---|
@@ -54,7 +47,7 @@ an `observer` gets **403**. There is no self-registration.
 A request for another tenant's company or user returns **404**, so other tenants' ids are not
 confirmed.
 
-## API
+### API
 
 ```bash
 curl -k -b jar.txt -H "X-CSRF-Token: $CSRF" -X POST https://<host>/api/users \
@@ -69,7 +62,7 @@ curl -k -b jar.txt -H "X-CSRF-Token: $CSRF" -X POST https://<host>/api/users \
 | `company_id` | Superuser only; a tenant admin always creates into their own company |
 | `is_active` | Settable by `PATCH`; re-enables a user after company reactivation |
 
-## CLI
+### CLI
 
 `scripts/manage_users.py` and `scripts/seed_users.py` connect as the gateway role
 (`API_GATEWAY_DB_USER` / `API_GATEWAY_DB_PASSWORD`, `DB_HOST` / `DB_PORT` / `DB_NAME`) with
@@ -104,7 +97,53 @@ refresh.
 A CLI-created user is a superuser only with `--superuser` or `ADMIN_USER_<n>_SUPERUSER=true`; `admin`
 alone is per-tenant.
 
-## Tenants
+## ADR-0004 dec 11
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/first_run.py::ensure_first_superuser` | Creates the first-run superuser |
+| `services/api_gateway/users.py` | `PASSWORD_CHANGE_REQUIRED`: holds the account to a password change |
+| `infrastructure/timescaledb/init-scripts/34-user-password-change-required.sql` | `password_change_required` column |
+
+### First-run superuser
+
+| Fact | Detail |
+|---|---|
+| Created | At gateway start, only while the platform has no account at all; in the oldest active tenant, or a new one (`PLATFORM_ADMIN_TENANT`, default `Default`). Retried in the background after a failure. A platform with users but no superuser gets one from the CLI |
+| Credentials | `PLATFORM_ADMIN_EMAIL` (default `admin@example.com`), `PLATFORM_ADMIN_PASSWORD` (default `industryflow`) |
+| Held to a change | With the default password: until the holder sets their own, every request answers **403** `PASSWORD_CHANGE_REQUIRED` except `GET`/`PATCH /users/me` and logout, and a socket handshake is closed **1008**; the current password and the default (any case, surrounding spaces) are refused as the new one; a new password has at least 8 characters |
+| Helm | `config.PLATFORM_ADMIN_EMAIL` and `config.PLATFORM_ADMIN_TENANT` in values; the chart passes no password, so its first run uses the default and is held |
+| Afterwards | An ordinary superuser; e-mail and password change in Settings (`PATCH /users/me`) |
+| Log | `first-run superuser created: email=… company_id=… tenant_provisioned=… password_change_required=…` (never the password) |
+
+## ADR-0033 dec 2
+
+Every name and key a tenant has outside the database is derived from its `company_id` by one module; no provisioning step creates them. Each prefix exists once something is written under it.
+
+| Store | Tenant scope | Taken from the mapping by |
+|---|---|---|
+| Cold layer | Key prefix `tenant_<uuid>` | Cold exporter (writes), notebook cold broker (reads), tenant-delete job |
+| Tracking store names | Experiment and model name prefix `tenant_<uuid with underscores>.` | Notebook tracking gateway, ml-service-api |
+| Model artifacts | Key prefix `tenant_<uuid with underscores>/` | Notebook tracking gateway, ml-service-api (admitted-upload check) |
+
+| Code | Role |
+|---|---|
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::cold_object_prefix` | Cold-layer prefix |
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::mlflow_name_prefix` | Tracking-store name prefix |
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::mlflow_artifact_prefix` | Artifact key prefix |
+| `services/cold_export/naming.py` | Exporter takes the cold prefix from the mapping |
+| `services/notebook_tracking_gateway/policy.py` | Gateway takes the name and artifact prefixes from the mapping |
+
+## ADR-0033 dec 3, 6, 7
+
+Suspend and delete are superuser actions on the tenant, recorded in `public.company_lifecycle_events`.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/companies.py` | Lifecycle actions |
+| `infrastructure/timescaledb/init-scripts/25-company-deletion.sql` | Lifecycle record, suspension time and the 30-day wait |
+
+### Tenants
 
 | Task | How | Effect |
 |---|---|---|
@@ -125,15 +164,6 @@ Tenant names are 1-255 characters, no control characters, unique
 ([`21-company-provisioning.sql`](../../infrastructure/timescaledb/init-scripts/21-company-provisioning.sql)).
 The gateway's database role cannot write the tenant registry or create schemas directly.
 
-## ADR-0033 dec 3, 6, 7
-
-Suspend and delete are superuser actions on the tenant, recorded (see Tenants).
-
-| Code | Role |
-|---|---|
-| `services/api_gateway/routers/companies.py` | Lifecycle actions |
-| `infrastructure/timescaledb/init-scripts/25-company-deletion.sql` | Lifecycle record, suspension time and the 30-day wait |
-
 ## ADR-0033 dec 3
 
 A stalled tenant-status stream, which carries suspension to ingestion, raises an alert.
@@ -148,4 +178,16 @@ The tenant-delete job removes the tenant from every store.
 
 | Code | Role |
 |---|---|
-| `services/tenant_delete` | Tenant-delete job |
+| `services/tenant_delete/main.py` | Tenant-delete job entry point |
+| `services/tenant_delete/job.py::run` | Removes each pending deletion store by store, recording each removal |
+
+## ADR-0033 dec 5
+
+`DELETE /api/companies/{id}` suspends the tenant (`update_company(…, false)`); it removes no row. No platform script or service deletes a `public.companies` row: `complete_company_deletion()` leaves it as a tombstone ([ADR-0033 dec 8](../../infrastructure/timescaledb/init-scripts/README.md#adr-0033-dec-8)), and the gateway's role cannot write the registry.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/companies.py::delete_company` | Deactivates; keeps schema and data |
+| `infrastructure/timescaledb/init-scripts/26-company-deletion-job.sql` | `complete_company_deletion()`: keeps the registry row |
+
+Links: [authentication](authentication.md) (sign-in and sessions).

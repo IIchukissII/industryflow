@@ -5,11 +5,20 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Dead letters
 
-Inspecting, triaging and replaying readings the stream could not process
-([ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md) dec 3). Nothing consumes the dead-letter
-topics automatically; an operator handles each letter.
+The manual of [ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md): inspecting, triaging and replaying readings the stream could not process.
 
-## Topics
+## ADR-0005 dec 3
+
+Nothing consumes the dead-letter topics automatically; an operator handles each letter.
+
+| Code | Role |
+|---|---|
+| `services/spark_jobs/reading_guard.py::publish_dead_letters` | `spark-streaming` dead-letter writer |
+| `services/alert_service/worker/kafka_consumer.py::AlertKafkaConsumer` | `alert-service-detector` dead-letter writer |
+| `scripts/dead-letters.sh` | Inspection and replay |
+| `scripts/tests/test_dead_letters.py` | Proof: inspection and replay |
+
+### Topics
 
 | Topic | Written by | Key |
 |---|---|---|
@@ -29,7 +38,7 @@ A letter is tenant data. It stays in Kafka and reaches no metric, log or dashboa
 letters by topic only ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 5).
 Letters expire with the topic's retention (broker default).
 
-## Alert
+### Alert
 
 `IndustryFlowDeadLetteredReadings` fires while a letter reached a dead-letter topic in the last 15m,
 including a topic's first letter, on Compose and Kubernetes
@@ -37,7 +46,7 @@ including a topic's first letter, on Compose and Kubernetes
 It clears 15m after the last letter. Replaying does not clear it: letters are never removed. Letters
 that were already there when Prometheus started (or its data was reset) do not raise it.
 
-## Commands
+### Commands
 
 `scripts/dead-letters.sh` runs inside the Kafka container with its own tools.
 
@@ -63,7 +72,7 @@ Kubernetes: `kubectl -n <namespace> exec -i <kafka-pod> -- sh -s -- <command> < 
 Record the replayed range (`<topic> <partition>:<first>-<last>`) in the incident: a replay leaves the
 letters in place.
 
-## Triage
+### Triage
 
 | `reason` | Cause | Action |
 |---|---|---|
@@ -77,8 +86,4 @@ letters in place.
 
 A database or Kafka outage never dead-letters a reading: the batch is retried (ADR-0005 dec 3).
 
-## Related
-
-- [Stream processing](../architecture/stream-processing.md#unwritable-readings): which reading is refused, and where.
-- [Alerting](../architecture/alerting.md): the detector's failure handling.
-- [Monitoring](monitoring.md#alerts): alert delivery.
+Links: [stream processing](../architecture/stream-processing.md#unwritable-readings) (which reading is refused, and where), [alerting](../architecture/alerting.md) (the detector's failure handling), [monitoring](monitoring.md#alerts) (alert delivery).

@@ -139,7 +139,7 @@ jobs:
           # `--py-files` its Dockerfile CMD ships (a module left out of that list or of the COPY
           # crashloops the job). It does NOT resolve the runtime `--packages` Kafka connector or
           # process a batch — that needs Kafka+TimescaleDB, which ADR-0026 keeps off CI and ADR-0029
-          # dec 5 assigns to the box run.
+          # dec 4 assigns to the box run.
           #
           # `security_refresh: true` marks the images whose layer cache must not go stale (see the
           # Build step's build-args): these Spark images patch their own OS at build (`apt-get

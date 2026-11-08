@@ -72,4 +72,5 @@ disagree about what a feature means. Offline training data cannot read the live 
 
 ## References
 
-- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): manual of decisions 2, 7, 9.
+- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): manual of
+  decisions 1-9.

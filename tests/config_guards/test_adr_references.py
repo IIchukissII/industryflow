@@ -21,7 +21,7 @@ from _repo import ROOT
 TEXT_SUFFIXES = {".md", ".py", ".sh", ".yml", ".yaml", ".sql", ".ts", ".tsx", ".js", ".conf",
                  ".toml", ".ini", ".j2", ".tpl", ".txt", ".example", ".env", ".dockerfile"}
 CITE = re.compile(
-    r"ADR-(\d{4})(?:\]\([^)\s]*\))?\)?,? (?:decisions?|decs?\.?|§) ?"
+    r"ADR-(\d{4})(?:\]\([^)\s]*\))?\)?,?(?: |\n[ \t]*(?:#+|//|--|\*|>)?[ \t]*)(?:decisions?|decs?\.?|§) ?"
     r"(\d+(?:\s*(?:,|and|-|–)\s*\d+)*)")
 ADR_ID = re.compile(r"\bADR-(\d{4})\b")
 LINK = re.compile(r"\]\(([^)\s#]+)(?:#[^)]*)?\)")
@@ -98,3 +98,51 @@ def test_every_relative_markdown_link_resolves():
             if not (base / target).exists():
                 broken.append(f"{rel}:{_line(text, m.start())}: {target}")
     assert not broken, "links to a file that does not exist:\n" + "\n".join(broken)
+
+
+ANCHORED_LINK = re.compile(r"\]\(([^)\s#]*)#([^)\s]+)\)")
+HEADING_LINE = re.compile(r"^#{1,6}\s+(.*?)\s*#*\s*$")
+
+
+def _anchors(text: str) -> set[str]:
+    """The fragment ids a Markdown renderer gives the headings of a page, duplicates suffixed."""
+    out, seen, fenced = set(), {}, False
+    for line in text.splitlines():
+        if line.startswith("```"):
+            fenced = not fenced
+        m = None if fenced else HEADING_LINE.match(line)
+        if not m:
+            continue
+        slug = re.sub(r"[^\w\- ]", "", m.group(1).lower()).replace(" ", "-")
+        n = seen.get(slug, 0)
+        seen[slug] = n + 1
+        out.add(slug if n == 0 else f"{slug}-{n}")
+    return out
+
+
+def _broken_anchors(rel: str, text: str, read) -> list[str]:
+    broken = []
+    for m in ANCHORED_LINK.finditer(text):
+        target, fragment = m.group(1), m.group(2)
+        if re.match(r"[a-z][a-z0-9+.-]*:", target) or (target and not target.endswith(".md")):
+            continue
+        path = ((ROOT / rel).parent / target).resolve() if target else ROOT / rel
+        page = read(path)
+        if page is not None and fragment.lower() not in _anchors(page):
+            broken.append(f"{rel}:{_line(text, m.start())}: {target}#{fragment}")
+    return broken
+
+
+def _read(path):
+    return path.read_text() if path.is_file() else None
+
+
+def test_the_anchor_guard_sees_a_missing_heading():
+    page = "# T\n\n## ADR-0000 dec 2\n\n[a](#adr-0000-dec-2) [b](#no-such-heading)\n"
+    assert _broken_anchors("docs/x.md", page, lambda p: page) == ["docs/x.md:5: #no-such-heading"]
+
+
+def test_every_markdown_anchor_resolves():
+    broken = [b for rel, text in FILES.items() if rel.endswith(".md")
+              for b in _broken_anchors(rel, text, _read)]
+    assert not broken, "links to a heading that does not exist:\n" + "\n".join(broken)
