@@ -32,7 +32,8 @@ carries partial-batch settings that no part of the platform reads.
 2. **A feature definition a transform cannot interpret is refused, never scored as a substitute.** It
    is a defect of the configuration, like an unknown transform type, and no reading can make it
    computable. A definition names every parameter it is computed with, the window of a stateful
-   feature included; the platform supplies no default.
+   feature included; the platform supplies no default. Its transform checks it where the
+   configuration is written and before any reading is scored, whatever the kill-switch says.
 3. **A substitute value is permitted only where ADR-0024 permits one, and is always reported.** A
    neutralized stateful slot and a stateful slot whose aggregate is unavailable take the neutral value,
    and the response names both. ADR-0024 keeps the per-call fallback to bound a total database outage.
@@ -53,10 +54,12 @@ carries partial-batch settings that no part of the platform reads.
 | 2 | A neutral value for a definition with a missing or unknown parameter | The same silent substitute, served on every reading until someone reads the logs |
 | 2 | A platform default for a parameter a definition omits | A bound model's input would follow a constant no record names, and changing it would change every model |
 | 2 | A default window declared in the shared contract | The same default, kept in another place; the window decides which aggregate a feature reads |
+| 2 | Check a definition only when its transform computes | A switched-off stateful class is not computed, so its defect would wait for the switch to be turned back on |
 | 3 | Narrow substitution to the kill-switch alone | Contradicts ADR-0024's outage fallback |
 | 3 | A failed aggregate read substituted without being reported | Breaks ADR-0024 dec 5: degraded serving must be visible |
 | 4 | Zero for any feature whose computation raises | The defect class this record removes |
 | 4 | A nudged denominator so a ratio of zero stays finite | A huge number served as an ordinary feature where the quotient does not exist |
+| 4 | Refuse a ratio of zero as the caller's defect | The reading is complete and valid; it is the definition that cannot compute on it |
 | 5 | Build partial scoring on a minimum sensor count | No decision intends it, and every alert would rest on vectors the model was not trained on |
 | 5 | Keep the unread settings for later | ADR-0000 dec 1: a behaviour is decided before it is offered |
 
@@ -70,8 +73,8 @@ carries partial-batch settings that no part of the platform reads.
 - A caller that sent incomplete readings, and was scored, is now refused.
 - A model bound to a defective configuration stops scoring until it is registered again on a corrected one.
 - A stateful feature is scored only for readings that name their equipment.
-- The baseline read extensions are handed takes its window explicitly: an extension-API break under
-  ADR-0010 dec 3.
+- Extensions break under ADR-0010 dec 3: a transform registers the check of its definition, and the
+  baseline read it is handed takes its window explicitly and raises for one the contract does not declare.
 - Equipment created with partial-batch settings loses them; they had no effect.
 
 ## Deferred

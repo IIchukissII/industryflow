@@ -149,11 +149,12 @@ async def test_window_std_returns_the_std():
 
 
 @pytest.mark.asyncio
-async def test_window_std_neutral_when_single_sample_window():
-    """A one-sample window has no stddev; 'no spread' is 0.0, not the raw value."""
-    result = await STATISTICAL(_transform(stat_type="window_std"),
-                               {"pressure": 72.5}, _ctx(_FakeProvider(mean=70.0, std=None)))
-    assert result == 0.0
+async def test_a_single_sample_window_has_no_spread_and_is_reported():
+    """A one-sample window has no stddev: the store cannot supply the value, which the engine serves
+    neutral and names (ADR-0044 dec 3) — never a silent 0.0, never the raw value."""
+    with pytest.raises(StatefulUnavailable, match="one sample"):
+        await STATISTICAL(_transform(stat_type="window_std"),
+                          {"pressure": 72.5}, _ctx(_FakeProvider(mean=70.0, std=None)))
 
 
 @pytest.mark.asyncio
@@ -367,3 +368,16 @@ async def test_a_value_that_is_not_an_equipment_id_is_neither_queried_nor_cached
         await provider.compute_baseline(COMPANY_ID, "'; drop table x; --", "pressure", "1min")
     assert pool.acquire_count == 0
     assert len(provider._cache) == 0
+
+
+
+class _UnreachablePool:
+    def acquire(self):
+        raise ConnectionRefusedError("database down")
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_cannot_be_reached_answers_none():
+    # The outage bound ADR-0024 keeps: a refused connection is an unavailable baseline (ADR-0044 dec 3).
+    provider = AggregateBaselineProvider(_UnreachablePool())
+    assert await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min") is None

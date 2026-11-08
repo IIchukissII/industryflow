@@ -294,7 +294,7 @@ def test_a_definition_that_cannot_be_computed_is_a_422(monkeypatch, loads):
     assert "nope" in r.json()["detail"]
 
 
-@register_transform("faults_when_computed")
+@register_transform("faults_when_computed", check=lambda d: None)
 async def _faults(transformation, sensor_data, ctx):
     raise RuntimeError("an unexplained fault")
 
@@ -369,7 +369,7 @@ def test_a_stateless_configuration_needs_no_equipment(monkeypatch, loads):
     assert _predict(_client(monkeypatch, _row())).status_code == 200
 
 
-@register_transform("computes_infinity")
+@register_transform("computes_infinity", check=lambda d: None)
 async def _infinite(transformation, sensor_data, ctx):
     return float("inf")
 
@@ -385,4 +385,32 @@ def test_a_feature_that_is_not_a_finite_number_fails_the_score(monkeypatch, load
     r = _client(monkeypatch, _row(), feature_config=config).post(
         "/api/inference/predict", json={"model_id": "m1", "sensor_data": {"b": 1.0, **reading}})
     assert r.status_code == 500, r.text
+    assert model.calls == []
+
+
+@pytest.mark.parametrize("definition", [
+    {"type": "statistical", "sensor": "a", "params": {"stat_type": "window_mean", "granularity": ["1min"]}},
+    {"type": "statistical", "sensor": "a", "params": {"stat_type": ["window_mean"], "granularity": "1min"}},
+    {"type": "interaction", "sensors": ["a", "b"], "params": {"operation": ["ratio"]}},
+    {"type": "interaction", "sensors": ["a", "b", "c"], "params": {"operation": "ratio"}},
+])
+def test_a_definition_of_the_wrong_kind_is_a_422_not_a_crash(monkeypatch, loads, definition):
+    config = {"base_sensors": ["a", "b"], "transformations": [{"name": "f", **definition}]}
+    r = _client(monkeypatch, _row(), feature_config=config).post(
+        "/api/inference/predict", json={"model_id": "m1", "sensor_data": {"a": 1.0, "b": 2.0, "c": 3.0,
+                                                                        "equipment_id": EQUIPMENT}})
+    assert r.status_code == 422, r.text
+
+
+def test_a_defective_stateful_definition_is_refused_while_its_class_is_switched_off(monkeypatch, loads):
+    # ADR-0044 dec 2, ADR-0024 dec 4: a switched-off transform is not called, so its definition is
+    # checked when the engine is built, not left to fail when the switch is turned back on.
+    _, model = loads
+    config = {"base_sensors": ["a"], "transformations": [
+        {"name": "a_dev", "type": "statistical", "sensor": "a", "params": {"stat_type": "window_mean"}}]}
+    client = _client(monkeypatch, _row(), feature_config=config)
+    client.app.state.stateful_switch = _SwitchedOff()
+    r = _predict(client, equipment_id=EQUIPMENT)
+    assert r.status_code == 422, r.text
+    assert "params.granularity" in r.json()["detail"]
     assert model.calls == []

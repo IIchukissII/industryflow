@@ -94,7 +94,9 @@ def test_stateless_transforms_are_not_tagged():
 def test_unknown_type_is_not_stateful():
     """A typo in a config must not silently neutralize a feature."""
     assert not is_stateful("no_such_transform")
-    assert neutral_value("no_such_transform") == 0.0
+    # And it has no neutral value: the engine refuses an unknown type before it could ask for one.
+    with pytest.raises(KeyError):
+        neutral_value("no_such_transform")
 
 
 def test_extension_api_version_bumped_minor():
