@@ -56,10 +56,20 @@ def in_repository(path: str):
     return target if target.is_relative_to(ROOT.resolve()) else None
 
 
+TRACKED = set(filter(None, subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, check=True,
+                                          capture_output=True, text=True).stdout.split("\0")))
+
+
+def tracked(target) -> bool:
+    """A path git tracks, or a directory holding one: an ignored local file is no repository code."""
+    rel = target.relative_to(ROOT.resolve()).as_posix()
+    return rel in TRACKED or any(f.startswith(rel + "/") for f in TRACKED)
+
+
 def missing(name: str) -> str | None:
     path, _, symbol = name.partition("::")
     target = in_repository(path)
-    if target is None or not target.exists():
+    if target is None or not target.exists() or not tracked(target):
         return "no such path"
     if symbol and not re.search(rf"\b{re.escape(symbol)}\b", target.read_text(errors="replace")):
         return f"no {symbol} in {path}"
