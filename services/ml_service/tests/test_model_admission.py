@@ -16,6 +16,7 @@ with a credential that reaches every tenant's artifacts. Two holes were open:
 
 Each refusal is driven at the wire, and the pure rule underneath is pinned on its own.
 """
+import dataclasses
 import os
 import sys
 import uuid
@@ -381,7 +382,8 @@ def _scoring(monkeypatch, fn):
     async def load(company_id, model):
         return object()
 
-    monkeypatch.setitem(extensions._DETECTORS, "sklearn", detector)
+    monkeypatch.setitem(extensions._DETECTORS, "sklearn",
+                        dataclasses.replace(extensions._DETECTORS["sklearn"], fn=detector))
     monkeypatch.setattr(models_router, "load_model_or_refuse", load)
 
 

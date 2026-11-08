@@ -94,7 +94,9 @@ def test_stateless_transforms_are_not_tagged():
 def test_unknown_type_is_not_stateful():
     """A typo in a config must not silently neutralize a feature."""
     assert not is_stateful("no_such_transform")
-    assert neutral_value("no_such_transform") == 0.0
+    # And it has no neutral value: the engine refuses an unknown type before it could ask for one.
+    with pytest.raises(KeyError):
+        neutral_value("no_such_transform")
 
 
 def test_extension_api_version_bumped_minor():
@@ -102,10 +104,11 @@ def test_extension_api_version_bumped_minor():
 
     0.2.0 added ADR-0024's `stateful`/`neutral` transform tags, 0.3.0 ADR-0028's detector
     declarations, 0.4.0 ADR-0044's refusals (`sensor_value`, `StatefulUnavailable`): the engine no
-    longer turns a transform's exception into zero, which within 0.x a minor may change.
+    longer turns a transform's exception into zero, which within 0.x a minor may change. 0.5.0 makes
+    the baseline provider's window required (ADR-0044 dec 2).
     """
     major, minor, _ = EXTENSION_API_VERSION.split(".")
-    assert (int(major), int(minor)) == (0, 4)
+    assert (int(major), int(minor)) == (0, 5)
 
 
 # --------------------------------------------------------------- null-in-slot, and ZERO calls

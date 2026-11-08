@@ -19,7 +19,7 @@ import logging
 # stateful class without knowing which types are in it.
 from extensions import (
     FeatureRefused, MissingSensors, StatefulUnavailable, TransformContext,
-    get_transform, is_stateful, missing_sensors, neutral_value,
+    check_definition, get_transform, is_stateful, missing_sensors, neutral_value,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,11 @@ class FeatureEngineeringEngine:
         unknown = sorted({str(t.get('type')) for t in self.transformations if get_transform(t.get('type')) is None})
         if unknown:
             raise UnknownTransform(unknown)
+        # Each definition is checked by its transform now, before any reading and whatever the
+        # kill-switch will say: a switched-off class does not call its transform, and a defect must not
+        # wait for the switch to be turned back on (ADR-0044 dec 2).
+        for t in self.transformations:
+            check_definition(t)
         self.stateful_features = [t['name'] for t in self.transformations if is_stateful(t['type'])]
         self.baseline_provider = baseline_provider
         self.equipment_id = equipment_id
