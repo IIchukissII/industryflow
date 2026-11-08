@@ -174,10 +174,21 @@ class DetectorContext:
 def detector_context_fields(model: Dict[str, Any], feature_names: List[str], equipment_id: Any = None) -> Dict[str, Any]:
     """The fields of the DetectorContext a model's detector is called with. Every scoring path —
     inference, drift and the baseline gate — builds its context here, so a detector meets the same
-    context on each, and none leaves a field it declares unset (ADR-0010 dec 6)."""
+    context on each, and none leaves a field it declares unset (ADR-0010 dec 6).
+
+    The reconstruction scale rides in the model's training metrics; where it lives in the schema is
+    still open (ADR-0028 Deferred). Metrics that are not a JSON object carry no scale, and the one
+    detector that needs it refuses without one."""
     metrics = model.get("training_metrics") or {}
     if isinstance(metrics, str):
-        metrics = json.loads(metrics)
+        try:
+            metrics = json.loads(metrics)
+        except ValueError:
+            metrics = None
+    if not isinstance(metrics, dict):
+        logger.warning("model %s: training metrics are not a JSON object; no reconstruction scale",
+                       model.get("model_id") or model.get("id"))
+        metrics = {}
     return {
         "feature_names": list(feature_names),
         "equipment_id": equipment_id,
