@@ -32,9 +32,7 @@ class FakeAlertStore:
     async def save_alert_once(self, alert, *, window, retrain=False):
         # The real insert binds both by key (ADR-0044 dec 3); so does the fake, or a builder that
         # forgot them would pass here and fail in production.
-        missing = {'degraded', 'neutralized_features'} - set(alert)
-        if missing:
-            raise KeyError(sorted(missing)[0])
+        _bound = (alert['degraded'], alert['neutralized_features'])
         prior = [
             row['triggered_at'] for row in self.saved
             if self._in_scope(row, alert, retrain)
