@@ -399,6 +399,7 @@ With the switch on, a stateful feature is null in its slot, checked before the s
 | Code | Role |
 |---|---|
 | `services/ml_service/api/feature_engineering/engine.py` | Null-in-slot and degraded-serving metric |
+| `tests/e2e/test_kill_switch.py` | Proof on the deployed platform: alerts ordinary with the switch on, degraded and naming the feature with it off |
 
 ## ADR-0024 dec 6
 
@@ -419,6 +420,7 @@ The gateway serves listing, flipping and history of a switch; every route takes 
 | `services/api_gateway/dependencies.py::require_superuser` | No tenant role passes |
 | `services/api_gateway/tests/test_platform_switches.py::test_no_tenant_role_passes` | Proof: tenant roles refused |
 | `services/api_gateway/tests/test_platform_switches.py::test_every_route_takes_the_superuser_gate` | Proof: every route gated |
+| `tests/e2e/test_kill_switch.py` | Proof on the deployed platform: a tenant administrator refused, the flip recorded with its user, a repeat not recorded |
 
 ## ADR-0043 dec 3, 4
 
