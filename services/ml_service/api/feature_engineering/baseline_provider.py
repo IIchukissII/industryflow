@@ -36,7 +36,6 @@ logger = logging.getLogger(__name__)
 # TABLE NAME, which cannot be a bound query parameter — this is the injection guard for that
 # interpolation.
 _AGG_TABLES = {granularity: w.table for granularity, w in windows.WINDOWS.items()}
-DEFAULT_GRANULARITY = windows.DEFAULT_GRANULARITY
 
 
 # Entries the baseline cache may hold. A live entry is one (tenant, equipment, sensor, window), so
@@ -84,33 +83,22 @@ class AggregateBaselineProvider:
         company_id: str,
         equipment_id: str,
         sensor_name: str,
-        granularity: Optional[str] = None,
+        granularity: str,
     ) -> Optional[dict]:
         """Return the latest closed window's ``{"mean", "std"}`` for a sensor, or ``None``.
 
-        ``None`` means "no baseline available" (no aggregate row yet, unknown granularity, or a
-        read error) — the caller degrades to its neutral value. Errors are swallowed to ``None``
-        rather than raised, so a degraded DB does not fail inference. ``std`` may be ``None``
-        within an otherwise-present baseline: a window holding a single sample has no stddev.
+        ``None`` means the store cannot supply a baseline (no aggregate row yet, or a read error) —
+        the caller degrades to its neutral value, so a degraded DB does not fail inference. ``std``
+        may be ``None`` within an otherwise-present baseline: a window holding a single sample has
+        no stddev. A window the contract does not declare, or ids that are not ids, are the caller's
+        defect and raise ``ValueError``: they are not an unavailable store (ADR-0044 dec 1-3).
         """
-        granularity = granularity or DEFAULT_GRANULARITY
         table = _AGG_TABLES.get(granularity)
         if table is None:
-            logger.warning("Unknown aggregate granularity '%s'; no baseline", granularity)
-            return None
-
-        try:
-            schema = _schema_for(company_id)
-        except (ValueError, AttributeError, TypeError):
-            logger.warning("Invalid company_id for baseline lookup: %r", company_id)
-            return None
-        try:
-            # Canonical, so one equipment is one key however the caller spelled it — and a value
-            # that is not an equipment id at all is answered without a query or a cache entry.
-            equipment = str(uuid.UUID(str(equipment_id)))
-        except (ValueError, AttributeError, TypeError):
-            logger.warning("Invalid equipment_id for baseline lookup: %r", equipment_id)
-            return None
+            raise ValueError(f"granularity {granularity!r} is not one of {', '.join(_AGG_TABLES)}")
+        schema = _schema_for(company_id)
+        # Canonical, so one equipment is one key however the caller spelled it.
+        equipment = str(uuid.UUID(str(equipment_id)))
 
         key = (schema, equipment, sensor_name, granularity)
         now = time.monotonic()
@@ -140,7 +128,7 @@ class AggregateBaselineProvider:
         company_id: str,
         equipment_id: str,
         sensor_name: str,
-        granularity: Optional[str] = None,
+        granularity: str,
     ) -> Optional[float]:
         """Return just the latest closed window's mean.
 

@@ -6,6 +6,9 @@
 Feature Engineering Engine
 Applies transformations based on configuration from database
 """
+import math
+import uuid
+
 import numpy as np
 from typing import Dict, List, Any, Optional
 import logging
@@ -15,12 +18,30 @@ import logging
 # also carries each type's capability tags (ADR-0024), which is how the engine can neutralize the
 # stateful class without knowing which types are in it.
 from extensions import (
-    FeatureRefused, MissingSensors, StatefulUnavailable, TransformContext,
-    get_transform, is_stateful, missing_sensors, neutral_value,
+    FeatureRefused, InvalidFeature, MissingSensors, StatefulUnavailable, TransformContext,
+    check_definition, get_transform, is_stateful, missing_sensors, neutral_value,
 )
 
 logger = logging.getLogger(__name__)
 
+
+
+class MissingEquipment(FeatureRefused):
+    """A configuration with stateful features scored for a reading that names no equipment, or one
+    that is not an equipment id: the baseline it reads is the equipment's (ADR-0044 dec 1)."""
+
+    def __init__(self, features, equipment_id):
+        self.features = list(features)
+        super().__init__(f"the stateful features {', '.join(self.features)} read the equipment's baseline, "
+                         f"and the reading names no valid equipment id (got {equipment_id!r})")
+
+
+class NonFiniteFeature(ArithmeticError):
+    """A transform computed a value that is not a finite number: a failure to compute, which fails
+    the score (ADR-0044 dec 4)."""
+
+    def __init__(self, feature, value):
+        super().__init__(f"feature '{feature}' computed {value!r}, not a finite number")
 
 
 class UnknownTransform(FeatureRefused):
@@ -63,6 +84,10 @@ class FeatureEngineeringEngine:
         """
         self.base_sensors = feature_config.get('base_sensors', [])
         self.transformations = feature_config.get('transformations', [])
+        for t in self.transformations:
+            if not isinstance(t, dict) or not isinstance(t.get('name'), str) or not t['name']:
+                raise InvalidFeature(t.get('name') if isinstance(t, dict) else None,
+                                     "a feature definition is an object that names itself")
         self.feature_names = [t['name'] for t in self.transformations]
         # Every sensor the configuration reads: its declared inputs and any a feature names. A
         # reading lacking one is refused before a slot is filled (ADR-0044 dec 1).
@@ -76,6 +101,12 @@ class FeatureEngineeringEngine:
         unknown = sorted({str(t.get('type')) for t in self.transformations if get_transform(t.get('type')) is None})
         if unknown:
             raise UnknownTransform(unknown)
+        # Each definition is checked by its transform now, before any reading and whatever the
+        # kill-switch will say: a switched-off class does not call its transform, and a defect must not
+        # wait for the switch to be turned back on (ADR-0044 dec 2).
+        for t in self.transformations:
+            check_definition(t)
+        self.stateful_features = [t['name'] for t in self.transformations if is_stateful(t['type'])]
         self.baseline_provider = baseline_provider
         self.equipment_id = equipment_id
         self.company_id = company_id
@@ -104,12 +135,22 @@ class FeatureEngineeringEngine:
         surfaces both, because a score on partially-neutral input must not look like an ordinary
         one (ADR-0024 dec 5, ADR-0044 dec 3).
 
-        Raises ``MissingSensors`` for an incomplete reading and ``FeatureRefused`` for a definition
-        that cannot be computed (ADR-0044 dec 1, 2); any other failure propagates (dec 4).
+        Raises ``MissingSensors`` for an incomplete reading, ``MissingEquipment`` for stateful features
+        scored without a valid equipment id, and ``FeatureRefused`` for a definition that cannot be
+        computed (ADR-0044 dec 1, 2); ``NonFiniteFeature`` and any other failure propagate (dec 4).
         """
         missing = missing_sensors(sensor_data, self.required_sensors)
         if missing:
             raise MissingSensors(missing)
+        if self.stateful_features:
+            # Whatever the kill-switch says: a reading that cannot name its equipment is the caller's
+            # defect, not an outage, and must not surface only when the switch is flipped.
+            try:
+                uuid.UUID(str(self.equipment_id))
+            except ValueError:
+                raise MissingEquipment(self.stateful_features, self.equipment_id) from None
+            if not self.company_id:
+                raise ValueError("a stateful feature is computed with no tenant")
 
         features = []
         neutralized: List[str] = []
@@ -135,6 +176,9 @@ class FeatureEngineeringEngine:
                 logger.warning("Feature '%s' served neutral, aggregate unavailable: %s", transformation['name'], e)
                 unavailable.append(transformation['name'])
                 feature_value = neutral_value(transformation['type'])
+            if isinstance(feature_value, bool) or not isinstance(feature_value, (int, float, np.number)) \
+                    or not math.isfinite(feature_value):
+                raise NonFiniteFeature(transformation['name'], feature_value)
             features.append(feature_value)
 
         self.neutralized_features = neutralized

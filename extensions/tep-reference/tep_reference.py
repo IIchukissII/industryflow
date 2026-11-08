@@ -10,14 +10,20 @@ This is illustrative: the worked example of the extension contract (ADR-0008/001
 The platform loads this module only when EXTENSION_MODULES names ``tep_reference``; the core
 never imports it.
 """
-from extensions import register_transform, register_detector, DetectionResult, check_api_version, sensor_value
+from extensions import (DetectionResult, InvalidFeature, check_api_version, register_detector, register_transform,
+                        sensor_value)
 
 # Declare the platform extension-API this module was written against (ADR-0010 dec 3).
-EXTENSION_TARGET_API = "0.4.0"
+EXTENSION_TARGET_API = "0.5.0"
 check_api_version(EXTENSION_TARGET_API)
 
 
-@register_transform("tep_reactor_pressure_margin")
+def _check_margin(transformation):
+    if not transformation.get("sensor"):
+        raise InvalidFeature(transformation.get("name"), "it names no sensor")
+
+
+@register_transform("tep_reactor_pressure_margin", check=_check_margin)
 async def reactor_pressure_margin(transformation, sensor_data, ctx):
     """
     Domain feature: how far reactor pressure sits below its TEP safety limit.

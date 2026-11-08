@@ -41,10 +41,6 @@ WINDOWS: Mapping[str, Window] = MappingProxyType({
     "1hour": Window("sensor_aggregations_1hour", 3600, 900),
 })
 
-# The granularity a feature reads when its config names none.
-DEFAULT_GRANULARITY = "1min"
-
-
 def window(granularity: str) -> Window:
     """The window of a granularity, or ``ValueError`` naming the ones that exist."""
     try:

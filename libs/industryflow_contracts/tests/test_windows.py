@@ -17,7 +17,7 @@ def test_the_contract_values():
         "5min": windows.Window("sensor_aggregations_5min", 300, 600),
         "1hour": windows.Window("sensor_aggregations_1hour", 3600, 900),
     }
-    assert windows.DEFAULT_GRANULARITY in windows.WINDOWS
+    assert not hasattr(windows, "DEFAULT_GRANULARITY"), "a feature names its window (ADR-0044 dec 2)"
 
 
 def test_the_contract_cannot_be_changed_at_runtime():

@@ -42,7 +42,6 @@ from industryflow_contracts import windows
 # (ADR-0006 dec 7): views of it for callers that index by granularity, never a second table.
 GRANULARITY_SECONDS: Dict[str, int] = {g: w.width_seconds for g, w in windows.WINDOWS.items()}
 WATERMARK_SECONDS: Dict[str, int] = {g: w.lateness_seconds for g, w in windows.WINDOWS.items()}
-DEFAULT_GRANULARITY = windows.DEFAULT_GRANULARITY
 
 # stat_type -> (feature-name suffix, aggregate to read)
 _STATS = {
@@ -59,12 +58,12 @@ def _epoch_seconds(timestamps: pd.Series) -> pd.Series:
     return pd.to_datetime(timestamps).astype("datetime64[s]").astype("int64")
 
 
-def window_index(timestamps: pd.Series, granularity: str = DEFAULT_GRANULARITY) -> pd.Series:
+def window_index(timestamps: pd.Series, granularity: str) -> pd.Series:
     """Tumbling-window index of each timestamp — the same bucketing Spark's windowing applies."""
     return _epoch_seconds(timestamps) // GRANULARITY_SECONDS[granularity]
 
 
-def latest_written_window(timestamps: pd.Series, granularity: str = DEFAULT_GRANULARITY) -> pd.Series:
+def latest_written_window(timestamps: pd.Series, granularity: str) -> pd.Series:
     """Index of the newest window whose aggregate row exists at each timestamp: ``closed(t)``."""
     return windows.latest_emitted_window(_epoch_seconds(timestamps), granularity)
 
@@ -73,7 +72,7 @@ def add_window_features(
     df: pd.DataFrame,
     sensor_cols: Sequence[str],
     *,
-    granularity: str = DEFAULT_GRANULARITY,
+    granularity: str,
     stats: Iterable[str] = ("deviation_from_window_mean",),
     timestamp_col: str = "timestamp",
     group_cols: Sequence[str] = (),
@@ -144,8 +143,7 @@ def add_window_features(
     return df, transformations
 
 
-def feature_config(sensor: str, stat_type: str, granularity: str = DEFAULT_GRANULARITY,
-                   name: Optional[str] = None) -> dict:
+def feature_config(sensor: str, stat_type: str, granularity: str, name: Optional[str] = None) -> dict:
     """The ``transformations`` entry that makes serving compute what ``add_window_features`` did."""
     suffix, _ = _STATS[stat_type]
     return {

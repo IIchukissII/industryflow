@@ -19,7 +19,7 @@ The core ships only generic built-ins and never imports a named extension.
 
 | Registry | Decorator |
 |---|---|
-| Feature transforms | `register_transform(name, *, stateful=False, neutral=0.0)` |
+| Feature transforms | `register_transform(name, *, check, stateful=False, neutral=0.0)` |
 | Detectors | `register_detector(name, *, semantics=DIRECT_SCORE, handles_flavors=None)` |
 
 Built-ins: [transforms](../architecture/ml-and-features.md#feature-configuration),
@@ -32,18 +32,30 @@ A transform is `async (transformation, sensor_data, ctx) -> float`. The feature 
 configured transform `type` through the registry. `ctx` is a `TransformContext` (`baseline_provider`,
 `equipment_id`, `company_id`).
 
+`check` is `(transformation) -> None`, raising `InvalidFeature` for a definition the transform cannot
+compute. It runs where a configuration is written (`422`) and when an engine is built (`422` at
+`/api/inference/predict`), before any reading and whatever the kill-switch says.
+
 ```python
 from extensions import InvalidFeature, StatefulUnavailable, register_transform, sensor_value
+from industryflow_contracts import windows
 
-@register_transform("pressure_margin")
+def check_margin(transformation):
+    if not isinstance((transformation.get("params") or {}).get("limit"), (int, float)):
+        raise InvalidFeature(transformation.get("name"), "it names no numeric params.limit")
+
+@register_transform("pressure_margin", check=check_margin)
 async def pressure_margin(transformation, sensor_data, ctx):
-    if "limit" not in transformation.get("params", {}):
-        raise InvalidFeature(transformation.get("name"), "it names no limit")
     return transformation["params"]["limit"] - sensor_value(sensor_data, transformation["sensor"])
 
-@register_transform("pressure_baseline", stateful=True, neutral=0.0)
+def check_baseline(transformation):
+    if (transformation.get("params") or {}).get("granularity") not in windows.WINDOWS:
+        raise InvalidFeature(transformation.get("name"), "it names no window")
+
+@register_transform("pressure_baseline", check=check_baseline, stateful=True, neutral=0.0)
 async def pressure_baseline(transformation, sensor_data, ctx):
-    baseline = await ctx.baseline_provider.compute_baseline(...)
+    baseline = await ctx.baseline_provider.compute_baseline(
+        ctx.company_id, ctx.equipment_id, transformation["sensor"], transformation["params"]["granularity"])
     if baseline is None:
         raise StatefulUnavailable("no closed window yet")
     return baseline["mean"]
@@ -56,10 +68,17 @@ A transform never returns a substitute value ([ADR-0044](../../ADR/ADR-0044-comp
 | `sensor_value(sensor_data, name)` | The only way to read a sensor; raises `MissingSensors` for an absent or non-finite value | `422` naming the sensors |
 | `InvalidFeature(feature, reason)` | The definition cannot be interpreted (missing or unknown parameter) | `422` |
 | `StatefulUnavailable(reason)` | A `stateful=True` transform's store cannot supply the value | Slot takes `neutral`; `degraded: true`, named in `neutralized_features` |
+| A computed value that is not a finite number | — | `500`; the score fails |
 | Any other exception | — | `500`; the score fails |
 
 The engine refuses a reading lacking any `base_sensors` entry, or any sensor a feature names in
-`sensor` / `sensors`, before a transform runs.
+`sensor` / `sensors`, before a transform runs; with a `stateful=True` feature in the configuration, a
+reading that names no valid `equipment_id` is refused too (`422`), whatever the kill-switch says.
+
+`ctx.baseline_provider.compute_baseline(company_id, equipment_id, sensor, granularity)` returns
+`{"mean", "std"}`, or `None` when its store cannot supply one; the window is required and must be one
+declared in `industryflow_contracts.windows`, and a window or ids it cannot read raise `ValueError`
+(extension API 0.5.0).
 
 | Tag | Meaning |
 |---|---|
@@ -160,8 +179,9 @@ A transform is `async (transformation, sensor_data, ctx) -> float`. The feature 
 | `services/ml_service/api/extensions/__init__.py::TransformFn` | The contract signature |
 | `services/ml_service/api/extensions/__init__.py::TransformContext` | The runtime context |
 | `services/ml_service/api/extensions/builtins.py` | Built-ins: `identity`, `polynomial`, `interaction`, `deviation`, `statistical` |
-| `services/ml_service/api/feature_engineering/engine.py` | Dispatch by `type` through `get_transform` |
-| `services/ml_service/tests/test_unknown_transform.py` | Proof: an unknown type is refused |
+| `services/ml_service/api/feature_engineering/engine.py` | Dispatch by `type` through `get_transform`; each definition's `check_definition` at build |
+| `services/ml_service/api/extensions/__init__.py::check_definition` | Runs the registered transform's check |
+| `services/ml_service/tests/test_unknown_transform.py` | Proof: an unknown type, and a definition its transform cannot compute, are refused where written and at build |
 
 ## ADR-0010 dec 3
 

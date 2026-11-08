@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0023 — Stream-materialized feature engineering
 
 - **Status:** Accepted
-- **Date:** 2026-07-06; changed 2026-10-17
+- **Date:** 2026-07-06; changed 2026-11-08
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md) (framing)
 - **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant routing, shared contract), [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (watermarked windows, window contract), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (transform registry), [ADR-0024](ADR-0024-stateful-feature-kill-switch.md) (kill-switch for the stateful class)
 
@@ -49,7 +49,7 @@ disagree about what a feature means. Offline training data cannot read the live 
 | 8 | The stateful feature keeping its serving-side window until a trigger fires | The skew trigger fired; the baseline class is built |
 | 9 | A whole-run or other non-causal mean as the training equivalent | A quantity inference cannot produce at any window, so the model learns a feature it is never served |
 | 9 | Training bound by granularity alone, the window just before the reading | Serving sees that window only after the lateness, so the gap reintroduces skew |
-| 9 | Window granularity carried per feature in its configuration | Width and lateness are one contract for stream, serving and training; a per-feature value lets a side drift |
+| 9 | A window's width or lateness carried per feature in its configuration | Width and lateness are one contract for stream, serving and training; a per-feature value lets a side drift |
 | 9 | A default statistic when a feature names none | A feature that named no statistic was silently served a deviation |
 
 ## Consequences

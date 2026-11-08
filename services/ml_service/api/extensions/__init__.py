@@ -30,7 +30,12 @@ logger = logging.getLogger(__name__)
 # a transform refuses or reports instead of returning a substitute, and the engine no longer turns
 # an exception into zero. Within 0.x a minor bump may break (ADR-0010 dec 3); this one does for a
 # transform that relied on that conversion.
-EXTENSION_API_VERSION = "0.4.0"
+# 0.5.0 breaks: the baseline provider handed to transforms (`compute_baseline`, `compute_rolling_mean`)
+# takes the window as a required argument, and raises for a window the contract does not declare or
+# ids that are not ids; it no longer defaults the window or answers None for either. And
+# `register_transform` requires `check`, the transform's test of a definition, run before any
+# reading (ADR-0044 dec 2).
+EXTENSION_API_VERSION = "0.5.0"
 
 
 @dataclass
@@ -99,16 +104,27 @@ def missing_sensors(sensor_data: Dict[str, Any], sensors: List[str]) -> List[str
 
 # A transform is: async (transformation_config, sensor_data, ctx) -> float
 TransformFn = Callable[[Dict[str, Any], Dict[str, float], TransformContext], Awaitable[float]]
+# A transform's check of a definition: returns when the transform can compute it, raises
+# InvalidFeature naming what it cannot read otherwise (ADR-0044 dec 2).
+CheckFn = Callable[[Dict[str, Any]], None]
 
-_TRANSFORMS: Dict[str, TransformFn] = {}
-# Capability tags per transform type (ADR-0024 dec 1): {"stateful": bool, "neutral": float}.
-# The engine dispatches by type and holds no transform knowledge (ADR-0010), so the *transform*
-# declares whether it reads an external substrate — that is what lets the kill-switch neutralize a
-# whole class without the engine hardcoding which types belong to it.
-_TRANSFORM_TAGS: Dict[str, Dict[str, Any]] = {}
+@dataclass(frozen=True)
+class _Transform:
+    """One registration: the function, its definition check, and its capability tags (ADR-0024 dec 1).
+    The engine dispatches by type and holds no transform knowledge (ADR-0010), so the *transform*
+    declares whether it reads an external substrate — that is what lets the kill-switch neutralize a
+    whole class without the engine hardcoding which types belong to it."""
+
+    fn: TransformFn
+    check: CheckFn
+    stateful: bool
+    neutral: float
 
 
-def register_transform(name: str, *, stateful: bool = False, neutral: float = 0.0):
+_TRANSFORMS: Dict[str, _Transform] = {}
+
+
+def register_transform(name: str, *, check: CheckFn, stateful: bool = False, neutral: float = 0.0):
     """Register a feature transform under ``name``. Re-registering a different function is an
     error rather than a silent overwrite (ADR-0010 negative consequence).
 
@@ -118,34 +134,44 @@ def register_transform(name: str, *, stateful: bool = False, neutral: float = 0.
     *without calling the transform*, so a degraded substrate stops being queried.
 
     ``neutral`` is the value that slot takes when the class is killed — ``0.0`` ("no deviation")
-    for the deviation-style features this ships with. Both keywords are optional with
-    back-compatible defaults, so this is an additive contract change (a minor extension-API bump,
-    ADR-0010 dec 3); transforms that pass neither keep working unchanged.
+    for the deviation-style features this ships with.
+
+    ``check`` is required: the transform's own test of a definition, run where a configuration is
+    written and where an engine is built, before any reading and whatever the kill-switch says. A
+    definition defect therefore surfaces on its first use, not when a switched-off class is switched
+    back on (ADR-0044 dec 2, ADR-0024 dec 4).
     """
     def decorator(fn: TransformFn) -> TransformFn:
         existing = _TRANSFORMS.get(name)
-        if existing is not None and existing is not fn:
+        if existing is not None and existing.fn is not fn:
             raise ValueError(f"feature transform '{name}' is already registered")
-        _TRANSFORMS[name] = fn
-        _TRANSFORM_TAGS[name] = {"stateful": stateful, "neutral": neutral}
+        _TRANSFORMS[name] = _Transform(fn=fn, check=check, stateful=stateful, neutral=neutral)
         return fn
     return decorator
 
 
+def check_definition(transformation: Dict[str, Any]) -> None:
+    """Raise InvalidFeature unless the definition's transform can compute it. Its type must be
+    registered; an unknown type is the caller's to refuse first."""
+    _TRANSFORMS[transformation["type"]].check(transformation)
+
+
 def get_transform(name: str):
-    return _TRANSFORMS.get(name)
+    entry = _TRANSFORMS.get(name)
+    return entry.fn if entry else None
 
 
 def is_stateful(name: str) -> bool:
     """Whether a transform type reads an external substrate. Unknown types are not stateful — an
     unregistered type is never dispatched anyway, and guessing 'stateful' would let a typo in a
     config silently neutralize a feature."""
-    return _TRANSFORM_TAGS.get(name, {}).get("stateful", False)
+    entry = _TRANSFORMS.get(name)
+    return bool(entry and entry.stateful)
 
 
 def neutral_value(name: str) -> float:
-    """The value a killed transform's slot takes (ADR-0024 dec 3)."""
-    return _TRANSFORM_TAGS.get(name, {}).get("neutral", 0.0)
+    """The value a killed transform's slot takes (ADR-0024 dec 3); only a registered type has one."""
+    return _TRANSFORMS[name].neutral
 
 
 def registered_transforms() -> List[str]:
@@ -153,7 +179,7 @@ def registered_transforms() -> List[str]:
 
 
 def stateful_transforms() -> List[str]:
-    return sorted(n for n, tags in _TRANSFORM_TAGS.items() if tags.get("stateful"))
+    return sorted(n for n, entry in _TRANSFORMS.items() if entry.stateful)
 
 
 # --- anomaly-detector contract (ADR-0010: the second contract on the registry pattern) ---
@@ -214,12 +240,19 @@ SCORE_SEMANTICS = (ANOMALY_PROBABILITY, OUTLIER_SCORE, RECONSTRUCTION_ERROR, DIR
 # loaded model (or None for model-free detectors); a detector reads only what it needs.
 DetectorFn = Callable[[Any, Any, float, DetectorContext], Awaitable[DetectionResult]]
 
-_DETECTORS: Dict[str, DetectorFn] = {}
-# What each detector DECLARES about itself (ADR-0028 dec 1/4): the score semantics it implements, and
-# the MLflow artifact flavors it can score. The second is what lets ADR-0027's gate ask not only "can
-# this environment LOAD the artifact" but "is there anything here that knows what its output MEANS" —
-# the same honest refusal, one level up.
-_DETECTOR_TAGS: Dict[str, Dict[str, Any]] = {}
+@dataclass(frozen=True)
+class _Detector:
+    """One registration: the function and what it DECLARES about itself (ADR-0028 dec 1/4) — the
+    score semantics it implements, and the MLflow artifact flavors it can score. The second is what
+    lets ADR-0027's gate ask not only "can this environment LOAD the artifact" but "is there anything
+    here that knows what its output MEANS" — the same honest refusal, one level up."""
+
+    fn: DetectorFn
+    semantics: str
+    handles_flavors: List[str]
+
+
+_DETECTORS: Dict[str, _Detector] = {}
 
 
 def register_detector(
@@ -248,19 +281,16 @@ def register_detector(
 
     def decorator(fn: DetectorFn) -> DetectorFn:
         existing = _DETECTORS.get(name)
-        if existing is not None and existing is not fn:
+        if existing is not None and existing.fn is not fn:
             raise ValueError(f"anomaly detector '{name}' is already registered")
-        _DETECTORS[name] = fn
-        _DETECTOR_TAGS[name] = {
-            "semantics": semantics,
-            "handles_flavors": list(handles_flavors or []),
-        }
+        _DETECTORS[name] = _Detector(fn=fn, semantics=semantics, handles_flavors=list(handles_flavors or []))
         return fn
     return decorator
 
 
 def get_detector(name: str):
-    return _DETECTORS.get(name)
+    entry = _DETECTORS.get(name)
+    return entry.fn if entry else None
 
 
 def registered_detectors() -> List[str]:
@@ -276,17 +306,14 @@ def detector_capabilities() -> List[Dict[str, Any]]:
     it rather than discovering the answer at a failed deploy.
     """
     return [
-        {"name": name, **_DETECTOR_TAGS.get(name, {})}
-        for name in registered_detectors()
+        {"name": name, "semantics": entry.semantics, "handles_flavors": list(entry.handles_flavors)}
+        for name, entry in sorted(_DETECTORS.items())
     ]
 
 
 def detectors_for_flavor(flavor: str) -> List[str]:
     """Which registered detectors claim they can score an artifact of this MLflow flavor."""
-    return [
-        name for name in registered_detectors()
-        if flavor in _DETECTOR_TAGS.get(name, {}).get("handles_flavors", [])
-    ]
+    return [name for name, entry in sorted(_DETECTORS.items()) if flavor in entry.handles_flavors]
 
 
 def detectors_for(semantics: str, flavor: str) -> List[str]:
@@ -303,11 +330,8 @@ def detectors_for(semantics: str, flavor: str) -> List[str]:
     An empty ``handles_flavors`` claims nothing and therefore matches nothing: a detector that makes
     no claim is not a detector that handles everything.
     """
-    return [
-        name for name in registered_detectors()
-        if _DETECTOR_TAGS.get(name, {}).get("semantics") == semantics
-        and flavor in _DETECTOR_TAGS.get(name, {}).get("handles_flavors", [])
-    ]
+    return [name for name, entry in sorted(_DETECTORS.items())
+            if entry.semantics == semantics and flavor in entry.handles_flavors]
 
 
 def check_api_version(target: str) -> None:

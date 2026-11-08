@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
 import config  # noqa: E402
 import extensions.builtins_detectors  # noqa: F401,E402  (registers the built-ins)
-from extensions import DetectionResult, register_detector  # noqa: E402
+from extensions import DetectionResult, register_detector, register_transform  # noqa: E402
 import model_cache  # noqa: E402
 import model_loader  # noqa: E402
 import skops_trust  # noqa: E402
@@ -116,8 +116,11 @@ def _client(monkeypatch, row, **repo_kw):
     return TestClient(app)
 
 
-def _predict(client):
-    return client.post("/api/inference/predict", json={"model_id": "m1", "sensor_data": {"a": 1.0}})
+EQUIPMENT = "550e8400-e29b-41d4-a716-446655440100"
+
+
+def _predict(client, **reading):
+    return client.post("/api/inference/predict", json={"model_id": "m1", "sensor_data": {"a": 1.0, **reading}})
 
 
 # --- the detector is the record's ----------------------------------------------------------------
@@ -286,24 +289,128 @@ def test_a_reading_lacking_a_sensor_is_a_422_naming_it(monkeypatch, loads, value
 def test_a_definition_that_cannot_be_computed_is_a_422(monkeypatch, loads):
     config = {"base_sensors": ["a"], "transformations": [
         {"name": "x", "type": "statistical", "sensor": "a", "params": {"stat_type": "nope"}}]}
-    r = _predict(_client(monkeypatch, _row(), feature_config=config))
+    r = _predict(_client(monkeypatch, _row(), feature_config=config), equipment_id=EQUIPMENT)
     assert r.status_code == 422, r.text
     assert "nope" in r.json()["detail"]
 
 
+@register_transform("faults_when_computed", check=lambda d: None)
+async def _faults(transformation, sensor_data, ctx):
+    raise RuntimeError("an unexplained fault")
+
+
 def test_a_feature_that_fails_to_compute_fails_the_score(monkeypatch, loads):
+    # ADR-0044 dec 4: an unexplained error is not a value.
     config = {"base_sensors": ["a"], "transformations": [
-        {"name": "p", "type": "polynomial", "sensor": "a", "params": {"power": "two"}}]}
+        {"name": "p", "type": "faults_when_computed", "sensor": "a"}]}
     r = _predict(_client(monkeypatch, _row(), feature_config=config))
     assert r.status_code == 500, r.text
+
+
+@pytest.mark.parametrize("definition", [
+    {"type": "polynomial", "sensor": "a"},
+    {"type": "polynomial", "sensor": "a", "params": {"power": "two"}},
+    {"type": "deviation", "sensor": "a", "params": {}},
+    {"type": "deviation", "sensor": "a", "params": {"baseline": True}},
+    {"type": "interaction", "sensors": ["a", "b"]},
+    {"type": "interaction", "sensors": ["a", "b"], "params": {"operation": "quotient"}},
+    {"type": "polynomial", "sensor": "a", "params": ["power", 2]},
+    {"type": "polynomial", "sensor": "a", "params": {"power": float("nan")}},
+    {"type": "deviation", "sensor": "a", "params": {"baseline": float("inf")}},
+    {"type": "statistical", "sensor": "a", "params": {"stat_type": "window_mean", "granularity": "5mins"}},
+])
+def test_a_builtin_definition_missing_its_parameter_is_a_422(monkeypatch, loads, definition):
+    # ADR-0044 dec 2: no default stands in for a parameter the definition does not name.
+    config = {"base_sensors": ["a", "b"], "transformations": [{"name": "f", **definition}]}
+    r = _client(monkeypatch, _row(), feature_config=config).post(
+        "/api/inference/predict", json={"model_id": "m1",
+                                        "sensor_data": {"a": 2.0, "b": 1.0, "equipment_id": EQUIPMENT}})
+    assert r.status_code == 422, r.text
+    assert "params" in r.text
 
 
 def test_an_unavailable_aggregate_is_served_neutral_and_named(monkeypatch, loads):
     config = {"base_sensors": ["a"], "transformations": [
         {"name": "a", "type": "identity", "sensor": "a"},
         {"name": "a_dev", "type": "statistical", "sensor": "a",
-         "params": {"stat_type": "deviation_from_window_mean"}}]}
-    r = _predict(_client(monkeypatch, _row(), feature_config=config))   # no baseline provider
+         "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}}]}
+    r = _predict(_client(monkeypatch, _row(), feature_config=config), equipment_id=EQUIPMENT)   # no provider
     assert r.status_code == 200, r.text
     assert r.json()["degraded"] is True
     assert r.json()["neutralized_features"] == ["a_dev"]
+
+
+STATEFUL = {"base_sensors": ["a"], "transformations": [
+    {"name": "a", "type": "identity", "sensor": "a"},
+    {"name": "a_dev", "type": "statistical", "sensor": "a",
+     "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}}]}
+
+
+class _SwitchedOff:
+    async def enabled(self):
+        return False
+
+
+@pytest.mark.parametrize("reading", [{}, {"equipment_id": None}, {"equipment_id": "eq-1"}])
+@pytest.mark.parametrize("switch", [None, _SwitchedOff()])
+def test_a_stateful_feature_for_a_reading_naming_no_equipment_is_a_422(monkeypatch, loads, reading, switch):
+    # ADR-0044 dec 1: the caller's reading lacks what the configuration reads; not an outage, so not
+    # served neutral, and refused whatever the kill-switch says.
+    _, model = loads
+    client = _client(monkeypatch, _row(), feature_config=STATEFUL)
+    client.app.state.stateful_switch = switch
+    r = _predict(client, **reading)
+    assert r.status_code == 422, r.text
+    assert "a_dev" in r.json()["detail"] and "equipment" in r.json()["detail"]
+    assert model.calls == []
+
+
+def test_a_stateless_configuration_needs_no_equipment(monkeypatch, loads):
+    assert _predict(_client(monkeypatch, _row())).status_code == 200
+
+
+@register_transform("computes_infinity", check=lambda d: None)
+async def _infinite(transformation, sensor_data, ctx):
+    return float("inf")
+
+
+@pytest.mark.parametrize("definition, reading", [
+    ({"type": "computes_infinity", "sensor": "a"}, {"a": 1.0}),
+    ({"type": "interaction", "sensors": ["a", "b"], "params": {"operation": "ratio"}}, {"a": 1.0, "b": 0.0}),
+])
+def test_a_feature_that_is_not_a_finite_number_fails_the_score(monkeypatch, loads, definition, reading):
+    # ADR-0044 dec 4: no nudged denominator, no infinity passed to the model.
+    _, model = loads
+    config = {"base_sensors": ["a", "b"], "transformations": [{"name": "f", **definition}]}
+    r = _client(monkeypatch, _row(), feature_config=config).post(
+        "/api/inference/predict", json={"model_id": "m1", "sensor_data": {"b": 1.0, **reading}})
+    assert r.status_code == 500, r.text
+    assert model.calls == []
+
+
+@pytest.mark.parametrize("definition", [
+    {"type": "statistical", "sensor": "a", "params": {"stat_type": "window_mean", "granularity": ["1min"]}},
+    {"type": "statistical", "sensor": "a", "params": {"stat_type": ["window_mean"], "granularity": "1min"}},
+    {"type": "interaction", "sensors": ["a", "b"], "params": {"operation": ["ratio"]}},
+    {"type": "interaction", "sensors": ["a", "b", "c"], "params": {"operation": "ratio"}},
+])
+def test_a_definition_of_the_wrong_kind_is_a_422_not_a_crash(monkeypatch, loads, definition):
+    config = {"base_sensors": ["a", "b"], "transformations": [{"name": "f", **definition}]}
+    r = _client(monkeypatch, _row(), feature_config=config).post(
+        "/api/inference/predict", json={"model_id": "m1", "sensor_data": {"a": 1.0, "b": 2.0, "c": 3.0,
+                                                                        "equipment_id": EQUIPMENT}})
+    assert r.status_code == 422, r.text
+
+
+def test_a_defective_stateful_definition_is_refused_while_its_class_is_switched_off(monkeypatch, loads):
+    # ADR-0044 dec 2, ADR-0024 dec 4: a switched-off transform is not called, so its definition is
+    # checked when the engine is built, not left to fail when the switch is turned back on.
+    _, model = loads
+    config = {"base_sensors": ["a"], "transformations": [
+        {"name": "a_dev", "type": "statistical", "sensor": "a", "params": {"stat_type": "window_mean"}}]}
+    client = _client(monkeypatch, _row(), feature_config=config)
+    client.app.state.stateful_switch = _SwitchedOff()
+    r = _predict(client, equipment_id=EQUIPMENT)
+    assert r.status_code == 422, r.text
+    assert "params.granularity" in r.json()["detail"]
+    assert model.calls == []

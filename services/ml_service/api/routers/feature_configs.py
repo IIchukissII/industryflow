@@ -15,7 +15,7 @@ import logging
 import asyncpg
 
 import auth
-from extensions import registered_transforms
+from extensions import check_definition, registered_transforms
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,9 @@ async def _bound_refusal(request: Request, company_id: str, config_id: str) -> H
 # ============================================================================
 
 def _known_transforms(transformations):
-    """Each transformation names itself and a type a registered transform implements (ADR-0010): a type
-    nothing implements would be scored as a substitute the model never saw."""
+    """Each transformation names itself, a type a registered transform implements (ADR-0010), and a
+    definition that transform can compute (ADR-0044 dec 2): anything else would be scored as a
+    substitute the model never saw."""
     if transformations is None:
         return transformations
     known = set(registered_transforms())
@@ -59,6 +60,8 @@ def _known_transforms(transformations):
         if t.get("type") not in known:
             raise ValueError(f"transformation {t.get('name')!r} has type {t.get('type')!r}; "
                              f"the types are {', '.join(sorted(known))}")
+        # The transform's own check of the definition (ADR-0044 dec 2): refused where it is written.
+        check_definition(t)
     return transformations
 
 

@@ -22,7 +22,7 @@ from extensions import (  # noqa: E402
 )
 from feature_engineering import FeatureEngineeringEngine  # noqa: E402
 
-EQ, CID = "eq-1", "cid-1"
+EQ, CID = "550e8400-e29b-41d4-a716-446655440100", "cid-1"
 
 
 def _engine(transformations, base_sensors=("a", "b"), provider=None):
@@ -65,7 +65,7 @@ async def test_a_complete_reading_is_computed():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("transformation,needle", [
     ({"name": "x", "type": "identity"}, "no sensor"),
-    ({"name": "x", "type": "interaction", "sensors": ["a"]}, "needs 2 sensors"),
+    ({"name": "x", "type": "interaction", "sensors": ["a"]}, "exactly 2 sensors"),
     ({"name": "x", "type": "interaction", "sensors": ["a", "b"], "params": {"operation": "pow"}}, "pow"),
     ({"name": "x", "type": "statistical", "sensor": "a", "params": {}}, "stat_type"),
     ({"name": "x", "type": "rolling_stat", "sensor": "a"}, "not implemented"),
@@ -84,25 +84,24 @@ def _unregister_test_transforms():
     yield
     for name in _TEST_TYPES:
         extensions._TRANSFORMS.pop(name, None)
-        extensions._TRANSFORM_TAGS.pop(name, None)
 
 
-@register_transform("_test_raises")
+@register_transform("_test_raises", check=lambda d: None)
 async def _raises(transformation, sensor_data, ctx):
     raise ZeroDivisionError("boom")
 
 
-@register_transform("_test_stateless_unavailable")
+@register_transform("_test_stateless_unavailable", check=lambda d: None)
 async def _stateless_unavailable(transformation, sensor_data, ctx):
     raise StatefulUnavailable("only a stateful transform may report this")
 
 
-@register_transform("_test_stateful_unavailable", stateful=True, neutral=-1.0)
+@register_transform("_test_stateful_unavailable", check=lambda d: None, stateful=True, neutral=-1.0)
 async def _stateful_unavailable(transformation, sensor_data, ctx):
     raise StatefulUnavailable("store down")
 
 
-@register_transform("_test_reads_undeclared")
+@register_transform("_test_reads_undeclared", check=lambda d: None)
 async def _reads_undeclared(transformation, sensor_data, ctx):
     return sensor_value(sensor_data, "z")
 
@@ -132,3 +131,16 @@ async def test_a_transform_reading_an_undeclared_sensor_is_refused_not_zeroed():
     with pytest.raises(MissingSensors) as exc:
         await _engine([{"name": "x", "type": "_test_reads_undeclared"}]).transform({"a": 1.0, "b": 2.0})
     assert exc.value.sensors == ["z"]
+
+
+
+@pytest.mark.asyncio
+async def test_a_stateful_feature_computed_with_no_tenant_is_a_platform_fault():
+    # The tenant comes from the authenticated principal (ADR-0003 dec 1); an engine without one for a
+    # stateful feature is the platform's defect, not the caller's, and is not served neutral.
+    config = {"base_sensors": ["a"], "transformations": [
+        {"name": "s", "type": "statistical", "sensor": "a",
+         "params": {"stat_type": "window_mean", "granularity": "1min"}}]}
+    engine = FeatureEngineeringEngine(feature_config=config, equipment_id=EQ, company_id=None)
+    with pytest.raises(ValueError, match="no tenant"):
+        await engine.transform({"a": 1.0})

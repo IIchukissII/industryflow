@@ -15,7 +15,7 @@ from pydantic import ValidationError
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
 import extensions.builtins  # noqa: E402,F401 - registers the built-in transforms
-from feature_engineering import FeatureEngineeringEngine, UnknownTransform  # noqa: E402
+from feature_engineering import FeatureEngineeringEngine, FeatureRefused, UnknownTransform  # noqa: E402
 from routers import feature_configs  # noqa: E402
 
 KNOWN = [{"name": "temp_1_raw", "type": "identity", "sensor": "temp_1"}]
@@ -44,3 +44,28 @@ def test_an_engine_is_not_built_from_a_stored_configuration_naming_one():
         FeatureEngineeringEngine(feature_config=config)
     assert refused.value.types == ["raw"]
     FeatureEngineeringEngine(feature_config={"base_sensors": ["temp_1"], "transformations": KNOWN})
+
+
+
+@pytest.mark.parametrize("definition, reason", [
+    ({"name": "p", "type": "polynomial", "sensor": "temp_1"}, "params.power"),
+    ({"name": "d", "type": "statistical", "sensor": "temp_1", "params": {"stat_type": "window_mean"}},
+     "params.granularity"),
+    ({"name": "i", "type": "interaction", "sensors": ["temp_1"], "params": {"operation": "sum"}}, "exactly 2"),
+])
+def test_a_definition_its_transform_cannot_compute_is_refused_where_it_is_written(definition, reason):
+    # ADR-0044 dec 2: refused like an unknown type, before any model is bound to it.
+    with pytest.raises(ValidationError, match=reason):
+        _create([definition])
+    with pytest.raises(ValidationError, match=reason):
+        feature_configs.FeatureConfigUpdate(transformations=[definition])
+    with pytest.raises(FeatureRefused, match=reason):
+        FeatureEngineeringEngine(feature_config={"base_sensors": ["temp_1"], "transformations": [definition]})
+
+
+
+@pytest.mark.parametrize("transformations", [[{"type": "identity", "sensor": "temp_1"}], [["identity"]],
+                                             [{"name": "", "type": "identity", "sensor": "temp_1"}]])
+def test_an_engine_is_not_built_from_a_definition_that_names_nothing(transformations):
+    with pytest.raises(FeatureRefused, match="names itself"):
+        FeatureEngineeringEngine(feature_config={"base_sensors": ["temp_1"], "transformations": transformations})
