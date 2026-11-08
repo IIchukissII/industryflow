@@ -72,6 +72,9 @@ Operating the kill-switch: [monitoring](monitoring.md#runbook-stateful-feature-k
 
 A detector is `async (features, model, threshold, ctx) -> DetectionResult`; `model` is `None` for a
 model-free detector.
+`ctx` is a `DetectorContext`: `feature_names` (the configuration's feature order), `equipment_id`,
+`reconstruction_scale` (from the model's training metrics). Inference, drift and the deploy gate pass
+the same context.
 
 ```python
 from extensions import register_detector, DetectionResult, RECONSTRUCTION_ERROR
@@ -197,6 +200,8 @@ A detector is `async (features, model, threshold, ctx) -> DetectionResult`. Each
 | Code | Role |
 |---|---|
 | `services/ml_service/api/extensions/__init__.py::DetectorContext` | The runtime context |
+| `services/ml_service/api/extensions/__init__.py::detector_context_fields` | The context's fields, for every scoring path |
+| `services/ml_service/tests/test_detector_context.py` | Proof: no scoring path builds the context by hand |
 | `services/ml_service/api/extensions/__init__.py::DetectionResult` | The detection result |
 | `services/ml_service/api/extensions/builtins_detectors.py` | Built-in detectors |
 | `services/ml_service/api/routers/models.py::_kernel_detector_or_refuse` | Default `sklearn` at registration; refuses an unloaded or flavor-mismatched detector |

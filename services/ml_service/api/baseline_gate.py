@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 import drift
-from extensions import DetectorContext, UninterpretableModel
+from extensions import DetectorContext, UninterpretableModel, detector_context_fields
 from feature_engineering import FeatureEngineeringEngine, FeatureRefused
 
 # The detector's threshold does not change its score; the gate asks only for the score.
@@ -113,12 +113,10 @@ async def plan(app_state, repository, company_id: str, model: Dict[str, Any]) ->
         return Plan(profile, reason=f"the sample cannot be scored: {exc}")
     except Exception as exc:  # noqa: BLE001 — the reason is recorded; a baseline never decides a deployment
         return Plan(profile, reason=f"the sample cannot be scored: {type(exc).__name__}: {exc}")
-    training_metrics = model.get("training_metrics") or {}
     return Plan(
         profile,
         detector=model.get("detector"),
-        context={"equipment_id": model.get("equipment_id"),
-                 "reconstruction_scale": training_metrics.get("reconstruction_scale")},
+        context=detector_context_fields(model, engine.get_feature_names(), model.get("equipment_id")),
         rows=scored,
     )
 

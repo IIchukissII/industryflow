@@ -34,7 +34,7 @@ from drift import (
     align_readings, baseline_state, compute_drift, prediction_column_refusal, DEFAULT_DRIFT_SHARE_THRESHOLD,
     MIN_ROWS,
 )
-from extensions import DetectorContext, UninterpretableModel
+from extensions import DetectorContext, UninterpretableModel, detector_context_fields
 from feature_engineering import FeatureEngineeringEngine, FeatureRefused
 from .inference import _resolve_company_id, detector_for, load_model_or_refuse
 
@@ -116,11 +116,7 @@ async def _current_predictions(
         logger.warning("Prediction drift not scored for model %s: %s", model.get("id"), exc, exc_info=True)
         return None, f"the model cannot be scored: {type(exc).__name__}: {exc}"
 
-    training_metrics = model.get("training_metrics") or {}
-    ctx = DetectorContext(
-        equipment_id=equipment_id,
-        reconstruction_scale=training_metrics.get("reconstruction_scale"),
-    )
+    ctx = DetectorContext(**detector_context_fields(model, engine.get_feature_names(), equipment_id))
     try:
         scores = await asyncio.to_thread(score_rows, rows, loaded, detector, ctx)
     except UninterpretableModel as exc:

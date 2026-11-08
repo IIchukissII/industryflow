@@ -14,6 +14,7 @@ Two things it got wrong, both silently:
     produced the CURRENT scores, so half of ADR-0021 dec 1 returned None forever.
 """
 import asyncio
+import json
 import os
 import sys
 import uuid
@@ -248,3 +249,49 @@ def test_the_deploy_gate_says_why_a_sample_on_an_unknown_transform_is_not_scored
              "feature_config_id": "fc1", "equipment_id": str(uuid.uuid4())}
     planned = asyncio.run(baseline_gate.plan(object(), Repo(), CID, model))
     assert planned.rows == [] and "raw" in planned.reason
+
+
+DRIFT_CONTEXTS = []
+
+
+def _drift_recorder():
+    from extensions import DetectionResult, get_detector, register_detector
+
+    if get_detector("drift_ctx_recorder") is None:
+        @register_detector("drift_ctx_recorder")
+        async def recorder(features, model, threshold, ctx):
+            DRIFT_CONTEXTS.append(ctx)
+            return DetectionResult(score=0.9, is_anomaly=True)
+
+
+def test_prediction_drift_scores_with_the_feature_names_in_the_context(evaluate):
+    # ADR-0010 dec 6: drift calls the detector with the same context inference does.
+    _drift_recorder()
+    DRIFT_CONTEXTS.clear()
+    rng = np.random.default_rng(3)
+    model = dict(_model(rng), detector="drift_ctx_recorder", training_metrics={"reconstruction_scale": 0.5})
+    evaluate(model, _fleet(rng))
+    assert DRIFT_CONTEXTS, "the detector was never called"
+    assert {tuple(c.feature_names) for c in DRIFT_CONTEXTS} == {("a", "b")}
+    assert {c.equipment_id for c in DRIFT_CONTEXTS} == {model["equipment_id"]}
+    assert {c.reconstruction_scale for c in DRIFT_CONTEXTS} == {0.5}
+
+
+def test_the_deploy_gate_scores_with_the_feature_names_in_the_context():
+    import baseline_gate
+
+    class Repo:
+        async def get_feature_config_by_id(self, company_id, config_id):
+            return FEATURES
+
+    rng = np.random.default_rng(8)
+    model = {"reference_profile": build_reference_profile({"a": rng.normal(size=N).tolist(),
+                                                           "b": rng.normal(size=N).tolist()}),
+             "feature_config_id": "fc1", "equipment_id": "eq-2", "detector": "direct",
+             "training_metrics": '{"reconstruction_scale": 0.75}'}
+    planned = asyncio.run(baseline_gate.plan(object(), Repo(), CID, model))
+    assert planned.reason is None, planned.reason
+    ctx = planned.detector_context()
+    assert (ctx.feature_names, ctx.equipment_id, ctx.reconstruction_scale) == (["a", "b"], "eq-2", 0.75)
+    # The context also travels to the isolated probe as JSON.
+    assert json.loads(json.dumps(planned.for_probe()["context"]))["feature_names"] == ["a", "b"]

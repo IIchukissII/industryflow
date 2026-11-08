@@ -17,8 +17,6 @@ import mlflow.pyfunc
 import os
 import hmac
 
-import json
-
 from industryflow_contracts import tenancy
 
 import auth
@@ -26,7 +24,7 @@ import model_cache
 import model_loader
 import uploaded_model
 from feature_engineering import FeatureEngineeringEngine, FeatureRefused
-from extensions import get_detector, DetectorContext, UninterpretableModel
+from extensions import get_detector, DetectorContext, UninterpretableModel, detector_context_fields
 
 logger = logging.getLogger(__name__)
 
@@ -299,19 +297,11 @@ async def predict(
         # the registration gate as the one that implements its declared semantics (ADR-0028 dec 1).
 
         # An autoencoder's error is unbounded, so it is scored against the error the model itself saw
-        # in training (ADR-0028). Where that scale lives is deliberately not fixed by the ADR; today it
-        # rides in training_metrics, which needs no migration.
-        training_metrics = model_data.get('training_metrics') or {}
-        if isinstance(training_metrics, str):
-            training_metrics = json.loads(training_metrics)
-
+        # in training (ADR-0028); the context carries it, with the feature names and the equipment.
         try:
             result = await detector(
                 input_features, model, request_data.threshold,
-                DetectorContext(
-                    equipment_id=equipment_id,
-                    reconstruction_scale=training_metrics.get('reconstruction_scale'),
-                ),
+                DetectorContext(**detector_context_fields(model_data, fe_engine.get_feature_names(), equipment_id)),
             )
         except UninterpretableModel as exc:
             # ADR-0028 dec 2: the detector could not establish what this model's output MEANS, so it

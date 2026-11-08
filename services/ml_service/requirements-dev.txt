@@ -2,12 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Test-only dependencies for the feature-store unit tests (services/ml_service/tests).
-# Minimal — the in-memory FeatureStore tests need the redis client importable (no running
-# server; Redis-backed tests are marked `redis` and skipped in CI). numpy is pulled in because
-# the feature_engineering package __init__ eagerly imports its engine module.
-# numpy is only an indirect import here (the package __init__ loads the engine), so the dev
-# pin just needs to install on the CI interpreter — it isn't exercised by these tests.
+# What the ml_service unit tests import; CI installs this file and the contracts package, not the api image pins.
 # redis matches the 8.x every runtime requirements file already pins; this dev pin was the last
 # 5.x left in the tree, so the tests imported a different major than the services run.
 redis==8.1.0
