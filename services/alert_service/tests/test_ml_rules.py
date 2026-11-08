@@ -64,7 +64,8 @@ def test_degraded_inference_is_marked_on_the_alert(monkeypatch):
 
     assert len(alerts) == 1
     saved = repo.saved[0]
-    assert "DEGRADED" in saved["message"] and "temp_dev_from_mean" in saved["message"]
+    # The fact is data, in one home; the message does not repeat it (ADR-0044 dec 3).
+    assert "DEGRADED" not in saved["message"]
     assert saved["degraded"] is True
     assert saved["neutralized_features"] == ["temp_dev_from_mean"]
 

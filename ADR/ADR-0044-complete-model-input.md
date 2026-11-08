@@ -13,7 +13,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
   permits and their visibility), [ADR-0041](ADR-0041-bound-feature-configuration.md) (dec 2: the bound
   inputs), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (dec 2: refusing over
   guessing), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (dec 3: the transform contract),
-  [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (the schema change)
+  [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (the schema change),
+  [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (dec 2-4: degraded alerts in labels and precision)
 
 ## Context
 
@@ -36,7 +37,8 @@ carries partial-batch settings that no part of the platform reads.
    configuration is written and before any reading is scored, whatever the kill-switch says.
 3. **A substitute value is permitted only where ADR-0024 permits one, and is always reported.** A
    neutralized stateful slot and a stateful slot whose aggregate is unavailable take the neutral value,
-   and the response names both. ADR-0024 keeps the per-call fallback to bound a total database outage.
+   and the response names both. An alert raised on such a score records, as data, that it was degraded
+   and which features. ADR-0024 keeps the per-call fallback to bound a total database outage.
 4. **Any other failure to compute a feature fails the score.** An unexplained error is not a value, and
    neither is a computed value that is not a finite number.
 5. **The platform offers no partial scoring, and equipment carries no partial-batch settings.** A
@@ -57,6 +59,7 @@ carries partial-batch settings that no part of the platform reads.
 | 2 | Check a definition only when its transform computes | A switched-off stateful class is not computed, so its defect would wait for the switch to be turned back on |
 | 3 | Narrow substitution to the kill-switch alone | Contradicts ADR-0024's outage fallback |
 | 3 | A failed aggregate read substituted without being reported | Breaks ADR-0024 dec 5: degraded serving must be visible |
+| 3 | A degraded alert told only in its message | Neither precision nor the retrain trigger can tell it apart, and an operator labels it as an ordinary one |
 | 4 | Zero for any feature whose computation raises | The defect class this record removes |
 | 4 | A nudged denominator so a ratio of zero stays finite | A huge number served as an ordinary feature where the quotient does not exist |
 | 4 | Refuse a ratio of zero as the caller's defect | The reading is complete and valid; it is the definition that cannot compute on it |
@@ -75,6 +78,7 @@ carries partial-batch settings that no part of the platform reads.
 - A stateful feature is scored only for readings that name their equipment.
 - A model with a ratio feature is not scored for a reading whose denominator is zero, such as stopped
   equipment, and a ratio is now the exact quotient where a near-zero denominator once shifted it.
+- An alert raised before degradation was recorded reads as unknown; nothing infers it from its message.
 - Extensions break under ADR-0010 dec 3: a transform registers the check of its definition, and the
   baseline read it is handed takes its window explicitly and raises for one the contract does not declare.
 - Equipment created with partial-batch settings loses them; they had no effect.

@@ -44,10 +44,11 @@ _SAVE_ALERT_ONCE = """
         INSERT INTO alerts (
             alert_id, triggered_at, rule_id, sensor_id, equipment_id, site_id, detection_type,
             threshold_value, actual_value, condition, model_id, anomaly_score, severity, message,
-            acknowledged
+            acknowledged, degraded, neutralized_features
         )
         SELECT $1::uuid, $2::timestamptz, $3::uuid, $4::uuid, $5::uuid, $6::text, $7::text,
-               $8::float8, $9::float8, $10::text, $11::uuid, $12::float8, $13::text, $14::text, false
+               $8::float8, $9::float8, $10::text, $11::uuid, $12::float8, $13::text, $14::text, false,
+               $16::boolean, $17::text[]
         WHERE (SELECT prior_at FROM prior) IS NULL
         ON CONFLICT (alert_id, triggered_at) DO NOTHING
         RETURNING alert_id
@@ -77,6 +78,22 @@ def dedup_lock_key(schema_name: str, scope: Tuple) -> int:
     """
     name = schema_name + '|' + '|'.join('' if part is None else str(part) for part in scope)
     return int.from_bytes(hashlib.blake2b(name.encode(), digest_size=8).digest(), 'big', signed=True)
+
+
+# The decided labels on a model's alerts in the precision window, for the retrain trigger (ADR-0022
+# dec 4). Run as written by infrastructure/timescaledb/tests/test_degraded_alerts.py.
+MODEL_LABEL_COUNTS = """
+                SELECT
+                    count(*) FILTER (WHERE verdict = 'true_positive')  AS tp,
+                    count(*) FILTER (WHERE verdict = 'false_positive') AS fp
+                FROM alert_labels
+                WHERE model_id = $1
+                  AND labeled_at >= NOW() - make_interval(days => $2::int)
+                  -- A label on a degraded alert judges a score the model was not fully given; a
+                  -- database incident must not read as model decay (ADR-0022 dec 4). A label from
+                  -- before degradation was recorded (NULL) counts, as it always did.
+                  AND degraded IS NOT TRUE
+"""
 
 
 class AlertRepository:
@@ -182,6 +199,10 @@ class AlertRepository:
                 alert_data['severity'],
                 alert_data['message'],
                 window,
+                # Every alert says whether its score was degraded (ADR-0044 dec 3); a builder that
+                # forgets is a KeyError here, not a NULL that reads as "unknown".
+                alert_data['degraded'],
+                alert_data['neutralized_features'],
             )
 
         inserted = row['inserted'] is not None
@@ -280,14 +301,7 @@ class AlertRepository:
         async with self._tenant(schema_name) as conn:
 
             label_row = await conn.fetchrow(
-                """
-                SELECT
-                    count(*) FILTER (WHERE verdict = 'true_positive')  AS tp,
-                    count(*) FILTER (WHERE verdict = 'false_positive') AS fp
-                FROM alert_labels
-                WHERE model_id = $1
-                  AND labeled_at >= NOW() - make_interval(days => $2::int)
-                """,
+                MODEL_LABEL_COUNTS,
                 model_uuid, precision_window_days,
             )
             recent_drift = await conn.fetchval(

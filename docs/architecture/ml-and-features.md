@@ -497,6 +497,7 @@ The engine refuses a reading with a missing sensor or an uninterpretable definit
 | `services/ml_service/api/feature_engineering/engine.py` | Refusals and substitutes |
 | `services/ml_service/api/extensions/builtins.py` | Built-in transforms |
 | `infrastructure/timescaledb/init-scripts/33-equipment-batch-settings-removed.sql` | Partial-batch columns dropped from every tenant |
+| `services/alert_service/worker/rules_engine.py` | Dec 3: an ML alert records its degraded score and the neutralized features |
 | `services/ml_service/tests/test_inference_dispatch.py::test_a_builtin_definition_missing_its_parameter_is_a_422` | Proof: dec 2 for every built-in parameter |
 | `services/ml_service/tests/test_inference_dispatch.py::test_a_feature_that_fails_to_compute_fails_the_score` | Proof: dec 4 |
 | `services/ml_service/tests/test_inference_dispatch.py::test_a_stateful_feature_for_a_reading_naming_no_equipment_is_a_422` | Proof: dec 1 for the equipment |

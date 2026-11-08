@@ -57,12 +57,18 @@ _BUCKET_INTERVAL = {"day": timedelta(days=1), "week": timedelta(days=7)}
 
 # The precision aggregation and its filters, run as written on the gateway's driver by
 # infrastructure/timescaledb/tests/test_alert_metrics_asyncpg.py.
+# A label on a degraded alert is counted apart (ADR-0022 dec 3): it judges a score computed with
+# stateful features neutralized. A label from before degradation was recorded (NULL) counts with the
+# rest, as it always did.
 LABEL_METRICS_SELECT = """
     SELECT
         time_bucket(:interval, labeled_at) AS bucket,
-        count(*) FILTER (WHERE verdict = 'true_positive')  AS tp,
-        count(*) FILTER (WHERE verdict = 'false_positive') AS fp,
-        count(*) FILTER (WHERE verdict = 'unsure')         AS unsure
+        count(*) FILTER (WHERE verdict = 'true_positive'  AND degraded IS NOT TRUE) AS tp,
+        count(*) FILTER (WHERE verdict = 'false_positive' AND degraded IS NOT TRUE) AS fp,
+        count(*) FILTER (WHERE verdict = 'unsure'         AND degraded IS NOT TRUE) AS unsure,
+        count(*) FILTER (WHERE verdict = 'true_positive'  AND degraded) AS degraded_tp,
+        count(*) FILTER (WHERE verdict = 'false_positive' AND degraded) AS degraded_fp,
+        count(*) FILTER (WHERE verdict = 'unsure'         AND degraded) AS degraded_unsure
     FROM alert_labels
     WHERE {where}
     GROUP BY bucket
@@ -73,6 +79,30 @@ LABEL_METRICS_FILTERS = {
     "model_id": "model_id = :model_id",
     "rule_id": "rule_id = :rule_id",
 }
+
+
+# What a label copies from its alert, and the label's write (ADR-0022 dec 2): the alert's rule, model,
+# detection type, severity and whether its score was degraded, so the label outlives the alert. Run as
+# written by infrastructure/timescaledb/tests/test_degraded_alerts.py.
+LABEL_ALERT_SELECT = """
+    SELECT triggered_at, rule_id, model_id, detection_type, severity, degraded
+    FROM alerts
+    WHERE alert_id = :alert_id
+"""
+LABEL_UPSERT = """
+        INSERT INTO alert_labels
+            (alert_id, triggered_at, verdict, note, rule_id, model_id,
+             detection_type, severity, degraded, labeled_by, labeled_at)
+        VALUES
+            (:alert_id, :triggered_at, :verdict, :note, :rule_id, :model_id,
+             :detection_type, :severity, :degraded, :labeled_by, NOW())
+        ON CONFLICT (alert_id) DO UPDATE SET
+            verdict = EXCLUDED.verdict,
+            note = EXCLUDED.note,
+            labeled_by = EXCLUDED.labeled_by,
+            labeled_at = NOW()
+        RETURNING *
+"""
 
 
 def _precision(tp: int, fp: int) -> Optional[float]:
@@ -113,7 +143,10 @@ class PrecisionMetrics(BaseModel):
     bucket: str
     model_id: Optional[str]
     rule_id: Optional[str]
+    # Labels on alerts whose score was not degraded; `series` buckets these.
     overall: PrecisionSummary
+    # Labels on degraded alerts, reported apart and outside the retrain trigger (ADR-0022 dec 3, 4).
+    degraded: PrecisionSummary
     series: List[PrecisionBucket]
     # Honest scope (ADR-0022 dec 3): recall is not derivable from fired-alert labels.
     note: str
@@ -137,6 +170,10 @@ class AlertResponse(BaseModel):
     anomaly_score: Optional[float]
     model_id: Optional[str]      # set for ml/statistical alerts (incl. drift + retrain recommendations)
     condition: Optional[str]     # e.g. 'drift', 'retrain_recommended' (ADR-0021/0022)
+    # Scored with stateful features neutralized, and which (ADR-0044 dec 3); null on an alert from
+    # before this was recorded.
+    degraded: Optional[bool] = None
+    neutralized_features: Optional[List[str]] = None
     triggered_at: datetime
     acknowledged: bool
     acknowledged_at: Optional[datetime]
@@ -156,7 +193,7 @@ _ALERT_SELECT = """
         s.sensor_name, s.display_name AS sensor_display_name, e.name AS equipment_name,
         r.name AS rule_name, a.detection_type,
         a.severity, a.message, a.actual_value, a.threshold_value, a.anomaly_score,
-        a.model_id::text, a.condition,
+        a.model_id::text, a.condition, a.degraded, a.neutralized_features,
         a.triggered_at, a.acknowledged, a.acknowledged_at, a.acknowledged_by,
         al.verdict AS label_verdict, al.labeled_at, al.labeled_by
     FROM alerts a
@@ -282,31 +319,14 @@ async def label_alert(
     """
     # Resolve the alert first so we can denormalize its fields onto the label — and 404 if the
     # operator is labelling something that isn't there.
-    alert_row = (await db.execute(text("""
-        SELECT triggered_at, rule_id, model_id, detection_type, severity
-        FROM alerts
-        WHERE alert_id = :alert_id
-    """), {"alert_id": alert_id})).fetchone()
+    alert_row = (await db.execute(text(LABEL_ALERT_SELECT), {"alert_id": alert_id})).fetchone()
 
     if not alert_row:
         raise HTTPException(status_code=404, detail="Alert not found")
 
     alert = dict(alert_row._mapping)
 
-    result = await db.execute(text("""
-        INSERT INTO alert_labels
-            (alert_id, triggered_at, verdict, note, rule_id, model_id,
-             detection_type, severity, labeled_by, labeled_at)
-        VALUES
-            (:alert_id, :triggered_at, :verdict, :note, :rule_id, :model_id,
-             :detection_type, :severity, :labeled_by, NOW())
-        ON CONFLICT (alert_id) DO UPDATE SET
-            verdict = EXCLUDED.verdict,
-            note = EXCLUDED.note,
-            labeled_by = EXCLUDED.labeled_by,
-            labeled_at = NOW()
-        RETURNING *
-    """), {
+    result = await db.execute(text(LABEL_UPSERT), {
         "alert_id": alert_id,
         "triggered_at": alert["triggered_at"],
         "verdict": body.verdict.value,
@@ -315,6 +335,7 @@ async def label_alert(
         "model_id": alert["model_id"],
         "detection_type": alert["detection_type"],
         "severity": alert["severity"],
+        "degraded": alert["degraded"],
         "labeled_by": str(current_user.id),
     })
 
@@ -361,12 +382,16 @@ async def alert_label_metrics(
 
     series = []
     tot_tp = tot_fp = tot_unsure = 0
+    deg_tp = deg_fp = deg_unsure = 0
     for row in rows:
         m = row._mapping
         tp, fp, unsure = m["tp"], m["fp"], m["unsure"]
         tot_tp += tp
         tot_fp += fp
         tot_unsure += unsure
+        deg_tp += m["degraded_tp"]
+        deg_fp += m["degraded_fp"]
+        deg_unsure += m["degraded_unsure"]
         series.append(PrecisionBucket(
             bucket=m["bucket"], true_positive=tp, false_positive=fp, unsure=unsure,
             precision=_precision(tp, fp),
@@ -379,9 +404,16 @@ async def alert_label_metrics(
         false_positive_rate=_false_positive_rate(tot_tp, tot_fp),
     )
 
+    degraded = PrecisionSummary(
+        true_positive=deg_tp, false_positive=deg_fp, unsure=deg_unsure,
+        labeled_total=deg_tp + deg_fp + deg_unsure,
+        precision=_precision(deg_tp, deg_fp),
+        false_positive_rate=_false_positive_rate(deg_tp, deg_fp),
+    )
+
     return PrecisionMetrics(
         window_days=days, bucket=bucket.value, model_id=model_id, rule_id=rule_id,
-        overall=overall, series=series,
+        overall=overall, degraded=degraded, series=series,
         note=("Precision and false-positive rate only; recall is not derivable from "
               "fired-alert labels (no false-negative signal) — ADR-0022."),
     )

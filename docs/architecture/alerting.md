@@ -34,10 +34,10 @@ The alert API, the detection worker, rule types, deduplication and operator labe
 | POST | `/api/alert-rules` | `engineer`, `admin` | Create |
 | PUT, DELETE | `/api/alert-rules/{rule_id}` | `engineer`, `admin` | Replace, delete |
 | PATCH | `/api/alert-rules/{rule_id}/detection-mode` | `engineer`, `admin` | Change detection type |
-| GET | `/api/alerts`, `/api/alerts/unacknowledged`, `/api/alerts/critical` | session | History, filtered history; each alert with `sensor_name`, `sensor_display_name`, `equipment_name`, `rule_name`, `detection_type` |
+| GET | `/api/alerts`, `/api/alerts/unacknowledged`, `/api/alerts/critical` | session | History, filtered history; each alert with `sensor_name`, `sensor_display_name`, `equipment_name`, `rule_name`, `detection_type`, `degraded`, `neutralized_features` (both `null` on an alert from before they were recorded) |
 | PATCH | `/api/alerts/{alert_id}/acknowledge` | `engineer`, `admin` | Acknowledge |
-| PATCH | `/api/alerts/{alert_id}/label` | `engineer`, `admin` | `true_positive` / `false_positive` / `unsure` |
-| GET | `/api/alerts/label-metrics` | session | Precision = TP/(TP+FP) and false-positive rate per bucket and overall; optional model or rule scope |
+| PATCH | `/api/alerts/{alert_id}/label` | `engineer`, `admin` | `true_positive` / `false_positive` / `unsure`; the label copies the alert's `degraded` |
+| GET | `/api/alerts/label-metrics` | session | Precision = TP/(TP+FP) and false-positive rate per bucket and `overall`, over labels on alerts that were not degraded (`null` counts with them); `degraded` holds the labels on degraded alerts apart; optional model or rule scope |
 
 ## Rule fields
 
@@ -105,7 +105,7 @@ tests' `FakeAlertStore` held to the same outcomes) and `test_alert_dedup_live.py
 | Store | Redis, `REDIS_URL` (required) |
 | Key | `features:{company_id}:{equipment_id}:{sensor_name}` |
 | Staleness | A sensor older than `FEATURE_MAX_AGE_SECONDS` by event time is missing; an incomplete snapshot is not scored |
-| Degraded score | When `ml-service-api` reports `degraded`, the alert message names the neutralised features |
+| Degraded score | When `ml-service-api` reports `degraded`, the alert records `degraded: true` and `neutralized_features`; the retrain recommendation leaves labels on such alerts out |
 
 Code: `services/alert_service/worker/feature_store.py`.
 
@@ -134,7 +134,9 @@ Labels are written through the alert history API into a per-tenant table; precis
 
 | Code | Role |
 |---|---|
-| `services/api_gateway/routers/alerts_history.py` | Labels and label metrics |
+| `services/api_gateway/routers/alerts_history.py` | Labels and label metrics; `LABEL_ALERT_SELECT`, `LABEL_UPSERT`, `LABEL_METRICS_SELECT` |
+| `infrastructure/timescaledb/init-scripts/35-degraded-alerts.sql` | `alerts.degraded`, `alerts.neutralized_features`, `alert_labels.degraded` |
+| `infrastructure/timescaledb/tests/test_degraded_alerts.py` | Proof: stored, read, copied onto the label, counted apart, on the real store |
 
 ## ADR-0022 dec 4, 5
 
@@ -144,6 +146,7 @@ After each drift pass the alert worker evaluates the retrain recommendation, wit
 |---|---|
 | `services/alert_service/worker/main.py` | Recommendation after the drift pass |
 | `services/alert_service/worker/rules_engine.py` | Recommendation evaluator |
+| `services/alert_service/worker/repository.py::MODEL_LABEL_COUNTS` | Decided labels, those on degraded alerts left out |
 
 ## ADR-0031 dec 1
 
