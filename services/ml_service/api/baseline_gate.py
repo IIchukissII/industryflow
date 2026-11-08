@@ -8,7 +8,8 @@ The prediction baseline, derived at the deployment gate (ADR-0035 dec 2, 3, 5).
 Prediction drift compares the declared detector's scores on the live window with its scores on the
 model's feature sample. Only the platform can guarantee both come from the same detector on the same
 serving stack, so the sample is scored here, at every deployment, the way `/predict` scores a reading:
-each complete row through the model's feature configuration, then the detector its record names.
+each complete row through the model's feature configuration, then the detector its record names,
+through the one scoring owner (`scoring`).
 
 The load that scores it is the gate's own. An uploaded model is loaded only in the isolated probe
 (ADR-0030 dec 7), so its rows are engineered here and scored there, in the same load that proves it
@@ -25,20 +26,9 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 import drift
-from extensions import DetectorContext, UninterpretableModel
+import scoring
+from extensions import UninterpretableModel
 from feature_engineering import FeatureEngineeringEngine, FeatureRefused
-
-# The detector's threshold does not change its score; the gate asks only for the score.
-_THRESHOLD = 0.5
-
-
-def score_rows(rows, model, detector, ctx) -> List[float]:
-    """Score engineered rows through the detector. Run in a worker thread with its own loop: a detector
-    is async by contract but does its model work synchronously, and hundreds of them must not hold the
-    service's event loop."""
-    async def run():
-        return [(await detector(features, model, _THRESHOLD, ctx)).score for features in rows]
-    return asyncio.run(run())
 
 
 @dataclass
@@ -46,20 +36,15 @@ class Plan:
     """A model's sample, ready to score: the engineered rows, or why there is nothing to score."""
 
     profile: Dict[str, Any]
-    detector: Optional[str] = None
-    context: Dict[str, Any] = field(default_factory=dict)
+    spec: Optional[scoring.Scoring] = None
     rows: List[np.ndarray] = field(default_factory=list)
     reason: Optional[str] = None
-
-    def detector_context(self) -> DetectorContext:
-        return DetectorContext(**self.context)
 
     def for_probe(self) -> Optional[Dict[str, Any]]:
         """What the isolated probe needs to score the rows in its own load, or None."""
         if self.reason or not self.rows:
             return None
-        return {"detector": self.detector, "context": self.context,
-                "rows": [r.reshape(-1).tolist() for r in self.rows]}
+        return {"scoring": self.spec.as_json(), "rows": [r.reshape(-1).tolist() for r in self.rows]}
 
     def finish(self, scores: Optional[List[float]], error: Optional[str]) -> Dict[str, Any]:
         """The profile to store, with derived scores or with the reason there are none."""
@@ -113,22 +98,19 @@ async def plan(app_state, repository, company_id: str, model: Dict[str, Any]) ->
         return Plan(profile, reason=f"the sample cannot be scored: {exc}")
     except Exception as exc:  # noqa: BLE001 — the reason is recorded; a baseline never decides a deployment
         return Plan(profile, reason=f"the sample cannot be scored: {type(exc).__name__}: {exc}")
-    training_metrics = model.get("training_metrics") or {}
-    return Plan(
-        profile,
-        detector=model.get("detector"),
-        context={"equipment_id": model.get("equipment_id"),
-                 "reconstruction_scale": training_metrics.get("reconstruction_scale")},
-        rows=scored,
-    )
+    try:
+        spec = scoring.Scoring.of(model, engine.get_feature_names(), model.get("equipment_id"))
+    except scoring.Unscorable as exc:
+        return Plan(profile, reason=f"the sample cannot be scored: {exc}")
+    return Plan(profile, spec=spec, rows=scored)
 
 
-async def score_in_process(p: Plan, loaded_model, detector) -> Dict[str, Any]:
+async def score_in_process(p: Plan, loaded_model) -> Dict[str, Any]:
     """Score the plan's rows with a model this process loaded, and the profile that results."""
     if p.reason:
         return p.finish(None, None)
     try:
-        scores = await asyncio.to_thread(score_rows, p.rows, loaded_model, detector, p.detector_context())
+        scores = await asyncio.to_thread(scoring.scores_blocking, p.spec, loaded_model, p.rows)
     except UninterpretableModel as exc:
         return p.finish(None, str(exc))
     except Exception as exc:  # noqa: BLE001 — the reason is recorded; a baseline never decides a deployment

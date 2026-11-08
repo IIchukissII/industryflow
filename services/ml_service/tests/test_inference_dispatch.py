@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
 import config  # noqa: E402
 import extensions.builtins_detectors  # noqa: F401,E402  (registers the built-ins)
-from extensions import register_transform  # noqa: E402
+from extensions import DetectionResult, register_detector, register_transform  # noqa: E402
 import model_cache  # noqa: E402
 import model_loader  # noqa: E402
 import skops_trust  # noqa: E402
@@ -141,6 +141,31 @@ def test_a_record_with_no_detector_is_refused_not_defaulted(monkeypatch, loads):
     r = _predict(_client(monkeypatch, _row(detector=None)))
     assert r.status_code == 422, r.text
     assert seen == [], "an artifact was fetched for a model nothing can interpret"
+
+
+CONTEXTS = []
+
+
+@register_detector("ctx_recorder")
+async def _ctx_recorder(features, model, threshold, ctx):
+    CONTEXTS.append(ctx)
+    return DetectionResult(score=0.1, is_anomaly=False)
+
+
+def test_the_detector_is_given_the_feature_names_equipment_and_scale(monkeypatch, loads):
+    # ADR-0010 dec 6: the context the contract declares reaches the detector, every field of it.
+    CONTEXTS.clear()
+    config = {"base_sensors": ["a"], "transformations": [{"name": "a", "type": "identity", "sensor": "a"},
+                                                         {"name": "a_sq", "type": "polynomial", "sensor": "a",
+                                                          "params": {"power": 2}}]}
+    row = _row(detector="ctx_recorder", training_metrics='{"reconstruction_scale": 0.25}')
+    r = _client(monkeypatch, row, feature_config=config).post(
+        "/api/inference/predict", json={"model_id": "m1", "sensor_data": {"a": 2.0, "equipment_id": "eq-1"}})
+    assert r.status_code == 200, r.text
+    [ctx] = CONTEXTS
+    assert ctx.feature_names == ["a", "a_sq"]
+    assert ctx.equipment_id == "eq-1"
+    assert ctx.reconstruction_scale == 0.25
 
 
 # --- an uploaded model is scored, from where it was admitted --------------------------------------

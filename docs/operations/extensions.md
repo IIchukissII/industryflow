@@ -72,6 +72,9 @@ Operating the kill-switch: [monitoring](monitoring.md#runbook-stateful-feature-k
 
 A detector is `async (features, model, threshold, ctx) -> DetectionResult`; `model` is `None` for a
 model-free detector.
+`ctx` is a `DetectorContext`: `feature_names` (the configuration's feature order), `equipment_id`,
+`reconstruction_scale` (from the model's training metrics). Inference, drift, the deploy gate and the
+load probe all score through one owner, so a detector meets the same context on each.
 
 ```python
 from extensions import register_detector, DetectionResult, RECONSTRUCTION_ERROR
@@ -197,10 +200,12 @@ A detector is `async (features, model, threshold, ctx) -> DetectionResult`. Each
 | Code | Role |
 |---|---|
 | `services/ml_service/api/extensions/__init__.py::DetectorContext` | The runtime context |
+| `services/ml_service/api/scoring.py` | The one owner of scoring: resolves the record's detector and builds its context |
+| `services/ml_service/tests/test_scoring.py` | Proof: the context reaches the detector; only `scoring` builds one or resolves a detector |
 | `services/ml_service/api/extensions/__init__.py::DetectionResult` | The detection result |
 | `services/ml_service/api/extensions/builtins_detectors.py` | Built-in detectors |
 | `services/ml_service/api/routers/models.py::_kernel_detector_or_refuse` | Default `sklearn` at registration; refuses an unloaded or flavor-mismatched detector |
-| `services/ml_service/api/routers/inference.py::detector_for` | Resolves the record's detector; refuses a record without one |
+| `services/ml_service/api/scoring.py::detector_name` | Resolves the record's detector; refuses a record without one, or naming one not loaded |
 | `services/ml_service/api/repository.py` | Writes and reads the `detector` column |
 | `infrastructure/timescaledb/init-scripts/20-model-detector.sql` | Adds the `detector` column per tenant; backfills kernel rows with `sklearn` |
 | `services/ml_service/tests/test_inference_dispatch.py::test_the_model_is_scored_by_the_detector_its_record_names` | Proof: dispatch by the record |
