@@ -38,6 +38,7 @@ compute. It runs where a configuration is written (`422`) and when an engine is 
 
 ```python
 from extensions import InvalidFeature, StatefulUnavailable, register_transform, sensor_value
+from industryflow_contracts import windows
 
 def check_margin(transformation):
     if not isinstance((transformation.get("params") or {}).get("limit"), (int, float)):
@@ -48,7 +49,7 @@ async def pressure_margin(transformation, sensor_data, ctx):
     return transformation["params"]["limit"] - sensor_value(sensor_data, transformation["sensor"])
 
 def check_baseline(transformation):
-    if (transformation.get("params") or {}).get("granularity") not in ("1min", "5min", "1hour"):
+    if (transformation.get("params") or {}).get("granularity") not in windows.WINDOWS:
         raise InvalidFeature(transformation.get("name"), "it names no window")
 
 @register_transform("pressure_baseline", check=check_baseline, stateful=True, neutral=0.0)

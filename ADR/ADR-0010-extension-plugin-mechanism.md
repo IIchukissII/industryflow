@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0010 — Extension plugin mechanism: in-process registry and contracts
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-11-07
+- **Date:** 2026-06-27; changed 2026-11-08
 - **Parent:** ADR-0008
 - **Related:** ADR-0024 (the stateful-class tag), ADR-0028 (the model-adapter contract), ADR-0023
   (the transform context)
@@ -23,7 +23,8 @@ configuration names.
    import.** Registering a name twice is an error, and the core never imports a named extension.
 2. **The first contract is the feature transform.** An asynchronous function of its configuration,
    the reading and a runtime context returns one value, dispatched by type through the registry; the
-   generic transforms are built-ins.
+   generic transforms are built-ins. A transform registers with the check of its definition, so a
+   definition is judged before any reading is scored (ADR-0044 dec 2).
 3. **Contracts carry a semantic extension-API version with a compatibility rule.** The loader accepts
    an extension whose major matches and whose target minor is not above the platform's, and refuses
    it otherwise with a clear error.
@@ -46,6 +47,7 @@ configuration names.
 | Dec | Rejected alternative | Why rejected |
 |---|---|---|
 | 2 | Hardcoded dispatcher with per-domain flags | Domain branches in the core (ADR-0008 dec 7) |
+| 2 | A transform that judges its definition only when it computes | A transform the kill-switch does not call would hide its defect until the switch is turned back on |
 | 3 | One compatibility rule for every major: a breaking change is always a major bump | At 0.x it declares the contract stable while its first users still shape it |
 | 3 | Keeping that rule and spending 1.0 on the next break | Version 1.0 would mark an accident, not a decision that the contract is done |
 | 4 | Out-of-process transforms | A network hop per feature per reading |
