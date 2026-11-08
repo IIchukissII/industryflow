@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 import sys
 
+import yaml
+
 from _repo import ROOT, find, helm_template
 
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -342,3 +344,13 @@ def test_the_gateway_throttles_per_source_only_where_it_is_told_the_clients_addr
     gateway = load_yaml("docker-compose.yml")["services"]["api-gateway"]["environment"]
     assert gateway["SIGN_IN_THROTTLE"] == "per-source" and gateway["EDGE_PROXY_PEERS"]
     assert load_yaml("deploy/helm/industryflow/values.yaml")["config"]["SIGN_IN_THROTTLE"] == "off"
+
+
+def test_the_browser_edge_is_published_on_ipv4_only():
+    """ADR-0004 dec 10: the per-source sign-in limits hold only where the edge sees the clients' own
+    addresses. On the IPv4-only compose network an IPv6 client is relayed with the network gateway as
+    its address, so the browser edge binds an IPv4 host address and no IPv6 listener exists."""
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    ports = compose["services"]["frontend"]["ports"]
+    assert ports, "the browser edge publishes no port"
+    assert [p for p in ports if not str(p).startswith("0.0.0.0:")] == [], ports

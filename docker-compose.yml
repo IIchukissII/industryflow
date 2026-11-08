@@ -733,8 +733,11 @@ services:
       EDGE_GRAFANA_ALLOW: ${EDGE_GRAFANA_ALLOW:-}
     ports:
       # Unprivileged nginx listens on 8443/8080 inside the container; host ports unchanged.
-      - "${FRONTEND_HTTPS_PORT:-3443}:8443"
-      - "${FRONTEND_PORT:-3000}:8080"
+      # IPv4 only: the compose network is IPv4, so Docker would relay an IPv6 client with the
+      # network's gateway as its address, and the per-source sign-in limits would see every IPv6
+      # client as one source (ADR-0004 dec 10).
+      - "0.0.0.0:${FRONTEND_HTTPS_PORT:-3443}:8443"
+      - "0.0.0.0:${FRONTEND_PORT:-3000}:8080"
     volumes:
       # Default: a named volume the entrypoint self-signs into. Set TLS_CERT_DIR to a host
       # directory holding tls.crt/tls.key (e.g. the output of scripts/gen-internal-ca.sh) to

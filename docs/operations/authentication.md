@@ -93,7 +93,7 @@ Password sign-in (`/auth/login`, `/auth/jwt/login`) is slowed, never locked
 | Limit | Where | Behaviour |
 |---|---|---|
 | Per account and source (ADR-0004 dec 10) | Gateway, `services/api_gateway/sign_in_throttle.py` | `SIGN_IN_THROTTLE=per-source` (compose; needs `EDGE_PROXY_PEERS`, else the gateway refuses to start). From the 5th consecutive failure for one e-mail address from one source (the address the edge reports; IPv6 by its /64), each attempt from it waits 1, 2, 4 … s after the last, up to 300 s; inside the wait **429** with `Retry-After`, the password unchecked and the attempt not counted. Each attempt is counted before the password is checked, so simultaneous guesses pass one at a time. Other sources are not slowed. Unknown addresses are counted the same. An admitted sign-in clears its source; a password change or reset (`manage_users.py reset-password` included) clears every source; an hour without a failure forgets it |
-| Per source address | Edge, `EDGE_SIGN_IN_PER_SOURCE=on` (compose) | Burst of 20, then 10 a minute; beyond it **429** |
+| Per source address | Edge, `EDGE_SIGN_IN_PER_SOURCE=on` (compose) | Burst of 20, then 10 a minute; beyond it **429** (the edge's page: no JSON, no `Retry-After`). The compose browser edge listens on IPv4 only: the compose network is IPv4, and Docker would relay an IPv6 client with the network gateway as its address. Clients on the host itself reach the edge as that gateway, one source |
 | Both | Behind a Kubernetes Ingress (the chart: `EDGE_SIGN_IN_PER_SOURCE=off`, `SIGN_IN_THROTTLE=off`) | Not applied: the edge and the gateway see only the Ingress (ADR-0004 Deferred) |
 
 Store unreachable: sign-in is refused with **503**.
@@ -289,13 +289,15 @@ The limits are described under Sign-in throttling.
 | `services/api_gateway/config.py` | `SIGN_IN_THROTTLE` |
 | `services/frontend/nginx.conf.template` | Per-source edge limit |
 | `services/frontend/docker-entrypoint-edge.sh` | `EDGE_SIGN_IN_PER_SOURCE` validated at start |
-| `docker-compose.yml` | Both limits on |
+| `docker-compose.yml` | Both limits on; the browser edge published on IPv4 only |
+| `tests/config_guards/test_frontend_edge.py::test_the_browser_edge_is_published_on_ipv4_only` | Proof: no IPv6 listener on the browser edge |
 | `deploy/helm/industryflow/templates/_helpers.tpl` | Edge limit off behind the Ingress |
 | `deploy/helm/industryflow/values.yaml` | Gateway limit off behind the Ingress |
 | `services/api_gateway/tests/test_sign_in_throttle.py::test_one_source_slowing_an_account_does_not_slow_its_owner` | Proof: no lock-out from another source |
 | `services/api_gateway/tests/test_sign_in_throttle.py::test_guesses_sent_at_once_are_refused_all_but_one` | Proof: counted before the check |
 | `services/api_gateway/tests/test_sign_in_throttle.py::test_inside_the_wait_the_password_is_not_checked` | Proof: refused unchecked |
 | `tests/e2e/test_session_end.py::test_wrong_passwords_slow_that_account_and_no_other` | Proof: deployed gateway slows one account only |
+| `tests/e2e/test_sign_in_sources.py` | Proof on the deployed edge: an account slowed at one source signs in at another; the edge slows a source across accounts on both paths and lets it in again |
 
 ## ADR-0004 dec 11
 
