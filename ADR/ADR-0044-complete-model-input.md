@@ -13,7 +13,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
   permits and their visibility), [ADR-0041](ADR-0041-bound-feature-configuration.md) (dec 2: the bound
   inputs), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (dec 2: refusing over
   guessing), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (dec 3: the transform contract),
-  [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (the schema change)
+  [ADR-0034](ADR-0034-platform-schema-migration-strategy.md) (the schema change),
+  [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (dec 2-4: degraded alerts in labels and precision)
 
 ## Context
 

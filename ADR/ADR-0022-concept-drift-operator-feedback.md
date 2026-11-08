@@ -43,8 +43,8 @@ platform has no training service; a notebook trains and registers new versions.
 |---|---|---|
 | 1 | Any authenticated tenant user may label | A label is a durable write that moves precision and can raise a recommendation; a read-only role would not hold |
 | 2 | Label columns on the alerts table | Retention deletes the label together with its alert |
-| 3 | Labels on degraded alerts counted with the rest | A database incident would read as the model's precision falling |
 | 2 | Reuse the per-prediction ground-truth column | A different grain and lifecycle from a verdict on a fired alert |
+| 3 | Labels on degraded alerts counted with the rest | A database incident would read as the model's precision falling |
 | 3 | Compute recall from labels | Fired-alert labels carry no missed events |
 | 4 | An automated retrain executor now | No training service exists to invoke; it needs its own ADR |
 | 4 | Labels on degraded alerts in the decay test | A kill-switch episode could raise a retrain recommendation for a model that did not decay |

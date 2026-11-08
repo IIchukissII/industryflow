@@ -97,7 +97,7 @@ every script once. Every script is idempotent.
 | `34-user-password-change-required.sql` | `public."user".password_change_required` (default false): an account must set its password before anything else | [ADR-0004](../../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) dec 11 |
 | `35-degraded-alerts.sql` | `add_degraded_columns_to_alerts()`: `alerts.degraded`, `alerts.neutralized_features`, `alert_labels.degraded`; over existing tenants | [ADR-0044](../../../ADR/ADR-0044-complete-model-input.md) dec 3, [ADR-0022](../../../ADR/ADR-0022-concept-drift-operator-feedback.md) dec 2 |
 
-`create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22 and 23.
+`create_tenant_schema()` calls the per-schema functions of scripts 02, 03, 06, 13–15, 18–20, 22, 23 and 35.
 The per-tenant definitions also apply themselves to every existing tenant schema (ADR-0034 dec 3).
 
 ## Roles

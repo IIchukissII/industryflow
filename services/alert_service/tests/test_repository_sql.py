@@ -18,6 +18,8 @@ import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
 import repository  # noqa: E402
@@ -186,7 +188,6 @@ def test_rules_load_only_for_tenants_the_registry_holds_as_active():
 
 def test_every_alert_must_say_whether_its_score_was_degraded():
     # ADR-0044 dec 3: an alert that omits it is refused at the write, not stored as "unknown".
-    import pytest
     alert = _alert()
     del alert["degraded"]
     with pytest.raises(KeyError, match="degraded"):

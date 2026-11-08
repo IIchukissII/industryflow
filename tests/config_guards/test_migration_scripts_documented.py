@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Every schema script has its row in the scripts table of its README (ADR-0034 dec 1).
+"""Every schema script has its row in the scripts table of its README, the manual of ADR-0034 dec 1-3.
 
 The table is the one place that says what each script creates or changes; a script missing from it
 ships undocumented with nothing failing (34-user-password-change-required.sql was).
