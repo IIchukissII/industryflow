@@ -119,9 +119,11 @@ async def _current_predictions(
         logger.warning("Prediction drift not scored for model %s: %s", model.get("id"), exc, exc_info=True)
         return None, f"the model cannot be scored: {type(exc).__name__}: {exc}"
 
-    spec = scoring.Scoring.of(model, engine.get_feature_names(), equipment_id)
     try:
+        spec = scoring.Scoring.of(model, engine.get_feature_names(), equipment_id)
         scores = await asyncio.to_thread(scoring.scores_blocking, spec, loaded, rows)
+    except scoring.Unscorable as exc:
+        return None, f"the model cannot be scored: {exc}"
     except UninterpretableModel as exc:
         return None, f"the model's output cannot be interpreted: {exc}"
     return scores, None
