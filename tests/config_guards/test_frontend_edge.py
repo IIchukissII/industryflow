@@ -349,7 +349,7 @@ def test_the_gateway_throttles_per_source_only_where_it_is_told_the_clients_addr
 def test_the_browser_edge_is_published_on_ipv4_only():
     """ADR-0004 dec 10: the per-source sign-in limits hold only where the edge sees the clients' own
     addresses. On the IPv4-only compose network an IPv6 client is relayed with the network gateway as
-    its address, so the browser edge binds an IPv4 host address and no IPv6 listener exists."""
+    its address, so every browser-edge port binds the IPv4 wildcard 0.0.0.0 and no IPv6 listener exists."""
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
     ports = compose["services"]["frontend"]["ports"]
     assert ports, "the browser edge publishes no port"

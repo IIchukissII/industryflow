@@ -133,7 +133,7 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 | Internal service-to-service authentication | An ADR, when an internal call carries tenant authority beyond the interim mechanism |
 | E-mail delivery of reset and verification credentials | The first deployment that enables self-service reset |
 | Slowing password guessing behind a proxy that hides client addresses (neither limit applies there) | The first deployment behind a Kubernetes Ingress |
-| Browser clients over IPv6 on the compose deployment (their addresses kept, the edge grouping them by /64) | The first compose deployment that must serve them |
+| Browser clients over IPv6 on the compose deployment (their addresses kept, the edge counting a host's network as one source) | The first compose deployment that must serve them |
 
 ## References
 
