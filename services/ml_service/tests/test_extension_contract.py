@@ -90,16 +90,17 @@ def test_its_configuration_is_accepted_where_configurations_are_written_only_whe
 
 def test_its_configuration_computes_and_the_detector_dispatches_by_name():
     out = _ok(_run(f"""
-        from extensions import DetectorContext, detector_context_fields, get_detector
+        import scoring
         from feature_engineering import FeatureEngineeringEngine
         {LOAD}
         engine = FeatureEngineeringEngine(feature_config=CONFIG)
+        # Scored as inference scores a model record naming the detector (ADR-0010 dec 6).
+        spec = scoring.Scoring.of({{"detector": "reference_margin_rule"}}, engine.get_feature_names(), "pump-1")
         scores = {{}}
         for pressure in (6.0, 9.0, 10.5):
             vector = asyncio.run(engine.transform({{"discharge_pressure": pressure, "flow_rate": 40.0,
                                                    "motor_temperature": 55.0}}))
-            ctx = DetectorContext(**detector_context_fields({{}}, engine.get_feature_names(), "pump-1"))
-            result = asyncio.run(get_detector("reference_margin_rule")(vector, None, 0.5, ctx))
+            [result] = asyncio.run(scoring.score(spec, None, [vector], 0.5))
             scores[str(pressure)] = [result.score, result.is_anomaly, result.detail["margin"]]
         print(json.dumps({{"names": engine.get_feature_names(), "scores": scores}}))
     """, modules="reference_extension"))
