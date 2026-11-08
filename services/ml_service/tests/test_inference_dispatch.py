@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
 import config  # noqa: E402
 import extensions.builtins_detectors  # noqa: F401,E402  (registers the built-ins)
+from extensions import register_transform  # noqa: E402
 import model_cache  # noqa: E402
 import model_loader  # noqa: E402
 import skops_trust  # noqa: E402
@@ -265,11 +266,34 @@ def test_a_definition_that_cannot_be_computed_is_a_422(monkeypatch, loads):
     assert "nope" in r.json()["detail"]
 
 
+@register_transform("faults_when_computed")
+async def _faults(transformation, sensor_data, ctx):
+    raise RuntimeError("an unexplained fault")
+
+
 def test_a_feature_that_fails_to_compute_fails_the_score(monkeypatch, loads):
+    # ADR-0044 dec 4: an unexplained error is not a value.
     config = {"base_sensors": ["a"], "transformations": [
-        {"name": "p", "type": "polynomial", "sensor": "a", "params": {"power": "two"}}]}
+        {"name": "p", "type": "faults_when_computed", "sensor": "a"}]}
     r = _predict(_client(monkeypatch, _row(), feature_config=config))
     assert r.status_code == 500, r.text
+
+
+@pytest.mark.parametrize("definition", [
+    {"type": "polynomial", "sensor": "a"},
+    {"type": "polynomial", "sensor": "a", "params": {"power": "two"}},
+    {"type": "deviation", "sensor": "a", "params": {}},
+    {"type": "deviation", "sensor": "a", "params": {"baseline": True}},
+    {"type": "interaction", "sensors": ["a", "b"]},
+    {"type": "interaction", "sensors": ["a", "b"], "params": {"operation": "quotient"}},
+])
+def test_a_builtin_definition_missing_its_parameter_is_a_422(monkeypatch, loads, definition):
+    # ADR-0044 dec 2: no default stands in for a parameter the definition does not name.
+    config = {"base_sensors": ["a", "b"], "transformations": [{"name": "f", **definition}]}
+    r = _client(monkeypatch, _row(), feature_config=config).post(
+        "/api/inference/predict", json={"model_id": "m1", "sensor_data": {"a": 2.0, "b": 1.0}})
+    assert r.status_code == 422, r.text
+    assert "params." in r.text
 
 
 def test_an_unavailable_aggregate_is_served_neutral_and_named(monkeypatch, loads):

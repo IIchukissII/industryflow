@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0044 — A model is scored on complete, computed input or not at all
 
 - **Status:** Accepted
-- **Date:** 2026-10-31
+- **Date:** 2026-10-31; changed 2026-11-08
 - **Parent:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (one computation of a
   feature for training and serving)
 - **Related:** [ADR-0024](ADR-0024-stateful-feature-kill-switch.md) (dec 3, 5: the neutral values it
@@ -62,7 +62,7 @@ carries partial-batch settings that no part of the platform reads.
 
 **Negative**
 - A caller that sent incomplete readings, and was scored, is now refused.
-- A model bound to a defective configuration stops scoring until it is rebound.
+- A model bound to a defective configuration stops scoring until it is registered again on a corrected one.
 - Equipment created with partial-batch settings loses them; they had no effect.
 
 ## Deferred

@@ -75,14 +75,17 @@ Stored per tenant in `feature_engineering_configs`: `base_sensors` and an ordere
 `transformations`, each with a `type` and params. `ml_models.feature_config_id` links a model to its
 config.
 
-| Built-in transform | Stateful |
-|---|---|
-| `identity` | no |
-| `polynomial` | no |
-| `interaction` | no |
-| `deviation` | no |
-| `statistical` | yes |
-| `rolling_stat` | yes; not implemented, a feature using it is refused |
+| Built-in transform | Stateful | Definition names |
+|---|---|---|
+| `identity` | no | `sensor` |
+| `polynomial` | no | `sensor`, numeric `params.power` |
+| `interaction` | no | `sensors` (2), `params.operation`: `ratio`, `difference`, `product` or `sum` |
+| `deviation` | no | `sensor`, numeric `params.baseline` |
+| `statistical` | yes | `sensor`, `params.stat_type`; `params.granularity` optional |
+| `rolling_stat` | yes; not implemented, a feature using it is refused | — |
+
+A definition missing a named parameter, or naming one of the wrong kind, is refused with `422`; no
+default stands in for it ([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 2).
 
 Stateful transforms read their baseline window from `params.granularity` (default `1min`, from
 `industryflow_contracts.windows`).

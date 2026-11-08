@@ -23,6 +23,15 @@ def _sensor(transformation) -> str:
     return sensor
 
 
+def _number(transformation, param: str) -> float:
+    """A numeric parameter the definition must name; absent or not a number is refused, never
+    replaced by a default (ADR-0044 dec 2)."""
+    value = (transformation.get("params") or {}).get(param)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise InvalidFeature(transformation.get("name"), f"it names no numeric params.{param}")
+    return value
+
+
 @register_transform("identity")
 async def identity(transformation, sensor_data, ctx):
     """Pass a sensor value through unchanged."""
@@ -31,18 +40,24 @@ async def identity(transformation, sensor_data, ctx):
 
 @register_transform("polynomial")
 async def polynomial(transformation, sensor_data, ctx):
-    """Raise a sensor value to a power."""
-    power = transformation.get("params", {}).get("power", 2)
+    """Raise a sensor value to ``params.power``."""
+    power = _number(transformation, "power")
     return sensor_value(sensor_data, _sensor(transformation)) ** power
+
+
+_OPERATIONS = ("ratio", "difference", "product", "sum")
 
 
 @register_transform("interaction")
 async def interaction(transformation, sensor_data, ctx):
-    """Combine two sensors: ratio, difference, product, or sum."""
+    """Combine two sensors by ``params.operation``: ratio, difference, product or sum."""
     sensors = transformation.get("sensors") or []
-    operation = transformation.get("params", {}).get("operation", "product")
+    operation = (transformation.get("params") or {}).get("operation")
     if len(sensors) < 2:
         raise InvalidFeature(transformation.get("name"), f"an interaction needs 2 sensors, it names {len(sensors)}")
+    if operation not in _OPERATIONS:
+        raise InvalidFeature(transformation.get("name"),
+                             f"params.operation {operation!r} is not one of {', '.join(_OPERATIONS)}")
     a = sensor_value(sensor_data, sensors[0])
     b = sensor_value(sensor_data, sensors[1])
     if operation == "ratio":
@@ -51,15 +66,13 @@ async def interaction(transformation, sensor_data, ctx):
         return a - b
     if operation == "product":
         return a * b
-    if operation == "sum":
-        return a + b
-    raise InvalidFeature(transformation.get("name"), f"unknown interaction operation {operation!r}")
+    return a + b
 
 
 @register_transform("deviation")
 async def deviation(transformation, sensor_data, ctx):
-    """Difference of a sensor value from a fixed baseline."""
-    baseline = transformation.get("params", {}).get("baseline", 0.0)
+    """Difference of a sensor value from ``params.baseline``."""
+    baseline = _number(transformation, "baseline")
     return sensor_value(sensor_data, _sensor(transformation)) - baseline
 
 
@@ -90,7 +103,7 @@ async def statistical(transformation, sensor_data, ctx):
     (ADR-0044 dec 2) rather than serving some other statistic, or a neutral, into the slot — the
     defect that made ``_run_mean`` and ``_run_std`` features receive a deviation.
     """
-    params = transformation.get("params", {})
+    params = transformation.get("params") or {}
     sensor = _sensor(transformation)
 
     stat_type = params.get("stat_type")
