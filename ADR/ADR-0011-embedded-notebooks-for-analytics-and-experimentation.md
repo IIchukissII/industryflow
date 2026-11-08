@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-27; changed 2026-10-29
 - **Parent:** ADR-0001
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the trusted-code isolation this record excepts), [ADR-0012](ADR-0012-notebook-credential-delivery.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (credential delivery, SQL proxy), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) and [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md) (tracking), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (hub sign-on), [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner portability), [ADR-0020](ADR-0020-notebook-per-user-persistence.md) (persistence), [ADR-0042](ADR-0042-capability-use-audit.md) (the capability-use record)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the trusted-code isolation this record excepts), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (credential delivery, SQL proxy), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md) and [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (tracking), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (hub sign-on), [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner portability), [ADR-0020](ADR-0020-notebook-per-user-work-persistence.md) (persistence), [ADR-0042](ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md) (the capability-use record)
 
 ## Context
 

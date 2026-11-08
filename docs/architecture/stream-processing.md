@@ -13,7 +13,7 @@ The path from a device reading to stored time-series, the live-value read path, 
 | Watermark + append windows, idempotent upserts, durable checkpoint | [ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) |
 | Aggregation windows as a feature contract | [ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) dec 7, [ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md) |
 | Tenant routing by verified `company_id` | [ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md) |
-| Checkpoint across a Spark major upgrade | [ADR-0029](../../ADR/ADR-0029-spark-major-upgrade-checkpoint-cutover.md) |
+| Checkpoint across a Spark major upgrade | [ADR-0029](../../ADR/ADR-0029-spark-major-upgrades.md) |
 
 ## Write path
 
@@ -95,7 +95,7 @@ Code: `services/api_gateway/messaging/cache_updater.py`, `services/api_gateway/r
 ## Spark major upgrade
 
 Whether the checkpoint resumes or must be reset is decided per boundary by running it
-([ADR-0029](../../ADR/ADR-0029-spark-major-upgrade-checkpoint-cutover.md)). 3.5 → 4.1 resumes.
+([ADR-0029](../../ADR/ADR-0029-spark-major-upgrades.md)). 3.5 → 4.1 resumes.
 
 | Step | Resume | Reset |
 |---|---|---|

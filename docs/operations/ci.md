@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # CI and required checks
 
 The GitHub Actions workflows, their gate jobs, and the required checks on `main`
-([ADR-0026](../../ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md)).
+([ADR-0026](../../ADR/ADR-0026-release-model.md)).
 
 ## Gate convention
 
@@ -50,7 +50,7 @@ gh api -X PATCH repos/<owner>/<repo>/branches/main/protection/required_status_ch
 
 A commit on `main` is box-validated when the long-lived environment runs it, deployed by upgrade from
 the last box-validated commit, and the end-to-end suite passed there
-([ADR-0026](../../ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md) dec 8–10). A versioned
+([ADR-0026](../../ADR/ADR-0026-release-model.md) dec 8–10). A versioned
 release is cut only from such a commit.
 
 | Task | Command |
@@ -71,7 +71,7 @@ release is cut only from such a commit.
 | Skips | Failures (`IF_E2E_REQUIRE=1`) |
 | Release workflow | `release.yml`: refuses a tag whose commit is not on `main`, has no successful `box-e2e` status, or has no successful `Images` run on `main`; resolves every image of `images.yml` from `:sha-<short>` to its digest, then tags each digest with the version |
 | Precondition (ADR-0026 dec 8) | The environment runs the commit under test (`scripts/box-deploy.sh`), with the notebook authoring image and the device CA (`scripts/device-ca.sh init`) |
-| Validated bytes | The environment builds its own images; a release publishes the main pipeline's build of the same commit ([ADR-0026](../../ADR/ADR-0026-release-model-and-the-compose-smoke-gate.md) Consequences) |
+| Validated bytes | The environment builds its own images; a release publishes the main pipeline's build of the same commit ([ADR-0026](../../ADR/ADR-0026-release-model.md) Consequences) |
 
 | Symptom | Cause | Fix |
 |---|---|---|

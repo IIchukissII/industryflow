@@ -9,8 +9,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-10-30
 - **Parent:** [ADR-0024](ADR-0024-stateful-feature-kill-switch.md) (the switch, and the operator surface
   it deferred)
-- **Related:** [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (dec 5: cross-tenant
-  authority is a distinct superuser), [ADR-0031](ADR-0031-alerting-http-surface-single-owner.md) (the gateway as the
+- **Related:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (dec 5: cross-tenant
+  authority is a distinct superuser), [ADR-0031](ADR-0031-the-api-gateway-as-the-single-owner-of-the-alerting-http-surface.md) (the gateway as the
   one HTTP surface), [ADR-0033](ADR-0033-tenant-lifecycle.md) (dec 1: privileged writes through a
   function; dec 6: the lifecycle record), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (platform
   data in the shared schema)

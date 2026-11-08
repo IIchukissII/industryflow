@@ -7,7 +7,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 Disruption budgets, spreading and autoscaling of the stateless tier in the Helm chart, and the
 single instances of the stateful backends. Packaging and the deferred stateful-operator decision:
-[ADR-0009](../../ADR/ADR-0009-kubernetes-deployment-and-packaging.md).
+[ADR-0009](../../ADR/ADR-0009-kubernetes-deployment-packaged-with-helm.md).
 
 ## Stateless tier (Helm)
 

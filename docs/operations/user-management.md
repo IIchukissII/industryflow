@@ -10,9 +10,9 @@ Roles, tenant scoping, and the API and CLI for managing users and tenants. Sign-
 
 | Decision | ADR |
 |---|---|
-| Role and tenant scoping | [ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) dec 5 |
+| Role and tenant scoping | [ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) dec 5 |
 | Tenant lifecycle | [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) |
-| First-run superuser | [ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) dec 11 |
+| First-run superuser | [ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) dec 11 |
 
 ## First-run superuser
 

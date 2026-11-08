@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Decision records
 
 How decision records, their manuals and the code they govern are kept apart and kept consistent.
-Manual of [ADR-0000](../../ADR/ADR-0000-decision-records-and-source-of-truth.md).
+Manual of [ADR-0000](../../ADR/ADR-0000-decision-records-and-the-single-source-of-truth.md).
 
 ## ADR-0000 dec 2
 

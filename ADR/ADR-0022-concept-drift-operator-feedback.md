@@ -7,10 +7,10 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-07-05; changed 2026-11-08
-- **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring.md)
-- **Related:** [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (tenant-scoped roles),
+- **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md)
+- **Related:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (tenant-scoped roles),
   [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant routing),
-  [ADR-0044](ADR-0044-complete-model-input.md) (dec 3: a degraded score recorded on its alert)
+  [ADR-0044](ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) (dec 3: a degraded score recorded on its alert)
 
 ## Context
 

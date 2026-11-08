@@ -18,9 +18,9 @@ profiles: [notebooks](../../docs/architecture/notebooks.md#kernel-environment). 
 |---|---|---|---|
 | `IndustryFlowClient` | Measurements, aggregations, training data | API gateway data API, handle in `X-IF-Capability` | authoring, analytics |
 | `IndustryFlowSQL`, `sql_query` | Read-only tenant SQL | SQL proxy, handle as the Postgres password | authoring |
-| `IndustryFlowCold`, `cold_read_all` | Cold-layer Parquet history | Cold-store broker, pre-signed object-store reads ([ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md)) | authoring |
-| `SKOPS_TRUSTED_TYPES` | Types to pass to `mlflow.sklearn.log_model` for tree-based models ([ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md)) | — | authoring |
-| `log_feature_sample`, `feature_sample` | The drift baseline's feature sample: logged into the active run as `industryflow/feature_sample.json`, or returned as a dict for the upload wizard ([ADR-0040](../../ADR/ADR-0040-notebook-model-promotion.md)) | MLflow run artifact | authoring |
+| `IndustryFlowCold`, `cold_read_all` | Cold-layer Parquet history | Cold-store broker, pre-signed object-store reads ([ADR-0025](../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md)) | authoring |
+| `SKOPS_TRUSTED_TYPES` | Types to pass to `mlflow.sklearn.log_model` for tree-based models ([ADR-0027](../../ADR/ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md)) | — | authoring |
+| `log_feature_sample`, `feature_sample` | The drift baseline's feature sample: logged into the active run as `industryflow/feature_sample.json`, or returned as a dict for the upload wizard ([ADR-0040](../../ADR/ADR-0040-a-notebook-registered-model-version-becomes-a-platform-model-by-promotion.md)) | MLflow run artifact | authoring |
 
 ## Read API
 
@@ -47,7 +47,7 @@ training = client.training_data("<equipment-id>", lookback_days=30)
 ## Tenant SQL
 
 Requires the `sql` extra (`industryflow[sql]`, installed in the authoring image). The proxy assumes
-the per-tenant read-only role ([ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-sql-proxy.md)).
+the per-tenant read-only role ([ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md)).
 
 ```python
 from industryflow import IndustryFlowSQL, sql_query

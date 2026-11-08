@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-10-11; changed 2026-11-06
 - **Parent:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (one shared tenant-resolution implementation)
-- **Related:** [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (one edge, one session model), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (operator labels and precision), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (the detector consumes and writes alerts without HTTP), [ADR-0021](ADR-0021-model-drift-monitoring.md) (drift alerts share the alert lane), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (each deployable is a scrape target)
+- **Related:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (one edge, one session model), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (operator labels and precision), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (the detector consumes and writes alerts without HTTP), [ADR-0021](ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md) (drift alerts share the alert lane), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (each deployable is a scrape target)
 
 ## Context
 

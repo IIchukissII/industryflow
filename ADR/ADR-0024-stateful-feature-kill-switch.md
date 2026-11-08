@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-07-06; changed 2026-10-30
 - **Parent:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extends the transform contract)
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (shared schema), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (degraded serving is visible), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (the aggregate read guarded), [ADR-0043](ADR-0043-platform-switch-operator-control.md) (who flips it, and the record of flips)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (shared schema), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (degraded serving is visible), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (the aggregate read guarded), [ADR-0043](ADR-0043-a-platform-switch-is-flipped-by-a-platform-superuser-through-the-api-gateway-and-every-flip-is-recorded.md) (who flips it, and the record of flips)
 
 ## Context
 

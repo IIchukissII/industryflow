@@ -9,7 +9,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-06-26; changed 2026-10-17
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (idempotent stream
-  sinks), [ADR-0029](ADR-0029-spark-major-upgrade-checkpoint-cutover.md) (aggregation start offset)
+  sinks), [ADR-0029](ADR-0029-spark-major-upgrades.md) (aggregation start offset)
 
 ## Context
 

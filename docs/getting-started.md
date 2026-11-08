@@ -53,7 +53,7 @@ curl http://localhost:8000/health
 ## 4. Sign in as the first-run superuser
 
 A platform with no account gets a superuser when the gateway starts
-([ADR-0004](../ADR/ADR-0004-api-authentication-sessions-and-transport.md) dec 11), in a first tenant
+([ADR-0004](../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) dec 11), in a first tenant
 named `Default` when there is none.
 
 | Setting (`.env`) | Default | Meaning |

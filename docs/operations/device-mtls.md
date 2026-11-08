@@ -12,7 +12,7 @@ CA, enrollment, revocation and CRL refresh. The browser-facing server certificat
 | Decision | ADR |
 |---|---|
 | mTLS, device identity | [ADR-0002](../../ADR/ADR-0002-ingestion-authentication-and-device-identity.md) |
-| Device CA, CRL | [ADR-0007](../../ADR/ADR-0007-public-key-infrastructure.md) |
+| Device CA, CRL | [ADR-0007](../../ADR/ADR-0007-device-certificate-authority.md) |
 
 ## Request path
 
@@ -84,7 +84,7 @@ All state lives in git-ignored `deploy/device-ca/` (override: `DEVICE_CA_DIR`).
 
 ## Expiry watch
 
-Every approaching expiry is raised in advance, graded by what it refuses ([ADR-0007](../../ADR/ADR-0007-public-key-infrastructure.md) dec 10).
+Every approaching expiry is raised in advance, graded by what it refuses ([ADR-0007](../../ADR/ADR-0007-device-certificate-authority.md) dec 10).
 
 | Expiring | Refuses | Raised by | Alert | Severity |
 |---|---|---|---|---|
@@ -146,7 +146,7 @@ An expired certificate needs no revocation. A tenant with no certificate is reco
 ## CRL refresh
 
 An expired CRL makes the edge refuse every device. Device certificates carry no CRL distribution
-point; the edge holds the CRL locally ([ADR-0007](../../ADR/ADR-0007-public-key-infrastructure.md) dec 8).
+point; the edge holds the CRL locally ([ADR-0007](../../ADR/ADR-0007-device-certificate-authority.md) dec 8).
 
 | CRL | Lists | Re-signed by | Where |
 |---|---|---|---|

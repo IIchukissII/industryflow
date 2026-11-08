@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-07-08; changed 2026-10-21
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md) (framing)
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant mapping), [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (scheduled jobs, object store), [ADR-0012](ADR-0012-notebook-credential-delivery.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (brokered reads, no secret in the kernel), [ADR-0032](ADR-0032-backup-and-disaster-recovery.md) (the cold layer's backup)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant mapping), [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (scheduled jobs, object store), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (brokered reads, no secret in the kernel), [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (the cold layer's backup)
 
 ## Context
 

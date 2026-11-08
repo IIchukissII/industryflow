@@ -9,10 +9,10 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-10-29; changed 2026-10-29
 - **Parent:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (one computation of a
   feature for training and serving)
-- **Related:** [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (dec 1: the output
-  contract fixed at registration), [ADR-0035](ADR-0035-drift-baseline-derived-scores.md) (dec 4: the
-  sample checked against the bound inputs), [ADR-0040](ADR-0040-notebook-model-promotion.md) (dec 3: the
-  promoting user binds the configuration), [ADR-0034](ADR-0034-platform-schema-migration-strategy.md)
+- **Related:** [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (dec 1: the output
+  contract fixed at registration), [ADR-0035](ADR-0035-drift-baseline.md) (dec 4: the
+  sample checked against the bound inputs), [ADR-0040](ADR-0040-a-notebook-registered-model-version-becomes-a-platform-model-by-promotion.md) (dec 3: the
+  promoting user binds the configuration), [ADR-0034](ADR-0034-platform-schema-migrations.md)
   (the schema change)
 
 ## Context

@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-27; changed 2026-10-30
 - **Parent:** ADR-0001
-- **Related:** [ADR-0012](ADR-0012-notebook-credential-delivery.md) (the properties realised here), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (per-tenant read-only role), [ADR-0014](ADR-0014-notebook-hub-single-sign-on.md) (the identity minted against; chained sign-out), [ADR-0004](ADR-0004-api-authentication-sessions-and-transport.md) (session end revokes capabilities), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway.md), [ADR-0025](ADR-0025-cold-layer-historical-data-open-columnar.md), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (planes added since), [ADR-0042](ADR-0042-capability-use-audit.md) (the capability-use record)
+- **Related:** [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) (the properties realised here), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (per-tenant read-only role), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (the identity minted against; chained sign-out), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (session end revokes capabilities), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (planes added since), [ADR-0042](ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md) (the capability-use record)
 
 ## Context
 

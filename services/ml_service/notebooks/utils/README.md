@@ -100,7 +100,7 @@ feature_config_id = config.register("<ml-service-url>", "<jwt>")
 feature_names = config.get_feature_names()
 ```
 
-A domain's sensor set lives in its extension ([ADR-0008](../../../../ADR/ADR-0008-extension-and-plugin-interface.md));
+A domain's sensor set lives in its extension ([ADR-0008](../../../../ADR/ADR-0008-extension-interface-for-a-domain-generic-core.md));
 `load_config("extensions/reference/reference_config.json")` starts from the reference pump.
 
 ## Troubleshooting

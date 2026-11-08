@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Cold-layer deferred items
 
-The cold-layer items [ADR-0025](../../ADR/ADR-0025-cold-layer-historical-data-open-columnar.md)
+The cold-layer items [ADR-0025](../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md)
 defers to a trigger, the signal that shows each trigger has fired, and the code each would touch.
 None is built.
 

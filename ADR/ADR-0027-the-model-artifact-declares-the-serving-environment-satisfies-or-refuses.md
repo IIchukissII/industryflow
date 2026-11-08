@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-07-14; changed 2026-10-26
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (its deferred supply chain, for the artifact path only)
-- **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (in-process registry), [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (model-adapter contract), [ADR-0026](ADR-0026-release-model-and-the-compose-smoke-gate.md) (the test is the gate), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (retrain lane), [ADR-0030](ADR-0030-externally-authored-model-admission.md) (provenance), [ADR-0037](ADR-0037-no-author-code-on-the-serving-side.md) (no load runs author code)
+- **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (in-process registry), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (model-adapter contract), [ADR-0026](ADR-0026-release-model.md) (the test is the gate), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (retrain lane), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (provenance), [ADR-0037](ADR-0037-no-model-load-on-the-serving-side-runs-author-code-whatever-the-provenance.md) (no load runs author code)
 
 ## Context
 

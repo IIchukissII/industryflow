@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Tracking gateway
 
-The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md)): it resolves the kernel's tracking capability handle (`MLFLOW_TRACKING_TOKEN`) to one tenant and confines every MLflow call to that tenant's namespace. The artifact store's read/write principal lives only here ([ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multitenancy.md) dec 1); MLflow's database credential stays with the tracking server.
+The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md)): it resolves the kernel's tracking capability handle (`MLFLOW_TRACKING_TOKEN`) to one tenant and confines every MLflow call to that tenant's namespace. The artifact store's read/write principal lives only here ([ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md) dec 1); MLflow's database credential stays with the tracking server.
 
 ## Endpoints
 
@@ -15,7 +15,7 @@ The experiment-tracking gateway for authoring notebooks ([ADR-0019](../../ADR/AD
 | GET, POST, PUT, PATCH, DELETE | `/api/2.0/mlflow/<endpoint>` | tracking handle | Allow-listed MLflow REST routes, tenant-scoped; any other route or non-canonical spelling: 403 |
 | GET, PUT, DELETE | `/api/2.0/mlflow-artifacts/artifacts/<path>` | tracking handle | Key forced under the tenant prefix. GET/PUT: 307 to a per-object, short-TTL pre-signed URL (ADR-0019 dec 6); DELETE: done by the gateway. PUT/DELETE under `<tenant>/uploads/`: 403 |
 | GET | `/api/2.0/mlflow-artifacts/artifacts` | tracking handle | Artifact listing, tenant-scoped |
-| POST | `/api/2.0/industryflow-upload/stage` | upload handle | Stage an externally-authored artifact under `_upload-staging/` ([ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md)) |
+| POST | `/api/2.0/industryflow-upload/stage` | upload handle | Stage an externally-authored artifact under `_upload-staging/` ([ADR-0030](../../ADR/ADR-0030-admission-of-externally-authored-models.md)) |
 | POST | `/api/2.0/industryflow-upload/commit` | upload handle | Judge and admit into `<tenant>/uploads/`, or discard |
 | DELETE | `/api/2.0/industryflow-operator/tenants/<company_id>` | `TRACKING_OPERATOR_TOKEN` | Empty a deleted tenant ([ADR-0033 dec 4](../../ADR/ADR-0033-tenant-lifecycle.md)): delete its registered models, artifacts and staged uploads; rename its experiments to `_deleted.tenant_<…>.<id>` and soft-delete them with their runs and logged models. Answers what remains; experiments count until `infrastructure/mlflow/collect_deleted.py` collects them. Absent when the token is unset |
 

@@ -7,7 +7,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-06-26; changed 2026-10-17
-- **Related:** [ADR-0008](ADR-0008-extension-and-plugin-interface.md), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extensions)
+- **Related:** [ADR-0008](ADR-0008-extension-interface-for-a-domain-generic-core.md), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extensions)
 
 ## Context
 

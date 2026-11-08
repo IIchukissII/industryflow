@@ -8,8 +8,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-28; changed 2026-10-25
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
-- **Related:** [ADR-0028](ADR-0028-model-adapter-contract-and-score-semantics.md) (declared detector
-  and scale), [ADR-0035](ADR-0035-drift-baseline-derived-scores.md) (the baseline),
+- **Related:** [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (declared detector
+  and scale), [ADR-0035](ADR-0035-drift-baseline.md) (the baseline),
   [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (labelled drift),
   [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors)
 

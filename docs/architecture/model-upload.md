@@ -9,11 +9,11 @@ The path that admits an externally-authored model: components, locations, settin
 
 | Decision | ADR |
 |---|---|
-| Admission, structural refusal, registration and deployment gates, browser reachability | [ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md) |
-| Bytes go direct to the store; the gateway is the only writer | [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway.md) dec 6 |
-| Supported flavor set, skops trust by provenance | [ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) |
-| Declared score semantics, detector per model | [ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) |
-| Single origin | [ADR-0004](../../ADR/ADR-0004-api-authentication-sessions-and-transport.md) |
+| Admission, structural refusal, registration and deployment gates, browser reachability | [ADR-0030](../../ADR/ADR-0030-admission-of-externally-authored-models.md) |
+| Bytes go direct to the store; the gateway is the only writer | [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) dec 6 |
+| Supported flavor set, skops trust by provenance | [ADR-0027](../../ADR/ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) |
+| Declared score semantics, detector per model | [ADR-0028](../../ADR/ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) |
+| Single origin | [ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) |
 
 ## Flow
 
@@ -49,7 +49,7 @@ and an artifact is refused. The check runs at registration, deployment and every
 hits included).
 
 The author-code check (`skops_trust.refuse_author_code`) runs for every model, uploaded or kernel-authored
-([ADR-0037](../../ADR/ADR-0037-no-author-code-on-the-serving-side.md)), at registration (422), deployment
+([ADR-0037](../../ADR/ADR-0037-no-model-load-on-the-serving-side-runs-author-code-whatever-the-provenance.md)), at registration (422), deployment
 (409) and every load. It reads the manifest only and imports nothing it names:
 
 | Refused | Detail |
@@ -120,10 +120,10 @@ Pre-signed URL lifetime: [tracking gateway settings](../../services/notebook_tra
 
 | Item | Status |
 |---|---|
-| Torch and other flavors outside the supported set | Refused with a reason ([ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md) dec 7) |
-| Uploaded tree-based sklearn models | Refused at deploy, stage `trust` ([ADR-0027](../../ADR/ADR-0027-model-artifact-supply-chain-parity.md) dec 13) |
+| Torch and other flavors outside the supported set | Refused with a reason ([ADR-0028](../../ADR/ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) dec 7) |
+| Uploaded tree-based sklearn models | Refused at deploy, stage `trust` ([ADR-0027](../../ADR/ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) dec 13) |
 | Attestation of origin | Not built |
-| Resumable or multipart transfer | Not built ([ADR-0030](../../ADR/ADR-0030-externally-authored-model-admission.md) dec 10) |
+| Resumable or multipart transfer | Not built ([ADR-0030](../../ADR/ADR-0030-admission-of-externally-authored-models.md) dec 10) |
 
 ## ADR-0030 dec 2, 4
 

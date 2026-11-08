@@ -7,7 +7,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 The extension surfaces of `ml-service-api`: configuration, the feature-transform and detector plugin
 contracts, and loading an extension module
-([ADR-0008](../../ADR/ADR-0008-extension-and-plugin-interface.md),
+([ADR-0008](../../ADR/ADR-0008-extension-interface-for-a-domain-generic-core.md),
 [ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)).
 
 | Surface | Content | Change needed |
@@ -61,7 +61,7 @@ async def pressure_baseline(transformation, sensor_data, ctx):
     return baseline["mean"]
 ```
 
-A transform never returns a substitute value ([ADR-0044](../../ADR/ADR-0044-complete-model-input.md)):
+A transform never returns a substitute value ([ADR-0044](../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md)):
 
 | SDK name | Use | Result at `/api/inference/predict` |
 |---|---|---|
@@ -110,7 +110,7 @@ async def rule_detector(features, model, threshold, ctx):
 
 | Element | Rule |
 |---|---|
-| `semantics` | What the model's output means: `ANOMALY_PROBABILITY`, `OUTLIER_SCORE`, `RECONSTRUCTION_ERROR`, `DIRECT_SCORE` ([ADR-0028](../../ADR/ADR-0028-model-adapter-contract-and-score-semantics.md)) |
+| `semantics` | What the model's output means: `ANOMALY_PROBABILITY`, `OUTLIER_SCORE`, `RECONSTRUCTION_ERROR`, `DIRECT_SCORE` ([ADR-0028](../../ADR/ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md)) |
 | `handles_flavors` | MLflow flavors the detector can score; empty claims none |
 | `UninterpretableModel` | Raise it when the meaning of a model's output cannot be established |
 | Dispatch | Inference uses the model record's `detector`; a record without one is refused (422) |

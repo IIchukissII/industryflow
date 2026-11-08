@@ -10,8 +10,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0002](ADR-0002-ingestion-authentication-and-device-identity.md) (shared edge),
   [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant claim),
-  [ADR-0009](ADR-0009-kubernetes-deployment-and-packaging.md) (deployment shapes),
-  [ADR-0015](ADR-0015-notebook-capability-minting-and-sql-proxy.md) (capabilities),
+  [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (deployment shapes),
+  [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capabilities),
   [ADR-0017](ADR-0017-database-tls-and-authentication.md) (shared internal CA)
 
 ## Context
