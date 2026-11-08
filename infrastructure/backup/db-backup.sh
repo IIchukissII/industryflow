@@ -85,10 +85,11 @@ _dst_aws() {
 # out here and, when $4 names a file, written to it JSON-encoded for the caller to report.
 _list_sizes() {
   local side="$1" bucket="$2" prefix="$3" unsafe="${4:-/dev/null}" out
+  # Failure is returned explicitly: a caller testing it (`if ! _list_sizes`) runs it without errexit.
   out="$("$side" s3api list-objects-v2 --bucket "$bucket" ${prefix:+--prefix "$prefix"} \
-           --query 'Contents[].[Key,Size]' --output json)"
+           --query 'Contents[].[Key,Size]' --output json)" || return 1
   printf '%s' "$out" | jq -r '(. // [])[] | select(.[0] | test("\\p{Cc}") | not)
-                               | "\(.[0])\t\(.[1])"'
+                               | "\(.[0])\t\(.[1])"' || return 1
   printf '%s' "$out" | jq -c '(. // [])[] | select(.[0] | test("\\p{Cc}")) | .[0]' \
     > "$unsafe"
 }
@@ -197,21 +198,19 @@ age_out_mirror() {
 
 prune() {
   # Keep the newest $RETAIN_PER_DB objects under a prefix; delete the rest. Keys are
-  # timestamp-named so lexical sort == chronological.
-  local prefix="$1"
-  local keys
-  keys="$(aws "${AWS_ARGS[@]}" s3api list-objects-v2 --bucket "${S3_BUCKET}" \
-            --prefix "${prefix}" --query 'Contents[].Key' --output text 2>/dev/null || true)"
-  [ -z "$keys" ] || [ "$keys" = "None" ] && return 0
-  local sorted total drop
-  sorted="$(printf '%s\n' $keys | sort)"
-  total="$(printf '%s\n' "$sorted" | wc -l)"
-  drop=$(( total - RETAIN_PER_DB ))
-  [ "$drop" -le 0 ] && return 0
+  # timestamp-named so lexical sort == chronological. A target that cannot be listed fails the run:
+  # retention would otherwise stop without a word while the copies grow.
+  local prefix="$1" keys="${WORKDIR}/retained" drop k
+  if ! _list_sizes _dst_aws "$S3_BUCKET" "$prefix" | cut -f1 | sort > "$keys"; then
+    log "  ${prefix}: FAILED, the backup target could not be listed; retention not applied"
+    return 1
+  fi
+  drop=$(( $(wc -l < "$keys") - RETAIN_PER_DB ))
+  [ "$drop" -gt 0 ] || return 0
   log "  pruning ${drop} old object(s) under ${prefix} (keep ${RETAIN_PER_DB})"
-  printf '%s\n' "$sorted" | head -n "$drop" | while read -r k; do
-    [ -n "$k" ] && aws "${AWS_ARGS[@]}" s3 rm "s3://${S3_BUCKET}/${k}" --only-show-errors
-  done
+  while IFS= read -r k <&4; do
+    _dst_aws s3 rm "s3://${S3_BUCKET}/${k}" --only-show-errors
+  done 4< <(head -n "$drop" "$keys")
 }
 
 # The platform database the migration runner gates, when this run dumps it; empty otherwise.
@@ -269,6 +268,8 @@ main() {
   DATABASES="${DATABASES:-industryflow mlflow}"
   S3_PREFIX="${S3_PREFIX:-timescaledb}"
   RETAIN_PER_DB="${RETAIN_PER_DB:-14}"
+  require_count RETAIN_PER_DB "$RETAIN_PER_DB"
+  [ -z "${MIRROR_RETAIN_DAYS:-}" ] || require_count MIRROR_RETAIN_DAYS "$MIRROR_RETAIN_DAYS"
   export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
   export PGPASSWORD
 

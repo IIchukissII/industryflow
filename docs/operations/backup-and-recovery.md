@@ -59,7 +59,8 @@ Image `infrastructure/backup/` (`postgres:15-alpine` + `aws-cli`, uid 10001), en
 | Notebook archive | `s3://<bucket>/<notebook-prefix>/<volume>/<stamp>.tar.gz` |
 
 `<stamp>` is UTC `YYYYMMDDTHHMMSSZ`; lexical order is chronological. Dumps and globals are pruned to
-the newest `RETAIN_PER_DB` per prefix. The bucket is created if absent.
+the newest `RETAIN_PER_DB` per prefix. A prefix that cannot be listed fails the run: it is not recorded
+and writes no metric. The bucket is created if absent.
 
 | Name | Default | Meaning |
 |---|---|---|
@@ -68,14 +69,14 @@ the newest `RETAIN_PER_DB` per prefix. The bucket is created if absent.
 | `S3_ENDPOINT_URL` | unset (AWS S3) | S3 endpoint |
 | `S3_PREFIX` | `timescaledb` | Key prefix for dumps and globals |
 | `DATABASES` | `industryflow mlflow` | Databases to dump |
-| `RETAIN_PER_DB` | `14` | Copies kept per database |
+| `RETAIN_PER_DB` | `14` | Copies kept per database; a whole number of at least 1, else the run is refused |
 | `SKIP_WITHOUT_CREDENTIALS` | unset | `1`: exit 0 with a log line when `PGUSER` is unset; the Helm pre-upgrade hook sets it |
 | `PLATFORM_DATABASE` | `industryflow` | A complete run that dumped it adds a row to its `public.backup_ledger`, which the migration runner reads ([before an upgrade](#before-an-upgrade)) |
 | `METRICS_TEXTFILE_DIR` | unset | Directory for the run's success time, `industryflow_backup_last_success_timestamp_seconds{backup="databases"}` (node-exporter textfile); Compose sets it |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | required | Backup principal |
 | `SOURCE_ENDPOINT_URL` | `S3_ENDPOINT_URL` | Endpoint of the mirrored buckets |
 | `SOURCE_ACCESS_KEY_ID` / `SOURCE_SECRET_ACCESS_KEY` | the `AWS_*` pair | Read-only `backup-read` principal |
-| `MIRROR_RETAIN_DAYS` | `RETAIN_PER_DB` | Days an object gone from a source stays in its mirror |
+| `MIRROR_RETAIN_DAYS` | `RETAIN_PER_DB` | Days an object gone from a source stays in its mirror; at least 1 |
 | `COLD_SOURCE_BUCKET` | unset (mirror skipped) | Cold bucket to mirror |
 | `COLD_SOURCE_ENDPOINT_URL` | `SOURCE_ENDPOINT_URL` | Cold bucket endpoint |
 | `COLD_BACKUP_PREFIX` | `cold` | Cold mirror prefix in `S3_BUCKET` |
@@ -114,7 +115,7 @@ Service `notebook-backup` (same image, entrypoint `notebook-backup.sh`, `backup`
 | `NOTEBOOK_HELPER_IMAGE` | required (`industryflow-db-backup` in Compose) | Image the reading containers are created from |
 | `NOTEBOOK_VOLUME_TEMPLATE` | `industryflow-nb-{username}` | The hub's volume name |
 | `NOTEBOOK_BACKUP_PREFIX` | `notebooks` | Key prefix in `S3_BUCKET` |
-| `RETAIN_PER_VOLUME` | `RETAIN_PER_DB`, else `14` | Archives kept per volume |
+| `RETAIN_PER_VOLUME` | `RETAIN_PER_DB`, else `14` | Archives kept per volume; at least 1 |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | Engine API socket |
 
 ### Object-store principal
