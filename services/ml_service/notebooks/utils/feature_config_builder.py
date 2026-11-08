@@ -11,7 +11,7 @@ while training models in Jupyter notebooks.
 The builder is domain-generic: it knows how to *shape* a feature config, never what any
 particular process measures. Sensor names, equipment types and limits come from the caller
 (ADR-0001, ADR-0008). A domain's own sensor set belongs in that domain's extension — see
-`extensions/tep-reference/tep_reactor_config.json` for a worked example, loadable with
+`extensions/reference/reference_config.json` for a worked example, loadable with
 `load_config()`.
 
 Example:
@@ -43,7 +43,7 @@ class FeatureConfigBuilder:
 
         Args:
             name: Human-readable name for the configuration
-            equipment_type: Type of equipment (e.g., "tep_reactor", "pump", "compressor")
+            equipment_type: Type of equipment (e.g., "pump", "compressor")
             description: Optional description
             version: Semantic version (default: "1.0.0")
         """

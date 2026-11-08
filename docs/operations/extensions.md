@@ -133,7 +133,7 @@ EXTENSION_MODULES=my_domain.transforms,my_domain.detectors
 
 ## Example
 
-[`extensions/tep-reference/`](../../extensions/tep-reference/README.md) (module `tep_reference`) is
+[`extensions/reference/`](../../extensions/reference/README.md) (module `reference_extension`) is
 loaded only when `EXTENSION_MODULES` names it.
 
 ## ADR-0008 dec 1
@@ -151,7 +151,9 @@ The reference extension is a separate package that depends on the platform.
 
 | Code | Role |
 |---|---|
-| `extensions/tep-reference` | Reference extension and data producer |
+| `extensions/reference` | Reference extension |
+| `services/ml_service/tests/test_extension_contract.py::test_the_platform_loads_no_extension_it_is_not_configured_to_load` | Proof: not loaded unless configured |
+| `services/ml_service/tests/test_extension_contract.py::test_no_platform_source_names_the_reference_module` | Proof: no platform source imports it |
 
 ## ADR-0010 dec 1
 
@@ -195,16 +197,17 @@ Each contract carries the extension-API version a plugin declares against.
 
 | Part | File |
 |---|---|
-| Domain configuration | `extensions/tep-reference/tep_reactor_config.json` |
-| Transform | `tep_reactor_pressure_margin` |
-| Detector | `tep_rule` (model-free) |
+| Domain configuration | `extensions/reference/reference_config.json` |
+| Transform | `reference_pressure_margin` |
+| Detector | `reference_margin_rule` (model-free) |
 
-The module declares its target extension-API version and is imported only when `EXTENSION_MODULES` names `tep_reference`. No platform code imports it.
+The module declares its target extension-API version and is imported only when `EXTENSION_MODULES` names `reference_extension`. No platform code imports it.
 
 | Code | Role |
 |---|---|
-| `extensions/tep-reference/tep_reference.py` | Reference transform and detector |
-| `extensions/tep-reference/tep_reactor_config.json` | Reference domain configuration |
+| `extensions/reference/reference_extension.py` | Reference transform and detector |
+| `extensions/reference/reference_config.json` | Reference domain configuration |
+| `services/ml_service/tests/test_extension_contract.py` | Proof: discovery by configured import, registration, the configuration accepted only when loaded, computation, dispatch by name, the version rule |
 
 ## ADR-0010 dec 6
 

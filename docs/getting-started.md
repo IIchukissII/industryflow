@@ -14,7 +14,7 @@ Values live in [`docker-compose.yml`](../docker-compose.yml) and [`.env.example`
 |---|---|
 | Docker with Compose v2 | The stack |
 | `openssl` on the host | `scripts/device-ca.sh` (device CA, ADR-0007 dec 1), `scripts/gen-internal-ca.sh` (internal CA, ADR-0004 dec 8) |
-| Python 3 with `requests` and `pandas` | The reference data producer |
+| Python 3 | The sample device (`clients/device`, ADR-0002 dec 7), with `pip install ./libs/industryflow_contracts` |
 | 8 GB+ RAM | The stack |
 
 ## 1. Configure
@@ -73,19 +73,29 @@ Open `https://localhost:<FRONTEND_HTTPS_PORT>` and sign in. From another machine
 
 ## 5. Stream test data
 
+A user provisions the equipment; a device, holding only its certificate, sends readings for it
+([ADR-0002](../ADR/ADR-0002-ingestion-authentication-and-device-identity.md)).
+
+| Step | Where |
+|---|---|
+| Create an equipment and its sensors | Equipment page; for the [reference pump](../extensions/reference/README.md#the-pump): `discharge_pressure`, `flow_rate`, `motor_temperature` |
+| Note the tenant id, the equipment id and each sensor id | Companies page (tenant), Equipment page |
+| Issue the device's certificate | `scripts/device-ca.sh issue <company_id> sample-device` |
+
 ```bash
-scripts/device-ca.sh issue <company_id> tep-producer
-
-# Terminal 1: stream
-DEVICE_CERT=deploy/device-ca/devices/<company_id>/tep-producer/current.chain.crt \
-DEVICE_KEY=deploy/device-ca/devices/<company_id>/tep-producer/current.key \
-  python3 extensions/tep-reference/producer/stream_tep_data.py
-
-# Terminal 2: watch the streaming job
-docker logs -f industryflow-spark-streaming
+pip install ./libs/industryflow_contracts
+python3 clients/device/stream_readings.py --url https://localhost:<INGESTION_MTLS_PORT>/ingest \
+  --cert deploy/device-ca/devices/<company_id>/sample-device/current.chain.crt \
+  --key deploy/device-ca/devices/<company_id>/sample-device/current.key \
+  --ca deploy/certs/ca.crt --equipment-id <equipment_id> --site-id <site> \
+  --sensor discharge_pressure=<sensor_id>:6:9 \
+  --sensor flow_rate=<sensor_id>:30:50 \
+  --sensor motor_temperature=<sensor_id>:50:70
 ```
 
-Producer settings: [tep-reference](../extensions/tep-reference/README.md#producer-settings).
+Each round prints every sensor's value and the edge's status (`202` accepted). The stream writes the
+readings within seconds; `GET /api/measurements/latest` reads them back. Options:
+`python3 clients/device/stream_readings.py --help`.
 
 ## 6. Notebooks (optional profile)
 

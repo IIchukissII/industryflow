@@ -101,7 +101,7 @@ feature_names = config.get_feature_names()
 ```
 
 A domain's sensor set lives in its extension ([ADR-0008](../../../../ADR/ADR-0008-extension-and-plugin-interface.md));
-`load_config("extensions/tep-reference/tep_reactor_config.json")` starts from the TEP example.
+`load_config("extensions/reference/reference_config.json")` starts from the reference pump.
 
 ## Troubleshooting
 

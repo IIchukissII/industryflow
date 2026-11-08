@@ -59,4 +59,5 @@ Index of every page under `docs/` and of the component READMEs. Decisions live i
 | [services/notebook_tracking_gateway](../services/notebook_tracking_gateway/README.md) | Tracking gateway |
 | [services/ml_service/notebooks/utils](../services/ml_service/notebooks/utils/README.md) | Notebook feature-config and baseline helpers |
 | [clients/python](../clients/python/README.md) | Python notebook client |
-| [extensions/tep-reference](../extensions/tep-reference/README.md) | Reference extension and data producer |
+| [extensions/reference](../extensions/reference/README.md) | Reference extension |
+| [clients/device](../clients/device/stream_readings.py) | Sample device: readings over mutual TLS |

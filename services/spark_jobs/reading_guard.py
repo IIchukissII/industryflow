@@ -35,12 +35,12 @@ from __future__ import annotations
 
 import uuid
 
-from industryflow_contracts import tenancy
+from industryflow_contracts import readings, tenancy
 
-# How far ahead of the processing clock an event timestamp may be. Ingestion rejects anything further
-# ahead at the edge (services/ingestion_service/schemas.py carries the same bound; a test holds them
-# equal); this is the stream's own guard for anything that reaches Kafka another way.
-MAX_FUTURE_SKEW_SECONDS = 300
+# How far ahead of the processing clock an event timestamp may be: the bound ingestion applies at the
+# edge, from the one readings contract. This is the stream's own guard for anything that reaches
+# Kafka another way.
+MAX_FUTURE_SKEW_SECONDS = readings.MAX_FUTURE_SKEW_SECONDS
 
 # The topic the jobs read; KAFKA_TOPIC_SENSOR_DATA overrides it, as for the producer and the alert worker.
 DEFAULT_SOURCE_TOPIC = "sensor-data-raw"

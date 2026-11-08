@@ -36,6 +36,7 @@ jobs:
               # The runbooks the ops-agent tests read as a contract (ADR-0046 dec 9).
               - 'docs/operations/**'
               - 'clients/python/**'
+              - 'clients/device/**'
               # Read by the parity guards (e.g. the alert worker's config parity test), so an
               # edit on that side alone must run them too.
               - 'docker-compose.yml'
@@ -132,6 +133,8 @@ jobs:
           # The shared contracts package itself. The repository-wide guards that every service takes
           # its tenant names and window contract from it live in tests/config_guards.
           - { service: contracts,           path: libs/industryflow_contracts/tests, install: "pip install './libs/industryflow_contracts[dev]'" }
+          # The sample device: its readings and a real mutual-TLS exchange with a stand-in edge.
+          - { service: device_client,       path: clients/device/tests, install: "pip install './libs/industryflow_contracts[dev]'" }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

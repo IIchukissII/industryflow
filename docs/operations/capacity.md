@@ -76,7 +76,7 @@ host run only the sampler.
 
 | Tool | Runs on | Needs |
 |---|---|---|
-| `loadgen.py` | Load machine | Python 3, `httpx`, a device certificate |
+| `loadgen.py` | Load machine | Python 3, `httpx`, `pip install ./libs/industryflow_contracts`, a device certificate and the edge's CA |
 | `sample_host.sh` | Docker host | cgroup v2, Docker's systemd cgroup driver |
 | `analyze.py` | Anywhere | Python 3, the sampler's log |
 
@@ -85,7 +85,7 @@ host run only the sampler.
 | Device certificate | `scripts/device-ca.sh issue …` ([device mTLS](device-mtls.md)) |
 | Sensor map | JSON object `name -> sensor UUID` of sensors in the device's tenant |
 | Start the sampler (Docker host) | `bash tests/performance/sample_host.sh /tmp/sample.log &` |
-| Load, one process per 125 readings/s | `python3 tests/performance/loadgen.py --url https://<host>:8443/ingest --cert <crt> --key <key> --sensor-map <map.json> --equipment-id <uuid> --site-id <site> --rate 125 --duration 120 --run-start <iso-time> --csv out-K.csv --workers 2 --worker K` (K = 0, 1 for 250 readings/s) |
+| Load, one process per 125 readings/s | `python3 tests/performance/loadgen.py --url https://<host>:8443/ingest --cert <crt> --key <key> --ca <edge-ca.crt> --sensor-map <map.json> --equipment-id <uuid> --site-id <site> --rate 125 --duration 120 --run-start <iso-time> --csv out-K.csv --workers 2 --worker K` (K = 0, 1 for 250 readings/s) |
 | Count landed rows | `SELECT count(*) FROM "<tenant-schema>".sensor_measurements WHERE time >= '<iso-time>' AND time < '<iso-time>'::timestamptz + '<sent> microseconds'::interval` |
 | Stop the sampler | `kill %1` in the sampler's shell |
 | Summarize host and containers | `python3 tests/performance/analyze.py /tmp/sample.log <start-epoch> <end-epoch>` |

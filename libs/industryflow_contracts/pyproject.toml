@@ -16,8 +16,10 @@ dependencies = []
 
 [project.optional-dependencies]
 # fakeredis with lupa runs the capability-audit first-use script in a real Lua interpreter;
-# prometheus-client, which the services that report build info already carry, tests that series.
-dev = ["pytest==9.1.1", "fakeredis[lua]==2.40.0", "lupa==2.8", "redis==8.1.0", "prometheus-client==0.26.0"]
+# prometheus-client, which the services that report build info already carry, tests that series;
+# cryptography makes the certificate the device-TLS test presents.
+dev = ["pytest==9.1.1", "fakeredis[lua]==2.40.0", "lupa==2.8", "redis==8.1.0", "prometheus-client==0.26.0",
+       "cryptography==50.0.2"]
 
 [tool.setuptools]
 packages = ["industryflow_contracts"]

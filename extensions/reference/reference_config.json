@@ -1,0 +1,13 @@
+{
+  "equipment_type": "example_pump",
+  "name": "Reference pump",
+  "description": "The reference extension's configuration: three pump sensors and the pressure margin its transform computes.",
+  "base_sensors": ["discharge_pressure", "flow_rate", "motor_temperature"],
+  "transformations": [
+    { "name": "discharge_pressure", "type": "identity", "sensor": "discharge_pressure" },
+    { "name": "flow_rate", "type": "identity", "sensor": "flow_rate" },
+    { "name": "motor_temperature", "type": "identity", "sensor": "motor_temperature" },
+    { "name": "pressure_margin", "type": "reference_pressure_margin", "sensor": "discharge_pressure",
+      "params": { "limit": 10.0 } }
+  ]
+}

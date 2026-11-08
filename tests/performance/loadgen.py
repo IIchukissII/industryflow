@@ -19,11 +19,11 @@ import asyncio
 import csv
 import json
 import signal
-import ssl
 import time
 from datetime import datetime, timedelta
 
 import httpx
+from industryflow_contracts import readings
 
 
 async def main():
@@ -31,7 +31,7 @@ async def main():
     p.add_argument("--url", required=True, help="https://<host>:8443/ingest")
     p.add_argument("--cert", required=True, help="device certificate chain (scripts/device-ca.sh)")
     p.add_argument("--key", required=True, help="device private key")
-    p.add_argument("--ca", default="", help="CA bundle for the edge certificate; empty skips verification")
+    p.add_argument("--ca", required=True, help="CA bundle the edge's certificate is verified against")
     p.add_argument("--sensor-map", required=True)
     p.add_argument("--equipment-id", required=True)
     p.add_argument("--site-id", required=True)
@@ -46,11 +46,7 @@ async def main():
 
     sensors = list(json.load(open(a.sensor_map)).values())
     base = datetime.fromisoformat(a.run_start)
-    ctx = ssl.create_default_context(cafile=a.ca or None)
-    if not a.ca:
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-    ctx.load_cert_chain(a.cert, a.key)
+    ctx = readings.device_tls_context(a.cert, a.key, a.ca)
     limits = httpx.Limits(max_connections=a.connections, max_keepalive_connections=a.connections)
     rows = []
     stop = asyncio.Event()
@@ -62,15 +58,11 @@ async def main():
 
     async with httpx.AsyncClient(verify=ctx, limits=limits, timeout=10.0) as client:
         async def send(seq):
-            body = {
-                "timestamp": (base + timedelta(microseconds=seq)).isoformat(),
-                "sensor_id": sensors[seq % len(sensors)],
-                "equipment_id": a.equipment_id,
-                "site_id": a.site_id,
-                "value": float(seq % 1000) / 10.0,
-                "unit": "u",
-                "quality_code": 0,
-            }
+            body = readings.reading(
+                timestamp=(base + timedelta(microseconds=seq)).isoformat(),
+                sensor_id=sensors[seq % len(sensors)], equipment_id=a.equipment_id, site_id=a.site_id,
+                value=float(seq % 1000) / 10.0, unit="u", quality_code=0,
+            )
             t0 = time.monotonic()
             try:
                 r = await client.post(a.url, json=body)

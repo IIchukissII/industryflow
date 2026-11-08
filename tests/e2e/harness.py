@@ -13,6 +13,7 @@ import time
 from typing import Callable, Iterable, Optional
 
 import httpx
+from industryflow_contracts import readings
 
 OK = (200, 201, 202, 204)
 
@@ -144,18 +145,18 @@ def issue_device(env: Environment, compose_dir: str, company_id: str, device_id:
 
 
 def send_reading(settings, cert, reading) -> httpx.Response:
-    """One reading through the device edge, presenting ``cert`` (a (chain, key) pair) or none."""
-    context = ssl.create_default_context(cafile=settings["IF_E2E_CA"])
-    if cert:
-        context.load_cert_chain(*cert)
+    """One reading through the device edge, presenting ``cert`` (a (chain, key) pair) as a device does,
+    or no certificate at all."""
+    context = (readings.device_tls_context(*cert, settings["IF_E2E_CA"]) if cert
+               else ssl.create_default_context(cafile=settings["IF_E2E_CA"]))
     with httpx.Client(verify=context, timeout=30.0) as c:
         return c.post(settings["IF_E2E_INGEST"], json=reading)
 
 
 def reading(equipment_id: str, sensor_id: str, value: float) -> dict:
     from datetime import datetime, timezone
-    return {"timestamp": datetime.now(timezone.utc).isoformat(), "sensor_id": sensor_id,
-            "equipment_id": equipment_id, "site_id": "e2e", "value": value}
+    return readings.reading(timestamp=datetime.now(timezone.utc).isoformat(), sensor_id=sensor_id,
+                            equipment_id=equipment_id, site_id="e2e", value=value)
 
 
 def eventually(check: Callable[[], object], *, timeout: float, every: float = 5.0, what: str = ""):

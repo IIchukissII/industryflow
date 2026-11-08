@@ -105,7 +105,7 @@ Each alert fires when its check has not passed for 13h (two missed six-hourly ru
 | Newest unrevoked certificate inside `CERT_WARN_DAYS` | `EXPIRING:` line naming tenant and device; non-zero exit |
 | Same `device_id`, two tenants | Two separate devices |
 
-Reference producer against the edge: [getting started, step 5](../getting-started.md#5-stream-test-data).
+Sample device against the edge: [getting started, step 5](../getting-started.md#5-stream-test-data).
 
 ## Revocation
 
@@ -224,6 +224,19 @@ The ingestion service is reachable only from its edge and holds no database role
 | `deploy/helm/industryflow/templates/ingress.yaml` | Device Ingress routes only the device paths, each `Exact` |
 | `services/ingestion_edge/nginx.conf` | Compose edge: the same paths, exact; any other answers 404 |
 | `tests/config_guards/test_device_edge_paths.py` | Proof: both edges serve the same device paths |
+
+## ADR-0002 dec 5, 7
+
+A reading's body carries no tenant; producers present a device certificate from the device CA and verify the edge.
+
+| Code | Role |
+|---|---|
+| `libs/industryflow_contracts/industryflow_contracts/readings.py` | The reading's shape, the clock-skew bound, the device side of mutual TLS |
+| `clients/device/stream_readings.py` | Sample device |
+| `tests/performance/loadgen.py` | Load generator |
+| `tests/e2e/harness.py::send_reading` | End-to-end journeys' device |
+| `services/ingestion_service/tests/test_schemas.py::test_the_readings_contract_is_what_ingestion_accepts` | Proof: ingestion accepts the contract's reading |
+| `clients/device/tests/test_stream_readings.py` | Proof: the sample device over real mutual TLS, both refusals |
 
 ## ADR-0002 dec 6
 
