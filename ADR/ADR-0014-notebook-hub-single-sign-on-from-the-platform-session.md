@@ -71,4 +71,5 @@ edge already forwards a verified identity that its service trusts only from that
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): request path; manual of decisions 1-4, 7.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): request path; manual of
+  decisions 1-7.

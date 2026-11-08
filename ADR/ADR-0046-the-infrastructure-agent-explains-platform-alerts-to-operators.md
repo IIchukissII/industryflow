@@ -94,4 +94,5 @@ and user addresses even though tenant data stays off that stack.
 
 ## References
 
-- [docs/operations/monitoring.md](../docs/operations/monitoring.md): the platform rules and runbooks; manual of decisions 1, 2, 4, 7-10.
+- [docs/operations/monitoring.md](../docs/operations/monitoring.md): the platform rules and
+  runbooks; manual of decisions 1-10.

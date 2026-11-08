@@ -5,8 +5,15 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Decision records
 
-How decision records, their manuals and the code they govern are kept apart and kept consistent.
-Manual of [ADR-0000](../../ADR/ADR-0000-decision-records-and-the-single-source-of-truth.md).
+The manual of [ADR-0000](../../ADR/ADR-0000-decision-records-and-the-single-source-of-truth.md): how decision records, their manuals and the code they govern are kept apart and kept consistent.
+
+## ADR-0000 dec 1
+
+Each decision is a record in `ADR/`; code, configuration and documents cite it as `ADR-NNNN` or `ADR-NNNN dec N`. A citation of a record that does not exist fails the reference guard. No check orders a record before the code it governs.
+
+| Code | Role |
+|---|---|
+| `tests/config_guards/test_adr_references.py::test_every_cited_adr_exists` | A cited record exists |
 
 ## ADR-0000 dec 2
 
@@ -36,11 +43,42 @@ A manual section is headed by the decision it follows and ends with a code table
 
 Each unavoidable copy of a fact has a guard that reads every copy and fails when they disagree.
 
+`tests/config_guards` holds one test per list of copies; each reads both sides.
+
 | Code | Role |
 |---|---|
-| `tests/config_guards` | One test per list of copies; each reads both sides |
+| `tests/config_guards/test_image_pins.py::test_compose_and_chart_pin_the_same_image_identically` | Example: Compose and the chart pin each image identically |
+| `tests/config_guards/test_session_cookie_names.py` | Example: every reader of the session cookies names the cookies the gateway sets |
 | `tests/config_guards/_repo.py` | Shared readers of workflows, compose file and chart; holds no list of its own |
 | `.github/workflows/config-guards.yml` | Runs the guards on every change ([CI](../operations/ci.md)) |
+
+## ADR-0000 dec 4
+
+Not yet realised.
+
+## ADR-0000 dec 5
+
+| Element | Form |
+|---|---|
+| Header date | `- **Date:** <date>`, followed by `; changed <date>` once the record has changed |
+| A changed decision | Edited in place under its own number |
+| The replaced choice | A row in Alternatives, with the decision number it lost to |
+| A reversed or replaced decision | A new record; the old one's status `Superseded` |
+
+## ADR-0000 dec 6
+
+No record's `Parent` names ADR-0000; ADR-0000's own `Parent` is `none`.
+
+## ADR-0000 dec 7
+
+| Status | Meaning |
+|---|---|
+| `Proposed` | Under discussion |
+| `Accepted` | Binding; set by the merge that accepts it |
+| `Superseded` | Replaced by a newer record |
+| `Withdrawn` | Abandoned without a replacement |
+
+Every record carries a `- **Status:**` header line.
 
 ## ADR-0000 dec 8
 
@@ -58,6 +96,21 @@ The reference guard keys each record by the number in its file name. It fails on
 |---|---|
 | `tests/config_guards/test_adr_references.py::_decisions` | Reads each `ADR-NNNN-*.md` file's numbered decisions, keyed by its number |
 | `tests/config_guards/test_adr_references.py::test_every_cited_decision_exists` | Fails on a citation of a number the record does not hold |
+
+## ADR-0000 dec 9
+
+| Part | Form |
+|---|---|
+| Header | `Status`, `Date`, optional `Parent`, `Related` with the relation |
+| Sections | `## Context`, `## Decision` (numbered), `## Alternatives`, `## Consequences`, `## Deferred`, `## References` |
+| Alternatives | Table `\| Dec \| Rejected alternative \| Why rejected \|`, one row per rejected alternative |
+| Deferred | Table `\| Open question \| Settled by \|` |
+
+The reference guard reads each record's numbered decisions from its `## Decision` section; a record without one fails it.
+
+| Code | Role |
+|---|---|
+| `tests/config_guards/test_adr_references.py::_decisions` | Reads the `## Decision` section of every record |
 
 ## ADR-0000 dec 10
 

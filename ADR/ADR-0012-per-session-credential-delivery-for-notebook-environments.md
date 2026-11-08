@@ -67,4 +67,5 @@ request to the caller's tenant (ADR-0003).
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): audiences and capability lifecycle; manual of decisions 2, 4-6.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): audiences and capability
+  lifecycle; manual of decisions 1-6.

@@ -73,4 +73,4 @@ operators label. The framework set is open, while the serving image is one pinne
 ## References
 
 - Issue #236: every outlier-model reading scored as an anomaly.
-- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 1-5, 7.
+- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 1-7.

@@ -5,29 +5,47 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Data and storage
 
-Where tenant data lives: PostgreSQL + TimescaleDB with one schema per tenant, and the cold layer in
-the object store. Scripts, roles and grants: [schema scripts](../../infrastructure/timescaledb/init-scripts/README.md).
+The manual of [ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md), [ADR-0025](../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md), [ADR-0039](../../ADR/ADR-0039-one-test-of-tenant-ownership-for-names-and-object-store-keys.md): where tenant data lives (PostgreSQL + TimescaleDB with one schema per tenant, and the cold layer in the object store) and how a name or key is tied to its tenant.
 
-| Decision | ADR |
+## ADR-0003 dec 1-3
+
+| Caller | Tenant taken from |
 |---|---|
-| Schema-per-tenant; tenant resolved from a verified identity, applied with `SET LOCAL search_path` in a transaction | [ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md) |
-| Idempotent writes against `UNIQUE` keys | [ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) |
-| Cold layer, export → verify → drop, raw retention owned by the exporter | [ADR-0025](../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) |
-| Tenant provisioning | [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) |
-| Applying init-script changes to a live database | [ADR-0034](../../ADR/ADR-0034-platform-schema-migrations.md) |
-
-## Tenant identity sources
-
-| Caller | `company_id` taken from |
-|---|---|
-| API request | `company_id` JWT claim |
-| Device reading | Client-certificate SAN, stamped by ingestion ([ADR-0002](../../ADR/ADR-0002-ingestion-authentication-and-device-identity.md)) |
+| Gateway request | The authenticated user's `company_id`, read with the user by primary key |
+| ML service request | The `company_id` claim the gateway signs into the access token; a token without a UUID claim answers 401 |
+| Device reading | The URI SAN of the client certificate the edge verified, stamped on the reading by ingestion ([ADR-0002](../../ADR/ADR-0002-ingestion-authentication-and-device-identity.md)) |
 | Spark, alert worker | The Kafka message (stamped by ingestion) |
 | Notebook kernel | The capability handle ([notebooks](notebooks.md)) |
 
+A request body's `company_id` is not the tenant for a user caller. A caller presenting `X-Internal-Service-Token` names the tenant in the body's `company_id`, validated as a UUID. The user self-update schema refuses a tenant field.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/users.py::CompanyClaimJWTStrategy` | Signs `company_id` into the access token |
+| `services/api_gateway/dependencies.py::get_current_user_with_company` | Gateway tenant from the authenticated user |
+| `services/api_gateway/schemas.py::UserSelfUpdate` | No tenant field on self-update |
+| `services/api_gateway/routers/user_admin.py` | User administration inside the caller's tenant |
+| `services/ml_service/api/auth.py::company_id_of` | ML service tenant from the token claim |
+| `services/ml_service/api/routers/inference.py::_resolve_company_id` | Internal-service caller names the tenant |
+| `services/ingestion_service/dependencies.py::get_ingestion_identity` | Device tenant from the verified certificate |
+| `services/ml_service/tests/test_tenant_from_token.py` | Proof: the claim is the tenant, a body `company_id` is not |
+| `services/api_gateway/tests/test_user_admin.py` | Proof: self-update and administration stay in the caller's tenant |
+
 Provisioning: [user management](../operations/user-management.md#tenants).
 
-## Tenant names
+## ADR-0003 dec 4, 5, 7
+
+Every function of the library parses the tenant identifier as a UUID and builds names from its canonical string; a non-UUID raises `ValueError`. Every image is built with that library.
+
+| Code | Role |
+|---|---|
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::canonical_company_id` | UUID validation and canonical form |
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::schema_name` | The canonical tenant-to-schema function |
+| `libs/industryflow_contracts/tests/test_tenancy.py` | Proof: a non-UUID never becomes a name; every spelling of one tenant yields one name |
+| `tests/config_guards/test_tenant_contract_copies.py` | No deployable keeps its own copy of the contract |
+| `tests/config_guards/test_images_carry_contracts.py` | Every image that imports the library is built with it |
+
+### Tenant names
 
 All tenant-derived names come from `libs/industryflow_contracts` (`industryflow_contracts.tenancy`).
 Every service image installs it (named build context `contracts`); the Spark jobs ship it to
@@ -49,7 +67,7 @@ executors with `--py-files`.
 | `tests/config_guards/test_tenant_contract_copies.py` | A service or script spelling a tenant name (ADR-0003 dec 7) or restating the window contract (ADR-0006 dec 7) in code |
 | `tests/config_guards/test_images_carry_contracts.py` | An image whose code imports the package but does not install it (ADR-0003 dec 7) |
 
-## Tables
+### Tables
 
 `public` schema:
 
@@ -94,67 +112,6 @@ WS `sensor_update` (`sensor_name`, `display_name`); `GET /api/alerts` and `GET /
 
 Extension-owned domain tables: [extensions](../operations/extensions.md).
 
-## Cold layer
-
-Raw `sensor_measurements` older than the export horizon, as Parquet in the object store.
-
-| Component | Where |
-|---|---|
-| Exporter (single-node PyArrow; ADR-0025 dec 3, 4, 11) | `services/cold_export/` — `exporter.py` (ordering), `source.py` (database reads, run lock), `store.py` (object store), `naming.py` (paths), `ports.py` |
-| Schedule | Helm `cronjob-cold-export.yaml` (`coldExport.schedule`, `concurrencyPolicy: Forbid`); compose `docker compose --profile cold-export up cold-export` |
-| Horizon | `COLD_EXPORT_HORIZON_DAYS` / `coldExport.horizonDays`, default 30 |
-| Bucket | `COLD_STORE_BUCKET` / `coldExport.store.bucket`, default `industryflow-cold` |
-| Database side | `16-cold-layer-raw-retention.sql`: `cold_export_day_fingerprint`, `cold_export_drop_day` (`SECURITY DEFINER`), `public.cold_export_drops` |
-| Object-store principals | Write-scoped exporter principal; read-only broker principal; created by `minio-init` / Helm `job-minio-init.yaml` |
-| Read path (ADR-0025 dec 5) | `services/notebook_cold_broker/`, client `industryflow.IndustryFlowCold` ([notebooks](notebooks.md)) |
-| Backup | `db-backup` mirrors the cold and artifact buckets (`backup-read` principal; Helm `backup.cold`, `backup.models`); `notebook-backup` archives work volumes; `restore-rehearsal` and `notebook-rehearsal` restore the latest backups into scratch copies weekly ([backup and recovery](../operations/backup-and-recovery.md)) |
-
-Exporter behaviour per tenant and day:
-
-| Step | Detail |
-|---|---|
-| Run lock | Session advisory lock for the whole run; a run that finds it held exits 0 |
-| Export | Day read from one snapshot, written as a part: `measurements.parquet`, then `measurements-0001.parquet`, … for rows that arrive later |
-| Verify | Written row count reconciled against the source; part listed in the day's `_manifest.json` |
-| Drop | `cold_export_drop_day` re-checks the day's fingerprint (count + digest) under a lock and drops nothing if it changed; the drop is recorded in `public.cold_export_drops` |
-| Schema | Derived from `company_id`; a registry `schema_name` that disagrees is refused |
-
-Deferred cold-layer items and their triggers: [cold layer evolution](cold-layer-evolution.md).
-
-## ADR-0003 dec 1-3
-
-| Caller | Tenant taken from |
-|---|---|
-| Gateway request | The authenticated user's `company_id`, read with the user by primary key |
-| ML service request | The `company_id` claim the gateway signs into the access token; a token without a UUID claim answers 401 |
-| Device reading | The URI SAN of the client certificate the edge verified |
-
-A request body's `company_id` is not the tenant for a user caller. A caller presenting `X-Internal-Service-Token` names the tenant in the body's `company_id`, validated as a UUID. The user self-update schema refuses a tenant field.
-
-| Code | Role |
-|---|---|
-| `services/api_gateway/users.py::CompanyClaimJWTStrategy` | Signs `company_id` into the access token |
-| `services/api_gateway/dependencies.py::get_current_user_with_company` | Gateway tenant from the authenticated user |
-| `services/api_gateway/schemas.py::UserSelfUpdate` | No tenant field on self-update |
-| `services/api_gateway/routers/user_admin.py` | User administration inside the caller's tenant |
-| `services/ml_service/api/auth.py::company_id_of` | ML service tenant from the token claim |
-| `services/ml_service/api/routers/inference.py::_resolve_company_id` | Internal-service caller names the tenant |
-| `services/ingestion_service/dependencies.py::get_ingestion_identity` | Device tenant from the verified certificate |
-| `services/ml_service/tests/test_tenant_from_token.py` | Proof: the claim is the tenant, a body `company_id` is not |
-| `services/api_gateway/tests/test_user_admin.py` | Proof: self-update and administration stay in the caller's tenant |
-
-## ADR-0003 dec 4, 5, 7
-
-Every function of the library parses the tenant identifier as a UUID and builds names from its canonical string; a non-UUID raises `ValueError`. Every image is built with that library.
-
-| Code | Role |
-|---|---|
-| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::canonical_company_id` | UUID validation and canonical form |
-| `libs/industryflow_contracts/industryflow_contracts/tenancy.py` | The canonical tenant-to-schema function |
-| `libs/industryflow_contracts/tests/test_tenancy.py` | Proof: a non-UUID never becomes a name; every spelling of one tenant yields one name |
-| `tests/config_guards/test_tenant_contract_copies.py` | No deployable keeps its own copy of the contract |
-| `tests/config_guards/test_images_carry_contracts.py` | Every image that imports the library is built with it |
-
 ## ADR-0003 dec 6
 
 Each tenant-scoped query runs in a transaction that sets the path with `SET LOCAL search_path` or `set_config('search_path', …, true)`; the connection returns to the pool without it.
@@ -196,7 +153,41 @@ The exporter writes, verifies and only then drops; it rewrites no archived part.
 
 | Code | Role |
 |---|---|
-| `services/cold_export` | Cold export job |
+| `services/cold_export/exporter.py::run_export` | Orders export, verify and drop per tenant and day |
+| `services/cold_export/exporter.py::export_day` | One day: export a part, verify it, record and drop |
+| `services/cold_export/source.py::PostgresMeasurementSource` | Database reads and the run lock |
+| `services/cold_export/store.py::S3ColdStore` | Object-store writes and reads |
+| `services/cold_export/ports.py` | The `MeasurementSource` and `ColdStore` ports |
+| `infrastructure/timescaledb/init-scripts/16-cold-layer-raw-retention.sql::cold_export_drop_day` | Fingerprint re-check, drop and drop record |
+| `services/cold_export/tests/test_exporter.py` | Proof: export, verify and drop ordering |
+| `services/cold_export/tests/test_cold_export_integration.py` | Proof: on a real database and object store |
+
+### Cold layer
+
+Raw `sensor_measurements` older than the export horizon, as Parquet in the object store.
+
+| Component | Where |
+|---|---|
+| Exporter (single-node PyArrow; ADR-0025 dec 3, 4, 11) | `services/cold_export/` — `exporter.py` (ordering), `source.py` (database reads, run lock), `store.py` (object store), `naming.py` (paths), `ports.py` |
+| Schedule | Helm `cronjob-cold-export.yaml` (`coldExport.schedule`, `concurrencyPolicy: Forbid`); compose `docker compose --profile cold-export up cold-export` |
+| Horizon | `COLD_EXPORT_HORIZON_DAYS` / `coldExport.horizonDays`, default 30 |
+| Bucket | `COLD_STORE_BUCKET` / `coldExport.store.bucket`, default `industryflow-cold` |
+| Database side | `16-cold-layer-raw-retention.sql`: `cold_export_day_fingerprint`, `cold_export_drop_day` (`SECURITY DEFINER`), `public.cold_export_drops` |
+| Object-store principals | Write-scoped exporter principal; read-only broker principal; created by `minio-init` / Helm `job-minio-init.yaml` |
+| Read path (ADR-0025 dec 5) | `services/notebook_cold_broker/`, client `industryflow.IndustryFlowCold` ([notebooks](notebooks.md)) |
+| Backup | `db-backup` mirrors the cold and artifact buckets (`backup-read` principal; Helm `backup.cold`, `backup.models`); `notebook-backup` archives work volumes; `restore-rehearsal` and `notebook-rehearsal` restore the latest backups into scratch copies weekly ([backup and recovery](../operations/backup-and-recovery.md)) |
+
+Exporter behaviour per tenant and day:
+
+| Step | Detail |
+|---|---|
+| Run lock | Session advisory lock for the whole run; a run that finds it held exits 0 |
+| Export | Day read from one snapshot, written as a part: `measurements.parquet`, then `measurements-0001.parquet`, … for rows that arrive later |
+| Verify | Written row count reconciled against the source; part listed in the day's `_manifest.json` |
+| Drop | `cold_export_drop_day` re-checks the day's fingerprint (count + digest) under a lock and drops nothing if it changed; the drop is recorded in `public.cold_export_drops` |
+| Schema | Derived from `company_id`; a registry `schema_name` that disagrees is refused |
+
+Deferred cold-layer items and their triggers: [cold layer evolution](cold-layer-evolution.md).
 
 ## ADR-0025 dec 5
 
@@ -204,7 +195,8 @@ Notebook reads of the cold layer go through a tenant-scoping broker.
 
 | Code | Role |
 |---|---|
-| `services/notebook_cold_broker` | Cold-layer broker |
+| `services/notebook_cold_broker/broker.py::build_app` | Cold-layer broker |
+| `services/notebook_cold_broker/policy.py` | Resolves the handle to one tenant and scopes its keys |
 
 ## ADR-0025 dec 6
 
@@ -227,8 +219,7 @@ The cold layer uses the platform's MinIO server; `minio-init` adds the cold buck
 |---|---|
 | `services/cold_export/config.py::StoreConfig` | Endpoint defaults to the platform's object store |
 | `services/cold_export/store.py::S3ColdStore` | Exporter's object-store adapter |
-| `infrastructure/minio/minio-init.sh` | Cold bucket principals (Compose) |
-| `deploy/helm/industryflow/files/minio-init.sh` | Cold bucket principals (Helm) |
+| `infrastructure/minio/minio-init.sh` | Cold bucket and its principals; Compose runs it, Helm through the link `deploy/helm/industryflow/files/minio-init.sh` |
 
 ## ADR-0025 dec 13
 
@@ -259,7 +250,7 @@ The tenant-delete job lists `tenant_<uuid>/` and deletes in batches until the li
 
 ## ADR-0039 dec 1-4
 
-One library test decides tenant ownership of a name or key (see Tenant names).
+One library test decides tenant ownership of a name or key ([tenant names](#tenant-names)).
 
 | Function | Rule |
 |---|---|
@@ -269,7 +260,7 @@ One library test decides tenant ownership of a name or key (see Tenant names).
 
 | Code | Role |
 |---|---|
-| `libs/industryflow_contracts/industryflow_contracts/tenancy.py` | Ownership test |
+| `libs/industryflow_contracts/industryflow_contracts/tenancy.py::owns_key` | Ownership test |
 | `libs/industryflow_contracts/industryflow_contracts/tenancy.py::scope_key` | Placing a caller's path |
 | `services/notebook_cold_broker/policy.py::scope_key` | Cold broker binds it to the caller's tenant |
 | `services/notebook_tracking_gateway/policy.py::owns_artifact_key` | Tracking gateway tests an encoded artifact key |
@@ -283,6 +274,8 @@ Every mediator and read path uses that test.
 
 | Code | Role |
 |---|---|
-| `services/notebook_tracking_gateway` | Tracking gateway |
-| `services/notebook_cold_broker` | Cold-layer broker |
-| `services/ml_service/api` | ML service read paths |
+| `services/notebook_tracking_gateway/policy.py::owns_artifact_key` | Tracking gateway |
+| `services/notebook_cold_broker/policy.py::owns_key` | Cold-layer broker |
+| `services/ml_service/api/mlflow_namespace.py::strip_owned` | ML service read paths |
+
+Links: [schema scripts](../../infrastructure/timescaledb/init-scripts/README.md) (scripts, roles and grants), [ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) (idempotent writes against `UNIQUE` keys), [ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) (tenant provisioning), [ADR-0034](../../ADR/ADR-0034-platform-schema-migrations.md) (applying init-script changes to a live database), [cold-layer deferred items](cold-layer-evolution.md).

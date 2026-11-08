@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0027 — The model artifact declares; the serving environment satisfies or refuses
 
 - **Status:** Accepted
-- **Date:** 2026-07-14; changed 2026-10-26
+- **Date:** 2026-07-14; changed 2026-11-08
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (its deferred supply chain, for the artifact path only)
 - **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (in-process registry), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (model-adapter contract), [ADR-0026](ADR-0026-release-model.md) (the test is the gate), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (retrain lane), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (provenance), [ADR-0037](ADR-0037-no-model-load-on-the-serving-side-runs-author-code-whatever-the-provenance.md) (no load runs author code)
 
@@ -41,7 +41,8 @@ pinned stack.
 10. **Models registered before this contract are served and marked, not retroactively refused.** Where
     the contract fails they cannot be re-deployed, and the remedy is a human retraining.
 11. **ADR-0011's supply-chain deferral is resolved for the artifact path only.** Package installs in a
-    running environment, other base-image contents and notebook promotion stay with ADR-0011.
+    running environment and other base-image contents stay with ADR-0011; a promoted notebook version
+    passes this contract's gate (ADR-0040 dec 2).
 12. **The analytics kernel is not bound by this contract.** It trains and registers nothing.
 13. **Trust in what an artifact deserialises into is granted by the serving side, by provenance, never
     taken from the artifact.** Kernel-authored artifacts get a minimal tree-type list amended only here,
@@ -57,6 +58,7 @@ pinned stack.
 | 3 | A version-checked serializer in place of version constraints | It is already the format scikit-learn models cross in, and it does not make two numeric stacks agree |
 | 4 | Recreate each model's environment at load | Per model is the wrong unit; per flavor is decision 4 |
 | 8 | Reuse the retrain recommendation | Corrupts the statistical signal ADR-0022 makes trustworthy |
+| 11 | Notebook promotion outside the artifact contract | A promoted version is served like any registered model, so it meets the same gate (ADR-0040 dec 2) |
 | 13 | Stay on the serializer version that trusted tree structures by default | Keeps a known memory-safety flaw on the model load path, and a security patch does not wait (ADR-0026 dec 7) |
 | 13 | Trust tree structures for every artifact | Erases the provenance distinction and hands the closed flaw to an author with no foothold |
 | 13 | Validate tree structures before trusting them | A standing bet on a checker against a library's private internals, which move between releases |
@@ -84,4 +86,4 @@ pinned stack.
 
 ## References
 
-- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 1-10, 12, 13.
+- [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 1-13.

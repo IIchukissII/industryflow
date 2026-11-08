@@ -124,4 +124,5 @@ not leave the tenant-isolated path.
 ## References
 
 - [docs/operations/monitoring.md](../docs/operations/monitoring.md): toggles, role, install steps; manual of decisions 1-8.
-- [deploy/observability/README.md](../deploy/observability/README.md): installing the cluster stack.
+- [deploy/observability/README.md](../deploy/observability/README.md): installing the cluster stack;
+  manual of decisions 1-5.

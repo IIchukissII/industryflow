@@ -36,7 +36,7 @@ The gateway is the only HTTP surface for alert rules and alert history
 
 | Service | Endpoints |
 |---|---|
-| `ml-service-api` | [ML and features](../architecture/ml-and-features.md#endpoints) |
+| `ml-service-api` | [ML and features](../architecture/ml-and-features.md#endpoint-auth) |
 | Ingestion | `POST /ingest` on the mTLS edge; device certificate only ([device mTLS](../operations/device-mtls.md)) |
 | Tracking gateway | [Tracking gateway](../../services/notebook_tracking_gateway/README.md#endpoints) |
 

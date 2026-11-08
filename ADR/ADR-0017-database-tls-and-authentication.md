@@ -68,4 +68,5 @@ do not satisfy by default. Requiring TLS breaks any client not yet configured fo
 
 ## References
 
-- [docs/operations/tls.md](../docs/operations/tls.md): issuance, configuration, rollout, rotation; manual of decisions 1-3, 5.
+- [docs/operations/tls.md](../docs/operations/tls.md): issuance, configuration, rollout, rotation;
+  manual of decisions 1-7.

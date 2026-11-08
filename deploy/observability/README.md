@@ -5,23 +5,18 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Cluster monitoring stack
 
-The Kubernetes monitoring backend and the integration objects the Helm chart emits for it
-([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md)). Compose stack, metric
-names, dashboards and runbooks: [monitoring](../../docs/operations/monitoring.md). Tenant sensor and
-streaming alerts never pass through this stack
-([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 5).
+The manual of [ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md): the Kubernetes monitoring backend and the integration objects the Helm chart emits for it.
 
-## Install the backend (self-hosted)
+## ADR-0016 dec 1, 2
 
-| Component | Command |
+| Code | Role |
 |---|---|
-| Prometheus Operator, Prometheus, Grafana, Alertmanager, node-exporter, kube-state-metrics | `helm repo add prometheus-community https://prometheus-community.github.io/helm-charts` then `helm install monitoring prometheus-community/kube-prometheus-stack -n monitoring --create-namespace` |
-| Loki and a log collector | `helm repo add grafana https://grafana.github.io/helm-charts` then `helm install loki grafana/loki-stack -n monitoring` |
+| `deploy/helm/industryflow/templates/observability-servicemonitors.yaml` | ServiceMonitors and the `platform="industryflow"` target label |
+| `deploy/helm/industryflow/templates/observability-exporters.yaml` | Data-store exporters |
+| `deploy/helm/industryflow/templates/observability-prometheusrules.yaml` | The `PrometheusRule` |
+| `deploy/helm/industryflow/templates/observability-dashboards.yaml` | Dashboard ConfigMaps |
 
-A managed deployment ([ADR-0001](../../ADR/ADR-0001-industryflow-framing.md)) points the same
-objects at the provider's stack instead.
-
-## Chart values
+### Chart values
 
 All under `observability:` in `deploy/helm/industryflow/values.yaml`.
 
@@ -32,29 +27,11 @@ All under `observability:` in `deploy/helm/industryflow/values.yaml`.
 | `serviceMonitors.interval` / `scrapeTimeout` | `30s` / `10s` | Per-endpoint scrape settings |
 | `prometheusRules.enabled` | `false` | Render the `PrometheusRule`; needs the Operator CRDs |
 | `prometheusRules.labels` | `{}` | Labels matched by the Operator's `ruleSelector` |
-| `prometheusRules.targetDownFor` | `5m` | `for:` of the down rules |
-| `prometheusRules.kafkaConsumerLagThreshold` / `kafkaConsumerLagFor` | `1000` / `10m` | Lag rule threshold and duration |
-| `prometheusRules.deadLetterWindow` | `15m` | Window of the dead-letter rule |
 | `dashboards.enabled` | `true` | Render dashboard ConfigMaps |
 | `dashboards.label` | `grafana_dashboard` | Label the Grafana sidecar selects on (value `"1"`) |
 | `exporters.{postgres,redis,kafka}.enabled` | `true` | Deploy the data-store exporter and its ServiceMonitor |
 
-Overlay for kube-prometheus-stack installed as release `monitoring` (it selects on
-`release: <release-name>`):
-
-```yaml
-observability:
-  serviceMonitors:
-    enabled: true
-    labels:
-      release: monitoring
-  prometheusRules:
-    enabled: true
-    labels:
-      release: monitoring
-```
-
-## Objects the chart emits (ADR-0016 dec 1, 2)
+### Objects the chart emits
 
 | Object | Rendered for | Template |
 |---|---|---|
@@ -65,16 +42,13 @@ observability:
 | PrometheusRule `<fullname>-platform` | group `industryflow.platform` from `files/prometheus-rules.yml` (symlink to `infrastructure/prometheus/rules/platform.yml`, the file Compose loads); group `industryflow.kubernetes` | `observability-prometheusrules.yaml` |
 | Dashboard ConfigMaps | each `files/grafana/*.json` (symlink to `infrastructure/grafana/provisioning/`) | `observability-dashboards.yaml` |
 
-`postgres-exporter` connects as `metrics_user` (`pg_monitor`) with `METRICS_DB_PASSWORD` from its
-workload Secret, over `hostssl` with `tls.db.sslmode` when `tls.db.enabled`
-([ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md)). node-exporter,
-kube-state-metrics and cAdvisor come from the backend, not the chart.
+node-exporter, kube-state-metrics and cAdvisor come from the backend, not the chart.
 
-## Platform alert rules
+### Platform alert rules
 
 Group `industryflow.platform`: [`infrastructure/prometheus/rules/platform.yml`](../../infrastructure/prometheus/rules/platform.yml)
 (`IndustryFlowTargetDown`, `IndustryFlowPostgresDown`, `IndustryFlowRedisDown`, `IndustryFlowRedisMemoryHigh`,
-`IndustryFlowKafkaConsumerLag`, `IndustryFlowDeadLetteredReadings`,
+`IndustryFlowKafkaConsumerLag`, `IndustryFlowTenantStatusStalled`, `IndustryFlowDeadLetteredReadings`,
 `IndustryFlowCapabilityAuditBacklog`, `IndustryFlowCapabilityEventsDropped`), the same rules and thresholds
 as Compose. Tune them in that file, or add a PrometheusRule of your own. Unit tests:
 `infrastructure/prometheus/rules/tests/platform_test.yml` (`promtool test rules`).
@@ -92,3 +66,50 @@ Dead letters: [dead-letter handling](../../docs/operations/dead-letters.md). Dev
 [device mTLS](../../docs/operations/device-mtls.md#kubernetes). Backups and rehearsals:
 [backup and disaster recovery](../../docs/operations/backup-and-recovery.md). Unit tests:
 `deploy/observability/tests/kubernetes_rules_test.yml`.
+
+## ADR-0016 dec 3
+
+`postgres-exporter` connects as `metrics_user` (`pg_monitor`) with `METRICS_DB_PASSWORD` from its
+workload Secret, over `hostssl` with `tls.db.sslmode` when `tls.db.enabled`
+([ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md)).
+
+| Code | Role |
+|---|---|
+| `deploy/helm/industryflow/templates/observability-exporters.yaml` | Exporter login as `metrics_user` |
+
+## ADR-0016 dec 4
+
+The backend is installed beside the chart; the `labels` values of the integration objects match its selectors.
+
+### Install the backend (self-hosted)
+
+| Component | Command |
+|---|---|
+| Prometheus Operator, Prometheus, Grafana, Alertmanager, node-exporter, kube-state-metrics | `helm repo add prometheus-community https://prometheus-community.github.io/helm-charts` then `helm install monitoring prometheus-community/kube-prometheus-stack -n monitoring --create-namespace` |
+| Loki and a log collector | `helm repo add grafana https://grafana.github.io/helm-charts` then `helm install loki grafana/loki-stack -n monitoring` |
+
+A managed deployment ([ADR-0001](../../ADR/ADR-0001-industryflow-framing.md)) points the same
+objects at the provider's stack instead.
+
+### Matching the stack's selectors
+
+Overlay for kube-prometheus-stack installed as release `monitoring` (it selects on
+`release: <release-name>`):
+
+```yaml
+observability:
+  serviceMonitors:
+    enabled: true
+    labels:
+      release: monitoring
+  prometheusRules:
+    enabled: true
+    labels:
+      release: monitoring
+```
+
+## ADR-0016 dec 5
+
+Tenant sensor and streaming alerts never pass through this stack ([alert paths](../../docs/operations/monitoring.md#adr-0016-dec-5)).
+
+Links: [monitoring](../../docs/operations/monitoring.md) (Compose stack, metric names, dashboards, runbooks).

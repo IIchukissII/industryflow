@@ -5,19 +5,22 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Getting started
 
-Running the Docker Compose stack: configuration, first tenant and admin, components and ports, tests.
+The manual of [ADR-0009](../ADR/ADR-0009-kubernetes-deployment-packaged-with-helm.md): running the single-host Docker Compose deployment, from configuration and first sign-in to components, ports and tests.
+
+## ADR-0009 dec 6
+
 Values live in [`docker-compose.yml`](../docker-compose.yml) and [`.env.example`](../.env.example).
 
-## Prerequisites
+### Prerequisites
 
 | Requirement | Used by |
 |---|---|
 | Docker with Compose v2 | The stack |
-| `openssl` on the host | `scripts/device-ca.sh` (device CA, ADR-0007 dec 1), `scripts/gen-internal-ca.sh` (internal CA, ADR-0004 dec 8) |
-| Python 3 | The sample device (`clients/device`, ADR-0002 dec 7), with `pip install ./libs/industryflow_contracts` |
+| `openssl` on the host | `scripts/device-ca.sh` (device CA: [device certificate authority](operations/device-mtls.md#adr-0007-dec-1)), `scripts/gen-internal-ca.sh` (internal CA: [TLS](operations/tls.md#adr-0004-dec-8)) |
+| Python 3 | The sample device (`clients/device`: [device ingestion](operations/device-mtls.md#adr-0002-dec-5-7)), with `pip install ./libs/industryflow_contracts` |
 | 8 GB+ RAM | The stack |
 
-## 1. Configure
+### 1. Configure
 
 ```bash
 git clone https://github.com/IIchukissII/industryflow
@@ -34,7 +37,7 @@ cp .env.example .env
 | `ADMIN_USER_<n>_*` | First users (step 4) |
 | `DOCKER_GID`, `JUPYTERHUB_CRYPT_KEY`, `NOTEBOOK_SSO_PROXY_SECRET`, `NOTEBOOK_SQL_PROXY_*` | Notebooks profile only (step 6) |
 
-## 2. Initialise the device CA
+### 2. Initialise the device CA
 
 `ingestion-edge` and `device-crl-refresh` do not start without it.
 
@@ -42,7 +45,7 @@ cp .env.example .env
 scripts/device-ca.sh init
 ```
 
-## 3. Start the stack
+### 3. Start the stack
 
 ```bash
 docker compose up -d
@@ -50,10 +53,10 @@ docker compose ps
 curl http://localhost:8000/health
 ```
 
-## 4. Sign in as the first-run superuser
+### 4. Sign in as the first-run superuser
 
 A platform with no account gets a superuser when the gateway starts
-([ADR-0004](../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) dec 11), in a first tenant
+([first-run superuser](operations/authentication.md#adr-0004-dec-11)), in a first tenant
 named `Default` when there is none.
 
 | Setting (`.env`) | Default | Meaning |
@@ -71,7 +74,7 @@ the CLI: [user management](operations/user-management.md).
 Open `https://localhost:<FRONTEND_HTTPS_PORT>` and sign in. From another machine:
 [name resolution](operations/tls.md#name-resolution).
 
-## 5. Stream test data
+### 5. Stream test data
 
 A user provisions the equipment; a device, holding only its certificate, sends readings for it
 ([ADR-0002](../ADR/ADR-0002-ingestion-authentication-and-device-identity.md)).
@@ -97,7 +100,7 @@ Each round prints every sensor's value and the edge's status (`202` accepted). T
 readings within seconds; `GET /api/measurements/latest` reads them back. Options:
 `python3 clients/device/stream_readings.py --help`.
 
-## 6. Notebooks (optional profile)
+### 6. Notebooks (optional profile)
 
 ```bash
 # In .env: DOCKER_GID=$(getent group docker | cut -d: -f3), JUPYTERHUB_CRYPT_KEY and
@@ -109,13 +112,13 @@ docker compose --profile notebooks up -d
 Open `https://localhost:<FRONTEND_HTTPS_PORT>/jupyter/` after signing in. The notebook hub spawns
 per-user containers through the Docker socket ([notebooks](architecture/notebooks.md)).
 
-## Components
+### Components
 
 Host ports bind to `127.0.0.1`, except `frontend` and `ingestion-edge`, which bind every interface.
 Grafana can also be served by the edge at `/grafana/` ([monitoring](operations/monitoring.md#grafana)).
 From another machine, reach a loopback port through an SSH tunnel (`ssh -L 5000:localhost:5000 <host>`).
 
-### Compose services (ADR-0009 dec 6)
+#### Compose services
 
 | Name | Role | Port | Config |
 |---|---|---|---|
@@ -138,13 +141,13 @@ From another machine, reach a loopback port through an SSH tunnel (`ssh -L 5000:
 | `db-backup` (profile `backup`) | Database backups | none | [backup](operations/backup-and-recovery.md) |
 | `cold-export` (profile `cold-export`) | Exports raw history to the cold layer | none | `services/cold_export/` |
 
-## API
+### API
 
 Swagger UI: `http://localhost:8000/docs`. Login and token examples:
 [authentication](operations/authentication.md#endpoints). Alert-rule example:
 [alerting](architecture/alerting.md#rule-fields).
 
-## Tests
+### Tests
 
 | Task | Command |
 |---|---|
@@ -155,7 +158,7 @@ Swagger UI: `http://localhost:8000/docs`. Login and token examples:
 
 CI workflows and required checks: [CI](operations/ci.md).
 
-## Performance settings
+### Performance settings
 
 | Name | Default | Meaning |
 |---|---|---|
@@ -175,7 +178,7 @@ Compression and retention: [data and storage](architecture/data-and-storage.md#t
 capacity: [capacity](operations/capacity.md). HA gaps: [production readiness](operations/production-readiness.md),
 [high availability](operations/high-availability.md).
 
-## Troubleshooting
+### Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|

@@ -62,4 +62,5 @@ data, code or entities; each needs a place outside the core, and the platform mu
 
 ## References
 
-- [docs/operations/extensions.md](../docs/operations/extensions.md): manual of decisions 1, 6.
+- [docs/operations/extensions.md](../docs/operations/extensions.md): manual of decisions 1-7.
+- [Reference extension](../extensions/reference/README.md): manual of decision 6.

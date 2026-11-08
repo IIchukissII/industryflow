@@ -71,4 +71,5 @@ platform has no training service; a notebook trains and registers new versions.
 
 ## References
 
-- [docs/architecture/alerting.md](../docs/architecture/alerting.md): labels, metrics, thresholds; manual of decisions 1-5.
+- [docs/architecture/alerting.md](../docs/architecture/alerting.md): labels, metrics, thresholds;
+  manual of decisions 1-6.

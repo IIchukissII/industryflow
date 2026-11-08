@@ -5,28 +5,24 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Alerting
 
-The alert API, the detection worker, rule types, deduplication and operator labels.
+The manual of [ADR-0031](../../ADR/ADR-0031-the-api-gateway-as-the-single-owner-of-the-alerting-http-surface.md), [ADR-0021](../../ADR/ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md), [ADR-0022](../../ADR/ADR-0022-concept-drift-operator-feedback.md): the alert API, the detection worker, rule types, deduplication, drift rules and operator labels.
 
-| Decision | ADR |
+## ADR-0031 dec 1
+
+The gateway serves rules and history.
+
+| Code | Role |
 |---|---|
-| The API gateway is the only alerting HTTP surface | [ADR-0031](../../ADR/ADR-0031-the-api-gateway-as-the-single-owner-of-the-alerting-http-surface.md) |
-| At-least-once consumption, dead-letter | [ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md) |
-| Tenant resolution | [ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md) |
-| Model drift (`statistical` rules) | [ADR-0021](../../ADR/ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md) |
-| Operator labels, precision, retrain recommendation | [ADR-0022](../../ADR/ADR-0022-concept-drift-operator-feedback.md) |
-| Redis latest-value snapshot for ML rules | [ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md) |
-| Degraded scores under the stateful-feature kill-switch | [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md) |
+| `services/api_gateway/routers/alert_rules.py` | Alert rules |
+| `services/api_gateway/routers/alerts_history.py` | Alert history, acknowledgement, labels, precision |
 
-## Components
+### Components
 
 | Name | Role | Port | Config |
 |---|---|---|---|
-| `api-gateway` | Rule CRUD, alert history, acknowledge, labels, precision (ADR-0031 dec 1) | 8000 | `services/api_gateway/routers/alert_rules.py`, `alerts_history.py` |
-| `alert-service-detector` | Kafka consumer on `KAFKA_TOPIC_SENSOR_DATA`; evaluates rules, writes `alerts`; no HTTP API (ADR-0031 dec 2) | 9108, `industryflow_build_info` only ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 8) | `services/alert_service/config.py`, `worker/` |
-| `ml-service-api` | Scores `ml` rules, computes drift (ADR-0021 dec 3; [ML and features](ml-and-features.md)) | 8002 | `services/ml_service/` |
-| Alerts page | Acknowledge, label (Real / False / Unsure); label precision over 30 days in the 24-hour summary (ADR-0022 dec 1, 3) | | `services/frontend/src/pages/AlertHistory.jsx` |
+| `api-gateway` | Rule CRUD, alert history, acknowledge, labels, precision | 8000 | `services/api_gateway/routers/alert_rules.py`, `alerts_history.py` |
 
-## Endpoints
+### Endpoints
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
@@ -39,7 +35,7 @@ The alert API, the detection worker, rule types, deduplication and operator labe
 | PATCH | `/api/alerts/{alert_id}/label` | `engineer`, `admin` | `true_positive` / `false_positive` / `unsure`; the label copies the alert's `degraded` |
 | GET | `/api/alerts/label-metrics` | session | Precision = TP/(TP+FP) and false-positive rate per bucket and `overall`, over labels on alerts that were not degraded (`null` counts with them); `degraded` holds the labels on degraded alerts apart; optional model or rule scope |
 
-## Rule fields
+### Rule fields
 
 | Field | Values |
 |---|---|
@@ -57,20 +53,38 @@ curl -X POST https://<host>/api/alert-rules -H "Authorization: Bearer <token>" \
        "condition": "greater_than", "threshold": 80.0, "severity": "critical"}'
 ```
 
-## Rule types (`alert_rules.detection_type`)
+## ADR-0031 dec 2
+
+The detection worker serves no HTTP API.
+
+| Code | Role |
+|---|---|
+| `services/alert_service/worker/main.py::AlertService` | Detection worker: consumption, rule reload, ML and drift schedules |
+| `services/alert_service/worker/kafka_consumer.py` | Kafka consumption, dead-lettering, rewind |
+| `services/alert_service/worker/rules_engine.py::RulesEngine` | Rule evaluation, alert emission |
+| `services/alert_service/worker/repository.py` | Alert writes, deduplication |
+| `services/alert_service/worker/feature_store.py` | ML snapshot store |
+| `services/alert_service/worker/healthcheck.py` | Liveness from the heartbeat file |
+
+### Components
+
+| Name | Role | Port | Config |
+|---|---|---|---|
+| `alert-service-detector` | Kafka consumer on `KAFKA_TOPIC_SENSOR_DATA`; evaluates rules, writes `alerts`; no HTTP API | 9108, `industryflow_build_info` only ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 8) | `services/alert_service/config.py`, `services/alert_service/worker/` |
+| `ml-service-api` | Scores `ml` rules, computes drift ([ML and features](ml-and-features.md)) | 8002 | `services/ml_service/` |
+
+### Rule types (`alert_rules.detection_type`)
 
 | Type | Evaluated | How |
 |---|---|---|
 | `threshold` | Per reading | Value over / under `threshold`, or outside `threshold_min`–`threshold_max` |
 | `ml` | Per reading | Worker calls `POST /api/inference/predict`; alert when the score crosses `anomaly_threshold` |
-| `statistical` | Every `DRIFT_EVAL_INTERVAL` over `DRIFT_WINDOW_MINUTES` | Worker calls `POST /api/drift/evaluate` for the rule's `model_id`; alert when the drifted-feature share crosses the rule threshold; no-op per reading |
-| Retrain recommendation | Scheduled, beside drift | `statistical` alert with `condition='retrain_recommended'` when a model shows sustained drift and precision below `RETRAIN_PRECISION_FLOOR`; cooldown per model |
+| `statistical` | On a schedule | See [ADR-0021 dec 2, 3, 5](#adr-0021-dec-2-3-5) |
 
 Worker → `ml-service-api` calls carry the internal service token
-([authentication](../operations/authentication.md#configuration)). `unsure` labels are excluded from precision. Labels sit in `alert_labels`, not on the `alerts`
-hypertable ([data and storage](data-and-storage.md)).
+([authentication](../operations/authentication.md#configuration)).
 
-## Failure handling
+### Failure handling
 
 | Cause | Handling |
 |---|---|
@@ -81,7 +95,7 @@ hypertable ([data and storage](data-and-storage.md)).
 | Other Kafka error, or any worker loop ending | Process exits non-zero and is restarted |
 | Consumer stalled | `healthcheck.py` fails once the heartbeat file is older than `HEARTBEAT_MAX_AGE_SECONDS` (compose healthcheck, chart exec liveness probe) |
 
-## Deduplication
+### Deduplication
 
 | Mechanism | Detail |
 |---|---|
@@ -93,12 +107,13 @@ hypertable ([data and storage](data-and-storage.md)).
 | In-memory cache | `ALERT_DEDUP_CACHE_MAX` entries in front of the query |
 | Hypertable chunks | The window check reaches across a chunk boundary; the primary key is per chunk and includes the event time, so an exact replay meets its row in the same chunk |
 
-Code: `services/alert_service/worker/repository.py`. Live proofs on the alerts hypertable:
-`infrastructure/timescaledb/tests/test_alert_dedup_hypertable.py` (window, replay, out-of-order and
-scope cases at a chunk boundary; concurrent writers across existing and new chunks; the engine
-tests' `FakeAlertStore` held to the same outcomes) and `test_alert_dedup_live.py`.
+| Code | Role |
+|---|---|
+| `services/alert_service/worker/repository.py` | Cooldown check, advisory lock, idempotent insert |
+| `infrastructure/timescaledb/tests/test_alert_dedup_hypertable.py` | Proof on the alerts hypertable: window, replay, out-of-order and scope cases at a chunk boundary; concurrent writers across existing and new chunks; the engine tests' `FakeAlertStore` held to the same outcomes |
+| `infrastructure/timescaledb/tests/test_alert_dedup_live.py` | Proof on the live store |
 
-## ML snapshot
+### ML snapshot
 
 | Item | Value |
 |---|---|
@@ -107,9 +122,11 @@ tests' `FakeAlertStore` held to the same outcomes) and `test_alert_dedup_live.py
 | Staleness | A sensor older than `FEATURE_MAX_AGE_SECONDS` by event time is missing; an incomplete snapshot is not scored |
 | Degraded score | When `ml-service-api` reports `degraded`, the alert records `degraded: true` and `neutralized_features`; the retrain recommendation leaves labels on such alerts out |
 
-Code: `services/alert_service/worker/feature_store.py`.
+| Code | Role |
+|---|---|
+| `services/alert_service/worker/feature_store.py::FeatureStore` | Latest-value snapshot |
 
-## Settings (`services/alert_service/config.py`)
+### Settings (`services/alert_service/config.py`)
 
 | Name | Default | Meaning |
 |---|---|---|
@@ -122,19 +139,43 @@ Code: `services/alert_service/worker/feature_store.py`.
 | `FEATURE_MAX_AGE_SECONDS` | 300 | Snapshot staleness |
 | `RULE_RELOAD_INTERVAL` | 60 | Rule reload, seconds |
 | `ML_SERVICE_URL` | `http://ml-service-api:8002` | `ml-service-api` base URL |
+
+## ADR-0031 dec 3
+
+Operator labels and label precision, the capabilities added after rules and history, are routes of the gateway's alert-history router: `PATCH /api/alerts/{alert_id}/label` and `GET /api/alerts/label-metrics`.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/alerts_history.py::label_alert` | Label route |
+| `services/api_gateway/routers/alerts_history.py` | Label-metrics route |
+
+## ADR-0021 dec 2, 3, 5
+
+A `statistical` rule binds a model and a drifted-feature share threshold. The worker evaluates it on a schedule, apart from the per-reading path; `ml-service-api` computes the drift ([ML and features](ml-and-features.md#adr-0021-dec-1-3-5)).
+
+| Code | Role |
+|---|---|
+| `services/alert_service/worker/main.py::_periodic_drift_evaluation` | Drift schedule |
+| `services/alert_service/worker/rules_engine.py::evaluate_drift_rules` | Statistical rule evaluation, threshold applied |
+| `services/alert_service/worker/rules_engine.py::_evaluate_statistical` | No-op per reading |
+
+| Type | Evaluated | How |
+|---|---|---|
+| `statistical` | Every `DRIFT_EVAL_INTERVAL` over `DRIFT_WINDOW_MINUTES` | Worker calls `POST /api/drift/evaluate` for the rule's `model_id`; alert when the drifted-feature share crosses the rule threshold; no-op per reading |
+
+| Setting | Default | Meaning |
+|---|---|---|
 | `DRIFT_EVAL_INTERVAL` / `DRIFT_WINDOW_MINUTES` / `DRIFT_SHARE_THRESHOLD` | 3600 / 1440 / 0.5 | Drift evaluation |
-| `RETRAIN_RECO_ENABLED` | true | Retrain recommendation on/off |
-| `RETRAIN_PRECISION_FLOOR` / `RETRAIN_MIN_LABELS` / `RETRAIN_MIN_DRIFT_ALERTS` | 0.6 / 10 / 2 | Recommendation conditions |
-| `RETRAIN_PRECISION_WINDOW_DAYS` / `RETRAIN_DRIFT_LOOKBACK_HOURS` | 30 / 72 | Recommendation windows |
-| `RETRAIN_RECO_COOLDOWN_SECONDS` / `RETRAIN_RECO_SEVERITY` | 86400 / `high` | Recommendation cooldown, severity |
 
 ## ADR-0022 dec 1-3
 
-Labels are written through the alert history API into a per-tenant table; precision is derived on read.
+Labels are written through the alert history API into a per-tenant table; precision is derived on read. `unsure` labels are excluded from precision. Labels sit in `alert_labels`, not on the `alerts`
+hypertable ([data and storage](data-and-storage.md)).
 
 | Code | Role |
 |---|---|
 | `services/api_gateway/routers/alerts_history.py` | Labels and label metrics; `LABEL_ALERT_SELECT`, `LABEL_UPSERT`, `LABEL_METRICS_SELECT` |
+| `services/frontend/src/pages/AlertHistory.jsx` | Alerts page: acknowledge, label (Real / False / Unsure); label precision over 30 days in the 24-hour summary |
 | `infrastructure/timescaledb/init-scripts/35-degraded-alerts.sql` | `alerts.degraded`, `alerts.neutralized_features`, `alert_labels.degraded` |
 | `infrastructure/timescaledb/tests/test_degraded_alerts.py` | Proof: stored, read, copied onto the label, counted apart, on the real store |
 
@@ -148,19 +189,24 @@ After each drift pass the alert worker evaluates the retrain recommendation, wit
 | `services/alert_service/worker/rules_engine.py` | Recommendation evaluator |
 | `services/alert_service/worker/repository.py::MODEL_LABEL_COUNTS` | Decided labels, those on degraded alerts left out |
 
-## ADR-0031 dec 1
+| Type | Evaluated | How |
+|---|---|---|
+| Retrain recommendation | Scheduled, beside drift | `statistical` alert with `condition='retrain_recommended'` when a model shows sustained drift and precision below `RETRAIN_PRECISION_FLOOR`; cooldown per model |
 
-The gateway serves rules and history (see Endpoints).
+| Setting | Default | Meaning |
+|---|---|---|
+| `RETRAIN_RECO_ENABLED` | true | Retrain recommendation on/off |
+| `RETRAIN_PRECISION_FLOOR` / `RETRAIN_MIN_LABELS` / `RETRAIN_MIN_DRIFT_ALERTS` | 0.6 / 10 / 2 | Recommendation conditions |
+| `RETRAIN_PRECISION_WINDOW_DAYS` / `RETRAIN_DRIFT_LOOKBACK_HOURS` | 30 / 72 | Recommendation windows |
+| `RETRAIN_RECO_COOLDOWN_SECONDS` / `RETRAIN_RECO_SEVERITY` | 86400 / `high` | Recommendation cooldown, severity |
+
+## ADR-0022 dec 6
+
+The label write runs on the caller's tenant schema; `labeled_by` records the labelling user's id and `labeled_at` the time, both rewritten when a label changes. Alert lists return them with the label.
 
 | Code | Role |
 |---|---|
-| `services/api_gateway/routers/alert_rules.py` | Alert rules |
-| `services/api_gateway/routers/alerts_history.py` | Alert history, acknowledgement, labels, precision |
+| `services/api_gateway/routers/alerts_history.py::label_alert` | Writer-only label write on the tenant session |
+| `services/api_gateway/routers/alerts_history.py::LABEL_UPSERT` | `labeled_by`, `labeled_at` |
 
-## ADR-0031 dec 2
-
-The detection worker serves no HTTP API.
-
-| Code | Role |
-|---|---|
-| `services/alert_service/worker` | Detection worker |
+Links: [ADR-0005](../../ADR/ADR-0005-kafka-delivery-semantics.md) (at-least-once consumption, dead letters), [ADR-0003](../../ADR/ADR-0003-tenant-to-schema-resolution.md) (tenant resolution), [ADR-0023](../../ADR/ADR-0023-stream-materialized-feature-engineering.md) (Redis latest-value snapshot for ML rules), [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md) (degraded scores under the stateful-feature kill-switch), [ML and features](ml-and-features.md).

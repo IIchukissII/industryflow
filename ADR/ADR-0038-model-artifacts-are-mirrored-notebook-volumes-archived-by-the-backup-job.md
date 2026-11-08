@@ -79,4 +79,5 @@ also holds.
 
 ## References
 
-- [docs/operations/backup-and-recovery.md](../docs/operations/backup-and-recovery.md) (procedures, rehearsal): manual of decisions 1-5, 8.
+- [docs/operations/backup-and-recovery.md](../docs/operations/backup-and-recovery.md) (procedures,
+  rehearsal): manual of decisions 1-8.

@@ -5,9 +5,21 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Helm chart
 
-Kubernetes packaging for IndustryFlow ([ADR-0009](../../../ADR/ADR-0009-kubernetes-deployment-packaged-with-helm.md)): templates, values, image pinning and pre-production steps.
+The manual of [ADR-0009](../../../ADR/ADR-0009-kubernetes-deployment-packaged-with-helm.md): the chart's templates, values, workloads, datastore toggles, secrets, TLS edge, image pinning and pre-production steps.
 
-## Templates
+## ADR-0009 dec 1
+
+One chart, `industryflow`, packages the platform for Kubernetes. The notebook stack (`notebookHub`) renders but is not run on a cluster.
+
+| Code | Role |
+|---|---|
+| `deploy/helm/industryflow/Chart.yaml` | The chart |
+| `deploy/helm/industryflow/values.yaml` | Defaults and per-dependency toggles |
+| `deploy/helm/industryflow/values-digests.yaml` | Generated first-party digest overlay |
+| `scripts/pin-image-digests.sh` | Generates the digest overlay |
+| `tests/config_guards/test_image_pins.py::test_every_chart_third_party_image_is_pinned_by_digest` | Every third-party image pinned by digest |
+
+### Templates
 
 | Template | Renders | Gate |
 |---|---|---|
@@ -38,38 +50,11 @@ Kubernetes packaging for IndustryFlow ([ADR-0009](../../../ADR/ADR-0009-kubernet
 | `observability-prometheusrules.yaml` | PrometheusRules | `observability.prometheusRules.enabled` |
 | `observability-dashboards.yaml` | Grafana dashboard ConfigMaps (`files/grafana`) | `observability.dashboards.enabled` |
 | `observability-exporters.yaml` | postgres / redis / kafka exporters | `observability.exporters.<name>.enabled` |
+| `cronjob-tenant-delete.yaml` | Tenant-delete CronJob ([ADR-0033](../../../ADR/ADR-0033-tenant-lifecycle.md) dec 4) | `tenantDelete.enabled` |
+| `cronjob-tracking-collect.yaml` | Tracking-store collection CronJob for deleted tenants | `tenantDelete.enabled`, `notebookHub.enabled`, `infra.mlflow.inCluster` |
+| `ops-agent.yaml` | Infrastructure agent Deployment, Service and NetworkPolicy | `observability.opsAgent.enabled` |
 
-### Compose sources (ADR-0009 dec 6)
-
-`files/` holds symlinks to the compose sources; Helm follows them when it loads the chart.
-
-| Symlink | Target |
-|---|---|
-| `files/db-migrations` | `infrastructure/timescaledb/init-scripts` |
-| `files/migrate.sh` | `infrastructure/timescaledb/migrate.sh` |
-| `files/db-config` | `infrastructure/timescaledb/config` |
-| `files/minio-init.sh` | `infrastructure/minio/minio-init.sh` |
-| `files/device-ca.sh` | `scripts/device-ca.sh` |
-| `files/grafana` | `infrastructure/grafana/provisioning` |
-
-## In-cluster vs external datastores
-
-Each stateful dependency under `infra` has an `inCluster` toggle ([ADR-0009](../../../ADR/ADR-0009-kubernetes-deployment-packaged-with-helm.md) dec 3).
-
-| `inCluster` | Result |
-|---|---|
-| `true` (default) | The chart renders the workload + Service |
-| `false` | Nothing is rendered; config points at `infra.<dep>.external.*`, and rendering fails if that value is empty |
-
-| Dependency | External key |
-|---|---|
-| `timescaledb` | `external.host`, `external.port` |
-| `kafka` | `external.bootstrap` |
-| `redis` | `external.host`, `external.port` |
-| `minio` | `external.endpoint` |
-| `mlflow` | `external.trackingUri` |
-
-## Commands
+### Commands
 
 | Task | Command |
 |---|---|
@@ -78,7 +63,7 @@ Each stateful dependency under `infra` has an `inCluster` toggle ([ADR-0009](../
 | Generate the digest overlay | `scripts/pin-image-digests.sh <tag> > deploy/helm/industryflow/values-digests.yaml` |
 | Install | `helm install industryflow deploy/helm/industryflow --namespace industryflow --create-namespace -f deploy/helm/industryflow/values-digests.yaml -f <secrets-values>` |
 
-## Image digest pinning
+### Image digest pinning
 
 | Image kind | Pinning |
 |---|---|
@@ -93,7 +78,7 @@ digest from GHCR over the registry API (`GITHUB_TOKEN` or `gh auth token` for pr
 | `REGISTRY` | `image.registry` | Registry/namespace prefix |
 | `GITHUB_TOKEN` | `gh auth token` | Token for private packages |
 
-## Before production
+### Before production
 
 | Item | Keys | Requirement |
 |---|---|---|
@@ -107,20 +92,22 @@ digest from GHCR over the registry API (`GITHUB_TOKEN` or `gh auth token` for pr
 | Object-store principals | `secrets.data.*_ACCESS_KEY` / `*_SECRET_KEY` | One pair per consumer, access keys distinct from the root's. External store: create equivalent principals; the policy table in `infrastructure/minio/minio-init.sh` is the reference (ADR-0025 dec 10, ADR-0030 dec 2, ADR-0038 dec 3) |
 | Device mTLS | `ingress.mtls.*` | Device CA Secret with `ca.crt` and `ca.crl` ([device mTLS](../../../docs/operations/device-mtls.md#kubernetes)) |
 
-### Object-store principals
+## ADR-0009 dec 2
 
-Only the MinIO server and the `minio-init` Job hold `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`.
-
-| Principal keys | Consumer |
+| App setting | Renders |
 |---|---|
-| `MLFLOW_STORE_*` | MLflow server, read-only on the artifact bucket |
-| `TRACKING_STORE_*` | Notebook tracking gateway |
-| `MODEL_READ_*` | ml-service-api, read-only on admitted uploads ([ADR-0030](../../../ADR/ADR-0030-admission-of-externally-authored-models.md)) |
-| `BACKUP_STORE_*` | db-backup CronJob (writes the backup bucket) |
-| `BACKUP_READ_*` | db-backup CronJob, read-only on the artifact and cold buckets it mirrors ([ADR-0038](../../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md)) |
-| `SPARK_CHECKPOINT_*` | Spark jobs with an S3A checkpoint |
-| `COLD_STORE_*` | cold-export CronJob (write) |
-| `COLD_READ_*` | Notebook cold-store broker (read) |
+| each `apps.<name>` | A Deployment (+ Service) |
+| `apps.<name>.probe` (`path`, `port`) | HTTP liveness and readiness probes |
+| `apps.<name>.livenessExec` | An exec liveness probe, for workers without a port |
+| `apps.<name>.resources` | The container's resource requests and limits |
+| `apps.<name>.persistence.enabled` | A ReadWriteOnce checkpoint volume and `strategy: Recreate`: the old pod stops before the new one starts |
+
+The tracking server (`infra-mlflow.yaml`) is a Deployment with a readiness probe and resources. Disruption budgets and autoscaling: [high availability](../../../docs/operations/high-availability.md#adr-0009-dec-2).
+
+| Code | Role |
+|---|---|
+| `deploy/helm/industryflow/templates/apps.yaml` | Deployments, probes, resources, `Recreate` for a checkpoint volume |
+| `deploy/helm/industryflow/templates/infra-mlflow.yaml` | Tracking server Deployment |
 
 ### Spark checkpoint on the object store
 
@@ -132,11 +119,6 @@ Moving the Structured-Streaming checkpoint off the PVC ([ADR-0006](../../../ADR/
 | `apps.<name>.secretKeys` | add `SPARK_CHECKPOINT_ACCESS_KEY`, `SPARK_CHECKPOINT_SECRET_KEY` |
 | `apps.<name>.secretEnv` | `{ MINIO_ACCESS_KEY: SPARK_CHECKPOINT_ACCESS_KEY, MINIO_SECRET_KEY: SPARK_CHECKPOINT_SECRET_KEY }` |
 | `apps.<name>.persistence.enabled` | `false` |
-
-## Deferred
-
-Open per [ADR-0009](../../../ADR/ADR-0009-kubernetes-deployment-packaged-with-helm.md) *Deferred decisions*: stateful operators, autoscaling policy, secrets backend,
-Spark on Kubernetes. The notebook stack (`notebookHub`) renders but is not run on a cluster.
 
 ## ADR-0009 dec 3
 
@@ -159,6 +141,23 @@ With `inCluster: false` the endpoint helper returns `infra.<dep>.external.*` and
 | `deploy/helm/industryflow/templates/infra-minio.yaml` | Object store StatefulSet |
 | `deploy/helm/industryflow/templates/_helpers.tpl` | `industryflow.dbHost`, `kafkaBootstrap`, `redisHost`, `minioEndpoint`, `mlflowUri`: in-cluster or required external endpoint |
 
+### In-cluster vs external datastores
+
+Each stateful dependency under `infra` has an `inCluster` toggle.
+
+| `inCluster` | Result |
+|---|---|
+| `true` (default) | The chart renders the workload + Service |
+| `false` | Nothing is rendered; config points at `infra.<dep>.external.*`, and rendering fails if that value is empty |
+
+| Dependency | External key |
+|---|---|
+| `timescaledb` | `external.host`, `external.port` |
+| `kafka` | `external.bootstrap` |
+| `redis` | `external.host`, `external.port` |
+| `minio` | `external.endpoint` |
+| `mlflow` | `external.trackingUri` |
+
 ## ADR-0009 dec 4
 
 | Element | Mechanism |
@@ -179,6 +178,21 @@ With `inCluster: false` the endpoint helper returns `infra.<dep>.external.*` and
 | `deploy/helm/industryflow/templates/infra-mlflow.yaml` | Tracking server: one `secretKeyRef` per key it uses |
 | `tests/config_guards/test_helm_secret_scoping.py` | No `envFrom` Secret; the same keys per workload with and without `existingSecret`; placeholder refusal |
 | `deploy/helm/industryflow/values.yaml` | `secrets.*` and per-app `secretKeys` |
+
+### Object-store principals
+
+Only the MinIO server and the `minio-init` Job hold `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`.
+
+| Principal keys | Consumer |
+|---|---|
+| `MLFLOW_STORE_*` | MLflow server, read-only on the artifact bucket |
+| `TRACKING_STORE_*` | Notebook tracking gateway |
+| `MODEL_READ_*` | ml-service-api, read-only on admitted uploads ([ADR-0030](../../../ADR/ADR-0030-admission-of-externally-authored-models.md)) |
+| `BACKUP_STORE_*` | db-backup CronJob (writes the backup bucket) |
+| `BACKUP_READ_*` | db-backup CronJob, read-only on the artifact and cold buckets it mirrors ([ADR-0038](../../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md)) |
+| `SPARK_CHECKPOINT_*` | Spark jobs with an S3A checkpoint |
+| `COLD_STORE_*` | cold-export CronJob (write) |
+| `COLD_READ_*` | Notebook cold-store broker (read) |
 
 ## ADR-0009 dec 5
 
@@ -206,12 +220,29 @@ With `inCluster: false` the endpoint helper returns `infra.<dep>.external.*` and
 | `deploy/helm/industryflow/templates/observability-servicemonitors.yaml` | Scrapes the listener's port |
 | `tests/config_guards/test_helm_ingestion_edge_policy.py` | Policy on by default; controller pods to the app port, Prometheus to the metrics port, nothing else; the listener serves only `/metrics` and is the port scraped; only the mTLS Ingress routes to ingestion; external egress required |
 
-## Related
+## ADR-0009 dec 6
 
-| Page | Topic |
+The chart reads the Compose deployment's own sources through symlinks; neither copies them. The two deployments pin each third-party image identically.
+
+### Compose sources
+
+`files/` holds symlinks to the compose sources; Helm follows them when it loads the chart.
+
+| Symlink | Target |
 |---|---|
-| [backup and recovery](../../../docs/operations/backup-and-recovery.md#kubernetes-helm) | `backup.*`, restore |
-| [cluster monitoring](../../observability/README.md) | `observability.*` |
-| [high availability](../../../docs/operations/high-availability.md) | `resilience.*`, HPA |
-| [notebooks](../../../docs/architecture/notebooks.md#deployment-profiles) | `notebookHub.*` |
-| [cold layer](../../../docs/architecture/data-and-storage.md#cold-layer) | `coldExport.*` |
+| `files/db-migrations` | `infrastructure/timescaledb/init-scripts` |
+| `files/migrate.sh` | `infrastructure/timescaledb/migrate.sh` |
+| `files/db-config` | `infrastructure/timescaledb/config` |
+| `files/minio-init.sh` | `infrastructure/minio/minio-init.sh` |
+| `files/device-ca.sh` | `scripts/device-ca.sh` |
+| `files/grafana` | `infrastructure/grafana/provisioning` |
+| `files/prometheus-rules.yml` | `infrastructure/prometheus/rules/platform.yml` |
+
+| Code | Role |
+|---|---|
+| `deploy/helm/industryflow/files/db-migrations` | Schema scripts from the Compose source |
+| `infrastructure/timescaledb/migrate.sh` | Migration runner, read by the chart through `files/migrate.sh` |
+| `deploy/helm/industryflow/templates/observability-prometheusrules.yaml` | Renders the platform alert rules from `files/prometheus-rules.yml` |
+| `tests/config_guards/test_image_pins.py::test_compose_and_chart_pin_the_same_image_identically` | Same third-party pin in both deployments |
+
+Links: [backup and recovery](../../../docs/operations/backup-and-recovery.md#kubernetes-helm) (`backup.*`, restore); [cluster monitoring](../../observability/README.md) (`observability.*`); [high availability](../../../docs/operations/high-availability.md) (`resilience.*`, HPA); [notebooks](../../../docs/architecture/notebooks.md#deployment-profiles) (`notebookHub.*`); [cold layer](../../../docs/architecture/data-and-storage.md#cold-layer) (`coldExport.*`).

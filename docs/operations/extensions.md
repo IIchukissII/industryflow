@@ -5,28 +5,133 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Extensions and plugins
 
-The extension surfaces of `ml-service-api`: configuration, the feature-transform and detector plugin
-contracts, and loading an extension module
-([ADR-0008](../../ADR/ADR-0008-extension-interface-for-a-domain-generic-core.md),
-[ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md)).
+The manual of [ADR-0008](../../ADR/ADR-0008-extension-interface-for-a-domain-generic-core.md), [ADR-0010](../../ADR/ADR-0010-extension-plugin-mechanism.md): the extension surfaces of `ml-service-api`, the feature-transform and detector plugin contracts, and loading an extension module.
+
+## ADR-0008 dec 1
+
+The core defines the plugin contracts in one package; an extension registers into them and edits no core file. Core rules name no framework or domain.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py` | The contracts: registries, decorators, context and result types |
+| `services/notebook_tracking_gateway/tests/test_admission.py::test_admits_a_safe_format_the_rule_has_never_heard_of` | Proof: the structural admission rule names no framework |
+
+The core ships only generic built-ins and never imports a named extension.
+
+## ADR-0008 dec 2
 
 | Surface | Content | Change needed |
 |---|---|---|
 | Configuration | Feature definitions (`feature_engineering_configs`), sensor mappings, alert rules, per tenant | Data only |
-| Code plugins | Feature transforms and detectors registered through `extensions` (`services/ml_service/api/extensions/`) (ADR-0008 dec 3) | An extension module named in `EXTENSION_MODULES` |
 
-The core ships only generic built-ins and never imports a named extension.
+Feature definitions and alert rules are per-tenant rows written through the API; adding one changes
+no code.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/routers/feature_configs.py` | `/api/feature-configs`: feature definitions |
+| `infrastructure/timescaledb/init-scripts/06-feature-engineering-tables.sql` | `feature_engineering_configs` per tenant |
+| `services/api_gateway/routers/alert_rules.py` | `/api/alert-rules`: alert rules |
+| `infrastructure/timescaledb/init-scripts/02-tenant-alert-tables.sql` | `alert_rules` per tenant |
+
+## ADR-0008 dec 3
+
+| Surface | Content | Change needed |
+|---|---|---|
+| Code plugins | Feature transforms and detectors registered through `extensions` (`services/ml_service/api/extensions/__init__.py`) | An extension module named in `EXTENSION_MODULES` |
 
 | Registry | Decorator |
 |---|---|
 | Feature transforms | `register_transform(name, *, check, stateful=False, neutral=0.0)` |
 | Detectors | `register_detector(name, *, semantics=DIRECT_SCORE, handles_flavors=None)` |
 
-Built-ins: [transforms](../architecture/ml-and-features.md#feature-configuration),
+Built-ins: [transforms](../architecture/ml-and-features.md#adr-0023-dec-3),
 [detectors](../architecture/ml-and-features.md#detectors).
 Registering a different function under an existing name raises `ValueError`.
 
-## Feature transforms
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py::register_transform` | Registers a feature transform |
+| `services/ml_service/api/extensions/__init__.py::register_detector` | Registers a detector |
+
+## ADR-0008 dec 4
+
+Not yet realised.
+
+Domain data goes in extension-owned tables in the tenant schema, with no columns on core tables. No extension ships tables; their registration and migration are deferred in ADR-0008.
+
+## ADR-0008 dec 5
+
+The module calls `check_api_version("<target>")` at import; the rule is [ADR-0010 dec 3](#adr-0010-dec-3).
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py::check_api_version` | Accepts or refuses a target version |
+| `extensions/reference/reference_extension.py` | Declares its target, `0.5.0` |
+
+## ADR-0008 dec 6
+
+The reference extension is a separate package that depends on the platform.
+
+| Code | Role |
+|---|---|
+| `extensions/reference/reference_extension.py` | Reference extension |
+| `services/ml_service/tests/test_extension_contract.py::test_the_platform_loads_no_extension_it_is_not_configured_to_load` | Proof: not loaded unless configured |
+| `services/ml_service/tests/test_extension_contract.py::test_no_platform_source_names_the_reference_module` | Proof: no platform source imports it |
+
+Extensions depend on IndustryFlow; the platform never vendors or imports them.
+
+### Example
+
+[`extensions/reference/`](../../extensions/reference/README.md) (module `reference_extension`) is
+loaded only when `EXTENSION_MODULES` names it.
+
+## ADR-0008 dec 7
+
+Not yet realised.
+
+## ADR-0010 dec 1
+
+| Step | Mechanism |
+|---|---|
+| Discovery | At startup the service imports each module named in `EXTENSION_MODULES` |
+| Registration | The module's `@register_transform` / `@register_detector` decorators write into the in-process registries |
+| Duplicate | A different function under a registered name raises `ValueError` |
+| Lookup | The feature engine and inference resolve a name through `get_transform` / `get_detector` |
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py::load_extension_modules` | Imports the configured modules |
+| `services/ml_service/api/extensions/__init__.py::register_transform` | Transform registry; refuses a second function under one name |
+| `services/ml_service/api/extensions/__init__.py::register_detector` | Detector registry; refuses a second function under one name |
+| `services/ml_service/api/main.py` | Loads `EXTENSION_MODULES` at startup |
+| `services/ml_service/api/config.py::EXTENSION_MODULES` | The configured module list |
+
+### Loading an extension
+
+```bash
+EXTENSION_MODULES=my_domain.transforms,my_domain.detectors
+```
+
+| Rule | Detail |
+|---|---|
+| Loading | `ml-service-api` imports each comma-separated module at startup, which runs its `@register_*` decorators |
+| Import path | The module must be importable by the service (a separate package depending on IndustryFlow) |
+
+## ADR-0010 dec 2
+
+A transform is `async (transformation, sensor_data, ctx) -> float`. The feature engine looks up each configured `type` in the registry and calls it; an unknown type is refused when the configuration is written and when an engine is built from it. The generic transforms register on package import.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py::TransformFn` | The contract signature |
+| `services/ml_service/api/extensions/__init__.py::TransformContext` | The runtime context |
+| `services/ml_service/api/extensions/builtins.py` | Built-ins: `identity`, `polynomial`, `interaction`, `deviation`, `statistical` |
+| `services/ml_service/api/feature_engineering/engine.py` | Dispatch by `type` through `get_transform`; each definition's `check_definition` at build |
+| `services/ml_service/api/extensions/__init__.py::check_definition` | Runs the registered transform's check |
+| `services/ml_service/tests/test_unknown_transform.py` | Proof: an unknown type, and a definition its transform cannot compute, are refused where written and at build |
+
+### Feature transforms
 
 A transform is `async (transformation, sensor_data, ctx) -> float`. The feature engine dispatches each
 configured transform `type` through the registry. `ctx` is a `TransformContext` (`baseline_provider`,
@@ -87,111 +192,32 @@ declared in `industryflow_contracts.windows`, and a window or ids it cannot read
 
 Operating the kill-switch: [monitoring](monitoring.md#runbook-stateful-feature-kill-switch).
 
-## Detectors
-
-A detector is `async (features, model, threshold, ctx) -> DetectionResult`; `model` is `None` for a
-model-free detector.
-`ctx` is a `DetectorContext`: `feature_names` (the configuration's feature order), `equipment_id`,
-`reconstruction_scale` (from the model's training metrics). Inference, drift, the deploy gate and the
-load probe all score through one owner, so a detector meets the same context on each.
-
-```python
-from extensions import register_detector, DetectionResult, RECONSTRUCTION_ERROR
-
-@register_detector(
-    "rule",
-    semantics=RECONSTRUCTION_ERROR,
-    handles_flavors=["mlflow.sklearn"],
-)
-async def rule_detector(features, model, threshold, ctx):
-    score = ...  # 0.0-1.0
-    return DetectionResult(score=score, is_anomaly=score >= threshold)
-```
-
-| Element | Rule |
-|---|---|
-| `semantics` | What the model's output means: `ANOMALY_PROBABILITY`, `OUTLIER_SCORE`, `RECONSTRUCTION_ERROR`, `DIRECT_SCORE` ([ADR-0028](../../ADR/ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md)) |
-| `handles_flavors` | MLflow flavors the detector can score; empty claims none |
-| `UninterpretableModel` | Raise it when the meaning of a model's output cannot be established |
-| Dispatch | Inference uses the model record's `detector`; a record without one is refused (422) |
-| `GET /api/ml/capabilities` | Every registered detector with its semantics and flavors, read from the registry, including those from `EXTENSION_MODULES` |
-
-## Loading an extension
-
-```bash
-EXTENSION_MODULES=my_domain.transforms,my_domain.detectors
-```
-
-| Rule | Detail |
-|---|---|
-| Loading | `ml-service-api` imports each comma-separated module at startup, which runs its `@register_*` decorators |
-| Import path | The module must be importable by the service (a separate package depending on IndustryFlow) |
-| Version check | The module calls `check_api_version("<target>")` at import. It passes when the major matches `EXTENSION_API_VERSION` and the platform minor is at least the target's; otherwise `ValueError` |
-| `EXTENSION_API_VERSION` | Defined in `services/ml_service/api/extensions/__init__.py`; stability rules in [ADR-0010 dec 3](../../ADR/ADR-0010-extension-plugin-mechanism.md) |
-| Domain data | Extension-owned tables in the tenant schema; no columns on core tables |
-| Dependency direction | Extensions depend on IndustryFlow; the platform never vendors or imports them |
-
-## Example
-
-[`extensions/reference/`](../../extensions/reference/README.md) (module `reference_extension`) is
-loaded only when `EXTENSION_MODULES` names it.
-
-## ADR-0008 dec 1
-
-The core defines the plugin contracts in one package; an extension registers into them and edits no core file. Core rules name no framework or domain.
-
-| Code | Role |
-|---|---|
-| `services/ml_service/api/extensions/__init__.py` | The contracts: registries, decorators, context and result types |
-| `services/notebook_tracking_gateway/tests/test_admission.py::test_admits_a_safe_format_the_rule_has_never_heard_of` | Proof: the structural admission rule names no framework |
-
-## ADR-0008 dec 6
-
-The reference extension is a separate package that depends on the platform.
-
-| Code | Role |
-|---|---|
-| `extensions/reference` | Reference extension |
-| `services/ml_service/tests/test_extension_contract.py::test_the_platform_loads_no_extension_it_is_not_configured_to_load` | Proof: not loaded unless configured |
-| `services/ml_service/tests/test_extension_contract.py::test_no_platform_source_names_the_reference_module` | Proof: no platform source imports it |
-
-## ADR-0010 dec 1
-
-| Step | Mechanism |
-|---|---|
-| Discovery | At startup the service imports each module named in `EXTENSION_MODULES` |
-| Registration | The module's `@register_transform` / `@register_detector` decorators write into the in-process registries |
-| Duplicate | A different function under a registered name raises `ValueError` |
-| Lookup | The feature engine and inference resolve a name through `get_transform` / `get_detector` |
-
-| Code | Role |
-|---|---|
-| `services/ml_service/api/extensions/__init__.py::load_extension_modules` | Imports the configured modules |
-| `services/ml_service/api/extensions/__init__.py::register_transform` | Transform registry; refuses a second function under one name |
-| `services/ml_service/api/extensions/__init__.py::register_detector` | Detector registry; refuses a second function under one name |
-| `services/ml_service/api/main.py` | Loads `EXTENSION_MODULES` at startup |
-| `services/ml_service/api/config.py::EXTENSION_MODULES` | The configured module list |
-
-## ADR-0010 dec 2
-
-A transform is `async (transformation, sensor_data, ctx) -> float`. The feature engine looks up each configured `type` in the registry and calls it; an unknown type is refused when the configuration is written and when an engine is built from it. The generic transforms register on package import.
-
-| Code | Role |
-|---|---|
-| `services/ml_service/api/extensions/__init__.py::TransformFn` | The contract signature |
-| `services/ml_service/api/extensions/__init__.py::TransformContext` | The runtime context |
-| `services/ml_service/api/extensions/builtins.py` | Built-ins: `identity`, `polynomial`, `interaction`, `deviation`, `statistical` |
-| `services/ml_service/api/feature_engineering/engine.py` | Dispatch by `type` through `get_transform`; each definition's `check_definition` at build |
-| `services/ml_service/api/extensions/__init__.py::check_definition` | Runs the registered transform's check |
-| `services/ml_service/tests/test_unknown_transform.py` | Proof: an unknown type, and a definition its transform cannot compute, are refused where written and at build |
-
 ## ADR-0010 dec 3
 
 Each contract carries the extension-API version a plugin declares against.
 
+| Rule | Detail |
+|---|---|
+| Version check | The module calls `check_api_version("<target>")` at import. It passes when the major matches `EXTENSION_API_VERSION` and the platform minor is at least the target's; otherwise `ValueError` |
+| `EXTENSION_API_VERSION` | Defined in `services/ml_service/api/extensions/__init__.py`; stability rules in [ADR-0010 dec 3](../../ADR/ADR-0010-extension-plugin-mechanism.md) |
+
 | Code | Role |
 |---|---|
-| `services/ml_service/api/extensions` | Registry, contracts and the current extension-API version |
+| `services/ml_service/api/extensions/__init__.py::EXTENSION_API_VERSION` | The current extension-API version |
+| `services/ml_service/api/extensions/__init__.py::check_api_version` | The compatibility rule |
+| `services/ml_service/tests/test_extension_contract.py::test_an_extension_is_loaded_only_against_a_compatible_api` | Proof: the version rule |
+
+## ADR-0010 dec 4
+
+`load_extension_modules` imports each configured module into the `ml-service-api` process; its
+plugins register into module-level registries and run as in-process calls. No out-of-process plugin
+transport exists.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py::load_extension_modules` | Imports the configured modules in process |
+| `services/ml_service/api/extensions/__init__.py::_TRANSFORMS` | In-process transform registry |
+| `services/ml_service/api/extensions/__init__.py::_DETECTORS` | In-process detector registry |
 
 ## ADR-0010 dec 5
 
@@ -235,3 +261,32 @@ A detector is `async (features, model, threshold, ctx) -> DetectionResult`. Each
 | `services/ml_service/tests/test_inference_dispatch.py::test_a_record_with_no_detector_is_refused_not_defaulted` | Proof: no serving default |
 | `services/ml_service/tests/test_registration_gate_uploaded.py::test_a_kernel_model_defaults_to_the_compatibility_detector` | Proof: registration default |
 | `services/ml_service/tests/test_repository_model_columns.py::test_the_detector_round_trips` | Proof: the column round-trips |
+
+### Detectors
+
+A detector is `async (features, model, threshold, ctx) -> DetectionResult`; `model` is `None` for a
+model-free detector.
+`ctx` is a `DetectorContext`: `feature_names` (the configuration's feature order), `equipment_id`,
+`reconstruction_scale` (from the model's training metrics). Inference, drift, the deploy gate and the
+load probe all score through one owner, so a detector meets the same context on each.
+
+```python
+from extensions import register_detector, DetectionResult, RECONSTRUCTION_ERROR
+
+@register_detector(
+    "rule",
+    semantics=RECONSTRUCTION_ERROR,
+    handles_flavors=["mlflow.sklearn"],
+)
+async def rule_detector(features, model, threshold, ctx):
+    score = ...  # 0.0-1.0
+    return DetectionResult(score=score, is_anomaly=score >= threshold)
+```
+
+| Element | Rule |
+|---|---|
+| `semantics` | What the model's output means: `ANOMALY_PROBABILITY`, `OUTLIER_SCORE`, `RECONSTRUCTION_ERROR`, `DIRECT_SCORE` ([ADR-0028](../../ADR/ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md)) |
+| `handles_flavors` | MLflow flavors the detector can score; empty claims none |
+| `UninterpretableModel` | Raise it when the meaning of a model's output cannot be established |
+| Dispatch | Inference uses the model record's `detector`; a record without one is refused (422) |
+| `GET /api/ml/capabilities` | Every registered detector with its semantics and flavors, read from the registry, including those from `EXTENSION_MODULES` |

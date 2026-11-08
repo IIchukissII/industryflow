@@ -5,37 +5,21 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Monitoring
 
-The Compose stack's metrics, logs and dashboards, and the stateful-feature kill-switch runbook
-([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md)). Kubernetes:
-[cluster monitoring](../../deploy/observability/README.md).
+The manual of [ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md), [ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md), [ADR-0043](../../ADR/ADR-0043-a-platform-switch-is-flipped-by-a-platform-superuser-through-the-api-gateway-and-every-flip-is-recorded.md), [ADR-0044](../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md), [ADR-0045](../../ADR/ADR-0045-agents.md), [ADR-0046](../../ADR/ADR-0046-the-infrastructure-agent-explains-platform-alerts-to-operators.md): the Compose stack's metrics, logs, dashboards and platform alerts, the stateful-feature kill-switch runbook and its degraded-serving metrics, and the infrastructure agent.
 
-## Components
+## ADR-0016 dec 1, 2
 
-Host ports bind to `127.0.0.1`.
+The chart renders scrape targets, platform rules and dashboards as integration objects.
 
-| Name | Role | Port | Config |
-|---|---|---|---|
-| `prometheus` | Metrics store, 15 s scrape and evaluation interval; evaluates the platform alert rules (ADR-0016 dec 1, 4) | `${PROMETHEUS_PORT:-9090}` | `infrastructure/prometheus/prometheus.yml`, `infrastructure/prometheus/rules/` |
-| `alertmanager` | Groups and routes firing alerts; no receiver as shipped | `${ALERTMANAGER_PORT:-9093}` | `${ALERTMANAGER_CONFIG:-infrastructure/alertmanager/alertmanager.yml}` |
-| `grafana` | Dashboards (ADR-0016 dec 4) | `${GRAFANA_PORT:-3001}` | `infrastructure/grafana/provisioning/` |
-| `loki` | Log store (ADR-0016 dec 4) | `3100` | `infrastructure/loki/loki-config.yml` |
-| `promtail` | Ships container and `/var/log` logs to Loki (ADR-0016 dec 4) | none (`9080` internal) | `infrastructure/promtail/promtail-config.yml` |
-| `cadvisor` | Container CPU, memory, network | `8080` | flags in `docker-compose.yml` |
-| `node-exporter` | Host CPU, memory, disk, network | `9100` | flags in `docker-compose.yml` |
-| `postgres-exporter` | TimescaleDB metrics | `9187` | env in `docker-compose.yml` |
-| `redis-exporter` | Redis metrics | `9121` | env in `docker-compose.yml` |
-| `kafka-exporter` | Kafka topic offsets, consumer lag | `9308` | flags in `docker-compose.yml` |
-| `ops-agent` | Infrastructure agent: explains each platform alert in a note in Loki; profile `ops-agent`, off by default ([below](#infrastructure-agent)) | none (`8095` internal) | `OPS_AGENT_*` in `.env` |
-
-| Volume | Holds |
+| Code | Role |
 |---|---|
-| `prometheus-data` | TSDB, retention `30d` (`--storage.tsdb.retention.time` in `docker-compose.yml`) |
-| `alertmanager-data` | Silences and notification log |
-| `grafana-data` | Grafana state |
-| `loki-data` | Chunks, index, compactor |
-| `promtail-positions` | Read positions; a recreated `promtail` resumes instead of re-sending history Loki rejects as too old |
+| `infrastructure/prometheus/rules/platform.yml` | Platform alert rules |
+| `deploy/helm/industryflow/templates/observability-servicemonitors.yaml` | Scrape targets, each labelled `platform="industryflow"` |
+| `deploy/helm/industryflow/templates/observability-prometheusrules.yaml` | Platform rules as a `PrometheusRule` |
+| `deploy/helm/industryflow/templates/observability-dashboards.yaml` | Dashboards as ConfigMaps |
+| `deploy/helm/industryflow/templates/observability-exporters.yaml` | Data-store exporters |
 
-## Prometheus scrape jobs
+### Prometheus scrape jobs
 
 Every target carries the label `platform="industryflow"`, which every platform alert rule selects on.
 
@@ -59,11 +43,11 @@ Every target carries the label `platform="industryflow"`, which every platform a
 | `promtail` | `promtail:9080` | `/metrics` |
 | `alertmanager` | `alertmanager:9093` | `/metrics` |
 
-## Alerts
+### Alerts
 
 | Rules file | Loaded by |
 |---|---|
-| [`platform.yml`](../../infrastructure/prometheus/rules/platform.yml) | Compose, and the chart's PrometheusRule ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 1) |
+| [`platform.yml`](../../infrastructure/prometheus/rules/platform.yml) | Compose, and the chart's PrometheusRule |
 | [`compose.yml`](../../infrastructure/prometheus/rules/compose.yml) | Compose only: the backup and rehearsal jobs' and the device CA watch's success times, from node-exporter's textfile collector (`backup-metrics` and `device-ca-metrics` volumes). The chart raises the same alerts from its CronJobs ([chart rules](../../deploy/observability/README.md#platform-alert-rules)) |
 
 | Alert | Fires when | Handling |
@@ -89,7 +73,86 @@ Every target carries the label `platform="industryflow"`, which every platform a
 | Prometheus | `http://localhost:<PROMETHEUS_PORT>/alerts` |
 | Alertmanager | `http://localhost:<ALERTMANAGER_PORT>` |
 
-### Alert delivery (ADR-0016 dec 4)
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Target down in Prometheus | Target unreachable or failing; `curl -s localhost:9090/api/v1/targets \| jq '.data.activeTargets[] \| {job: .labels.job, health, lastError}'` | Fix the target named in `lastError` |
+| Edit to `prometheus.yml` not applied | The single-file bind mount keeps the old inode when an editor replaces the file | `docker exec industryflow-prometheus promtool check config /etc/prometheus/prometheus.yml`; `docker compose restart prometheus` |
+| `redis_up` is `0` | Redis down (`docker exec industryflow-redis redis-cli ping`) | Start `redis`, then the exporter |
+
+## ADR-0016 dec 3
+
+| Lane | Exporter login | TLS |
+|---|---|---|
+| Compose | `metrics_user` with `METRICS_DB_PASSWORD` | `verify-full` |
+| Kubernetes | `metrics_user` with `METRICS_DB_PASSWORD` | `verify-full` |
+
+`metrics_user` holds `pg_monitor` and a connection limit of 5. In Compose, `postgres-exporter` connects
+to `timescaledb` as `metrics_user` with `METRICS_DB_PASSWORD`, `sslmode=${DB_SSLMODE:-verify-full}`
+([ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md)).
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/12-metrics-role.sql` | The monitoring role |
+| `docker-compose.yml` | Compose exporter login |
+| `deploy/helm/industryflow/templates/observability-exporters.yaml` | Kubernetes exporter login |
+| `.env.example` | `METRICS_DB_PASSWORD` template |
+| `tests/config_guards/test_compose_db_roles.py::test_postgres_exporter_uses_the_monitoring_role_over_verified_tls` | Proof: no superuser login, TLS verified |
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `pg_up` is `0` | `metrics_user` has no password, or the CA mount for `verify-full` is missing (`docker logs industryflow-postgres-exporter`) | Set the password as `12-metrics-role.sql` describes; check the CA mount |
+
+## ADR-0016 dec 4
+
+| Lane | Backend | Alert router |
+|---|---|---|
+| Compose | Prometheus, Loki, Grafana beside the services | `alertmanager`, one receiver `operator` with no delivery; `ALERTMANAGER_CONFIG` names the operator's copy |
+| Kubernetes | The operator's stack; the chart renders `ServiceMonitor`, `PrometheusRule` and dashboard ConfigMaps | The operator's; `observability.*.labels` match its selectors |
+| Kubernetes scrape of ingestion | The `metrics-listener` container in the ingestion pod serves only `/metrics` (from the app on loopback) on port `metrics` (`apps.ingestion-service.metricsListener.port`); its ServiceMonitor scrapes that port, and the NetworkPolicy admits `observability.prometheusPodLabels` pods in `observability.monitoringNamespace` to it alone | — |
+
+| Code | Role |
+|---|---|
+| `infrastructure/prometheus/prometheus.yml` | Firing alerts sent to `alertmanager` |
+| `infrastructure/alertmanager/alertmanager.yml` | Receiver with no delivery as shipped |
+| `docker-compose.yml` | Backend services beside the application |
+| `deploy/helm/industryflow/values.yaml` | Integration-object toggles and selector labels |
+| `deploy/helm/industryflow/files/prometheus-rules.yml` | Platform rules rendered into the `PrometheusRule` |
+| `deploy/helm/industryflow/templates/ops-agent.yaml` | Agent endpoints are the operator's stack |
+| `deploy/helm/industryflow/templates/apps.yaml` | Ingestion's metrics-only listener |
+| `tests/config_guards/test_helm_ingestion_edge_policy.py` | Proof: the listener serves only `/metrics`, is the port scraped, and the only port the monitoring stack reaches |
+| `tests/config_guards/test_alert_rules.py::test_the_chart_renders_the_same_platform_rules` | Proof: one rule set in both lanes |
+
+### Components
+
+Host ports bind to `127.0.0.1`.
+
+| Name | Role | Port | Config |
+|---|---|---|---|
+| `prometheus` | Metrics store, 15 s scrape and evaluation interval; evaluates the platform alert rules | `${PROMETHEUS_PORT:-9090}` | `infrastructure/prometheus/prometheus.yml`, `infrastructure/prometheus/rules/` |
+| `alertmanager` | Groups and routes firing alerts; no receiver as shipped | `${ALERTMANAGER_PORT:-9093}` | `${ALERTMANAGER_CONFIG:-infrastructure/alertmanager/alertmanager.yml}` |
+| `grafana` | Dashboards | `${GRAFANA_PORT:-3001}` | `infrastructure/grafana/provisioning/` |
+| `loki` | Log store | `3100` | `infrastructure/loki/loki-config.yml` |
+| `promtail` | Ships container and `/var/log` logs to Loki | none (`9080` internal) | `infrastructure/promtail/promtail-config.yml` |
+| `cadvisor` | Container CPU, memory, network | `8080` | flags in `docker-compose.yml` |
+| `node-exporter` | Host CPU, memory, disk, network | `9100` | flags in `docker-compose.yml` |
+| `postgres-exporter` | TimescaleDB metrics | `9187` | env in `docker-compose.yml` |
+| `redis-exporter` | Redis metrics | `9121` | env in `docker-compose.yml` |
+| `kafka-exporter` | Kafka topic offsets, consumer lag | `9308` | flags in `docker-compose.yml` |
+| `ops-agent` | Infrastructure agent: explains each platform alert in a note in Loki; profile `ops-agent`, off by default ([below](#infrastructure-agent)) | none (`8095` internal) | `OPS_AGENT_*` in `.env` |
+
+| Volume | Holds |
+|---|---|
+| `prometheus-data` | TSDB, retention `30d` (`--storage.tsdb.retention.time` in `docker-compose.yml`) |
+| `alertmanager-data` | Silences and notification log |
+| `grafana-data` | Grafana state |
+| `loki-data` | Chunks, index, compactor |
+| `promtail-positions` | Read positions; a recreated `promtail` resumes instead of re-sending history Loki rejects as too old |
+
+### Alert delivery
 
 The shipped `infrastructure/alertmanager/alertmanager.yml` routes every alert to a receiver with no
 integration: nothing is sent.
@@ -101,13 +164,290 @@ integration: nothing is sent.
 | 3 | `docker compose up -d alertmanager` |
 | 4 | Check: `docker compose exec alertmanager amtool check-config /etc/alertmanager/alertmanager.yml` |
 
+### Dashboards
+
+| UID | Title | File | Rows / panels |
+|---|---|---|---|
+| `complete-system` | Complete System Infrastructure | `complete_system_dashboard.json` | Service health (`up` for prometheus, postgres, redis, kafka, api-gateway, ml-service; alert detector via cAdvisor `container_last_seen`); system CPU / memory / disk; container CPU and memory; container and host network I/O; DB connections and activity; Redis hit rate and activity; Kafka topic offsets and consumer lag; Spark container CPU / memory / network. Refresh `10s` |
+| `ops-agent-incidents` | Incidents | `incidents_dashboard.json` | Counts per priority (P1 critical, P2 warning), all incidents, notes without a model; incidents over time by priority; incident table by priority (what happened, likely cause, next step); detail of the incident picked in the table, or the newest. Variables `alertname`, `severity`, `incident`. Refresh `1m` |
+| `container_logs` | Container Logs Dashboard | `logs_dashboard.json` | Log rate by service, active containers, current log rate, top 10 services by volume, log viewer. Variables `service`, `container`, `search` (regex). Refresh `10s` |
+
+### Metrics
+
+| Source | Metrics |
+|---|---|
+| `api-gateway`, `ml-service-api`, `ingestion-service` (`prometheus-fastapi-instrumentator` defaults) | `http_requests_total{handler,method,status}` (`status` grouped: `2xx`, `5xx`, …), `http_request_duration_seconds{handler,method}`, `http_request_duration_highr_seconds`, `http_request_size_bytes`, `http_response_size_bytes` |
+| `ml-service-api` | Degraded serving: [`ml_stateful_features_neutralized_total`](#adr-0024-dec-3-5), [`ml_stateful_features_unavailable_total`](#adr-0044-dec-3) |
+| Every platform-built image that runs platform code and serves metrics, and every long-lived platform worker | `industryflow_build_info` ([ADR-0016 dec 8](#adr-0016-dec-8)) |
+| Spark | Native `PrometheusServlet` driver, executor and master metrics |
+| `cadvisor` | `container_cpu_usage_seconds_total`, `container_memory_usage_bytes`, `container_network_{receive,transmit}_bytes_total`, `container_last_seen` (disk and diskIO metrics disabled) |
+| `node-exporter` | `node_cpu_seconds_total`, `node_memory_*`, `node_filesystem_*`, `node_network_*` |
+| `postgres-exporter` | `pg_up`, `pg_stat_database_*`, `pg_database_size_bytes` |
+| `redis-exporter` | `redis_up`, `redis_connected_clients`, `redis_commands_total` |
+| `kafka-exporter` | `kafka_brokers`, `kafka_topic_partition_current_offset`, `kafka_consumergroup_lag` |
+
+| Question | PromQL |
+|---|---|
+| Request rate | `sum by (handler) (rate(http_requests_total[5m]))` |
+| 5xx rate | `sum by (job) (rate(http_requests_total{status="5xx"}[5m]))` |
+| p95 latency | `histogram_quantile(0.95, sum by (le, handler) (rate(http_request_duration_seconds_bucket[5m])))` |
+| Container CPU | `sum by (name) (rate(container_cpu_usage_seconds_total{name=~".+"}[5m]))` |
+| Host memory used % | `100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)` |
+| DB connections | `pg_stat_database_numbackends{datname="industryflow"}` |
+| Consumer lag | `sum by (consumergroup, topic) (kafka_consumergroup_lag)` |
+| Dead-lettered readings | `sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".+\\.dlq"}[15m]))` ([dead-letter handling](dead-letters.md)) |
+
+### Logs
+
+| Setting | Value (`loki-config.yml`) |
+|---|---|
+| Retention | `168h`, compactor every `10m` |
+| Ingestion rate / burst | `16` / `32` MB |
+| Per-stream rate / burst | `8MB` / `16MB` |
+| Max streams per user | `10000` local, `50000` global |
+| Auth | disabled (`auth_enabled: false`) |
+
+| Promtail job | Source | Labels |
+|---|---|---|
+| `docker` | Docker socket: containers named `industryflow-*` (every service's `container_name`, `ingestion-service` and the no-network jobs included), and containers on `industryflow-network`, `industryflow-notebook-kernels` or `industryflow-ops-agent` (spawned kernels, `spark-worker`); one target per container | `job="docker"`, `container`, `container_id`, `service`, `project`, `level` (from JSON logs), `environment="production"`, `cluster="industryflow"` |
+| `system` | `/var/log/*log` | `job="varlogs"` |
+
+| Query | LogQL |
+|---|---|
+| One service | `{service="api-gateway"}` |
+| One container | `{container="industryflow-kafka"}` |
+| Errors | `{job="docker"} \|~ "ERROR\|FATAL"` |
+| JSON level | `{job="docker", level="error"}` |
+| Lines per service | `sum by (service) (count_over_time({job="docker"}[5m]))` |
+| Noisiest containers | `topk(10, sum by (container) (count_over_time({job="docker"}[1h])))` |
+
+| Loki API | Path |
+|---|---|
+| Ready | `GET http://localhost:3100/ready` |
+| Labels | `GET http://localhost:3100/loki/api/v1/labels` |
+| Label values | `GET http://localhost:3100/loki/api/v1/label/<label>/values` |
+| Range query | `GET http://localhost:3100/loki/api/v1/query_range?query=<logql>` |
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Dashboards missing | Dashboard files are bind-mounted one by one in `docker-compose.yml`; a new JSON file has no mount | Add its mount, then `docker compose up -d grafana` |
+| No logs in Loki | Container neither named `industryflow-*` nor on `industryflow-network`, `industryflow-notebook-kernels` or `industryflow-ops-agent`, or promtail down (`docker logs industryflow-promtail`) | Give the service a `container_name` `industryflow-<service>`; `curl -s localhost:3100/ready` |
+| LogQL parse error | Unquoted label value or range without a unit | `{job="docker"}`, `[5m]` |
+
+## ADR-0016 dec 5
+
+| Path | Holds |
+|---|---|
+| Alert worker to the tenant's schema | Tenant alerts ([alert planes](#alert-planes)) |
+| Prometheus and the platform rules | Operational, aggregate series; no tenant value or alert content |
+| Grafana datasources | Prometheus and Loki; no database datasource, and the earlier `TimescaleDB` datasource is deleted at start |
+
+Database health reaches Grafana as `postgres-exporter` metrics.
+
+| Code | Role |
+|---|---|
+| `services/alert_service/worker/repository.py` | Alert written to the tenant's store |
+| `infrastructure/prometheus/rules/platform.yml` | Aggregate platform rules |
+| `infrastructure/grafana/provisioning/datasources.yml` | Datasource set; database datasource deleted |
+| `tests/config_guards/test_grafana_datasources.py::test_no_database_datasource_is_provisioned` | Proof: no database datasource |
+| `tests/config_guards/test_compose_db_roles.py::test_grafana_has_no_database_datasource` | Proof: Grafana holds no database password |
+
+### Alert planes
+
+| Plane | Where |
+|---|---|
+| Platform rules, Compose | `infrastructure/prometheus/rules/`, evaluated by `prometheus`, routed by `alertmanager` (no receiver as shipped) |
+| Platform rules, Kubernetes | Helm `PrometheusRule` ([platform alert rules](../../deploy/observability/README.md#platform-alert-rules)) |
+| Tenant sensor and streaming alerts | `alert-service-detector`, tenant-isolated, never this stack |
+
+## ADR-0016 dec 6, 7
+
+Grafana is served at the edge and signs a platform superuser on from the platform session.
+
+| Code | Role |
+|---|---|
+| `services/frontend/grafana.conf.template` | Grafana at the edge |
+| `services/api_gateway/routers/dashboards_assertion.py` | Sign-on assertion from the platform session |
+
+### Grafana
+
+| Item | Value |
+|---|---|
+| URL | `http://localhost:<GRAFANA_PORT>/grafana/` on the host |
+| Through the edge | `https://<host>:<FRONTEND_HTTPS_PORT>/grafana/` when `.env` sets `EDGE_GRAFANA=grafana:3000` (dec 6) |
+| Source addresses | `EDGE_GRAFANA_ALLOW`: addresses or CIDR blocks, space- or comma-separated; others get `403`. Unset: any. An invalid entry stops the edge from starting |
+| Sign-on through the edge | The platform session of a superuser; no session: `302` to `/login?next=<path>` (back to Grafana after sign-in), `401` on `/grafana/api/`; any other user: `403`; a write without `Sec-Fetch-Site: same-origin` from a browser: `403`. Grafana user = `if-<platform user id>`, role `Editor`, Grafana Live off (dec 7) |
+| Sign-on key | `dashboards-key-init` generates it once: private half in volume `industryflow-dashboards-signing-key` (gateway only), public half in `industryflow-dashboards-verify-key` (Grafana) |
+| Rotate the sign-on key | `docker compose rm -sf dashboards-key-init grafana api-gateway && docker volume rm industryflow-dashboards-signing-key industryflow-dashboards-verify-key && docker compose up -d` |
+| Login on the loopback URL | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env` |
+| Datasources | `Prometheus` (default), `Loki` — `datasources.yml` (no database datasource: [dec 5](#adr-0016-dec-5)) |
+| Dashboard provider | folder `IndustryFlow`, files under `/etc/grafana/provisioning/dashboards` — `dashboards.yml` ([dashboards](#dashboards)) |
+
+## ADR-0016 dec 8
+
+Every service exposes its build information.
+
+| Source | Metric |
+|---|---|
+| `api-gateway`, `ml-service-api`, `ingestion-service`, `spark-streaming`, `spark-aggregations`, `alert-service-detector` | `industryflow_build_info{component,revision} 1`: the commit the image was built from (`INDUSTRYFLOW_REVISION` build argument; `unknown` when the build passed none); `component` is the compose service name, since a Kubernetes scrape sets its own `service` label; the Spark drivers serve it alone on port `9108` (`INDUSTRYFLOW_METRICS_PORT`), apart from the `PrometheusServlet`, and `alert-service-detector`, which serves no other metrics, on the same port; `spark-master` (stock image) and `spark-worker` report none |
+
+| Question | PromQL |
+|---|---|
+| Revision each service runs | `max by (component, revision) (industryflow_build_info)` |
+| Revisions each service ran in the last day (more than one: deployed) | `count by (component) (max by (component, revision) (count_over_time(industryflow_build_info[1d])))` |
+
+| Code | Role |
+|---|---|
+| `libs/industryflow_contracts/industryflow_contracts/build_info.py::report` | The constant series in a service's own metrics |
+| `libs/industryflow_contracts/industryflow_contracts/build_info.py::serve` | The series alone on a port of its own (default `9108`) |
+| `tests/config_guards/test_build_info.py` | Every image exposes build information |
+
+## ADR-0024 dec 1
+
+`register_transform` takes `stateful` (default false) and `neutral` (default 0.0); extension API 0.2.0 adds both. The engine asks `is_stateful` by type, so every statistic of a stateful type is governed together.
+
+| Type | Stateful |
+|---|---|
+| `statistical` | Yes |
+| `rolling_stat` | Yes |
+| `identity`, `polynomial`, `interaction`, `deviation` | No |
+| Unregistered | No |
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/extensions/__init__.py::register_transform` | Class tag at registration |
+| `services/ml_service/api/extensions/__init__.py::is_stateful` | Class lookup by type |
+| `services/ml_service/api/extensions/builtins.py` | Built-in transforms and their tags |
+| `services/ml_service/tests/test_stateful_kill_switch.py::test_stateful_transforms_are_tagged` | Proof: stateful types tagged |
+| `services/ml_service/tests/test_stateful_kill_switch.py::test_unknown_type_is_not_stateful` | Proof: unknown type not stateful |
+
+## ADR-0024 dec 2, 7
+
+The engine reads the switch from the shared schema and keeps the last-known-good value when the read fails.
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/feature_engineering/kill_switch.py` | Switch read, last-known-good |
+
+### Runbook: stateful-feature kill-switch
+
+The switch makes the feature engine fill every stateful transform's slot (`statistical`,
+`rolling_stat`) with its neutral value without calling the transform, so inference stops reading the
+aggregate tables. Vector length and order are unchanged. Use it when the database is alive but
+overloaded; in a total outage it reads as enabled and each stateful slot whose aggregate read fails
+takes the same neutral value, counted in `ml_stateful_features_unavailable_total` and named in
+`neutralized_features` ([ADR-0044 dec 3](#adr-0044-dec-3)).
+
+| Task | Command / signal |
+|---|---|
+| Who | A platform superuser ([ADR-0043](../../ADR/ADR-0043-a-platform-switch-is-flipped-by-a-platform-superuser-through-the-api-gateway-and-every-flip-is-recorded.md)); no tenant role |
+| Turn off (neutralize) | `PUT /api/platform/switches/stateful_features_enabled` with `{"value": false}` |
+| Turn back on | same with `{"value": true}` |
+| State | `GET /api/platform/switches` |
+| Who flipped it, when | `GET /api/platform/switches/stateful_features_enabled/changes` (`public.platform_config_changes`, append-only) |
+| Takes effect | within `STATEFUL_SWITCH_CACHE_TTL` seconds (default `5`); no restart |
+| Confirm, alerts | ML alerts raised meanwhile carry `degraded: true` and `neutralized_features` (`GET /api/alerts`) |
+| Confirm, metric | `rate(ml_stateful_features_neutralized_total[5m])` > 0; `0` in normal operation |
+
+`ml_service_user` holds `SELECT` only on `public.platform_config`; the service never writes the flag.
+The gateway writes it only through `set_platform_switch()`, which records the flip; a flip to the
+current value is not recorded.
+No shipped rule alerts on the counter.
+
+## ADR-0024 dec 3-5
+
+With the switch on, a stateful feature is null in its slot, checked before the substrate call, and counted.
+
+| Metric (`ml-service-api`) | Counts |
+|---|---|
+| `ml_stateful_features_neutralized_total` | Feature slots filled with a neutral value because the switch is off; `0` in normal operation ([runbook](#runbook-stateful-feature-kill-switch)) |
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/feature_engineering/engine.py` | Null-in-slot; the neutralized features named |
+| `services/ml_service/api/routers/inference.py::STATEFUL_NEUTRALIZED` | Degraded-serving metric |
+| `tests/e2e/test_kill_switch.py` | Proof on the deployed platform: alerts ordinary with the switch on, degraded and naming the feature with it off |
+
+## ADR-0024 dec 6
+
+One row, `public.platform_config` key `stateful_features_enabled`, holds the switch for every tenant. It starts `true`; `ml_service_user` has `SELECT` only, so no service changes it.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/17-stateful-feature-kill-switch.sql` | The global row; read-only grant to `ml-service-api` |
+| `services/ml_service/api/feature_engineering/kill_switch.py` | Reads the switch; never writes it |
+
+## ADR-0043 dec 1, 2
+
+The gateway serves listing, flipping and history of a switch; every route takes the superuser gate. `ml-service-api` only reads the switch.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/platform_switches.py` | Switch routes behind `require_superuser` |
+| `services/api_gateway/dependencies.py::require_superuser` | No tenant role passes |
+| `services/api_gateway/tests/test_platform_switches.py::test_no_tenant_role_passes` | Proof: tenant roles refused |
+| `services/api_gateway/tests/test_platform_switches.py::test_every_route_takes_the_superuser_gate` | Proof: every route gated |
+| `tests/e2e/test_kill_switch.py` | Proof on the deployed platform: a tenant administrator refused, the flip recorded with its user, a repeat not recorded |
+
+## ADR-0043 dec 3, 4
+
+The gateway flips a switch through one privileged function that records the flip ([runbook](#runbook-stateful-feature-kill-switch)).
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/17-stateful-feature-kill-switch.sql` | The switch |
+| `infrastructure/timescaledb/init-scripts/32-platform-switch-control.sql` | Flip function and flip record |
+
+## ADR-0043 dec 5
+
+`set_platform_switch()` compares the value with the current one. An equal value updates nothing,
+appends no row to `public.platform_config_changes` and returns `changed` false; the gateway's `PUT`
+returns that `changed` field.
+
+| Code | Role |
+|---|---|
+| `infrastructure/timescaledb/init-scripts/32-platform-switch-control.sql` | No update and no record for the current value |
+| `services/api_gateway/routers/platform_switches.py::flip_switch` | `changed` in the flip's response |
+| `infrastructure/timescaledb/tests/test_platform_switch_control.py::test_a_flip_changes_the_switch_and_records_it_once` | Proof: a repeat is not recorded |
+| `tests/e2e/test_kill_switch.py` | Proof on the deployed platform: a repeat not recorded |
+
+## ADR-0044 dec 3
+
+A stateful slot whose aggregate is unavailable takes its neutral value. The response's
+`neutralized_features` names it beside the slots the kill-switch neutralized, and the score is
+`degraded`; each kind has its own counter.
+
+| Metric (`ml-service-api`) | Counts |
+|---|---|
+| `ml_stateful_features_unavailable_total` | Stateful slots served neutral because their aggregate was unavailable; apart from [`ml_stateful_features_neutralized_total`](#adr-0024-dec-3-5) |
+
+| Code | Role |
+|---|---|
+| `services/ml_service/api/feature_engineering/engine.py` | Unavailable slots named apart from neutralized ones |
+| `services/ml_service/api/routers/inference.py::STATEFUL_UNAVAILABLE` | Degraded-serving metric for an unavailable aggregate |
+| `services/ml_service/tests/test_inference_dispatch.py::test_an_unavailable_aggregate_is_served_neutral_and_named` | Proof: served neutral, degraded and named |
+
+## ADR-0045 dec 1-6, 8
+
+An agent is its own service: a trigger reaches its graph, deterministic steps gather and redact the evidence, a configured model writes the note from it, and the note says it is generated and names the model. It runs only when the operator enables it.
+
+| Code | Role |
+|---|---|
+| `services/ops_agent/app.py` | Trigger receiver |
+| `services/ops_agent/graph.py` | Gather, correlate, redact, explain, publish; the generated-note header |
+| `services/ops_agent/tools.py` | Read-only tools over MCP |
+| `services/ops_agent/model.py` | Model over an API, chosen by configuration |
+| `services/ops_agent/redaction.py` | Redaction before the model |
+| `docker-compose.yml` | `ops-agent` profile, off unless enabled |
+
 ### Infrastructure agent
 
 The `ops-agent` service receives Alertmanager's webhook, gathers evidence for each firing platform
 alert and has a model write a short note: what happened, impact, likely cause with evidence, next
-step from the runbooks ([ADR-0045](../../ADR/ADR-0045-agents.md),
-[ADR-0046](../../ADR/ADR-0046-the-infrastructure-agent-explains-platform-alerts-to-operators.md)). Notes are generated text, marked with the
-model that wrote them; advice beside the alert, not a diagnosis.
+step from the runbooks. Notes are generated text, marked with the model that wrote them; advice beside
+the alert, not a diagnosis.
 
 | Step | Action |
 |---|---|
@@ -140,317 +480,45 @@ receivers:
 
 | Item | Value |
 |---|---|
-| Evidence | The rule's PromQL over the 30 minutes before the alert to now; the revisions every service reported over the same window, in the order they ran (`industryflow_build_info`, each point the last value in its step, a change marked `CHANGED`, revisions cut to 12 characters); error lines of the services in the rule's `services` annotation and the target's host; other active alerts; the alert's row in the [alert table](#alerts) (every platform rule has one); `Symptom \| Cause \| Fix` rows sharing at least two words with the alert. The metric series are narrowed to the alert's own labels |
-| Sent to the model | The alert and the evidence, after redaction: tenant identifiers, emails, network addresses and credential-shaped strings become `<tenant-1>`, `<email-1>`, … ; the note records the counts per category |
-| Output | Loki stream `{job="ops-agent"}`; the `complete-system` and Incidents dashboards draw it as annotations. No Grafana credential |
-| Note fields | `alertname`, `severity`, `services`, `what`, `impact`, `cause`, `next_step` (the model's four sections), `text` (the whole note), `model`, `evidence`, `redacted`, `fingerprint`, `key` |
 | Without a model | A model error or refusal still publishes a note: the evidence listing, `model` = `none` |
-| Once per firing | A firing (fingerprint and start) is explained once; remembered 7 days, and after a restart the agent finds its earlier note in Loki |
-| Alert storm | At most 5 alerts of one webhook (critical first) and 10 waiting; the rest are logged as not explained |
 | Refuses to start | Webhook secret under 32 characters; `anthropic` without `ANTHROPIC_API_KEY`; `openai-compatible` without `OPS_AGENT_MODEL_BASE_URL` |
-| Kubernetes | `observability.opsAgent` in the chart values (endpoints of your monitoring stack, `secrets.data.OPS_AGENT_WEBHOOK_SECRET`); the webhook URL is the `<release>-ops-agent` Service. With `networkPolicy.enabled` (the default): ingress from `observability.monitoringNamespace` only; egress to DNS, that namespace, HTTPS on public addresses, and `modelEndpoints` (an in-house model server's CIDR and port) |
 
-## Grafana
-
-| Item | Value |
-|---|---|
-| URL | `http://localhost:<GRAFANA_PORT>/grafana/` on the host |
-| Through the edge | `https://<host>:<FRONTEND_HTTPS_PORT>/grafana/` when `.env` sets `EDGE_GRAFANA=grafana:3000` ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 6) |
-| Source addresses | `EDGE_GRAFANA_ALLOW`: addresses or CIDR blocks, space- or comma-separated; others get `403`. Unset: any. An invalid entry stops the edge from starting |
-| Sign-on through the edge | The platform session of a superuser; no session: `302` to `/login?next=<path>` (back to Grafana after sign-in), `401` on `/grafana/api/`; any other user: `403`; a write without `Sec-Fetch-Site: same-origin` from a browser: `403`. Grafana user = `if-<platform user id>`, role `Editor`, Grafana Live off ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 7) |
-| Sign-on key | `dashboards-key-init` generates it once: private half in volume `industryflow-dashboards-signing-key` (gateway only), public half in `industryflow-dashboards-verify-key` (Grafana) |
-| Rotate the sign-on key | `docker compose rm -sf dashboards-key-init grafana api-gateway && docker volume rm industryflow-dashboards-signing-key industryflow-dashboards-verify-key && docker compose up -d` |
-| Login on the loopback URL | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env` |
-| Datasources | `Prometheus` (default), `Loki` — `datasources.yml` |
-| Dashboard provider | folder `IndustryFlow`, files under `/etc/grafana/provisioning/dashboards` — `dashboards.yml` |
-
-There is no database datasource: the database holds tenant data
-([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 5). Database
-health reaches Grafana as `postgres-exporter` metrics.
-
-### Dashboards
-
-| UID | Title | File | Rows / panels |
-|---|---|---|---|
-| `complete-system` | Complete System Infrastructure | `complete_system_dashboard.json` | Service health (`up` for prometheus, postgres, redis, kafka, api-gateway, ml-service; alert detector via cAdvisor `container_last_seen`); system CPU / memory / disk; container CPU and memory; container and host network I/O; DB connections and activity; Redis hit rate and activity; Kafka topic offsets and consumer lag; Spark container CPU / memory / network. Refresh `10s` |
-| `ops-agent-incidents` | Incidents | `incidents_dashboard.json` | Counts per priority (P1 critical, P2 warning), all incidents, notes without a model; incidents over time by priority; incident table by priority (what happened, likely cause, next step); detail of the incident picked in the table, or the newest. Variables `alertname`, `severity`, `incident`. Refresh `1m` |
-| `container_logs` | Container Logs Dashboard | `logs_dashboard.json` | Log rate by service, active containers, current log rate, top 10 services by volume, log viewer. Variables `service`, `container`, `search` (regex). Refresh `10s` |
-
-## Metrics
-
-| Source | Metrics |
-|---|---|
-| `api-gateway`, `ml-service-api`, `ingestion-service` (`prometheus-fastapi-instrumentator` defaults) | `http_requests_total{handler,method,status}` (`status` grouped: `2xx`, `5xx`, …), `http_request_duration_seconds{handler,method}`, `http_request_duration_highr_seconds`, `http_request_size_bytes`, `http_response_size_bytes` |
-| `api-gateway`, `ml-service-api`, `ingestion-service`, `spark-streaming`, `spark-aggregations`, `alert-service-detector` | `industryflow_build_info{component,revision} 1`: the commit the image was built from (`INDUSTRYFLOW_REVISION` build argument; `unknown` when the build passed none); `component` is the compose service name, since a Kubernetes scrape sets its own `service` label; the Spark drivers serve it alone on port `9108` (`INDUSTRYFLOW_METRICS_PORT`), apart from the `PrometheusServlet`, and `alert-service-detector`, which serves no other metrics, on the same port; `spark-master` (stock image) and `spark-worker` report none ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 8) |
-| `ml-service-api` | `ml_stateful_features_neutralized_total` — see [kill-switch](#runbook-stateful-feature-kill-switch); `ml_stateful_features_unavailable_total` — stateful slots served neutral because their aggregate was unavailable ([ADR-0044](../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) dec 3) |
-| Spark | Native `PrometheusServlet` driver, executor and master metrics |
-| `cadvisor` | `container_cpu_usage_seconds_total`, `container_memory_usage_bytes`, `container_network_{receive,transmit}_bytes_total`, `container_last_seen` (disk and diskIO metrics disabled) |
-| `node-exporter` | `node_cpu_seconds_total`, `node_memory_*`, `node_filesystem_*`, `node_network_*` |
-| `postgres-exporter` | `pg_up`, `pg_stat_database_*`, `pg_database_size_bytes` |
-| `redis-exporter` | `redis_up`, `redis_connected_clients`, `redis_commands_total` |
-| `kafka-exporter` | `kafka_brokers`, `kafka_topic_partition_current_offset`, `kafka_consumergroup_lag` |
-
-`postgres-exporter` connects to `timescaledb` as `metrics_user` (`pg_monitor`) with
-`METRICS_DB_PASSWORD`, `sslmode=${DB_SSLMODE:-verify-full}`
-([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 3,
-[ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md)).
-
-| Question | PromQL |
-|---|---|
-| Request rate | `sum by (handler) (rate(http_requests_total[5m]))` |
-| 5xx rate | `sum by (job) (rate(http_requests_total{status="5xx"}[5m]))` |
-| p95 latency | `histogram_quantile(0.95, sum by (le, handler) (rate(http_request_duration_seconds_bucket[5m])))` |
-| Container CPU | `sum by (name) (rate(container_cpu_usage_seconds_total{name=~".+"}[5m]))` |
-| Host memory used % | `100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)` |
-| DB connections | `pg_stat_database_numbackends{datname="industryflow"}` |
-| Consumer lag | `sum by (consumergroup, topic) (kafka_consumergroup_lag)` |
-| Revision each service runs | `max by (component, revision) (industryflow_build_info)` |
-| Revisions each service ran in the last day (more than one: deployed) | `count by (component) (max by (component, revision) (count_over_time(industryflow_build_info[1d])))` |
-| Dead-lettered readings | `sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".+\\.dlq"}[15m]))` ([dead-letter handling](dead-letters.md)) |
-
-## Logs
-
-| Setting | Value (`loki-config.yml`) |
-|---|---|
-| Retention | `168h`, compactor every `10m` |
-| Ingestion rate / burst | `16` / `32` MB |
-| Per-stream rate / burst | `8MB` / `16MB` |
-| Max streams per user | `10000` local, `50000` global |
-| Auth | disabled (`auth_enabled: false`) |
-
-| Promtail job | Source | Labels |
-|---|---|---|
-| `docker` | Docker socket: containers named `industryflow-*` (every service's `container_name`, `ingestion-service` and the no-network jobs included), and containers on `industryflow-network`, `industryflow-notebook-kernels` or `industryflow-ops-agent` (spawned kernels, `spark-worker`); one target per container | `job="docker"`, `container`, `container_id`, `service`, `project`, `level` (from JSON logs), `environment="production"`, `cluster="industryflow"` |
-| `system` | `/var/log/*log` | `job="varlogs"` |
-
-| Query | LogQL |
-|---|---|
-| One service | `{service="api-gateway"}` |
-| One container | `{container="industryflow-kafka"}` |
-| Errors | `{job="docker"} \|~ "ERROR\|FATAL"` |
-| JSON level | `{job="docker", level="error"}` |
-| Lines per service | `sum by (service) (count_over_time({job="docker"}[5m]))` |
-| Noisiest containers | `topk(10, sum by (container) (count_over_time({job="docker"}[1h])))` |
-
-| Loki API | Path |
-|---|---|
-| Ready | `GET http://localhost:3100/ready` |
-| Labels | `GET http://localhost:3100/loki/api/v1/labels` |
-| Label values | `GET http://localhost:3100/loki/api/v1/label/<label>/values` |
-| Range query | `GET http://localhost:3100/loki/api/v1/query_range?query=<logql>` |
-
-## Alerts
-
-| Plane | Where |
-|---|---|
-| Platform rules, Compose | `infrastructure/prometheus/rules/`, evaluated by `prometheus`, routed by `alertmanager` (no receiver as shipped; ADR-0016 dec 1, 4) |
-| Platform rules, Kubernetes | Helm `PrometheusRule` ([platform alert rules](../../deploy/observability/README.md#platform-alert-rules)) |
-| Tenant sensor and streaming alerts | `alert-service-detector`, tenant-isolated, never this stack ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 5) |
-
-## Runbook: stateful-feature kill-switch
-
-The switch ([ADR-0024](../../ADR/ADR-0024-stateful-feature-kill-switch.md)) makes the feature engine
-fill every stateful transform's slot (`statistical`, `rolling_stat`) with its neutral value without
-calling the transform, so inference stops reading the aggregate tables. Vector length and order are
-unchanged. Use it when the database is alive but overloaded; in a total outage it reads as enabled
-and each stateful slot whose aggregate read fails takes the same neutral value, counted in
-`ml_stateful_features_unavailable_total` and named in `neutralized_features`.
-
-| Task | Command / signal |
-|---|---|
-| Who | A platform superuser ([ADR-0043](../../ADR/ADR-0043-a-platform-switch-is-flipped-by-a-platform-superuser-through-the-api-gateway-and-every-flip-is-recorded.md)); no tenant role |
-| Turn off (neutralize) | `PUT /api/platform/switches/stateful_features_enabled` with `{"value": false}` |
-| Turn back on | same with `{"value": true}` |
-| State | `GET /api/platform/switches` |
-| Who flipped it, when | `GET /api/platform/switches/stateful_features_enabled/changes` (`public.platform_config_changes`, append-only) |
-| Takes effect | within `STATEFUL_SWITCH_CACHE_TTL` seconds (default `5`); no restart |
-| Confirm, alerts | ML alerts raised meanwhile carry `degraded: true` and `neutralized_features` (`GET /api/alerts`) |
-| Confirm, metric | `rate(ml_stateful_features_neutralized_total[5m])` > 0; `0` in normal operation |
-
-`ml_service_user` holds `SELECT` only on `public.platform_config`; the service never writes the flag.
-The gateway writes it only through `set_platform_switch()`, which records the flip; a flip to the
-current value is not recorded.
-No shipped rule alerts on the counter.
-
-## Troubleshooting
+### Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Target down in Prometheus | Target unreachable or failing; `curl -s localhost:9090/api/v1/targets \| jq '.data.activeTargets[] \| {job: .labels.job, health, lastError}'` | Fix the target named in `lastError` |
-| Edit to `prometheus.yml` not applied | The single-file bind mount keeps the old inode when an editor replaces the file | `docker exec industryflow-prometheus promtool check config /etc/prometheus/prometheus.yml`; `docker compose restart prometheus` |
-| Dashboards missing | Dashboard files are bind-mounted one by one in `docker-compose.yml`; a new JSON file has no mount | Add its mount, then `docker compose up -d grafana` |
-| No logs in Loki | Container neither named `industryflow-*` nor on `industryflow-network`, `industryflow-notebook-kernels` or `industryflow-ops-agent`, or promtail down (`docker logs industryflow-promtail`) | Give the service a `container_name` `industryflow-<service>`; `curl -s localhost:3100/ready` |
-| `pg_up` is `0` | `metrics_user` has no password, or the CA mount for `verify-full` is missing (`docker logs industryflow-postgres-exporter`) | Set the password as `12-metrics-role.sql` describes; check the CA mount |
-| `redis_up` is `0` | Redis down (`docker exec industryflow-redis redis-cli ping`) | Start `redis`, then the exporter |
-| LogQL parse error | Unquoted label value or range without a unit | `{job="docker"}`, `[5m]` |
-| No incident note for a firing alert | The webhook is missing from `ALERTMANAGER_CONFIG`, its secret differs (`401` in `docker compose logs alertmanager`), or the `ops-agent` profile is not up | Add the receiver as in [Infrastructure agent](#infrastructure-agent); `docker compose --profile ops-agent up -d ops-agent` |
 | Incident note reads "The model could not write this note" | The model key is missing or wrong, the endpoint is unreachable, or the model declined; the note's `error` field names it | Set `ANTHROPIC_API_KEY` or `OPS_AGENT_MODEL_BASE_URL` / `OPS_AGENT_MODEL_API_KEY`; `docker compose logs ops-agent` |
 
-## ADR-0016 dec 1, 2
+## ADR-0045 dec 7
 
-The chart renders scrape targets, platform rules and dashboards as integration objects.
-
-| Code | Role |
-|---|---|
-| `infrastructure/prometheus/rules/platform.yml` | Platform alert rules |
-| `deploy/helm/industryflow/templates` | Observability templates (`observability-*.yaml`) |
-
-## ADR-0016 dec 3
-
-| Lane | Exporter login | TLS |
-|---|---|---|
-| Compose | `metrics_user` with `METRICS_DB_PASSWORD` | `verify-full` |
-| Kubernetes | `metrics_user` with `METRICS_DB_PASSWORD` | `verify-full` |
-
-`metrics_user` holds `pg_monitor` and a connection limit of 5.
+The infrastructure agent's graph is a LangGraph `StateGraph` of the steps `gather`, `correlate`,
+`redact`, `explain` and `publish`. LangGraph is imported only in `services/ops_agent/graph.py` and
+pinned only in `services/ops_agent/requirements.txt`.
 
 | Code | Role |
 |---|---|
-| `infrastructure/timescaledb/init-scripts/12-metrics-role.sql` | The monitoring role |
-| `docker-compose.yml` | Compose exporter login |
-| `deploy/helm/industryflow/templates/observability-exporters.yaml` | Kubernetes exporter login |
-| `.env.example` | `METRICS_DB_PASSWORD` template |
-| `tests/config_guards/test_compose_db_roles.py::test_postgres_exporter_uses_the_monitoring_role_over_verified_tls` | Proof: no superuser login, TLS verified |
-
-## ADR-0016 dec 4
-
-| Lane | Backend | Alert router |
-|---|---|---|
-| Compose | Prometheus, Loki, Grafana beside the services | `alertmanager`, one receiver `operator` with no delivery; `ALERTMANAGER_CONFIG` names the operator's copy |
-| Kubernetes | The operator's stack; the chart renders `ServiceMonitor`, `PrometheusRule` and dashboard ConfigMaps | The operator's; `observability.*.labels` match its selectors |
-| Kubernetes scrape of ingestion | The `metrics-listener` container in the ingestion pod serves only `/metrics` (from the app on loopback) on port `metrics` (`apps.ingestion-service.metricsListener.port`); its ServiceMonitor scrapes that port, and the NetworkPolicy admits `observability.prometheusPodLabels` pods in `observability.monitoringNamespace` to it alone | — |
-
-| Code | Role |
-|---|---|
-| `infrastructure/prometheus/prometheus.yml` | Firing alerts sent to `alertmanager` |
-| `infrastructure/alertmanager/alertmanager.yml` | Receiver with no delivery as shipped |
-| `docker-compose.yml` | Backend services beside the application |
-| `deploy/helm/industryflow/values.yaml` | Integration-object toggles and selector labels |
-| `deploy/helm/industryflow/files/prometheus-rules.yml` | Platform rules rendered into the `PrometheusRule` |
-| `deploy/helm/industryflow/templates/ops-agent.yaml` | Agent endpoints are the operator's stack |
-| `deploy/helm/industryflow/templates/apps.yaml` | Ingestion's metrics-only listener |
-| `tests/config_guards/test_helm_ingestion_edge_policy.py` | Proof: the listener serves only `/metrics`, is the port scraped, and the only port the monitoring stack reaches |
-| `tests/config_guards/test_alert_rules.py::test_the_chart_renders_the_same_platform_rules` | Proof: one rule set in both lanes |
-
-## ADR-0016 dec 5
-
-| Path | Holds |
-|---|---|
-| Alert worker to the tenant's schema | Tenant alerts ([Alerts](#alerts-1)) |
-| Prometheus and the platform rules | Operational, aggregate series; no tenant value or alert content |
-| Grafana datasources | Prometheus and Loki; no database datasource, and the earlier `TimescaleDB` datasource is deleted at start |
-
-| Code | Role |
-|---|---|
-| `services/alert_service/worker/repository.py` | Alert written to the tenant's store |
-| `infrastructure/prometheus/rules/platform.yml` | Aggregate platform rules |
-| `infrastructure/grafana/provisioning/datasources.yml` | Datasource set; database datasource deleted |
-| `tests/config_guards/test_grafana_datasources.py::test_no_database_datasource_is_provisioned` | Proof: no database datasource |
-| `tests/config_guards/test_compose_db_roles.py::test_grafana_has_no_database_datasource` | Proof: Grafana holds no database password |
-
-## ADR-0016 dec 6, 7
-
-Grafana is served at the edge and signs a platform superuser on from the platform session (see Grafana).
-
-| Code | Role |
-|---|---|
-| `services/frontend/grafana.conf.template` | Grafana at the edge |
-| `services/api_gateway/routers/dashboards_assertion.py` | Sign-on assertion from the platform session |
-
-## ADR-0016 dec 8
-
-Every service exposes its build information.
-
-| Code | Role |
-|---|---|
-| `tests/config_guards/test_build_info.py` | Every image exposes build information |
-
-## ADR-0024 dec 1
-
-`register_transform` takes `stateful` (default false) and `neutral` (default 0.0); extension API 0.2.0 adds both. The engine asks `is_stateful` by type, so every statistic of a stateful type is governed together.
-
-| Type | Stateful |
-|---|---|
-| `statistical` | Yes |
-| `rolling_stat` | Yes |
-| `identity`, `polynomial`, `interaction`, `deviation` | No |
-| Unregistered | No |
-
-| Code | Role |
-|---|---|
-| `services/ml_service/api/extensions/__init__.py::register_transform` | Class tag at registration |
-| `services/ml_service/api/extensions/__init__.py::is_stateful` | Class lookup by type |
-| `services/ml_service/api/extensions/builtins.py` | Built-in transforms and their tags |
-| `services/ml_service/tests/test_stateful_kill_switch.py::test_stateful_transforms_are_tagged` | Proof: stateful types tagged |
-| `services/ml_service/tests/test_stateful_kill_switch.py::test_unknown_type_is_not_stateful` | Proof: unknown type not stateful |
-
-## ADR-0024 dec 2, 7
-
-The engine reads the switch from the shared schema and keeps the last-known-good value when the read fails (see Runbook: stateful-feature kill-switch).
-
-| Code | Role |
-|---|---|
-| `services/ml_service/api/feature_engineering/kill_switch.py` | Switch read, last-known-good |
-
-## ADR-0024 dec 3-5
-
-With the switch on, a stateful feature is null in its slot, checked before the substrate call, and counted.
-
-| Code | Role |
-|---|---|
-| `services/ml_service/api/feature_engineering/engine.py` | Null-in-slot and degraded-serving metric |
-| `tests/e2e/test_kill_switch.py` | Proof on the deployed platform: alerts ordinary with the switch on, degraded and naming the feature with it off |
-
-## ADR-0024 dec 6
-
-One row, `public.platform_config` key `stateful_features_enabled`, holds the switch for every tenant. It starts `true`; `ml_service_user` has `SELECT` only, so no service changes it.
-
-| Code | Role |
-|---|---|
-| `infrastructure/timescaledb/init-scripts/17-stateful-feature-kill-switch.sql` | The global row; read-only grant to `ml-service-api` |
-| `services/ml_service/api/feature_engineering/kill_switch.py` | Reads the switch; never writes it |
-
-## ADR-0043 dec 1, 2
-
-The gateway serves listing, flipping and history of a switch; every route takes the superuser gate. `ml-service-api` only reads the switch.
-
-| Code | Role |
-|---|---|
-| `services/api_gateway/routers/platform_switches.py` | Switch routes behind `require_superuser` |
-| `services/api_gateway/dependencies.py::require_superuser` | No tenant role passes |
-| `services/api_gateway/tests/test_platform_switches.py::test_no_tenant_role_passes` | Proof: tenant roles refused |
-| `services/api_gateway/tests/test_platform_switches.py::test_every_route_takes_the_superuser_gate` | Proof: every route gated |
-| `tests/e2e/test_kill_switch.py` | Proof on the deployed platform: a tenant administrator refused, the flip recorded with its user, a repeat not recorded |
-
-## ADR-0043 dec 3, 4
-
-The gateway flips a switch through one privileged function that records the flip (see Runbook: stateful-feature kill-switch).
-
-| Code | Role |
-|---|---|
-| `infrastructure/timescaledb/init-scripts/17-stateful-feature-kill-switch.sql` | The switch |
-| `infrastructure/timescaledb/init-scripts/32-platform-switch-control.sql` | Flip function and flip record |
-
-## ADR-0045 dec 1-6, 8
-
-An agent is its own service: a trigger reaches its graph, deterministic steps gather and redact the evidence, a configured model writes the note from it, and the note says it is generated and names the model. It runs only when the operator enables it (see Infrastructure agent).
-
-| Code | Role |
-|---|---|
-| `services/ops_agent/app.py` | Trigger receiver |
-| `services/ops_agent/graph.py` | Gather, correlate, redact, explain, publish; the generated-note header |
-| `services/ops_agent/tools.py` | Read-only tools over MCP |
-| `services/ops_agent/model.py` | Model over an API, chosen by configuration |
-| `services/ops_agent/redaction.py` | Redaction before the model |
-| `docker-compose.yml` | `ops-agent` profile, off unless enabled |
+| `services/ops_agent/graph.py::build` | The agent's graph, built with LangGraph |
+| `services/ops_agent/requirements.txt` | The framework pinned in this agent alone |
 
 ## ADR-0046 dec 1
 
-The operator adds a receiver for the agent to the alert router (see Infrastructure agent).
+The operator adds a receiver for the agent to the alert router ([infrastructure agent](#infrastructure-agent)).
+
+| Item | Value |
+|---|---|
+| Alert storm | At most 5 alerts of one webhook (critical first) and 10 waiting; the rest are logged as not explained |
 
 | Code | Role |
 |---|---|
 | `infrastructure/alertmanager/alertmanager.yml` | Alert router receivers |
+| `services/ops_agent/app.py::create_app` | The receiver, behind the webhook secret |
+| `services/ops_agent/tests/test_app.py::test_the_receiver_refuses_without_the_secret` | Proof: a caller without the secret is refused |
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| No incident note for a firing alert | The webhook is missing from `ALERTMANAGER_CONFIG`, its secret differs (`401` in `docker compose logs alertmanager`), or the `ops-agent` profile is not up | Add the receiver as in [Infrastructure agent](#infrastructure-agent); `docker compose --profile ops-agent up -d ops-agent` |
 
 ## ADR-0046 dec 2
 
@@ -461,6 +529,10 @@ The operator adds a receiver for the agent to the alert router (see Infrastructu
 | Error lines of the rule's `services` and the target's host | `loki_errors` | Log store |
 | Active alerts | `active_alerts` | Alert router |
 | The alert's row; matching symptom rows | `alert_runbook`, `runbook_rows` | Runbooks in the image |
+
+| Item | Value |
+|---|---|
+| Evidence | The rule's PromQL over the 30 minutes before the alert to now; the revisions every service reported over the same window, in the order they ran (`industryflow_build_info`, each point the last value in its step, a change marked `CHANGED`, revisions cut to 12 characters); error lines of the services in the rule's `services` annotation and the target's host; other active alerts; the alert's row in the [alert table](#alerts) (every platform rule has one); `Symptom \| Cause \| Fix` rows sharing at least two words with the alert. The metric series are narrowed to the alert's own labels |
 
 | Code | Role |
 |---|---|
@@ -473,15 +545,73 @@ The operator adds a receiver for the agent to the alert router (see Infrastructu
 | `infrastructure/promtail/promtail-config.yml` | Every service's logs collected, by container name or network |
 | `tests/config_guards/test_logs_collected.py` | Proof: no Compose service is skipped by the collector |
 
+## ADR-0046 dec 3
+
+The model's instructions ask for four sections; the publish step stores each as a field of the note.
+
+| Section | Field | Content |
+|---|---|---|
+| What happened | `what` | One or two sentences from the alert and the observed items |
+| Impact | `impact` | What is affected, as far as the observed items show |
+| Likely cause | `cause` | Cites at least one observed item; with none pointing to a cause, `Unknown from the evidence`. A note without a model: `Unknown: no model wrote this note` |
+| Next step | `next_step` | A runbook fix when the observed items match its symptom, citing it; otherwise the first thing to check |
+
+| Item | Value |
+|---|---|
+| Note fields | `alertname`, `severity`, `services`, `what`, `impact`, `cause`, `next_step` (the model's four sections), `text` (the whole note), `model`, `evidence`, `redacted`, `fingerprint`, `key` |
+
+| Code | Role |
+|---|---|
+| `services/ops_agent/graph.py` | The four sections in the model's instructions (`SYSTEM`) |
+| `services/ops_agent/graph.py::sections` | Sections into fields |
+| `services/ops_agent/tests/test_graph.py::test_the_notes_sections_become_fields` | Proof: sections become fields |
+| `services/ops_agent/tests/test_graph.py::test_a_note_without_a_model_still_fills_the_columns` | Proof: a note without a model fills them too |
+
 ## ADR-0046 dec 4
 
 The publisher pushes each note to Loki under `job="ops-agent"`, labelled with `alertname` and `severity`, and reads that stream to skip a firing it has already explained.
+
+| Item | Value |
+|---|---|
+| Output | Loki stream `{job="ops-agent"}`; the `complete-system` and Incidents dashboards draw it as annotations. No Grafana credential |
+| Once per firing | A firing (fingerprint and start) is explained once; remembered 7 days, and after a restart the agent finds its earlier note in Loki |
 
 | Code | Role |
 |---|---|
 | `services/ops_agent/publish.py::LokiPublisher` | Push and lookup on the note stream |
 | `deploy/helm/industryflow/files/grafana/incidents_dashboard.json` | Incidents dashboard over the stream |
 | `services/ops_agent/tests/test_tools.py::test_a_note_is_pushed_to_its_own_log_stream` | Proof: one stream |
+
+## ADR-0046 dec 5
+
+The agent's tools only read; its one write is its own note ([dec 4](#adr-0046-dec-4)).
+
+| Tool | Reads |
+|---|---|
+| `prometheus_range` | `GET /api/v1/query_range` on the metrics store |
+| `loki_errors` | `GET /loki/api/v1/query_range` on the log store |
+| `active_alerts` | `GET /api/v2/alerts` on the alert router |
+| `alert_runbook`, `runbook_rows` | The runbooks in the image |
+
+| Code | Role |
+|---|---|
+| `services/ops_agent/tools.py::build_server` | The five reading tools, no acting tool |
+| `services/ops_agent/tests/test_tools.py::test_the_tool_set_is_the_monitoring_plane` | Proof: the tool set is exactly these five |
+
+## ADR-0046 dec 6
+
+| Surface | Exposure |
+|---|---|
+| Compose | No host port; its only network, `industryflow-ops-agent`, carries no platform service |
+| Kubernetes | NetworkPolicy ingress from `observability.monitoringNamespace` only |
+| API gateway, frontend | No route to the agent |
+| Notes | In Loki, reached through Grafana, which signs on platform superusers only at the edge ([ADR-0016 dec 6, 7](#adr-0016-dec-6-7)) |
+
+| Code | Role |
+|---|---|
+| `docker-compose.yml` | No `ports`; the agent's own network |
+| `deploy/helm/industryflow/templates/ops-agent.yaml` | Ingress from the monitoring namespace only |
+| `tests/config_guards/test_ops_agent_network.py::test_the_agent_shares_a_network_only_with_the_monitoring_stack` | Proof: no platform service shares its network |
 
 ## ADR-0046 dec 7
 
@@ -510,6 +640,10 @@ The publisher pushes each note to Loki under `job="ops-agent"`, labelled with `a
 | Credential-shaped strings (bearer and basic values, JWTs, known key prefixes, URL passwords, values of credential-named keys, long hex) | `<secret-N>` |
 
 One `Redactor` serves one note, so a value keeps its placeholder within it; the note records counts per category.
+
+| Item | Value |
+|---|---|
+| Sent to the model | The alert and the evidence, after redaction: tenant identifiers, emails, network addresses and credential-shaped strings become `<tenant-1>`, `<email-1>`, … ; the note records the counts per category |
 
 | Code | Role |
 |---|---|
@@ -545,12 +679,14 @@ The endpoints default to the Compose service names and are set per deployment; b
 | Compose | Profile `ops-agent` | `prometheus`, `loki`, `alertmanager` |
 | Kubernetes | `observability.opsAgent.enabled: false` | `prometheusUrl`, `lokiUrl`, `alertmanagerUrl`, required when enabled |
 
+| Item | Value |
+|---|---|
+| Kubernetes | `observability.opsAgent` in the chart values (endpoints of your monitoring stack, `secrets.data.OPS_AGENT_WEBHOOK_SECRET`); the webhook URL is the `<release>-ops-agent` Service. With `networkPolicy.enabled` (the default): ingress from `observability.monitoringNamespace` only; egress to DNS, that namespace, HTTPS on public addresses, and `modelEndpoints` (an in-house model server's CIDR and port) |
+
 | Code | Role |
 |---|---|
 | `services/ops_agent/config.py::Config` | Endpoints from the environment |
 | `deploy/helm/industryflow/templates/ops-agent.yaml` | Refuses to render without the operator's endpoints |
 | `deploy/helm/industryflow/templates/observability-dashboards.yaml` | Incidents dashboard as a ConfigMap |
 
-## Links
-
-- [Prometheus](https://prometheus.io/docs/) · [PromQL](https://prometheus.io/docs/prometheus/latest/querying/basics/) · [Grafana](https://grafana.com/docs/) · [Loki](https://grafana.com/docs/loki/) · [LogQL](https://grafana.com/docs/loki/latest/query/)
+Links: [cluster monitoring](../../deploy/observability/README.md) · [Prometheus](https://prometheus.io/docs/) · [PromQL](https://prometheus.io/docs/prometheus/latest/querying/basics/) · [Grafana](https://grafana.com/docs/) · [Loki](https://grafana.com/docs/loki/) · [LogQL](https://grafana.com/docs/loki/latest/query/).
