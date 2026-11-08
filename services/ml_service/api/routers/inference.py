@@ -17,8 +17,6 @@ import mlflow.pyfunc
 import os
 import hmac
 
-import json
-
 from industryflow_contracts import tenancy
 
 import auth
@@ -26,7 +24,8 @@ import model_cache
 import model_loader
 import uploaded_model
 from feature_engineering import FeatureEngineeringEngine, FeatureRefused
-from extensions import get_detector, DetectorContext, UninterpretableModel
+from extensions import UninterpretableModel
+import scoring
 
 logger = logging.getLogger(__name__)
 
@@ -181,27 +180,18 @@ async def load_model_or_refuse(company_id: str, model_data: Dict[str, Any]):
         ) from exc
 
 
-def detector_for(model_data: Dict[str, Any]):
-    """The detector the model record names (ADR-0010 dec 6), refusing rather than assuming one.
-
-    The detector IS the declaration of what the model's output means (ADR-0028 dec 1). A record with
-    none — an upload registered before the choice was kept — is refused: scoring it with a default
-    would be deciding its semantics on its behalf.
-    """
-    name = model_data.get('detector')
-    if not name:
-        raise HTTPException(status_code=422, detail={
+def refuse_unscorable(exc: scoring.Unscorable) -> HTTPException:
+    """The answer to a record that cannot be scored here (ADR-0010 dec 6, ADR-0028 dec 1). A record
+    naming no detector is refused: scoring it with a default would decide its semantics on its behalf.
+    One naming a detector that is not loaded is a deployment fault, not the caller's."""
+    if isinstance(exc, scoring.NoDetector):
+        return HTTPException(status_code=422, detail={
             "message": (
                 "This model records no detector, so nothing declares what its output means and it "
                 "will not be scored (ADR-0028). Register it again to record one."
             ),
         })
-    detector = get_detector(name)
-    if detector is None:
-        # Named, but not loaded in this deployment (an extension module was removed). A deployment
-        # fault rather than the caller's, and not one a retry fixes.
-        raise HTTPException(status_code=500, detail=f"Unknown anomaly detector: {name}")
-    return name, detector
+    return HTTPException(status_code=500, detail=str(exc))
 
 
 # ============================================================================
@@ -243,7 +233,10 @@ async def predict(
 
     # Before anything is loaded: which detector scores it. A model whose semantics nothing declares is
     # refused without fetching an artifact it could never be scored with.
-    detector_name, detector = detector_for(model_data)
+    try:
+        detector_name = scoring.detector_name(model_data)
+    except scoring.Unscorable as exc:
+        raise refuse_unscorable(exc) from exc
 
     try:
         model = await load_model_or_refuse(company_id, model_data)
@@ -297,21 +290,10 @@ async def predict(
 
         # Score the features through the detector the model record names (ADR-0010 dec 6), chosen at
         # the registration gate as the one that implements its declared semantics (ADR-0028 dec 1).
-
-        # An autoencoder's error is unbounded, so it is scored against the error the model itself saw
-        # in training (ADR-0028). Where that scale lives is deliberately not fixed by the ADR; today it
-        # rides in training_metrics, which needs no migration.
-        training_metrics = model_data.get('training_metrics') or {}
-        if isinstance(training_metrics, str):
-            training_metrics = json.loads(training_metrics)
-
         try:
-            result = await detector(
-                input_features, model, request_data.threshold,
-                DetectorContext(
-                    equipment_id=equipment_id,
-                    reconstruction_scale=training_metrics.get('reconstruction_scale'),
-                ),
+            [result] = await scoring.score(
+                scoring.Scoring.of(model_data, fe_engine.get_feature_names(), equipment_id),
+                model, [input_features], request_data.threshold,
             )
         except UninterpretableModel as exc:
             # ADR-0028 dec 2: the detector could not establish what this model's output MEANS, so it

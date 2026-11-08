@@ -35,6 +35,7 @@ KERNEL = uploaded_model.PROVENANCE_KERNEL
 UPLOADED = uploaded_model.PROVENANCE_UPLOADED
 
 X = np.random.RandomState(0).rand(40, 4)
+FEATURES = [f"c{i}" for i in range(4)]
 Y = X @ [1.0, 2.0, 3.0, 4.0]
 
 
@@ -263,14 +264,14 @@ def test_the_probe_scores_a_feature_sample_in_its_own_load(tmp_path):
     model = LogisticRegression().fit(X, (Y > Y.mean()).astype(int))
     rows = X[:5].tolist()
     verdict = _probe_with_sample(_save(tmp_path, "logit", model),
-                                 {"detector": "sklearn", "context": {}, "rows": rows})
+                                 {"scoring": {"detector": "sklearn", "feature_names": FEATURES}, "rows": rows})
     assert verdict["ok"] is True, verdict
     assert np.allclose(verdict["scores"], model.predict_proba(X[:5])[:, 1])
 
 
 def test_a_detector_that_cannot_score_the_sample_does_not_fail_the_probe(tmp_path):
     verdict = _probe_with_sample(_save(tmp_path, "lin", LinearRegression().fit(X, Y)),
-                                 {"detector": "sklearn", "context": {}, "rows": X[:2].tolist()})
+                                 {"scoring": {"detector": "sklearn", "feature_names": FEATURES}, "rows": X[:2].tolist()})
     assert verdict["ok"] is True and "UninterpretableModel" in verdict["sample_error"], verdict
 
 

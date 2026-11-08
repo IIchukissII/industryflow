@@ -381,7 +381,7 @@ def _scoring(monkeypatch, fn):
     async def load(company_id, model):
         return object()
 
-    monkeypatch.setattr(models_router, "detector_for", lambda model: ("sklearn", detector))
+    monkeypatch.setitem(extensions._DETECTORS, "sklearn", detector)
     monkeypatch.setattr(models_router, "load_model_or_refuse", load)
 
 
@@ -451,7 +451,8 @@ def test_an_uploads_sample_is_scored_in_the_probes_own_load(client, monkeypatch)
     monkeypatch.setattr(load_probe, "probe", probe)
     row = _kernel_row(mlflow_run_id=None, artifact_uri=ADMITTED, provenance="uploaded")
     assert _deploy(client, row).status_code == 200
-    assert seen[0]["detector"] == "sklearn" and seen[0]["rows"][3] == [3.0]
+    assert seen[0]["scoring"]["detector"] == "sklearn" and seen[0]["scoring"]["feature_names"] == ["a"]
+    assert seen[0]["rows"][3] == [3.0]
     assert client.repo.profiles[-1]["sample"]["prediction_score"] == [0.25] * 40
 
 
