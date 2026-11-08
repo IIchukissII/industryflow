@@ -521,6 +521,52 @@ def test_a_successful_backup_writes_its_metric_and_a_failed_one_does_not(env):
     assert list(metrics.iterdir()) == []
 
 
+def test_retention_keeps_the_newest_copies_under_each_prefix_and_nothing_else(env):
+    # ADR-0032: each database's dumps and the globals are kept by count, each under its own prefix;
+    # a prefix that only starts with a database's name and the mirrors are not the dumps' to prune.
+    for stamp in ("20260101T020000Z", "20260102T020000Z", "20260103T020000Z", "20260104T020000Z"):
+        _put(env, BACKUPS, "backups", f"timescaledb/industryflow/{stamp}.dump", b"x")
+        _put(env, BACKUPS, "backups", f"timescaledb/globals/{stamp}.sql", b"x")
+    _put(env, BACKUPS, "backups", "timescaledb/mlflow/20260101T020000Z.dump", b"x")
+    _put(env, BACKUPS, "backups", "timescaledb/industryflow_old/20260101T020000Z.dump", b"x")
+    _put(env, BACKUPS, "backups", "cold/tenant_x/2026-01-01/part.parquet", b"x")
+    r = _backup_run(env, DATABASES="industryflow mlflow", RETAIN_PER_DB="3")
+    assert r.returncode == 0, r.stdout + r.stderr
+    [new] = [k for k in _keys(env, "timescaledb/mlflow") if not k.endswith("20260101T020000Z.dump")]
+    stamp = new.rsplit("/", 1)[1].removesuffix(".dump")
+    assert _keys(env, "timescaledb/industryflow") == [
+        "timescaledb/industryflow/20260103T020000Z.dump", "timescaledb/industryflow/20260104T020000Z.dump",
+        f"timescaledb/industryflow/{stamp}.dump"]
+    assert _keys(env, "timescaledb/globals") == [
+        "timescaledb/globals/20260103T020000Z.sql", "timescaledb/globals/20260104T020000Z.sql",
+        f"timescaledb/globals/{stamp}.sql"]
+    assert len(_keys(env, "timescaledb/mlflow")) == 2
+    assert _keys(env, "timescaledb/industryflow_old") == ["timescaledb/industryflow_old/20260101T020000Z.dump"]
+    assert _keys(env, "cold") == ["cold/tenant_x/2026-01-01/part.parquet"]
+    assert "pruning 2 old object(s) under timescaledb/industryflow/ (keep 3)" in r.stdout
+
+
+def test_a_target_that_cannot_be_listed_fails_the_run_unrecorded(env):
+    # Retention must not stop silently: the copies would grow until the store is full.
+    metrics = env["tmp"] / "metrics"
+    metrics.mkdir()
+    r, script = _recorded_run(env, FAKE_S3_FAIL_LIST="1", METRICS_TEXTFILE_DIR=str(metrics))
+    assert r.returncode != 0
+    assert "timescaledb/industryflow/: FAILED, the backup target could not be listed" in r.stdout
+    assert "INSERT INTO public.backup_ledger" not in script
+    assert list(metrics.iterdir()) == []
+
+
+@pytest.mark.parametrize("name, value", [("RETAIN_PER_DB", "0"), ("RETAIN_PER_DB", "-1"), ("RETAIN_PER_DB", "x"),
+                                         ("MIRROR_RETAIN_DAYS", "0"), ("MIRROR_RETAIN_DAYS", "7d")])
+def test_a_retention_below_one_is_refused_before_anything_is_dumped(env, name, value):
+    # A retention of 0 would delete the dump the run has just written.
+    r = _backup_run(env, **{name: value})
+    assert r.returncode != 0
+    assert f"{name} must be a whole number of at least 1, not '{value}'" in r.stderr
+    assert not (env["tmp"] / "pg_dump.log").exists()
+
+
 def test_restore_latest_takes_only_a_dump(env):
     _put(env, BACKUPS, "backups", "timescaledb/industryflow/20260101T020000Z.dump", b"x")
     _put(env, BACKUPS, "backups", "timescaledb/industryflow/20260101T020000Z.zzz", b"x")
