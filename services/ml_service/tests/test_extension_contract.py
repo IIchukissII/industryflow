@@ -152,7 +152,7 @@ def test_an_extension_is_loaded_only_against_a_compatible_api(tmp_path, target, 
         from extensions import check_api_version, register_transform
         check_api_version({target!r})
 
-        @register_transform("versioned_ext_value")
+        @register_transform("versioned_ext_value", check=lambda definition: None)
         async def value(transformation, sensor_data, ctx):
             return 1.0
     """))

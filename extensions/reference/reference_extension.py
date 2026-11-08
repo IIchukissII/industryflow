@@ -8,6 +8,8 @@ detector, registered through the platform's contracts without editing the core.
 The domain is a fictional pump. The platform imports this module only when EXTENSION_MODULES names
 ``reference_extension``; no platform module imports it.
 """
+import math
+
 from extensions import (DIRECT_SCORE, DetectionResult, InvalidFeature, UninterpretableModel, check_api_version,
                         register_detector, register_transform, sensor_value)
 
@@ -20,17 +22,22 @@ MARGIN_FEATURE = "pressure_margin"
 HEADROOM_BAR = 2.0
 
 
-@register_transform("reference_pressure_margin")
+def check_pressure_margin(transformation) -> None:
+    """A definition names its sensor and a finite numeric ``params.limit`` (ADR-0044 dec 2)."""
+    params = transformation.get("params")
+    limit = params.get("limit") if isinstance(params, dict) else None
+    if not transformation.get("sensor"):
+        raise InvalidFeature(transformation.get("name"), "it names no sensor")
+    if isinstance(limit, bool) or not isinstance(limit, (int, float)) or not math.isfinite(limit):
+        raise InvalidFeature(transformation.get("name"), "it names no finite numeric params.limit")
+
+
+@register_transform("reference_pressure_margin", check=check_pressure_margin)
 async def pressure_margin(transformation, sensor_data, ctx):
     """How far a pressure sensor sits below the limit the feature names: ``params.limit`` minus the
-    reading. A definition naming no sensor or no numeric limit is refused (ADR-0044 dec 2)."""
-    sensor = transformation.get("sensor")
-    limit = (transformation.get("params") or {}).get("limit")
-    if not sensor:
-        raise InvalidFeature(transformation.get("name"), "it names no sensor")
-    if isinstance(limit, bool) or not isinstance(limit, (int, float)):
-        raise InvalidFeature(transformation.get("name"), "it names no numeric params.limit")
-    return limit - sensor_value(sensor_data, sensor)
+    reading."""
+    check_pressure_margin(transformation)
+    return transformation["params"]["limit"] - sensor_value(sensor_data, transformation["sensor"])
 
 
 @register_detector("reference_margin_rule", semantics=DIRECT_SCORE)

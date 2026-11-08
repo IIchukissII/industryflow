@@ -37,6 +37,4 @@ Streaming it: [getting started, step 5](../../docs/getting-started.md#5-stream-t
 `EXTENSION_MODULES=reference_extension`, with this directory on `ml-service-api`'s import path
 ([loading an extension](../../docs/operations/extensions.md#loading-an-extension)).
 
-| Code | Role |
-|---|---|
-| `services/ml_service/tests/test_extension_contract.py` | Proof: loaded by configured import, listed, accepted where configurations are written, computed and dispatched; refused definitions; version rule; not loaded unless configured |
+The code and its proofs: [ADR-0010 dec 5](../../docs/operations/extensions.md#adr-0010-dec-5).
