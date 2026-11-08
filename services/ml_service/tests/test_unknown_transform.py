@@ -61,3 +61,11 @@ def test_a_definition_its_transform_cannot_compute_is_refused_where_it_is_writte
         feature_configs.FeatureConfigUpdate(transformations=[definition])
     with pytest.raises(FeatureRefused, match=reason):
         FeatureEngineeringEngine(feature_config={"base_sensors": ["temp_1"], "transformations": [definition]})
+
+
+
+@pytest.mark.parametrize("transformations", [[{"type": "identity", "sensor": "temp_1"}], [["identity"]],
+                                             [{"name": "", "type": "identity", "sensor": "temp_1"}]])
+def test_an_engine_is_not_built_from_a_definition_that_names_nothing(transformations):
+    with pytest.raises(FeatureRefused, match="names itself"):
+        FeatureEngineeringEngine(feature_config={"base_sensors": ["temp_1"], "transformations": transformations})

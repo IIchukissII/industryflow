@@ -73,6 +73,8 @@ carries partial-batch settings that no part of the platform reads.
 - A caller that sent incomplete readings, and was scored, is now refused.
 - A model bound to a defective configuration stops scoring until it is registered again on a corrected one.
 - A stateful feature is scored only for readings that name their equipment.
+- A model with a ratio feature is not scored for a reading whose denominator is zero, such as stopped
+  equipment, and a ratio is now the exact quotient where a near-zero denominator once shifted it.
 - Extensions break under ADR-0010 dec 3: a transform registers the check of its definition, and the
   baseline read it is handed takes its window explicitly and raises for one the contract does not declare.
 - Equipment created with partial-batch settings loses them; they had no effect.

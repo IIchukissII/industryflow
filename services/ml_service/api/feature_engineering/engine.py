@@ -18,7 +18,7 @@ import logging
 # also carries each type's capability tags (ADR-0024), which is how the engine can neutralize the
 # stateful class without knowing which types are in it.
 from extensions import (
-    FeatureRefused, MissingSensors, StatefulUnavailable, TransformContext,
+    FeatureRefused, InvalidFeature, MissingSensors, StatefulUnavailable, TransformContext,
     check_definition, get_transform, is_stateful, missing_sensors, neutral_value,
 )
 
@@ -84,6 +84,10 @@ class FeatureEngineeringEngine:
         """
         self.base_sensors = feature_config.get('base_sensors', [])
         self.transformations = feature_config.get('transformations', [])
+        for t in self.transformations:
+            if not isinstance(t, dict) or not isinstance(t.get('name'), str) or not t['name']:
+                raise InvalidFeature(t.get('name') if isinstance(t, dict) else None,
+                                     "a feature definition is an object that names itself")
         self.feature_names = [t['name'] for t in self.transformations]
         # Every sensor the configuration reads: its declared inputs and any a feature names. A
         # reading lacking one is refused before a slot is filled (ADR-0044 dec 1).
