@@ -9,6 +9,9 @@ These carry no domain knowledge — they are the building blocks any domain comp
 configuration. Domain-specific transforms live in extensions, registered the same way.
 """
 import logging
+import math
+
+from industryflow_contracts import windows
 
 from . import InvalidFeature, StatefulUnavailable, register_transform, sensor_value
 
@@ -23,12 +26,22 @@ def _sensor(transformation) -> str:
     return sensor
 
 
+def _params(transformation) -> dict:
+    """The definition's parameters; a ``params`` that is not an object cannot be interpreted."""
+    params = transformation.get("params")
+    if params is None:
+        return {}
+    if not isinstance(params, dict):
+        raise InvalidFeature(transformation.get("name"), "its params are not an object")
+    return params
+
+
 def _number(transformation, param: str) -> float:
-    """A numeric parameter the definition must name; absent or not a number is refused, never
-    replaced by a default (ADR-0044 dec 2)."""
-    value = (transformation.get("params") or {}).get(param)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise InvalidFeature(transformation.get("name"), f"it names no numeric params.{param}")
+    """A finite numeric parameter the definition must name; absent or not a finite number is refused,
+    never replaced by a default (ADR-0044 dec 2)."""
+    value = _params(transformation).get(param)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise InvalidFeature(transformation.get("name"), f"it names no finite numeric params.{param}")
     return value
 
 
@@ -52,7 +65,7 @@ _OPERATIONS = ("ratio", "difference", "product", "sum")
 async def interaction(transformation, sensor_data, ctx):
     """Combine two sensors by ``params.operation``: ratio, difference, product or sum."""
     sensors = transformation.get("sensors") or []
-    operation = (transformation.get("params") or {}).get("operation")
+    operation = _params(transformation).get("operation")
     if len(sensors) < 2:
         raise InvalidFeature(transformation.get("name"), f"an interaction needs 2 sensors, it names {len(sensors)}")
     if operation not in _OPERATIONS:
@@ -103,7 +116,7 @@ async def statistical(transformation, sensor_data, ctx):
     (ADR-0044 dec 2) rather than serving some other statistic, or a neutral, into the slot — the
     defect that made ``_run_mean`` and ``_run_std`` features receive a deviation.
     """
-    params = transformation.get("params") or {}
+    params = _params(transformation)
     sensor = _sensor(transformation)
 
     stat_type = params.get("stat_type")
@@ -121,8 +134,13 @@ async def statistical(transformation, sensor_data, ctx):
         )
 
     # Which aggregate window is the baseline is domain configuration (ADR-0001), not a platform
-    # constant: read it from params and let the provider apply its default.
+    # constant: read it from params, the shared contract's default when it names none. A window the
+    # contract does not declare is a defect of the definition, refused here rather than served as an
+    # unavailable baseline (ADR-0044 dec 2, 3).
     granularity = params.get("granularity")
+    if granularity is not None and granularity not in windows.WINDOWS:
+        raise InvalidFeature(transformation.get("name"),
+                             f"params.granularity {granularity!r} is not one of {', '.join(windows.WINDOWS)}")
     provider = ctx.baseline_provider
     # The reading is checked before the aggregate, so an incomplete one is refused rather than
     # reported as a degraded store.

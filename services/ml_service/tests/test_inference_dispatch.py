@@ -311,6 +311,10 @@ def test_a_feature_that_fails_to_compute_fails_the_score(monkeypatch, loads):
     {"type": "deviation", "sensor": "a", "params": {"baseline": True}},
     {"type": "interaction", "sensors": ["a", "b"]},
     {"type": "interaction", "sensors": ["a", "b"], "params": {"operation": "quotient"}},
+    {"type": "polynomial", "sensor": "a", "params": ["power", 2]},
+    {"type": "polynomial", "sensor": "a", "params": {"power": float("nan")}},
+    {"type": "deviation", "sensor": "a", "params": {"baseline": float("inf")}},
+    {"type": "statistical", "sensor": "a", "params": {"stat_type": "window_mean", "granularity": "5mins"}},
 ])
 def test_a_builtin_definition_missing_its_parameter_is_a_422(monkeypatch, loads, definition):
     # ADR-0044 dec 2: no default stands in for a parameter the definition does not name.
@@ -318,7 +322,7 @@ def test_a_builtin_definition_missing_its_parameter_is_a_422(monkeypatch, loads,
     r = _client(monkeypatch, _row(), feature_config=config).post(
         "/api/inference/predict", json={"model_id": "m1", "sensor_data": {"a": 2.0, "b": 1.0}})
     assert r.status_code == 422, r.text
-    assert "params." in r.text
+    assert "params" in r.text
 
 
 def test_an_unavailable_aggregate_is_served_neutral_and_named(monkeypatch, loads):

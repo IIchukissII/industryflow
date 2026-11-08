@@ -81,14 +81,16 @@ config.
 | `polynomial` | no | `sensor`, numeric `params.power` |
 | `interaction` | no | `sensors` (2), `params.operation`: `ratio`, `difference`, `product` or `sum` |
 | `deviation` | no | `sensor`, numeric `params.baseline` |
-| `statistical` | yes | `sensor`, `params.stat_type`; `params.granularity` optional |
+| `statistical` | yes | `sensor`, `params.stat_type`; `params.granularity` optional, one of the windows in `industryflow_contracts.windows` |
 | `rolling_stat` | yes; not implemented, a feature using it is refused | — |
 
-A definition missing a named parameter, or naming one of the wrong kind, is refused with `422`; no
-default stands in for it ([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 2).
+A definition missing a named parameter, naming one of the wrong kind or a non-finite number, or whose
+`params` is not an object, is refused with `422`; no default stands in for it
+([ADR-0044](../../ADR/ADR-0044-complete-model-input.md) dec 2).
 
-Stateful transforms read their baseline window from `params.granularity` (default `1min`, from
-`industryflow_contracts.windows`).
+Stateful transforms read their baseline window from `params.granularity` (default `1min`, declared in
+`industryflow_contracts.windows`); a window it does not declare is refused, not served as an
+unavailable baseline.
 
 ## Detectors
 
@@ -494,3 +496,5 @@ The engine refuses a reading with a missing sensor or an uninterpretable definit
 | `services/ml_service/api/feature_engineering/engine.py` | Refusals and substitutes |
 | `services/ml_service/api/extensions/builtins.py` | Built-in transforms |
 | `infrastructure/timescaledb/init-scripts/33-equipment-batch-settings-removed.sql` | Partial-batch columns dropped from every tenant |
+| `services/ml_service/tests/test_inference_dispatch.py::test_a_builtin_definition_missing_its_parameter_is_a_422` | Proof: dec 2 for every built-in parameter |
+| `services/ml_service/tests/test_inference_dispatch.py::test_a_feature_that_fails_to_compute_fails_the_score` | Proof: dec 4 |
