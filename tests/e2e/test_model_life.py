@@ -8,12 +8,11 @@ deployed past the load-and-score gate and scored; the bound configuration then k
 
 ADR-0030 (admission), ADR-0027/0037 (the artifact declares, no author code), ADR-0041 (bound
 configuration), ADR-0028 (declared semantics)."""
-import os
 import uuid
 
 import pytest
 
-from harness import equipment, eventually, pretty, reading, send_reading
+from harness import build_model, equipment, eventually, pretty, reading, send_reading, upload_model
 
 SENSORS = ("temp_1", "flow_1")
 
@@ -46,49 +45,17 @@ def feature_config(tenant):
 
 @pytest.fixture(scope="module")
 def artifact(env, tenant, settings):
-    """The model's files, built in the authoring image into the run's work directory (mounted at the
-    same path here and on the host)."""
-    out = os.path.join(settings["IF_E2E_WORK"], f"model-{tenant['run']}")
-    os.makedirs(out, exist_ok=True)
-    os.chmod(out, 0o777)
-    env.run("docker", "run", "--rm", "-u", "1000", "-v", f"{out}:/out", "--entrypoint", "python",
-            settings["IF_E2E_AUTHORING_IMAGE"], "-c", BUILD)
-    root = os.path.join(out, "model")
-    files = {}
-    for dirpath, _dirs, names in os.walk(root):
-        for name in names:
-            path = os.path.join(dirpath, name)
-            files[os.path.relpath(path, root)] = open(path, "rb").read()
-    assert "MLmodel" in files, f"the authoring image built no manifest: {sorted(files)}"
-    return files
+    return build_model(env, settings, f"model-{tenant['run']}", BUILD)
 
 
 @pytest.fixture(scope="module")
 def model(edge, tenant, feature_config, pump, artifact):
     """Uploaded through the edge as the upload wizard does, then registered bound to the configuration."""
-    eng = tenant["engineer"]
-    cap = eng.post("/api/models/upload-capability").json()
-    door = {"Authorization": f"Bearer {cap['capability']}"}
-    staged = edge.anonymous("/api/2.0/industryflow-upload/stage", method="POST", headers=door,
-                            json={"files": sorted(artifact)})
-    assert staged.status_code == 200, staged.text
-    staged = staged.json()
-    for member, url in staged["urls"].items():
-        put = edge.client.put(url, content=artifact[member])
-        assert put.status_code in (200, 204), f"PUT {member}: {put.status_code} {put.text[:300]}"
-    committed = edge.anonymous("/api/2.0/industryflow-upload/commit", method="POST", headers=door,
-                               json={"upload_id": staged["upload_id"]})
-    assert committed.status_code == 200, committed.text
-    # The capability is spent by the commit (ADR-0015 dec 4).
-    again = edge.anonymous("/api/2.0/industryflow-upload/commit", method="POST", headers=door,
-                           json={"upload_id": staged["upload_id"]})
-    assert again.status_code == 401
-    registered = eng.post("/api/models", json={
+    return tenant["engineer"].post("/api/models", json={
         "model_name": f"e2e-model-{tenant['run']}", "model_version": "1", "model_type": "logistic_regression",
         "feature_config_id": feature_config, "equipment_id": pump[0],
-        "artifact_uri": committed.json()["artifact_uri"], "score_semantics": "anomaly_probability",
+        "artifact_uri": upload_model(edge, tenant["engineer"], artifact), "score_semantics": "anomaly_probability",
     }).json()
-    return registered
 
 
 def test_an_uploaded_model_is_deployed_and_scores_the_readings_its_rule_watches(settings, tenant, model, pump,

@@ -144,6 +144,46 @@ def issue_device(env: Environment, compose_dir: str, company_id: str, device_id:
     return os.path.join(base, "current.chain.crt"), os.path.join(base, "current.key")
 
 
+def build_model(env: Environment, settings, name: str, script: str) -> dict:
+    """A model's files, built by ``script`` in the authoring image into ``/out/model`` (the run's work
+    directory, mounted at the same path here and on the host); member path -> bytes."""
+    out = os.path.join(settings["IF_E2E_WORK"], name)
+    os.makedirs(out, exist_ok=True)
+    os.chmod(out, 0o777)
+    env.run("docker", "run", "--rm", "-u", "1000", "-v", f"{out}:/out", "--entrypoint", "python",
+            settings["IF_E2E_AUTHORING_IMAGE"], "-c", script)
+    root = os.path.join(out, "model")
+    files = {}
+    for dirpath, _dirs, names in os.walk(root):
+        for member in names:
+            path = os.path.join(dirpath, member)
+            files[os.path.relpath(path, root)] = open(path, "rb").read()
+    assert "MLmodel" in files, f"the authoring image built no manifest: {sorted(files)}"
+    return files
+
+
+def upload_model(edge, engineer: Session, files: dict) -> str:
+    """The files uploaded through the edge as the upload wizard does (ADR-0030); the admitted
+    artifact's location."""
+    cap = engineer.post("/api/models/upload-capability").json()
+    door = {"Authorization": f"Bearer {cap['capability']}"}
+    staged = edge.anonymous("/api/2.0/industryflow-upload/stage", method="POST", headers=door,
+                            json={"files": sorted(files)})
+    assert staged.status_code == 200, staged.text
+    staged = staged.json()
+    for member, url in staged["urls"].items():
+        put = edge.client.put(url, content=files[member])
+        assert put.status_code in (200, 204), f"PUT {member}: {put.status_code} {put.text[:300]}"
+    committed = edge.anonymous("/api/2.0/industryflow-upload/commit", method="POST", headers=door,
+                               json={"upload_id": staged["upload_id"]})
+    assert committed.status_code == 200, committed.text
+    # The capability is spent by the commit (ADR-0015 dec 4).
+    again = edge.anonymous("/api/2.0/industryflow-upload/commit", method="POST", headers=door,
+                           json={"upload_id": staged["upload_id"]})
+    assert again.status_code == 401
+    return committed.json()["artifact_uri"]
+
+
 def send_reading(settings, cert, reading) -> httpx.Response:
     """One reading through the device edge, presenting ``cert`` (a (chain, key) pair) as a device does,
     or no certificate at all."""
