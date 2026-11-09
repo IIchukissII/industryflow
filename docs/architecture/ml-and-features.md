@@ -38,10 +38,6 @@ The alert worker schedules a drift evaluation per statistical rule ([alerting](a
 | `prediction` | `derived` (scores from the last deployment), `supplied` (scores from before ADR-0035, replaced at the next deployment) or `null` |
 | `reason` | Why monitoring is less than data and prediction drift |
 
-## ADR-0021 dec 4
-
-Withdrawn; the baseline is [ADR-0035](#adr-0035-dec-1-4).
-
 ## ADR-0021 dec 6
 
 One evaluation reads one model of one tenant. The tenant comes from the verified identity, or from the `company_id` body field on an internal-token call; the model record and the trailing window are read on that tenant's schema.
