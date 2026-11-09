@@ -6,7 +6,7 @@
 Feature Engineering Module
 Flexible, configuration-driven feature engineering for multiple equipment types
 """
-from .baseline_provider import AggregateBaselineProvider, AsOf, UnknownBaselineInput
+from .baseline_provider import AggregateBaselineProvider, UnknownBaselineInput
 from extensions import FeatureRefused, MissingSensors
 
 from .engine import (FeatureEngineeringEngine, MissingEquipment, NonFiniteFeature, SubstituteRefused,
