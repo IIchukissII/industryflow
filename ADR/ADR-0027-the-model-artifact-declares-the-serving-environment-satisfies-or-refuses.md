@@ -6,9 +6,11 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0027 — The model artifact declares; the serving environment satisfies or refuses
 
 - **Status:** Accepted
-- **Date:** 2026-07-14; changed 2026-11-08
+- **Date:** 2026-07-14; changed 2026-11-09
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (its deferred supply chain, for the artifact path only)
-- **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (in-process registry), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (model-adapter contract), [ADR-0026](ADR-0026-release-model.md) (the test is the gate), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (retrain lane), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (provenance), [ADR-0037](ADR-0037-no-model-load-on-the-serving-side-runs-author-code-whatever-the-provenance.md) (no load runs author code)
+- **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (in-process registry), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (model-adapter contract), [ADR-0026](ADR-0026-release-model.md) (the test is the gate), [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (retrain lane), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (provenance), [ADR-0037](ADR-0037-no-model-load-on-the-serving-side-runs-author-code-whatever-the-provenance.md) (no load runs author code),
+  [ADR-0035](ADR-0035-drift-baseline.md) (dec 2: the gate derives the drift baseline),
+  [ADR-0036](ADR-0036-out-of-process-model-runtime-for-frameworks-the-serving-image-does-not-carry.md) (dec 7: a runtime-served model's gate)
 
 ## Context
 
@@ -22,18 +24,24 @@ pinned stack.
 
 1. **The artifact declares its requirements; the serving environment satisfies them or refuses it.**
    The rule is generic and needs no amendment for a new framework.
-2. **What the serving environment can satisfy is a declared, closed supported flavor set.** It is the
-   in-process flavors plus installed model adapters; a model outside it is refused with a reason.
+2. **What the serving environment can satisfy is a closed supported flavor set.** It is the in-process
+   flavors plus the adapters and runtimes the deployment installs, discovered from the registry
+   (ADR-0028 dec 5); closed means bounded at any moment, not a list kept in code. A model outside it is
+   refused with a reason.
 3. **For in-process flavors the rule instantiates as version constraints in each library's own terms.**
    numpy major, scikit-learn major.minor and pandas major (build time only) must match; serializers on
    the serving side are at or above the kernel's, within the major.
 4. **The open framework set is served through ADR-0028's model-adapter contract.**
 5. **Two checks enforce the contract, and the empirical one is the authority.** A declarative check
    compares the pins each image actually installs; a required round trip trains a model in the real
-   authoring image that must load and score in the real serving image.
+   authoring image that must load and score in the real serving image. For an artifact with no authoring
+   image (an upload, ADR-0030 dec 7; a runtime-served model, ADR-0036 dec 7), the round trip is replaced
+   by loading and scoring that artifact at the deployment gate, which proves it works in the serving
+   image only; the round trip is the authority only where an authoring image exists.
 6. **The serving service refuses an artifact it cannot serve at registration and again at deployment,
    not in the inference path.** The registration verdict expires when the serving image is rebuilt, and
-   the two refusals are distinguishable.
+   the two refusals are distinguishable. At deployment the gate also derives the model's drift
+   baseline from its sample where it can (ADR-0035 dec 2, 5).
 7. **Compatibility is a property of a registered model, surfaced where models are looked at.** It is
    satisfied, satisfied with differing exact versions (warning shown), or not satisfied (no deploy).
 8. **That property is never routed into the retrain recommendation (ADR-0022 dec 4).**
@@ -53,10 +61,12 @@ pinned stack.
 | Dec | Rejected alternative | Why rejected |
 |---|---|---|
 | 2 | Every framework in the serving image | A multi-gigabyte layer for every self-hoster (ADR-0001) and a second numeric stack to keep in parity |
+| 2 | The supported set kept as a list in code | It drifts from what the deployment installs; the registry knows (ADR-0028 dec 5) |
 | 3 | Identical versions on both ends | Every serving patch becomes a notebook release; fails on an open framework set |
 | 3 | The round trip alone, no version rule | A test cannot refuse one artifact at a gate after a later rebuild |
 | 3 | A version-checked serializer in place of version constraints | It is already the format scikit-learn models cross in, and it does not make two numeric stacks agree |
 | 4 | Recreate each model's environment at load | Per model is the wrong unit; per flavor is decision 4 |
+| 5 | A round trip required for an artifact with no authoring image | There is no image to train it in; only loading that artifact at the gate can refuse it |
 | 8 | Reuse the retrain recommendation | Corrupts the statistical signal ADR-0022 makes trustworthy |
 | 11 | Notebook promotion outside the artifact contract | A promoted version is served like any registered model, so it meets the same gate (ADR-0040 dec 2) |
 | 13 | Stay on the serializer version that trusted tree structures by default | Keeps a known memory-safety flaw on the model load path, and a security patch does not wait (ADR-0026 dec 7) |

@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0030 — Admission of externally-authored models
 
 - **Status:** Accepted
-- **Date:** 2026-07-16; changed 2026-10-29
+- **Date:** 2026-07-16; changed 2026-11-09
 - **Parent:** [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) (the artifact declares; the serving environment satisfies or refuses)
-- **Related:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (sole writer of the artifact store), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (declared semantics), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capability audiences), [ADR-0035](ADR-0035-drift-baseline.md) (the declared baseline, dec 8), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (the public edge), [ADR-0037](ADR-0037-no-model-load-on-the-serving-side-runs-author-code-whatever-the-provenance.md) (dec 4's rule for every provenance), [ADR-0039](ADR-0039-one-test-of-tenant-ownership-for-names-and-object-store-keys.md) (the one test of a tenant's upload area)
+- **Related:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (sole writer of the artifact store), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (declared semantics), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capability audiences), [ADR-0035](ADR-0035-drift-baseline.md) (dec 8: the drift baseline, a supplied sample and derived scores), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (the public edge), [ADR-0037](ADR-0037-no-model-load-on-the-serving-side-runs-author-code-whatever-the-provenance.md) (dec 4's rule for every provenance), [ADR-0039](ADR-0039-one-test-of-tenant-ownership-for-names-and-object-store-keys.md) (the one test of a tenant's upload area)
 
 ## Context
 
@@ -40,7 +40,8 @@ artifact that runs author code on load would grant code execution on the trusted
    score in the real serving image, in an isolated process, which proves it works here only.
 8. **Provenance is a first-class fact, never synthesised to look internal.** An upload is admitted only
    at one upload under the caller's tenant's uploads area, checked at registration, deployment and every
-   load, and carries a declared baseline or is visibly un-monitorable.
+   load, and carries a drift baseline (ADR-0035: a feature sample matching its feature configuration)
+   or is visibly un-monitorable.
 9. **This record admits no flavor outside ADR-0027's supported set.** A runtime that serves a framework
    out of process widens that set by ADR-0036, not here.
 10. **The upload plane is reachable through the one public edge, and bytes go client to store under a
@@ -70,6 +71,7 @@ artifact that runs author code on load would grant code execution on the trusted
 | 7 | A version comparison in place of the empirical check | Checks assertions only against assertions |
 | 7 | A load-and-score path beside the deployment gate | A second answer to a question the deployment gate already answers |
 | 8 | A synthesised tracking run for an upload | Makes an environment the platform never observed look observed |
+| 8 | A baseline the uploader declares with its scores | The scores would come from another stack than the one serving; ADR-0035 dec 2 derives them |
 | 10 | Relay bytes through the mediator | Couples it to artifact size (ADR-0019 dec 6) |
 | 10 | Only an in-network client, the browser deferred | Re-opens decision 3, which already made the browser a client |
 | 10 | A cross-origin allowlist on the store for the app's origin | One origin through the edge needs no cross-origin exposure at all |

@@ -106,7 +106,7 @@ Not yet realised.
 
 | Store | Holds | Bound |
 |---|---|---|
-| ML service baseline cache | Returned aggregate means of live reads, keyed by tenant schema, equipment, sensor and window; a read as of a past instant is not cached | TTL `BASELINE_CACHE_TTL` (5 s), `BASELINE_CACHE_MAX_ENTRIES` (4096), least recently used evicted |
+| ML service baseline cache | Returned aggregate means of live reads, keyed by tenant schema, equipment, sensor and window; a read as of a past instant is not cached; read only while the kill-switch leaves stateful features on | TTL `BASELINE_CACHE_TTL` (5 s), `BASELINE_CACHE_MAX_ENTRIES` (4096), least recently used evicted |
 | Alert worker latest-value store (Redis) | Recent readings per tenant, equipment and sensor; ML rules read the latest of each as one snapshot | `FEATURE_MAX_AGE_SECONDS` (300 s) per reading |
 | ML service capability store (Redis) | Upload-capability bindings only; no feature data | — |
 
@@ -323,7 +323,7 @@ The verdict is `compatible`, `patch_drift` or `incompatible`; a refusal carries 
 
 ## ADR-0027 dec 5
 
-A parity script compares declared constraints with the image; a round-trip workflow logs, registers and scores a model of each flavor.
+A parity script compares declared constraints with the image; a round-trip workflow logs, registers and scores a model of each flavor. An upload has no authoring image: its empirical check is its load and score at the deployment gate ([model upload](model-upload.md#adr-0030-dec-5-8)).
 
 | Code | Role |
 |---|---|
@@ -332,7 +332,7 @@ A parity script compares declared constraints with the image; a round-trip workf
 
 ## ADR-0027 dec 6, 7, 13
 
-Registration and deployment judge compatibility; the serving side grants deserialisation trust by provenance.
+Registration and deployment judge compatibility; the serving side grants deserialisation trust by provenance. Deployment also loads and scores every model to derive its drift baseline ([ADR-0035 dec 2, 3](#adr-0035-dec-2-3)).
 
 | Code | Role |
 |---|---|
