@@ -8,8 +8,12 @@ Failed password sign-ins are counted per e-mail address and source address in th
 ``THRESHOLD`` failures on, each attempt from that source must wait twice as long after the last as the
 one before, up to ``MAX_DELAY_SECONDS``; an attempt inside the wait is refused (429) without the
 password being checked, and is not counted. One source slowing an account does not slow the account's
-owner at another, so no one can lock a user out; each source is also limited across all accounts at
-the edge.
+owner at another, so no one can lock a user out.
+
+Each source is also limited across all accounts (``reserve_source``): ``SOURCE_RATE_PER_MINUTE``
+attempts a minute, after a burst of ``SOURCE_BURST``, every attempt counted, an admitted one too. The limit is the gateway's, so every path to the
+sign-in meets it, the edge and a notebook kernel's direct one alike; the edge keeps the same limit in
+front of it (its values held to these by tests/config_guards/test_frontend_edge.py).
 
 Each attempt is reserved before the password is checked, atomically (``RESERVE_SCRIPT``): it is
 counted as a failure up front, so guesses sent at the same moment are refused all but one, and a
@@ -33,6 +37,23 @@ MAX_DELAY_SECONDS = 300
 FORGET_AFTER_SECONDS = 3600
 _PREFIX = "sign-in-failures:"
 
+SOURCE_RATE_PER_MINUTE = 10
+SOURCE_BURST = 20
+_SOURCE_PREFIX = "sign-in-source:"
+
+# KEYS[1] the source's record; ARGV: now, interval, tolerance. A generic cell rate: the record holds
+# the theoretical arrival time of the next attempt. Returns 0 when the attempt may go ahead (and is now
+# counted), else the whole seconds still to wait; a refused attempt is not counted.
+SOURCE_SCRIPT = """
+local now, interval, tolerance = tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])
+local tat = tonumber(redis.call('GET', KEYS[1]) or '0')
+if tat < now then tat = now end
+if tat - now > tolerance then return math.ceil(tat - now - tolerance) end
+tat = tat + interval
+redis.call('SET', KEYS[1], tostring(tat), 'EX', math.ceil(tat - now) + 1)
+return 0
+"""
+
 # KEYS[1] the address's record; ARGV: source, now, threshold, cap, forget. Returns 0 when the attempt
 # may go ahead (and is now counted), else the whole seconds still to wait.
 RESERVE_SCRIPT = """
@@ -54,9 +75,10 @@ def _key(email: str) -> str:
     return _PREFIX + hashlib.sha256((email or "").strip().lower().encode()).hexdigest()
 
 
-# How the gateway counts (SIGN_IN_THROTTLE): per account and source, where it is told each client's
-# own address by the edge; off where it is not (behind a proxy that hides them, ADR-0004 Deferred),
-# since every client would then share one source and the count would hold the owner out.
+# How the gateway counts (SIGN_IN_THROTTLE): per account and source, and per source across accounts,
+# where it sees each client's own address; off where it does not (behind a proxy that hides them,
+# ADR-0004 Deferred), since every client would then share one source and the count would hold the
+# owner out.
 MODES = ("per-source", "off")
 
 
@@ -96,6 +118,17 @@ async def reserve(store, email: str, source) -> int:
     waited = await asyncio.wait_for(
         store.eval(RESERVE_SCRIPT, 1, _key(email), _source(source), repr(time.time()), THRESHOLD,
                    MAX_DELAY_SECONDS, FORGET_AFTER_SECONDS),
+        READ_TIMEOUT_SECONDS)
+    return int(waited)
+
+
+async def reserve_source(store, source) -> int:
+    """0 when this source may make another sign-in attempt, on any account (it is now counted), else
+    the seconds to wait. A store error, or a store slower than the read timeout, propagates."""
+    interval = 60 / SOURCE_RATE_PER_MINUTE
+    waited = await asyncio.wait_for(
+        store.eval(SOURCE_SCRIPT, 1, _SOURCE_PREFIX + _source(source), repr(time.time()), repr(interval),
+                   repr(interval * SOURCE_BURST)),
         READ_TIMEOUT_SECONDS)
     return int(waited)
 

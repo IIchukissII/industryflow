@@ -87,16 +87,17 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         """A user of a suspended company cannot sign in (ADR-0033 dec 3); refused like a bad
         password, so the answer does not reveal the company's state.
 
-        Password guessing is slowed per address and source (ADR-0004 dec 10, sign_in_throttle.py):
-        inside the wait the attempt is refused with 429 before the password is checked, and the store
-        being unreadable refuses it with 503."""
+        Password guessing is slowed per address and source, and limited per source across addresses
+        (ADR-0004 dec 10, sign_in_throttle.py): inside a wait the attempt is refused with 429 before the
+        password is checked, and the store being unreadable refuses it with 503."""
         from messaging.redis_client import redis_client
 
         if settings.SIGN_IN_THROTTLE == "off":
             return await self._admitted(credentials)
         email, source = credentials.username, getattr(self, "sign_in_source", None)
         store = redis_client.redis
-        wait = await _throttled(sign_in_throttle.reserve(store, email, source))
+        wait = (await _throttled(sign_in_throttle.reserve_source(store, source))
+                or await _throttled(sign_in_throttle.reserve(store, email, source)))
         if wait:
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                                 detail="Too many failed sign-ins; try again later",
