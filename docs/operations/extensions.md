@@ -142,18 +142,25 @@ compute. It runs where a configuration is written (`422`) and when an engine is 
 `/api/inference/predict`), before any reading and whatever the kill-switch says.
 
 ```python
+import math
+
 from extensions import InvalidFeature, StatefulUnavailable, register_transform, sensor_value
 from industryflow_contracts import windows
 
 def check_margin(transformation):
-    if not isinstance((transformation.get("params") or {}).get("limit"), (int, float)):
-        raise InvalidFeature(transformation.get("name"), "it names no numeric params.limit")
+    limit = (transformation.get("params") or {}).get("limit")
+    if isinstance(limit, bool) or not isinstance(limit, (int, float)) or not math.isfinite(limit):
+        raise InvalidFeature(transformation.get("name"), "it names no finite numeric params.limit")
+    if not isinstance(transformation.get("sensor"), str):
+        raise InvalidFeature(transformation.get("name"), "it names no sensor")
 
 @register_transform("pressure_margin", check=check_margin)
 async def pressure_margin(transformation, sensor_data, ctx):
     return transformation["params"]["limit"] - sensor_value(sensor_data, transformation["sensor"])
 
 def check_baseline(transformation):
+    if not isinstance(transformation.get("sensor"), str):
+        raise InvalidFeature(transformation.get("name"), "it names no sensor")
     if (transformation.get("params") or {}).get("granularity") not in windows.WINDOWS:
         raise InvalidFeature(transformation.get("name"), "it names no window")
 
@@ -172,7 +179,7 @@ A transform never returns a substitute value ([ADR-0044](../../ADR/ADR-0044-a-mo
 |---|---|---|
 | `sensor_value(sensor_data, name)` | The only way to read a sensor; raises `MissingSensors` for an absent or non-finite value | `422` naming the sensors |
 | `InvalidFeature(feature, reason)` | The definition cannot be interpreted (missing or unknown parameter) | `422` |
-| `StatefulUnavailable(reason)` | A `stateful=True` transform's store cannot supply the value | Slot takes `neutral`; `degraded: true`, named in `neutralized_features` |
+| `StatefulUnavailable(reason)` | A `stateful=True` transform's store cannot supply the value | Slot takes `neutral`; `degraded: true`, named in `neutralized_features`. Drift and the deployment gate take no substitute: prediction drift and its baseline are not computed, with the reason |
 | A computed value that is not a finite number | — | `500`; the score fails |
 | Any other exception | — | `500`; the score fails |
 
@@ -181,9 +188,11 @@ The engine refuses a reading lacking any `base_sensors` entry, or any sensor a f
 reading that names no valid `equipment_id` is refused too (`422`), whatever the kill-switch says.
 
 `ctx.baseline_provider.compute_baseline(company_id, equipment_id, sensor, granularity)` returns
-`{"mean", "std"}`, or `None` when its store cannot supply one; the window is required and must be one
-declared in `industryflow_contracts.windows`, and a window or ids it cannot read raise `ValueError`
-(extension API 0.5.0).
+`{"mean", "std"}`, `None`, or raises, as the provider's answers in
+[ML and features](../architecture/ml-and-features.md#adr-0023-dec-7) say; the window is required and must
+be one declared in `industryflow_contracts.windows`, and a window or ids it cannot read raise
+`ValueError`. When drift scores a stored reading, `ctx.baseline_provider` reads the window
+written by that reading's instant (extension API 0.6.0).
 
 | Tag | Meaning |
 |---|---|

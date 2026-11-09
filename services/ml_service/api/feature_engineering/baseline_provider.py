@@ -18,13 +18,18 @@ The cache is keyed by tenant schema as well as equipment, and BOUNDED: its keys 
 request (the equipment named in the sensor payload), so an unbounded map would grow with every
 distinct value a caller chose to send.
 """
+import asyncio
 import logging
 import os
 import time
 import uuid
 from collections import OrderedDict
+from datetime import datetime, timezone
 from typing import Optional
 
+import asyncpg
+
+from extensions import FeatureRefused
 from industryflow_contracts import tenancy, windows
 
 logger = logging.getLogger(__name__)
@@ -47,6 +52,73 @@ DEFAULT_CACHE_MAX_ENTRIES = 4096
 # shared module rather than the repository layer so the provider has no import coupling to it. A
 # non-UUID raises ValueError rather than yielding an arbitrary schema name.
 _schema_for = tenancy.schema_name
+
+
+# The failures ADR-0024's per-call fallback bounds: the store cannot be reached, is shutting down or
+# out of resources, or did not answer in time (ADR-0044 dec 3). Any other error is a defect of the
+# query or the schema, which fails the score rather than being served as a substitute (dec 4).
+_OUTAGE = (
+    asyncio.TimeoutError, TimeoutError, OSError,
+    asyncpg.InterfaceError,
+    asyncpg.exceptions.PostgresConnectionError,        # class 08
+    asyncpg.exceptions.InsufficientResourcesError,     # class 53
+    asyncpg.exceptions.OperatorInterventionError,      # class 57: cancelled, shutting down
+)
+
+
+# A sensor's newest closed window, no later than $3 when it is given; the sensor row itself, with no
+# window, when none is written yet; nothing when the equipment has no such sensor. {table} is one of
+# _AGG_TABLES. Run as written by infrastructure/timescaledb/tests/test_baseline_provider_live.py.
+BASELINE_SELECT = """
+    SELECT s.sensor_id, b.avg_value, b.stddev_value
+    FROM sensors s
+    LEFT JOIN LATERAL (
+        SELECT a.avg_value, a.stddev_value FROM {table} a
+        WHERE a.sensor_id = s.sensor_id AND ($3::timestamptz IS NULL OR a.time <= $3::timestamptz)
+        ORDER BY a.time DESC LIMIT 1
+    ) b ON true
+    WHERE s.equipment_id = $1::uuid AND s.sensor_name = $2
+    LIMIT 1
+"""
+
+
+class UnknownBaselineInput(FeatureRefused):
+    """The equipment has no sensor of that name, or no such equipment exists in the tenant: the
+    caller's defect, refused, not an unavailable aggregate (ADR-0044 dec 1)."""
+
+    def __init__(self, equipment_id, sensor_name):
+        super().__init__(f"equipment {equipment_id} has no sensor {sensor_name!r} in this tenant, so no "
+                         f"baseline can be read for it")
+
+
+def _window_bound(as_of: datetime, granularity: str) -> datetime:
+    """The start of the newest window written by ``as_of``: the row a reading at ``as_of`` was or
+    would have been scored with (ADR-0023 dec 9), from the one window contract."""
+    if as_of.tzinfo is None:
+        raise ValueError("a baseline as of a time needs an aware time")
+    m = windows.latest_emitted_window(int(as_of.timestamp()), granularity)
+    return datetime.fromtimestamp(m * windows.window(granularity).width_seconds, tz=timezone.utc)
+
+
+class AsOf:
+    """A provider that reads every baseline as of one past instant: what a reading taken then was or
+    would have been scored with (ADR-0023 dec 9). Handed to transforms in place of the provider when
+    stored readings are scored, so a domain transform reads the same window without knowing."""
+
+    def __init__(self, provider, as_of: datetime):
+        self._provider, self._as_of = provider, as_of
+
+    async def compute_baseline(self, company_id, equipment_id, sensor_name, granularity):
+        return await self._provider.compute_baseline(company_id, equipment_id, sensor_name, granularity,
+                                                     as_of=self._as_of)
+
+    async def compute_rolling_mean(self, company_id, equipment_id, sensor_name, granularity):
+        return await self._provider.compute_rolling_mean(company_id, equipment_id, sensor_name, granularity,
+                                                         as_of=self._as_of)
+
+    def __getattr__(self, name):
+        # Anything else a transform uses on the provider is the provider's own.
+        return getattr(self._provider, name)
 
 
 class AggregateBaselineProvider:
@@ -84,14 +156,17 @@ class AggregateBaselineProvider:
         equipment_id: str,
         sensor_name: str,
         granularity: str,
+        as_of: Optional[datetime] = None,
     ) -> Optional[dict]:
-        """Return the latest closed window's ``{"mean", "std"}`` for a sensor, or ``None``.
+        """Return the newest closed window's ``{"mean", "std"}`` for a sensor, or ``None``; with
+        ``as_of``, the newest written by that instant (ADR-0023 dec 9).
 
-        ``None`` means the store cannot supply a baseline (no aggregate row yet, or a read error) —
-        the caller degrades to its neutral value, so a degraded DB does not fail inference. ``std``
+        ``None`` means the store cannot supply a baseline (no aggregate row yet, or an outage) — the
+        caller degrades to its neutral value, so a database outage does not fail inference. ``std``
         may be ``None`` within an otherwise-present baseline: a window holding a single sample has
-        no stddev. A window the contract does not declare, or ids that are not ids, are the caller's
-        defect and raise ``ValueError``: they are not an unavailable store (ADR-0044 dec 1-3).
+        no stddev. A window the contract does not declare, or ids that are not ids, raise
+        ``ValueError``; an equipment without that sensor raises ``UnknownBaselineInput``; any other
+        read error propagates. None of them is an unavailable store (ADR-0044 dec 1-4).
         """
         table = _AGG_TABLES.get(granularity)
         if table is None:
@@ -99,7 +174,12 @@ class AggregateBaselineProvider:
         schema = _schema_for(company_id)
         # Canonical, so one equipment is one key however the caller spelled it.
         equipment = str(uuid.UUID(str(equipment_id)))
+        bound = None if as_of is None else _window_bound(as_of, granularity)
 
+        if bound is not None:
+            # A past window is read once per stored row and not cached: a drift pass reads hundreds,
+            # and they would evict the live entries the cache is for.
+            return await self._read(schema, table, equipment, sensor_name, bound)
         key = (schema, equipment, sensor_name, granularity)
         now = time.monotonic()
         cached = self._cache.get(key)
@@ -107,7 +187,7 @@ class AggregateBaselineProvider:
             self._cache.move_to_end(key)
             return cached[1]
 
-        value = await self._read(schema, table, equipment, sensor_name)
+        value = await self._read(schema, table, equipment, sensor_name, None)
         self._store(key, (now + self.cache_ttl_seconds, value), now)
         return value
 
@@ -129,27 +209,24 @@ class AggregateBaselineProvider:
         equipment_id: str,
         sensor_name: str,
         granularity: str,
+        as_of: Optional[datetime] = None,
     ) -> Optional[float]:
-        """Return just the latest closed window's mean.
+        """Return just the newest closed window's mean (as of ``as_of``, when given).
 
         The legacy provider API. The core reads ``compute_baseline`` now, but the provider is
         handed to *domain* transforms through ``TransformContext``, so an extension may already
         call this — dropping it would be a breaking extension-API change (ADR-0010 dec 3) for no
         gain. Kept as a thin read over the same baseline, not a second computation.
         """
-        baseline = await self.compute_baseline(company_id, equipment_id, sensor_name, granularity)
+        baseline = await self.compute_baseline(company_id, equipment_id, sensor_name, granularity, as_of)
         return None if baseline is None else baseline["mean"]
 
-    async def _read(self, schema, table, equipment_id, sensor_name) -> Optional[dict]:
-        # The aggregate is keyed by sensor_id (UUID); resolve it from the tenant's sensors table
-        # by (equipment_id, sensor_name), then take the most recent closed window.
-        sql = (
-            f"SELECT a.avg_value, a.stddev_value "
-            f"FROM {table} a "
-            f"JOIN sensors s ON s.sensor_id = a.sensor_id "
-            f"WHERE s.equipment_id = $1::uuid AND s.sensor_name = $2 "
-            f"ORDER BY a.time DESC LIMIT 1"
-        )
+    async def _read(self, schema, table, equipment_id, sensor_name, bound) -> Optional[dict]:
+        # The aggregate is keyed by sensor_id (UUID); resolve it from the tenant's sensors table by
+        # (equipment_id, sensor_name), then take the newest closed window, no later than the bound
+        # when one is given. No sensor row at all is an unknown input, told apart from a known
+        # sensor with no window yet (ADR-0044 dec 1).
+        sql = BASELINE_SELECT.format(table=table)
         try:
             async with self.pool.acquire() as conn:
                 # Tenant isolation via search_path (ADR-0003); schema is UUID-validated above. Set
@@ -159,12 +236,14 @@ class AggregateBaselineProvider:
                     await conn.execute(
                         "SELECT set_config('search_path', $1, true)", f"{schema}, public"
                     )
-                    row = await conn.fetchrow(sql, str(equipment_id), sensor_name,
+                    row = await conn.fetchrow(sql, str(equipment_id), sensor_name, bound,
                                               timeout=self.query_timeout_seconds)
-        except Exception as e:  # noqa: BLE001 — degrade to neutral, never fail inference
-            logger.warning("Baseline query failed for %s/%s: %s", equipment_id, sensor_name, e)
+        except _OUTAGE as e:
+            logger.warning("Baseline store unavailable for %s/%s: %s", equipment_id, sensor_name, e)
             return None
-        if row is None or row["avg_value"] is None:
+        if row is None:
+            raise UnknownBaselineInput(equipment_id, sensor_name)
+        if row["avg_value"] is None:
             return None
         std = row["stddev_value"]
         return {"mean": float(row["avg_value"]), "std": None if std is None else float(std)}

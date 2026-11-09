@@ -58,6 +58,17 @@ def test_sensors_not_compared_do_not_thin_the_rows():
     assert len(rows["a"]) == 6
 
 
+def test_a_value_that_is_not_a_finite_number_did_not_report():
+    # One bad value drops its instant like a missed reading, not the whole evaluation (ADR-0021 dec 1).
+    readings = [_reading(i, "a", float(i)) for i in range(5)] + [_reading(i, "b", 1.0) for i in range(5)]
+    readings[1]["value"] = None
+    readings[2]["value"] = float("nan")
+    readings[3]["value"] = float("inf")
+    times, rows = align_readings(readings, ["a", "b"])
+    assert times == [T0, T0 + timedelta(seconds=4)]
+    assert rows["a"] == [0.0, 4.0]
+
+
 def test_unaligned_columns_are_refused_rather_than_guessed_at():
     prof = build_reference_profile({"a": list(range(50)), "b": list(range(50))})
     with pytest.raises(ValueError, match="row-aligned"):
@@ -139,10 +150,12 @@ def evaluate(monkeypatch):
     monkeypatch.setattr(drift_router, "load_model_or_refuse", loaded)
     monkeypatch.setattr(drift_router, "compute_drift", compute)
 
-    def run(model, readings, feature_config=FEATURES):
+    def run(model, readings, feature_config=FEATURES, **state):
         app = FastAPI()
         app.include_router(drift_router.router)
         app.state.ml_repository = FakeRepo(model, readings, feature_config)
+        for name, value in state.items():
+            setattr(app.state, name, value)
 
         async def tenant(request, request_data):
             return CID
@@ -296,3 +309,78 @@ def test_the_deploy_gate_scores_with_the_feature_names_in_the_context():
     # The same scoring travels to the isolated probe as JSON.
     sent = json.loads(json.dumps(planned.for_probe()["scoring"]))
     assert scoring.Scoring.from_json(sent) == planned.spec
+
+
+# --- stateful features in drift (ADR-0044 dec 3, ADR-0023 dec 9) ---------------------------------
+
+STATEFUL = {"base_sensors": ["a", "b"],
+            "transformations": [{"name": "a", "type": "identity", "sensor": "a"},
+                                {"name": "a_dev", "type": "statistical", "sensor": "a",
+                                 "params": {"stat_type": "deviation_from_window_mean", "granularity": "1min"}}]}
+
+
+class AsOfProvider:
+    """Records the instant each baseline is read as of; ``mean=None`` is a sensor with no window yet."""
+
+    def __init__(self, mean=0.0):
+        self.mean, self.as_of = mean, []
+
+    async def compute_baseline(self, company_id, equipment_id, sensor_name, granularity, as_of=None):
+        self.as_of.append(as_of)
+        return None if self.mean is None else {"mean": self.mean, "std": 1.0}
+
+
+class Switch:
+    def __init__(self, on):
+        self.on = on
+
+    async def enabled(self):
+        return self.on
+
+
+def test_each_row_reads_the_window_written_by_its_own_instant(evaluate):
+    rng = np.random.default_rng(11)
+    provider = AsOfProvider()
+    res = evaluate(_model(rng), _fleet(rng), feature_config=STATEFUL, baseline_provider=provider)
+    assert res["prediction_drift"] is not None, res.get("prediction_drift_reason")
+    instants = {_reading(i, "a", 0.0)["time"] for i in range(0, 2 * N, 2)}
+    assert provider.as_of and set(provider.as_of) <= instants and None not in provider.as_of
+
+
+@pytest.mark.parametrize("state, why", [
+    ({"baseline_provider": AsOfProvider(mean=None)}, "no closed aggregate window"),
+    ({"baseline_provider": AsOfProvider(), "stateful_switch": Switch(False)}, "switched off"),
+    ({}, "no baseline source"),
+])
+def test_a_substitute_value_leaves_prediction_drift_not_computed(evaluate, monkeypatch, state, why):
+    """A score on a substitute is one the model was not given; compared with the baseline, it would
+    read as drift or hide it (ADR-0044 dec 3). Data drift reads the sensors and still reports."""
+    rng = np.random.default_rng(12)
+    scored = []
+    monkeypatch.setattr(scoring, "scores_blocking", lambda *a: scored.append(a) or [])
+    res = evaluate(_model(rng), _fleet(rng), feature_config=STATEFUL, **state)
+    assert res["status"] == "ok", res
+    assert res["data_drift"]["n_columns"] == 2
+    assert res["prediction_drift"] is None
+    assert "substitute" in res["prediction_drift_reason"] and why in res["prediction_drift_reason"]
+    assert scored == []
+
+
+def test_the_deploy_gate_derives_no_baseline_for_stateful_features():
+    """A sample row carries no instant, so no window can be read as of it (ADR-0023 dec 9)."""
+    import baseline_gate
+
+    class Repo:
+        async def get_feature_config_by_id(self, company_id, config_id):
+            return STATEFUL
+
+    class State:
+        baseline_provider = AsOfProvider()
+
+    rng = np.random.default_rng(13)
+    model = {"reference_profile": build_reference_profile({"a": rng.normal(size=N).tolist(),
+                                                           "b": rng.normal(size=N).tolist()}),
+             "feature_config_id": "fc1", "equipment_id": str(uuid.uuid4()), "detector": "direct"}
+    planned = asyncio.run(baseline_gate.plan(State(), Repo(), CID, model))
+    assert planned.rows == [] and "carry no time" in planned.reason and "a_dev" in planned.reason
+    assert State.baseline_provider.as_of == [], "no baseline was read for a row it cannot belong to"

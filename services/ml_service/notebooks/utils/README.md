@@ -79,7 +79,8 @@ agree. Granularities and their width/lateness come from `industryflow_contracts.
 | `window_mean` | `_window_mean` | window mean |
 | `window_std` | `_window_std` | window standard deviation |
 
-Rows with no written window yet get `0.0`, the serving fallback. A frame holding more than one
+Rows with no written window yet get `0.0`, the serving fallback; a row missing its own reading stays
+missing. A frame holding more than one
 equipment's history needs `group_cols=["equipment_id"]` (or its equivalent).
 
 ## Example

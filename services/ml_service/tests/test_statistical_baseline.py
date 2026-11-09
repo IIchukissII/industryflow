@@ -15,12 +15,13 @@ Unit tests for the aggregate-backed baseline path (ADR-0023 dec 7):
 import os
 import sys
 
+import asyncpg
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'api'))
 
 from extensions import InvalidFeature, StatefulUnavailable, get_transform, TransformContext  # noqa: E402
-from feature_engineering.baseline_provider import AggregateBaselineProvider  # noqa: E402
+from feature_engineering.baseline_provider import AggregateBaselineProvider, UnknownBaselineInput  # noqa: E402
 
 
 EQUIPMENT_ID = "550e8400-e29b-41d4-a716-446655440100"
@@ -185,6 +186,7 @@ class _FakeConn:
         self.raise_on_fetch = raise_on_fetch
         self.executed = []
         self.fetched = []
+        self.args = []
         self.in_transaction = False
 
     def transaction(self):
@@ -195,8 +197,10 @@ class _FakeConn:
 
     async def fetchrow(self, sql, *args, timeout=None):
         self.fetched.append(sql)
+        self.args.append(args)
         if self.raise_on_fetch:
-            raise RuntimeError("db unreachable")
+            raise self.raise_on_fetch if isinstance(self.raise_on_fetch, BaseException) \
+                else RuntimeError("relation does not exist")
         return self.row
 
 
@@ -290,19 +294,76 @@ async def test_provider_invalid_company_id_raises_without_the_db():
 
 
 @pytest.mark.asyncio
-async def test_provider_db_error_is_none():
+async def test_a_read_error_that_is_not_an_outage_fails_the_score():
+    """A missing table, a permission or a bad column is a defect: served as a substitute it would be
+    one for ever (ADR-0044 dec 4)."""
     pool = _FakePool(_FakeConn(raise_on_fetch=True))
     provider = AggregateBaselineProvider(pool)
-    mean = await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
-    assert mean is None
+    with pytest.raises(RuntimeError, match="relation does not exist"):
+        await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
+
+
+@pytest.mark.parametrize("outage", [
+    TimeoutError(), ConnectionResetError(),
+    asyncpg.exceptions.ConnectionDoesNotExistError("gone"),
+    asyncpg.exceptions.TooManyConnectionsError("full"),
+    asyncpg.exceptions.AdminShutdownError("shutting down"),
+    asyncpg.exceptions.QueryCanceledError("statement timeout"),
+])
+@pytest.mark.asyncio
+async def test_an_outage_answers_none(outage):
+    # The outage ADR-0024's per-call fallback bounds (ADR-0044 dec 3).
+    provider = AggregateBaselineProvider(_FakePool(_FakeConn(raise_on_fetch=outage)))
+    assert await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min") is None
 
 
 @pytest.mark.asyncio
-async def test_provider_no_row_is_none():
+async def test_an_equipment_without_the_sensor_is_refused():
+    """No sensor row: the equipment does not exist in this tenant, or has no such sensor. The
+    caller's defect, refused, not an unavailable aggregate (ADR-0044 dec 1)."""
     pool = _FakePool(_FakeConn(row=None))
     provider = AggregateBaselineProvider(pool)
-    mean = await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
-    assert mean is None
+    with pytest.raises(UnknownBaselineInput, match="has no sensor 'pressure'"):
+        await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")
+    assert len(provider._cache) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_known_sensor_with_no_window_yet_is_none():
+    pool = _FakePool(_FakeConn(row={"sensor_id": "s", "avg_value": None, "stddev_value": None}))
+    provider = AggregateBaselineProvider(pool)
+    assert await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min") is None
+
+
+@pytest.mark.parametrize("granularity, at, start", [
+    # closed(t) = floor((t - lateness) / width) - 1, from the window contract (ADR-0023 dec 9).
+    ("1min", "2026-11-09T12:10:30+00:00", "2026-11-09T12:07:00+00:00"),
+    ("1hour", "2026-11-09T12:10:30+00:00", "2026-11-09T10:00:00+00:00"),
+])
+@pytest.mark.asyncio
+async def test_as_of_reads_the_window_written_by_that_instant(granularity, at, start):
+    from datetime import datetime
+    pool = _FakePool(_FakeConn(row={"sensor_id": "s", "avg_value": 70.0, "stddev_value": 1.5}))
+    provider = AggregateBaselineProvider(pool, cache_ttl_seconds=60.0)
+    await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", granularity,
+                                    as_of=datetime.fromisoformat(at))
+    assert pool.conn.args[-1][2] == datetime.fromisoformat(start)
+    assert "a.time <= $3::timestamptz" in pool.conn.fetched[-1]
+    # A past window is not cached, so a drift pass cannot evict the live entries; live is read live.
+    await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", granularity,
+                                    as_of=datetime.fromisoformat(at))
+    assert pool.acquire_count == 2 and len(provider._cache) == 0
+    await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", granularity)
+    assert pool.conn.args[-1][2] is None and len(provider._cache) == 1
+
+
+@pytest.mark.asyncio
+async def test_as_of_needs_an_aware_time():
+    from datetime import datetime
+    provider = AggregateBaselineProvider(_FakePool(_FakeConn(row={"avg_value": 1.0, "stddev_value": 0.0})))
+    with pytest.raises(ValueError, match="aware"):
+        await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min",
+                                        as_of=datetime(2026, 11, 9, 12, 0))
 
 
 # --------------------------------------------------------------------------- tenant path + cache bound

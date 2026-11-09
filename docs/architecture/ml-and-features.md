@@ -23,9 +23,10 @@ The alert worker schedules a drift evaluation per statistical rule ([alerting](a
 |---|---|
 | Feature sample | Supplied at registration: `reference_profile` in `POST /api/models` (the upload wizard's sample file), or the run's `industryflow/feature_sample.json` at promotion; format and row bound (`DEFAULT_MAX_SAMPLE_ROWS`, a longer sample evenly down-sampled on every path, [ADR-0035](../../ADR/ADR-0035-drift-baseline.md) dec 8) `drift/reference_profile.py` |
 | Accepted when | Its columns are exactly the bound feature config's base sensors and it carries no scores; otherwise the model registers without a baseline and `baseline.reason` says why ([ADR-0035](../../ADR/ADR-0035-drift-baseline.md)) |
-| Prediction scores | Derived at every deployment to `production`/`active`: each complete sample row through the feature config and the model's detector, in the probe's load for an upload and serving's load otherwise |
+| Prediction scores | Derived at every deployment to `production`/`active`: each complete sample row through the feature config and the model's detector, in the probe's load for an upload and serving's load otherwise. A config with a stateful feature derives none: a sample row carries no time to read its window as of |
 | Detector cannot score the sample | Deployment proceeds; data drift only, with the reason |
-| Current window | Trailing window of the model's `sensor_ids`, aligned to instants where every compared sensor reported |
+| Current window | Trailing window of the model's `sensor_ids`, aligned to instants where every compared sensor reported a finite value |
+| Current predictions | Up to `MAX_PREDICTION_ROWS` (500) instants, each through the feature config with stateful features read as of that instant; a slot that would take a substitute (kill-switch off, no window yet, no baseline source) leaves prediction drift not computed, with the reason |
 | Engine | `evidently` |
 | Output | Data drift (drifted-feature share), prediction drift, `prediction_drift_reason` when prediction drift cannot be computed, `baseline` |
 | Caller | `alert-service-detector` `statistical` rules ([alerting](alerting.md)) |
@@ -109,15 +110,24 @@ Not yet realised.
 
 | Store | Holds | Bound |
 |---|---|---|
-| ML service baseline cache | Returned aggregate means, keyed by tenant schema, equipment, sensor and window | TTL `BASELINE_CACHE_TTL` (5 s), `BASELINE_CACHE_MAX_ENTRIES` (4096), least recently used evicted |
+| ML service baseline cache | Returned aggregate means of live reads, keyed by tenant schema, equipment, sensor and window; a read as of a past instant is not cached | TTL `BASELINE_CACHE_TTL` (5 s), `BASELINE_CACHE_MAX_ENTRIES` (4096), least recently used evicted |
 | Alert worker latest-value store (Redis) | Recent readings per tenant, equipment and sensor; ML rules read the latest of each as one snapshot | `FEATURE_MAX_AGE_SECONDS` (300 s) per reading |
 | ML service capability store (Redis) | Upload-capability bindings only; no feature data | — |
 
 The `statistical` transform reads its window mean and deviation from the aggregate; no windowing runs on the serving side.
 
+| Provider answer | When | Result |
+|---|---|---|
+| `{"mean", "std"}` | The newest window, or with `as_of` the newest at or before the window written by that instant | Value |
+| `None` | The sensor has no window yet, or the store is out (cannot be reached, out of resources, shutting down, no answer in `BASELINE_QUERY_TIMEOUT`) | Unavailable aggregate |
+| `UnknownBaselineInput` | The equipment has no sensor of that name in the tenant | `422` |
+| Any other error | A defect of the query or schema | The score fails |
+
 | Code | Role |
 |---|---|
 | `services/ml_service/api/feature_engineering/baseline_provider.py::AggregateBaselineProvider` | Aggregate read behind the bounded cache |
+| `services/ml_service/api/feature_engineering/baseline_provider.py::BASELINE_SELECT` | The read: newest window, unknown sensor told apart |
+| `infrastructure/timescaledb/tests/test_baseline_provider_live.py` | Proof on a real tenant: newest, as of, no window, unknown sensor |
 | `services/ml_service/api/extensions/builtins.py::statistical` | Window statistics from the aggregate |
 | `services/alert_service/worker/feature_store.py::FeatureStore` | Latest-value snapshot store |
 | `services/ml_service/api/config.py::CAPABILITY_REDIS_URL` | Capability store, not a feature store |
@@ -134,12 +144,14 @@ No stream-computed feature, no dedicated feature table and no rolling statistic 
 
 ## ADR-0023 dec 9
 
-Offline training derives the window through the shared window contract.
+Offline training derives the window through the shared window contract; so does drift, scoring a stored reading. A row whose own reading is missing stays missing in training.
 
 | Code | Role |
 |---|---|
 | `libs/industryflow_contracts/industryflow_contracts/windows.py` | Window contract |
+| `services/ml_service/api/feature_engineering/baseline_provider.py::AsOf` | The provider handed to transforms when a stored reading is scored |
 | `services/ml_service/tests/test_train_serve_agreement.py` | Train/serve agreement |
+| `services/ml_service/tests/test_drift_endpoint.py::test_each_row_reads_the_window_written_by_its_own_instant` | Proof: drift reads each row's window |
 
 ## ADR-0041 dec 1-4
 
@@ -173,7 +185,7 @@ The API reports the refusal.
 
 ## ADR-0044 dec 1-5
 
-The engine refuses a reading with a missing sensor or an uninterpretable definition and fails the score on any other feature failure. No partial-scoring path exists; the equipment table has no partial-batch columns.
+The engine refuses a reading with a missing sensor, an equipment without a sensor a stateful feature reads, or an uninterpretable definition, and fails the score on any other feature failure. Drift and the deployment gate build the engine with `substitutes=False`: where a slot would take a substitute it raises `SubstituteRefused`, and prediction drift or its baseline is not computed, with the reason. No partial-scoring path exists; the equipment table has no partial-batch columns.
 
 | Code | Role |
 |---|---|
@@ -188,6 +200,10 @@ The engine refuses a reading with a missing sensor or an uninterpretable definit
 | `services/ml_service/tests/test_inference_dispatch.py::test_a_feature_that_fails_to_compute_fails_the_score` | Proof: dec 4 |
 | `services/ml_service/tests/test_inference_dispatch.py::test_a_stateful_feature_for_a_reading_naming_no_equipment_is_a_422` | Proof: dec 1 for the equipment |
 | `services/ml_service/tests/test_inference_dispatch.py::test_a_feature_that_is_not_a_finite_number_fails_the_score` | Proof: dec 4 for non-finite values |
+| `services/ml_service/tests/test_stateful_kill_switch.py::test_an_unknown_sensor_is_refused_not_served_neutral` | Proof: dec 1 for an equipment without the sensor |
+| `services/ml_service/tests/test_drift_endpoint.py::test_a_substitute_value_leaves_prediction_drift_not_computed` | Proof: dec 3, no substitute in drift |
+| `services/ml_service/tests/test_drift_endpoint.py::test_the_deploy_gate_derives_no_baseline_for_stateful_features` | Proof: dec 3, none in a baseline |
+| `services/ml_service/tests/test_statistical_baseline.py::test_a_read_error_that_is_not_an_outage_fails_the_score` | Proof: dec 4, only an outage is unavailable |
 
 ### Refusals
 
@@ -195,7 +211,8 @@ A definition missing a named parameter, naming one of the wrong kind or a non-fi
 `params` is not an object, is refused with `422`; no default stands in for it (dec 2).
 
 A stateful feature reads the baseline of the reading's equipment in the window `params.granularity`
-names; a reading naming no valid `equipment_id` is refused with `422`. A ratio whose denominator is
+names; a reading naming no valid `equipment_id`, or an equipment without the feature's sensor, is
+refused with `422`. A ratio whose denominator is
 `0`, or any computed value that is not a finite number, fails the score with `500` (dec 1, 4).
 
 ### Inference (`POST /api/inference/predict`)
@@ -487,7 +504,7 @@ The deployment gate scores the sample through the declared detector.
 | Sample outcome at the gate | Stored profile |
 |---|---|
 | Scored | `prediction_baseline.origin` = `derived`, with the time |
-| Detector refuses, scoring fails or stalls, no complete row, no feature configuration | `prediction_baseline.origin` = null, with the reason; data drift still runs |
+| Detector refuses, scoring fails or stalls, no complete row, no feature configuration, a stateful feature, a substitute | `prediction_baseline.origin` = null, with the reason; data drift still runs |
 
 The load verdict is read before the sample's outcome, so a sample never fails a deployment. The detector context carries the model's `reconstruction_scale`. Drift evaluation returns `prediction_drift_reason` when there is no prediction baseline.
 

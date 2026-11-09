@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0044 — A model is scored on complete, computed input or not at all
 
 - **Status:** Accepted
-- **Date:** 2026-10-31; changed 2026-11-08
+- **Date:** 2026-10-31; changed 2026-11-09
 - **Parent:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (one computation of a
   feature for training and serving)
 - **Related:** [ADR-0024](ADR-0024-stateful-feature-kill-switch.md) (dec 3, 5: the neutral values it
@@ -29,7 +29,8 @@ carries partial-batch settings that no part of the platform reads.
 
 1. **A reading that lacks what the configuration reads is refused, naming what is missing.** That is
    a sensor, a value that is absent or not a finite number, and, for a stateful feature, the
-   equipment whose baseline it reads. The refusal is the engine's, so every caller meets it.
+   equipment whose baseline it reads, which must exist with that sensor. The refusal is the engine's,
+   so every caller meets it.
 2. **A feature definition a transform cannot interpret is refused, never scored as a substitute.** It
    is a defect of the configuration, like an unknown transform type, and no reading can make it
    computable. A definition names every parameter it is computed with, the window of a stateful
@@ -38,7 +39,9 @@ carries partial-batch settings that no part of the platform reads.
 3. **A substitute value is permitted only where ADR-0024 permits one, and is always reported.** A
    neutralized stateful slot and a stateful slot whose aggregate is unavailable take the neutral value,
    and the response names both. An alert raised on such a score records, as data, that it was degraded
-   and which features. ADR-0024 keeps the per-call fallback to bound a total database outage.
+   and which features. ADR-0024 keeps the per-call fallback to bound a total database outage. A score
+   compared as a distribution, prediction drift and its baseline, takes no substitute: it is not
+   computed, and says why.
 4. **Any other failure to compute a feature fails the score.** An unexplained error is not a value, and
    neither is a computed value that is not a finite number.
 5. **The platform offers no partial scoring, and equipment carries no partial-batch settings.** A
@@ -53,6 +56,7 @@ carries partial-batch settings that no part of the platform reads.
 | 1 | Check completeness at the gateway only | Leaves every other caller of the engine unguarded |
 | 1 | Refuse a missing sensor as a server error | The request is what is wrong, and a server error invites a retry that cannot succeed |
 | 1 | A stateful feature for a reading naming no equipment served neutral, as an unavailable aggregate | Nothing is unavailable; it reports a caller defect as an operations event |
+| 1 | An equipment id that names no equipment, or a sensor it lacks, served as an unavailable aggregate | The same caller defect, under a well-formed id |
 | 2 | A neutral value for a definition with a missing or unknown parameter | The same silent substitute, served on every reading until someone reads the logs |
 | 2 | A platform default for a parameter a definition omits | A bound model's input would follow a constant no record names, and changing it would change every model |
 | 2 | A default window declared in the shared contract | The same default, kept in another place; the window decides which aggregate a feature reads |
@@ -60,6 +64,8 @@ carries partial-batch settings that no part of the platform reads.
 | 3 | Narrow substitution to the kill-switch alone | Contradicts ADR-0024's outage fallback |
 | 3 | A failed aggregate read substituted without being reported | Breaks ADR-0024 dec 5: degraded serving must be visible |
 | 3 | A degraded alert told only in its message | Neither precision nor the retrain trigger can tell it apart, and an operator labels it as an ordinary one |
+| 3 | Drift scored on substitutes and its alert recorded as degraded | A degraded drift alert still counts toward sustained drift (ADR-0022 dec 4), and a baseline derived during a switch episode stands until the next deployment |
+| 3, 4 | Every failed aggregate read served as unavailable | A defect of the query or the schema would be a substitute for ever; the fallback bounds an outage, not a defect |
 | 4 | Zero for any feature whose computation raises | The defect class this record removes |
 | 4 | A nudged denominator so a ratio of zero stays finite | A huge number served as an ordinary feature where the quotient does not exist |
 | 4 | Refuse a ratio of zero as the caller's defect | The reading is complete and valid; it is the definition that cannot compute on it |
@@ -82,6 +88,11 @@ carries partial-batch settings that no part of the platform reads.
 - Extensions break under ADR-0010 dec 3: a transform registers the check of its definition, and the
   baseline read it is handed takes its window explicitly and raises for one the contract does not declare.
 - Equipment created with partial-batch settings loses them; they had no effect.
+- Extensions break again under ADR-0010 dec 3: the baseline read refuses an equipment without the named
+  sensor and fails on any error but an outage, where it answered with no value, and a transform scoring
+  a stored reading is handed a read bound to that reading's time.
+- While the kill-switch is off or an aggregate is unavailable, prediction drift is not computed for a
+  model with stateful features.
 
 ## Deferred
 

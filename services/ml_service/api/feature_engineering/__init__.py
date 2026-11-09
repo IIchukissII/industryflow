@@ -6,11 +6,13 @@
 Feature Engineering Module
 Flexible, configuration-driven feature engineering for multiple equipment types
 """
-from .baseline_provider import AggregateBaselineProvider
+from .baseline_provider import AggregateBaselineProvider, AsOf, UnknownBaselineInput
 from extensions import FeatureRefused, MissingSensors
 
-from .engine import FeatureEngineeringEngine, MissingEquipment, NonFiniteFeature, UnknownTransform
+from .engine import (FeatureEngineeringEngine, MissingEquipment, NonFiniteFeature, SubstituteRefused,
+                     UnknownTransform)
 from .kill_switch import StatefulFeatureSwitch
 
 __all__ = ['AggregateBaselineProvider', 'FeatureEngineeringEngine', 'FeatureRefused', 'MissingEquipment',
-           'MissingSensors', 'NonFiniteFeature', 'StatefulFeatureSwitch', 'UnknownTransform']
+           'MissingSensors', 'NonFiniteFeature', 'StatefulFeatureSwitch', 'SubstituteRefused',
+           'UnknownBaselineInput', 'UnknownTransform']

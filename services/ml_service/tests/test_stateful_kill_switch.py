@@ -105,10 +105,11 @@ def test_extension_api_version_bumped_minor():
     0.2.0 added ADR-0024's `stateful`/`neutral` transform tags, 0.3.0 ADR-0028's detector
     declarations, 0.4.0 ADR-0044's refusals (`sensor_value`, `StatefulUnavailable`): the engine no
     longer turns a transform's exception into zero, which within 0.x a minor may change. 0.5.0 makes
-    the baseline provider's window required (ADR-0044 dec 2).
+    the baseline provider's window required (ADR-0044 dec 2), 0.6.0 makes it refuse an unknown sensor
+    and fail on any error but an outage, read as of a stored reading's instant (ADR-0044 dec 1, 4).
     """
     major, minor, _ = EXTENSION_API_VERSION.split(".")
-    assert (int(major), int(minor)) == (0, 5)
+    assert (int(major), int(minor)) == (0, 6)
 
 
 # --------------------------------------------------------------- null-in-slot, and ZERO calls
@@ -279,3 +280,33 @@ async def test_failed_read_backs_off_rather_than_hammering():
     await switch.enabled()
     await switch.enabled()
     assert pool.acquire_count == 1
+
+
+# --------------------------------------------------------------- callers that take no substitute
+
+class _UnknownSensorProvider:
+    async def compute_baseline(self, company_id, equipment_id, sensor_name, granularity, as_of=None):
+        from feature_engineering import UnknownBaselineInput
+        raise UnknownBaselineInput(equipment_id, sensor_name)
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_sensor_is_refused_not_served_neutral():
+    """ADR-0044 dec 1: an equipment without the sensor is the caller's defect, not an unavailable
+    aggregate. (With the switch off no baseline is read, so there is nothing to refuse.)"""
+    from feature_engineering import FeatureRefused
+    with pytest.raises(FeatureRefused, match="has no sensor 'pressure'"):
+        await _engine(_UnknownSensorProvider(), _Switch(enabled=True)).transform(SENSOR_DATA)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider, switch", [(_CountingProvider(), _Switch(enabled=False)), (None, None)])
+async def test_a_caller_that_takes_no_substitute_is_refused(provider, switch):
+    from feature_engineering import SubstituteRefused
+    engine = FeatureEngineeringEngine(
+        feature_config=FEATURE_CONFIG, baseline_provider=provider, equipment_id=EQUIPMENT_ID,
+        company_id=COMPANY_ID, kill_switch=switch, substitutes=False,
+    )
+    with pytest.raises(SubstituteRefused, match="pressure_deviation"):
+        await engine.transform(SENSOR_DATA)
+    assert provider is None or provider.calls == 0, "a switched-off class issues no store query"

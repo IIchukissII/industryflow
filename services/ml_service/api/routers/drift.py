@@ -84,7 +84,7 @@ async def _current_predictions(
     base_sensors = feature_config.get("base_sensors") or []
     if not base_sensors:
         return None, "the feature config names no base sensors"
-    _, aligned = align_readings(readings, base_sensors)
+    times, aligned = align_readings(readings, base_sensors)
     n = len(aligned[base_sensors[0]])
     if n < MIN_ROWS:
         return None, (f"only {n} instants in the window carry every base sensor; "
@@ -108,10 +108,14 @@ async def _current_predictions(
             equipment_id=equipment_id,
             company_id=company_id,
             kill_switch=getattr(request.app.state, "stateful_switch", None),
+            # Prediction drift compares distributions: a substitute value would be a score the model
+            # was not given, so the window is not scored at all (ADR-0044 dec 3).
+            substitutes=False,
         )
         rows = []
         for i in _even_sample(n, MAX_PREDICTION_ROWS):
-            rows.append(await engine.transform({s: aligned[s][i] for s in base_sensors}))
+            # Each row read as of its own instant, as live inference read it (ADR-0023 dec 9).
+            rows.append(await engine.transform({s: aligned[s][i] for s in base_sensors}, as_of=times[i]))
     except FeatureRefused as exc:
         # Prediction drift only; data drift reads the sensors, not the transforms.
         return None, f"the model cannot be scored: {exc}"

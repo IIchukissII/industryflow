@@ -417,7 +417,9 @@ returns that `changed` field.
 
 A stateful slot whose aggregate is unavailable takes its neutral value. The response's
 `neutralized_features` names it beside the slots the kill-switch neutralized, and the score is
-`degraded`; each kind has its own counter.
+`degraded`; each kind has its own counter. What counts as unavailable:
+[ML and features](../architecture/ml-and-features.md#adr-0023-dec-7). Drift takes no substitute, so a drift alert is never degraded:
+while the kill-switch is off, prediction drift for a model with stateful features is not computed.
 
 | Metric (`ml-service-api`) | Counts |
 |---|---|
