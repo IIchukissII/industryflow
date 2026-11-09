@@ -41,6 +41,12 @@ class Save:
 
 
 @dataclass(frozen=True)
+class Acknowledge:
+    """An operator acknowledges every retrain recommendation for the model labelled in scope."""
+    scope: tuple
+
+
+@dataclass(frozen=True)
 class Scenario:
     name: str
     steps: tuple
@@ -143,7 +149,31 @@ SCENARIOS = (
     Scenario("a retrain recommendation is suppressed within its model's window", (
         Save(RETRAIN, s(0), True),
         Save(RETRAIN, s(10), False, s(0)),
+        Acknowledge(RETRAIN),
         Save(RETRAIN, s(400), True),
+    )),
+    # An open recommendation marks its model until acknowledged; a repeat would add only another
+    # mark to clear (ADR-0022 dec 4).
+    Scenario("an unacknowledged recommendation suppresses past the window", (
+        Save(RETRAIN, s(0), True),
+        Save(RETRAIN, s(400), False, s(0)),
+        Save(RETRAIN, s(100_000), False, s(0)),
+    )),
+    Scenario("an acknowledged recommendation suppresses only within the window", (
+        Save(RETRAIN, s(0), True),
+        Acknowledge(RETRAIN),
+        Save(RETRAIN, s(100), False, s(0)),
+        Save(RETRAIN, s(400), True),
+        Save(RETRAIN, s(100_000), False, s(400)),
+    )),
+    Scenario("an open recommendation for another model suppresses nothing", (
+        Save((None, None, None, "model-b"), s(0), True),
+        Save(RETRAIN, s(400), True),
+    )),
+    Scenario("an open alert does not hold back a recommendation or an alert outside the window", (
+        Save(A, s(0), True),
+        Save(RETRAIN, s(10), True),
+        Save(A, s(400), True),
     )),
     Scenario("another model's recommendation is another scope", (
         Save(RETRAIN, s(0), True),
@@ -194,6 +224,9 @@ def materialise(scenario: Scenario, base: datetime, company_id: str):
 
     calls = []
     for step in scenario.steps:
+        if isinstance(step, Acknowledge):
+            calls.append((ident(step.scope[3]), None, None, None))
+            continue
         rule, sensor, equipment, model = (ident(p) for p in step.scope)
         retrain = is_retrain(step.scope)
         alert = {
@@ -211,10 +244,17 @@ def materialise(scenario: Scenario, base: datetime, company_id: str):
     return calls
 
 
-async def run(store, scenario: Scenario, base: datetime, company_id: str):
-    """(got, want): what store.save_alert_once returned for each step, and what it must return."""
+async def run(store, scenario: Scenario, base: datetime, company_id: str, acknowledge=None):
+    """(got, want): what store.save_alert_once returned for each step, and what it must return.
+
+    An Acknowledge step calls acknowledge(model_id), by default the store's own.
+    """
+    acknowledge = acknowledge or store.acknowledge_recommendations
     got, want = [], []
     for alert, window, retrain, expected in materialise(scenario, base, company_id):
+        if window is None:
+            await acknowledge(alert)
+            continue
         got.append(tuple(await store.save_alert_once(alert, window=window, retrain=retrain)))
         want.append(expected)
     return got, want

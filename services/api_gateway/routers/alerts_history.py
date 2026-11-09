@@ -59,17 +59,24 @@ _BUCKET_INTERVAL = {"day": timedelta(days=1), "week": timedelta(days=7)}
 # infrastructure/timescaledb/tests/test_alert_metrics_asyncpg.py.
 # A label on a degraded alert is counted apart (ADR-0022 dec 3): it judges a score computed with
 # stateful features neutralized. A label from before degradation was recorded (NULL) counts with the
-# rest, as it always did.
+# rest, as it always did. Scoped to one model (:own_only), precision counts only the alerts its own
+# score raised; labels on its drift alerts and recommendations judge the monitoring and are counted
+# apart, as the retrain trigger leaves them out (ADR-0022 dec 3, 4).
 LABEL_METRICS_SELECT = """
     SELECT
         time_bucket(:interval, labeled_at) AS bucket,
-        count(*) FILTER (WHERE verdict = 'true_positive'  AND degraded IS NOT TRUE) AS tp,
-        count(*) FILTER (WHERE verdict = 'false_positive' AND degraded IS NOT TRUE) AS fp,
-        count(*) FILTER (WHERE verdict = 'unsure'         AND degraded IS NOT TRUE) AS unsure,
-        count(*) FILTER (WHERE verdict = 'true_positive'  AND degraded) AS degraded_tp,
-        count(*) FILTER (WHERE verdict = 'false_positive' AND degraded) AS degraded_fp,
-        count(*) FILTER (WHERE verdict = 'unsure'         AND degraded) AS degraded_unsure
-    FROM alert_labels
+        count(*) FILTER (WHERE verdict = 'true_positive'  AND degraded IS NOT TRUE AND own) AS tp,
+        count(*) FILTER (WHERE verdict = 'false_positive' AND degraded IS NOT TRUE AND own) AS fp,
+        count(*) FILTER (WHERE verdict = 'unsure'         AND degraded IS NOT TRUE AND own) AS unsure,
+        count(*) FILTER (WHERE verdict = 'true_positive'  AND degraded AND own) AS degraded_tp,
+        count(*) FILTER (WHERE verdict = 'false_positive' AND degraded AND own) AS degraded_fp,
+        count(*) FILTER (WHERE verdict = 'unsure'         AND degraded AND own) AS degraded_unsure,
+        count(*) FILTER (WHERE verdict = 'true_positive'  AND NOT own) AS monitoring_tp,
+        count(*) FILTER (WHERE verdict = 'false_positive' AND NOT own) AS monitoring_fp,
+        count(*) FILTER (WHERE verdict = 'unsure'         AND NOT own) AS monitoring_unsure
+    FROM alert_labels,
+         LATERAL (SELECT (NOT CAST(:own_only AS boolean)
+                          OR detection_type IS NOT DISTINCT FROM 'ml') AS own) o
     WHERE {where}
     GROUP BY bucket
     ORDER BY bucket
@@ -121,6 +128,13 @@ def _false_positive_rate(tp: int, fp: int) -> Optional[float]:
     return round(fp / decided, 4) if decided else None
 
 
+def _summary(tp: int, fp: int, unsure: int) -> "PrecisionSummary":
+    return PrecisionSummary(
+        true_positive=tp, false_positive=fp, unsure=unsure, labeled_total=tp + fp + unsure,
+        precision=_precision(tp, fp), false_positive_rate=_false_positive_rate(tp, fp),
+    )
+
+
 class PrecisionBucket(BaseModel):
     bucket: datetime
     true_positive: int
@@ -147,6 +161,9 @@ class PrecisionMetrics(BaseModel):
     overall: PrecisionSummary
     # Labels on degraded alerts, reported apart and outside the retrain trigger (ADR-0022 dec 3, 4).
     degraded: PrecisionSummary
+    # Scoped to a model: labels on its drift alerts and retrain recommendations, which judge the
+    # monitoring, not the model; reported apart and outside the retrain trigger (ADR-0022 dec 3, 4).
+    monitoring: PrecisionSummary
     series: List[PrecisionBucket]
     # Honest scope (ADR-0022 dec 3): recall is not derivable from fired-alert labels.
     note: str
@@ -368,7 +385,7 @@ async def alert_label_metrics(
     days = max(1, min(days, 365))
 
     where = [LABEL_METRICS_FILTERS["days"]]
-    params = {"days": days, "interval": _BUCKET_INTERVAL[bucket.value]}
+    params = {"days": days, "interval": _BUCKET_INTERVAL[bucket.value], "own_only": bool(model_id)}
     if model_id:
         where.append(LABEL_METRICS_FILTERS["model_id"])
         params["model_id"] = model_id
@@ -383,6 +400,7 @@ async def alert_label_metrics(
     series = []
     tot_tp = tot_fp = tot_unsure = 0
     deg_tp = deg_fp = deg_unsure = 0
+    mon_tp = mon_fp = mon_unsure = 0
     for row in rows:
         m = row._mapping
         tp, fp, unsure = m["tp"], m["fp"], m["unsure"]
@@ -392,28 +410,22 @@ async def alert_label_metrics(
         deg_tp += m["degraded_tp"]
         deg_fp += m["degraded_fp"]
         deg_unsure += m["degraded_unsure"]
+        mon_tp += m["monitoring_tp"]
+        mon_fp += m["monitoring_fp"]
+        mon_unsure += m["monitoring_unsure"]
         series.append(PrecisionBucket(
             bucket=m["bucket"], true_positive=tp, false_positive=fp, unsure=unsure,
             precision=_precision(tp, fp),
         ))
 
-    overall = PrecisionSummary(
-        true_positive=tot_tp, false_positive=tot_fp, unsure=tot_unsure,
-        labeled_total=tot_tp + tot_fp + tot_unsure,
-        precision=_precision(tot_tp, tot_fp),
-        false_positive_rate=_false_positive_rate(tot_tp, tot_fp),
-    )
+    overall = _summary(tot_tp, tot_fp, tot_unsure)
 
-    degraded = PrecisionSummary(
-        true_positive=deg_tp, false_positive=deg_fp, unsure=deg_unsure,
-        labeled_total=deg_tp + deg_fp + deg_unsure,
-        precision=_precision(deg_tp, deg_fp),
-        false_positive_rate=_false_positive_rate(deg_tp, deg_fp),
-    )
+    degraded = _summary(deg_tp, deg_fp, deg_unsure)
+    monitoring = _summary(mon_tp, mon_fp, mon_unsure)
 
     return PrecisionMetrics(
         window_days=days, bucket=bucket.value, model_id=model_id, rule_id=rule_id,
-        overall=overall, degraded=degraded, series=series,
+        overall=overall, degraded=degraded, monitoring=monitoring, series=series,
         note=("Precision and false-positive rate only; recall is not derivable from "
               "fired-alert labels (no false-negative signal) — ADR-0022."),
     )

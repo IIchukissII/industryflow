@@ -110,7 +110,6 @@ class AlertServiceConfig:
     RETRAIN_PRECISION_WINDOW_DAYS = int(os.getenv('RETRAIN_PRECISION_WINDOW_DAYS', '30'))
     RETRAIN_DRIFT_LOOKBACK_HOURS = int(os.getenv('RETRAIN_DRIFT_LOOKBACK_HOURS', '72'))
     RETRAIN_RECO_COOLDOWN_SECONDS = float(os.getenv('RETRAIN_RECO_COOLDOWN_SECONDS', '86400'))  # once/day/model
-    RETRAIN_RECO_SEVERITY = os.getenv('RETRAIN_RECO_SEVERITY', 'high')
     
     @property
     def database_url(self):
@@ -131,12 +130,33 @@ class AlertServiceConfig:
         'REDIS_URL',
     )
 
+    # Settings that no longer exist. One still set would be silently ignored, telling its author a
+    # behaviour exists that does not: the recommendation's severity is decided, high (ADR-0022 dec 4).
+    REMOVED_ENV = ('RETRAIN_RECO_SEVERITY',)
+
+    def retrain_settings_invalid(self):
+        """Why the retrain-recommendation settings cannot hold ADR-0022 dec 4, or an empty list."""
+        invalid = [f"{key} is no longer a setting" for key in self.REMOVED_ENV if key in os.environ]
+        if self.RETRAIN_MIN_LABELS < 1:
+            # Precision over no decided label is undefined.
+            invalid.append(f"RETRAIN_MIN_LABELS must be at least 1, not {self.RETRAIN_MIN_LABELS}")
+        if not 0 < self.RETRAIN_PRECISION_FLOOR <= 1:
+            invalid.append(f"RETRAIN_PRECISION_FLOOR must be in (0, 1], not {self.RETRAIN_PRECISION_FLOOR}")
+        if self.RETRAIN_MIN_DRIFT_ALERTS < 1:
+            invalid.append(f"RETRAIN_MIN_DRIFT_ALERTS must be at least 1, not {self.RETRAIN_MIN_DRIFT_ALERTS}")
+        return invalid
+
     def validate(self):
         """Validate required configuration on startup"""
         missing = [key for key in self.REQUIRED_ENV if not getattr(self, key)]
         
         if missing:
             logger.error(f"ERROR: Missing required environment variables: {', '.join(missing)}")
+            sys.exit(1)
+
+        invalid = self.retrain_settings_invalid()
+        if invalid:
+            logger.error(f"ERROR: Invalid retrain-recommendation settings: {'; '.join(invalid)}")
             sys.exit(1)
         
         logger.info(f"Configuration validated: {self.ALERT_SERVICE_DB_USER}@{self.TIMESCALEDB_HOST}")

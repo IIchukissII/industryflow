@@ -33,7 +33,7 @@ The gateway serves rules and history.
 | GET | `/api/alerts`, `/api/alerts/unacknowledged`, `/api/alerts/critical` | session | History, filtered history; each alert with `sensor_name`, `sensor_display_name`, `equipment_name`, `rule_name`, `detection_type`, `degraded`, `neutralized_features` (both `null` on an alert from before they were recorded) |
 | PATCH | `/api/alerts/{alert_id}/acknowledge` | `engineer`, `admin` | Acknowledge |
 | PATCH | `/api/alerts/{alert_id}/label` | `engineer`, `admin` | `true_positive` / `false_positive` / `unsure`; the label copies the alert's `degraded` |
-| GET | `/api/alerts/label-metrics` | session | Precision = TP/(TP+FP) and false-positive rate per bucket and `overall`, over labels on alerts that were not degraded (`null` counts with them); `degraded` holds the labels on degraded alerts apart; optional model or rule scope |
+| GET | `/api/alerts/label-metrics` | session | Precision = TP/(TP+FP) and false-positive rate per bucket and summary; optional model or rule scope; which labels each summary counts: [ADR-0022 dec 1-3](#adr-0022-dec-1-3) |
 
 ### Rule fields
 
@@ -100,6 +100,7 @@ Worker → `ml-service-api` calls carry the internal service token
 | Mechanism | Detail |
 |---|---|
 | Cooldown key | `(company_id, rule_id, sensor_id, equipment_id)`; retrain recommendations keyed by model |
+| Open recommendation | A retrain recommendation is also suppressed while an earlier one for its model is unacknowledged |
 | Cooldown window | `ALERT_COOLDOWN_SECONDS` around the reading's event time, checked in the database |
 | Concurrent writers | `pg_advisory_xact_lock` on the key before the check |
 | Exact replay | `alert_id` derived from key and event time; `ON CONFLICT DO NOTHING` |
@@ -172,22 +173,33 @@ A `statistical` rule binds a model and a drifted-feature share threshold. The wo
 Labels are written through the alert history API into a per-tenant table; precision is derived on read. `unsure` labels are excluded from precision. Labels sit in `alert_labels`, not on the `alerts`
 hypertable ([data and storage](data-and-storage.md)).
 
+`GET /api/alerts/label-metrics` summaries:
+
+| Field | Labels counted |
+|---|---|
+| `overall`, `series` | Not degraded (`null`, from before degradation was recorded, counts with them); with `model_id`, only on `ml` alerts (the model's own score) |
+| `degraded` | On degraded alerts; with `model_id`, only on `ml` alerts |
+| `monitoring` | With `model_id`: on the model's `statistical` alerts (drift, retrain recommendations); otherwise empty |
+
 | Code | Role |
 |---|---|
 | `services/api_gateway/routers/alerts_history.py` | Labels and label metrics; `LABEL_ALERT_SELECT`, `LABEL_UPSERT`, `LABEL_METRICS_SELECT` |
 | `services/frontend/src/pages/AlertHistory.jsx` | Alerts page: acknowledge, label (Real / False / Unsure); label precision over 30 days in the 24-hour summary |
 | `infrastructure/timescaledb/init-scripts/35-degraded-alerts.sql` | `alerts.degraded`, `alerts.neutralized_features`, `alert_labels.degraded` |
-| `infrastructure/timescaledb/tests/test_degraded_alerts.py` | Proof: stored, read, copied onto the label, counted apart, on the real store |
+| `infrastructure/timescaledb/tests/test_degraded_alerts.py` | Proof: stored, read, copied onto the label, counted apart (degraded, monitoring), on the real store |
 
 ## ADR-0022 dec 4, 5
 
-After each drift pass the alert worker evaluates the retrain recommendation, with a per-model cooldown.
+After each drift pass the alert worker evaluates the retrain recommendation, with a per-model cooldown. It raises one when the model has at least `RETRAIN_MIN_DRIFT_ALERTS` drift alerts in the lookback and its precision is below the floor over at least `RETRAIN_MIN_LABELS` decided labels on its own `ml` alerts that were not degraded. The recommendation is `high`. While it is unacknowledged the model is marked on the models page and no second one is raised. Invalid settings stop the worker at start.
 
 | Code | Role |
 |---|---|
 | `services/alert_service/worker/main.py` | Recommendation after the drift pass |
 | `services/alert_service/worker/rules_engine.py` | Recommendation evaluator |
-| `services/alert_service/worker/repository.py::MODEL_LABEL_COUNTS` | Decided labels, those on degraded alerts left out |
+| `services/alert_service/worker/repository.py::MODEL_LABEL_COUNTS` | Decided labels on the model's `ml` alerts, those on degraded alerts left out |
+| `services/alert_service/worker/repository.py::_RETRAIN_OPEN` | No second recommendation while one is open |
+| `services/alert_service/config.py::retrain_settings_invalid` | Settings refused at start |
+| `services/frontend/src/pages/MLModels.jsx` | Model marked while a recommendation is unacknowledged |
 
 | Type | Evaluated | How |
 |---|---|---|
@@ -196,9 +208,10 @@ After each drift pass the alert worker evaluates the retrain recommendation, wit
 | Setting | Default | Meaning |
 |---|---|---|
 | `RETRAIN_RECO_ENABLED` | true | Retrain recommendation on/off |
-| `RETRAIN_PRECISION_FLOOR` / `RETRAIN_MIN_LABELS` / `RETRAIN_MIN_DRIFT_ALERTS` | 0.6 / 10 / 2 | Recommendation conditions |
+| `RETRAIN_PRECISION_FLOOR` | 0.6, in (0, 1] | Precision below this is decayed |
+| `RETRAIN_MIN_LABELS` / `RETRAIN_MIN_DRIFT_ALERTS` | 10 / 2, each at least 1 | Recommendation conditions |
 | `RETRAIN_PRECISION_WINDOW_DAYS` / `RETRAIN_DRIFT_LOOKBACK_HOURS` | 30 / 72 | Recommendation windows |
-| `RETRAIN_RECO_COOLDOWN_SECONDS` / `RETRAIN_RECO_SEVERITY` | 86400 / `high` | Recommendation cooldown, severity |
+| `RETRAIN_RECO_COOLDOWN_SECONDS` | 86400 | Recommendation cooldown, from the last recommendation |
 
 ## ADR-0022 dec 6
 

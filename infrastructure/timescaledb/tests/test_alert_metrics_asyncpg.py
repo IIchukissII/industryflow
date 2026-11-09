@@ -72,7 +72,8 @@ def _metrics(schema, **filters):
     where = [clauses["days"]] + [clauses[name] for name in filters]
     stmt = service_sql.statement(ENDPOINT, "LABEL_METRICS_SELECT", template.format(where=" AND ".join(where)))
     # The bucket interval is a timedelta (_BUCKET_INTERVAL), the window an int, as the endpoint binds them.
-    params = {"interval": timedelta(days=1), "days": 30, **filters}
+    # Scoped to a model, precision counts only the alerts its own score raised (ADR-0022 dec 3).
+    params = {"interval": timedelta(days=1), "days": 30, "own_only": "model_id" in filters, **filters}
     return service_sql.run(stmt, params, role="api_gateway_user", search_path=f'"{schema}", public')
 
 
@@ -82,8 +83,8 @@ def test_label_metrics_aggregation_on_the_gateways_driver(tenant):
     model_id, rule_id = uuid.uuid4(), uuid.uuid4()
     # 3 true positives, 1 false positive, 1 unsure → precision 0.75; one more label on another model.
     for v in (["true_positive"] * 3 + ["false_positive", "unsure"]):
-        cur.execute("INSERT INTO alert_labels (alert_id, verdict, model_id, rule_id, labeled_by) "
-                    "VALUES (%s, %s, %s, %s, 'op')", (str(uuid.uuid4()), v, str(model_id), str(rule_id)))
+        cur.execute("INSERT INTO alert_labels (alert_id, verdict, model_id, rule_id, detection_type, labeled_by) "
+                    "VALUES (%s, %s, %s, %s, 'ml', 'op')", (str(uuid.uuid4()), v, str(model_id), str(rule_id)))
     cur.execute("INSERT INTO alert_labels (alert_id, verdict, model_id, labeled_by) "
                 "VALUES (%s, 'false_positive', %s, 'op')", (str(uuid.uuid4()), str(uuid.uuid4())))
 
