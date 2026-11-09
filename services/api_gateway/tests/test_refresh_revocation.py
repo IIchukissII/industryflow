@@ -17,7 +17,6 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-from industryflow_contracts import denials
 
 from fastapi.testclient import TestClient
 from industryflow_contracts import testing

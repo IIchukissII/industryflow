@@ -34,6 +34,7 @@ import pytest
 
 import requests
 import redis
+from industryflow_contracts import denials
 import boto3
 from botocore.client import Config  # noqa: E402
 
@@ -51,7 +52,11 @@ def _broker_url():
 
 
 def _redis_client():
-    return redis.Redis.from_url(os.getenv("COLD_BROKER_REDIS_URL", "redis://redis:6379/0"))
+    rc = redis.Redis.from_url(os.getenv("COLD_BROKER_REDIS_URL", "redis://redis:6379/0"))
+    # The rebuild record the API gateway writes on a running platform (ADR-0015 dec 8); this proof runs
+    # the plane without it. NX: a running gateway's own record stands.
+    rc.set(denials.STORE_REBUILT_KEY, "0", nx=True)
+    return rc
 
 
 def _s3():
