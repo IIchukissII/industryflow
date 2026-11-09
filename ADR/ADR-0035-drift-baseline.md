@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0035 — Drift baseline: a supplied feature sample, scores derived by the platform
 
 - **Status:** Accepted
-- **Date:** 2026-10-25; changed 2026-10-29
+- **Date:** 2026-10-25; changed 2026-11-09
 - **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md)
 - **Related:** [ADR-0021](ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md) (dec 4: the baseline decision this
   replaces), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (the declared detector that
@@ -14,7 +14,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
   [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 7: uploads scored at that gate; dec 8:
   a declared baseline or visibly un-monitorable), [ADR-0040](ADR-0040-a-notebook-registered-model-version-becomes-a-platform-model-by-promotion.md)
   (dec 4: how a notebook supplies its sample), [ADR-0041](ADR-0041-a-model-s-feature-configuration-is-fixed-once-bound.md) (the
-  bound inputs a sample matches stay fixed)
+  bound inputs a sample matches stay fixed), [ADR-0044](ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md)
+  (dec 3: no substitute in a baseline), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (dec 9: the
+  window a stored row is read with)
 
 ## Context
 
@@ -44,9 +46,11 @@ judges any other model declaratively, without loading it (ADR-0027 dec 6).
    configuration, checked at registration; otherwise the model has no baseline and says so.** The model
    is still registered: a missing baseline makes it visibly un-monitorable (ADR-0030 dec 8), never
    refused and never given a guessed baseline.
-5. **A detector that cannot score the sample leaves the model without a prediction baseline, and drift
-   says why.** Data drift still runs on the sample; an autoencoder still needs its declared error scale
-   (ADR-0028) before its scores mean anything.
+5. **A sample that cannot be scored honestly leaves the model without a prediction baseline, and drift
+   says why.** That is a detector that cannot score it, a feature that would take a substitute value
+   (ADR-0044 dec 3), and a stateful feature, whose window a sample row without its time cannot name
+   (ADR-0023 dec 9). Data drift still runs on the sample; an autoencoder still needs its declared error
+   scale (ADR-0028) before its scores mean anything.
 6. **Every registration path accepts a sample, uploads included.** The supplier, not the path, decides
    whether the model is monitored.
 7. **A baseline recorded before this decision keeps its supplied scores until the model is next
@@ -72,6 +76,8 @@ judges any other model declaratively, without loading it (ADR-0027 dec 6).
 | 3 | Deriving once and keeping the scores across serving-image rebuilds | The live side would score with the new image and the baseline with the old one |
 | 4 | Refusing the model when its sample does not match its feature configuration | A baseline is monitoring, not admission; ADR-0030 dec 8 already names the un-monitorable state |
 | 4 | Matching sample columns to the feature configuration only at deployment | The supplier would learn of a wrong sample only when deploying |
+| 5 | A stateful sample scored against the newest window | Each row meets a window it was never scored with; the baseline compares a different quantity from live scores |
+| 5 | A baseline derived on substitute values | It stands until the next deployment, and live scores are compared with values the model was not given |
 | 7 | Discarding supplied scores at once | Every monitored model would go dark until redeployed |
 | 8 | Refusing a sample longer than the bound | An evenly down-sampled sample still represents the data, and the model would go unmonitored for its length alone |
 | 8 | A bound only where the notebook client builds the sample | A direct registration or an upload would decide the gate's scoring cost |
@@ -86,7 +92,8 @@ judges any other model declaratively, without loading it (ADR-0027 dec 6).
 **Negative**
 - Deployment takes longer by scoring the sample, and a model that is not an upload is now loaded at the
   gate, which it was not before.
-- A model whose detector cannot score the sample is monitored for data drift only.
+- A model whose detector cannot score the sample, or whose configuration has a stateful feature, is
+  monitored for data drift only.
 
 ## Deferred
 

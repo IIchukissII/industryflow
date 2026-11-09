@@ -92,7 +92,16 @@ async def plan(app_state, repository, company_id: str, model: Dict[str, Any]) ->
             equipment_id=model.get("equipment_id"),
             company_id=company_id,
             kill_switch=getattr(app_state, "stateful_switch", None),
+            # A baseline compares distributions: a substitute would store scores the model was not
+            # given, until the next deployment (ADR-0044 dec 3, ADR-0035 dec 3).
+            substitutes=False,
         )
+        if engine.stateful_features:
+            # A sample row carries no instant, so no window can be read as of it; the newest one
+            # would be a substitute under another name (ADR-0023 dec 9).
+            return Plan(profile, reason=("the sample rows carry no time, so the stateful features "
+                                         f"{', '.join(engine.stateful_features)} cannot read the window "
+                                         "each row was scored with"))
         scored = [await engine.transform(row) for row in rows]
     except FeatureRefused as exc:
         return Plan(profile, reason=f"the sample cannot be scored: {exc}")

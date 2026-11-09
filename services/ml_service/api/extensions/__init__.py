@@ -35,7 +35,11 @@ logger = logging.getLogger(__name__)
 # ids that are not ids; it no longer defaults the window or answers None for either. And
 # `register_transform` requires `check`, the transform's test of a definition, run before any
 # reading (ADR-0044 dec 2).
-EXTENSION_API_VERSION = "0.5.0"
+# 0.6.0 breaks: the baseline provider raises `UnknownBaselineInput` (a `FeatureRefused`) for an
+# equipment without the named sensor, and any read error but an outage, where it answered None; it
+# takes an optional `as_of`, and a transform scoring a stored reading is handed one bound to that
+# reading's instant (ADR-0044 dec 1, 4; ADR-0023 dec 9).
+EXTENSION_API_VERSION = "0.6.0"
 
 
 @dataclass

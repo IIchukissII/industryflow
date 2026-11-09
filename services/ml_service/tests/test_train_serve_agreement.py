@@ -280,3 +280,16 @@ def test_row_order_is_preserved():
     engineered, _ = offline_baseline.add_window_features(df.copy(), ["pressure"], granularity="1min")
     pd.testing.assert_series_equal(engineered["sample"], df["sample"])
     pd.testing.assert_series_equal(engineered["pressure"], df["pressure"])
+
+
+def test_a_missing_reading_stays_missing_and_cold_start_is_neutral():
+    """Serving refuses a reading without the sensor (ADR-0044 dec 1); a zero in training would teach
+    the model a deviation nobody measured. Only a row with no written window yet takes the neutral."""
+    df = _frame(n_samples=600)
+    late = df.index[df["sample"] == 500][0]
+    df.loc[late, "pressure"] = float("nan")
+    engineered, _ = offline_baseline.add_window_features(df, ["pressure"], granularity="1min")
+    column = engineered["pressure_deviation"]
+    assert pd.isna(column[late])
+    assert column.drop(late).notna().all()
+    assert (column[df["sample"] <= 60] == 0.0).all(), "no window is written in the first minute"

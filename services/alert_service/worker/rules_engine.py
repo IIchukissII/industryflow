@@ -814,7 +814,8 @@ class RulesEngine:
             'condition': 'drift',
             'severity': rule.get('severity', 'medium'),
             'message': message,
-            # Drift and retrain verdicts score no stateful feature.
+            # Never degraded: drift is not computed on a substitute value, and a recommendation
+            # scores nothing (ADR-0044 dec 3).
             'degraded': False,
             'neutralized_features': [],
         }
@@ -906,7 +907,8 @@ class RulesEngine:
             'condition': 'retrain_recommended',
             'severity': 'high',  # decided, not a setting (ADR-0022 dec 4)
             'message': message,
-            # Drift and retrain verdicts score no stateful feature.
+            # Never degraded: drift is not computed on a substitute value, and a recommendation
+            # scores nothing (ADR-0044 dec 3).
             'degraded': False,
             'neutralized_features': [],
         }

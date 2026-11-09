@@ -8,6 +8,7 @@ Applies transformations based on configuration from database
 """
 import math
 import uuid
+from datetime import datetime
 
 import numpy as np
 from typing import Dict, List, Any, Optional
@@ -21,6 +22,8 @@ from extensions import (
     FeatureRefused, InvalidFeature, MissingSensors, StatefulUnavailable, TransformContext,
     check_definition, get_transform, is_stateful, missing_sensors, neutral_value,
 )
+
+from .baseline_provider import AsOf
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,15 @@ class NonFiniteFeature(ArithmeticError):
         super().__init__(f"feature '{feature}' computed {value!r}, not a finite number")
 
 
+class SubstituteRefused(FeatureRefused):
+    """A caller that compares distributions takes no substitute: a slot the kill-switch neutralized,
+    or whose aggregate is unavailable, leaves nothing to score (ADR-0044 dec 3)."""
+
+    def __init__(self, feature, why):
+        self.feature = feature
+        super().__init__(f"feature '{feature}' would take a substitute value ({why})")
+
+
 class UnknownTransform(FeatureRefused):
     """A feature configuration names a transform type no registered transform implements."""
 
@@ -64,7 +76,8 @@ class FeatureEngineeringEngine:
         baseline_provider: Optional[Any] = None,
         equipment_id: Optional[str] = None,
         company_id: Optional[str] = None,
-        kill_switch: Optional[Any] = None
+        kill_switch: Optional[Any] = None,
+        substitutes: bool = True,
     ):
         """
         Initialize feature engineering engine with configuration
@@ -81,6 +94,9 @@ class FeatureEngineeringEngine:
                 stateful transforms are not called at all and their slots take their neutral value.
                 Absent (None), stateful features compute — the switch is a control, not a
                 requirement, so an engine constructed without one behaves as it always did.
+            substitutes: False for a caller that compares distributions (prediction drift and its
+                baseline): where a slot would take a substitute value, ``transform`` raises
+                ``SubstituteRefused`` instead (ADR-0044 dec 3).
         """
         self.base_sensors = feature_config.get('base_sensors', [])
         self.transformations = feature_config.get('transformations', [])
@@ -111,6 +127,7 @@ class FeatureEngineeringEngine:
         self.equipment_id = equipment_id
         self.company_id = company_id
         self.kill_switch = kill_switch
+        self.substitutes = substitutes
         # Slots the switch neutralized on the last transform() call, and slots whose aggregate was
         # unavailable. Empty is the normal state, so a caller that reads them before transform()
         # sees "nothing degraded" rather than an error.
@@ -119,13 +136,16 @@ class FeatureEngineeringEngine:
 
         logger.info(f"Initialized FeatureEngineeringEngine: {len(self.base_sensors)} base sensors, {len(self.transformations)} transformations, baseline provider: {baseline_provider is not None}")
 
-    async def transform(self, sensor_data: Dict[str, float]) -> np.ndarray:
+    async def transform(self, sensor_data: Dict[str, float], as_of: Optional[datetime] = None) -> np.ndarray:
         """
         Apply all transformations to raw sensor data
 
         Args:
             sensor_data: Dictionary mapping sensor names to values
                 Example: {"temp_inlet": 72.5, "pressure_1": 4.2, ...}
+            as_of: The instant a stored reading was taken. Stateful features then read the window
+                written by that instant, as the reading was or would have been scored live, not the
+                newest one (ADR-0023 dec 9). None for a live reading.
 
         Returns:
             numpy array of engineered features in the order defined by transformations
@@ -162,17 +182,24 @@ class FeatureEngineeringEngine:
         stateful_enabled = True
         if self.kill_switch is not None:
             stateful_enabled = await self.kill_switch.enabled()
+        if not stateful_enabled and not self.substitutes and self.stateful_features:
+            raise SubstituteRefused(self.stateful_features[0], "stateful features are switched off")
+        provider = self.baseline_provider
+        if as_of is not None and provider is not None:
+            provider = AsOf(provider, as_of)
 
         for transformation in self.transformations:
             try:
                 feature_value = await self._apply_transformation(
-                    transformation, sensor_data, stateful_enabled, neutralized,
+                    transformation, sensor_data, stateful_enabled, neutralized, provider,
                 )
             except StatefulUnavailable as e:
                 # The outage fallback ADR-0024 keeps, for the stateful class only; from any other
                 # transform this is an ordinary failure and fails the score (ADR-0044 dec 3, 4).
                 if not is_stateful(transformation['type']):
                     raise
+                if not self.substitutes:
+                    raise SubstituteRefused(transformation['name'], str(e)) from e
                 logger.warning("Feature '%s' served neutral, aggregate unavailable: %s", transformation['name'], e)
                 unavailable.append(transformation['name'])
                 feature_value = neutral_value(transformation['type'])
@@ -193,7 +220,8 @@ class FeatureEngineeringEngine:
 
     async def _apply_transformation(self, transformation: Dict[str, Any], sensor_data: Dict[str, float],
                                     stateful_enabled: bool = True,
-                                    neutralized: Optional[List[str]] = None) -> float:
+                                    neutralized: Optional[List[str]] = None,
+                                    provider: Optional[Any] = None) -> float:
         """
         Apply a single transformation by dispatching its ``type`` through the extension
         registry (ADR-0010). Built-in generic transforms and any loaded domain transforms
@@ -213,7 +241,7 @@ class FeatureEngineeringEngine:
             return neutral_value(t_type)
 
         ctx = TransformContext(
-            baseline_provider=self.baseline_provider,
+            baseline_provider=provider if provider is not None else self.baseline_provider,
             equipment_id=self.equipment_id,
             company_id=self.company_id,
         )

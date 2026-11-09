@@ -54,6 +54,7 @@ jobs:
               - 'services/api_gateway/routers/alerts_history.py'
               - 'services/alert_service/worker/repository.py'
               - 'services/ml_service/api/repository.py'
+              - 'services/ml_service/api/feature_engineering/baseline_provider.py'
               - 'services/api_gateway/messaging/capability_audit_drain.py'
               - 'services/api_gateway/routers/capability_use.py'
               - 'services/api_gateway/routers/platform_switches.py'

@@ -31,7 +31,8 @@ it describes, so inference cannot reproduce it at any window size, and a model t
 a feature it never sees in production. That is the defect this replaces (issue #173).
 
 Rows with no written window yet (the start of a history) get the neutral ``0.0`` the serving
-transform degrades to when no aggregate row exists, so the two agree on cold start too.
+transform degrades to when no aggregate row exists, so the two agree on cold start too. A row missing
+its own reading stays missing: serving refuses such a reading (ADR-0044 dec 1).
 """
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -135,8 +136,9 @@ def add_window_features(
             else:
                 column = baseline
             # No written window yet (the start of a history), or a single-sample window with no
-            # stddev: the neutral value the serving transform degrades to.
-            df[f"{sensor}{suffix}"] = column.fillna(0.0)
+            # stddev: the neutral value the serving transform degrades to. A row whose own reading
+            # is missing stays missing: a zero there would be a deviation nobody measured.
+            df[f"{sensor}{suffix}"] = column.mask(baseline.isna(), 0.0)
             transformations.append(feature_config(sensor, stat_type, granularity))
 
     df = df.drop(columns=["_window", "_closed"]).reindex(original_index)

@@ -25,6 +25,7 @@ fraction of feature columns evidently flags as drifted — matching the ADR's
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
@@ -54,7 +55,8 @@ def align_readings(
     ``readings`` are ``{time, sensor_name, value}`` mappings (what the repository reads). An instant
     missing any of ``columns`` is dropped rather than filled — a fill value is a reading nobody took,
     and the distributions under comparison would then be partly invented. Readings of sensors not in
-    ``columns`` are ignored. A repeated (instant, sensor) keeps its last value.
+    ``columns`` are ignored. A repeated (instant, sensor) keeps its last value. A reading whose value is
+    absent or not a finite number did not report: its instant is dropped like one the sensor missed.
 
     Returns ``(times, {column: values})``, oldest first, every list the same length.
     """
@@ -63,7 +65,12 @@ def align_readings(
     for reading in readings:
         name = reading["sensor_name"]
         if name in wanted:
-            by_time.setdefault(reading["time"], {})[name] = reading["value"]
+            row = by_time.setdefault(reading["time"], {})
+            value = reading["value"]
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+                row[name] = value
+            else:
+                row.pop(name, None)
 
     times = sorted(t for t, row in by_time.items() if len(row) == len(wanted))
     aligned = {c: [float(by_time[t][c]) for t in times] for c in columns}
