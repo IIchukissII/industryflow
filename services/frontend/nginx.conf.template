@@ -19,7 +19,8 @@
 # chooses plaintext for itself; it gains nothing it could not get by not following the redirect.
 # Password sign-in per source address (ADR-0004 dec 10): a burst, then one attempt every 6 s, refused
 # with 429 beyond it. Counted only where the edge sees the clients' own addresses
-# (EDGE_SIGN_IN_PER_SOURCE=on): an empty key is not counted. Each account is slowed by the gateway.
+# (EDGE_SIGN_IN_PER_SOURCE=on): an empty key is not counted. The gateway holds the same limit (ADR-0004
+# dec 10), so a path that skips the edge meets it too; each account is slowed by the gateway.
 map "${EDGE_SIGN_IN_PER_SOURCE}" $edge_sign_in_source {
     on      $binary_remote_addr;
     default "";

@@ -94,6 +94,27 @@ async def test_a_success_clears_its_source_and_a_new_password_every_source(store
     assert await store.exists(throttle._key(EMAIL)) == 0
 
 
+@pytest.mark.asyncio
+async def test_a_source_is_limited_across_accounts_and_others_are_not(store):
+    """Spraying one guess at each of many accounts: every account's own count stays below the
+    threshold, so only the limit per source across accounts slows it."""
+    allowed = [await throttle.reserve_source(store, ATTACKER) for _ in range(throttle.SOURCE_BURST + 1)]
+    assert allowed == [0] * (throttle.SOURCE_BURST + 1)
+    wait = await throttle.reserve_source(store, ATTACKER)
+    assert 1 <= wait <= 60 / throttle.SOURCE_RATE_PER_MINUTE + 1
+    # A refused attempt is not counted: the wait does not grow while the source keeps trying.
+    assert all([await throttle.reserve_source(store, ATTACKER) <= wait for _ in range(10)])
+    assert await throttle.reserve_source(store, OWNER) == 0
+    assert 0 < await store.ttl(throttle._SOURCE_PREFIX + ATTACKER) <= 60 * throttle.SOURCE_BURST
+
+
+@pytest.mark.asyncio
+async def test_attempts_sent_at_once_beyond_the_burst_are_refused(store):
+    waits = await asyncio.gather(*(throttle.reserve_source(store, ATTACKER)
+                                   for _ in range(throttle.SOURCE_BURST + 10)))
+    assert waits.count(0) == throttle.SOURCE_BURST + 1
+
+
 def _manager(monkeypatch, outcome, source=ATTACKER):
     async def authenticate(self, credentials):
         return outcome(credentials)
@@ -120,6 +141,21 @@ async def test_inside_the_wait_the_password_is_not_checked(store, monkeypatch):
         await manager.authenticate(SimpleNamespace(username=EMAIL, password="right"))
     assert refused.value.status_code == 429 and int(refused.value.headers["Retry-After"]) >= 1
     assert len(checked) == before
+
+
+@pytest.mark.asyncio
+async def test_a_source_spraying_accounts_is_refused_unchecked(store, monkeypatch):
+    """A notebook kernel reaches the gateway without the edge; its own address is its source, and the
+    gateway's limit across accounts holds it as the edge's would (ADR-0004 dec 10)."""
+    checked = []
+    manager = _manager(monkeypatch, lambda c: checked.append(c.username), source="172.30.0.9")
+    for i in range(throttle.SOURCE_BURST + 1):
+        assert await manager.authenticate(SimpleNamespace(username=f"user{i}@example.com", password="x")) is None
+    with pytest.raises(HTTPException) as refused:
+        await manager.authenticate(SimpleNamespace(username="last@example.com", password="x"))
+    assert refused.value.status_code == 429 and int(refused.value.headers["Retry-After"]) >= 1
+    assert "last@example.com" not in checked
+    assert await store.exists(throttle._key("last@example.com")) == 0, "a refused attempt counts on no account"
 
 
 @pytest.mark.asyncio
@@ -203,4 +239,4 @@ async def test_off_counts_nothing_and_still_refuses_a_suspended_company(store, m
     for _ in range(throttle.THRESHOLD + 3):
         assert await manager.authenticate(SimpleNamespace(username=EMAIL, password="wrong")) is None
     assert await store.exists(throttle._key(EMAIL)) == 0
-
+    assert await store.exists(throttle._SOURCE_PREFIX + ATTACKER) == 0

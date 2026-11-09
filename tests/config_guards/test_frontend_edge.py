@@ -336,6 +336,20 @@ def test_password_sign_in_is_limited_per_source_on_both_routes():
 
 
 
+def test_the_edge_limits_each_source_as_the_gateway_does():
+    """ADR-0004 dec 10: the limit per source across accounts is the gateway's, so every path to the
+    sign-in meets it; the edge holds the same limit in front of it, and the two must not drift apart."""
+    import ast
+
+    tree = ast.parse((ROOT / "services" / "api_gateway" / "sign_in_throttle.py").read_text())
+    gateway = {t.id: node.value.value for node in tree.body if isinstance(node, ast.Assign)
+               for t in node.targets if isinstance(t, ast.Name)
+               and t.id in ("SOURCE_RATE_PER_MINUTE", "SOURCE_BURST")}
+    [rate] = re.findall(r"zone=edge_sign_in:\S+ rate=(\d+)r/m;", TEMPLATE)
+    bursts = set(re.findall(r"limit_req zone=edge_sign_in burst=(\d+) nodelay;", TEMPLATE))
+    assert (int(rate), {int(b) for b in bursts}) == (gateway["SOURCE_RATE_PER_MINUTE"], {gateway["SOURCE_BURST"]})
+
+
 def test_the_gateway_throttles_per_source_only_where_it_is_told_the_clients_addresses():
     """ADR-0004 dec 10: compose counts per account and source, with the edge named so its reported
     client address is believed; the chart, behind an Ingress, does not (ADR-0004 Deferred)."""
