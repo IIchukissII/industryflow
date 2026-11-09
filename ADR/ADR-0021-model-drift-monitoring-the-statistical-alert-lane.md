@@ -66,4 +66,4 @@ the ML service already holds a drift library and the tenant data path.
 
 - [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md),
   [docs/architecture/alerting.md](../docs/architecture/alerting.md): baseline, window, schedule;
-  manual of decisions 1-6.
+  manual of decisions 1-3, 5, 6.
