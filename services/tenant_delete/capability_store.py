@@ -24,6 +24,7 @@ import json
 import uuid
 
 from industryflow_contracts import capability_audit as audit
+from industryflow_contracts import denials
 from industryflow_contracts import sessions as session_record
 
 from .job import Removal
@@ -31,7 +32,6 @@ from .job import Removal
 _KEY_PREFIX = "nbcap:"
 _USER_INDEX_PREFIX = "nbcap-user:"
 _UPLOAD_INDEX_PREFIX = "nbcap-upload-user:"
-_SUSPENDED_PREFIX = "nbcap-suspended:"
 _REFRESH_PREFIX = "refresh:"
 _REFRESH_USER_PREFIX = "refresh-user:"
 _FEATURES_PREFIX = "features:"
@@ -89,7 +89,7 @@ class CapabilityStore:
         found = []
         for key in self._redis.scan_iter(match=pattern, count=500):
             key = _s(key)
-            if key.startswith(_SUSPENDED_PREFIX):
+            if key.startswith(denials.SUSPENDED_PREFIX):
                 continue  # the marker stays (ADR-0033 dec 8)
             if _bound_to(self._redis.get(key), company_id):
                 found.append(key)
@@ -118,7 +118,7 @@ class CapabilityStore:
         for start in range(0, len(keys), 500):
             self._redis.delete(*keys[start:start + 500])
         # A lost marker would let a verifier honour a stray handle of the tenant: put it back.
-        self._redis.set(f"{_SUSPENDED_PREFIX}{company_id}", "1")
+        self._redis.set(denials.suspended_key(company_id), "1")
         return Removal(detail={"handles": len(handles), "sessions": len(sessions), "user_indexes": len(indexes),
                                "refresh_rotations": len(rotations),
                                "feature_snapshots": len(features), "latest_readings": len(latest)})

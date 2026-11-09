@@ -32,7 +32,7 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
    answered with that successor, and later ends its session. Logout ends its session and the
    user's notebook capabilities; compromise, a password change or reset, a move to another company,
    and deactivating or deleting the account or its company end all the user's sessions and those
-   capabilities. Every request re-reads the account and refuses an access token whose session has
+   capabilities; the capability store's rebuild after a loss ends every session (ADR-0015 dec 8). Every request re-reads the account and refuses an access token whose session has
    ended, and is refused while that cannot be read.
 3. **The browser holds tokens in httpOnly, Secure, SameSite cookies set by the backend.** Every
    state-changing request authenticated by the session cookie must echo a double-submit CSRF token in

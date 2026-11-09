@@ -8,6 +8,7 @@ import json
 import uuid
 
 import pytest
+from industryflow_contracts import denials
 
 import policy  # noqa: E402
 
@@ -15,8 +16,9 @@ CID = "0b2f503a-6e59-4f4f-b0cd-b82547a20cf2"
 
 
 def _get(mapping):
+    """A store holding ``mapping``, rebuilt (ADR-0015 dec 8)."""
     async def aget(key):
-        return mapping.get(key)
+        return {denials.STORE_REBUILT_KEY: "0", **mapping}.get(key)
     return aget
 
 
@@ -88,6 +90,17 @@ def test_a_suspended_tenants_handle_is_denied():
     assert _resolve(store, "h") is not None
     store[f"nbcap-suspended:{CID}"] = "1"
     assert _resolve(store, "h") is None
+
+
+def test_a_store_that_lost_its_rebuild_record_resolves_nothing():
+    # ADR-0015 dec 8: recreated empty, the store cannot show which tenants are suspended.
+    entry = json.dumps({"user": "u", "company_id": CID, "audience": "cold"})
+
+    async def lost(key):
+        return entry if key == "nbcap:h" else None
+
+    binding, reason, _ = asyncio.run(policy.resolve_cold_outcome(lost, "h"))
+    assert (binding, reason) == (None, denials.STORE_NOT_REBUILT)
 
 
 def test_a_handle_with_a_malformed_tenant_is_denied():

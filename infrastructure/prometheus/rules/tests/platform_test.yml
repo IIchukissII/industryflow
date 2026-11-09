@@ -128,6 +128,26 @@ tests:
       - eval_time: 30m
         alertname: IndustryFlowCapabilityAuditBacklog
         exp_alerts: []
+  # A rebuild within the last 15 minutes raises it; an older one and another stack's do not.
+  - interval: 1m
+    input_series:
+      - series: 'capability_store_rebuilt_timestamp_seconds{platform="industryflow", instance="gw-1"}'
+        values: '600x40'
+      - series: 'capability_store_rebuilt_timestamp_seconds{platform="other", instance="x"}'
+        values: '2000x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: IndustryFlowCapabilityStoreRebuilt
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The capability store was rebuilt"
+              description: "The API gateway found the capability store without its rebuild record and rebuilt it: every suspension re-derived, every user signed out, every notebook server's handles gone."
+              services: "redis, api-gateway"
+      - eval_time: 30m
+        alertname: IndustryFlowCapabilityStoreRebuilt
+        exp_alerts: []
   # The store near its limit raises it; one with no limit (0) and another stack's do not.
   - interval: 1m
     input_series:

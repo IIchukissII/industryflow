@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 
 import upload_capability as uc  # noqa: E402
 from industryflow_contracts import capability_audit as audit  # noqa: E402
+from industryflow_contracts import denials  # noqa: E402
 
 CID = str(uuid.uuid4())
 
@@ -249,8 +250,18 @@ def test_the_route_writes_the_mint_and_its_record_in_one_transaction():
 
 
 def test_the_route_refuses_a_suspended_tenant():
-    store = Store({uc.suspended_key(CID): "1"})
+    store = Store({denials.suspended_key(CID): "1"})
     r = _mint_route(store.client)
     assert r.status_code == 403
+    assert not [k for k in store.sync.keys() if k.startswith("nbcap:")]
+    assert store.events() == [] and store.transactions == []
+
+
+def test_the_route_mints_nothing_from_a_store_that_lost_its_rebuild_record():
+    # ADR-0015 dec 8: recreated empty, the store cannot show whether the tenant is suspended.
+    store = Store()
+    store.sync.delete(denials.STORE_REBUILT_KEY)
+    r = _mint_route(store.client)
+    assert r.status_code == 503
     assert not [k for k in store.sync.keys() if k.startswith("nbcap:")]
     assert store.events() == [] and store.transactions == []

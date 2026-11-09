@@ -8,6 +8,7 @@ import json
 import uuid
 
 import pytest
+from industryflow_contracts import denials
 
 from industryflow_contracts import capability_audit as audit
 from industryflow_contracts import testing
@@ -23,9 +24,10 @@ async def _store(entries=(), **kwargs):
 
 
 async def _keys(redis, kind):
-    """The store's keys of one Redis type, not counting the capability-use record's own."""
+    """The store's keys of one Redis type, not counting the capability-use record's own or the store's
+    rebuild record."""
     return {k for k in await redis.keys("*")
-            if not k.startswith("nbcap-audit") and await redis.type(k) == kind}
+            if not k.startswith("nbcap-audit") and k != denials.STORE_REBUILT_KEY and await redis.type(k) == kind}
 
 
 def _record(company_id, audience="api", user="u", read_only=True):

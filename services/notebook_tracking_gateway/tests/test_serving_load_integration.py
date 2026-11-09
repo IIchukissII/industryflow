@@ -26,6 +26,7 @@ import pytest
 
 import requests
 import redis
+from industryflow_contracts import denials
 
 pytestmark = pytest.mark.integration
 
@@ -51,6 +52,9 @@ def handle_for():
         requests.get(f"{_direct()}/health", timeout=5).raise_for_status()
         rc = redis.Redis.from_url(os.getenv("TRACKING_REDIS_URL", "redis://redis:6379/0"))
         rc.ping()
+        # The rebuild record the API gateway writes on a running platform (ADR-0015 dec 8); this proof runs
+        # the plane without it. NX: a running gateway's own record stands.
+        rc.set(denials.STORE_REBUILT_KEY, "0", nx=True)
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"live stack unreachable: {exc}")
 

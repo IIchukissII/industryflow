@@ -20,6 +20,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from industryflow_contracts import denials
 from fastapi.testclient import TestClient
 from industryflow_contracts import testing
 from sqlalchemy.exc import IntegrityError, InvalidRequestError
@@ -152,7 +153,7 @@ def store(monkeypatch):
 
 def _keys(store):
     async def read():
-        return set(await store.keys("*"))
+        return set(await store.keys("*")) - {denials.STORE_REBUILT_KEY}
 
     return asyncio.run(read())
 

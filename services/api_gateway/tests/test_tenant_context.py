@@ -12,6 +12,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from industryflow_contracts import denials
 
 
 def _request(headers=None):
@@ -45,6 +46,8 @@ async def test_capability_resolves_read_only(monkeypatch):
     record = json.dumps({"user": "alice", "company_id": cid, "audience": "api", "read_only": True})
 
     async def fake_get(key):
+        if key == denials.STORE_REBUILT_KEY:
+            return "0"
         return record if key.endswith("good-handle") else None
 
     monkeypatch.setattr(dependencies, "_capability_get", fake_get, raising=True)

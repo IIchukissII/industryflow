@@ -7,7 +7,7 @@ import json
 import uuid
 
 from industryflow_contracts import capability_audit as audit
-from industryflow_contracts import testing
+from industryflow_contracts import denials, testing
 
 from tenant_delete.capability_store import CapabilityStore
 
@@ -49,7 +49,8 @@ def _store():
 
 
 def _keys(redis):
-    return {k.decode() for k in redis.keys("*")}
+    """The store's keys, not counting its rebuild record, which a tenant's delete leaves."""
+    return {k.decode() for k in redis.keys("*")} - {denials.STORE_REBUILT_KEY}
 
 
 def _events(redis):

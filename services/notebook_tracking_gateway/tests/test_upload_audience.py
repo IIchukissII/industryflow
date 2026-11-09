@@ -17,6 +17,7 @@ import sys
 import uuid
 
 import pytest
+from industryflow_contracts import denials
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -27,8 +28,9 @@ OTHER = str(uuid.uuid4())
 
 
 def _store(**records):
+    """A store holding ``records``, rebuilt (ADR-0015 dec 8)."""
     async def aget(key):
-        return records.get(key)
+        return {denials.STORE_REBUILT_KEY: "0", **records}.get(key)
     return aget
 
 
@@ -50,6 +52,17 @@ async def test_tracking_handle_resolves_on_the_tracking_plane():
 async def test_upload_handle_resolves_on_the_upload_plane():
     b = await policy.resolve_upload_binding(_store(**{"nbcap:h": _rec("upload", read_only=False)}), "h")
     assert b is not None and b.company_id == CID and b.audience == "upload"
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_lost_its_rebuild_record_resolves_nothing():
+    # ADR-0015 dec 8: recreated empty, the store cannot show which tenants are suspended.
+    entries = {"nbcap:h": _rec("tracking")}
+
+    async def lost(key):
+        return entries.get(key)
+
+    assert await policy.resolve_tracking_binding(lost, "h") is None
 
 
 # --- ...and never the other's. Both directions. -------------------------------------------------

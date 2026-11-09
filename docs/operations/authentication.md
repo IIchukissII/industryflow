@@ -38,12 +38,13 @@ Downstream services read the tenant from the `company_id` claim
 | Password change or reset, user moved to another company, deactivated or deleted, tenant deactivated | All of the user's sessions and capability handles are revoked |
 | `manage_users.py reset-password` or `delete` | The same; the command exits non-zero if the session store cannot be reached |
 | Password set in the database directly | Existing sessions fail at their next refresh (fingerprint mismatch) |
+| Capability store lost and rebuilt | Every session issued before the rebuild ends; each user signs in again ([rebuild paths](backup-and-recovery.md#rebuild-paths)) |
 
 An ended session is recorded in the capability store for one access-token lifetime
 (`libs/industryflow_contracts/industryflow_contracts/sessions.py`). Every verifier of an access token
 reads the record:
 
-| Verifier | Access token of an ended session | Store unreachable |
+| Verifier | Access token of an ended session | Store unreachable, or not rebuilt |
 |---|---|---|
 | API gateway, every request | **401** | **503** |
 | `ml-service-api`, every request (`SESSION_REDIS_URL`, required); also **401** when the token's `company_id` is not the account's | **401** | **503** |
@@ -52,8 +53,8 @@ reads the record:
 
 A read slower than `READ_TIMEOUT_SECONDS` (2 s) counts as unreachable; so does the gateway's read of
 the suspension marker, which then leaves the decision to the registry. A token issued up to
-`CLOCK_SKEW_SECONDS` (2 s) after an end of all the user's sessions would count as ended, so a sign-in
-or refresh in that window waits it out (at most 3 s).
+`CLOCK_SKEW_SECONDS` (2 s) after an end of all the user's sessions, or after the store's rebuild, would
+count as ended, so a sign-in or refresh in that window waits it out (at most 3 s).
 
 ### Suspended tenants
 

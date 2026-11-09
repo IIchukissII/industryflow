@@ -32,7 +32,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
-from industryflow_contracts import capability_audit, tenancy
+from industryflow_contracts import capability_audit, denials, tenancy
 
 import staging
 
@@ -45,10 +45,6 @@ AUDIENCE_TRACKING = "tracking"  # the gateway's copy of the audience (ADR-0019 /
 # them, or uploads escape the refusal that is the precondition for admitting them at all.
 AUDIENCE_UPLOAD = "upload"
 _KEY_PREFIX = "nbcap:"
-# Present while the handle's company is suspended (ADR-0033 dec 3): its handles do not resolve.
-# Written and removed by the platform API with the company's active flag; shared contract
-# (services/api_gateway/capability_auth.py).
-_SUSPENDED_PREFIX = "nbcap-suspended:"
 
 
 @dataclass(frozen=True)
@@ -101,8 +97,9 @@ async def _resolve_outcome(
         company_id = tenancy.canonical_company_id(record.get("company_id") or "")
     except ValueError:
         return None, "malformed_entry", facts
-    if await aget(f"{_SUSPENDED_PREFIX}{company_id}") is not None:
-        return None, "tenant_suspended", facts
+    refusal = await denials.tenant_refusal(aget, company_id)
+    if refusal:
+        return None, refusal, facts
     return TrackingBinding(
         user=record.get("user", ""), company_id=company_id, audience=expected_audience,
         handle_id=facts.get("handle_id"),

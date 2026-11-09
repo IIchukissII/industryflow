@@ -36,6 +36,7 @@ import pytest
 
 import psycopg2
 import redis
+from industryflow_contracts import denials
 from psycopg2 import errors  # noqa: E402
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -64,7 +65,11 @@ def _admin_dsn():
 
 
 def _redis_client():
-    return redis.Redis.from_url(os.getenv("SQL_PROXY_REDIS_URL", "redis://localhost:6379/0"))
+    rc = redis.Redis.from_url(os.getenv("SQL_PROXY_REDIS_URL", "redis://localhost:6379/0"))
+    # The rebuild record the API gateway writes on a running platform (ADR-0015 dec 8); this proof runs
+    # the plane without it. NX: a running gateway's own record stands.
+    rc.set(denials.STORE_REBUILT_KEY, "0", nx=True)
+    return rc
 
 
 def _proxy_connect(handle: str):

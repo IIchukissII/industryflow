@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0032 — Backup and disaster recovery for every durable store
 
 - **Status:** Accepted
-- **Date:** 2026-10-24; changed 2026-11-03
+- **Date:** 2026-10-24; changed 2026-11-09
 - **Parent:** ADR-0001
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a backup holds every tenant), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capability store, dec 7), [ADR-0020](ADR-0020-notebook-per-user-work-persistence.md) (notebook volumes), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (cold layer, the only copy of raw history; dec 13 its mirror), [ADR-0029](ADR-0029-spark-major-upgrades.md) (checkpoints), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion), [ADR-0034](ADR-0034-platform-schema-migrations.md) (forward-only migrations), [ADR-0038](ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md) (model and notebook mechanism)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a backup holds every tenant), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capability store, dec 7; dec 8: its denials rebuilt), [ADR-0020](ADR-0020-notebook-per-user-work-persistence.md) (notebook volumes), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (cold layer, the only copy of raw history; dec 13 its mirror), [ADR-0029](ADR-0029-spark-major-upgrades.md) (checkpoints), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion), [ADR-0034](ADR-0034-platform-schema-migrations.md) (forward-only migrations), [ADR-0038](ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md) (model and notebook mechanism)
 
 ## Context
 
@@ -20,7 +20,8 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 
 1. **Every durable store is classified, and the class decides its recovery path.** *Authoritative* stores
    (databases, cold layer, model artifacts, authored notebooks) are backed up; *derivable* ones (capability
-   store, broker topics, streaming checkpoints, caches) record a rebuild path instead.
+   store, broker topics, streaming checkpoints, caches) record a rebuild path instead. A derivable store
+   that holds denials re-derives them before it grants anything (ADR-0015 dec 8).
 2. **Recovery targets are declared per authoritative store.** The operations documentation owns the
    recovery-point and recovery-time objectives; a store without them is a gap.
 3. **Disaster recovery means a copy outside the failure domain.** A backup sharing storage, cluster or site
@@ -46,6 +47,7 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 | 1 | Back up the databases only | Misses the cold layer and model artifacts, which exist nowhere else |
 | 1 | Back up the capability store | Puts live, revocable handles into a long-lived artifact |
 | 1 | Back up streaming checkpoints | Keeps state that a major upgrade may deliberately discard |
+| 1 | Back up the broker's dead letters | They age out with the topic's retention whatever is copied, and a copy would hold refused tenant data longer than the broker does |
 | 2 | One recovery objective for the whole platform | Over-protects derivable state or under-protects the only copy of raw history |
 | 3 | Rely on the object store's own replication | In-cluster replication shares the failure domain and copies deletions; managed cross-region versioned replication is one way to meet decision 3 |
 | 4 | Keep the cold copy append-only | A deleted tenant's raw history would never leave it (ADR-0033 dec 4) |
@@ -65,6 +67,8 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 - Restore rehearsal is recurring operational work that needs an owner.
 - A deployment without a backup job upgrades only by the explicit choice to go without one.
 - A restored database is backed up again before pending migrations apply to it.
+- Losing a derivable store loses what only it held: the broker's unconsumed readings and dead letters,
+  open aggregation windows, the capability-use events not yet written to the database, and every session.
 
 ## Deferred
 

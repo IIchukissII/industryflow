@@ -7,15 +7,15 @@ import asyncio
 
 import pytest
 
-from industryflow_contracts import sessions, testing
+from industryflow_contracts import denials, sessions, testing
 
 USER = "7d0c1f4e-2b8a-4c39-9f61-0a5e3b2d4c11"
 
 
-def _ended(records, checks):
+def _ended(records, checks, rebuilt=True):
     """Write ``records`` to an empty store, then answer each (user, session, issued_at) in ``checks``."""
     async def run():
-        store = await testing.async_redis()
+        store = await testing.async_redis(rebuilt=rebuilt)
         try:
             for key, value in records.items():
                 await store.set(key, value)
@@ -27,7 +27,26 @@ def _ended(records, checks):
 
 
 def test_a_session_with_no_record_has_not_ended():
-    assert _ended({}, [(USER, "s", 100), (USER, None, None)]) == [False, False]
+    assert _ended({}, [(USER, "s", 100), (USER, None, 100)]) == [False, False]
+
+
+def test_a_token_with_no_issue_time_counts_as_ended_by_the_rebuild():
+    # The rebuild ends every session; a token that cannot be placed after it is one of them.
+    assert _ended({}, [(USER, "s", None), (USER, "s", "not a time")]) == [True, True]
+
+
+# Rebuilt at 500.4 (ADR-0015 dec 8): every token issued up to CLOCK_SKEW_SECONDS after it is ended.
+@pytest.mark.parametrize("issued_at, ended", [(499, True), (502.4, True), (503, False)])
+def test_the_rebuild_ends_every_session_issued_before_it(issued_at, ended):
+    records = {denials.STORE_REBUILT_KEY: "500.4"}
+    assert _ended(records, [(USER, "s", issued_at), ("someone-else", None, issued_at)]) == [ended, ended]
+
+
+def test_a_store_not_rebuilt_answers_nothing():
+    with pytest.raises(denials.StoreNotRebuilt):
+        _ended({}, [(USER, "s", 100)], rebuilt=False)
+    with pytest.raises(denials.StoreNotRebuilt, match="unreadable"):
+        _ended({denials.STORE_REBUILT_KEY: "garbage"}, [(USER, "s", 100)], rebuilt=False)
 
 
 def test_a_session_ended_by_itself_is_ended_whatever_its_issue_time():
@@ -40,7 +59,9 @@ def test_a_session_ended_by_itself_is_ended_whatever_its_issue_time():
                                               (103, False), (None, True), ("not a time", True)])
 def test_ending_all_sessions_ends_the_tokens_issued_at_or_before_it(issued_at, ended):
     records = {sessions.user_ended_key(USER): "100.4"}
-    assert _ended(records, [(USER, "s", issued_at), ("someone-else", "s", issued_at)]) == [ended, False]
+    # Another user is ended only by an issue time the rebuild cannot place (the test above).
+    other = issued_at is None or isinstance(issued_at, str)
+    assert _ended(records, [(USER, "s", issued_at), ("someone-else", "s", issued_at)]) == [ended, other]
 
 
 def test_an_unreadable_end_time_counts_as_ended():

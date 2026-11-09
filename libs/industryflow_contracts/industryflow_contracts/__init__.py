@@ -14,6 +14,9 @@ isolation or meaning:
   * ``windows`` — the width and allowed lateness of each aggregation granularity (ADR-0006 dec 7).
     The Spark job that writes the windows, the provider that serves features from them and the
     offline re-derivation that trains on them must use the same numbers (ADR-0023 dec 9).
+  * ``denials`` — the suspension marker and the store's rebuild record every verifier and minter of
+    the shared capability store reads (ADR-0015 dec 8). A verifier that read a different key, or
+    trusted a store not rebuilt, would grant what a lost denial withheld.
   * ``tenant_status`` — the topic and message of the tenant-status stream the alert worker publishes
     and ingestion reads (ADR-0033 dec 3). A publisher and a reader that disagreed about either would
     leave a suspended tenant's devices ingesting with nothing failing.

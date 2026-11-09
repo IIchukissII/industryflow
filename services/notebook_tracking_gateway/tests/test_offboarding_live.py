@@ -22,6 +22,7 @@ import pytest
 
 import requests
 import redis
+from industryflow_contracts import denials
 
 pytestmark = pytest.mark.integration
 
@@ -39,8 +40,11 @@ def _token():
 
 def _handle(company_id):
     handle = "e2e-" + uuid.uuid4().hex
-    redis.Redis.from_url(os.getenv("TRACKING_REDIS_URL", "redis://redis:6379/0")).set(
-        f"nbcap:{handle}", json.dumps({"user": "e2e", "company_id": company_id, "audience": "tracking"}), ex=600)
+    rc = redis.Redis.from_url(os.getenv("TRACKING_REDIS_URL", "redis://redis:6379/0"))
+    # The rebuild record the API gateway writes on a running platform (ADR-0015 dec 8); this proof runs
+    # the plane without it. NX: a running gateway's own record stands.
+    rc.set(denials.STORE_REBUILT_KEY, "0", nx=True)
+    rc.set(f"nbcap:{handle}", json.dumps({"user": "e2e", "company_id": company_id, "audience": "tracking"}), ex=600)
     return {"Authorization": f"Bearer {handle}"}
 
 

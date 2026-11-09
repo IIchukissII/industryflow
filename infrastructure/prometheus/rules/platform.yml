@@ -52,6 +52,17 @@ groups:
           summary: "Redis is near its memory limit"
           description: "Redis uses {{ $value | humanizePercentage }} of its memory limit; at the limit it refuses writes (it never evicts)."
           services: "redis, api-gateway"
+      - alert: IndustryFlowCapabilityStoreRebuilt
+        # The capability store had no rebuild record (ADR-0015 dec 8): it was lost or recreated, or this is
+        # a fresh install or the first start of a release that keeps the record. The API gateway re-derived
+        # every suspension and ended every session issued before it.
+        expr: time() - max(capability_store_rebuilt_timestamp_seconds{platform="industryflow"}) < 900
+        labels:
+          severity: warning
+        annotations:
+          summary: "The capability store was rebuilt"
+          description: "The API gateway found the capability store without its rebuild record and rebuilt it: every suspension re-derived, every user signed out, every notebook server's handles gone."
+          services: "redis, api-gateway"
       - alert: IndustryFlowKafkaConsumerLag
         expr: kafka_consumergroup_lag{platform="industryflow"} > 1000
         for: 10m
