@@ -11,12 +11,17 @@ failed every idle pass on a real server (#501). So CI runs these tests against a
 rather than a quiet fallback. Every test that needs a store takes it from here
 (tests/config_guards/test_tests_use_real_redis.py).
 
+Each store starts as the platform's runs: rebuilt (``denials.STORE_REBUILT_KEY``, at time 0, so it ends
+no session), unless a test asks for one that is not (``rebuilt=False``).
+
 Imported by tests only; its dependencies are the tests' own (the ``dev`` extra) and load lazily.
 """
 from __future__ import annotations
 
 import os
 from typing import Any
+
+from .denials import STORE_REBUILT_KEY
 
 URL_ENV = "IF_TEST_REDIS_URL"
 REQUIRE_ENV = "IF_REQUIRE_REAL_REDIS"
@@ -57,29 +62,42 @@ def _emptied(url: str) -> None:
         target.flushdb()
 
 
-def sync_redis(**kwargs: Any):
+def _start(sync_client, rebuilt: bool) -> None:
+    if rebuilt:
+        sync_client.set(STORE_REBUILT_KEY, "0")
+
+
+def sync_redis(rebuilt: bool = True, **kwargs: Any):
     """A synchronous client on an empty database: the real server's, or a fresh fake."""
     url = real_redis_url()
     if url is None:
         import fakeredis
-        return fakeredis.FakeRedis(**kwargs)
-    import redis
-    _emptied(url)
-    return redis.Redis.from_url(url, **kwargs)
+        client = fakeredis.FakeRedis(**kwargs)
+    else:
+        import redis
+        _emptied(url)
+        client = redis.Redis.from_url(url, **kwargs)
+    _start(client, rebuilt)
+    return client
 
 
-async def async_redis(**kwargs: Any):
+async def async_redis(rebuilt: bool = True, **kwargs: Any):
     """An asyncio client on an empty database: the real server's, or a fresh fake."""
     url = real_redis_url()
     if url is None:
         import fakeredis
-        return fakeredis.FakeAsyncRedis(**kwargs)
+        server = fakeredis.FakeServer()
+        _start(fakeredis.FakeRedis(server=server), rebuilt)
+        return fakeredis.FakeAsyncRedis(server=server, **kwargs)
+    import redis
     import redis.asyncio as aioredis
     _emptied(url)
+    with redis.Redis.from_url(url) as seed:
+        _start(seed, rebuilt)
     return aioredis.from_url(url, **kwargs)
 
 
-def redis_pair(sync_kwargs=None, async_kwargs=None):
+def redis_pair(sync_kwargs=None, async_kwargs=None, rebuilt: bool = True):
     """A synchronous and an asyncio client on one empty database, for a test that drives code through
     one and reads the store back through the other."""
     sync_kwargs, async_kwargs = sync_kwargs or {}, async_kwargs or {}
@@ -87,12 +105,15 @@ def redis_pair(sync_kwargs=None, async_kwargs=None):
     if url is None:
         import fakeredis
         server = fakeredis.FakeServer()
-        return (fakeredis.FakeRedis(server=server, **sync_kwargs),
+        pair = (fakeredis.FakeRedis(server=server, **sync_kwargs),
                 fakeredis.FakeAsyncRedis(server=server, **async_kwargs))
-    import redis
-    import redis.asyncio as aioredis
-    _emptied(url)
-    return redis.Redis.from_url(url, **sync_kwargs), aioredis.from_url(url, **async_kwargs)
+    else:
+        import redis
+        import redis.asyncio as aioredis
+        _emptied(url)
+        pair = redis.Redis.from_url(url, **sync_kwargs), aioredis.from_url(url, **async_kwargs)
+    _start(pair[0], rebuilt)
+    return pair
 
 
 class AnyLoopRedis:
@@ -102,7 +123,7 @@ class AnyLoopRedis:
     ``async_redis`` would give it; a test reads and writes through this object from any loop, or
     through ``sync()`` outside one. ``entries`` (string keys to values) are written first."""
 
-    def __init__(self, entries: Any = None, **kwargs: Any):
+    def __init__(self, entries: Any = None, rebuilt: bool = True, **kwargs: Any):
         self._kwargs, self._clients = kwargs, {}
         self._url = real_redis_url()
         if self._url is None:
@@ -111,6 +132,7 @@ class AnyLoopRedis:
         if self._url is not None:
             _emptied(self._url)
         with self.sync() as client:
+            _start(client, rebuilt)
             for key, value in dict(entries or {}).items():
                 client.set(key, value)
 

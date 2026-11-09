@@ -80,6 +80,8 @@ def _client(pool, store="fresh"):
 
 
 def _token(sub=USER, company=COMPANY, **claims):
+    # Issued now unless the test names a time, as the gateway issues every token (users.write_token).
+    claims.setdefault("iat", int(time.time()))
     if company is not None:
         claims["company_id"] = str(company)
     return jwt.encode({"sub": str(sub), "exp": int(time.time()) + 600, **claims},
@@ -126,7 +128,7 @@ def test_the_role_is_the_account_s_not_the_token_s():
     app.state.db_pool = FakePool(_row(role="observer"))
     app.state.session_store = Records()
     token = jwt.encode({"sub": str(USER), "company_id": str(COMPANY), "role": "admin", "is_superuser": True,
-                        "exp": int(time.time()) + 600},
+                        "iat": int(time.time()), "exp": int(time.time()) + 600},
                        config.config.JWT_SECRET_KEY, algorithm=auth.JWT_ALGORITHM)
     r = TestClient(app).get("/who", headers={"Authorization": f"Bearer {token}"})
     assert r.json() == {"role": "observer", "is_superuser": False}
@@ -190,7 +192,15 @@ def test_ending_all_sessions_refuses_the_tokens_issued_before_and_not_after():
     assert _get(FakePool(_row()), _token(sid="s", iat=now - 10), store).status_code == 401
     assert _get(FakePool(_row()), _token(sid="s", iat=now), store).status_code == 200
     # A token with no issue time cannot be placed after the end.
-    assert _get(FakePool(_row()), _token(), store).status_code == 401
+    no_iat = jwt.encode({"sub": str(USER), "company_id": str(COMPANY), "exp": int(time.time()) + 600},
+                        config.config.JWT_SECRET_KEY, algorithm=auth.JWT_ALGORITHM)
+    assert _get(FakePool(_row()), no_iat, store).status_code == 401
+
+
+def test_a_session_store_that_lost_its_rebuild_record_refuses_every_token():
+    # ADR-0015 dec 8: it cannot say which sessions ended, so it answers nothing (503), not yes.
+    store = testing.AnyLoopRedis(rebuilt=False)
+    assert _get(FakePool(_row()), _token(sid="s"), store).status_code == 503
 
 
 def test_an_unreadable_session_store_fails_closed():

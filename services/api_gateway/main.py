@@ -26,6 +26,7 @@ from messaging import capability_audit_drain
 
 # Authentication imports
 from users import auth_backend, fastapi_users, ACCESS_COOKIE
+import capability_store_rebuild
 import sign_in_throttle
 import users
 
@@ -70,11 +71,13 @@ async def lifespan(_app: FastAPI):
     cache_task = asyncio.create_task(update_redis_cache())
     # The one writer of the capability-use record (ADR-0042 dec 4); the store is the same Redis.
     audit_task = asyncio.create_task(capability_audit_drain.run(redis_client.redis, engine))
+    # The capability store's denials, re-derived whenever it lacks its rebuild record (ADR-0015 dec 8).
+    rebuild_task = asyncio.create_task(capability_store_rebuild.run(redis_client.redis, engine))
 
     yield
 
     # Shutdown
-    for task in (cache_task, audit_task, first_run_task):
+    for task in (cache_task, audit_task, rebuild_task, first_run_task):
         task.cancel()
         try:
             await task

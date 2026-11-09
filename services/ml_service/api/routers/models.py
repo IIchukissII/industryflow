@@ -16,6 +16,7 @@ import json
 
 import asyncpg
 from industryflow_contracts import capability_audit as audit
+from industryflow_contracts import denials
 
 import auth
 import baseline_gate
@@ -396,8 +397,12 @@ async def mint_upload_capability(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # A suspended company is issued nothing (ADR-0033 dec 3); the platform API keeps this marker
-    # with the company's active flag, and every verifier refuses the company's handles by it.
-    if await store.get(upload_capability.suspended_key(record["company_id"])) is not None:
+    # with the company's active flag, and every verifier refuses the company's handles by it. A store
+    # not rebuilt cannot say, so nothing is issued (ADR-0015 dec 8).
+    refused = await denials.tenant_refusal(store.get, record["company_id"])
+    if refused == denials.STORE_NOT_REBUILT:
+        raise HTTPException(status_code=503, detail="Capability store not available")
+    if refused:
         raise HTTPException(status_code=403, detail="This company is suspended.")
 
     # The index, the entry and the mint's record in one MULTI (ADR-0042 dec 3): a handle that is not

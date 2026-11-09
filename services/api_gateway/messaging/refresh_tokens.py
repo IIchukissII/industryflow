@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from industryflow_contracts import sessions
+from industryflow_contracts import denials, sessions
 
 from messaging.redis_client import redis_client
 from config import get_settings
@@ -261,22 +261,25 @@ async def session_was_ended(session_id: Optional[str]) -> bool:
 
 
 async def wait_out_an_end(user_id: str) -> float:
-    """Before a token is minted for the user: if all their sessions ended within the clock-skew
-    allowance, wait until a token issued now would count as issued after the end
-    (``sessions.session_ended``), so a sign-in or refresh never yields a token that is refused for
-    its whole life. Returns the seconds waited; an unreadable record waits for nothing (the token
-    is then refused or not by the same rule at each request)."""
+    """Before a token is minted for the user: if all their sessions ended, or the capability store was
+    rebuilt (which ends every session, ADR-0015 dec 8), within the clock-skew allowance, wait until a
+    token issued now would count as issued after it (``sessions.session_ended``), so a sign-in or
+    refresh never yields a token that is refused for its whole life. Returns the seconds waited; an
+    unreadable record waits for nothing (the token is then refused or not by the same rule at each
+    request)."""
     import asyncio
     import math
 
     try:
-        raw = await asyncio.wait_for(redis_client.redis.get(sessions.user_ended_key(user_id)),
-                                     sessions.READ_TIMEOUT_SECONDS)
-        ended = float(raw.decode() if isinstance(raw, bytes) else raw) if raw is not None else None
+        raws = await asyncio.wait_for(
+            redis_client.redis.mget([sessions.user_ended_key(user_id), denials.STORE_REBUILT_KEY]),
+            sessions.READ_TIMEOUT_SECONDS)
+        ends = [float(raw.decode() if isinstance(raw, bytes) else raw) for raw in raws if raw is not None]
     except Exception:  # noqa: BLE001 - see above
         return 0.0
-    if ended is None:
+    if not ends:
         return 0.0
+    ended = max(ends)
     # Issue times are whole seconds: the first one after the allowance.
     ready = math.floor(ended + sessions.CLOCK_SKEW_SECONDS) + 1
     started = time.time()

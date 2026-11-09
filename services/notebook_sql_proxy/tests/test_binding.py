@@ -14,7 +14,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import binding as b  # noqa: E402
-from industryflow_contracts import testing  # noqa: E402
+from industryflow_contracts import denials, testing  # noqa: E402
 
 
 async def _store(entries=()):
@@ -129,6 +129,16 @@ async def test_a_suspended_tenants_handle_is_denied():
     assert await b.resolve_sql_binding(store.get, "h") is not None
     await store.set(f"nbcap-suspended:{cid}", "1")
     assert await b.resolve_sql_binding(store.get, "h") is None
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_lost_its_rebuild_record_resolves_nothing():
+    # ADR-0015 dec 8: recreated empty, the store cannot show which tenants are suspended.
+    cid = str(uuid.uuid4())
+    store = await _store({f"{b._KEY_PREFIX}h": _rec(cid)})
+    await store.delete(denials.STORE_REBUILT_KEY)
+    binding, reason, _ = await b.resolve_sql_outcome(store.get, "h")
+    assert (binding, reason) == (None, denials.STORE_NOT_REBUILT)
 
 
 @pytest.mark.asyncio

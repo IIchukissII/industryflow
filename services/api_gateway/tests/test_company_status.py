@@ -17,6 +17,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from industryflow_contracts import denials
 
 from fastapi import HTTPException
 from fastapi_users import BaseUserManager
@@ -199,7 +200,7 @@ async def test_a_capability_of_a_suspended_company_is_refused_by_the_data_api(co
     record = json.dumps({"user": "alice", "company_id": cid, "audience": "api", "read_only": True})
 
     async def get(key):
-        return record if key == "nbcap:h" else None
+        return {"nbcap:h": record, denials.STORE_REBUILT_KEY: "0"}.get(key)
 
     store = await _store()
     monkeypatch.setattr(dependencies, "_capability_get", get)
@@ -220,7 +221,7 @@ async def test_a_capability_of_a_suspended_company_is_refused_by_the_data_api(co
 @pytest.mark.asyncio
 async def test_the_suspension_marker_denies_a_handle():
     cid = str(uuid.uuid4())
-    kv = {"nbcap:h": json.dumps({"user": "u", "company_id": cid, "audience": "api"})}
+    kv = {"nbcap:h": json.dumps({"user": "u", "company_id": cid, "audience": "api"}), denials.STORE_REBUILT_KEY: "0"}
 
     async def get(key):
         return kv.get(key)
@@ -231,15 +232,27 @@ async def test_the_suspension_marker_denies_a_handle():
 
 
 @pytest.mark.asyncio
+async def test_a_store_that_lost_its_rebuild_record_resolves_no_handle():
+    # ADR-0015 dec 8: recreated empty, the store cannot show which tenants are suspended.
+    cid = str(uuid.uuid4())
+    kv = {"nbcap:h": json.dumps({"user": "u", "company_id": cid, "audience": "api"})}
+
+    async def get(key):
+        return kv.get(key)
+
+    assert await resolve_capability(get, "h") is None
+
+
+@pytest.mark.asyncio
 async def test_marking_and_lifting_a_suspension():
     store = await _store()
     cid = uuid.uuid4()
     await company_status.mark_suspended(store, cid)
-    assert await store.keys("*") == [f"nbcap-suspended:{cid}"]
+    assert set(await store.keys("*")) - {denials.STORE_REBUILT_KEY} == {f"nbcap-suspended:{cid}"}
     assert await store.get(f"nbcap-suspended:{cid}") == "1"
     assert await store.ttl(f"nbcap-suspended:{cid}") == -1  # lasts as long as the suspension
     await company_status.clear_suspended(store, cid)
-    assert await store.keys("*") == []
+    assert set(await store.keys("*")) == {denials.STORE_REBUILT_KEY}
 
 
 @pytest.mark.asyncio

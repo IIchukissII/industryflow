@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Protocol, Tuple
 
 from industryflow_contracts import capability_audit as audit
+from industryflow_contracts import denials
 
 # Audiences (ADR-0015 dec 3). A handle resolves only for the audience it was minted for.
 AUDIENCE_API = "api"  # the tenant-scoped data API (ADR-0011 dec 4)
@@ -59,10 +60,6 @@ _KEY_PREFIX = "nbcap:"
 # Per-user index of minted handles: handle -> the server it was minted for. Shared contract with
 # the data API, which revokes a user's handles at platform logout.
 _USER_INDEX_PREFIX = "nbcap-user:"
-# Present while a company is suspended (ADR-0033 dec 3): nothing is minted for it and none of its
-# handles resolve. Written and removed by the platform API with the company's active flag; shared
-# contract with every verifier (services/api_gateway/capability_auth.py).
-_SUSPENDED_PREFIX = "nbcap-suspended:"
 
 # The plane the hub records as (ADR-0042 dec 1).
 PLANE = "hub"
@@ -109,8 +106,9 @@ class CompanySuspended(ValueError):
     """The tenant is suspended, so no capability is minted for it (ADR-0033 dec 3)."""
 
 
-def is_suspended(store: CapabilityStore, company_id: str) -> bool:
-    return store.get(f"{_SUSPENDED_PREFIX}{company_id}") is not None
+def refusal(store: CapabilityStore, company_id: str) -> Optional[str]:
+    """Why nothing of the company may be minted or honoured now, or None (``denials``)."""
+    return denials.tenant_refusal_sync(store.get, company_id)
 
 
 def _key(handle: str) -> str:
@@ -140,7 +138,11 @@ def mint(
         raise ValueError(f"unknown capability audience: {audience!r}")
     if not user or not company_id:
         raise ValueError("capability requires a user and a tenant")
-    if is_suspended(store, company_id):
+    refused = refusal(store, company_id)
+    if refused == denials.STORE_NOT_REBUILT:
+        # Not the tenant's state: the store cannot show it (ADR-0015 dec 8), so nothing is minted.
+        raise denials.StoreNotRebuilt("the capability store has not been rebuilt")
+    if refused:
         raise CompanySuspended(f"tenant {company_id} is suspended")
 
     handle = secrets.token_urlsafe(32)
@@ -183,7 +185,7 @@ def resolve(store: CapabilityStore, handle: str, *, expected_audience: str) -> O
         return None  # non-interchangeable across planes (dec 3)
     if not record.get("company_id") or not record.get("user"):
         return None  # a handle bound to no tenant or no user is a hole, not a capability
-    if is_suspended(store, str(record["company_id"])):
+    if refusal(store, str(record["company_id"])):
         return None
     return Binding(
         user=str(record["user"]),

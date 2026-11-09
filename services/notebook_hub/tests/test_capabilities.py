@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import capabilities as cap  # noqa: E402
 from industryflow_contracts import capability_audit as audit  # noqa: E402
-from industryflow_contracts import testing  # noqa: E402
+from industryflow_contracts import denials, testing  # noqa: E402
 
 
 def _store():
@@ -60,8 +60,8 @@ def _keys(store, kind):
 
 
 def _data(store):
-    """Every string entry: the handles' and the suspension markers."""
-    return {k: _text(_redis(store).get(k)) for k in _keys(store, "string")}
+    """Every string entry: the handles' and the suspension markers, not the store's rebuild record."""
+    return {k: _text(_redis(store).get(k)) for k in _keys(store, "string") if k != denials.STORE_REBUILT_KEY}
 
 
 def _indexes(store):
@@ -290,6 +290,17 @@ def test_a_suspended_tenants_handle_does_not_resolve():
     assert cap.resolve(store, handle, expected_audience=cap.AUDIENCE_API) is not None
     _put(store, f"nbcap-suspended:{cid}", "1")
     assert cap.resolve(store, handle, expected_audience=cap.AUDIENCE_API) is None
+
+
+def test_a_store_that_lost_its_rebuild_record_mints_and_resolves_nothing():
+    # ADR-0015 dec 8: recreated empty, the store cannot show which tenants are suspended.
+    store = _store()
+    cid = str(uuid.uuid4())
+    handle = cap.mint(store, user="u", company_id=cid, audience=cap.AUDIENCE_API, ttl_seconds=60)
+    _redis(store).delete(denials.STORE_REBUILT_KEY)
+    assert cap.resolve(store, handle, expected_audience=cap.AUDIENCE_API) is None
+    with pytest.raises(denials.StoreNotRebuilt):
+        cap.mint(store, user="u", company_id=cid, audience=cap.AUDIENCE_API, ttl_seconds=60)
 
 
 # --- the capability-use record (ADR-0042) ---------------------------------------------------------

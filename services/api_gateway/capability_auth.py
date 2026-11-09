@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
 from industryflow_contracts import capability_audit as audit
+from industryflow_contracts import denials
 
 AUDIENCE_API = "api"
 _KEY_PREFIX = "nbcap:"
@@ -34,12 +35,8 @@ _USER_INDEX_PREFIX = "nbcap-user:"
 _UPLOAD_INDEX_PREFIX = "nbcap-upload-user:"
 # Present while a company is suspended (ADR-0033 dec 3): no handle bound to it resolves or is
 # minted. Written by the gateway when a company is deactivated, removed when it is reactivated
-# (company_status.py). Shared contract with every other verifier and minter of handles.
-SUSPENDED_PREFIX = "nbcap-suspended:"
-
-
-def suspended_key(company_id: str) -> str:
-    return f"{SUSPENDED_PREFIX}{company_id}"
+# (company_status.py), and re-derived by the store's rebuild (capability_store_rebuild.py).
+suspended_key = denials.suspended_key
 
 
 @dataclass(frozen=True)
@@ -100,8 +97,9 @@ async def resolve_capability_outcome(
         company_id = str(uuid.UUID(str(record.get("company_id") or "")))
     except ValueError:
         return None, "malformed_entry", facts
-    if await aget(suspended_key(company_id)) is not None:
-        return None, "tenant_suspended", facts
+    refusal = await denials.tenant_refusal(aget, company_id)
+    if refusal:
+        return None, refusal, facts
     return CapabilityBinding(
         user=str(record.get("user", "")),
         company_id=company_id,

@@ -16,7 +16,7 @@ with the store unreachable the check falls back to the cache and its bound.
 
 The capability planes outside this service do not read the registry. For them the transition also
 writes a suspension marker into the shared capability store (``mark_suspended``), which every
-verifier and minter of capability handles consults (capability_auth.SUSPENDED_PREFIX, the shared
+verifier and minter of capability handles consults (``industryflow_contracts.denials``, the shared
 contract), so no handle for a suspended company resolves or is minted, at once and everywhere.
 """
 import asyncio

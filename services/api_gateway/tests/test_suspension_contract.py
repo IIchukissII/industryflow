@@ -3,18 +3,21 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Every plane that holds a copy of the capability-store contract honours the suspension marker.
+Every plane that holds a copy of the capability-store contract honours the store's denials.
 
-The gateway writes the marker when a company is suspended (ADR-0033 dec 3). A verifier or minter
-that kept its own copy of the store's key format but not the marker would keep honouring, or
-issuing, a suspended company's handles, and nothing would fail. So the set of copies is found by
-searching for the store's key prefix, not listed by hand, and each one must carry the gateway's
-marker prefix and consult it.
+The gateway writes the suspension marker when a company is suspended (ADR-0033 dec 3), and the store's
+rebuild record once its denials are re-derived (ADR-0015 dec 8). A verifier or minter that kept its own
+copy of the store's key format but not the shared check would keep honouring, or issuing, a suspended
+company's handles, or trust a store that lost its markers, and nothing would fail. So the set of copies
+is found by searching for the store's key prefix, not listed by hand; none may spell the marker itself
+(its one home is ``industryflow_contracts.denials``), and each verifier or minter consults the shared
+check.
 """
 import os
 import re
 
 import capability_auth
+from industryflow_contracts import denials
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 SERVICES = os.path.join(ROOT, "services")
@@ -46,18 +49,34 @@ def test_the_copies_are_found():
     } <= set(_copies())
 
 
-def test_every_copy_carries_the_marker_and_consults_it():
-    marker = capability_auth.SUSPENDED_PREFIX
+# Copies of the store's key format that neither resolve nor mint, and why. Every other copy found
+# must consult the shared check.
+NOT_VERIFIERS = {
+    # Builds the upload minter's records; the route that writes them consults the check (below).
+    "services/ml_service/api/upload_capability.py",
+    # Purges a deleted tenant and marks it; it grants nothing.
+    "services/tenant_delete/capability_store.py",
+}
+
+
+def test_no_copy_spells_the_marker_itself():
     for path, src in _copies().items():
-        assert f'"{marker}"' in src, f"{path} does not know the suspension marker {marker!r}"
-        uses = len(re.findall(r"_SUSPENDED_PREFIX|suspended_key\(", src))
-        assert uses >= 2, f"{path} declares the suspension marker but never consults it"
+        assert denials.SUSPENDED_PREFIX not in src, f"{path} spells the suspension marker instead of denials"
 
 
-def test_the_ml_route_that_mints_consults_the_marker():
-    # upload_capability.py holds the rule; the route that writes the handle is where it is applied.
+def test_every_verifier_and_minter_consults_the_shared_check():
+    copies = _copies()
+    assert NOT_VERIFIERS <= set(copies), "a named non-verifier no longer holds the key format"
+    for path, src in copies.items():
+        if path in NOT_VERIFIERS:
+            continue
+        assert re.search(r"denials\.tenant_refusal(_sync)?\(", src), \
+            f"{path} holds the capability store's key format without the shared denial check"
+
+
+def test_the_ml_route_that_mints_consults_the_shared_check():
     route = open(os.path.join(SERVICES, "ml_service", "api", "routers", "models.py"), encoding="utf-8").read()
-    assert "upload_capability.suspended_key(" in route
+    assert "denials.tenant_refusal(" in route
 
 
 def test_the_upload_index_is_the_one_the_gateway_revokes():

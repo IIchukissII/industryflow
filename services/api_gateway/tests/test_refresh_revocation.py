@@ -12,10 +12,12 @@ industryflow_contracts.testing's (a real Redis in CI), one client per event loop
 app on its own.
 """
 import json
+import time
 import uuid
 from types import SimpleNamespace
 
 import pytest
+from industryflow_contracts import denials
 
 from fastapi.testclient import TestClient
 from industryflow_contracts import testing
@@ -223,7 +225,7 @@ async def test_logout_records_that_its_session_ended(refresh_client, redis):
     await refresh_tokens.create_refresh_token(str(user.id), user.hashed_password, "sid-b")
     assert client.post("/auth/logout", json={"refresh_token": t}).status_code == 204
     assert await refresh_tokens.session_ended(str(user.id), "sid-a", None) is True
-    assert await refresh_tokens.session_ended(str(user.id), "sid-b", 0) is False
+    assert await refresh_tokens.session_ended(str(user.id), "sid-b", time.time()) is False
 
 
 @pytest.mark.asyncio
@@ -237,7 +239,7 @@ async def test_ending_all_sessions_records_each_session_and_the_time(redis):
     assert await refresh_tokens.session_ended(uid, "sid-z", time.time() - 60) is True  # by its time
     assert await refresh_tokens.session_ended(uid, None, None) is True
     assert await refresh_tokens.session_ended(uid, "sid-z", time.time() + 60) is False
-    assert await refresh_tokens.session_ended(str(uuid.uuid4()), None, None) is False
+    assert await refresh_tokens.session_ended(str(uuid.uuid4()), None, time.time()) is False
 
 
 # --- every request reads it (ADR-0004 dec 2) -------------------------------------------------
@@ -345,7 +347,7 @@ async def test_a_logout_with_a_forged_access_token_ends_nothing(refresh_client, 
     forged = pyjwt.encode({"sub": str(user.id), "sid": "sid-victim", "aud": ["fastapi-users:auth"]},
                           "not-the-secret", algorithm="HS256")
     assert client.post("/auth/logout", headers={"Authorization": f"Bearer {forged}"}).status_code == 204
-    assert await refresh_tokens.session_ended(str(user.id), "sid-victim", None) is False
+    assert await refresh_tokens.session_ended(str(user.id), "sid-victim", time.time()) is False
 
 
 @pytest.mark.asyncio

@@ -494,9 +494,10 @@ The SQL proxy resolves the handle and opens the upstream session as the tenant's
 
 | Element | Form |
 |---|---|
-| Content | `nbcap:<handle>` entries (bound facts only), `nbcap-user:` and upload indexes, `nbcap-suspended:` markers, the `nbcap-audit` stream; no database or object-store secret |
+| Content | `nbcap:<handle>` entries (bound facts only), `nbcap-user:` and upload indexes, `nbcap-suspended:` markers, the rebuild record `capability-store-rebuilt`, the `nbcap-audit` stream; no database or object-store secret |
 | Eviction | `maxmemory-policy noeviction`; at `maxmemory` (compose 256mb, Helm 192mb) a write is refused and the mint or request fails |
 | Watch | `IndustryFlowRedisMemoryHigh`: above 80% of the limit for 10m |
+| Lost whole | No rebuild record: every verifier and minter refuses (`store_not_rebuilt`, 503) until the API gateway has written a marker for each inactive company and then the record, whose time ends every earlier session; `IndustryFlowCapabilityStoreRebuilt` ([rebuild paths](../operations/backup-and-recovery.md#rebuild-paths)) |
 
 | Code | Role |
 |---|---|
@@ -509,6 +510,9 @@ The SQL proxy resolves the handle and opens the upstream session as the tenant's
 | `services/notebook_hub/tests/test_capabilities.py::test_store_holds_no_database_secret` | Proof: no secret in an entry |
 | `services/ml_service/tests/test_upload_capability.py::test_the_record_holds_bound_facts_and_nothing_resembling_a_secret` | Proof: upload entry holds bound facts only |
 | `tests/config_guards/test_capability_store_eviction.py` | Proof: no eviction, a limit, an alert |
+| `libs/industryflow_contracts/industryflow_contracts/denials.py` | The marker, the rebuild record and the shared refusal |
+| `services/api_gateway/capability_store_rebuild.py` | The rebuild |
+| `services/api_gateway/tests/test_suspension_contract.py` | Proof: every verifier and minter uses the shared refusal |
 
 ## ADR-0018 dec 1
 

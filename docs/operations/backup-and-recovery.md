@@ -21,8 +21,34 @@ The manual of [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-eve
 | Notebook work volumes ([ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md)), Compose | Yes | `notebook-backup`: one archive per volume |
 | Notebook work volumes, Kubernetes | No | The cluster's volume snapshots ([ADR-0038](../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md) dec 6); not built while the hub has no cluster |
 | Notebook hub database | No | Derivable: users and servers return from the platform session ([ADR-0038](../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md) dec 7) |
-| Capability store, broker topics, streaming checkpoints, caches | No | Derivable; no backup job reads them |
+| Capability store, broker topics, streaming checkpoints, caches | No | Derivable: [rebuild paths](#rebuild-paths) |
 | Continuous WAL archiving / point-in-time recovery | No | Deferred in [ADR-0032](../../ADR/ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) |
+
+### Rebuild paths
+
+What a derivable store holds, what brings it back when it is lost whole, and what is lost with it.
+
+| Store | Rebuilt by | Lost with it |
+|---|---|---|
+| Capability store (Redis), denials | The API gateway, every 10 s: a suspension marker for each inactive company in the registry, then the store's rebuild record (`capability-store-rebuilt`), whose time ends every session issued before it. Until the record exists every verifier and minter refuses (503, or the refusal `store_not_rebuilt`). `IndustryFlowCapabilityStoreRebuilt` fires | Every session (each user signs in again), the ended-session records, the sign-in throttle counts |
+| Capability store, grants | Users sign in again; a notebook server whose handles are gone is stopped at its next refresh and spawns with new ones; an upload capability is minted again on request | Running kernels' handles, in-flight upload grants |
+| Capability store, capability-use stream | The gateway's writer recreates its consumer group | Events not yet written to `public.capability_use_events`, normally seconds |
+| Capability store, feature snapshot (`features:`, `sensor:latest:`) | Readings as they arrive; `sensor:latest:` from the database within 2 s | Up to `FEATURE_MAX_AGE_SECONDS` of the alert worker's ML snapshot |
+| Broker topics (Kafka) | Auto-created on first use; `tenant-status` republished by the alert worker every 10 s | Readings not yet consumed, dead letters, consumer offsets: the alert worker then reads from the earliest retained offset |
+| Streaming checkpoints (`s3a://spark-checkpoints`, Helm `/opt/spark/checkpoints`) | A job without a checkpoint starts again: measurements from the earliest retained offset (idempotent writes), aggregations from the latest | Aggregation windows open at the loss |
+| Broker recreated empty, checkpoints kept | Reset the checkpoints ([Spark checkpoint reset](../architecture/stream-processing.md#adr-0029-dec-3)): a kept checkpoint names offsets the empty topic does not have, and the job stops | As above |
+| In-process caches (model, baseline, kill-switch, company status) | Each process, on demand | Nothing |
+| Notebook hub database | The next platform-session sign-in and spawn ([ADR-0038](../../ADR/ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md) dec 7) | Hub sessions and API tokens |
+| Upload staging (`_upload-staging/`) | The next upload | Uploads not yet admitted |
+| Alertmanager silences | Set again | Silences |
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/capability_store_rebuild.py::rebuild_once` | Suspension markers from the registry, then the rebuild record |
+| `libs/industryflow_contracts/industryflow_contracts/denials.py::tenant_refusal` | Every plane's refusal of a store not rebuilt |
+| `libs/industryflow_contracts/industryflow_contracts/sessions.py::session_ended` | Sessions issued before the rebuild are ended |
+| `services/api_gateway/tests/test_capability_store_rebuild.py` | Proof: markers then record; a reactivation in the pass keeps no marker |
+| `infrastructure/prometheus/rules/platform.yml::IndustryFlowCapabilityStoreRebuilt` | Rebuild alert |
 
 ### Backup job
 

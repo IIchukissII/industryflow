@@ -33,16 +33,13 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
 from industryflow_contracts import capability_audit as audit
+from industryflow_contracts import denials
 from industryflow_contracts import tenancy
 
 AUDIENCE_COLD = "cold"  # the broker's copy of the audience (ADR-0025 / ADR-0015 dec 3)
 # This plane's name in the capability-use record (ADR-0042).
 PLANE = "cold_broker"
 _KEY_PREFIX = "nbcap:"
-# Present while the handle's company is suspended (ADR-0033 dec 3): its handles do not resolve.
-# Written and removed by the platform API with the company's active flag; shared contract
-# (services/api_gateway/capability_auth.py).
-_SUSPENDED_PREFIX = "nbcap-suspended:"
 
 
 @dataclass(frozen=True)
@@ -97,8 +94,9 @@ async def resolve_cold_outcome(
         company_id = tenancy.canonical_company_id(record.get("company_id") or "")
     except ValueError:
         return None, "malformed_entry", facts
-    if await aget(f"{_SUSPENDED_PREFIX}{company_id}") is not None:
-        return None, "tenant_suspended", facts
+    refusal = await denials.tenant_refusal(aget, company_id)
+    if refusal:
+        return None, refusal, facts
     return ColdBinding(user=str(record.get("user", "")), company_id=company_id,
                        handle_id=facts.get("handle_id")), None, facts
 

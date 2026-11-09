@@ -6,9 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0015 — Notebook capability minting and the SQL access proxy
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-30
+- **Date:** 2026-06-27; changed 2026-11-09
 - **Parent:** ADR-0001
-- **Related:** [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) (the properties realised here), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (per-tenant read-only role), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (the identity minted against; chained sign-out), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (session end revokes capabilities), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (planes added since), [ADR-0042](ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md) (the capability-use record)
+- **Related:** [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) (the properties realised here), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (per-tenant read-only role), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (the identity minted against; chained sign-out), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (session end revokes capabilities), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (planes added since), [ADR-0042](ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md) (the capability-use record), [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (dec 1: the store's rebuild path)
 
 ## Context
 
@@ -42,9 +42,13 @@ is one the client can widen again.
    connection is one upstream session.
 7. **The store is the single capability authority and holds handles and bindings, never database or
    object-store secrets.** A reader of it sees revocable, single-tenant handles and nothing worse.
-8. **The store removes a key only when told to or when its expiry passes; a full store refuses writes.**
-   It holds denials whose absence grants, a tenant's suspension and a session's end among them, so a
-   key dropped for memory fails open, while a refused write fails the mint or request that needed it.
+8. **The store removes a key only when told to or when its expiry passes; a full store refuses writes;
+   a store that cannot show it was rebuilt grants nothing.** It holds denials whose absence grants, a
+   tenant's suspension and a session's end among them, so a key dropped for memory fails open, while a
+   refused write fails the mint or request that needed it. A store lost whole fails open the same way,
+   so it is trusted only once it carries a rebuild record: the platform API re-derives every suspension
+   from the registry, then writes the record, whose time ends every session issued before it; until
+   then every verifier and minter refuses.
 
 ## Alternatives
 
@@ -66,6 +70,9 @@ is one the client can widen again.
 | 8 | Evicting only keys that carry an expiry | A session-end marker carries one, and the session it ended is honoured again |
 | 8 | A larger memory limit with eviction left on | Postpones the failure and keeps it silent |
 | 8 | A separate store for what may be evicted | A second store to run for caches that already expire on their own |
+| 8 | Rebuilding the denials only by an operator after a loss | Until someone runs it, every plane honours what the lost denials withheld, and nothing shows the gap |
+| 8 | Rebuilding only when the platform API starts | A store recreated under running services is not rebuilt |
+| 8 | Re-deriving each ended session | No source outside the store records them; ending every earlier session is the only answer that is not a guess |
 
 ## Consequences
 
@@ -75,6 +82,8 @@ is one the client can widen again.
 
 **Negative**
 - The store is on the hot path; an outage denies capabilities and closes open SQL sessions.
+- A lost store signs every user out and stops every notebook server's handles, and refuses everything
+  until the platform API has rebuilt it.
 - A store that fills refuses mints, sign-ins and cache writes until memory is freed, so its use is
   watched against its limit.
 - Provisioning and offboarding create and remove each tenant's login, whose credential derives from one

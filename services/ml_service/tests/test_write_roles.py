@@ -88,7 +88,8 @@ def _row(role, is_superuser=False):
 
 
 def _token(**claims):
-    return jwt.encode({"sub": str(USER), "company_id": CID, "exp": int(time.time()) + 600, **claims},
+    return jwt.encode({"sub": str(USER), "company_id": CID, "iat": int(time.time()), "exp": int(time.time()) + 600,
+                       **claims},
                       config.config.JWT_SECRET_KEY, algorithm=auth.JWT_ALGORITHM)
 
 

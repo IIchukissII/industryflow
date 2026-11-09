@@ -56,6 +56,7 @@ Every target carries the label `platform="industryflow"`, which every platform a
 | `IndustryFlowPostgresDown` | `postgres-exporter` cannot reach TimescaleDB for 5m | `docker compose logs timescaledb` |
 | `IndustryFlowRedisDown` | `redis-exporter` cannot reach Redis for 5m | `docker compose logs redis` |
 | `IndustryFlowRedisMemoryHigh` | Redis above 80% of its `maxmemory` for 10m; it never evicts, so at the limit mints, sign-ins and cache writes fail | `redis-cli info memory`; `redis-cli --bigkeys`; the capability-use stream's backlog (`capability_audit_backlog`) |
+| `IndustryFlowCapabilityStoreRebuilt` | The API gateway rebuilt the capability store in the last 15m: every suspension re-derived, every user signed out | Expected after a fresh install or the release that adds the record; otherwise the store was lost: `docker compose logs redis`, then [rebuild paths](backup-and-recovery.md#rebuild-paths) |
 | `IndustryFlowKafkaConsumerLag` | A consumer group lags more than 1000 for 10m | The consumer's logs |
 | `IndustryFlowDeadLetteredReadings` | A letter reached a `*.dlq` topic in the last 15m | [Dead-letter handling](dead-letters.md) |
 | `IndustryFlowTenantStatusStalled` | A `tenant-status` partition that carried statuses within the hour has carried none for 5m; ingestion has forgotten every suspension ([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) dec 3) | `docker compose logs alert-service-detector` (`tenant-status publish failed`); `docker compose ps kafka`; [stream processing](../architecture/stream-processing.md) |
