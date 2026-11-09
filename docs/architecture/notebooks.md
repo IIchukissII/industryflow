@@ -732,7 +732,8 @@ export: [cold layer](data-and-storage.md#cold-layer).
 
 A model a kernel registers is not served until a user with a writing role promotes a version from the
 Models page ([promotion](ml-and-features.md#promotion)). Its drift baseline is the feature sample logged
-in the same run:
+in the same run. A missing or unreadable sample, or one over `MAX_SAMPLE_BYTES`, leaves the model without
+a baseline; one with more rows than the bound is down-sampled ([ADR-0035 dec 8](ml-and-features.md#adr-0035-dec-8)):
 
 ```python
 with mlflow.start_run():

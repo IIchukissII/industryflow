@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0040 — A notebook-registered model version becomes a platform model by promotion
 
 - **Status:** Accepted
-- **Date:** 2026-10-28
+- **Date:** 2026-10-28; changed 2026-11-09
 - **Parent:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (dec 9: the kernel registers
   model versions in its tenant)
 - **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (dec 2: the
@@ -39,8 +39,9 @@ the notebook.
    taken.
 4. **The feature sample travels as a data artifact of the version's run, under a name the platform
    fixes.** The kernel logs it through its tracking capability; the ML service reads it as data, within
-   a size bound, and holds it to ADR-0035 dec 4. A missing, oversized or unreadable sample leaves the
-   model without a baseline, and the model says why.
+   a size bound, and holds it to ADR-0035 dec 4. A missing or unreadable sample, or one larger than the
+   read bound (ADR-0035 dec 8), leaves the model without a baseline, and the model says why. A sample
+   with more rows than the row bound is down-sampled, not refused.
 5. **A version is promoted once.** The platform model is the record of what was served under that name
    and version; promoting it again is refused.
 
@@ -53,6 +54,7 @@ the notebook.
 | 3 | The kernel records feature configuration and detector as run tags | A kernel's claim of what its output means is the assertion ADR-0028 dec 1 does not take |
 | 4 | The browser sends the sample with the promotion | The browser holds no copy; the run is where the supplier recorded what the model learned from |
 | 4 | A sample derived from stored history at promotion | Not what the model learned from (ADR-0035 dec 1) |
+| 4 | A sample with more rows than the row bound left without a baseline | Every other path down-samples it (ADR-0035 dec 8); the promotion path would decide monitoring by length alone |
 | 5 | Promoting again replaces the platform model | A model version is a record of what was served |
 
 ## Consequences

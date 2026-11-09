@@ -26,10 +26,9 @@ model knows what it learned from, so the feature sample can come only from them.
 what the live side computes, but when it is supplied with the sample the platform can check only that it
 is a finite number on the declared scale; a number in range can still be another quantity, computed by
 another code path or feature pipeline, and prediction drift would then fire on a model that has not
-moved. An externally authored model is scored off the platform by construction, and the upload flow
-offers no way to supply a baseline, so uploads go unmonitored in practice. The deployment gate is the last check
-before a model serves; it loads and scores an uploaded artifact in the serving image (ADR-0030 dec 7) and
-judges any other model declaratively, without loading it (ADR-0027 dec 6).
+moved. An externally authored model is scored off the platform by construction. The deployment gate is
+the last check before a model serves, and it can load and score an artifact in the serving image
+(ADR-0030 dec 7).
 
 ## Decision
 

@@ -8,7 +8,10 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-07-06; changed 2026-11-09
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md) (framing)
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant routing, shared contract), [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (watermarked windows, window contract), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (transform registry), [ADR-0024](ADR-0024-stateful-feature-kill-switch.md) (kill-switch for the stateful class)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant routing, shared contract), [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (watermarked windows, window contract), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (transform registry), [ADR-0024](ADR-0024-stateful-feature-kill-switch.md) (kill-switch for the stateful class),
+  [ADR-0041](ADR-0041-a-model-s-feature-configuration-is-fixed-once-bound.md) (dec 2: a bound configuration is fixed),
+  [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (dec 7: raw readings only),
+  [ADR-0035](ADR-0035-drift-baseline.md) (dec 5: no baseline for a sample with no time)
 
 ## Context
 
@@ -25,17 +28,21 @@ disagree about what a feature means. Offline training data cannot read the live 
 3. **Stateless transforms stay substrate-neutral; they run wherever is cheapest.**
 4. **Tenant isolation is the stream partition key; output goes to the tenant schema (ADR-0003).**
 5. **Per-tenant feature configuration is routed live within the shared stream, without a restart.**
+   Routing carries a configuration's creation and its edits while no model binds it; once bound, what
+   it computes is fixed (ADR-0041 dec 2), so a reload never changes a bound model's inputs.
 6. **The transform registry holds across the stream's executor boundary** (ADR-0010).
 7. **The serving side holds no windowing state.** The baseline is a read of the aggregate, fronted by a
    short-lived, bounded, tenant-keyed cache of returned values; the alerting worker's tenant-keyed
-   latest-value store is a snapshot join and outside this decision.
+   latest-value store is a snapshot join and outside this decision. The baseline is read, through the
+   cache, only for a stateful feature the kill-switch (ADR-0024 dec 4) leaves enabled.
 8. **The rest is built when a feature needs it:** stream-computed features (decisions 4–6), a dedicated
    feature table, the rolling-statistic transform.
-9. **Offline training re-derives the served window.** Each row gets the newest window written by its
-   instant given the allowed lateness, with width and lateness defined once in the shared contract and the
-   statistic named explicitly; a test asserts offline and serving agree on the same data. Every
-   consumer that scores a stored reading reads its window the same way; a row with no instant has no
-   such window, and its score is refused, saying why.
+9. **Offline training re-derives the served window from the raw readings (ADR-0025 dec 7).** Each row
+   gets the newest window written by its instant given the allowed lateness, with width and lateness
+   defined once in the shared contract and the statistic named explicitly; a test asserts
+   offline and serving agree on the same data. Every consumer that scores a stored reading reads its
+   window the same way; a row with no instant has no such window, and nothing is scored from it, saying
+   why (ADR-0035 dec 5).
 
 ## Alternatives
 
@@ -46,6 +53,7 @@ disagree about what a feature means. Offline training data cannot read the live 
 | 1 | Inference moved into the stream as well | Per-tenant artifacts and blast radius make it a separate decision |
 | 2 | A dedicated feature table for the windowed baseline | Duplicates a value the aggregate tables already carry |
 | 4 | One feature table keyed by a tenant column | Breaks schema-per-tenant isolation |
+| 5 | A live reload carrying an edit to a bound configuration | It would change a bound model's inputs, which ADR-0041 dec 2 fixes |
 | 7 | No cache in front of the aggregate read | Every scored reading pays a database read for a value that changes once per window |
 | 7 | Snapshot keys by equipment and sensor alone | Isolation would rest on identifiers happening not to collide |
 | 8 | The stateful feature keeping its serving-side window until a trigger fires | The skew trigger fired; the baseline class is built |

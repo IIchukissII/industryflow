@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0041 — A model's feature configuration is fixed once bound
 
 - **Status:** Accepted
-- **Date:** 2026-10-29; changed 2026-10-29
+- **Date:** 2026-10-29; changed 2026-11-09
 - **Parent:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (one computation of a
   feature for training and serving)
 - **Related:** [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (dec 1: the output
@@ -58,8 +58,8 @@ at registration (ADR-0028).
 **Positive**
 - A model's input vector is the one it was trained on for as long as it exists.
 - A drift sample accepted at registration matches its model's inputs for the model's lifetime.
-- Configuration reload for stream-computed features (ADR-0023 deferral) has no bound configuration to
-  reload.
+- Configuration reload for stream-computed features (ADR-0023 deferral) has no bound configuration's
+  computation to reload.
 
 **Negative**
 - Changing the inputs of a deployed model means a new configuration and a new registration.
