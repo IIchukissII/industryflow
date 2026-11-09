@@ -27,19 +27,22 @@ normalize_company_id_to_schema = tenancy.schema_name
 
 # Dedup scopes for save_alert_once ($n are the insert's own parameters). An alert's scope is
 # (rule, sensor, equipment); a retrain recommendation's is its model. The two never suppress each other.
+# A recommendation is also suppressed while an earlier one for its model is unacknowledged: it marks
+# the model until acknowledged, and a repeat would only add another mark to clear (ADR-0022 dec 4).
 _ALERT_SCOPE = (
     "rule_id IS NOT DISTINCT FROM $3::uuid AND sensor_id IS NOT DISTINCT FROM $4::uuid"
     " AND equipment_id IS NOT DISTINCT FROM $5::uuid"
     " AND condition IS DISTINCT FROM 'retrain_recommended'"
 )
 _RETRAIN_SCOPE = "model_id = $11::uuid AND condition = 'retrain_recommended'"
+_RETRAIN_OPEN = " OR acknowledged IS NOT TRUE"
 
 _SAVE_ALERT_ONCE = """
     WITH prior AS (
         SELECT max(triggered_at) AS prior_at FROM alerts
         WHERE {scope}
-          AND triggered_at > $2::timestamptz - $15::interval
-          AND triggered_at < $2::timestamptz + $15::interval
+          AND ((triggered_at > $2::timestamptz - $15::interval
+                AND triggered_at < $2::timestamptz + $15::interval){open})
     ), ins AS (
         INSERT INTO alerts (
             alert_id, triggered_at, rule_id, sensor_id, equipment_id, site_id, detection_type,
@@ -80,14 +83,17 @@ def dedup_lock_key(schema_name: str, scope: Tuple) -> int:
     return int.from_bytes(hashlib.blake2b(name.encode(), digest_size=8).digest(), 'big', signed=True)
 
 
-# The decided labels on a model's alerts in the precision window, for the retrain trigger (ADR-0022
-# dec 4). Run as written by infrastructure/timescaledb/tests/test_degraded_alerts.py.
+# The decided labels on the alerts a model's own score raised, in the precision window, for the
+# retrain trigger (ADR-0022 dec 3, 4). Labels on its drift alerts and recommendations judge the
+# monitoring, not the model; counted, a verdict on one recommendation would move the next. Run as
+# written by infrastructure/timescaledb/tests/test_degraded_alerts.py.
 MODEL_LABEL_COUNTS = """
                 SELECT
                     count(*) FILTER (WHERE verdict = 'true_positive')  AS tp,
                     count(*) FILTER (WHERE verdict = 'false_positive') AS fp
                 FROM alert_labels
                 WHERE model_id = $1
+                  AND detection_type = 'ml'
                   AND labeled_at >= NOW() - make_interval(days => $2::int)
                   -- A label on a degraded alert judges a score the model was not fully given; a
                   -- database incident must not read as model decay (ADR-0022 dec 4). A label from
@@ -174,16 +180,16 @@ class AlertRepository:
         """
         schema_name = normalize_company_id_to_schema(alert_data['company_id'])
         if retrain:
-            scope_sql = _RETRAIN_SCOPE
+            scope_sql, open_sql = _RETRAIN_SCOPE, _RETRAIN_OPEN
             scope = ('retrain', alert_data.get('model_id'))
         else:
-            scope_sql = _ALERT_SCOPE
+            scope_sql, open_sql = _ALERT_SCOPE, ''
             scope = ('alert', alert_data['rule_id'], alert_data.get('sensor_id'), alert_data.get('equipment_id'))
 
         async with self._tenant(schema_name) as conn:
             await conn.execute("SELECT pg_advisory_xact_lock($1)", dedup_lock_key(schema_name, scope))
             row = await conn.fetchrow(
-                _SAVE_ALERT_ONCE.format(scope=scope_sql),
+                _SAVE_ALERT_ONCE.format(scope=scope_sql, open=open_sql),
                 alert_data['alert_id'],
                 alert_data['triggered_at'],
                 alert_data['rule_id'],

@@ -93,11 +93,18 @@ async def _run():
             await conn.execute(f'DELETE FROM "{schema}".alerts')
 
         repo = AlertRepository(pool)
+
+        async def acknowledge(model_id):
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    f'UPDATE "{schema}".alerts SET acknowledged = true '
+                    "WHERE model_id = $1 AND condition = 'retrain_recommended'", uuid.UUID(model_id))
+
         bases = {"inside": boundary - timedelta(days=2), "chunk_boundary": boundary}
         outcomes, chunks = {}, set()
         for scenario in dedup_scenarios.SCENARIOS:
             base = bases[scenario.base]
-            got, want = await dedup_scenarios.run(repo, scenario, base, str(company_id))
+            got, want = await dedup_scenarios.run(repo, scenario, base, str(company_id), acknowledge)
             outcomes[scenario.name] = (scenario, base, got, want)
             async with pool.acquire() as conn:
                 if scenario.base == "chunk_boundary":

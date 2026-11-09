@@ -29,6 +29,11 @@ class FakeAlertStore:
             and row.get('condition') != 'retrain_recommended'
         )
 
+    async def acknowledge_recommendations(self, model_id):
+        for row in self.saved:
+            if row.get('model_id') == model_id and row.get('condition') == 'retrain_recommended':
+                row['acknowledged'] = True
+
     async def save_alert_once(self, alert, *, window, retrain=False):
         # The real insert binds both by key (ADR-0044 dec 3); so does the fake, or a builder that
         # forgot them would pass here and fail in production.
@@ -36,7 +41,9 @@ class FakeAlertStore:
         prior = [
             row['triggered_at'] for row in self.saved
             if self._in_scope(row, alert, retrain)
-            and abs(row['triggered_at'] - alert['triggered_at']) < window
+            and (abs(row['triggered_at'] - alert['triggered_at']) < window
+                 # An open recommendation holds its model's next one back (ADR-0022 dec 4).
+                 or (retrain and not row.get('acknowledged')))
         ]
         if prior:
             return False, max(prior)

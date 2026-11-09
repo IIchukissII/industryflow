@@ -830,7 +830,6 @@ class RulesEngine:
         precision_window_days: int,
         drift_lookback_hours: int,
         cooldown_seconds: float,
-        severity: str = 'high',
     ) -> List[Dict]:
         """Raise a retrain *recommendation* for models with sustained drift AND precision decay.
 
@@ -868,7 +867,7 @@ class RulesEngine:
                 )
                 if precision is None:
                     continue
-                alert = self._build_retrain_alert(rule, company_id, precision, signals, severity)
+                alert = self._build_retrain_alert(rule, company_id, precision, signals)
                 if not await self._emit(alert, retrain=True, cooldown_seconds=cooldown_seconds):
                     continue
                 triggered.append(alert)
@@ -882,7 +881,7 @@ class RulesEngine:
         return triggered
 
     def _build_retrain_alert(
-        self, rule: Dict, company_id: str, precision: float, signals: Dict, severity: str,
+        self, rule: Dict, company_id: str, precision: float, signals: Dict,
     ) -> Dict:
         """Build the retrain-recommendation alert (a distinct 'statistical' condition)."""
         decided = signals['tp'] + signals['fp']
@@ -905,7 +904,7 @@ class RulesEngine:
             'model_id': str(rule['model_id']),
             'threshold_value': None,  # the precision floor is service config, not a rule threshold
             'condition': 'retrain_recommended',
-            'severity': severity,
+            'severity': 'high',  # decided, not a setting (ADR-0022 dec 4)
             'message': message,
             # Drift and retrain verdicts score no stateful feature.
             'degraded': False,

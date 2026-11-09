@@ -25,7 +25,7 @@ RULE_ID = "33333333-3333-3333-3333-333333333333"
 KW = dict(
     precision_floor=0.6, min_labels=10, min_drift_alerts=2,
     precision_window_days=30, drift_lookback_hours=72,
-    cooldown_seconds=86400, severity="high",
+    cooldown_seconds=86400,
 )
 
 

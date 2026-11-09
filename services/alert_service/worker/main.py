@@ -223,7 +223,6 @@ class AlertService:
                                 precision_window_days=config.RETRAIN_PRECISION_WINDOW_DAYS,
                                 drift_lookback_hours=config.RETRAIN_DRIFT_LOOKBACK_HOURS,
                                 cooldown_seconds=config.RETRAIN_RECO_COOLDOWN_SECONDS,
-                                severity=config.RETRAIN_RECO_SEVERITY,
                             )
                             if recos:
                                 logger.info(f"Generated {len(recos)} retrain recommendation(s) for tenant {company_id}")
