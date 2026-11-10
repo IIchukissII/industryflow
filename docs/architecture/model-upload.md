@@ -209,7 +209,7 @@ detector, never by importing the module the manifest names.
 ## ADR-0030 dec 10
 
 The edge serves the upload plane and the staging area by sub-path on the app's origin (single origin,
-[ADR-0004](../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md)); the gateway
+[ADR-0047](../../ADR/ADR-0047-one-browser-origin-for-the-app-and-every-plane-it-reaches.md)); the gateway
 stages the upload outside every tenant namespace and the client writes the bytes to the store under a
 pre-signed PUT.
 

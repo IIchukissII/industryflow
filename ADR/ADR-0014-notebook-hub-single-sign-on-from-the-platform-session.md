@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0014 — Notebook hub single sign-on from the platform session
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-17
+- **Date:** 2026-06-27; changed 2026-11-10
 - **Parent:** ADR-0001
 - **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (no second login, dec 8; role profiles, dec 5), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (the session and its one verification), [ADR-0002](ADR-0002-ingestion-authentication-and-device-identity.md) (the verified-identity forwarding pattern), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (what is minted after sign-on)
 
@@ -21,8 +21,9 @@ edge already forwards a verified identity that its service trusts only from that
 1. **The hub authenticates users from the platform session and has no login or user store of its
    own.** A user with a valid platform session is, by that fact, authenticated to the hub.
 2. **A trusted proxy validates the session and forwards a verified identity; the hub does not re-verify
-   the session token.** On every request the proxy asks the platform's one session verification and
-   forwards the verified user, tenant and role.
+   the session token.** On every request the proxy asks the platform's one session verification, which
+   it reaches through the notebook session bound to the platform session (ADR-0048 dec 4), and forwards
+   the verified user, tenant and role.
 3. **The hub accepts a forwarded identity only with a proxy credential it verifies, and the proxy
    overwrites any client-supplied identity.** The credential is a shared secret set only by the proxy,
    only on hub traffic, and never held by an environment; every environment reaches the hub, so
@@ -33,9 +34,9 @@ edge already forwards a verified identity that its service trusts only from that
    naming platform roles only; a role the platform does not have stops the hub rather than mapping.
 5. **The entry credential is not a data credential.** Hub sign-on grants no data access; the session
    token never reaches the kernel.
-6. **No new public authentication surface is introduced.** The hub is mounted under a path of the
-   platform's own origin behind the existing edge, and it and every environment permit framing by that
-   origin only.
+6. **The hub adds no login; its one public entry is the ticket exchange of the notebook origin.** The
+   hub is served from that origin behind the existing edge (ADR-0048), the exchange takes no password,
+   and the hub and every environment permit framing by the platform origin only.
 7. **The hub re-checks the forwarded identity, and sign-out is chained.** At a bounded age and before
    every spawn, a changed tenant or role stops the user's environments and a different or invalid user
    ends the hub login; signing out of the platform also signs out of the hub, which stops the
@@ -50,6 +51,7 @@ edge already forwards a verified identity that its service trusts only from that
 | 2 | The hub verifies the session cookie itself | A second verification to keep correct, and the verification key distributed to the hub |
 | 3 | A client-supplied identity trusted without restricting who sends it | Trivially forged |
 | 3 | Trusting the forwarded identity by the hub's network boundary alone | Every environment reaches the same hub, so any of them could forge a login |
+| 6 | The hub under a path of the platform's own origin | Kernel-produced script would act with the user's platform session (ADR-0048) |
 | 7 | Hub session lifetime tied only to platform session expiry | A role change or sign-out would take effect only when a timer ran out |
 
 ## Consequences

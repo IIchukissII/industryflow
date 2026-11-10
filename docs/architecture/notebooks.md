@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Embedded notebooks
 
-The manual of [ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md), [ADR-0012](../../ADR/ADR-0012-per-session-credential-delivery-for-notebook-environments.md), [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md), [ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md), [ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md), [ADR-0018](../../ADR/ADR-0018-notebook-hub-spawner-portability.md), [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md), [ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md), [ADR-0025](../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md), [ADR-0040](../../ADR/ADR-0040-a-notebook-registered-model-version-becomes-a-platform-model-by-promotion.md), [ADR-0042](../../ADR/ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md): the notebook hub, its per-user environments, the planes a kernel reaches through capability handles, and the record of their use.
+The manual of [ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md), [ADR-0012](../../ADR/ADR-0012-per-session-credential-delivery-for-notebook-environments.md), [ADR-0013](../../ADR/ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md), [ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md), [ADR-0015](../../ADR/ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md), [ADR-0018](../../ADR/ADR-0018-notebook-hub-spawner-portability.md), [ADR-0019](../../ADR/ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md), [ADR-0020](../../ADR/ADR-0020-notebook-per-user-work-persistence.md), [ADR-0025](../../ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md), [ADR-0040](../../ADR/ADR-0040-a-notebook-registered-model-version-becomes-a-platform-model-by-promotion.md), [ADR-0042](../../ADR/ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md), [ADR-0048](../../ADR/ADR-0048-notebook-environments-are-served-from-an-origin-of-their-own.md): the notebook hub, its per-user environments, the planes a kernel reaches through capability handles, and the record of their use.
 
 ## ADR-0011 dec 1
 
@@ -175,7 +175,8 @@ Principals: [ADR-0012 dec 4](#adr-0012-dec-4).
 
 ## ADR-0011 dec 8
 
-The frontend edge serves the hub at `/jupyter/` of the platform's own origin, through `notebook-sso`;
+Entry by ticket to the notebook origin is not yet realised ([ADR-0048](#adr-0048-dec-1-6)). The frontend
+edge serves the hub at `/jupyter/` of the platform's own origin, through `notebook-sso`;
 neither `notebook-sso` nor `notebook-hub` has a host port. The hub has no login form and no user store:
 `/hub/login` establishes a login from the forwarded identity only when the proxy secret is present
 ([ADR-0014 dec 1-3](#adr-0014-dec-1-3)).
@@ -411,9 +412,9 @@ session check and removes them from the Cookie header it sends to the hub and th
 
 ## ADR-0014 dec 6
 
-The hub is mounted under `/jupyter/` (`NOTEBOOK_BASE_URL`) of the platform's origin, behind the
-frontend edge ([ADR-0011 dec 8](#adr-0011-dec-8)). The hub and every single-user server send
-`Content-Security-Policy: frame-ancestors 'self'`.
+Not yet realised: the hub is still served under `/jupyter/` (`NOTEBOOK_BASE_URL`) of the platform's
+origin, behind the frontend edge ([ADR-0011 dec 8](#adr-0011-dec-8)), until [ADR-0048](#adr-0048-dec-1-6)
+is built. The hub and every single-user server send `Content-Security-Policy: frame-ancestors 'self'`.
 
 | Frontend page | Shows | Source |
 |---|---|---|
@@ -860,5 +861,9 @@ function refuses fewer than 30 days, whoever calls it.
 | `deploy/helm/industryflow/values.yaml` | Retention setting |
 | `docker-compose.yml` | Retention setting |
 | `infrastructure/timescaledb/tests/test_capability_audit.py::test_retention_removes_only_what_is_older_than_its_period_and_never_under_the_floor` | Proof: period and floor |
+
+## ADR-0048 dec 1-6
+
+Not yet realised.
 
 Links: [database TLS](../operations/tls.md) ([ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md), `verify-full`).
