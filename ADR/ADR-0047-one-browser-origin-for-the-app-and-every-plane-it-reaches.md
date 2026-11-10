@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR-0047 — One browser origin for the app and every plane it reaches
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-10
 - **Parent:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (dec 3, 9:
   the session cookies, the CSRF token and the socket origin check that need one origin)
