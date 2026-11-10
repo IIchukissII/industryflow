@@ -53,13 +53,15 @@ New views use the tokens in `theme.css` instead of literal colours.
 ## ADR-0047 dec 2
 
 The edge serves every browser-reached plane by sub-path: [edge routes](../../docs/api/README.md#edge-routes).
-Each upstream is an `EDGE_*` variable, set by the `frontend` service in `docker-compose.yml` and by the
+Each upstream is an `EDGE_*` variable (`EDGE_API_GATEWAY`, `EDGE_ML_SERVICE`, `EDGE_NOTEBOOK_SSO`,
+`EDGE_TRACKING_GATEWAY`, `EDGE_OBJECT_STORE_URL`; `EDGE_RESOLVER` defaults to the container's
+nameservers), set by the `frontend` service in `docker-compose.yml` and by the
 chart's `_helpers.tpl`; Kubernetes upstreams are fully qualified (`<svc>.<namespace>.svc.<clusterDomain>`),
 as nginx re-resolves them per request without search domains.
 
 | Code | Role |
 |---|---|
-| `services/frontend/nginx.conf.template` | Routes `/jupyter/`, the upload plane and the staging area to their upstreams |
+| `services/frontend/nginx.conf.template` | Routes `/jupyter/`, the upload plane and the staging area to their upstreams; security headers at server level: `Content-Security-Policy` and `X-Frame-Options: SAMEORIGIN` on the app (none under `/jupyter/`, `/docs`, `/grafana/`), `nosniff`, referrer and permissions policy |
 | `services/frontend/grafana.conf.template` | `/grafana/` route ([monitoring](../../docs/operations/monitoring.md)) |
 
 Links: [TLS at the edge, ports and certificates](../../docs/operations/tls.md#adr-0004-dec-1),

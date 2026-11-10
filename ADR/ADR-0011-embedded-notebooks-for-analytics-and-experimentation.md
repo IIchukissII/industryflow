@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0011 — Embedded notebooks for analytics and experimentation
 
 - **Status:** Accepted
-- **Date:** 2026-06-27; changed 2026-10-29
+- **Date:** 2026-06-27; changed 2026-11-10
 - **Parent:** ADR-0001
 - **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the trusted-code isolation this record excepts), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (credential delivery, SQL proxy), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md) and [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (tracking), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (hub sign-on), [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner portability), [ADR-0020](ADR-0020-notebook-per-user-work-persistence.md) (persistence), [ADR-0042](ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md) (the capability-use record)
 
@@ -41,7 +41,8 @@ service role could re-scope itself to another tenant.
    platform endpoints it needs, CPU and memory limits, ephemerality by default, and per-tenant
    concurrency and quota caps.
 8. **Notebooks sit behind the existing front door and authenticate from the existing session.** There
-   is no second login and no separately exposed notebook authentication endpoint.
+   is no second login: no notebook endpoint takes a password, and the notebook origin is entered only
+   by a ticket the platform mints from the session (ADR-0048).
 9. **Experiment tracking from notebooks goes only through a trusted gateway that confines it to the
    caller's tenant.** The environment uses a capability of its own and never holds a tracking-store or
    object-store credential.
@@ -56,6 +57,7 @@ service role could re-scope itself to another tenant.
 | 2 | A shared notebook server exposed through the product | No per-user identity, no tenant scope, and a shared credential |
 | 3 | The ML-service role in the kernel, scoped by search path | Isolation by discipline does not hold for user-authored code |
 | 6 | A database principal created and dropped per session | Race-prone role lifecycle, and its credential would sit in the kernel |
+| 8 | No notebook authentication endpoint at all, the hub reading the platform session on the platform origin | Kernel-produced script would run on that origin with the user's session (ADR-0048) |
 | 9 | Notebook experiment tracking withheld until tracking-store tenancy is decided | A gateway that confines tracking to the caller's tenant now serves it without that wait |
 
 ## Consequences
