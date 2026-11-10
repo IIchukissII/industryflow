@@ -34,7 +34,7 @@ The manual of [ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and
 | `notebook-analytics` image | Voila, data-API client (ADR-0011 dec 5) | | `services/notebook_hub/Dockerfile.analytics` |
 | `notebook-sql-proxy` | SQL proxy (Postgres wire) | 6432 | [SQL proxy](../../services/notebook_sql_proxy/README.md) |
 | `notebook-tracking-gateway` | Tracking gateway (MLflow, per-route tenant rules); upload stage and commit | 5050 | [tracking gateway](../../services/notebook_tracking_gateway/README.md) |
-| `notebook-cold-broker` | Cold-store broker: pre-signed GETs for the tenant's cold prefix ([ADR-0025 dec 5](#adr-0025-dec-5)) | 5060 | `services/notebook_cold_broker/` |
+| `notebook-cold-broker` | Cold-store broker: pre-signed GETs for the tenant's cold prefix ([ADR-0025 dec 5](#adr-0025-dec-5)) | 5060 | `services/notebook_cold_broker/broker.py` |
 | Python client | `IndustryFlowClient`, `IndustryFlowSQL`, `IndustryFlowCold`, `SKOPS_TRUSTED_TYPES`, `log_feature_sample` | | [Python client](../../clients/python/README.md) |
 
 ## ADR-0011 dec 2
@@ -456,8 +456,8 @@ resolves `tracking` and `upload` separately and applies upload admission to `upl
 |---|---|---|
 | `api` | `services/api_gateway/capability_auth.py` | yes |
 | `sql` | `services/notebook_sql_proxy/binding.py` | yes |
-| `tracking` | `services/notebook_tracking_gateway/` | no |
-| `cold` | `services/notebook_cold_broker/` | yes |
+| `tracking` | `services/notebook_tracking_gateway/policy.py` | no |
+| `cold` | `services/notebook_cold_broker/policy.py` | yes |
 
 ### Handle lifecycle
 
@@ -476,7 +476,7 @@ resolves `tracking` and `upload` separately and applies upload admission to `upl
 | Plane | Mediator | Detail |
 |---|---|---|
 | Data API | `api-gateway` | Read endpoints accept an `api` handle and run read-only ([endpoints](../api/README.md#api-gateway-endpoints)) |
-| SQL | SQL proxy | [principals and mechanism](../../services/notebook_sql_proxy/README.md#database-principals) |
+| SQL | SQL proxy | [principals and mechanism](../../services/notebook_sql_proxy/README.md#adr-0015-dec-5-6) |
 | Tracking | Tracking gateway | [endpoints and rules](../../services/notebook_tracking_gateway/README.md#endpoints) |
 | Cold history | Cold-store broker | [cold layer](data-and-storage.md#cold-layer) |
 | Model upload | `ml-service-api`, tracking gateway | [model upload](model-upload.md) |

@@ -118,3 +118,4 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 ## References
 
 - [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): the planes and their capabilities; manual of decisions 1-10.
+- [SQL proxy](../services/notebook_sql_proxy/README.md): manual of decisions 1-3, 5, 8, 9.

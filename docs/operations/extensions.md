@@ -83,7 +83,7 @@ Extensions depend on IndustryFlow; the platform never vendors or imports them.
 
 ### Example
 
-[`extensions/reference/`](../../extensions/reference/README.md) (module `reference_extension`) is
+[`extensions/reference/reference_extension.py`](../../extensions/reference/reference_extension.py) ([README](../../extensions/reference/README.md)) is
 loaded only when `EXTENSION_MODULES` names it.
 
 ## ADR-0008 dec 7

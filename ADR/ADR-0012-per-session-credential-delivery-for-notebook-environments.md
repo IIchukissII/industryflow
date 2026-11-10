@@ -69,3 +69,4 @@ request to the caller's tenant (ADR-0003).
 
 - [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): audiences and capability
   lifecycle; manual of decisions 1-6.
+- [SQL proxy](../services/notebook_sql_proxy/README.md): manual of decisions 2, 4.

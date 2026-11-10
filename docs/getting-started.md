@@ -17,7 +17,7 @@ Values live in [`docker-compose.yml`](../docker-compose.yml) and [`.env.example`
 |---|---|
 | Docker with Compose v2 | The stack |
 | `openssl` on the host | `scripts/device-ca.sh` (device CA: [device certificate authority](operations/device-mtls.md#adr-0007-dec-1)), `scripts/gen-internal-ca.sh` (internal CA: [TLS](operations/tls.md#adr-0004-dec-8)) |
-| Python 3 | The sample device (`clients/device`: [device ingestion](operations/device-mtls.md#adr-0002-dec-5-7)), with `pip install ./libs/industryflow_contracts` |
+| Python 3 | The sample device (`clients/device/stream_readings.py`: [device ingestion](operations/device-mtls.md#adr-0002-dec-5-7)), with `pip install ./libs/industryflow_contracts` |
 | 8 GB+ RAM | The stack |
 
 ### 1. Configure
@@ -122,24 +122,24 @@ From another machine, reach a loopback port through an SSH tunnel (`ssh -L 5000:
 
 | Name | Role | Port | Config |
 |---|---|---|---|
-| `frontend` | HTTPS edge, React app, same-origin proxy ([edge routes](api/README.md#edge-routes)) | `FRONTEND_HTTPS_PORT`; `FRONTEND_PORT` redirects to HTTPS | `services/frontend/` |
-| `api-gateway` | Auth, tenant data, alert rules and history, websocket ([API](api/README.md)) | `API_GATEWAY_PORT` | `services/api_gateway/` |
-| `ml-service-api` | Models, feature configs, inference, drift ([ML](architecture/ml-and-features.md)) | `ML_SERVICE_PORT` | `services/ml_service/` |
+| `frontend` | HTTPS edge, React app, same-origin proxy ([edge routes](api/README.md#edge-routes)) | `FRONTEND_HTTPS_PORT`; `FRONTEND_PORT` redirects to HTTPS | `services/frontend/nginx.conf.template` |
+| `api-gateway` | Auth, tenant data, alert rules and history, websocket ([API](api/README.md)) | `API_GATEWAY_PORT` | `services/api_gateway/config.py` |
+| `ml-service-api` | Models, feature configs, inference, drift ([ML](architecture/ml-and-features.md)) | `ML_SERVICE_PORT` | `services/ml_service/api/config.py` |
 | `ingestion-edge` | Device mTLS termination, CRL check ([device mTLS](operations/device-mtls.md)) | `INGESTION_MTLS_PORT` | `services/ingestion_edge/nginx.conf` |
-| `ingestion-service` | Produces readings to Kafka; reachable only from the edge | none | `services/ingestion_service/` |
+| `ingestion-service` | Produces readings to Kafka; reachable only from the edge | none | `services/ingestion_service/config.py` |
 | `device-crl-refresh` | Re-signs the device CRL | none | `scripts/device-ca.sh` |
-| `spark-streaming`, `spark-aggregations` | Kafka → TimescaleDB raw and aggregates ([stream processing](architecture/stream-processing.md)) | none | `services/spark_jobs/` |
+| `spark-streaming`, `spark-aggregations` | Kafka → TimescaleDB raw and aggregates ([stream processing](architecture/stream-processing.md)) | none | `services/spark_jobs/kafka_to_timescaledb.py`, `services/spark_jobs/kafka_aggregations.py` |
 | `spark-master`, `spark-worker` | Standalone Spark cluster | 7077, 8083 (master UI) | `services/spark_jobs/Dockerfile.worker` |
-| `alert-service-detector` | Evaluates alert rules ([alerting](architecture/alerting.md)) | none | `services/alert_service/` |
-| `timescaledb` | System of record, schema-per-tenant ([data and storage](architecture/data-and-storage.md)) | `DB_PORT` | `infrastructure/timescaledb/` |
+| `alert-service-detector` | Evaluates alert rules ([alerting](architecture/alerting.md)) | none | `services/alert_service/config.py` |
+| `timescaledb` | System of record, schema-per-tenant ([data and storage](architecture/data-and-storage.md)) | `DB_PORT` | `infrastructure/timescaledb/config/postgresql.conf`, `infrastructure/timescaledb/config/pg_hba.conf` |
 | `kafka`, `zookeeper` | Sensor-data topic | 9092, 29092; 2181 | `docker-compose.yml` |
 | `redis` | Gateway cache, alert-worker snapshot, capability store | `REDIS_PORT` | `docker-compose.yml` |
 | `minio` | Model artifacts, Spark checkpoints, backups, cold layer | 9000 (API), 9001 (console) | `infrastructure/minio/minio-init.sh` |
-| `mlflow` | Tracking server and model registry | 5000 | `infrastructure/mlflow/` |
-| `prometheus`, `grafana`, `loki`, `promtail`, exporters | Metrics, dashboards, logs | [monitoring](operations/monitoring.md#components) | `infrastructure/` |
+| `mlflow` | Tracking server and model registry | 5000 | `docker-compose.yml` |
+| `prometheus`, `grafana`, `loki`, `promtail`, exporters | Metrics, dashboards, logs | [monitoring](operations/monitoring.md#components) | `infrastructure/prometheus/prometheus.yml`, `infrastructure/loki/loki-config.yml`, `infrastructure/promtail/promtail-config.yml` |
 | `notebook-*` (profile `notebooks`) | Notebook hub and its mediators | none | [notebooks](architecture/notebooks.md#components) |
 | `db-backup` (profile `backup`) | Database backups | none | [backup](operations/backup-and-recovery.md) |
-| `cold-export` (profile `cold-export`) | Exports raw history to the cold layer | none | `services/cold_export/` |
+| `cold-export` (profile `cold-export`) | Exports raw history to the cold layer | none | `services/cold_export/config.py` |
 
 ### API
 
