@@ -47,7 +47,7 @@ Every function of the library parses the tenant identifier as a UUID and builds 
 
 ### Tenant names
 
-All tenant-derived names come from `libs/industryflow_contracts` (`industryflow_contracts.tenancy`).
+All tenant-derived names come from `libs/industryflow_contracts/industryflow_contracts/tenancy.py`.
 Every service image installs it (named build context `contracts`); the Spark jobs ship it to
 executors with `--py-files`.
 
@@ -168,13 +168,13 @@ Raw `sensor_measurements` older than the export horizon, as Parquet in the objec
 
 | Component | Where |
 |---|---|
-| Exporter (single-node PyArrow; ADR-0025 dec 3, 4, 11) | `services/cold_export/` — `exporter.py` (ordering), `source.py` (database reads, run lock), `store.py` (object store), `naming.py` (paths), `ports.py` |
+| Exporter (single-node PyArrow; ADR-0025 dec 3, 4, 11) | `services/cold_export/exporter.py` (ordering), `services/cold_export/source.py` (database reads, run lock), `services/cold_export/store.py` (object store), `services/cold_export/naming.py` (paths), `services/cold_export/ports.py` |
 | Schedule | Helm `cronjob-cold-export.yaml` (`coldExport.schedule`, `concurrencyPolicy: Forbid`); compose `docker compose --profile cold-export up cold-export` |
 | Horizon | `COLD_EXPORT_HORIZON_DAYS` / `coldExport.horizonDays`, default 30 |
 | Bucket | `COLD_STORE_BUCKET` / `coldExport.store.bucket`, default `industryflow-cold` |
 | Database side | `16-cold-layer-raw-retention.sql`: `cold_export_day_fingerprint`, `cold_export_drop_day` (`SECURITY DEFINER`), `public.cold_export_drops` |
 | Object-store principals | Write-scoped exporter principal; read-only broker principal; created by `minio-init` / Helm `job-minio-init.yaml` |
-| Read path (ADR-0025 dec 5) | `services/notebook_cold_broker/`, client `industryflow.IndustryFlowCold` ([notebooks](notebooks.md)) |
+| Read path (ADR-0025 dec 5) | `services/notebook_cold_broker/broker.py`, `services/notebook_cold_broker/policy.py`, client `industryflow.IndustryFlowCold` ([notebooks](notebooks.md)) |
 | Backup | `db-backup` mirrors the cold and artifact buckets (`backup-read` principal; Helm `backup.cold`, `backup.models`); `notebook-backup` archives work volumes; `restore-rehearsal` and `notebook-rehearsal` restore the latest backups into scratch copies weekly ([backup and recovery](../operations/backup-and-recovery.md)) |
 
 Exporter behaviour per tenant and day:

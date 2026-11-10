@@ -52,7 +52,7 @@ What a derivable store holds, what brings it back when it is lost whole, and wha
 
 ### Backup job
 
-Image `infrastructure/backup/` (`postgres:15-alpine` + `aws-cli`, uid 10001), entrypoint
+Image `infrastructure/backup/Dockerfile` (`postgres:15-alpine` + `aws-cli`, uid 10001), entrypoint
 `db-backup.sh`.
 
 | Object | Key |

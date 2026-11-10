@@ -70,3 +70,4 @@ do not satisfy by default. Requiring TLS breaks any client not yet configured fo
 
 - [docs/operations/tls.md](../docs/operations/tls.md): issuance, configuration, rollout, rotation;
   manual of decisions 1-7.
+- [SQL proxy](../services/notebook_sql_proxy/README.md): manual of decisions 1, 2.

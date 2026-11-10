@@ -70,7 +70,6 @@ without a fork, and must never contain secrets.
 
 ## References
 
-- [deploy/helm/industryflow/README.md](../deploy/helm/industryflow/README.md);
-  [docs/operations/high-availability.md](../docs/operations/high-availability.md): manual of
-  decisions 1-6.
+- [Helm chart](../deploy/helm/industryflow/README.md);
+  [High availability](../docs/operations/high-availability.md): manual of decisions 1-6.
 - [Getting started](../docs/getting-started.md): manual of decision 6.

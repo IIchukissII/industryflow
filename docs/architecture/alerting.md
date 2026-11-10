@@ -70,8 +70,8 @@ The detection worker serves no HTTP API.
 
 | Name | Role | Port | Config |
 |---|---|---|---|
-| `alert-service-detector` | Kafka consumer on `KAFKA_TOPIC_SENSOR_DATA`; evaluates rules, writes `alerts`; no HTTP API | 9108, `industryflow_build_info` only ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 8) | `services/alert_service/config.py`, `services/alert_service/worker/` |
-| `ml-service-api` | Scores `ml` rules, computes drift ([ML and features](ml-and-features.md)) | 8002 | `services/ml_service/` |
+| `alert-service-detector` | Kafka consumer on `KAFKA_TOPIC_SENSOR_DATA`; evaluates rules, writes `alerts`; no HTTP API | 9108, `industryflow_build_info` only ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 8) | `services/alert_service/config.py`, `services/alert_service/worker/main.py`, `services/alert_service/worker/rules_engine.py` |
+| `ml-service-api` | Scores `ml` rules, computes drift ([ML and features](ml-and-features.md)) | 8002 | `services/ml_service/api/scoring.py`, `services/ml_service/api/drift/score.py` |
 
 ### Rule types (`alert_rules.detection_type`)
 

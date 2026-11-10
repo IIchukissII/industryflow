@@ -56,8 +56,8 @@ One configuration serves both spawners; `NOTEBOOK_SPAWNER` selects one.
 
 | Code | Role |
 |---|---|
-| `services/notebook_hub/Dockerfile.authoring` | Authoring single-user image: JupyterLab, the `industryflow` client with `[sql,cold]`; build context `clients/python` |
-| `services/notebook_hub/Dockerfile.analytics` | Analytics single-user image: Voila, client without `[sql]`; build context `clients/python` |
+| `services/notebook_hub/Dockerfile.authoring` | Authoring single-user image: JupyterLab, the `industryflow` client (`clients/python/pyproject.toml`) with `[sql,cold]` |
+| `services/notebook_hub/Dockerfile.analytics` | Analytics single-user image: Voila, client (`clients/python/pyproject.toml`) without `[sql]` |
 
 ## ADR-0020 dec 6
 

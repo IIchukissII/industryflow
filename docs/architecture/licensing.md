@@ -73,7 +73,7 @@ Not yet realised.
 
 ## ADR-0001 dec 7
 
-The core loads domain transforms and detectors from the modules named in `EXTENSION_MODULES`; it names no extension itself. `extensions/reference` is the in-repository example ([extensions](../operations/extensions.md)).
+The core loads domain transforms and detectors from the modules named in `EXTENSION_MODULES`; it names no extension itself. `extensions/reference/reference_extension.py` is the in-repository example ([extensions](../operations/extensions.md)).
 
 | Code | Role |
 |---|---|
