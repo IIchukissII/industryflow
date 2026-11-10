@@ -22,7 +22,8 @@ The manual of [ADR-0047](../../ADR/ADR-0047-one-browser-origin-for-the-app-and-e
 | `VITE_API_URL` | empty (same-origin) | API base URL |
 | `VITE_WS_URL` | derived from the page origin | WebSocket base URL |
 
-Build-time variables are read as `import.meta.env.VITE_*`.
+Build-time variables are read as `import.meta.env.VITE_*`. A non-empty `VITE_API_URL` or `VITE_WS_URL`
+makes the app call another origin, which ADR-0047 dec 1 rejects; no build sets them.
 
 ### Commands
 
@@ -52,6 +53,9 @@ New views use the tokens in `theme.css` instead of literal colours.
 
 ## ADR-0047 dec 2
 
+The notebook environments' own origin is not yet realised: the edge still serves the hub under
+`/jupyter/` ([notebooks](../../docs/architecture/notebooks.md#adr-0048-dec-1-6)).
+
 The edge serves every browser-reached plane by sub-path: [edge routes](../../docs/api/README.md#edge-routes).
 Each upstream is an `EDGE_*` variable (`EDGE_API_GATEWAY`, `EDGE_ML_SERVICE`, `EDGE_NOTEBOOK_SSO`,
 `EDGE_TRACKING_GATEWAY`, `EDGE_OBJECT_STORE_URL`; `EDGE_RESOLVER` defaults to the container's
@@ -62,7 +66,7 @@ as nginx re-resolves them per request without search domains.
 | Code | Role |
 |---|---|
 | `services/frontend/nginx.conf.template` | Routes `/jupyter/`, the upload plane and the staging area to their upstreams; security headers at server level: `Content-Security-Policy` and `X-Frame-Options: SAMEORIGIN` on the app (none under `/jupyter/`, `/docs`, `/grafana/`), `nosniff`, referrer and permissions policy |
-| `services/frontend/grafana.conf.template` | `/grafana/` route ([monitoring](../../docs/operations/monitoring.md)) |
+| `services/frontend/grafana.conf.template` | `/grafana/` route, rendered only when `EDGE_GRAFANA` is set; `EDGE_GRAFANA_ALLOW` source allowlist ([monitoring](../../docs/operations/monitoring.md)) |
 
 Links: [TLS at the edge, ports and certificates](../../docs/operations/tls.md#adr-0004-dec-1),
 [sign-in limits at the edge](../../docs/operations/authentication.md#adr-0004-dec-10).

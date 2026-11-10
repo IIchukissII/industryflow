@@ -21,8 +21,9 @@ edge already forwards a verified identity that its service trusts only from that
 1. **The hub authenticates users from the platform session and has no login or user store of its
    own.** A user with a valid platform session is, by that fact, authenticated to the hub.
 2. **A trusted proxy validates the session and forwards a verified identity; the hub does not re-verify
-   the session token.** On every request the proxy asks the platform's one session verification and
-   forwards the verified user, tenant and role.
+   the session token.** On every request the proxy asks the platform's one session verification, which
+   it reaches through the notebook session bound to the platform session (ADR-0048 dec 4), and forwards
+   the verified user, tenant and role.
 3. **The hub accepts a forwarded identity only with a proxy credential it verifies, and the proxy
    overwrites any client-supplied identity.** The credential is a shared secret set only by the proxy,
    only on hub traffic, and never held by an environment; every environment reaches the hub, so
@@ -33,9 +34,9 @@ edge already forwards a verified identity that its service trusts only from that
    naming platform roles only; a role the platform does not have stops the hub rather than mapping.
 5. **The entry credential is not a data credential.** Hub sign-on grants no data access; the session
    token never reaches the kernel.
-6. **No new public authentication surface is introduced.** The hub is served from the notebook origin
-   behind the existing edge (ADR-0048), entered from the platform session by its ticket, and it and
-   every environment permit framing by the platform origin only.
+6. **The hub adds no login; its one public entry is the ticket exchange of the notebook origin.** The
+   hub is served from that origin behind the existing edge (ADR-0048), the exchange takes no password,
+   and the hub and every environment permit framing by the platform origin only.
 7. **The hub re-checks the forwarded identity, and sign-out is chained.** At a bounded age and before
    every spawn, a changed tenant or role stops the user's environments and a different or invalid user
    ends the hub login; signing out of the platform also signs out of the hub, which stops the

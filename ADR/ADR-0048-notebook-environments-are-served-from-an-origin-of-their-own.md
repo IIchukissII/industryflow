@@ -14,7 +14,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
   (dec 2: planes on the platform origin), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md)
   (dec 2, 3, 6, 9: the session, its cookies, the origin allowlist), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md)
   (dec 1, 3: what a notebook may hold), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md)
-  (dec 4: demand-minting)
+  (dec 1, 4: capabilities and demand-minting)
 
 ## Context
 
@@ -38,12 +38,14 @@ own pages. Self-hosted installs are often reached by an address or a local name 
 2. **The platform origin grants the notebook origin nothing.** It is in no cross-origin or socket
    allowlist (ADR-0004 dec 6, 9), so its script can neither read a platform response nor send a
    CSRF-checked request; platform cookies that reach it are never honoured there.
-3. **The notebook origin is entered by a single-use ticket the platform mints from the session.** It
-   lives seconds, names one user, tenant and session, is spent by the exchange, and travels in a request
-   body, never a URL; it is no data credential and cannot be exchanged for a platform session.
+3. **The notebook origin is entered by a single-use ticket the platform demand-mints from the
+   session.** It is a capability of its own audience (ADR-0015 dec 1, 4): it lives seconds, names one
+   user, tenant and session, is spent by the exchange, and travels in a request body, never a URL; it
+   is no data credential and cannot be exchanged for a platform session.
 4. **The exchange opens a notebook session that is bound to the platform session and ends with it.**
-   The proxy checks it on every request through the platform's one session verification, so every end
-   of a platform session (ADR-0004 dec 2) ends it, and sign-out stays chained (ADR-0014 dec 7).
+   It is bound to the session, not to an access token, so refresh rotation leaves it; the proxy checks
+   it on every request through the platform's one session verification, so every end of a platform
+   session (ADR-0004 dec 2) ends it, and sign-out stays chained (ADR-0014 dec 7).
 5. **Framing is explicit in both directions.** The hub and every environment permit framing by the
    platform origin only, and the platform frames the notebook origin only.
 6. **The form of the notebook origin follows the deployment shape, and a hub without a distinct one

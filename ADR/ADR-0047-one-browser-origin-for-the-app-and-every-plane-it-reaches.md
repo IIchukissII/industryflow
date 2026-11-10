@@ -36,8 +36,7 @@ served from the platform's origin acts with the user's session.
    allowlist (ADR-0004 dec 6) names this origin for the socket check.
 2. **Every other plane the browser reaches is a sub-path of that origin, behind the same edge, except
    the notebook environments (ADR-0048).** The upload plane and the dashboards serve only
-   platform-authored content and share the session, the certificate and the frame policy of the one
-   origin. A store the browser writes under a grant is a sub-path too: the edge forwards the
+   platform-authored content and share the origin's session check, certificate and frame policy. A store the browser writes under a grant is a sub-path too: the edge forwards the
    bytes, which still pass no plane (ADR-0013 dec 3), and the store exposes no cross-origin policy.
 
 ## Alternatives
