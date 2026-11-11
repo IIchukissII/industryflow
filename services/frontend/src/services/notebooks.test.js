@@ -27,8 +27,24 @@ describe('enterNotebooks', () => {
   test('a refused ticket posts nothing', async () => {
     const submit = vi.spyOn(HTMLFormElement.prototype, 'submit');
     const post = async () => { throw Object.assign(new Error('409'), { response: { status: 409 } }); };
-    await expect(enterNotebooks({ post, target: 'if-notebooks' })).rejects.toThrow('409');
+    const refresh = async () => { throw new Error('expired'); };
+    await expect(enterNotebooks({ post, target: 'if-notebooks', refresh })).rejects.toThrow('expired');
     expect(submit).not.toHaveBeenCalled();
+    submit.mockRestore();
+  });
+
+  test('a session not yet continuable is refreshed once, then entered', async () => {
+    const submit = vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => {});
+    const calls = [];
+    let first = true;
+    const post = async (url) => {
+      calls.push(url);
+      if (first) { first = false; throw Object.assign(new Error('409'), { response: { status: 409 } }); }
+      return { data: TICKET };
+    };
+    await enterNotebooks({ post, target: 'f', refresh: async () => calls.push('refresh') });
+    expect(calls).toEqual(['/api/notebook-ticket', 'refresh', '/api/notebook-ticket']);
+    expect(submit).toHaveBeenCalledTimes(1);
     submit.mockRestore();
   });
 });

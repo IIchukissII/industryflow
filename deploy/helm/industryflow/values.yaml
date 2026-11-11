@@ -847,7 +847,8 @@ notebookHub:
   # read-only analytics (ADR-0014 dec 4). Comma-separated; an unknown role stops the hub at start.
   authoringRoles: "admin,engineer"
   # The notebook origin's own host (ADR-0048 dec 6): a sibling of the frontend's, never the same one
-  # (the render fails). The /notebooks page frames it; it is in no CORS allowlist (dec 2).
+  # (the render fails). The /notebooks page frames it; it is in no CORS allowlist (dec 2). The
+  # Ingress serves it with ingress.tls.secretName, whose certificate must name this host too.
   host: notebooks.industryflow.local
   # Per-user images the hub spawns by role profile (ADR-0011 dec 5): authoring = JupyterLab + the
   # lean DS stack; analytics = Voila read-only dashboards. Referenced by the spawner, not run as

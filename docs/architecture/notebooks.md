@@ -417,6 +417,7 @@ the single-user servers.
 | `services/notebook_hub/sso-nginx.conf` | Compose: platform cookies removed before the hub |
 | `deploy/helm/industryflow/templates/notebook-hub.yaml` | Kubernetes: the same |
 | `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_proxy_sends_the_hub_no_platform_cookie` | Proof: no platform or notebook session cookie reaches the hub |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_a_second_cookie_of_a_platform_name_refuses_the_request` | Proof: a planted duplicate refuses the request (400) instead of passing |
 
 ## ADR-0014 dec 6
 
@@ -922,7 +923,7 @@ the gateway at startup. Platform cookies that reach the notebook origin are read
 
 | Step | Form |
 |---|---|
-| Mint | `POST /api/notebook-ticket` on the platform session (CSRF-checked): `{ticket, entry, origin}`, `Cache-Control: no-store`. 404 without `NOTEBOOK_ORIGIN`; 409 for a session with no refresh token |
+| Mint | `POST /api/notebook-ticket` on the platform session (CSRF-checked): `{ticket, entry, origin}`, `Cache-Control: no-store`. 404 without `NOTEBOOK_ORIGIN`; 409 for a session not live (`session-live:<sid>` absent), after which the app refreshes the session once and asks again |
 | Ticket | Capability entry `nbcap:<ticket>`, audience `notebook`, user, tenant, `sid`, 30 s (`TICKET_TTL_SECONDS`); `minted` recorded with it |
 | Exchange | `POST <notebook origin>/enter`, form field `ticket`, `Origin` in `CORS_ORIGINS`, `Host` the notebook origin's; spent once (`consumed` recorded), refusals recorded ([ADR-0042](#adr-0042-dec-1-3-5)) |
 | Notebook session | `notebook-session:<handle>` naming user, `sid`, issue time and a password fingerprint, for one refresh lifetime; cookie `if_nb`, host-only, `HttpOnly`, `Secure`, `SameSite=Strict`; then `303 /` |

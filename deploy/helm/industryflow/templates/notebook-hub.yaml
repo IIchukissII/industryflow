@@ -345,6 +345,13 @@ data:
         default $if_cookie_no_notebook;
         "~^;[ ]*(.*)$" "$1";
     }
+    # Each map above removes one cookie of its name; a second one of the same name (script on this
+    # origin can plant one with another Path) is still there, and the request is refused rather than
+    # passed on with it.
+    map $if_hub_cookie $if_platform_cookie_left {
+        default 0;
+        "~(?:^|;)[ ]*if_[A-Za-z0-9_]*=" 1;
+    }
     # A browser without a notebook session: a page in the platform's frame is told so, a top-level one
     # is sent to the platform's notebooks page, which enters again.
     map $http_sec_fetch_dest $if_no_session_top_level {
@@ -402,6 +409,9 @@ data:
             # Always set, so a client-supplied value never passes; empty (not sent) off hub routes.
             proxy_set_header X-IF-SSO-Proxy-Secret $if_sso_proxy_secret;
             # No platform cookie and not the notebook session's (the maps above).
+            if ($if_platform_cookie_left) {
+                return 400;
+            }
             proxy_set_header Cookie $if_hub_cookie;
 
             proxy_pass http://{{ $proxySvc }}:{{ .Values.notebookHub.proxy.port }};

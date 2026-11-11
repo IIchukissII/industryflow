@@ -737,6 +737,27 @@ def test_the_proxy_sends_the_hub_no_platform_cookie(where):
 
 
 @pytest.mark.parametrize("where", sorted(SSO_CONFIGS))
+def test_a_second_cookie_of_a_platform_name_refuses_the_request(where):
+    # Script on the notebook origin can plant a same-named cookie with another Path; the browser then
+    # sends both, and the strip removes one. What is left refuses the request instead of reaching the
+    # single-user server.
+    conf = SSO_CONFIGS[where]
+    body = re.search(r"map \$if_hub_cookie \$if_platform_cookie_left \{(.*?)\n\s*\}", conf, re.S).group(1)
+    left = re.compile(re.search(r'"~(.*?)" 1;', body).group(1))
+    hub_loc = re.search(r"\n        location / \{(.*?)\n        \}", conf, re.S).group(1)
+    assert re.search(r"if \(\$if_platform_cookie_left\) \{\s*return 400;", hub_loc)
+    platform, nb = _cookie_names()
+    send = _hub_cookie(where)
+    hub = "jupyterhub-session-id=s; _xsrf=x"
+    for name in [*platform, nb]:
+        assert left.search(send(f"{name}=planted; {hub}; {name}=real")), name
+        assert left.search(send(f"{hub};{name}=a;{name}=b")), name
+        assert not left.search(send(f"{name}=one; {hub}")), name
+    assert not left.search(send(hub))
+    assert not left.search("xif_access=keep; " + hub)
+
+
+@pytest.mark.parametrize("where", sorted(SSO_CONFIGS))
 def test_the_session_check_reads_the_notebook_session_only(where):
     # ADR-0048 dec 2: a platform cookie that reaches the notebook origin is honoured nowhere there.
     conf = SSO_CONFIGS[where]

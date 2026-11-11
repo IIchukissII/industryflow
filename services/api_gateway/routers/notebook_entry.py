@@ -30,7 +30,7 @@ from messaging import refresh_tokens
 from messaging.redis_client import redis_client
 from models.user import User
 from origins import allowed_origins
-from routers.auth_tokens import _presented_access_claims
+from routers.auth_tokens import presented_access_claims
 from users import admit_session, get_user_manager
 
 # Header names the SSO proxy reads (must match services/notebook_hub/identity.py).
@@ -59,7 +59,7 @@ async def mint_ticket(request: Request, response: Response,
     A session that cannot be continued (a sign-in without a refresh token) opens no notebook session,
     since nothing would end it."""
     origin = _notebook_origin()
-    claims = _presented_access_claims(request) or {}
+    claims = presented_access_claims(request) or {}
     session_id = claims.get("sid")
     try:
         live = await refresh_tokens.session_live(session_id)
@@ -87,9 +87,9 @@ async def enter(request: Request, ticket: str = Form(...), user_manager=Depends(
     session cookie lands on the notebook origin only.
     """
     origin = _notebook_origin()
-    if request.headers.get("origin", "").rstrip("/") not in allowed_origins():
+    if request.headers.get("origin", "").rstrip("/").lower() not in allowed_origins():
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Entry is sent by a platform page")
-    if request.headers.get("host") != urlsplit(origin).netloc:
+    if (request.headers.get("host") or "").lower() != urlsplit(origin).netloc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Entry is made on the notebook origin")
     source = await audit.client_source(request.client.host if request.client else None,
                                        request.headers.get("x-real-ip"), EDGE_PEERS)

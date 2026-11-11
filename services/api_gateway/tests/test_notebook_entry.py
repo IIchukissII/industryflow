@@ -257,7 +257,8 @@ def test_the_platform_page_and_non_browser_callers_are_unaffected(world):
     assert world.client.post("/auth/logout").status_code == 204
 
 
-@pytest.mark.parametrize("value", ["https://nb.example.com/path", "nb.example.com", "https://nb.example.com?x"])
+@pytest.mark.parametrize("value", ["https://nb.example.com/path", "nb.example.com", "https://nb.example.com?x",
+                                   "http://nb.example.com"])
 def test_the_notebook_origin_is_an_origin(value):
     with pytest.raises(ValidationError, match="ADR-0048"):
         config.Settings(CORS_ORIGINS=PLATFORM, NOTEBOOK_ORIGIN=value)
@@ -265,7 +266,7 @@ def test_the_notebook_origin_is_an_origin(value):
 
 def test_the_notebook_origin_is_in_no_allowlist():
     with pytest.raises(ValidationError, match="ADR-0048 dec 2"):
-        config.Settings(CORS_ORIGINS=f"{PLATFORM}, {NOTEBOOK}", NOTEBOOK_ORIGIN=f"{NOTEBOOK}/")
+        config.Settings(CORS_ORIGINS=f"{PLATFORM}, {NOTEBOOK}", NOTEBOOK_ORIGIN=f"{NOTEBOOK.upper()}/")
     assert config.Settings(CORS_ORIGINS=PLATFORM, NOTEBOOK_ORIGIN=f"{NOTEBOOK}/").NOTEBOOK_ORIGIN == NOTEBOOK
 
 
@@ -275,3 +276,20 @@ def test_verify_header_names_match_hub_contract():
 
     assert (route.HEADER_USER, route.HEADER_COMPANY_ID, route.HEADER_ROLE) == (
         "X-IF-User", "X-IF-Company-Id", "X-IF-Role")
+
+
+def test_the_notebook_origin_is_refused_whatever_host_it_addresses(world):
+    # Addressed to the notebook host itself, its own origin is still no platform page.
+    r = world.client.post("/auth/logout", headers={"Origin": NOTEBOOK, "Host": NB_HOST})
+    assert r.status_code == 403 and r.json()["detail"] == "Cross-origin request refused"
+    r = world.client.post("/auth/logout", headers={"Origin": NOTEBOOK.upper(), "Host": "testserver"})
+    assert r.status_code == 403
+
+
+@pytest.mark.parametrize("step", ["entry", "verify"])
+def test_an_account_held_to_a_password_change_does_not_enter(world, step):
+    cookie, _ = _nb_cookie(_entered(world)) if step == "verify" else (None, None)
+    ticket = _mint(world, _signed_in(world, "sid-h")).json()["ticket"] if step == "entry" else None
+    world.user.password_change_required = True
+    r = _enter(world, ticket) if step == "entry" else _verify(world, cookie)
+    assert r.status_code == 403 and r.json()["detail"] == users.PASSWORD_CHANGE_REQUIRED

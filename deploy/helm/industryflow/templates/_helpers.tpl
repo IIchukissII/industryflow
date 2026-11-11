@@ -325,8 +325,8 @@ when they are the same: kernel-produced script must never run on the platform or
 {{- end -}}
 
 {{- define "industryflow.notebookOrigin" -}}
-{{- $origin := printf "https://%s" (required "notebookHub.host: the notebook origin's own host (ADR-0048)" .Values.notebookHub.host) -}}
-{{- if eq $origin (include "industryflow.platformOrigin" .) -}}
+{{- $origin := printf "https://%s" (required "notebookHub.host: the notebook origin's own host (ADR-0048)" .Values.notebookHub.host) | lower -}}
+{{- if eq $origin (include "industryflow.platformOrigin" . | lower) -}}
 {{- fail "notebookHub.host must differ from the platform's host (ADR-0048 dec 1)" -}}
 {{- end -}}
 {{- $origin -}}

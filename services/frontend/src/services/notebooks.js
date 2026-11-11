@@ -7,6 +7,8 @@
 // in a form body (never a URL), into the frame or tab that is to show the hub. The notebook origin
 // spends it for a notebook session of its own.
 
+import { refreshSession } from './session';
+
 const ORIGIN_KEY = 'if.notebookOrigin';
 let knownOrigin = null;
 
@@ -29,10 +31,22 @@ export function notebookOrigin() {
   }
 }
 
+// A ticket for this session. A session the platform cannot yet continue (409: one signed in before
+// notebooks had their own origin) is refreshed once, which makes it one.
+async function mint(post, refresh) {
+  try {
+    return (await post('/api/notebook-ticket')).data;
+  } catch (err) {
+    if (err?.response?.status !== 409) throw err;
+    await refresh();
+    return (await post('/api/notebook-ticket')).data;
+  }
+}
+
 // Mint a ticket and post it into `target` (a frame or window name). Resolves once the form is sent;
 // rejects with the platform's refusal if no ticket was minted.
-export async function enterNotebooks({ post, target, doc = globalThis.document }) {
-  const { data } = await post('/api/notebook-ticket');
+export async function enterNotebooks({ post, target, doc = globalThis.document, refresh = refreshSession }) {
+  const data = await mint(post, refresh);
   remember(data.origin);
   const form = doc.createElement('form');
   form.method = 'POST';

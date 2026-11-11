@@ -14,7 +14,7 @@ from sqlalchemy.engine import URL
 # hold the wildcard (ADR-0004 dec 6).
 CORS_ALLOW_CREDENTIALS = True
 # An origin: scheme, host and an optional port, nothing after.
-_ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?")
+_ORIGIN = re.compile(r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?")
 
 
 class Settings(BaseSettings):
@@ -91,10 +91,10 @@ class Settings(BaseSettings):
         """An origin and nothing more, never one the allowlist admits (ADR-0048 dec 1, 2)."""
         if value is None or not value.strip():
             return None
-        value = value.strip().rstrip("/")
+        value = value.strip().rstrip("/").lower()
         if not _ORIGIN.fullmatch(value):
             raise ValueError("NOTEBOOK_ORIGIN must be an origin, https://host[:port] (ADR-0048)")
-        if value in {o.rstrip("/") for o in cors_origin_list(info.data.get("CORS_ORIGINS") or "")}:
+        if value in {o.rstrip("/").lower() for o in cors_origin_list(info.data.get("CORS_ORIGINS") or "")}:
             raise ValueError("NOTEBOOK_ORIGIN must not be in CORS_ORIGINS (ADR-0048 dec 2)")
         return value
 
