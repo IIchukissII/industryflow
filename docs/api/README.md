@@ -51,9 +51,10 @@ The browser reaches every API same-origin through the HTTPS edge
 | `/api/2.0/industryflow-upload/` | Tracking gateway ([model upload](../architecture/model-upload.md)) |
 | `/mlflow/_upload-staging/` | Object store, pre-signed requests only |
 | `/api/`, `/auth/`, `/users/`, `/health`, `/docs`, `/openapi.json`, `/ws/` | `api-gateway` |
-| `/jupyter/` | Notebook SSO → notebook hub ([ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md)); moves to the notebook origin ([ADR-0048](../../ADR/ADR-0048-notebook-environments-are-served-from-an-origin-of-their-own.md)) |
 | `/grafana/` | Grafana, only when `EDGE_GRAFANA` is set; signed on from a superuser session ([ADR-0016](../../ADR/ADR-0016-observability-and-monitoring-integration.md) dec 6-7) |
 | `/` | The single-page app |
+
+The notebook hub is on an origin of its own, not a path of this one ([notebooks](../architecture/notebooks.md#adr-0048-dec-1-6)).
 
 ## Conventions
 

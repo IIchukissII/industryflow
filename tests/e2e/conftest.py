@@ -13,6 +13,7 @@ is a failure, so a run that validates a commit cannot pass by skipping.
 | Variable | Meaning |
 |---|---|
 | ``IF_E2E_EDGE`` | The HTTPS edge, ``https://<host>`` |
+| ``IF_E2E_NOTEBOOKS`` | The notebook origin, the deployment's ``NOTEBOOK_ORIGIN`` |
 | ``IF_E2E_INGEST`` | The device edge, ``https://<host>:8443/ingest`` |
 | ``IF_E2E_CA`` | The edges' CA certificate |
 | ``IF_E2E_SUPERUSER_EMAIL``, ``IF_E2E_SUPERUSER_PASSWORD`` | The run's platform superuser |
@@ -29,7 +30,7 @@ import pytest
 
 from harness import Edge, Environment, Secret, issue_device
 
-REQUIRED = ("IF_E2E_EDGE", "IF_E2E_INGEST", "IF_E2E_CA", "IF_E2E_SUPERUSER_EMAIL",
+REQUIRED = ("IF_E2E_EDGE", "IF_E2E_NOTEBOOKS", "IF_E2E_INGEST", "IF_E2E_CA", "IF_E2E_SUPERUSER_EMAIL",
             "IF_E2E_SUPERUSER_PASSWORD", "IF_E2E_COMPOSE_DIR", "IF_E2E_WORK", "IF_E2E_AUTHORING_IMAGE")
 # Read only where it is used, never part of what a fixture hands a test.
 SECRET = "IF_E2E_SUPERUSER_PASSWORD"

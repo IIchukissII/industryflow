@@ -165,8 +165,12 @@ variables move together (tests/config_guards renders both and compares).
   value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "api-gateway")) (index $apps "api-gateway").port | quote }}
 - name: EDGE_ML_SERVICE
   value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "ml-service-api")) (index $apps "ml-service-api").port | quote }}
-- name: EDGE_NOTEBOOK_SSO
-  value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "notebook-sso")) .Values.notebookHub.ssoProxy.port | quote }}
+{{- if .Values.notebookHub.enabled }}
+# The notebook origin the app frames (ADR-0048 dec 5). The Ingress serves it on its own host straight
+# to the SSO proxy, so this edge serves no notebook port (no EDGE_NOTEBOOK_SSO).
+- name: EDGE_NOTEBOOK_ORIGIN
+  value: {{ include "industryflow.notebookOrigin" . | quote }}
+{{- end }}
 - name: EDGE_TRACKING_GATEWAY
   value: {{ printf "%s:%v" (include "industryflow.serviceFqdn" (dict "ctx" . "name" "notebook-tracking-gateway")) .Values.notebookHub.trackingGateway.port | quote }}
 # Behind the Ingress the edge sees the Ingress's address, not the client's: the per-source sign-in
@@ -309,4 +313,21 @@ cut the workload off from the store it needs.
       port: {{ required "networkPolicy.externalEgress entries need a port" .port }}
 {{- end }}
 {{- end }}
+{{- end -}}
+
+{{/*
+The two browser origins (ADR-0047, ADR-0048): the platform's (publicBaseUrl, else the frontend's
+Ingress host) and the notebook origin, a sibling host of its own (notebookHub.host). The render fails
+when they are the same: kernel-produced script must never run on the platform origin (ADR-0048 dec 1).
+*/}}
+{{- define "industryflow.platformOrigin" -}}
+{{- .Values.publicBaseUrl | default (printf "https://%s" (index .Values.apps "frontend").ingress.host) | trimSuffix "/" -}}
+{{- end -}}
+
+{{- define "industryflow.notebookOrigin" -}}
+{{- $origin := printf "https://%s" (required "notebookHub.host: the notebook origin's own host (ADR-0048)" .Values.notebookHub.host) | lower -}}
+{{- if eq $origin (include "industryflow.platformOrigin" . | lower) -}}
+{{- fail "notebookHub.host must differ from the platform's host (ADR-0048 dec 1)" -}}
+{{- end -}}
+{{- $origin -}}
 {{- end -}}

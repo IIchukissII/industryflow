@@ -29,8 +29,8 @@ TEMPLATE = (FRONTEND / "nginx.conf.template").read_text()
 ENTRYPOINT = (FRONTEND / "docker-entrypoint-edge.sh").read_text()
 
 # Defaulted by the entrypoint (the container's own nameservers; the sign-in limit on); a deployment may
-# override them.
-OPTIONAL = {"EDGE_RESOLVER", "EDGE_SIGN_IN_PER_SOURCE"}
+# override them. The frame and notebook sources are computed by it from EDGE_NOTEBOOK_ORIGIN.
+OPTIONAL = {"EDGE_RESOLVER", "EDGE_SIGN_IN_PER_SOURCE", "EDGE_FRAME_SOURCES", "EDGE_NOTEBOOK_SOURCES"}
 
 
 def _template_vars() -> set[str]:
@@ -368,3 +368,29 @@ def test_the_browser_edge_is_published_on_ipv4_only():
     ports = compose["services"]["frontend"]["ports"]
     assert ports, "the browser edge publishes no port"
     assert [p for p in ports if not str(p).startswith("0.0.0.0:")] == [], ports
+
+
+NOTEBOOK_ORIGIN_SERVER = (FRONTEND / "notebook-origin.conf.template").read_text()
+
+
+def test_the_notebook_origin_is_served_only_where_the_deployment_names_its_proxy():
+    # ADR-0048 dec 1, 6: compose serves it on the edge's second port; the chart's Ingress serves it on
+    # its own host, so the chart names no EDGE_NOTEBOOK_SSO and every deployment names the origin.
+    assert "EDGE_NOTEBOOK_SSO" not in _template_vars(), "the platform server must not reach the SSO proxy"
+    assert re.search(r"^\s*listen 8444 ssl;", NOTEBOOK_ORIGIN_SERVER, re.M)
+    assert 'if [ -n "${EDGE_NOTEBOOK_SSO:-}" ]; then' in ENTRYPOINT
+    compose = compose_env()
+    assert compose["EDGE_NOTEBOOK_SSO"] and compose["EDGE_NOTEBOOK_ORIGIN"].startswith("https://")
+    helm = helm_env(["--set", "notebookHub.enabled=true"])
+    assert "EDGE_NOTEBOOK_SSO" not in helm and helm["EDGE_NOTEBOOK_ORIGIN"].startswith("https://")
+    service = yaml.safe_load((ROOT / "docker-compose.yml").read_text())["services"]["frontend"]
+    assert any(str(p).endswith(":8444") for p in service["ports"]), service["ports"]
+
+
+def test_the_platform_policy_frames_the_notebook_origin_only():
+    # ADR-0048 dec 5: framed, posted to and signed out of; nothing else.
+    csp = re.search(r'default "([^"]+)";', TEMPLATE).group(1)
+    assert "frame-src ${EDGE_FRAME_SOURCES};" in csp
+    assert "form-action 'self'${EDGE_NOTEBOOK_SOURCES};" in csp
+    assert "connect-src 'self'${EDGE_NOTEBOOK_SOURCES};" in csp
+    assert "/jupyter/" not in TEMPLATE

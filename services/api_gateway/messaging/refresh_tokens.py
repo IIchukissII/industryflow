@@ -39,12 +39,22 @@ _PREFIX = "refresh:"
 _USER_PREFIX = "refresh-user:"
 # What a claimed refresh token was rotated into, kept for the token's own lifetime (ADR-0004 dec 2).
 _ROTATED_PREFIX = sessions.ROTATED_REFRESH_PREFIX
+_LIVE_PREFIX = "session-live:"
 # A second presentation this soon after the rotation is a concurrent refresh (another tab of the same
 # browser), answered with the successor already issued; later, it is a reuse and ends the session.
 ROTATION_GRACE_SECONDS = 10
 # How long a concurrent refresh waits for the rotation it raced to record itself, and its successor.
 _RECORD_WAIT_SECONDS = 0.5
 _SUCCESSOR_WAIT_SECONDS = 2.0
+# KEYS[1] the session's ended record, KEYS[2] its live marker; ARGV[1] the user, ARGV[2] the lifetime.
+# Ending a session writes the one and removes the other in one transaction, so the two never both hold.
+_MARK_LIVE_SCRIPT = """
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return 0
+end
+redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[2])
+return 1
+"""
 
 
 @dataclass(frozen=True)
@@ -72,10 +82,23 @@ def _ttl() -> int:
     return settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
 
 
+def session_ttl() -> int:
+    """The longest a session lives without being continued: one refresh lifetime."""
+    return _ttl()
+
+
 def _ended_ttl() -> int:
-    """How long an ended-session record must live: past the expiry of any access token issued
-    before it (one access-token lifetime, plus a minute of clock skew)."""
-    return settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60 + 60
+    """How long an ended-session record must live: past the expiry of anything issued in the session
+    before it ended, its refresh tokens, its access tokens and a notebook session bound to it
+    (ADR-0048 dec 4), all of which live at most one refresh lifetime; plus a minute of clock skew."""
+    return _ttl() + 60
+
+
+def live_session_key(session_id: str) -> str:
+    """Present while the session can still be continued: set with each refresh token issued in it,
+    for that token's lifetime, and removed when the session ends. A notebook session asks it, because
+    nothing else it carries expires with the session (ADR-0048 dec 4)."""
+    return f"{_LIVE_PREFIX}{session_id}"
 
 
 def new_session_id() -> str:
@@ -89,14 +112,18 @@ async def create_refresh_token(user_id: str, hashed_password: str, session_id: O
     session.
     """
     token = secrets.token_urlsafe(48)
+    session_id = session_id or new_session_id()
     value = json.dumps({"uid": str(user_id), "cred": credential_fingerprint(hashed_password),
-                        "sid": session_id or new_session_id()})
+                        "sid": session_id})
     async with redis_client.redis.pipeline(transaction=True) as pipe:
         pipe.set(_key(token), value, ex=_ttl())
         pipe.sadd(_user_key(str(user_id)), token)
         # The index lives as long as the newest token in it.
         pipe.expire(_user_key(str(user_id)), _ttl())
         await pipe.execute()
+    # A token issued in a race with the end of its session does not make the session live again.
+    await redis_client.redis.eval(_MARK_LIVE_SCRIPT, 2, sessions.ended_session_key(session_id),
+                                  live_session_key(session_id), str(user_id), str(_ttl()))
     return token
 
 
@@ -200,9 +227,9 @@ async def _end_reused_session(claim: RefreshClaim) -> None:
     longer the user's alone. End it: its live refresh token, and (by the record) its access tokens."""
     if not claim.session_id:
         return
-    # For the refresh lifetime, not the access one: a refresh token of the session issued in a race
-    # with this must find the session ended whenever it is presented (session_was_ended).
-    await _record_session_ended(claim.session_id, ttl=_ttl())
+    # The record lives a refresh lifetime: a refresh token of the session issued in a race with this
+    # must find the session ended whenever it is presented (session_was_ended).
+    await _record_session_ended(claim.session_id)
     index = _user_key(claim.user_id)
     for t in await redis_client.redis.smembers(index):
         t = t.decode() if isinstance(t, bytes) else t
@@ -244,8 +271,23 @@ def _owner(raw: str) -> tuple[str, Optional[str]]:
         return raw, None
 
 
-async def _record_session_ended(session_id: str, ttl: Optional[int] = None) -> None:
-    await redis_client.redis.set(sessions.ended_session_key(session_id), "1", ex=ttl or _ended_ttl())
+async def _record_session_ended(session_id: str) -> None:
+    async with redis_client.redis.pipeline(transaction=True) as pipe:
+        pipe.set(sessions.ended_session_key(session_id), "1", ex=_ended_ttl())
+        pipe.delete(live_session_key(session_id))
+        await pipe.execute()
+
+
+async def session_live(session_id: Optional[str]) -> bool:
+    """Whether the session can still be continued (``live_session_key``). An unreadable store
+    propagates: an unknown answer is not a yes."""
+    if not session_id:
+        return False
+    import asyncio
+
+    raw = await asyncio.wait_for(redis_client.redis.exists(live_session_key(str(session_id))),
+                                 sessions.READ_TIMEOUT_SECONDS)
+    return bool(raw)
 
 
 async def session_was_ended(session_id: Optional[str]) -> bool:

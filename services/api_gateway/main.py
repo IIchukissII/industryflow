@@ -13,10 +13,11 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from industryflow_contracts import build_info
 
 from config import CORS_ALLOW_CREDENTIALS, cors_origin_list, get_settings
+from origins import origin_admitted
 from routers import (
     health, measurements, aggregations, websocket, cache,
     training_data, alerts_history, companies,
-    equipment, alert_rules, auth_tokens, auth_verify, user_admin, capability_use, platform_switches,
+    equipment, alert_rules, auth_tokens, notebook_entry, user_admin, capability_use, platform_switches,
     dashboards_assertion,
 )
 from database import close_engine, engine
@@ -136,6 +137,20 @@ async def csrf_protect(request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def refuse_foreign_origins(request, call_next):
+    """
+    A state-changing request a browser sent from an origin the gateway does not admit is refused,
+    whatever it carries (ADR-0048 dec 2; ``origins.origin_admitted``). The notebook origin is the same
+    site, so the browser attaches the platform cookies to its requests; this keeps /auth/*, which the
+    double-submit check above exempts, out of its reach as well.
+    """
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and not origin_admitted(
+            request.headers.get("origin"), request.headers.get("host")):
+        return JSONResponse(status_code=403, content={"detail": "Cross-origin request refused"})
+    return await call_next(request)
+
+
 # Prometheus metrics
 Instrumentator().instrument(app).expose(app)
 # The source revision this image was built from (ADR-0016 dec 8).
@@ -154,8 +169,8 @@ app.include_router(user_admin.router)
 
 # Refresh-token auth (login -> access + refresh, /auth/refresh, /auth/logout) — ADR-0004
 app.include_router(auth_tokens.router)
-# Session-verification endpoint for the notebook-hub SSO handoff (ADR-0014).
-app.include_router(auth_verify.router)
+# Entering the notebook origin and the SSO proxy's session check (ADR-0048, ADR-0014).
+app.include_router(notebook_entry.router)
 app.include_router(dashboards_assertion.router)
 
 

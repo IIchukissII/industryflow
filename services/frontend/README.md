@@ -53,19 +53,21 @@ New views use the tokens in `theme.css` instead of literal colours.
 
 ## ADR-0047 dec 2
 
-The notebook environments' own origin is not yet realised: the edge still serves the hub under
-`/jupyter/` ([notebooks](../../docs/architecture/notebooks.md#adr-0048-dec-1-6)).
+The notebook environments are on their own origin, not a sub-path: under compose the edge serves it
+on its second TLS port (`notebook-origin.conf.template`), and the app's policy frames it
+([notebooks](../../docs/architecture/notebooks.md#adr-0048-dec-1-6)).
 
 The edge serves every browser-reached plane by sub-path: [edge routes](../../docs/api/README.md#edge-routes).
-Each upstream is an `EDGE_*` variable (`EDGE_API_GATEWAY`, `EDGE_ML_SERVICE`, `EDGE_NOTEBOOK_SSO`,
-`EDGE_TRACKING_GATEWAY`, `EDGE_OBJECT_STORE_URL`; `EDGE_RESOLVER` defaults to the container's
-nameservers), set by the `frontend` service in `docker-compose.yml` and by the
+Each upstream is an `EDGE_*` variable (`EDGE_API_GATEWAY`, `EDGE_ML_SERVICE`, `EDGE_TRACKING_GATEWAY`, `EDGE_OBJECT_STORE_URL`;
+`EDGE_RESOLVER` defaults to the container's nameservers; `EDGE_NOTEBOOK_ORIGIN` and
+`EDGE_NOTEBOOK_SSO` where notebooks are deployed), set by the `frontend` service in `docker-compose.yml` and by the
 chart's `_helpers.tpl`; Kubernetes upstreams are fully qualified (`<svc>.<namespace>.svc.<clusterDomain>`),
 as nginx re-resolves them per request without search domains.
 
 | Code | Role |
 |---|---|
-| `services/frontend/nginx.conf.template` | Routes `/jupyter/`, the upload plane and the staging area to their upstreams; security headers at server level: `Content-Security-Policy` and `X-Frame-Options: SAMEORIGIN` on the app (none under `/jupyter/`, `/docs`, `/grafana/`), `nosniff`, referrer and permissions policy |
+| `services/frontend/nginx.conf.template` | Routes the upload plane and the staging area to their upstreams; security headers at server level: `Content-Security-Policy` (none under `/docs`, `/grafana/`) and `X-Frame-Options: SAMEORIGIN`, `nosniff`, referrer and permissions policy |
+| `services/frontend/notebook-origin.conf.template` | The notebook origin's server, rendered only when `EDGE_NOTEBOOK_SSO` is set |
 | `services/frontend/grafana.conf.template` | `/grafana/` route, rendered only when `EDGE_GRAFANA` is set; `EDGE_GRAFANA_ALLOW` source allowlist ([monitoring](../../docs/operations/monitoring.md)) |
 
 Links: [TLS at the edge, ports and certificates](../../docs/operations/tls.md#adr-0004-dec-1),

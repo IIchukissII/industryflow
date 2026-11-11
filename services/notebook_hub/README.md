@@ -32,7 +32,9 @@ One configuration serves both spawners; `NOTEBOOK_SPAWNER` selects one.
 | Name | Default | Meaning |
 |---|---|---|
 | `NOTEBOOK_SPAWNER` | `kube` | `kube` (KubeSpawner) or `docker` (DockerSpawner) |
-| `NOTEBOOK_BASE_URL` | `/` | Hub path prefix (`/jupyter/` when embedded) |
+| `NOTEBOOK_BASE_URL` | `/` | Hub path prefix on the notebook origin (`/jupyter/` in both deployments) |
+| `NOTEBOOK_PLATFORM_ORIGIN` | required | The only origin that may frame the hub |
+| `NOTEBOOK_ORIGIN` | required | The hub's own origin; the hub does not start unless it differs from `NOTEBOOK_PLATFORM_ORIGIN` in host or port |
 | `REDIS_URL` | required | Capability store |
 | `NOTEBOOK_SSO_PROXY_SECRET` | required | Shared with the SSO proxy; ≥ 32 alphanumeric characters; the hub does not start without it |
 | `NOTEBOOK_AUTHORING_ROLES` | `admin,engineer` | Comma-separated platform roles (`admin`, `engineer`, `observer`) that get the authoring profile; any other role gets analytics; an empty list or an unknown role stops the hub at start |

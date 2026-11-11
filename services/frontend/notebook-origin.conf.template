@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The notebook origin (ADR-0048), where this edge serves it: a second TLS port on the platform's host
+# and certificate, for an install reached by an address or a local name (dec 6). Rendered into
+# conf.d by 10-edge-config.sh only when the deployment names EDGE_NOTEBOOK_SSO.
+#
+# Everything here goes to the notebook SSO proxy, which takes the ticket exchange, checks the notebook
+# session on every request and serves the hub; no path of the platform's server reaches it, and none
+# of the platform's routes is served here (dec 1). The hub and every environment set their own frame
+# policy (dec 5), so this server sets none.
+
+server {
+    listen 8444 ssl;
+    http2 on;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/certs/tls.crt;
+    ssl_certificate_key /etc/nginx/certs/tls.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    resolver ${EDGE_RESOLVER} valid=10s ipv6=off;
+    absolute_redirect off;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    set $notebook_sso ${EDGE_NOTEBOOK_SSO};
+
+    # WebSocket-heavy (Lab and kernel channels). The Host as the client sent it, port included: the
+    # exchange is accepted on the notebook origin only.
+    location / {
+        proxy_pass http://$notebook_sso;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+    }
+}

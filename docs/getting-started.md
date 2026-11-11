@@ -104,12 +104,13 @@ readings within seconds; `GET /api/measurements/latest` reads them back. Options
 
 ```bash
 # In .env: DOCKER_GID=$(getent group docker | cut -d: -f3), JUPYTERHUB_CRYPT_KEY and
-# NOTEBOOK_SSO_PROXY_SECRET (openssl rand -hex 32 each)
+# NOTEBOOK_SSO_PROXY_SECRET (openssl rand -hex 32 each); PLATFORM_ORIGIN and NOTEBOOK_ORIGIN as the
+# browser reaches them (same host, NOTEBOOK_HTTPS_PORT for the notebook origin)
 docker compose --profile notebooks build
 docker compose --profile notebooks up -d
 ```
 
-Open `https://localhost:<FRONTEND_HTTPS_PORT>/jupyter/` after signing in. The notebook hub spawns
+Open **Notebooks** in the app after signing in; the hub is framed from `NOTEBOOK_ORIGIN`. The notebook hub spawns
 per-user containers through the Docker socket ([notebooks](architecture/notebooks.md)).
 
 ### Components

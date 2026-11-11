@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS public.capability_use_events (
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     company_id UUID,
     user_id TEXT,
-    audience TEXT CHECK (audience IN ('api', 'sql', 'tracking', 'cold', 'upload')),
+    audience TEXT CHECK (audience IN ('api', 'sql', 'tracking', 'cold', 'upload', 'notebook')),
     handle_id UUID,
     digest TEXT CHECK (digest ~ '^[0-9a-f]{16}$'),
     reason TEXT,
@@ -40,6 +40,13 @@ CREATE TABLE IF NOT EXISTS public.capability_use_events (
 -- (ADR-0042 dec 8).
 ALTER TABLE public.capability_use_events
     ADD COLUMN IF NOT EXISTS suppressed INTEGER CHECK (suppressed > 0);
+-- A table created before the audience list grew keeps its old check; this definition restates it on
+-- every application, so the table's list is the one above.
+ALTER TABLE public.capability_use_events
+    DROP CONSTRAINT IF EXISTS capability_use_events_audience_check;
+ALTER TABLE public.capability_use_events
+    ADD CONSTRAINT capability_use_events_audience_check
+    CHECK (audience IN ('api', 'sql', 'tracking', 'cold', 'upload', 'notebook'));
 CREATE INDEX IF NOT EXISTS idx_capability_use_events_company
     ON public.capability_use_events (company_id, at);
 -- A tenant's page, newest first, as the reader asks for it (ORDER BY event_id DESC under a tenant).

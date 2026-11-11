@@ -841,13 +841,14 @@ networkPolicy:
 # implemented at GET /auth/verify (ADR-0014 handoff contract).
 notebookHub:
   enabled: false
-  # Path prefix the hub is mounted under, embedded same-origin in the frontend (ADR-0014): the
-  # notebooks Ingress serves this prefix on the frontend's host, and the /notebooks page iframes it.
+  # The hub's path on the notebook origin; the origin's root is sent here.
   baseUrl: /jupyter/
   # Platform roles (admin, engineer, observer) that get the authoring profile; every other role gets
   # read-only analytics (ADR-0014 dec 4). Comma-separated; an unknown role stops the hub at start.
   authoringRoles: "admin,engineer"
-  # Legacy standalone host (unused under single-origin; kept for a dedicated-host deployment).
+  # The notebook origin's own host (ADR-0048 dec 6): a sibling of the frontend's, never the same one
+  # (the render fails). The /notebooks page frames it; it is in no CORS allowlist (dec 2). The
+  # Ingress serves it with ingress.tls.secretName, whose certificate must name this host too.
   host: notebooks.industryflow.local
   # Per-user images the hub spawns by role profile (ADR-0011 dec 5): authoring = JupyterLab + the
   # lean DS stack; analytics = Voila read-only dashboards. Referenced by the spawner, not run as
@@ -867,13 +868,14 @@ notebookHub:
   proxy:
     image: jupyterhub/configurable-http-proxy:4.6.3@sha256:3e93aaee24350050dca97bfe9a05eab8bd26781d08cd9682268a38053643d709
     port: 8000
-  # SSO reverse proxy (ADR-0014): validates the platform session against api-gateway and
-  # forwards the verified identity to the hub, overwriting any client-supplied identity.
+  # SSO reverse proxy (ADR-0014, ADR-0048): serves the notebook origin, exchanges the ticket for a
+  # notebook session, checks it against api-gateway and forwards the verified identity to the hub,
+  # overwriting any client-supplied identity.
   ssoProxy:
     image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
     port: 8080
-    # api-gateway endpoint that validates the session cookie and returns the verified identity
-    # in X-IF-* response headers (implemented; ADR-0014 handoff contract).
+    # api-gateway endpoint that checks the notebook session and returns the verified identity in
+    # X-IF-* response headers (ADR-0014 handoff contract).
     verifyPath: /auth/verify
   # SQL access proxy (ADR-0015): authoring kernels connect with a Postgres driver using their SQL
   # capability handle as the password; the proxy logs in as that tenant's own login

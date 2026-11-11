@@ -150,7 +150,7 @@ async def _session_was_ended(session_id) -> bool:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Session store not available")
 
 
-def _presented_access_claims(request: Request) -> Optional[dict]:
+def presented_access_claims(request: Request) -> Optional[dict]:
     """The verified claims of the access token the request carries (Bearer header or cookie)."""
     header = request.headers.get("Authorization", "")
     token = header[7:] if header.startswith("Bearer ") else request.cookies.get(ACCESS_COOKIE)
@@ -172,7 +172,7 @@ async def logout(request: Request, response: Response, body: Optional[RefreshReq
         user_id = await refresh_tokens.revoke_refresh_token(token)
     # The access token presented ends its own session too, so a logout that carries no refresh
     # token (or another session's) still ends the session the caller is in.
-    claims = _presented_access_claims(request)
+    claims = presented_access_claims(request)
     if claims and claims.get("sid"):
         await refresh_tokens.end_session(claims["sid"])
     for uid in {u for u in (user_id, claims and claims.get("sub")) if u}:

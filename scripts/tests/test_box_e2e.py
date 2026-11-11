@@ -49,6 +49,7 @@ def run(tmp_path):
     (repo / "scripts").mkdir(parents=True)
     shutil.copy(ROOT / "scripts" / "box-e2e.sh", repo / "scripts" / "box-e2e.sh")
     (repo / ".box-deployed").write_text(f"deployed={SHA}\n")
+    (repo / ".env").write_text("NOTEBOOK_ORIGIN=https://industryflow.local:3444\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _stub(bin_dir / "docker", DOCKER)
@@ -112,3 +113,13 @@ def test_a_run_that_ends_early_still_removes_its_superuser(run):
     done, results, deletes = run(build=1)
     assert done.returncode != 0 and results == []
     assert len(deletes) == 1, "the exit trap removes the superuser of a run that never got to the suite"
+
+
+@pytest.mark.parametrize("origin", ["", "https://elsewhere.example:3444", "https://industryflow.localx"])
+def test_a_notebook_origin_not_on_the_edge_host_refuses_the_run(run, tmp_path, origin):
+    # The journeys enter the origin the deployment serves (ADR-0048); one off the edge's host is a
+    # deployment the run cannot reach, refused before a superuser is created.
+    (tmp_path / "repo" / ".env").write_text(f"NOTEBOOK_ORIGIN={origin}\n")
+    done, results, deletes = run()
+    assert done.returncode == 2 and "NOTEBOOK_ORIGIN" in done.stderr, done.stderr
+    assert results == [] and deletes == []

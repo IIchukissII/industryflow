@@ -39,7 +39,9 @@ CONFIG = HUB_DIR / "jupyterhub_config.py"
 
 # The config reads these at import; they are deployment values, not secrets.
 BASE_ENV = {
-    "PLATFORM_VERIFY_URL": "http://api-gateway:8000/auth/verify",
+    # The two browser origins (ADR-0048); the hub does not start unless they differ.
+    "NOTEBOOK_PLATFORM_ORIGIN": "https://app.example.com",
+    "NOTEBOOK_ORIGIN": "https://app.example.com:8444",
     "REDIS_HOST": "localhost",
     "REDIS_PORT": "6379",
     "NOTEBOOK_IMAGE": "industryflow/notebook:test",
@@ -674,16 +676,27 @@ def test_the_secret_is_sent_on_hub_routes_only(where, uri, sent):
 
 
 
+_PLATFORM_COOKIES = ("ACCESS_COOKIE", "CSRF_COOKIE", "REFRESH_COOKIE")
+
+
 def _hub_cookie(where):
-    """The Cookie header the proxy sends on, computed by its own three maps (nginx regex maps: the first
-    matching regex wins, else the default)."""
+    """The Cookie header the proxy sends on, computed by its own chain of maps from $http_cookie to
+    $if_hub_cookie (nginx regex maps: the first matching regex wins, else the default)."""
     conf = SSO_CONFIGS[where]
-    chain = []
-    for source, target in (("http_cookie", "if_cookie_no_access"), ("if_cookie_no_access", "if_cookie_no_csrf"),
-                           ("if_cookie_no_csrf", "if_hub_cookie")):
-        body = re.search(r"map \$%s \$%s \{(.*?)\n\s*\}" % (source, target), conf, re.S).group(1)
+    maps = {src: (dst, body) for src, dst, body in
+            re.findall(r"map \$(\w+) \$(\w+) \{(.*?)\n\s*\}", conf, re.S)}
+    chain, source = [], "http_cookie"
+    while True:
+        dst, body = next(((d, b) for s_, (d, b) in maps.items() if s_ == source and d.startswith("if_cookie_")
+                          or s_ == source and d == "if_hub_cookie"), (None, None))
+        if dst is None:
+            break
         pattern, value = re.search(r'"~(.*?)" "(.*?)";', body).groups()
         chain.append((re.compile(pattern), value))
+        if dst == "if_hub_cookie":
+            break
+        source = dst
+    assert len(chain) >= 5, f"{where}: the cookie chain was not read ({len(chain)} maps)"
 
     def send(header):
         for pattern, value in chain:
@@ -694,26 +707,108 @@ def _hub_cookie(where):
     return send
 
 
+def _cookie_names():
+    gateway = "\n".join(p.read_text() for p in (REPO / "services/api_gateway").rglob("*.py"))
+    names = dict(re.findall(r'^(ACCESS_COOKIE|CSRF_COOKIE|REFRESH_COOKIE) = "([^"]+)"', gateway, re.M))
+    assert set(names) == set(_PLATFORM_COOKIES), names
+    nb = re.search(r'^SESSION_COOKIE = "([^"]+)"', (REPO / "services/api_gateway/notebook_entry.py").read_text(), re.M)
+    return [names[n] for n in _PLATFORM_COOKIES], nb.group(1)
+
+
 @pytest.mark.parametrize("where", sorted(SSO_CONFIGS))
 def test_the_proxy_sends_the_hub_no_platform_cookie(where):
-    # ADR-0014 dec 5: the session token never reaches the kernel; chp hands /user/ traffic, cookies
-    # included, to the single-user server where user code runs.
+    # ADR-0014 dec 5, ADR-0048 dec 2: no platform cookie and not the notebook session's reaches the hub;
+    # chp hands /user/ traffic, cookies included, to the single-user server where user code runs.
     conf = SSO_CONFIGS[where]
     assert re.search(r"proxy_set_header\s+Cookie\s+\$if_hub_cookie;", conf)
-    gateway = (REPO / "services/api_gateway").rglob("*.py")
-    names = dict(re.findall(r'^(ACCESS_COOKIE|CSRF_COOKIE) = "([^"]+)"', "\n".join(p.read_text() for p in gateway), re.M))
-    assert set(names) == {"ACCESS_COOKIE", "CSRF_COOKIE"}, names
-    access, csrf = names["ACCESS_COOKIE"], names["CSRF_COOKIE"]
+    platform, nb = _cookie_names()
     send = _hub_cookie(where)
     hub = "jupyterhub-session-id=s; _xsrf=x"
-    for header in (f"{access}=tok; {hub}; {csrf}=c", f"{hub}; {access}=tok; {csrf}=c",
-                   f"{csrf}=c; {access}=tok; {hub}", f"{access}=tok;{hub};{csrf}=c"):
-        sent = send(header)
-        assert access not in sent and csrf not in sent, (header, sent)
-        assert sent.replace(";", "; ").replace(";  ", "; ") .strip("; ") in (hub, hub.replace("; ", ";")), (header, sent)
-    assert send(f"{access}=tok; {csrf}=c") == ""
+    ours = [f"{n}=v{i}" for i, n in enumerate([*platform, nb])]
+    import itertools
+    for order in itertools.permutations([*ours, hub]):
+        for sep in ("; ", ";"):
+            sent = send(sep.join(order))
+            assert not any(c.split("=")[0] + "=" in sent.replace(hub, "") for c in ours), (order, sent)
+            assert sent.replace(";", "; ").replace(";  ", "; ").strip("; ") in (hub, hub.replace("; ", ";")), (order, sent)
+    assert send("; ".join(ours)) == ""
     assert send(hub) == hub
-    assert send(f"x{access}=keep; {hub}") == f"x{access}=keep; {hub}"
+    assert send(f"x{platform[0]}=keep; {hub}") == f"x{platform[0]}=keep; {hub}"
+
+
+@pytest.mark.parametrize("where", sorted(SSO_CONFIGS))
+def test_a_second_cookie_of_a_platform_name_refuses_the_request(where):
+    # Script on the notebook origin can plant a same-named cookie with another Path; the browser then
+    # sends both, and the strip removes one. What is left refuses the request instead of reaching the
+    # single-user server.
+    conf = SSO_CONFIGS[where]
+    body = re.search(r"map \$if_hub_cookie \$if_platform_cookie_left \{(.*?)\n\s*\}", conf, re.S).group(1)
+    left = re.compile(re.search(r'"~(.*?)" 1;', body).group(1))
+    hub_loc = re.search(r"\n        location / \{(.*?)\n        \}", conf, re.S).group(1)
+    assert re.search(r"if \(\$if_platform_cookie_left\) \{\s*return 400;", hub_loc)
+    platform, nb = _cookie_names()
+    send = _hub_cookie(where)
+    hub = "jupyterhub-session-id=s; _xsrf=x"
+    for name in [*platform, nb]:
+        assert left.search(send(f"{name}=planted; {hub}; {name}=real")), name
+        assert left.search(send(f"{hub};{name}=a;{name}=b")), name
+        assert not left.search(send(f"{name}=one; {hub}")), name
+    assert not left.search(send(hub))
+    assert not left.search("xif_access=keep; " + hub)
+
+
+@pytest.mark.parametrize("where", sorted(SSO_CONFIGS))
+def test_the_session_check_reads_the_notebook_session_only(where):
+    # ADR-0048 dec 2: a platform cookie that reaches the notebook origin is honoured nowhere there.
+    conf = SSO_CONFIGS[where]
+    platform, nb = _cookie_names()
+    verify = re.search(r"location = /_(?:auth_verify|notebook_auth) \{(.*?)\n\s*\}", conf, re.S).group(1)
+    assert re.search(r"proxy_set_header\s+Cookie\s+\$if_notebook_session;", verify)
+    body = re.search(r"map \$http_cookie \$if_notebook_session \{(.*?)\n\s*\}", conf, re.S).group(1)
+    pattern, value = re.search(r'"~(.*?)" "(.*?)";', body).groups()
+    m = re.compile(pattern).search(f"{platform[0]}=tok; {nb}=h1; {platform[1]}=c")
+    assert re.sub(r"\$(\d)", lambda g: m.group(int(g.group(1))), value) == f"{nb}=h1"
+    assert not re.compile(pattern).search(f"{platform[0]}=tok; x{nb}=h1")
+
+
+@pytest.mark.parametrize("where", sorted(SSO_CONFIGS))
+def test_the_one_public_entry_is_the_ticket_exchange(where):
+    # ADR-0014 dec 6, ADR-0048 dec 3: POST only, to the gateway's exchange, with the Host the browser
+    # used and no cookie; every other path passes the session check.
+    conf = SSO_CONFIGS[where]
+    enter = re.search(r"location = /enter \{(.*?)\n        \}", conf, re.S).group(1)
+    assert "limit_except POST { deny all; }" in enter
+    assert "/auth/notebook-entry" in enter
+    assert re.search(r'proxy_set_header\s+Host\s+\$http_host;', enter)
+    assert re.search(r'proxy_set_header\s+Cookie\s+"";', enter)
+    hub = re.search(r"\n        location / \{(.*?)\n        \}", conf, re.S).group(1)
+    assert re.search(r"auth_request /_(?:auth_verify|notebook_auth);", hub)
+    locations = set(re.findall(r"\n        location (.*?) \{", conf))
+    assert locations == {"= /_auth_verify", "= /enter", "= /logout", "= /", "/", "@no_session"} or \
+        locations == {"= /_notebook_auth", "= /enter", "= /logout", "= /", "/", "@no_session"}, locations
+
+
+def test_the_hub_is_framed_by_the_platform_origin_only():
+    # ADR-0048 dec 5, ADR-0014 dec 6: the hub and every single-user server.
+    cfg = _load("docker")
+    csp = "frame-ancestors https://app.example.com"
+    assert cfg.JupyterHub.tornado_settings["headers"]["Content-Security-Policy"] == csp
+    assert any(csp in a for a in cfg.Spawner.args), cfg.Spawner.args
+
+
+@pytest.mark.parametrize("platform, notebook", [
+    (None, "https://nb.example.com"),
+    ("https://app.example.com", None),
+    ("https://app.example.com", "https://app.example.com"),
+    ("https://app.example.com", "https://APP.example.com:443/"),
+    ("https://app.example.com:3443", "https://app.example.com:3443"),
+    ("https://app.example.com", "https://nb.example.com/jupyter/"),
+])
+def test_the_hub_does_not_start_without_a_distinct_notebook_origin(platform, notebook):
+    # ADR-0048 dec 6.
+    with pytest.raises(ValueError, match="ADR-0048"):
+        _load("docker", NOTEBOOK_PLATFORM_ORIGIN=platform, NOTEBOOK_ORIGIN=notebook)
+
 
 # --- reclaim of a deleted tenant's volumes (ADR-0020 dec 6) ---
 

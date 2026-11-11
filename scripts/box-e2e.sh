@@ -30,6 +30,12 @@ if [ "$deployed" != "$SHA" ]; then
     exit 2
 fi
 HOST="${E2E_EDGE_HOST:-industryflow.local}"
+# The notebook origin the deployment serves (ADR-0048): the one its .env names, which must be on HOST.
+NOTEBOOKS="$(sed -n 's/^NOTEBOOK_ORIGIN=//p' .env | tail -1)"
+case "$NOTEBOOKS" in
+    "https://$HOST"|"https://$HOST:"*) ;;
+    *) echo "box-e2e: NOTEBOOK_ORIGIN in .env is '${NOTEBOOKS:-unset}', not an origin on $HOST" >&2; exit 2 ;;
+esac
 IP="${E2E_EDGE_IP:-$(hostname -I | cut -d' ' -f1)}"
 WORK="$(mktemp -d /tmp/industryflow-e2e.XXXXXX)"
 # Shared with the authoring image's user; sticky, so no one replaces another's file.
@@ -76,6 +82,7 @@ docker build -q --build-context contracts=libs/industryflow_contracts -t industr
 cat > "$ENVFILE" <<VARS
 IF_E2E_REQUIRE=1
 IF_E2E_EDGE=https://$HOST
+IF_E2E_NOTEBOOKS=$NOTEBOOKS
 IF_E2E_INGEST=https://$HOST:8443/ingest
 IF_E2E_CA=$ROOT/deploy/certs/ca.crt
 IF_E2E_SUPERUSER_EMAIL=$EMAIL

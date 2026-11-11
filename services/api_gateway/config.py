@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import re
 from typing import Optional
 
 from pydantic import field_validator
@@ -12,6 +13,8 @@ from sqlalchemy.engine import URL
 # The gateway's CORS policy sends credentials (the session cookie), so its origin allowlist may never
 # hold the wildcard (ADR-0004 dec 6).
 CORS_ALLOW_CREDENTIALS = True
+# An origin: scheme, host and an optional port, nothing after.
+_ORIGIN = re.compile(r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?")
 
 
 class Settings(BaseSettings):
@@ -76,6 +79,23 @@ class Settings(BaseSettings):
                 "CORS_ORIGINS must list explicit origins: '*' is refused because the gateway "
                 "allows credentials (ADR-0004 dec 6)"
             )
+        return value
+
+    # The notebook origin (ADR-0048), as scheme://host[:port]; unset where notebooks are not deployed,
+    # and then no ticket is minted. It is in no allowlist (dec 2).
+    NOTEBOOK_ORIGIN: Optional[str] = None
+
+    @field_validator("NOTEBOOK_ORIGIN")
+    @classmethod
+    def _a_notebook_origin_of_its_own(cls, value: Optional[str], info) -> Optional[str]:
+        """An origin and nothing more, never one the allowlist admits (ADR-0048 dec 1, 2)."""
+        if value is None or not value.strip():
+            return None
+        value = value.strip().rstrip("/").lower()
+        if not _ORIGIN.fullmatch(value):
+            raise ValueError("NOTEBOOK_ORIGIN must be an origin, https://host[:port] (ADR-0048)")
+        if value in {o.rstrip("/").lower() for o in cors_origin_list(info.data.get("CORS_ORIGINS") or "")}:
+            raise ValueError("NOTEBOOK_ORIGIN must not be in CORS_ORIGINS (ADR-0048 dec 2)")
         return value
 
     @property
