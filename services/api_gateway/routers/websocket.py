@@ -25,6 +25,7 @@ from config import get_settings
 from database import AsyncSessionLocal
 from dependencies import normalize_company_id_to_schema
 from users import ACCESS_COOKIE, JWT_ALGORITHM
+from origins import origin_admitted
 from sqlalchemy import select, text
 from models.user import User
 
@@ -186,27 +187,13 @@ async def get_user_from_token(token: str) -> Optional[SocketSession]:
                          issued_at=float(issued_at) if isinstance(issued_at, (int, float)) else None)
 
 
-def allowed_origins() -> set[str]:
-    """The gateway's configured origin allowlist (CORS_ORIGINS, ADR-0004 dec 6)."""
-    return {o.strip().rstrip("/") for o in settings.CORS_ORIGINS.split(",") if o.strip()}
-
-
 def origin_allowed(websocket: WebSocket) -> bool:
     """
     Cross-site WebSocket hijacking guard. Browsers send the session cookie on a cross-origin
-    wss:// handshake and CORS does not apply to websockets, so the Origin is checked here: it
-    must be in the allowlist, or be exactly the host the request was addressed to (same origin
-    behind an edge that forwards Host). A handshake without Origin is not from a browser, so no
-    ambient cookie of a victim is involved; it still needs a valid session.
+    wss:// handshake and CORS does not apply to websockets, so the Origin is checked here
+    (``origins.origin_admitted``): the allowlist, or exactly the host the request was addressed to.
     """
-    origin = websocket.headers.get("origin")
-    if origin is None:
-        return True
-    origin = origin.rstrip("/")
-    if origin in allowed_origins():
-        return True
-    host = websocket.headers.get("host")
-    return bool(host) and origin in (f"https://{host}", f"http://{host}")
+    return origin_admitted(websocket.headers.get("origin"), websocket.headers.get("host"))
 
 
 async def _authenticate(websocket: WebSocket) -> Optional[SocketSession]:

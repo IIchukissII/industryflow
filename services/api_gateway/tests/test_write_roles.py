@@ -46,6 +46,9 @@ OWN_AUTHORIZATION = {
     "/users/me", "/api/users", "/api/users/{user_id}",
     "/api/companies", "/api/companies/{company_id}", "/api/companies/{company_id}/deletion",
     "/api/platform/switches/{key}",
+    # Entering the notebook origin: every role has a notebook profile (ADR-0011 dec 5), and the ticket
+    # writes no tenant data; the exchange is authorized by the ticket (ADR-0048 dec 3).
+    "/api/notebook-ticket", "/auth/notebook-entry",
 }
 
 

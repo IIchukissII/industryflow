@@ -191,6 +191,30 @@ async def get_user_manager(connection: HTTPConnection, user_db=Depends(get_user_
 bearer_transport = BearerTransport(tokenUrl="auth/jwt/login")
 
 
+async def admit_session(user, session_id: Optional[str], issued_at) -> bool:
+    """The platform's one session verification (ADR-0004 dec 2), for an active user presenting
+    something issued in a session at ``issued_at``: an access token, or a notebook session bound to it
+    (ADR-0048 dec 4). False when the user's company is suspended (ADR-0033 dec 3) or the session has
+    ended; 403 while the account must change its password, except for what lets it (ADR-0004 dec 11).
+
+    The session store is read on every call; when it cannot be read the call fails with 503 rather
+    than admitting, since an unknown answer is not a yes.
+    """
+    if user.company_id and not await company_status.is_company_active(user.company_id):
+        return False
+    try:
+        ended = await refresh_tokens.session_ended(str(user.id), session_id, issued_at)
+    except Exception as exc:  # noqa: BLE001 - any store failure leaves the session unknown
+        logger.error("session store unreadable, refusing the request: %s", type(exc).__name__)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Session store not available")
+    if ended:
+        return False
+    if getattr(user, "password_change_required", False) and CURRENT_REQUEST.get() not in PASSWORD_CHANGE_ALLOWED:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PASSWORD_CHANGE_REQUIRED)
+    return True
+
+
 class CompanyClaimJWTStrategy(JWTStrategy):
     """
     JWT strategy that embeds company_id and role as claims, so downstream services resolve
@@ -229,22 +253,10 @@ class CompanyClaimJWTStrategy(JWTStrategy):
         user = await super().read_token(token, user_manager)
         if user is None:
             return None
-        if user.company_id and not await company_status.is_company_active(user.company_id):
-            return None
         claims = self.claims(token)
         if claims is None:
             return None
-        try:
-            ended = await refresh_tokens.session_ended(str(user.id), claims.get("sid"), claims.get("iat"))
-        except Exception as exc:  # noqa: BLE001 - any store failure leaves the session unknown
-            logger.error("session store unreadable, refusing the request: %s", type(exc).__name__)
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                                detail="Session store not available")
-        if ended:
-            return None
-        if getattr(user, "password_change_required", False) and CURRENT_REQUEST.get() not in PASSWORD_CHANGE_ALLOWED:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PASSWORD_CHANGE_REQUIRED)
-        return user
+        return user if await admit_session(user, claims.get("sid"), claims.get("iat")) else None
 
     def claims(self, token: str) -> Optional[dict]:
         """The verified claims of an unexpired access token, else None."""

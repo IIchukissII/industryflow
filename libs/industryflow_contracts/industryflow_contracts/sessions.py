@@ -8,8 +8,8 @@ The ended-session record (ADR-0004 dec 2): which access tokens no longer stand f
 The gateway writes it in the shared capability store when a session ends (logout) and when all of a
 user's sessions end (a password change or reset, deactivation, deletion, the company's suspension).
 Every verifier of an access token reads it on every request, so an access token stops working when
-its session ends rather than when it expires. Each record outlives every access token issued before
-it. A store that lost the records cannot say which sessions ended, so the rebuild of the store
+its session ends rather than when it expires. Each record outlives everything issued in a session
+before it: refresh and access tokens, and a notebook session bound to it (ADR-0048 dec 4). A store that lost the records cannot say which sessions ended, so the rebuild of the store
 (``denials.STORE_REBUILT_KEY``) ends every session issued before it, and a store not rebuilt answers
 nothing (ADR-0015 dec 8).
 

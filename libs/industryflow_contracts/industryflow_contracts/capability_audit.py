@@ -121,7 +121,8 @@ REPEATABLE = (REFUSED, SQL_SESSION_OPENED, SQL_SESSION_CLOSED)
 PLANES = ("hub", "ml_service", "api_gateway", "sql_proxy", "tracking_gateway", "cold_broker",
           "tenant_delete")
 
-AUDIENCES = ("api", "sql", "tracking", "cold", "upload")
+# ``notebook``: the single-use ticket that enters the notebook origin (ADR-0048 dec 3).
+AUDIENCES = ("api", "sql", "tracking", "cold", "upload", "notebook")
 
 # 16 hex characters: enough to correlate repeated refusals of one presented value, far too few to
 # search the handle space with.

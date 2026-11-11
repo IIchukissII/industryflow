@@ -121,7 +121,7 @@ def _held():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("request_", [("GET", "/api/companies"), ("POST", "/api/users"), ("GET", "/auth/verify"),
+@pytest.mark.parametrize("request_", [("GET", "/api/companies"), ("POST", "/api/users"), ("POST", "/api/notebook-ticket"),
                                       ("GET", "/internal/dashboards/assertion"), None])
 async def test_a_held_account_reaches_nothing_else(store, request_):
     user = _held()
@@ -232,7 +232,7 @@ def test_through_the_app_a_held_account_reads_itself_and_nothing_else(store):
         assert me.status_code == 200 and me.json()["password_change_required"] is True, me.text
         refused = client.get("/api/companies", headers=bearer)
         assert refused.status_code == 403 and refused.json()["detail"] == users.PASSWORD_CHANGE_REQUIRED
-        assert client.get("/auth/verify", headers=bearer).status_code == 403
+        assert client.post("/api/notebook-ticket", headers=bearer).status_code == 403
     finally:
         main.app.dependency_overrides.clear()
 
