@@ -134,14 +134,12 @@ def test_entry_is_sent_by_a_platform_page_to_the_notebook_origin(world):
 
 
 def test_the_ticket_is_no_data_credential(world):
-    import asyncio
 
     ticket = _mint(world, _signed_in(world)).json()["ticket"]
     assert _on(world, lambda st: resolve_capability(st.get, ticket)) is None
 
 
 def test_the_ticket_lives_seconds_and_names_user_tenant_and_session(world):
-    import asyncio
 
     ticket = _mint(world, _signed_in(world, "sid-t")).json()["ticket"]
     key = f"nbcap:{ticket}"
@@ -152,7 +150,6 @@ def test_the_ticket_lives_seconds_and_names_user_tenant_and_session(world):
 
 
 def test_mint_and_consumption_are_recorded(world):
-    import asyncio
 
     ticket = _mint(world, _signed_in(world)).json()["ticket"]
     _enter(world, ticket)
@@ -163,7 +160,6 @@ def test_mint_and_consumption_are_recorded(world):
 
 
 def test_an_unknown_ticket_is_refused_and_recorded(world):
-    import asyncio
 
     assert _enter(world, "not-a-ticket").status_code == 401
     events = [audit.decode(f) for _, f in _on(world, lambda st: st.xrange(audit.STREAM_KEY))]
@@ -177,9 +173,9 @@ def test_the_proxy_honours_no_platform_cookie(world):
 
 
 def test_the_notebook_session_survives_refresh_rotation(world):
-    cookie, _ = _nb_cookie(_entered(world))
-    rt = None
     import asyncio
+
+    cookie, _ = _nb_cookie(_entered(world))
     rt = asyncio.run(refresh_tokens.create_refresh_token(str(world.user.id), world.user.hashed_password, "sid-a"))
     rotated = world.client.post("/auth/refresh", json={"refresh_token": rt})
     assert rotated.status_code == 200, rotated.text
