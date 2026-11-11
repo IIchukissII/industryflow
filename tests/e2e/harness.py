@@ -63,9 +63,14 @@ class Session:
         return self.request("DELETE", path, **kw)
 
 
+def ssl_context(ca: str) -> ssl.SSLContext:
+    """Trust the edges' CA only."""
+    return ssl.create_default_context(cafile=ca)
+
+
 class Edge:
     def __init__(self, base_url: str, ca: str):
-        self.client = httpx.Client(base_url=base_url, verify=ssl.create_default_context(cafile=ca), timeout=30.0)
+        self.client = httpx.Client(base_url=base_url, verify=ssl_context(ca), timeout=30.0)
 
     def __enter__(self):
         return self
