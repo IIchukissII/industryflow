@@ -314,8 +314,10 @@ jobs:
       # So each is probed from the host, through its real listener and certificate:
       #   frontend   /healthz (its own probe), and /health PROXIED to the gateway over TLS, with the
       #              security headers present; plain HTTP is redirected to https.
-      #   notebook-sso  /jupyter/ through the frontend: with no session the SSO proxy asks the gateway,
-      #              is refused, and sends the browser to /login — which proves all three hops.
+      #   notebook-sso  the notebook origin, the frontend's second port (ADR-0048): with no notebook
+      #              session the SSO proxy asks the gateway, is refused, and sends a top-level browser
+      #              to the platform's /notebooks page, which proves all three hops; the platform
+      #              origin's /jupyter/ does not reach it.
       #   ingestion-edge  /health PROXIED to ingestion with the test device's certificate, and the
       #              handshake refused without one.
       - name: Probe the edges from outside
@@ -330,11 +332,23 @@ jobs:
             grep -qi "^$h:" headers.txt || { echo "::error::frontend sends no $h"; cat headers.txt; exit 1; }
           done
           echo "OK    frontend: probe, redirect, /health via the gateway, security headers"
-          code=$(curl -s --cacert "$ca" -o /dev/null -w '%{http_code} %{redirect_url}' https://localhost:3443/jupyter/hub/home)
+          code=$(curl -s --cacert "$ca" -H 'Sec-Fetch-Dest: document' -o /dev/null -w '%{http_code} %{redirect_url}' \
+            https://localhost:3444/jupyter/hub/home)
           case "$code" in
-            "302 https://localhost:3443/login") echo "OK    notebook-sso: unauthenticated -> /login via the gateway" ;;
-            *) echo "::error::/jupyter/ through the edge answered '$code', expected a redirect to /login"; exit 1 ;;
+            "302 https://localhost:3443/notebooks") echo "OK    notebook-sso: no notebook session -> the platform's notebooks page" ;;
+            *) echo "::error::the notebook origin answered '$code', expected a redirect to the platform's /notebooks"; exit 1 ;;
           esac
+          # In the platform's frame, the same refusal is a page, framed by the platform only.
+          curl -s --cacert "$ca" -H 'Sec-Fetch-Dest: iframe' -D nb.txt -o /dev/null https://localhost:3444/jupyter/hub/home
+          head -1 nb.txt | grep -q ' 401' && grep -qi "^content-security-policy:.*frame-ancestors https://localhost:3443" nb.txt \
+            || { echo "::error::the framed refusal is not a 401 framed by the platform only"; cat nb.txt; exit 1; }
+          # The platform's own cookies are no notebook session (ADR-0048 dec 2).
+          test "$(curl -s --cacert "$ca" -o /dev/null -w '%{http_code}' -b 'if_access=x; if_csrf=y' \
+            https://localhost:3444/jupyter/hub/home)" = 401 || { echo "::error::platform cookies passed the notebook origin"; exit 1; }
+          if curl -s --cacert "$ca" https://localhost:3443/jupyter/hub/home | grep -qi "notebook session"; then
+            echo "::error::the platform origin reaches the notebook SSO proxy"; exit 1
+          fi
+          echo "OK    notebook origin: own port, no platform path, no platform cookie"
           curl -fsS --cacert "$ca" --cert "$dev/current.chain.crt" --key "$dev/current.key" \
             https://localhost:8443/health
           if curl -fs --cacert "$ca" -o /dev/null https://localhost:8443/health; then

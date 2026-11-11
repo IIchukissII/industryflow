@@ -3,24 +3,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { API_URL } from '../config';
+import { notebookOrigin } from './notebooks';
 
-// Platform sign-out, including the embedded notebook hub (ADR-0014, ADR-0012 dec 6).
+// Platform sign-out, including the embedded notebook hub (ADR-0014 dec 7, ADR-0012 dec 6).
 //
-// The hub keeps a login of its own once the platform session has opened it. Signing out of the
-// platform therefore signs out of the hub too — first, because the hub is reachable only through
-// the SSO proxy, which stops letting anything through once the platform session is gone. Logging
-// out of the hub stops the user's notebook server, and stopping it revokes its credentials. The
-// platform's own logout then revokes every notebook credential of the user server-side as well, so
-// a sign-out from a closed tab or a failed hub call still ends them.
+// The hub keeps a login of its own once a notebook session has opened it. Signing out of the platform
+// therefore signs out of the hub too, first, while the notebook session still admits: logging out of
+// the hub stops the user's notebook server, and stopping it revokes its credentials. The hub is on the
+// notebook origin (ADR-0048), so the request carries that origin's cookies and its answer is not read.
+// The platform's own logout then ends the session, which ends the notebook session with it, and
+// revokes every notebook credential of the user server-side, so a sign-out from a closed tab or a
+// failed hub call still ends them.
 
-export const HUB_LOGOUT_URL = '/jupyter/hub/logout';
-
-export async function signOut({ post, fetchImpl = globalThis.fetch }) {
-  try {
-    // `manual`: the hub answers with a redirect to its login page, which is not ours to follow.
-    await fetchImpl(HUB_LOGOUT_URL, { credentials: 'same-origin', redirect: 'manual' });
-  } catch {
-    /* notebooks not deployed, or the hub is down: the platform logout below still revokes */
+export async function signOut({ post, fetchImpl = globalThis.fetch, origin = notebookOrigin() }) {
+  if (origin) {
+    try {
+      await fetchImpl(`${origin}/logout`, { mode: 'no-cors', credentials: 'include' });
+    } catch {
+      /* notebooks not deployed, or the hub is down: the platform logout below still revokes */
+    }
   }
   try {
     await post('/auth/logout');

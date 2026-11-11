@@ -16,4 +16,9 @@ describe('notebooksReading', () => {
   it('says the environment is open once loaded, whatever the timer said', () => {
     expect(notebooksReading({ loaded: true, slow: true })).toMatch(/^Your notebook environment is open\./);
   });
+
+  it('says why notebooks could not be opened', () => {
+    expect(notebooksReading({ refused: 'Notebooks are not deployed', slow: true }))
+      .toBe('Notebooks could not be opened: Notebooks are not deployed');
+  });
 });

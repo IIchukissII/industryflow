@@ -55,6 +55,34 @@ AUTHORING_ROLES_ENV = "NOTEBOOK_AUTHORING_ROLES"
 DEFAULT_AUTHORING_ROLES = frozenset({"admin", "engineer"})
 
 
+# The two browser origins (ADR-0048): the platform's, which alone may frame the hub, and the notebook
+# origin the hub is served from. Deployment values; the hub does not start without two distinct ones.
+PLATFORM_ORIGIN_ENV = "NOTEBOOK_PLATFORM_ORIGIN"
+NOTEBOOK_ORIGIN_ENV = "NOTEBOOK_ORIGIN"
+_ORIGIN = re.compile(r"(https?)://([A-Za-z0-9.-]+)(?::([0-9]{1,5}))?")
+_DEFAULT_PORT = {"https": "443", "http": "80"}
+
+
+def _origin(name: str, value: str | None) -> tuple[str, tuple[str, str, str]]:
+    value = (value or "").strip().rstrip("/")
+    m = _ORIGIN.fullmatch(value)
+    if not m:
+        raise ValueError(f"{name} must be an origin, https://host[:port] (ADR-0048)")
+    scheme, host, port = m.group(1), m.group(2).lower(), m.group(3) or _DEFAULT_PORT[m.group(1)]
+    return value, (scheme, host, port)
+
+
+def validate_origins(platform: str | None, notebook: str | None) -> tuple[str, str]:
+    """The platform and notebook origins, or ValueError unless both are origins that differ in host or
+    port (ADR-0048 dec 1, 6): kernel-produced script must never run on the platform origin."""
+    platform, p = _origin(PLATFORM_ORIGIN_ENV, platform)
+    notebook, n = _origin(NOTEBOOK_ORIGIN_ENV, notebook)
+    if p[1:] == n[1:]:
+        raise ValueError(f"{NOTEBOOK_ORIGIN_ENV} must differ from {PLATFORM_ORIGIN_ENV} in host or port "
+                         "(ADR-0048 dec 6)")
+    return platform, notebook
+
+
 def parse_authoring_roles(value: str | None) -> frozenset[str]:
     """The configured authoring roles, or ValueError if the list is empty or names an unknown role.
 

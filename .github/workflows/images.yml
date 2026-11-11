@@ -157,7 +157,7 @@ jobs:
           - { name: mlflow,                 context: infrastructure/mlflow,     file: infrastructure/mlflow/Dockerfile, security_refresh: true,
               smoke: "python -c \"import mlflow.server.fastapi_app; print('mlflow SERVER imports ok', __import__('mlflow').__version__)\"" }
           - { name: notebook-hub,           context: services/notebook_hub,     file: services/notebook_hub/Dockerfile, security_refresh: true,
-              smoke: "cd /opt/hub && env NOTEBOOK_SPAWNER=docker NOTEBOOK_SSO_PROXY_SECRET=0123456789abcdef0123456789abcdef NOTEBOOK_NETWORK=x NOTEBOOK_IMAGE=x PLATFORM_VERIFY_URL=http://x REDIS_HOST=x REDIS_PORT=6379 python -c \"import os; from traitlets.config import Config; c = Config(); f = os.path.abspath('jupyterhub_config.py'); exec(compile(open(f).read(), f, 'exec'), {'c': c, 'get_config': lambda: c, '__file__': f, '__name__': '__main__'}); print('hub config loads', c.JupyterHub.spawner_class)\" && jupyterhub --version" }
+              smoke: "cd /opt/hub && env NOTEBOOK_SPAWNER=docker NOTEBOOK_SSO_PROXY_SECRET=0123456789abcdef0123456789abcdef NOTEBOOK_NETWORK=x NOTEBOOK_IMAGE=x NOTEBOOK_PLATFORM_ORIGIN=https://x NOTEBOOK_ORIGIN=https://x:8444 REDIS_HOST=x REDIS_PORT=6379 python -c \"import os; from traitlets.config import Config; c = Config(); f = os.path.abspath('jupyterhub_config.py'); exec(compile(open(f).read(), f, 'exec'), {'c': c, 'get_config': lambda: c, '__file__': f, '__name__': '__main__'}); print('hub config loads', c.JupyterHub.spawner_class)\" && jupyterhub --version" }
           - { name: notebook-sql-proxy,     context: services/notebook_sql_proxy, file: services/notebook_sql_proxy/Dockerfile, security_refresh: true,
               smoke: "python -c \"import server; print('sql-proxy imports ok')\"" }
           # Imports what the container SERVES, not merely what it depends on. `import fastapi, redis`
@@ -313,14 +313,32 @@ jobs:
               def do_GET(self):
                   self.send_response(200); self.end_headers(); self.wfile.write(('host=' + self.headers['Host']).encode())
           http.server.HTTPServer(('', 8000), H).serve_forever()"
-          docker run -d --name edge --network edgenet --env-file compose.env -p 18080:8080 -p 18443:8443 "$IMAGE"
-          trap 'docker logs edge; docker rm -f edge api-gateway' EXIT
+          # The same stand-in as the notebook SSO proxy, behind the notebook origin's own port.
+          docker run -d --name notebook-sso --network edgenet python:3.14-slim python -c "
+          import http.server
+          class H(http.server.BaseHTTPRequestHandler):
+              def do_GET(self):
+                  self.send_response(200); self.end_headers(); self.wfile.write(('sso host=' + self.headers['Host']).encode())
+          http.server.HTTPServer(('', 8080), H).serve_forever()"
+          docker run -d --name edge --network edgenet --env-file compose.env -p 18080:8080 -p 18443:8443 -p 18444:8444 "$IMAGE"
+          trap 'docker logs edge; docker rm -f edge api-gateway notebook-sso' EXIT
           for i in $(seq 1 30); do curl -fsS http://localhost:18080/healthz >/dev/null 2>&1 && break; sleep 1; done
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18080/)" = 301
           test "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' http://localhost:18080/)" = 200
           # A slashless prefix redirects relative, never to the container's own port.
-          loc=$(curl -sk -o /dev/null -w '%{redirect_url}' https://localhost:18443/jupyter)
-          test "$loc" = "https://localhost:18443/jupyter/" || { echo "::error::/jupyter redirected to '$loc'"; exit 1; }
+          loc=$(curl -sk -o /dev/null -w '%{redirect_url}' https://localhost:18443/users)
+          test "$loc" = "https://localhost:18443/users/" || { echo "::error::/users redirected to '$loc'"; exit 1; }
+          # ADR-0048: the notebook origin is the edge's second port, every path of it to the SSO proxy,
+          # and no path of the platform origin reaches the proxy.
+          got=$(curl -sk https://localhost:18444/jupyter/hub/home)
+          test "$got" = "sso host=localhost:18444" || { echo "::error::the notebook origin forwarded '$got'"; exit 1; }
+          if curl -sk https://localhost:18443/jupyter/hub/home | grep -q "sso host"; then
+            echo "::error::the platform origin reaches the notebook SSO proxy"; exit 1
+          fi
+          csp=$(curl -sk -D - -o /dev/null https://localhost:18443/ | grep -i '^content-security-policy:')
+          for d in "frame-src https://localhost:3444;" "form-action 'self' https://localhost:3444;"; do
+            echo "$csp" | grep -qF "$d" || { echo "::error::the platform policy lacks '$d': $csp"; exit 1; }
+          done
           headers=$(curl -sk -D - -o /dev/null https://localhost:18443/)
           for h in Strict-Transport-Security Content-Security-Policy X-Content-Type-Options X-Frame-Options Referrer-Policy; do
             echo "$headers" | grep -qi "^$h:" || { echo "::error::missing $h"; echo "$headers"; exit 1; }

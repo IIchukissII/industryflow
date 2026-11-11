@@ -44,6 +44,8 @@ data:
   # The bucket the gateway admits uploads into; ml_service registers and serves an uploaded model
   # only from an admitted upload there (ADR-0030 dec 4). The gateway's own value, not a second one.
   UPLOAD_ARTIFACT_BUCKET: {{ .Values.notebookHub.trackingGateway.artifactBucket | quote }}
+  # The notebook origin the gateway's ticket enters (ADR-0048 dec 3); it is in no allowlist (dec 2).
+  NOTEBOOK_ORIGIN: {{ include "industryflow.notebookOrigin" . | quote }}
   {{- end }}
   # Spark S3A checkpoint endpoint (ADR-0006). Used only when CHECKPOINT_LOCATION is an s3a:// URI
   # (the scale-out path); the default local mode ignores it.

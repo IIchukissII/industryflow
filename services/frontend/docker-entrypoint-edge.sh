@@ -31,13 +31,30 @@ case "$EDGE_SIGN_IN_PER_SOURCE" in
 esac
 export EDGE_SIGN_IN_PER_SOURCE
 
-VARS="EDGE_RESOLVER EDGE_SIGN_IN_PER_SOURCE EDGE_API_GATEWAY EDGE_ML_SERVICE EDGE_NOTEBOOK_SSO EDGE_TRACKING_GATEWAY EDGE_OBJECT_STORE_URL"
+# The notebook origin (ADR-0048): the one other origin the app frames, posts its ticket to and signs
+# out of. Unset: notebooks are not deployed and the app frames nothing. It must be an origin and nothing
+# more, since it is written into the Content-Security-Policy.
+if [ -n "${EDGE_NOTEBOOK_ORIGIN:-}" ]; then
+    if ! printf '%s' "$EDGE_NOTEBOOK_ORIGIN" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$'; then
+        echo "[edge] refusing to start: EDGE_NOTEBOOK_ORIGIN must be https://host[:port]" >&2
+        exit 1
+    fi
+    EDGE_FRAME_SOURCES="$EDGE_NOTEBOOK_ORIGIN"
+    EDGE_NOTEBOOK_SOURCES=" $EDGE_NOTEBOOK_ORIGIN"
+else
+    EDGE_FRAME_SOURCES="'none'"
+    EDGE_NOTEBOOK_SOURCES=""
+fi
+export EDGE_FRAME_SOURCES EDGE_NOTEBOOK_SOURCES
+
+VARS="EDGE_RESOLVER EDGE_SIGN_IN_PER_SOURCE EDGE_FRAME_SOURCES EDGE_NOTEBOOK_SOURCES EDGE_API_GATEWAY EDGE_ML_SERVICE EDGE_TRACKING_GATEWAY EDGE_OBJECT_STORE_URL"
 missing=""
 subst=""
 for v in $VARS; do
     eval "val=\${$v:-}"
     # shellcheck disable=SC2154  # assigned by the eval above
-    [ -n "$val" ] || missing="$missing $v"
+    # The notebook sources are empty where notebooks are not deployed.
+    [ -n "$val" ] || [ "$v" = EDGE_NOTEBOOK_SOURCES ] || missing="$missing $v"
     subst="$subst \${$v}"
 done
 if [ -n "$missing" ]; then
@@ -69,5 +86,20 @@ if [ -n "${EDGE_GRAFANA:-}" ]; then
     export EDGE_GRAFANA EDGE_GRAFANA_ACCESS
     envsubst '${EDGE_GRAFANA} ${EDGE_GRAFANA_ACCESS}' < "$GRAFANA_TEMPLATE" > "$OPTIONAL_DIR/grafana.conf"
     echo "[edge] dashboards at /grafana/ (upstream $EDGE_GRAFANA, allowed: ${EDGE_GRAFANA_ALLOW:-any})"
+fi
+# The notebook origin's own server (ADR-0048 dec 6), where this edge serves it: a second TLS port on
+# the same host and certificate, for an install reached by address or local name. Where the origin is a
+# sibling host, the deployment's ingress serves it and names no EDGE_NOTEBOOK_SSO here.
+NOTEBOOK_TEMPLATE="${EDGE_NOTEBOOK_TEMPLATE:-/etc/nginx/edge/notebook-origin.conf.template}"
+NOTEBOOK_OUTPUT="${EDGE_NOTEBOOK_OUTPUT:-/etc/nginx/conf.d/notebook-origin.conf}"
+rm -f "$NOTEBOOK_OUTPUT"
+if [ -n "${EDGE_NOTEBOOK_SSO:-}" ]; then
+    if [ -z "${EDGE_NOTEBOOK_ORIGIN:-}" ]; then
+        echo "[edge] refusing to start: EDGE_NOTEBOOK_SSO is set without EDGE_NOTEBOOK_ORIGIN" >&2
+        exit 1
+    fi
+    export EDGE_NOTEBOOK_SSO
+    envsubst '${EDGE_RESOLVER} ${EDGE_NOTEBOOK_SSO}' < "$NOTEBOOK_TEMPLATE" > "$NOTEBOOK_OUTPUT"
+    echo "[edge] notebook origin $EDGE_NOTEBOOK_ORIGIN on :8444 (upstream $EDGE_NOTEBOOK_SSO)"
 fi
 echo "[edge] rendered $OUTPUT (resolver $EDGE_RESOLVER, gateway $EDGE_API_GATEWAY)"

@@ -78,7 +78,9 @@ refresh, on a socket and on a capability handle
 | POST | `/auth/refresh` | Refresh token (cookie or body) | Rotates the session |
 | POST | `/auth/logout` | Refresh token | Revokes it, clears the cookies (204) |
 | POST | `/auth/jwt/login` | Form `username`, `password` | Access token only (fastapi-users) |
-| GET | `/auth/verify` | session | 204 with `X-IF-User` / `X-IF-Company-Id` / `X-IF-Role` for the notebook SSO proxy ([ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md)) |
+| POST | `/api/notebook-ticket` | session | A single-use ticket into the notebook origin ([notebooks](../architecture/notebooks.md#adr-0048-dec-3-4)) |
+| POST | `/auth/notebook-entry` | Ticket (form body), from a platform page | Opens a notebook session on the notebook origin (303) |
+| GET | `/auth/verify` | Notebook session (`if_nb`) | 204 with `X-IF-User` / `X-IF-Company-Id` / `X-IF-Role` for the notebook SSO proxy ([ADR-0014](../../ADR/ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md)) |
 | GET, PATCH | `/users/me` | session | Current user (`password_change_required` when held to a change); change own email or password |
 | GET, POST, PATCH, DELETE | `/api/users[/{id}]` | `admin` | [User management](user-management.md) |
 

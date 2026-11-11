@@ -9,7 +9,7 @@
 # the Helm chart passes the release's Service FQDNs. Every upstream is a variable resolved per
 # request through ${EDGE_RESOLVER} (default: the container's own nameservers, so Docker's embedded
 # DNS under compose and the cluster DNS under Kubernetes): a recreated service is followed rather
-# than pinned to the address nginx saw at boot, and an opt-in plane (notebooks) that is not
+# than pinned to the address nginx saw at boot, and an opt-in plane that is not
 # deployed answers 502 instead of stopping the edge from starting. Because a resolver does not
 # apply search domains, the Kubernetes names must be fully qualified.
 
@@ -36,12 +36,12 @@ map "$scheme:$http_x_forwarded_proto:$uri" $edge_redirect_to_https {
 
 # The SPA's Content-Security-Policy (ADR-0004). It allows exactly what the built app loads: its own
 # bundle, the inline <style> in index.html, the Google Fonts stylesheet and font files theme.css
-# imports, same-origin API/WebSocket calls (connect-src 'self' covers ws(s): on the same host) and
-# the same-origin notebook iframe. The hub under /jupyter/ and the gateway's /docs page are other
-# applications with their own needs (the hub sets its own policy), so the edge sets none there.
+# imports, same-origin API/WebSocket calls (connect-src 'self' covers ws(s): on the same host), and
+# the notebook origin only (ADR-0048 dec 5): framed, entered by a posted ticket, signed out of. The
+# gateway's /docs page and the dashboards are other applications with their own needs, so the edge
+# sets none there.
 map $uri $edge_csp {
-    default "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'";
-    ~^/jupyter/ "";
+    default "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'${EDGE_NOTEBOOK_SOURCES}; frame-src ${EDGE_FRAME_SOURCES}; frame-ancestors 'self'; base-uri 'self'; form-action 'self'${EDGE_NOTEBOOK_SOURCES}; object-src 'none'";
     ~^/docs     "";
     ~^/grafana/ "";
 }
@@ -54,10 +54,6 @@ map "$request_method:$http_sec_fetch_site:$http_origin" $edge_dashboards_foreign
     "~^(GET|HEAD|OPTIONS):"   0;
     "~^[A-Z]+:same-origin:"   0;
     "~^[A-Z]+::$"             0;
-}
-map $uri $edge_frame_options {
-    default     SAMEORIGIN;
-    ~^/jupyter/ "";
 }
 
 server {
@@ -93,7 +89,7 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
-    add_header X-Frame-Options $edge_frame_options always;
+    add_header X-Frame-Options SAMEORIGIN always;
     add_header Content-Security-Policy $edge_csp always;
 
     # The container probe (plain HTTP, so it does not depend on the certificate).
@@ -112,7 +108,6 @@ server {
 
     set $api_gateway        ${EDGE_API_GATEWAY};
     set $ml_service         ${EDGE_ML_SERVICE};
-    set $notebook_sso       ${EDGE_NOTEBOOK_SSO};
     set $tracking_gateway   ${EDGE_TRACKING_GATEWAY};
     set $artifact_store     ${EDGE_OBJECT_STORE_URL};
 
@@ -158,22 +153,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 3600s;
-    }
-
-    # Embedded notebooks (ADR-0014 single-origin): the hub is mounted under /jupyter/ via its SSO
-    # proxy, so it is same-origin with the app — the session cookie is first-party and the
-    # /notebooks page can iframe it without cross-origin framing. The SSO proxy validates the
-    # session against the gateway and forwards the verified identity to the hub. WebSocket-heavy
-    # (Lab/kernel channels).
-    location /jupyter/ {
-        proxy_pass http://$notebook_sso;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Cookie $http_cookie;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_read_timeout 3600s;

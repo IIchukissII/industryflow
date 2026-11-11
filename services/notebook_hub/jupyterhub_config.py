@@ -64,10 +64,8 @@ CULL_EVERY_SECONDS = int(os.environ.get("NOTEBOOK_CULL_EVERY_SECONDS", "300"))
 
 c = get_config()  # noqa: F821  (provided by JupyterHub at load time)
 
-# Mount the hub under a path prefix so it can be embedded same-origin in the platform UI
-# (ADR-0014 single-origin): the frontend reverse-proxies <app>/jupyter/ → SSO proxy → hub, so the
-# session cookie is first-party and the iframe is same-origin. Defaults to "/" for a standalone
-# deployment. JupyterHub propagates base_url to chp and every single-user server.
+# The hub is served under this path of the notebook origin (ADR-0048), whose root the SSO proxy sends
+# here. JupyterHub propagates base_url to chp and every single-user server.
 c.JupyterHub.base_url = os.environ.get("NOTEBOOK_BASE_URL", "/")
 
 # Migrate the hub's own state database on start, instead of refusing to boot against an older one.
@@ -87,12 +85,13 @@ c.JupyterHub.base_url = os.environ.get("NOTEBOOK_BASE_URL", "/")
 # also backs a SQLite database up itself immediately before migrating it.
 c.JupyterHub.upgrade_db = True
 
-# Allow the platform UI to embed the notebook same-origin (ADR-0014). The hub and each single-user
-# server default to `Content-Security-Policy: frame-ancestors 'none'`, which blocks framing even
-# from the same origin — so the /notebooks iframe would be refused. Relax it to `'self'`: the embed
-# is same-origin (same host), and no cross-origin site may frame it. Set on the hub and propagated
-# to every spawned server.
-_FRAME_CSP = "frame-ancestors 'self'"
+# Framed by the platform origin only (ADR-0048 dec 5, ADR-0014 dec 6). The hub runs on an origin of its
+# own, which must differ from the platform's: without two distinct origins the hub does not start
+# (dec 6). Set on the hub and propagated to every spawned server, which would otherwise refuse all
+# framing (`frame-ancestors 'none'`).
+PLATFORM_ORIGIN, NOTEBOOK_ORIGIN = ident.validate_origins(
+    os.environ.get(ident.PLATFORM_ORIGIN_ENV), os.environ.get(ident.NOTEBOOK_ORIGIN_ENV))
+_FRAME_CSP = f"frame-ancestors {PLATFORM_ORIGIN}"
 c.JupyterHub.tornado_settings = {"headers": {"Content-Security-Policy": _FRAME_CSP}}
 c.Spawner.args = [
     "--ServerApp.tornado_settings="

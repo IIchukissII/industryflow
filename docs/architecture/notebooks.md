@@ -28,7 +28,7 @@ The manual of [ADR-0011](../../ADR/ADR-0011-embedded-notebooks-for-analytics-and
 
 | Name | Role | Port | Config |
 |---|---|---|---|
-| `notebook-sso` | nginx `auth_request` to `/auth/verify`; forwards `X-IF-*`; adds `X-IF-SSO-Proxy-Secret` on hub routes only (ADR-0014 dec 2, 3) | 8080 | `services/notebook_hub/sso-nginx.conf` |
+| `notebook-sso` | Serves the notebook origin: `/enter` ticket exchange, nginx `auth_request` to `/auth/verify` on the notebook session; forwards `X-IF-*`; adds `X-IF-SSO-Proxy-Secret` on hub routes only (ADR-0014 dec 2, 3; ADR-0048) | 8080 | `services/notebook_hub/sso-nginx.conf` |
 | `notebook-hub` | JupyterHub; spawns and culls per-user environments, mints capability handles; login only with the SSO proxy secret | 8000 (chp, platform network only), 8081 (hub API) | [notebook hub](../../services/notebook_hub/README.md) |
 | `notebook-authoring` image | JupyterLab, data-science stack, `industryflow[sql,cold]` client (ADR-0011 dec 5) | | `services/notebook_hub/Dockerfile.authoring` |
 | `notebook-analytics` image | Voila, data-API client (ADR-0011 dec 5) | | `services/notebook_hub/Dockerfile.analytics` |
@@ -175,16 +175,15 @@ Principals: [ADR-0012 dec 4](#adr-0012-dec-4).
 
 ## ADR-0011 dec 8
 
-Entry by ticket to the notebook origin is not yet realised ([ADR-0048](#adr-0048-dec-1-6)). The frontend
-edge serves the hub at `/jupyter/` of the platform's own origin, through `notebook-sso`;
-neither `notebook-sso` nor `notebook-hub` has a host port. The hub has no login form and no user store:
-`/hub/login` establishes a login from the forwarded identity only when the proxy secret is present
-([ADR-0014 dec 1-3](#adr-0014-dec-1-3)).
+The hub is served from the notebook origin and entered by a ticket from the platform session
+([ADR-0048 dec 3, 4](#adr-0048-dec-3-4)); neither `notebook-sso` nor `notebook-hub` has a host port.
+The hub has no login form and no user store: `/hub/login` establishes a login from the forwarded
+identity only when the proxy secret is present ([ADR-0014 dec 1-3](#adr-0014-dec-1-3)).
 
 | Code | Role |
 |---|---|
-| `services/frontend/nginx.conf.template` | `location /jupyter/` to the SSO proxy |
-| `services/notebook_hub/sso-nginx.conf` | Session check against `/auth/verify` |
+| `services/frontend/notebook-origin.conf.template` | Compose: the notebook origin's server, to the SSO proxy |
+| `services/notebook_hub/sso-nginx.conf` | Ticket exchange and the session check against `/auth/verify` |
 | `services/notebook_hub/jupyterhub_config.py::ProxyHeaderAuthenticator` | Login from the forwarded identity |
 | `docker-compose.yml` | `notebook-sso` and `notebook-hub` without host ports |
 | `services/notebook_hub/tests/test_jupyterhub_config.py::test_hub_authenticates_from_the_platform_session` | Proof: the hub's authenticator is the forwarded-identity one |
@@ -192,7 +191,11 @@ neither `notebook-sso` nor `notebook-hub` has a host port. The hub has no login 
 ### Request path
 
 ```
-browser ─▶ frontend edge /jupyter/ ─▶ notebook-sso ──auth_request──▶ api-gateway GET /auth/verify
+platform page ──POST /api/notebook-ticket──▶ api-gateway            (platform session, CSRF-checked)
+      │ form POST {ticket} into the frame
+      ▼
+notebook origin /enter ─▶ notebook-sso ─▶ api-gateway POST /auth/notebook-entry ─▶ if_nb cookie, 303 /
+notebook origin /…     ─▶ notebook-sso ──auth_request──▶ api-gateway GET /auth/verify (if_nb only)
                                           │ X-IF-* identity (client-supplied values overwritten)
                                           ▼
                                     notebook-hub ──spawns──▶ per-user environment (profile by role)
@@ -369,11 +372,15 @@ is not built.
 
 ## ADR-0014 dec 1-3
 
-The edge asks the platform's session verification on every hub request and forwards the verified identity with a proxy credential; the hub accepts only that.
+`notebook-sso` asks `GET /auth/verify` on every hub request with the notebook session cookie only; the
+gateway admits it through the platform's one session verification ([ADR-0048 dec 4](#adr-0048-dec-3-4))
+and answers the account's current user, tenant and role. The proxy forwards them with the proxy
+secret on hub routes; the hub accepts only that.
 
 | Code | Role |
 |---|---|
 | `services/notebook_hub/sso-nginx.conf` | Session check and identity forwarding |
+| `services/api_gateway/routers/notebook_entry.py::verify_session` | The notebook session's verification |
 | `services/notebook_hub/jupyterhub_config.py` | Forwarded-identity authenticator |
 
 ## ADR-0014 dec 4
@@ -397,8 +404,9 @@ from the role in the hub's auth state and mints every handle against the tenant 
 
 The hub login yields the forwarded identity only. The spawn hook writes user, tenant and profile into
 the kernel environment beside the minted handles; neither the platform session token nor the SSO
-proxy secret is placed there. The SSO proxy reads the platform cookies (`if_access`, `if_csrf`) for its
-session check and removes them from the Cookie header it sends to the hub and the single-user servers.
+proxy secret is placed there. The SSO proxy removes the platform cookies (`if_access`, `if_csrf`,
+`if_refresh`) and the notebook session cookie (`if_nb`) from the Cookie header it sends to the hub and
+the single-user servers.
 
 | Code | Role |
 |---|---|
@@ -408,31 +416,37 @@ session check and removes them from the Cookie header it sends to the hub and th
 | `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_proxy_secret_never_reaches_a_kernel` | Proof: the proxy secret stays out of the environment |
 | `services/notebook_hub/sso-nginx.conf` | Compose: platform cookies removed before the hub |
 | `deploy/helm/industryflow/templates/notebook-hub.yaml` | Kubernetes: the same |
-| `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_proxy_sends_the_hub_no_platform_cookie` | Proof: no platform cookie reaches the hub |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_proxy_sends_the_hub_no_platform_cookie` | Proof: no platform or notebook session cookie reaches the hub |
 
 ## ADR-0014 dec 6
 
-Not yet realised: the hub is still served under `/jupyter/` (`NOTEBOOK_BASE_URL`) of the platform's
-origin, behind the frontend edge ([ADR-0011 dec 8](#adr-0011-dec-8)), until [ADR-0048](#adr-0048-dec-1-6)
-is built. The hub and every single-user server send `Content-Security-Policy: frame-ancestors 'self'`.
+The hub is served under `NOTEBOOK_BASE_URL` (`/jupyter/`) of the notebook origin; the origin's root
+redirects there. Its one public entry is `POST /enter`, which takes a ticket and no password. The hub
+and every single-user server send `Content-Security-Policy: frame-ancestors <platform origin>`.
 
 | Frontend page | Shows | Source |
 |---|---|---|
-| `/notebooks` | `/jupyter/` in an iframe: the role's profile ([profiles](#profiles)), so the `analytics` landing for every role not mapped to authoring; framed under the platform's own origin | `services/frontend/src/pages/Notebooks.jsx` |
+| `/notebooks` | The notebook origin in an iframe, entered with a ticket: the role's profile ([profiles](#profiles)), so the `analytics` landing for every role not mapped to authoring; **Open in a new tab** enters a tab the same way | `services/frontend/src/pages/Notebooks.jsx` |
 
 | Code | Role |
 |---|---|
-| `services/notebook_hub/jupyterhub_config.py::_FRAME_CSP` | Framing by the same origin only, hub and single-user servers |
-| `services/frontend/nginx.conf.template` | `/jupyter/` on the platform origin |
+| `services/notebook_hub/jupyterhub_config.py::_FRAME_CSP` | Framing by the platform origin only, hub and single-user servers |
+| `services/notebook_hub/sso-nginx.conf` | `/enter`, `/` to the hub's base URL |
 | `services/frontend/src/pages/Notebooks.jsx` | The embedding page |
+| `services/frontend/src/services/notebooks.js::enterNotebooks` | Ticket minted and posted into the frame or tab |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_one_public_entry_is_the_ticket_exchange` | Proof: `/enter` is POST only; every other path passes the session check |
 
 ## ADR-0014 dec 7
 
-Platform sign-out signs out of the hub first.
+Platform sign-out first requests `<notebook origin>/logout` (no-cors, with that origin's cookies),
+which the SSO proxy redirects to the hub's logout; `shutdown_on_logout` stops the user's servers.
+`/auth/logout` then ends the platform session, which ends the notebook session with it.
 
 | Code | Role |
 |---|---|
-| `services/frontend/src/services/session.js` | Chained sign-out |
+| `services/frontend/src/services/session.js::signOut` | Chained sign-out |
+| `services/frontend/src/services/notebooks.js::notebookOrigin` | The notebook origin this browser last entered |
+| `services/notebook_hub/sso-nginx.conf` | `/logout` to the hub's logout |
 
 ## ADR-0015 dec 1-4
 
@@ -459,6 +473,7 @@ resolves `tracking` and `upload` separately and applies upload admission to `upl
 | `sql` | `services/notebook_sql_proxy/binding.py` | yes |
 | `tracking` | `services/notebook_tracking_gateway/policy.py` | no |
 | `cold` | `services/notebook_cold_broker/policy.py` | yes |
+| `notebook` | `services/api_gateway/notebook_entry.py::spend_ticket`, once, for a notebook session ([ADR-0048 dec 3](#adr-0048-dec-3-4)); no data plane | yes |
 
 ### Handle lifecycle
 
@@ -467,7 +482,7 @@ resolves `tracking` and `upload` separately and applies upload admission to `upl
 | Spawn | Handles of an earlier run of the server are revoked; one handle per audience is minted with lifetime `NOTEBOOK_CAPABILITY_TTL_SECONDS` and recorded in `nbcap-user:<user>` |
 | Spawner poll, server healthy | Lifetime extended |
 | Server stops (user, culler, hub logout) | `post_stop_hook` revokes its handles |
-| Platform logout | The frontend logs out of the hub first (`shutdown_on_logout` stops the server); `/auth/logout` revokes all the user's handles; a server whose handles are all revoked stops at its next poll |
+| Platform logout | The frontend logs out of the hub first, on the notebook origin (`shutdown_on_logout` stops the server); `/auth/logout` ends the notebook session and revokes all the user's handles; a server whose handles are all revoked stops at its next poll |
 | Login (`/hub/login`) | Refused (401) unless `X-IF-SSO-Proxy-Secret` matches `NOTEBOOK_SSO_PROXY_SECRET` |
 | Hub request after `NOTEBOOK_AUTH_REFRESH_SECONDS`, and before a spawn | Hub login compared with the forwarded identity (identity headers without the proxy secret count as none): a different user ends the login; the same user with another tenant or role ends it and stops their servers |
 | Open SQL session | Re-checked every `SQL_PROXY_REVALIDATE_SECONDS`; closed once the handle is revoked |
@@ -533,7 +548,7 @@ Configuration selects the Docker or the Kubernetes spawner (`NOTEBOOK_SPAWNER`, 
 | Environment | Per-user container | Per-user pod |
 | Egress | Network `industryflow-notebook-kernels`, shared with `notebook-hub`, `api-gateway`, `notebook-sql-proxy`, `notebook-tracking-gateway`, `notebook-cold-broker`, `minio` | Single-user egress NetworkPolicy (`networkpolicy.yaml`) |
 | Docker access | Hub in supplementary group `DOCKER_GID` | RBAC for pods and PVCs (`notebook-hub.yaml`) |
-| Enable | [getting started, step 6](../getting-started.md#6-notebooks-optional-profile) | `notebookHub.enabled: true`, `notebookHub.baseUrl: /jupyter/`, `notebookHub.authoringRoles` |
+| Enable | [getting started, step 6](../getting-started.md#6-notebooks-optional-profile) | `notebookHub.enabled: true`, `notebookHub.host` (the notebook origin), `notebookHub.baseUrl: /jupyter/`, `notebookHub.authoringRoles` |
 | Validation | Compose smoke checks the kernel network on every PR | Renders and lints in CI; not run on a cluster |
 
 ### Not built
@@ -862,8 +877,79 @@ function refuses fewer than 30 days, whoever calls it.
 | `docker-compose.yml` | Retention setting |
 | `infrastructure/timescaledb/tests/test_capability_audit.py::test_retention_removes_only_what_is_older_than_its_period_and_never_under_the_floor` | Proof: period and floor |
 
-## ADR-0048 dec 1-6
+## ADR-0048 dec 1, 6
 
-Not yet realised.
+The notebook origin differs from the platform origin in host or port, by deployment shape; no path of
+the platform origin reaches `notebook-sso` (`/jupyter/` there is the app's).
+
+| Deployment | Platform origin | Notebook origin | Served by |
+|---|---|---|---|
+| Compose | `PLATFORM_ORIGIN` (`https://<host>:3443`) | `NOTEBOOK_ORIGIN` (`https://<host>:3444`), same host and certificate | The frontend edge, port `8444` (`NOTEBOOK_HTTPS_PORT`), when `EDGE_NOTEBOOK_SSO` is set |
+| Helm | `publicBaseUrl`, else `https://<apps.frontend.ingress.host>` | `https://<notebookHub.host>`, a sibling host | The `-notebooks` Ingress, to `notebook-sso` |
+
+| Refusal | Where |
+|---|---|
+| The hub does not start: an origin unset, not `scheme://host[:port]`, or both with the same host and port | `identity.validate_origins`, at config load |
+| The chart does not render: `notebookHub.host` unset, or its origin equals the platform's | `industryflow.notebookOrigin` |
+| The edge does not start: `EDGE_NOTEBOOK_ORIGIN` not `https://host[:port]`, or `EDGE_NOTEBOOK_SSO` without it | `docker-entrypoint-edge.sh` |
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/identity.py::validate_origins` | Two distinct origins or no hub |
+| `services/frontend/notebook-origin.conf.template` | Compose: the notebook origin's server |
+| `services/frontend/docker-entrypoint-edge.sh` | Renders it when the deployment names `EDGE_NOTEBOOK_SSO` |
+| `deploy/helm/industryflow/templates/notebook-hub.yaml` | Helm: the notebook origin's Ingress |
+| `deploy/helm/industryflow/templates/_helpers.tpl` | `industryflow.platformOrigin`, `industryflow.notebookOrigin` |
+| `docker-compose.yml` | Port `3444:8444`, the origins for gateway, edge, hub and proxy |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_hub_does_not_start_without_a_distinct_notebook_origin` | Proof: no distinct origin, no hub |
+
+## ADR-0048 dec 2
+
+The gateway refuses every `POST`, `PUT`, `PATCH` and `DELETE` whose `Origin` is neither in
+`CORS_ORIGINS` nor the origin it was addressed to, `/auth/*` included (`403 Cross-origin request
+refused`); the socket's origin check is the same function. `NOTEBOOK_ORIGIN` in `CORS_ORIGINS` stops
+the gateway at startup. Platform cookies that reach the notebook origin are read by nothing there.
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/origins.py::origin_admitted` | One origin check for requests and sockets |
+| `services/api_gateway/main.py::refuse_foreign_origins` | State-changing requests from another origin refused |
+| `services/api_gateway/config.py::Settings` | `NOTEBOOK_ORIGIN` an origin, in no allowlist |
+| `services/api_gateway/tests/test_notebook_entry.py::test_the_notebook_origin_sends_the_platform_no_state_changing_request` | Proof: `/auth/logout`, `/auth/refresh`, `/auth/login` and the ticket refused from the notebook origin |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_session_check_reads_the_notebook_session_only` | Proof: the session check reads `if_nb` only |
+
+## ADR-0048 dec 3, 4
+
+| Step | Form |
+|---|---|
+| Mint | `POST /api/notebook-ticket` on the platform session (CSRF-checked): `{ticket, entry, origin}`, `Cache-Control: no-store`. 404 without `NOTEBOOK_ORIGIN`; 409 for a session with no refresh token |
+| Ticket | Capability entry `nbcap:<ticket>`, audience `notebook`, user, tenant, `sid`, 30 s (`TICKET_TTL_SECONDS`); `minted` recorded with it |
+| Exchange | `POST <notebook origin>/enter`, form field `ticket`, `Origin` in `CORS_ORIGINS`, `Host` the notebook origin's; spent once (`consumed` recorded), refusals recorded ([ADR-0042](#adr-0042-dec-1-3-5)) |
+| Notebook session | `notebook-session:<handle>` naming user, `sid`, issue time and a password fingerprint, for one refresh lifetime; cookie `if_nb`, host-only, `HttpOnly`, `Secure`, `SameSite=Strict`; then `303 /` |
+| Each hub request | Admitted while the platform session can be continued (`session-live:<sid>`, set with each refresh token and removed when the session ends), has not ended, the account is active, its company not suspended and its password unchanged |
+| No notebook session | A top-level page is redirected to `<platform origin>/notebooks`; a framed one gets a 401 page framed by the platform only |
+
+| Code | Role |
+|---|---|
+| `services/api_gateway/routers/notebook_entry.py::mint_ticket` | Ticket from the session |
+| `services/api_gateway/routers/notebook_entry.py::enter` | Exchange and the notebook session cookie |
+| `services/api_gateway/notebook_entry.py` | Ticket and notebook session in the capability store |
+| `services/api_gateway/users.py::admit_session` | The one session verification, for access tokens and notebook sessions |
+| `services/api_gateway/messaging/refresh_tokens.py::session_live` | Whether the session can still be continued |
+| `services/frontend/src/services/notebooks.js::enterNotebooks` | Ticket posted in a form body |
+| `services/api_gateway/tests/test_notebook_entry.py` | Proof: single use, entry from a platform page only, no data credential, ended with its session |
+
+## ADR-0048 dec 5
+
+| Who | Policy |
+|---|---|
+| Hub, single-user servers | `frame-ancestors <platform origin>` |
+| Platform pages | `frame-src <notebook origin>`, `form-action 'self' <notebook origin>`, `connect-src 'self' <notebook origin>`; `X-Frame-Options: SAMEORIGIN` |
+
+| Code | Role |
+|---|---|
+| `services/notebook_hub/jupyterhub_config.py::_FRAME_CSP` | The hub's frame policy |
+| `services/frontend/nginx.conf.template` | The platform's policy, from `EDGE_NOTEBOOK_ORIGIN` |
+| `services/notebook_hub/tests/test_jupyterhub_config.py::test_the_hub_is_framed_by_the_platform_origin_only` | Proof: hub and servers |
 
 Links: [database TLS](../operations/tls.md) ([ADR-0017](../../ADR/ADR-0017-database-tls-and-authentication.md), `verify-full`).

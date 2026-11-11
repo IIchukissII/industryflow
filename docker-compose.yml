@@ -667,6 +667,8 @@ services:
       COMPANY_STATUS_CACHE_SECONDS: ${COMPANY_STATUS_CACHE_SECONDS:-30}
       WS_SESSION_RECHECK_SECONDS: ${WS_SESSION_RECHECK_SECONDS:-60}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      # The notebook origin a ticket enters (ADR-0048 dec 3); it is in no allowlist (dec 2).
+      NOTEBOOK_ORIGIN: ${NOTEBOOK_ORIGIN:-https://localhost:3444}
       # Workers x (pool size + overflow) must fit api_gateway_user's CONNECTION LIMIT
       # (services/api_gateway/tests/test_db_connection_budget.py checks it).
       API_GATEWAY_WORKERS: ${API_GATEWAY_WORKERS:-2}
@@ -674,8 +676,9 @@ services:
       API_GATEWAY_DB_MAX_OVERFLOW: ${API_GATEWAY_DB_MAX_OVERFLOW:-2}
       # The capability-use record's retention (ADR-0042 dec 10); the database refuses under 30 days.
       CAPABILITY_AUDIT_RETENTION_DAYS: ${CAPABILITY_AUDIT_RETENTION_DAYS:-365}
-      # The edge, the one peer whose reported client address is believed (ADR-0042 dec 9).
-      EDGE_PROXY_PEERS: frontend
+      # The edge, the one peer whose reported client address is believed (ADR-0042 dec 9), and the
+      # notebook SSO proxy, which passes on the address the edge reported for a ticket exchange.
+      EDGE_PROXY_PEERS: frontend,notebook-sso
       # Password sign-in slowed per account and source, the source as the edge reports it (ADR-0004 dec 10).
       SIGN_IN_THROTTLE: per-source
       # The first-run superuser, created only on a platform with no account (ADR-0004 dec 11). Unset: the
@@ -722,6 +725,9 @@ services:
       # service is followed and the opt-in notebooks plane answers 502 while it is down.
       EDGE_API_GATEWAY: api-gateway:8000
       EDGE_ML_SERVICE: ml-service-api:8002
+      # The notebook origin, served by this edge on its second TLS port (ADR-0048 dec 6), and its
+      # SSO proxy; the platform's pages frame it and nothing else.
+      EDGE_NOTEBOOK_ORIGIN: ${NOTEBOOK_ORIGIN:-https://localhost:3444}
       EDGE_NOTEBOOK_SSO: notebook-sso:8080
       EDGE_TRACKING_GATEWAY: notebook-tracking-gateway:5050
       EDGE_OBJECT_STORE_URL: ${MINIO_ENDPOINT:-http://minio:9000}
@@ -738,6 +744,8 @@ services:
       # client as one source (ADR-0004 dec 10).
       - "0.0.0.0:${FRONTEND_HTTPS_PORT:-3443}:8443"
       - "0.0.0.0:${FRONTEND_PORT:-3000}:8080"
+      # The notebook origin (ADR-0048 dec 6): same host and certificate, its own port.
+      - "0.0.0.0:${NOTEBOOK_HTTPS_PORT:-3444}:8444"
     volumes:
       # Default: a named volume the entrypoint self-signs into. Set TLS_CERT_DIR to a host
       # directory holding tls.crt/tls.key (e.g. the output of scripts/gen-internal-ca.sh) to
@@ -1038,9 +1046,13 @@ services:
       # Kernels spawn onto the dedicated kernel network, not the platform network (ADR-0018 dec 4).
       NOTEBOOK_NETWORK: industryflow-notebook-kernels
       HUB_CONNECT_IP: notebook-hub
-      # Mount the hub under a path prefix so the frontend can embed it same-origin (ADR-0014):
-      # <app>/jupyter/ → notebook-sso → hub. JupyterHub propagates this to chp + single-user servers.
+      # The hub's path on the notebook origin, whose root notebook-sso sends here. JupyterHub
+      # propagates it to chp and every single-user server.
       NOTEBOOK_BASE_URL: ${NOTEBOOK_BASE_URL:-/jupyter/}
+      # The two origins (ADR-0048): the hub is framed by the platform's only, and does not start
+      # unless its own differs from it.
+      NOTEBOOK_PLATFORM_ORIGIN: ${PLATFORM_ORIGIN:-https://localhost:3443}
+      NOTEBOOK_ORIGIN: ${NOTEBOOK_ORIGIN:-https://localhost:3444}
       REDIS_URL: redis://redis:6379/0
       # Required for enable_auth_state — the hub encrypts the verified tenant/role it carries from
       # the SSO handoff to the spawn hook (ADR-0014). Generate: openssl rand -hex 32.
@@ -1213,21 +1225,23 @@ services:
       - notebook-kernels
     restart: unless-stopped
 
-  # SSO reverse proxy (ADR-0014): the hub's only entry point. Validates the platform session via
-  # api-gateway /auth/verify and forwards the verified identity, overwriting client-supplied values.
-  # Plain HTTP on the internal network only — the frontend edge terminates TLS and reverse-proxies
-  # <app>/jupyter/ here (single-origin, ADR-0014), so notebooks are embeddable in the platform UI.
-  # No host port and no cert: it is never reached directly, only through the frontend.
+  # SSO reverse proxy (ADR-0014, ADR-0048): everything the notebook origin serves. Exchanges the
+  # platform's ticket for a notebook session, checks it via api-gateway /auth/verify on every request
+  # and forwards the verified identity, overwriting client-supplied values. Plain HTTP on the
+  # internal network only: the frontend edge serves the notebook origin on its second TLS port and
+  # reverse-proxies it here. No host port and no cert: it is reached only through the frontend.
   notebook-sso:
     profiles: ["notebooks"]
     image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
     container_name: industryflow-notebook-sso
     environment:
       # sso-nginx.conf is a template the image renders at start into /etc/nginx/nginx.conf; the
-      # filter limits substitution to these two.
+      # filter limits substitution to the NOTEBOOK_ values below.
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
       NGINX_ENVSUBST_FILTER: ^NOTEBOOK_
       NOTEBOOK_BASE_URL: ${NOTEBOOK_BASE_URL:-/jupyter/}
+      # Where a browser without a notebook session is sent back to (ADR-0048).
+      NOTEBOOK_PLATFORM_ORIGIN: ${PLATFORM_ORIGIN:-https://localhost:3443}
       # Presented to the hub on hub routes (ADR-0014 dec 3); the same value the hub holds.
       NOTEBOOK_SSO_PROXY_SECRET: ${NOTEBOOK_SSO_PROXY_SECRET:-}
     volumes:

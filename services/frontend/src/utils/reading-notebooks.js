@@ -4,7 +4,8 @@
 
 // Notebooks: whether the embedded environment is up yet, and what it can reach.
 
-export function notebooksReading({ loaded = false, slow = false }) {
+export function notebooksReading({ loaded = false, slow = false, refused = null }) {
+  if (refused) return `Notebooks could not be opened: ${refused}`;
   if (loaded) return 'Your notebook environment is open. It can read your tenant’s data and no other tenant’s.';
   if (slow) return 'Your environment is still starting. The first launch takes the longest.';
   return 'Your notebook environment is starting. It can read your tenant’s data and no other tenant’s.';
