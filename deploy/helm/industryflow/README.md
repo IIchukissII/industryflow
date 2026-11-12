@@ -229,7 +229,7 @@ The chart reads the Compose deployment's own sources through symlinks; neither c
 
 | Symlink | Target |
 |---|---|
-| `files/db-migrations` | `infrastructure/timescaledb/init-scripts` |
+| `files/db-migrations` | [the schema sequence](../../../infrastructure/timescaledb/init-scripts/README.md) |
 | `files/migrate.sh` | `infrastructure/timescaledb/migrate.sh` |
 | `files/db-config` | `infrastructure/timescaledb/config` |
 | `files/minio-init.sh` | `infrastructure/minio/minio-init.sh` |
