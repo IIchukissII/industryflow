@@ -88,6 +88,24 @@ def test_a_future_timestamp_does_not_close_live_windows(spark, tmp_path):
     assert all(r["max_value"] < 999.0 for r in rows)
 
 
+# --- every window carries its spread ------------------------------------------------------------
+
+def test_a_window_of_one_reading_has_zero_spread(spark):
+    # The job's own aggregation over a batch frame: the sample standard deviation, and zero where a
+    # window holds one reading, never an empty spread (ADR-0006 dec 9).
+    w0 = (datetime.now(timezone.utc) - timedelta(minutes=30)).replace(second=0, microsecond=0)
+    readings = [_reading(w0 + timedelta(seconds=5), 7.0),
+                _reading(w0 + timedelta(seconds=65), 1.0), _reading(w0 + timedelta(seconds=75), 3.0)]
+    kafka_like = spark.createDataFrame(
+        [(json.dumps(r), "t", 0, i) for i, r in enumerate(readings)],
+        "value string, topic string, partition int, offset long")
+    rows = job.aggregate_readings(parse_readings(kafka_like), "1min").collect()
+    by_count = {r["count_values"]: r for r in rows}
+    assert set(by_count) == {1, 2}
+    assert by_count[1]["stddev_value"] == 0.0
+    assert by_count[2]["stddev_value"] == pytest.approx(2 ** 0.5)
+
+
 # --- one unknown tenant must not fail every tenant -----------------------------------------------
 
 class _Conn:

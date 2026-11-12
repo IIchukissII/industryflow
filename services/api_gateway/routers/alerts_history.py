@@ -59,9 +59,10 @@ _BUCKET_INTERVAL = {"day": timedelta(days=1), "week": timedelta(days=7)}
 # infrastructure/timescaledb/tests/test_alert_metrics_asyncpg.py.
 # A label on a degraded alert is counted apart (ADR-0022 dec 3): it judges a score computed with
 # stateful features neutralized. A label from before degradation was recorded (NULL) counts with the
-# rest, as it always did. Scoped to one model (:own_only), precision counts only the alerts its own
-# score raised; labels on its drift alerts and recommendations judge the monitoring and are counted
-# apart, as the retrain trigger leaves them out (ADR-0022 dec 3, 4).
+# rest, as it always did. Labels on drift alerts and recommendations judge the monitoring and are
+# counted apart (ADR-0022 dec 3): scoped to one model (:own_only), precision counts only the alerts its
+# own score raised, as the retrain trigger does (dec 4); unscoped, the alerts a threshold or a model's
+# score raised.
 LABEL_METRICS_SELECT = """
     SELECT
         time_bucket(:interval, labeled_at) AS bucket,
@@ -75,8 +76,8 @@ LABEL_METRICS_SELECT = """
         count(*) FILTER (WHERE verdict = 'false_positive' AND NOT own) AS monitoring_fp,
         count(*) FILTER (WHERE verdict = 'unsure'         AND NOT own) AS monitoring_unsure
     FROM alert_labels,
-         LATERAL (SELECT (NOT CAST(:own_only AS boolean)
-                          OR detection_type IS NOT DISTINCT FROM 'ml') AS own) o
+         LATERAL (SELECT COALESCE(CASE WHEN CAST(:own_only AS boolean) THEN detection_type = 'ml'
+                                       ELSE detection_type IN ('threshold', 'ml') END, false) AS own) o
     WHERE {where}
     GROUP BY bucket
     ORDER BY bucket
@@ -122,16 +123,10 @@ def _precision(tp: int, fp: int) -> Optional[float]:
     return round(tp / decided, 4) if decided else None
 
 
-def _false_positive_rate(tp: int, fp: int) -> Optional[float]:
-    """FP / (TP + FP), or None when nothing decisive was labelled."""
-    decided = tp + fp
-    return round(fp / decided, 4) if decided else None
-
-
 def _summary(tp: int, fp: int, unsure: int) -> "PrecisionSummary":
     return PrecisionSummary(
         true_positive=tp, false_positive=fp, unsure=unsure, labeled_total=tp + fp + unsure,
-        precision=_precision(tp, fp), false_positive_rate=_false_positive_rate(tp, fp),
+        precision=_precision(tp, fp),
     )
 
 
@@ -149,7 +144,6 @@ class PrecisionSummary(BaseModel):
     unsure: int
     labeled_total: int
     precision: Optional[float]
-    false_positive_rate: Optional[float]
 
 
 class PrecisionMetrics(BaseModel):
@@ -161,8 +155,8 @@ class PrecisionMetrics(BaseModel):
     overall: PrecisionSummary
     # Labels on degraded alerts, reported apart and outside the retrain trigger (ADR-0022 dec 3, 4).
     degraded: PrecisionSummary
-    # Scoped to a model: labels on its drift alerts and retrain recommendations, which judge the
-    # monitoring, not the model; reported apart and outside the retrain trigger (ADR-0022 dec 3, 4).
+    # Labels on drift alerts and retrain recommendations, which judge the monitoring, not an alert's
+    # trigger; reported apart and outside the retrain trigger (ADR-0022 dec 3, 4).
     monitoring: PrecisionSummary
     series: List[PrecisionBucket]
     # Honest scope (ADR-0022 dec 3): recall is not derivable from fired-alert labels.
@@ -373,10 +367,10 @@ async def alert_label_metrics(
         db: AsyncSession = Depends(get_db_with_tenant),
         current_user: User = Depends(get_current_user_with_company)
 ):
-    """Precision + false-positive rate over time from operator alert labels (ADR-0022 dec 3).
+    """Precision over time from operator alert labels (ADR-0022 dec 3).
 
     Buckets the labelled fired alerts by time and reports, per bucket and overall, precision
-    = TP/(TP+FP) and the false-positive rate. Optionally scoped to one model or rule.
+    = TP/(TP+FP). Optionally scoped to one model or rule.
 
     Recall is deliberately NOT reported: fired-alert labels carry no false-negative signal
     (we never see the anomalies that didn't fire), so a recall number here would be a fiction
@@ -426,6 +420,6 @@ async def alert_label_metrics(
     return PrecisionMetrics(
         window_days=days, bucket=bucket.value, model_id=model_id, rule_id=rule_id,
         overall=overall, degraded=degraded, monitoring=monitoring, series=series,
-        note=("Precision and false-positive rate only; recall is not derivable from "
+        note=("Precision only; recall is not derivable from "
               "fired-alert labels (no false-negative signal) — ADR-0022."),
     )

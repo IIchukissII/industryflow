@@ -150,12 +150,13 @@ async def test_window_std_returns_the_std():
 
 
 @pytest.mark.asyncio
-async def test_a_single_sample_window_has_no_spread_and_is_reported():
-    """A one-sample window has no stddev: the store cannot supply the value, which the engine serves
-    neutral and names (ADR-0044 dec 3) — never a silent 0.0, never the raw value."""
-    with pytest.raises(StatefulUnavailable, match="one sample"):
+async def test_a_window_without_its_spread_is_a_defect_not_an_outage():
+    """Every written window carries its spread, zero for one reading (ADR-0006 dec 9): a window
+    without one is a defect, which fails the score, never served neutral (ADR-0044 dec 3, 4)."""
+    with pytest.raises(RuntimeError, match="carries no spread") as raised:
         await STATISTICAL(_transform(stat_type="window_std"),
                           {"pressure": 72.5}, _ctx(_FakeProvider(mean=70.0, std=None)))
+    assert not isinstance(raised.value, StatefulUnavailable)
 
 
 @pytest.mark.asyncio
@@ -243,7 +244,8 @@ async def test_provider_returns_mean_and_std():
 
 @pytest.mark.asyncio
 async def test_provider_std_may_be_none():
-    """A single-sample window has avg but no stddev — a present baseline with a null std."""
+    """The provider reports a window's stored spread as it is; a missing one is the transform's to
+    refuse (ADR-0006 dec 9)."""
     pool = _FakePool(_FakeConn(row={"avg_value": 70.0, "stddev_value": None}))
     provider = AggregateBaselineProvider(pool)
     baseline = await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min")

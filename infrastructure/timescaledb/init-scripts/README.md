@@ -68,6 +68,7 @@ No service creates a table at startup; the `public."user"` table is defined by `
 | `33-equipment-batch-settings-removed.sql` | Drops `batch_timeout_seconds`, `require_complete_batch`, `min_sensors_for_partial` from every tenant's `equipment` | [ADR-0044](../../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) dec 5 |
 | `34-user-password-change-required.sql` | `public."user".password_change_required` (default false): an account must set its password before anything else | [ADR-0004](../../../ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) dec 11 |
 | `35-degraded-alerts.sql` | `add_degraded_columns_to_alerts()`: `alerts.degraded`, `alerts.neutralized_features`, `alert_labels.degraded`; over existing tenants | [ADR-0044](../../../ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) dec 3, [ADR-0022](../../../ADR/ADR-0022-concept-drift-operator-feedback.md) dec 2 |
+| `36-window-spread-of-one-reading.sql` | Sets `stddev_value` to 0 where it is NULL and `count_values` is 1, in every tenant's `sensor_aggregations_*` | [ADR-0006](../../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) dec 9 |
 
 ## ADR-0034 dec 2
 

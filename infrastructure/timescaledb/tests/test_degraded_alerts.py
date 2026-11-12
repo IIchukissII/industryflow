@@ -14,8 +14,9 @@ read and label them; the worker's retrain-trigger count runs as written. Proves:
   * a label copies its alert's degraded state, NULL included;
   * label metrics count labels on degraded alerts apart; the retrain trigger leaves them out and
     still counts the unknown ones;
-  * scoped to a model, labels on its drift alerts are counted apart and the retrain trigger leaves
-    them out: they judge the monitoring, not the model (ADR-0022 dec 3, 4).
+  * labels on drift alerts are counted apart, scoped to a model and tenant-wide, and the retrain
+    trigger leaves them out: they judge the monitoring, not an alert's trigger (ADR-0022 dec 3, 4);
+    tenant-wide, a threshold alert's label counts with the model's.
 
 Requires a running database with the init scripts applied (db-tenant-isolation.yml stands one up).
 """
@@ -113,7 +114,9 @@ def test_a_degraded_alert_is_stored_read_labelled_and_counted_apart(tenant):
     ordinary = _alert(model_id=model, degraded=False, neutralized_features=[])
     drift = _alert(model_id=model, detection_type="statistical", condition="drift", degraded=False,
                    neutralized_features=[])
-    asyncio.run(_save(company_id, [degraded, ordinary, drift]))
+    threshold = _alert(detection_type="threshold", condition=">", model_id=None, anomaly_score=None,
+                       degraded=False, neutralized_features=[])
+    asyncio.run(_save(company_id, [degraded, ordinary, drift, threshold]))
     # An alert written before the change: the columns are NULL.
     legacy = str(uuid.uuid4())
     cur.execute(f'INSERT INTO "{schema}".alerts (alert_id, triggered_at, rule_id, detection_type, model_id, '
@@ -127,7 +130,7 @@ def test_a_degraded_alert_is_stored_read_labelled_and_counted_apart(tenant):
     assert (rows[legacy]["degraded"], rows[legacy]["neutralized_features"]) == (None, None)
 
     # Each is labelled false positive the way the endpoint does it: its fields read, then upserted.
-    for alert_id in (degraded["alert_id"], ordinary["alert_id"], drift["alert_id"], legacy):
+    for alert_id in (degraded["alert_id"], ordinary["alert_id"], drift["alert_id"], threshold["alert_id"], legacy):
         [source] = _gateway(schema, "LABEL_ALERT_SELECT", {"alert_id": uuid.UUID(alert_id)})
         [label] = _gateway(schema, "LABEL_UPSERT", {
             "alert_id": uuid.UUID(alert_id), "verdict": "false_positive", "note": None, "labeled_by": "op",
@@ -142,11 +145,11 @@ def test_a_degraded_alert_is_stored_read_labelled_and_counted_apart(tenant):
                         {"interval": timedelta(days=1), "days": 30, "model_id": model, "own_only": True},
                         sql=metrics_sql)
     assert (bucket["fp"], bucket["degraded_fp"], bucket["monitoring_fp"]) == (2, 1, 1), bucket
-    # Unscoped, every label is the tenant's own; nothing is set apart as monitoring.
+    # Tenant-wide, the threshold and model alerts' labels count; the drift alert's is set apart.
     unscoped_sql = template.format(where=filters["days"])
     [bucket] = _gateway(schema, "LABEL_METRICS_SELECT",
                         {"interval": timedelta(days=1), "days": 30, "own_only": False}, sql=unscoped_sql)
-    assert (bucket["fp"], bucket["degraded_fp"], bucket["monitoring_fp"]) == (3, 1, 0), bucket
+    assert (bucket["fp"], bucket["degraded_fp"], bucket["monitoring_fp"]) == (3, 1, 1), bucket
 
     counts = service_sql.run(service_sql.statement(WORKER, "MODEL_LABEL_COUNTS"), (uuid.UUID(model), 30),
                              role="alert_service_user", search_path=f'"{schema}", public')

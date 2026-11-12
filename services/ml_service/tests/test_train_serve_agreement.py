@@ -92,7 +92,8 @@ class _ProviderOver:
         window = mine[windows == written.max()]
         self.baseline = {
             "mean": float(window[sensor].mean()),
-            "std": None if len(window) < 2 else float(window[sensor].std()),
+            # As the writer stores it: the sample standard deviation, zero for one reading (ADR-0006 dec 9).
+            "std": 0.0 if len(window) == 1 else float(window[sensor].std()),
         }
 
     async def compute_baseline(self, company_id, equipment_id, sensor_name, granularity=None):
@@ -222,6 +223,31 @@ async def test_cold_start_rows_agree_on_neutral():
         {"pressure": row["pressure"]}, _ProviderOver(df, now=row["timestamp"]),
     )
     assert served == 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_sensor_reporting_once_per_window_agrees_on_zero_spread_computed_not_degraded():
+    """A window of one reading has zero spread (ADR-0006 dec 9): training records it, and serving
+    computes it as an ordinary value, naming no unavailable slot (ADR-0044 dec 3)."""
+    df = _frame(n_samples=20, interval_seconds=60)
+    engineered, _ = offline_baseline.add_window_features(
+        df.copy(), ["pressure"], granularity="1min", stats=("window_std",))
+    transformation = offline_baseline.feature_config("pressure", "window_std", "1min")
+
+    checked = 0
+    for _, row in engineered.iterrows():
+        provider = _ProviderOver(df, now=row["timestamp"])
+        if provider.baseline is None:
+            continue  # cold start: covered by test_cold_start_rows_agree_on_neutral
+        engine = FeatureEngineeringEngine(
+            feature_config={"base_sensors": ["pressure"], "transformations": [transformation]},
+            baseline_provider=provider, equipment_id=EQUIPMENT_ID, company_id=COMPANY_ID,
+        )
+        served = float((await engine.transform({"pressure": row["pressure"]}))[0][0])
+        assert served == row["pressure_window_std"] == 0.0
+        assert engine.unavailable_features == []
+        checked += 1
+    assert checked > len(df) // 2, "no windowed row was compared"
 
 
 # ------------------------------------------------------------- the offline derivation is causal

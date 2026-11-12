@@ -199,6 +199,18 @@ Changing `N` starts the aggregation queries on fresh checkpoints from the latest
 open at the switch is written from post-switch readings only. The previous `-p<M>` (or unsuffixed)
 directories are no longer read; delete them once the new queries run.
 
+## ADR-0006 dec 9
+
+The aggregation writes `stddev_value` as the sample standard deviation, and 0 for a window with `count_values` 1. Offline training derives it by the same rule.
+
+| Code | Role |
+|---|---|
+| `services/spark_jobs/kafka_aggregations.py::aggregate_readings` | Writer: zero spread for one reading |
+| `services/ml_service/notebooks/utils/offline_baseline.py::add_window_features` | Training: the same rule |
+| `infrastructure/timescaledb/init-scripts/36-window-spread-of-one-reading.sql` | Windows written before: set to 0 |
+| `services/spark_jobs/tests/test_aggregations.py::test_a_window_of_one_reading_has_zero_spread` | Proof: the writer |
+| `infrastructure/timescaledb/tests/test_window_spread_migration.py` | Proof: the backfill, compressed chunks included, on the real store |
+
 ## ADR-0029 dec 1
 
 A major upgrade relies on the idempotent sinks of [ADR-0006 dec 3](#adr-0006-dec-3): a re-read of the source re-upserts the same rows.
