@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0044 — A model is scored on complete, computed input or not at all
 
 - **Status:** Accepted
-- **Date:** 2026-10-31; changed 2026-11-09
+- **Date:** 2026-10-31; changed 2026-11-12
 - **Parent:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (one computation of a
   feature for training and serving)
 - **Related:** [ADR-0024](ADR-0024-stateful-feature-kill-switch.md) (dec 3, 5: the neutral values it
@@ -14,7 +14,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
   inputs), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (dec 2: refusing over
   guessing), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (dec 3: the transform contract),
   [ADR-0034](ADR-0034-platform-schema-migrations.md) (the schema change),
-  [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (dec 2-4: degraded alerts in labels and precision)
+  [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (dec 2-4: degraded alerts in labels and precision),
+  [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (dec 9: every window carries its spread)
 
 ## Context
 
@@ -37,8 +38,9 @@ carries partial-batch settings that no part of the platform reads.
    feature included; the platform supplies no default. Its transform checks it where the
    configuration is written and before any reading is scored, whatever the kill-switch says.
 3. **A substitute value is permitted only where ADR-0024 permits one, and is always reported.** A
-   neutralized stateful slot and a stateful slot whose aggregate is unavailable take the neutral value,
-   and the response names both. An alert raised on such a score records, as data, that it was degraded
+   neutralized stateful slot and a stateful slot whose aggregate is unavailable, because the store is
+   out or the sensor has no closed window yet, take the neutral value, and the response names both. A
+   statistic missing from a window that exists is a defect under decision 4. An alert raised on such a score records, as data, that it was degraded
    and which features. ADR-0024 keeps the per-call fallback to bound a total database outage. A score
    compared as a distribution, prediction drift and its baseline, takes no substitute: it is not
    computed, and says why.
@@ -65,6 +67,7 @@ carries partial-batch settings that no part of the platform reads.
 | 3 | A failed aggregate read substituted without being reported | Breaks ADR-0024 dec 5: degraded serving must be visible |
 | 3 | A degraded alert told only in its message | Neither precision nor the retrain trigger can tell it apart, and an operator labels it as an ordinary one |
 | 3 | Drift scored on substitutes and its alert recorded as degraded | A degraded drift alert still counts toward sustained drift (ADR-0022 dec 4), and a baseline derived during a switch episode stands until the next deployment |
+| 3 | A statistic undefined on an existing window served as unavailable | A data condition reported as an outage, for ever on a sparse sensor, whose drift then is never computed; ADR-0006 dec 9 defines it instead |
 | 3, 4 | Every failed aggregate read served as unavailable | A defect of the query or the schema would be a substitute for ever; the fallback bounds an outage, not a defect |
 | 4 | Zero for any feature whose computation raises | The defect class this record removes |
 | 4 | A nudged denominator so a ratio of zero stays finite | A huge number served as an ordinary feature where the quotient does not exist |
