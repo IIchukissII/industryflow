@@ -153,9 +153,10 @@ async def statistical(transformation, sensor_data, ctx):
     the same window the offline training re-derivation uses, which is what keeps train and serve
     computing one quantity rather than two (ADR-0023 dec 9).
 
-    When the store cannot supply the value — no provider, no aggregate row yet, or a window holding
-    one sample has no spread — it raises ``StatefulUnavailable``: the engine fills the neutral value
-    and the response names the slot (ADR-0024 dec 3, 5; ADR-0044 dec 3). Never the raw sensor value,
+    When the store cannot supply the value — no provider, the store out, or no closed window yet —
+    it raises ``StatefulUnavailable``: the engine fills the neutral value and the response names the
+    slot (ADR-0024 dec 3, 5; ADR-0044 dec 3). Every written window carries its spread, zero for one
+    reading (ADR-0006 dec 9), so a window without one is a defect and fails the score (dec 4). Never the raw sensor value,
     which would be an out-of-distribution number in a slot the model expects to hold a small
     deviation.
     """
@@ -184,7 +185,7 @@ async def statistical(transformation, sensor_data, ctx):
         return baseline["mean"]
     if stat_type == "window_std":
         if baseline["std"] is None:
-            raise StatefulUnavailable(f"the latest window of {sensor} holds one sample, which has no spread")
+            raise RuntimeError(f"the latest window of {sensor} carries no spread (ADR-0006 dec 9)")
         return baseline["std"]
     return current - baseline["mean"]
 

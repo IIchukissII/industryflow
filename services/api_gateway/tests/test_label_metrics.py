@@ -5,11 +5,11 @@
 """Unit tests for the alert-label precision math (ADR-0022 dec 3).
 
 The SQL aggregation runs against a real DB in the db-tenant-isolation CI (see
-infrastructure/timescaledb/tests/test_alert_precision.py); here we pin the pure precision /
-false-positive-rate helpers the endpoint folds those counts through — no DB needed. conftest.py
+infrastructure/timescaledb/tests/test_alert_precision.py); here we pin the pure precision
+helper the endpoint folds those counts through — no DB needed. conftest.py
 sets the import path + settings so the router module imports in-process.
 """
-from routers.alerts_history import _precision, _false_positive_rate
+from routers.alerts_history import _precision, _summary
 
 
 def test_precision_basic():
@@ -17,18 +17,14 @@ def test_precision_basic():
     assert _precision(3, 1) == 0.75
 
 
-def test_false_positive_rate_basic():
-    assert _false_positive_rate(3, 1) == 0.25
-
-
-def test_precision_and_fp_rate_sum_to_one_when_decided():
-    assert _precision(7, 3) + _false_positive_rate(7, 3) == 1.0
+def test_the_summary_carries_no_false_positive_rate():
+    # Over decided labels it is one minus precision: a second number for one fact (ADR-0022 dec 3).
+    assert "false_positive_rate" not in _summary(3, 1, 0).model_dump()
 
 
 def test_none_when_nothing_decisive():
     # No true/false positives labelled → precision is undefined, not a fake zero.
     assert _precision(0, 0) is None
-    assert _false_positive_rate(0, 0) is None
 
 
 def test_unsure_is_excluded_from_the_denominator():

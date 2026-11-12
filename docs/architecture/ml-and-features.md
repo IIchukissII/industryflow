@@ -114,7 +114,7 @@ The `statistical` transform reads its window mean and deviation from the aggrega
 
 | Provider answer | When | Result |
 |---|---|---|
-| `{"mean", "std"}` | The newest window, or with `as_of` the newest at or before the window written by that instant | Value |
+| `{"mean", "std"}` | The newest window, or with `as_of` the newest at or before the window written by that instant | Value; a window without its spread (`std` `None`) fails a `window_std` score ([ADR-0006 dec 9](stream-processing.md#adr-0006-dec-9)) |
 | `None` | The sensor has no window yet, or the store is out (cannot be reached, out of resources, shutting down, no answer in `BASELINE_QUERY_TIMEOUT`) | Unavailable aggregate |
 | `UnknownBaselineInput` | The equipment has no sensor of that name in the tenant | `422` |
 | Any other error | A defect of the query or schema | The score fails |
@@ -200,6 +200,8 @@ The engine refuses a reading with a missing sensor, an equipment without a senso
 | `services/ml_service/tests/test_drift_endpoint.py::test_a_substitute_value_leaves_prediction_drift_not_computed` | Proof: dec 3, no substitute in drift |
 | `services/ml_service/tests/test_drift_endpoint.py::test_the_deploy_gate_derives_no_baseline_for_stateful_features` | Proof: dec 3, none in a baseline |
 | `services/ml_service/tests/test_statistical_baseline.py::test_a_read_error_that_is_not_an_outage_fails_the_score` | Proof: dec 4, only an outage is unavailable |
+| `services/ml_service/tests/test_statistical_baseline.py::test_a_window_without_its_spread_is_a_defect_not_an_outage` | Proof: dec 3, 4, a statistic missing from an existing window fails the score |
+| `services/ml_service/tests/test_train_serve_agreement.py::test_a_sensor_reporting_once_per_window_agrees_on_zero_spread_computed_not_degraded` | Proof: dec 3, a one-reading window is computed, not unavailable |
 
 ### Refusals
 

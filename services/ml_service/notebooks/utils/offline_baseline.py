@@ -119,8 +119,11 @@ def add_window_features(
         # row's closed(t) — the row the serving provider reads: the latest one written (a window with
         # no samples is never written, so the one before it is). merge_asof needs both sides sorted
         # on the key; `by` keeps each equipment's windows to itself.
-        per_window = (df.groupby(group_cols + ["_window"])[sensor].agg(["mean", "std"])
+        per_window = (df.groupby(group_cols + ["_window"])[sensor].agg(["mean", "std", "count"])
                       .reset_index().sort_values("_window"))
+        # The sample standard deviation, zero for a window of one reading, as the writer stores it
+        # (ADR-0006 dec 9).
+        per_window.loc[per_window["count"] == 1, "std"] = 0.0
         rows = df[group_cols + ["_closed"]].reset_index(drop=True)
         rows["_pos"] = range(len(rows))
         aligned = pd.merge_asof(
@@ -135,8 +138,8 @@ def add_window_features(
                 column = df[sensor] - baseline
             else:
                 column = baseline
-            # No written window yet (the start of a history), or a single-sample window with no
-            # stddev: the neutral value the serving transform degrades to. A row whose own reading
+            # No written window yet (the start of a history): the neutral value the serving transform
+            # degrades to. A row whose own reading
             # is missing stays missing: a zero there would be a deviation nobody measured.
             df[f"{sensor}{suffix}"] = column.mask(baseline.isna(), 0.0)
             transformations.append(feature_config(sensor, stat_type, granularity))

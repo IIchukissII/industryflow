@@ -33,7 +33,7 @@ The gateway serves rules and history.
 | GET | `/api/alerts`, `/api/alerts/unacknowledged`, `/api/alerts/critical` | session | History, filtered history; each alert with `sensor_name`, `sensor_display_name`, `equipment_name`, `rule_name`, `detection_type`, `degraded`, `neutralized_features` (both `null` on an alert from before they were recorded) |
 | PATCH | `/api/alerts/{alert_id}/acknowledge` | `engineer`, `admin` | Acknowledge |
 | PATCH | `/api/alerts/{alert_id}/label` | `engineer`, `admin` | `true_positive` / `false_positive` / `unsure`; the label copies the alert's `degraded` |
-| GET | `/api/alerts/label-metrics` | session | Precision = TP/(TP+FP) and false-positive rate per bucket and summary; optional model or rule scope; which labels each summary counts: [ADR-0022 dec 1-3](#adr-0022-dec-1-3) |
+| GET | `/api/alerts/label-metrics` | session | Precision = TP/(TP+FP) per bucket and summary; optional model or rule scope; which labels each summary counts: [ADR-0022 dec 1-3](#adr-0022-dec-1-3) |
 
 ### Rule fields
 
@@ -177,16 +177,16 @@ hypertable ([data and storage](data-and-storage.md)).
 
 | Field | Labels counted |
 |---|---|
-| `overall`, `series` | Not degraded (`null`, from before degradation was recorded, counts with them); with `model_id`, only on `ml` alerts (the model's own score) |
-| `degraded` | On degraded alerts; with `model_id`, only on `ml` alerts |
-| `monitoring` | With `model_id`: on the model's `statistical` alerts (drift, retrain recommendations); otherwise empty |
+| `overall`, `series` | Not degraded (`null`, from before degradation was recorded, counts with them); on `threshold` and `ml` alerts, with `model_id` only on `ml` alerts (the model's own score) |
+| `degraded` | On degraded alerts; on `threshold` and `ml` alerts, with `model_id` only on `ml` alerts |
+| `monitoring` | On `statistical` alerts (drift, retrain recommendations); with `model_id`, the model's |
 
 | Code | Role |
 |---|---|
 | `services/api_gateway/routers/alerts_history.py` | Labels and label metrics; `LABEL_ALERT_SELECT`, `LABEL_UPSERT`, `LABEL_METRICS_SELECT` |
 | `services/frontend/src/pages/AlertHistory.jsx` | Alerts page: acknowledge, label (Real / False / Unsure); label precision over 30 days in the 24-hour summary |
 | `infrastructure/timescaledb/init-scripts/35-degraded-alerts.sql` | `alerts.degraded`, `alerts.neutralized_features`, `alert_labels.degraded` |
-| `infrastructure/timescaledb/tests/test_degraded_alerts.py` | Proof: stored, read, copied onto the label, counted apart (degraded, monitoring), on the real store |
+| `infrastructure/timescaledb/tests/test_degraded_alerts.py` | Proof: stored, read, copied onto the label, counted apart (degraded, monitoring) scoped to a model and tenant-wide, on the real store |
 
 ## ADR-0022 dec 4, 5
 

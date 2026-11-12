@@ -416,7 +416,7 @@ returns that `changed` field.
 
 ## ADR-0044 dec 3
 
-A stateful slot whose aggregate is unavailable takes its neutral value. The response's
+A stateful slot whose aggregate is unavailable, because the store is out or the sensor has no closed window yet, takes its neutral value. The response's
 `neutralized_features` names it beside the slots the kill-switch neutralized, and the score is
 `degraded`; each kind has its own counter. What counts as unavailable:
 [ML and features](../architecture/ml-and-features.md#adr-0023-dec-7). Drift takes no substitute, so a drift alert is never degraded:
