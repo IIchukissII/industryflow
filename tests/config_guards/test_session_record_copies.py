@@ -86,8 +86,8 @@ def test_every_compose_service_names_the_one_store():
     urls = {(name, key): str(value) for name, env in _compose_env() for key, value in env.items()
             if str(value).startswith("redis://") or "REDIS_URL:-redis://" in str(value)}
     assert any(key == "SESSION_REDIS_URL" for _, key in urls), "the scan finds no session-store URL"
-    wrong = {k: v for k, v in urls.items() if SHARED_STORE not in v}
-    assert not wrong, f"a Redis URL that is not {SHARED_STORE}: {wrong}"
+    wrong = {k: v for k, v in urls.items() if v != SHARED_STORE}
+    assert not wrong, f"a Redis URL that is not {SHARED_STORE}, or that the environment can override: {wrong}"
     gateway = dict(_compose_env())["api-gateway"]
     assert (gateway["REDIS_HOST"], str(gateway["REDIS_PORT"]), str(gateway["REDIS_DB"])) == ("redis", "6379", "0")
 
@@ -96,6 +96,8 @@ def test_helm_names_the_one_store_for_the_gateway_and_the_session_readers():
     lines = (ROOT / "deploy/helm/industryflow/templates/configmap.yaml").read_text(encoding="utf-8").splitlines()
     value = {line.split(":", 1)[0].strip(): line.split(":", 1)[1].strip() for line in lines
              if line.startswith("  ") and not line.strip().startswith(("#", "{{")) and ":" in line}
-    assert value["SESSION_REDIS_URL"] == value["REDIS_URL"]
+    urls = {key for key in value if key.endswith("REDIS_URL")}
+    assert {"SESSION_REDIS_URL", "CAPABILITY_REDIS_URL"} <= urls, f"the scan finds no store URL: {urls}"
+    assert all(value[key] == value["REDIS_URL"] for key in urls), {key: value[key] for key in urls}
     assert value["REDIS_DB"] == '"0"' and value["REDIS_URL"].endswith('"redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}')
     assert value["REDIS_PORT"] == "{{ .Values.infra.redis.port | quote }}"
