@@ -114,6 +114,7 @@ DECLARE
     v_schema TEXT;
     v_reader TEXT := 'tenant_reader_' || v_suffix;
     v_login TEXT := 'tenant_sqlproxy_' || v_suffix;
+    v_hypertable TEXT;
     v_missing TEXT[];
     v_users INTEGER := 0;
     v_drops INTEGER := 0;
@@ -154,6 +155,13 @@ BEGIN
         WHERE a.usename = v_login AND a.pid <> pg_backend_pid();
     END IF;
 
+    -- Each hypertable by name first: its compressed chunks live in the extension's internal schema,
+    -- and a schema drop alone leaves them, with the tenant's history, behind.
+    FOR v_hypertable IN
+        SELECT h.hypertable_name FROM timescaledb_information.hypertables h WHERE h.hypertable_schema = v_schema
+    LOOP
+        EXECUTE format('DROP TABLE %I.%I CASCADE', v_schema, v_hypertable);
+    END LOOP;
     EXECUTE format('DROP SCHEMA IF EXISTS %I CASCADE', v_schema);
     IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = v_login) THEN
         EXECUTE format('DROP OWNED BY %I', v_login);

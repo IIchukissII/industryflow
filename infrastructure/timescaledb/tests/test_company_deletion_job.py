@@ -154,6 +154,28 @@ def test_completion_empties_the_database_and_leaves_the_tombstone(requested):
         _as(cur, GATEWAY, "SELECT * FROM public.update_company(%s, NULL, true)", (company_id,))
 
 
+def test_completion_leaves_no_compressed_chunk_of_the_tenant(requested):
+    # A tenant's compressed history lives in the extension's internal schema, outside its own
+    # (ADR-0033 dec 4: the tenant leaves every store).
+    cur, company_id = requested
+    suffix = company_id.replace("-", "_")
+    table = f'"tenant_{suffix}".sensor_aggregations_1min'
+    cur.execute(f"INSERT INTO {table} (time, sensor_id, equipment_id, avg_value, count_values) "
+                "VALUES (date_trunc('minute', now() - interval '10 days'), gen_random_uuid(), gen_random_uuid(), 1, 1)")
+    cur.execute(f"SELECT compress_chunk(c) FROM show_chunks('{table}', older_than => now() - interval '5 days') c")
+    assert cur.fetchall(), "no chunk was compressed: the case is not exercised"
+    cur.execute("SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = '_timescaledb_internal' AND c.relname LIKE 'compress_hyper_%%' "
+                "AND has_table_privilege(%s, c.oid, 'SELECT')", (f"tenant_reader_{suffix}",))
+    compressed = [oid for (oid,) in cur.fetchall()]
+    assert compressed, "the tenant's compressed chunk is not found before the deletion"
+
+    _record_all(cur, company_id)
+    _as(cur, JOB, "SELECT public.complete_company_deletion(%s, interval '14 days')", (company_id,))
+    cur.execute("SELECT count(*) FROM pg_class WHERE oid = ANY(%s::oid[])", (compressed,))
+    assert cur.fetchone()[0] == 0, "a compressed chunk of the deleted tenant remains"
+
+
 def test_the_job_role_reaches_no_table_directly(requested):
     cur, company_id = requested
     for statement in (
