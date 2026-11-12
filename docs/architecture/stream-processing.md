@@ -201,7 +201,7 @@ directories are no longer read; delete them once the new queries run.
 
 ## ADR-0006 dec 9
 
-The aggregation writes `stddev_value` as the sample standard deviation, and 0 for a window with `count_values` 1. Offline training derives it by the same rule.
+The aggregation writes `stddev_value` as the sample standard deviation, and 0 for a window with `count_values` 1, set after the aggregation so the checkpointed state keeps its shape. Offline training derives it by the same rule.
 
 | Code | Role |
 |---|---|
@@ -209,6 +209,7 @@ The aggregation writes `stddev_value` as the sample standard deviation, and 0 fo
 | `services/ml_service/notebooks/utils/offline_baseline.py::add_window_features` | Training: the same rule |
 | `infrastructure/timescaledb/init-scripts/36-window-spread-of-one-reading.sql` | Windows written before: set to 0 |
 | `services/spark_jobs/tests/test_aggregations.py::test_a_window_of_one_reading_has_zero_spread` | Proof: the writer |
+| `services/spark_jobs/tests/test_aggregations.py::test_the_job_resumes_a_checkpoint_written_by_the_deployed_aggregation` | Proof: the rule is applied after the aggregation and leaves the checkpointed state as it is |
 | `infrastructure/timescaledb/tests/test_window_spread_migration.py` | Proof: the backfill, compressed chunks included, on the real store |
 
 ## ADR-0029 dec 1

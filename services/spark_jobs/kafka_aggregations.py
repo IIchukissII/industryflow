@@ -219,8 +219,7 @@ def aggregate_readings(readings_df, granularity):
             avg("value").alias("avg_value"),
             spark_min("value").alias("min_value"),
             spark_max("value").alias("max_value"),
-            # The sample standard deviation, zero for a window of one reading (ADR-0006 dec 9).
-            when(count("value") == 1, lit(0.0)).otherwise(stddev("value")).alias("stddev_value"),
+            stddev("value").alias("stddev_value"),
             count("value").alias("count_values")
         ) \
         .select(
@@ -231,7 +230,10 @@ def aggregate_readings(readings_df, granularity):
             col("avg_value"),
             col("min_value"),
             col("max_value"),
-            col("stddev_value"),
+            # The sample standard deviation, zero for a window of one reading (ADR-0006 dec 9). Set
+            # after the aggregation: an aggregate expression is part of the checkpointed state, and
+            # changing one makes the existing checkpoint unreadable.
+            when(col("count_values") == 1, lit(0.0)).otherwise(col("stddev_value")).alias("stddev_value"),
             col("count_values").cast("int").alias("count_values"),
             lit(0).alias("anomaly_count"),
             lit(0.0).alias("anomaly_percentage")
