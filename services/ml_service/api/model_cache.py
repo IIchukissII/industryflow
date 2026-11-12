@@ -7,8 +7,9 @@
 MLflow model loads are slow (artifact fetch + deserialize). Both the real-time anomaly
 detector (`/api/inference`) and the ADR-0021 drift evaluator score with the same model
 repeatedly, so cold-loading it from MLflow on every call is wasteful. This is a small
-process-local LRU cache of already-loaded model objects keyed by MLflow run_id: the first
-call warms it, subsequent calls reuse the warm model.
+process-local LRU cache of already-loaded model objects keyed by tenant, provenance and run id or
+artifact URI (``model_loader.cache_key``): the first call warms it, subsequent calls reuse the warm
+model.
 
 Scope note: the cache is per worker process (uvicorn runs several). That is the intended
 granularity — each worker warms independently; there is no shared mutable model state to

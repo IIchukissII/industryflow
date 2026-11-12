@@ -13,7 +13,8 @@ contract. It is the check whose absence let the gap open in the first place (ml_
 alone, and nothing was watching).
 
 It is deliberately NOT the authority. It reasons about version numbers, and a version number is a
-proxy for the thing we actually care about — that the pickle loads. The authority is the empirical
+proxy for the thing we actually care about — that the artifact loads, as data only (ADR-0037
+dec 2). The authority is the empirical
 round-trip gate (train in the real kernel image, load and score in the real serving image). This
 runs in seconds on every PR; that one builds two images.
 
