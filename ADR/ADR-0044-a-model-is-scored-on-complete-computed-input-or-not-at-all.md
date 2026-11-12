@@ -41,9 +41,9 @@ carries partial-batch settings that no part of the platform reads.
    neutralized stateful slot and a stateful slot whose aggregate is unavailable, because the store is
    out or the sensor has no closed window yet, take the neutral value, and the response names both. A
    statistic missing from a window that exists is a defect under decision 4. An alert raised on such
-   a score records, as data, that it was degraded and which features. ADR-0024 keeps the per-call fallback to bound a total database outage. A score
-   compared as a distribution, prediction drift and its baseline, takes no substitute: it is not
-   computed, and says why.
+   a score records, as data, that it was degraded and which features. ADR-0024 keeps the per-call
+   fallback to bound a total database outage. A score compared as a distribution, prediction drift and
+   its baseline, takes no substitute: it is not computed, and says why.
 4. **Any other failure to compute a feature fails the score.** An unexplained error is not a value, and
    neither is a computed value that is not a finite number.
 5. **The platform offers no partial scoring, and equipment carries no partial-batch settings.** A
