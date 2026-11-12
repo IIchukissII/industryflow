@@ -105,6 +105,16 @@ describe('both clients share one refresh', () => {
     expect(calls.refresh).toBe(1);
   });
 
+  test.each(['https://other.example/api/x', '//other.example/api/x', '/\\other.example/api/x', 'api/x'])(
+    'a URL off this origin is refused, never sent: %s', async (url) => {
+      const calls = stubFetch();
+      routeAxiosThroughFetch();
+      await expect(authFetch(url)).rejects.toThrow(TypeError);
+      await expect(api.get(url)).rejects.toThrow(TypeError);
+      expect(calls.api).toHaveLength(0);
+    },
+  );
+
   test('axios ends the session when the refresh fails', async () => {
     stubFetch({ refreshOk: false });
     routeAxiosThroughFetch();

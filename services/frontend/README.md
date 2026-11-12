@@ -11,19 +11,15 @@ The manual of [ADR-0047](../../ADR/ADR-0047-one-browser-origin-for-the-app-and-e
 
 | Code | Role |
 |---|---|
-| `services/frontend/src/config.js` | API and socket base URLs; empty by default, so every call is same-origin |
+| `services/frontend/src/config.js` | Socket base URL, the page origin with its `ws`/`wss` scheme; API paths are relative |
+| `services/frontend/src/services/session.js` | `assertOwnOriginPath`: `authFetch` and the axios client refuse, before sending, any URL but a path of this origin |
+| `services/frontend/eslint.config.js` | `no-restricted-syntax` refuses `import.meta` in `src`, so no build variable can name an API origin |
 | `services/frontend/vite.config.js` | Dev server; `server.proxy` sends `/api`, `/auth`, `/users` and `/ws` to `http://localhost:8000`, one origin in development |
 | `services/frontend/Dockerfile` | `node:22-alpine` runs `npm ci && npm run build`; `nginxinc/nginx-unprivileged` serves `build/` as uid 101 |
 | `services/frontend/nginx.conf.template` | Serves the app (`try_files … /index.html`) beside the API prefixes and `/ws/` |
 | `services/frontend/docker-entrypoint-edge.sh` | Renders `nginx.conf.template` from the `EDGE_*` variables; refuses to start if a required one is unset |
 
-| Name (build time) | Default | Meaning |
-|---|---|---|
-| `VITE_API_URL` | empty (same-origin) | API base URL |
-| `VITE_WS_URL` | derived from the page origin | WebSocket base URL |
-
-Build-time variables are read as `import.meta.env.VITE_*`. A non-empty `VITE_API_URL` or `VITE_WS_URL`
-makes the app call another origin, which ADR-0047 dec 1 rejects; no build sets them.
+The build takes no base-URL variable: no build can point the app's API calls at another origin.
 
 ### Commands
 
@@ -42,7 +38,7 @@ makes the app call another origin, which ADR-0047 dec 1 rejects; no build sets t
 | Path | Content |
 |---|---|
 | `index.html` | Entry page; loads `/src/index.jsx` |
-| `src/` | Components (`.jsx`), utilities (`config.js`, `services/*.js`); imports are extensionless |
+| `src/index.jsx` | Entry module; components are `.jsx`, utilities `.js`, imports extensionless |
 | `src/styles/theme.css` | Design tokens: colour, `--font-display` (Fraunces), `--font-sans` (IBM Plex Sans), `--font-mono` (IBM Plex Mono) |
 | `src/styles/components.css` | Shared classes (`.panel`, `.kpi`, `.badge`, `.btn`, `.sdot`) |
 | `src/test/setup.js` | Vitest setup |

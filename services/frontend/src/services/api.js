@@ -3,8 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import axios from 'axios';
-import { API_URL as API_BASE_URL } from '../config';
-import { csrfHeaders, endSession, refreshSession, shouldRefresh } from './session';
+import { assertOwnOriginPath, csrfHeaders, endSession, refreshSession, shouldRefresh } from './session';
 
 export { getCookie } from './session';
 
@@ -12,10 +11,12 @@ export { getCookie } from './session';
 // cookie the browser sends automatically, so we never read or store it in JS. We only
 // echo the JS-readable CSRF token on unsafe requests, and refresh once on a 401 — through the
 // single-flight refresh the fetch wrapper (http.js) shares (session.js).
-const api = axios.create({ baseURL: API_BASE_URL, withCredentials: true });
+const api = axios.create({ withCredentials: true });
 
-// Attach the CSRF token (double-submit) on state-changing requests.
+// Refuse any URL but a path of this origin, then attach the CSRF token (double-submit) on
+// state-changing requests.
 api.interceptors.request.use((config) => {
+  assertOwnOriginPath(config.url);
   Object.assign(config.headers, csrfHeaders(config.method));
   return config;
 }, (error) => Promise.reject(error));

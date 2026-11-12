@@ -84,6 +84,12 @@ export default [
       // Non-breaking spaces are used intentionally inside display template literals (keeping
       // "3 days" on one line); allow them there, still flag stray ones in code.
       'no-irregular-whitespace': ['error', { skipTemplates: true }],
+      // A build-time variable could point the app's API calls at another origin; every API it calls
+      // is on its own (ADR-0047 dec 1). `import.meta` is refused whole, so no spelling reaches `env`.
+      'no-restricted-syntax': ['error', {
+        selector: "MetaProperty[meta.name='import']",
+        message: 'The app reads no build-time variable: every API it calls is on its own origin (ADR-0047 dec 1).',
+      }],
     },
   },
 

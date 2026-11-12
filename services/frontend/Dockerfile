@@ -9,9 +9,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Build the app. The image is always served behind this edge, same-origin with the API, so it
-# takes no base-URL build args: src/config.js defaults to same-origin. VITE_* overrides are for
-# `npm run dev` against a gateway elsewhere (see README).
+# Build the app. It is served behind this edge, on the origin of every API it calls (ADR-0047
+# dec 1), so it takes no base-URL build args.
 COPY . .
 RUN npm run build
 
