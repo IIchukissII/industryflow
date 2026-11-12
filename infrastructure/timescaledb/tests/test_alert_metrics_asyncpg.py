@@ -85,8 +85,8 @@ def test_label_metrics_aggregation_on_the_gateways_driver(tenant):
     for v in (["true_positive"] * 3 + ["false_positive", "unsure"]):
         cur.execute("INSERT INTO alert_labels (alert_id, verdict, model_id, rule_id, detection_type, labeled_by) "
                     "VALUES (%s, %s, %s, %s, 'ml', 'op')", (str(uuid.uuid4()), v, str(model_id), str(rule_id)))
-    cur.execute("INSERT INTO alert_labels (alert_id, verdict, model_id, labeled_by) "
-                "VALUES (%s, 'false_positive', %s, 'op')", (str(uuid.uuid4()), str(uuid.uuid4())))
+    cur.execute("INSERT INTO alert_labels (alert_id, verdict, model_id, detection_type, labeled_by) "
+                "VALUES (%s, 'false_positive', %s, 'ml', 'op')", (str(uuid.uuid4()), str(uuid.uuid4())))
 
     rows = _metrics(schema, model_id=str(model_id))
     assert len(rows) == 1, "same-run labels should fall in one daily bucket"

@@ -52,6 +52,11 @@ def tenant():
         yield cur, schema
     finally:
         cur.execute("SET search_path TO public")
+        # Each hypertable first: a compressed chunk lives outside the schema and outlives its drop.
+        cur.execute("SELECT hypertable_name FROM timescaledb_information.hypertables WHERE hypertable_schema = %s",
+                    (schema,))
+        for (name,) in cur.fetchall():
+            cur.execute(f'DROP TABLE "{schema}"."{name}" CASCADE')
         cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
         cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
         cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
