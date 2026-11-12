@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import './Settings.css';
 import api from '../services/api';
-import { API_URL, WS_URL } from '../config';
+import { WS_URL } from '../config';
 import { settingsReading } from '../utils/reading-settings';
 import { detailText } from '../utils/errors';
 
@@ -141,7 +141,7 @@ function Settings() {
     }
   });
 
-  const apiEndpoint = API_URL || (typeof window !== 'undefined' ? window.location.origin : 'same origin');
+  const apiEndpoint = typeof window !== 'undefined' ? window.location.origin : 'same origin';
   const role = user?.is_superuser ? 'Superuser' : user?.role;
 
   return (

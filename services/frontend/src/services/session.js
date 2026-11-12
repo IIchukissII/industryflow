@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { API_URL } from '../config';
 import { notebookOrigin } from './notebooks';
 
 // Platform sign-out, including the embedded notebook hub (ADR-0014 dec 7, ADR-0012 dec 6).
@@ -50,6 +49,12 @@ export function csrfHeaders(method) {
   return csrf ? { 'X-CSRF-Token': csrf } : {};
 }
 
+// Credentials go only to this origin (ADR-0047 dec 1): a path with one leading slash, not `//` or
+// `/\`, which browsers read as another host. Both clients refuse anything else before sending.
+export function assertOwnOriginPath(path) {
+  if (!/^\/(?![/\\])/.test(path)) throw new TypeError(`Only a path of this origin is sent, not ${path}`);
+}
+
 // A 401 from the auth endpoints themselves is an answer, not an expired session (a wrong password,
 // a spent refresh token); refreshing on it would loop.
 export function shouldRefresh(status, url) {
@@ -62,7 +67,7 @@ let inflight = null;
 // renewed, rejects when it cannot be.
 export function refreshSession() {
   if (!inflight) {
-    inflight = fetch(`${API_URL}/auth/refresh`, {
+    inflight = fetch('/auth/refresh', {
       method: 'POST',
       credentials: 'include',
       headers: csrfHeaders('POST'),
