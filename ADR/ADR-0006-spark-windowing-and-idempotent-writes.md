@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0006 — Spark windowing and idempotent writes
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-11-07
+- **Date:** 2026-06-26; changed 2026-11-12
 - **Parent:** ADR-0001
 - **Related:** ADR-0005 (at-least-once), ADR-0023 (features), ADR-0029 (checkpoint cutover), ADR-0009 (Kubernetes)
 
@@ -39,6 +39,10 @@ repeat. Unbounded window state exhausts memory, and model features are computed 
    the series count, not to the cluster.** The engine fixes the count when a checkpoint is created and
    ignores a new value afterwards, so a changed count starts fresh checkpoints rather than doing
    nothing. Each batch commits state per partition, so the count sets the job's fixed per-batch cost.
+9. **A window's spread is its sample standard deviation, and zero for a window of one reading.** Every
+   window then carries a spread a consumer can compute on; a single reading shows no variation, and
+   the window's reading count still tells it from a steady signal. Training re-derives it by the same
+   rule (ADR-0023 dec 9).
 
 ## Alternatives
 
@@ -59,6 +63,8 @@ repeat. Unbounded window state exhausts memory, and model features are computed 
 | 8 | Change the count in place on an existing checkpoint | The engine silently keeps the old count; the setting does nothing |
 | 8 | Refuse to start when the configured and checkpointed counts differ | Reads engine-internal checkpoint metadata, and still leaves the operator to reset by hand |
 | 8 | Keep a count sized for cluster parallelism (8, or the engine default of 200) | Per-batch state commits then dominate CPU on a small host, whatever the data rate |
+| 9 | No spread for a window of one reading | Every score of a sensor reporting about once per window is degraded, and its drift is never computed (ADR-0044 dec 3) |
+| 9 | Population standard deviation for every window | Changes the spread of every window and every model trained on it, to settle one case |
 
 ## Consequences
 
@@ -71,6 +77,7 @@ repeat. Unbounded window state exhausts memory, and model features are computed 
   and dead letters need watching.
 - A raw correction is an explicit operation outside the stream; changing a window value invalidates trained models.
 - A scaled-out streaming path depends on the object store.
+- A window of one reading reads as zero spread; telling it from a steady signal takes its reading count.
 - Changing the state partition count costs each series' open window (written from post-change
   readings only) and leaves the old checkpoint to delete.
 
@@ -82,4 +89,4 @@ repeat. Unbounded window state exhausts memory, and model features are computed 
 
 ## References
 
-- [docs/architecture/stream-processing.md](../docs/architecture/stream-processing.md): manual of decisions 1-8.
+- [docs/architecture/stream-processing.md](../docs/architecture/stream-processing.md): manual of decisions 1-9.
