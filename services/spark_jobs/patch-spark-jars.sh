@@ -31,8 +31,10 @@ MAVEN=https://repo1.maven.org/maven2
 fetch() {
     name="$2-$3${4:+-$4}.jar"
     url="$MAVEN/$1/$2/$3/$name"
-    curl -fsSL -o "$5" "$url"
-    sha1=$(curl -fsSL "$url.sha1" | cut -c1-40)
+    # The repository answers a transient error, a 404 included, now and then; a missing artifact
+    # still fails after the retries.
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o "$5" "$url"
+    sha1=$(curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$url.sha1" | cut -c1-40)
     echo "$sha1  $5" | sha1sum -c -
 }
 
