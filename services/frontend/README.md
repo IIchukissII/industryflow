@@ -38,7 +38,7 @@ The build takes no base-URL variable: no build can point the app's API calls at 
 | Path | Content |
 |---|---|
 | `index.html` | Entry page; loads `/src/index.jsx` |
-| `src/` | Components (`.jsx`), utilities (`config.js`, `services/*.js`); imports are extensionless |
+| `src/index.jsx` | Entry module; components are `.jsx`, utilities `.js`, imports extensionless |
 | `src/styles/theme.css` | Design tokens: colour, `--font-display` (Fraunces), `--font-sans` (IBM Plex Sans), `--font-mono` (IBM Plex Mono) |
 | `src/styles/components.css` | Shared classes (`.panel`, `.kpi`, `.badge`, `.btn`, `.sdot`) |
 | `src/test/setup.js` | Vitest setup |
