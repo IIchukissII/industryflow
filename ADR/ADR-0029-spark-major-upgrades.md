@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0029 — Spark major upgrades: resume the checkpoint when it can be read, reset it when it cannot
 
 - **Status:** Accepted
-- **Date:** 2026-07-15; changed 2026-10-17
+- **Date:** 2026-07-15; changed 2026-11-13
 - **Parent:** [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (idempotent sinks, bounded state, durable checkpoints)
 - **Related:** [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (at-least-once, so re-reading the source is safe), [ADR-0026](ADR-0026-release-model.md) (per-image smoke and box run), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (aggregate tables that see a gap on reset), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (cold layer, untouched by either path)
 
@@ -32,7 +32,7 @@ only by running it; on 3.5 → 4.1 the checkpoint resumes, offsets and state bot
    is a restart against the existing checkpoint with no loss.
 3. **A reset is the fallback for a boundary that does not resume, at a bounded, asymmetric cost.** The
    stateless job re-reads and re-upserts losslessly within broker retention; the stateful job restarts at
-   the tail and loses only the windows open at the reset.
+   the tail, so each window open at the reset is written from the readings after it.
 4. **The upgrade is proven by the per-image smoke (ADR-0026 dec 5) and the box run, not the whole-stack
    gate, which excludes the Spark JVMs on cost.** It is an operator-run act with a documented procedure.
 
@@ -53,8 +53,8 @@ only by running it; on 3.5 → 4.1 the checkpoint resumes, offsets and state bot
 
 **Negative**
 - Every major must be run before it is trusted; resume on one boundary does not carry to the next.
-- A forced reset leaves a gap in the aggregate tables (ADR-0023), and in drift monitoring that reads
-  them (ADR-0021), for the windows open at the reset.
+- A forced reset writes the windows open at it short, in the aggregate tables (ADR-0023) and in drift
+  monitoring that reads them (ADR-0021).
 - The upgrade needs a maintenance window: the jobs stop and restart.
 
 ## Deferred
