@@ -672,6 +672,11 @@ dbMigrations:
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
+  # ADR-0034 dec 11: an upgrade stops the stream engines (every app built from a Spark image) before
+  # the backup and this Job, and starts them after it. The hooks scale their Deployments with kubectl.
+  streamEngines:
+    image: cgr.dev/chainguard/kubectl:latest-dev@sha256:414ec8c8ced12b949cc15c31d3ec64df4b5690b7a40b9c709a1eba4976d05764
+    stopTimeoutSeconds: 300
 
 secrets:
   create: true
