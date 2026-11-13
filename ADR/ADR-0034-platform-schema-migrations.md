@@ -8,7 +8,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-10-24; changed 2026-11-13
 - **Parent:** ADR-0001
-- **Related:** [ADR-0017](ADR-0017-database-tls-and-authentication.md) (the runner is a network client), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a change applies once per tenant), [ADR-0008](ADR-0008-extension-interface-for-a-domain-generic-core.md), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extension-owned tables), [ADR-0026](ADR-0026-release-model.md) (dec 4: upgrade-path gate), [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (dec 7: the runner refuses an upgrade without a recent backup, which is the way back), [ADR-0033](ADR-0033-tenant-lifecycle.md) (provisioning), [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (dec 2: single writers replaced, never rolled), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (a stopped consumer loses nothing)
+- **Related:** [ADR-0017](ADR-0017-database-tls-and-authentication.md) (the runner is a network client), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a change applies once per tenant), [ADR-0008](ADR-0008-extension-interface-for-a-domain-generic-core.md), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extension-owned tables), [ADR-0026](ADR-0026-release-model.md) (dec 4: upgrade-path gate), [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (dec 7: the runner refuses an upgrade without a recent backup, which is the way back), [ADR-0033](ADR-0033-tenant-lifecycle.md) (provisioning), [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (dec 2: a job with a single-writer checkpoint volume is replaced, never rolled), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (dec 2, 3: offsets committed after the work is durable, so a stopped consumer resumes where it was), [ADR-0029](ADR-0029-spark-major-upgrades.md) (a stopped engine resumes its checkpoint)
 
 ## Context
 
@@ -34,7 +34,7 @@ which is after the sequence has run.
    start against a database the ledger shows behind, and fresh installs write the same ledger.
 5. **Migrations are forward-only.** There are no down-scripts; the way back is a restore of the backup taken
    before the upgrade, which the runner requires before it changes a database holding platform state
-   (ADR-0032 dec 7).
+   unless the operator explicitly chooses to go without one (ADR-0032 dec 7).
 6. **The upgrade path is tested.** The whole-stack gate applies the pending sequence to state written by
    the commit the change merges onto, settling the database under ADR-0026 dec 4; the upgrade across
    several merges is the box run's (ADR-0026 dec 8).
