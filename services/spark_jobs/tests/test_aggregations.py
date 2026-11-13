@@ -106,6 +106,45 @@ def test_a_window_of_one_reading_has_zero_spread(spark):
     assert by_count[2]["stddev_value"] == pytest.approx(2 ** 0.5)
 
 
+def test_the_job_resumes_a_checkpoint_written_by_the_deployed_aggregation(spark, tmp_path):
+    # A checkpoint holds the aggregation's state, whose shape is its aggregate expressions. The shape
+    # below is what deployed checkpoints hold; a change to it makes them unreadable and stops every
+    # aggregation query, so it is a deliberate reset, never a side effect (ADR-0029).
+    from pyspark.sql.functions import avg, col, count, max as smax, min as smin, stddev, window
+
+    def deployed_shape(readings):
+        return (readings.filter(job.rejection_reason().isNull())
+                .withWatermark("time", aw.watermark_delay("1min"))
+                .groupBy(window(col("time"), aw.window_duration("1min")), col("sensor_id"),
+                         col("equipment_id"), col("company_id"))
+                .agg(avg("value").alias("avg_value"), smin("value").alias("min_value"),
+                     smax("value").alias("max_value"), stddev("value").alias("stddev_value"),
+                     count("value").alias("count_values")))
+
+    inbox, ckpt = tmp_path / "in", str(tmp_path / "ckpt")
+    inbox.mkdir()
+    w0 = (datetime.now(timezone.utc) - timedelta(minutes=30)).replace(second=0, microsecond=0)
+
+    def run(build, name, readings, n):
+        with open(inbox / f"{n:03d}.json", "w") as f:
+            for i, r in enumerate(readings):
+                f.write(json.dumps({"value": json.dumps(r), "topic": "t", "partition": 0,
+                                    "offset": n * 1000 + i}) + "\n")
+        source = (spark.readStream.schema("value string, topic string, partition int, offset long")
+                  .json(str(inbox)))
+        # The noop sink resumes a checkpoint; the memory sink refuses to.
+        query = (build(parse_readings(source)).writeStream.outputMode("append").format("noop")
+                 .queryName(name).option("checkpointLocation", ckpt).start())
+        try:
+            query.processAllAvailable()
+        finally:
+            query.stop()
+
+    run(deployed_shape, "agg_deployed", [_reading(w0 + timedelta(seconds=5), 1.0)], 1)
+    run(lambda r: job.aggregate_readings(r, "1min"), "agg_current",
+        [_reading(w0 + timedelta(seconds=15), 2.0)], 2)
+
+
 # --- one unknown tenant must not fail every tenant -----------------------------------------------
 
 class _Conn:
