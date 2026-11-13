@@ -183,6 +183,7 @@ Window width and allowed lateness are read from one shared definition by the str
 | Code | Role |
 |---|---|
 | `libs/industryflow_contracts/industryflow_contracts/windows.py::WINDOWS` | The window contract |
+| `tests/config_guards/test_tenant_contract_copies.py::test_no_service_or_script_builds_a_tenant_name_or_restates_the_window_contract` | Proof: no component restates it |
 
 ## ADR-0006 dec 8
 
@@ -192,12 +193,18 @@ The aggregation job sets `spark.sql.shuffle.partitions` from `SPARK_SQL_SHUFFLE_
 |---|---|
 | `services/spark_jobs/kafka_aggregations.py::state_partitions` | Partition count |
 | `services/spark_jobs/kafka_aggregations.py::checkpoint_path` | Checkpoint keyed by the count |
-| `services/spark_jobs/tests/test_aggregations.py::test_a_changed_partition_count_gets_its_own_checkpoint` | Proof |
+| `services/spark_jobs/tests/test_aggregations.py::test_a_changed_partition_count_gets_its_own_checkpoint` | Proof: a changed count is a fresh checkpoint |
+| `services/spark_jobs/tests/test_aggregations.py::test_the_job_resumes_a_checkpoint_written_by_the_deployed_aggregation` | Proof: the aggregation's state shape is the deployed one |
 
 Changing `N` starts the aggregation queries on fresh checkpoints from the latest offsets
 ([ADR-0006](../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) dec 8): each series' window
 open at the switch is written from post-switch readings only. The previous `-p<M>` (or unsuffixed)
 directories are no longer read; delete them once the new queries run.
+
+The state shape is the aggregation's grouping and aggregate expressions in `aggregate_readings`. A
+change to them fails `test_the_job_resumes_a_checkpoint_written_by_the_deployed_aggregation`; a
+deliberate one is deployed as a reset ([ADR-0029 dec 3](#adr-0029-dec-3)), with the aggregation
+checkpoints deleted while the job is stopped, and the test's deployed shape updated with it.
 
 ## ADR-0006 dec 9
 
@@ -234,9 +241,9 @@ Whether the checkpoint resumes or must be reset is decided per boundary by runni
 
 A boundary that does not resume is reset: the checkpoint is deleted and both jobs restart.
 
-Reset cost: measurements re-read from `earliest` within Kafka retention; aggregations lose the windows
-open at the reset instant. Pausing producers until the widest window's watermark passes avoids that
-loss.
+Reset cost: measurements re-read from `earliest` within Kafka retention; aggregations restart from
+`latest`, so each window open at the reset instant is written from the readings after it. Pausing
+producers until the widest window's watermark passes closes those windows before the reset.
 
 ### Spark major upgrade
 

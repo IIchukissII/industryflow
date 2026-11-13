@@ -109,7 +109,7 @@ def test_a_window_of_one_reading_has_zero_spread(spark):
 def test_the_job_resumes_a_checkpoint_written_by_the_deployed_aggregation(spark, tmp_path):
     # A checkpoint holds the aggregation's state, whose shape is its aggregate expressions. The shape
     # below is what deployed checkpoints hold; a change to it makes them unreadable and stops every
-    # aggregation query, so it is a deliberate reset, never a side effect (ADR-0029).
+    # aggregation query, so it is a deliberate reset, never a side effect (ADR-0006 dec 8).
     from pyspark.sql.functions import avg, col, count, max as smax, min as smin, stddev, window
 
     def deployed_shape(readings):
