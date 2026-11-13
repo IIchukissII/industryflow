@@ -62,6 +62,38 @@ def test_the_start_restores_each_engine_to_its_declared_replicas():
     assert started == {name: str(values[name].get("replicas", 1)) for name in _compose_engines()}
 
 
+def _selects(selector: dict, labels: dict) -> bool:
+    return all(labels.get(k) == v for k, v in (selector.get("matchLabels") or {}).items()) and not \
+        selector.get("matchExpressions")
+
+
+def test_the_stop_waits_on_the_labels_the_engines_pods_carry():
+    # A selector that matches no pod ends the wait at once, while the engines still drain.
+    docs = helm_template()
+    script = _hooks(docs)["Job", "if-industryflow-stream-engines-stop"][
+        "spec"]["template"]["spec"]["containers"][0]["args"][0]
+    selector = re.search(r"selector='([^']*)'", script).group(1)
+    instance = re.search(r"app\.kubernetes\.io/instance=([^,]+)", selector).group(1)
+    names = set(re.search(r"app\.kubernetes\.io/name in \(([^)]*)\)", selector).group(1).split(","))
+    assert names == _compose_engines()
+    for name in names:
+        deployment = next(d for d in docs if d["kind"] == "Deployment"
+                          and d["metadata"]["name"] == f"if-industryflow-{name}")
+        labels = deployment["spec"]["template"]["metadata"]["labels"]
+        assert labels["app.kubernetes.io/name"] == name and labels["app.kubernetes.io/instance"] == instance
+
+
+def test_no_egress_policy_cuts_the_hooks_off_the_api_server():
+    docs = helm_template()
+    for (kind, _), job in _hooks(docs).items():
+        if kind != "Job":
+            continue
+        labels = job["spec"]["template"]["metadata"]["labels"]
+        for policy in (d for d in docs if d["kind"] == "NetworkPolicy"):
+            if "Egress" in policy["spec"].get("policyTypes", []):
+                assert not _selects(policy["spec"]["podSelector"], labels), policy["metadata"]["name"]
+
+
 def test_box_deploy_stops_every_stream_engine_before_the_schema_sequence():
     text = (ROOT / "scripts" / "box-deploy.sh").read_text()
     spark = set(re.search(r"^SPARK=\(([^)]*)\)", text, re.M).group(1).split())

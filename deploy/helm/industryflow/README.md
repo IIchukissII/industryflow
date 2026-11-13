@@ -67,7 +67,7 @@ One chart, `industryflow`, packages the platform for Kubernetes. The notebook st
 
 | Image kind | Pinning |
 |---|---|
-| Third-party (TimescaleDB, Kafka, ZooKeeper, Redis, MinIO, mc, exporters, notebook proxies, init images) | `name:tag@sha256:…` inline in `values.yaml` |
+| Third-party (TimescaleDB, Kafka, ZooKeeper, Redis, MinIO, mc, kubectl, exporters, notebook proxies, init images) | `name:tag@sha256:…` inline in `values.yaml` |
 | First-party `industryflow-*` | Per-image `digest:` in every mapping with `image` + `digest`; empty uses `image.tag`, a set digest wins over the tag |
 
 `scripts/pin-image-digests.sh [TAG]` derives the image list from `values.yaml` and resolves each

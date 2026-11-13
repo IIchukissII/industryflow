@@ -139,7 +139,7 @@ every script once. Every script is idempotent.
 
 | Task | Command |
 |---|---|
-| Apply pending scripts (Compose) | `docker compose stop spark-master spark-worker spark-streaming spark-aggregations`, `docker compose run --rm --no-deps db-backup`, `docker compose up db-migrate`, then `docker compose up -d` |
+| Apply pending scripts (Compose) | `docker compose stop` the services of `SPARK` in `scripts/box-deploy.sh`, `docker compose run --rm --no-deps db-backup`, `docker compose up db-migrate`, then `docker compose up -d` |
 | Show the plan (Compose) | `docker compose run --rm db-migrate status` |
 | Create an optional role whose password was set after its script ran (Compose) | `docker compose run --rm db-migrate reapply 00-create-roles.sh 13-notebook-sql-proxy-role.sh 28-schema-ledger-read.sql` |
 | Read the ledger | `SELECT script, kind, applied_at FROM public.schema_ledger ORDER BY script;` |
@@ -207,7 +207,7 @@ On an upgrade the stream engines, the services holding a Spark checkpoint, stop 
 
 | Deployment | Stop | Start |
 |---|---|---|
-| Compose | `scripts/box-deploy.sh` stops `spark-master`, `spark-worker`, `spark-streaming`, `spark-aggregations` before the build; by hand: `docker compose stop` them first ([manual operations](#manual-operations)) | After `db-migrate` exits 0; on any failure the script starts them again |
+| Compose | `scripts/box-deploy.sh` stops the Spark services of its `SPARK` list, the engines among them, before the build; by hand: the same services first ([manual operations](#manual-operations)) | After `db-migrate` exits 0; on any failure the script starts them again |
 | Helm | `<release>-stream-engines-stop` hook Job (`pre-upgrade`, weight `-5`, before the backup hook): scales each Deployment built from an `industryflow-spark*` image to 0 and waits up to `dbMigrations.streamEngines.stopTimeoutSeconds` for its pods to be gone | `schema-ready` holds the new pods until the ledger is current; `<release>-stream-engines-start` hook Job (`post-upgrade`) scales each back to `apps.<name>.replicas` |
 
 A Helm upgrade that fails after the stop leaves the engines at 0 replicas until the next upgrade or rollback.

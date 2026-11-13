@@ -8,7 +8,8 @@
   first (weight -5, before the backup), scales their Deployments to zero and waits until no pod of
   theirs is left. The new pods' schema-ready init containers then hold them until the ledger is
   current; the post-upgrade hook scales each Deployment back to its declared replicas. An upgrade
-  that fails after the stop leaves the engines stopped until the next upgrade or rollback.
+  that fails after the stop leaves the engines stopped until the next upgrade or rollback. The
+  ServiceAccount and its Role stay between upgrades: the post-upgrade hook needs them again.
 */}}
 {{- $fullname := include "industryflow.fullname" . }}
 {{- $se := .Values.dbMigrations.streamEngines }}
@@ -53,7 +54,8 @@ rules:
       - {{ printf "%s-%s" $fullname $name | quote }}
       {{- end }}
     verbs: ["get", "patch", "update"]
-  # Waiting for their pods to be gone needs a list; it reads no pod's content.
+  # Waiting for their pods to be gone needs a list. A list cannot be narrowed by name, so it returns
+  # every pod of the namespace, specs included.
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["list"]
