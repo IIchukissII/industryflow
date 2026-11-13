@@ -383,8 +383,8 @@ recorded in its `public.backup_ledger` within `MIGRATE_BACKUP_MAX_AGE_SECONDS`
 
 | Deployment | Backup taken by | Without a backup |
 |---|---|---|
-| Compose | `docker compose run --rm --no-deps db-backup`, then `docker compose up db-migrate`; `scripts/box-deploy.sh` runs both in that order | `MIGRATE_WITHOUT_BACKUP=1 docker compose up db-migrate` |
-| Helm | Hook Job `<release>-pre-upgrade-backup` (`helm.sh/hook: pre-upgrade`), before the revision's `db-migrate` Job: the database dumps only, no object mirrors; `helm upgrade --timeout` must cover them. Skipped, with a log line, on the upgrade that sets `backup.enabled=true` (its Secret and principal do not exist yet) | `dbMigrations.withoutBackup=true`; required when `backup.enabled=false`, the chart refuses to render otherwise |
+| Compose | With the stream engines stopped ([ADR-0034 dec 11](../../infrastructure/timescaledb/init-scripts/README.md#adr-0034-dec-11)): `docker compose run --rm --no-deps db-backup`, then `docker compose up db-migrate`; `scripts/box-deploy.sh` runs both in that order | `MIGRATE_WITHOUT_BACKUP=1 docker compose up db-migrate` |
+| Helm | Hook Job `<release>-pre-upgrade-backup` (`helm.sh/hook: pre-upgrade`), after `<release>-stream-engines-stop` and before the revision's `db-migrate` Job: the database dumps only, no object mirrors; `helm upgrade --timeout` must cover them. Skipped, with a log line, on the upgrade that sets `backup.enabled=true` (its Secret and principal do not exist yet) | `dbMigrations.withoutBackup=true`; required when `backup.enabled=false`, the chart refuses to render otherwise |
 
 Pre-upgrade dumps are ordinary runs: they count toward `RETAIN_PER_DB`.
 

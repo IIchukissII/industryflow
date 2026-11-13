@@ -1,0 +1,164 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- /*
+  ADR-0034 dec 11: on an upgrade the stream engines stop before the pending scripts run and start
+  behind the completed runner, so a migration that corrects data is never outlived by the writer it
+  corrects. The stream engines are the apps built from a Spark image. Helm applies the revision's
+  resources, the db-migrate Job among them, only after its pre-upgrade hooks: the stop hook runs
+  first (weight -5, before the backup), scales their Deployments to zero and waits until no pod of
+  theirs is left. The new pods' schema-ready init containers then hold them until the ledger is
+  current; the post-upgrade hook scales each Deployment back to its declared replicas. An upgrade
+  that fails after the stop leaves the engines stopped until the next upgrade or rollback.
+*/}}
+{{- $fullname := include "industryflow.fullname" . }}
+{{- $se := .Values.dbMigrations.streamEngines }}
+{{- $engines := dict }}
+{{- range $name, $app := .Values.apps }}
+{{- if and $app.enabled (hasPrefix "industryflow-spark" ($app.image | default "")) }}
+{{- $_ := set $engines $name ($app.replicas | default 1) }}
+{{- end }}
+{{- end }}
+{{- if $engines }}
+{{- $sa := printf "%s-stream-engines" $fullname }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: stream-engines
+  annotations:
+    helm.sh/hook: pre-upgrade,post-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: stream-engines
+  annotations:
+    helm.sh/hook: pre-upgrade,post-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+rules:
+  # Only the stream engines' Deployments may be read and scaled.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    resourceNames:
+      {{- range $name, $_ := $engines }}
+      - {{ printf "%s-%s" $fullname $name | quote }}
+      {{- end }}
+    verbs: ["get", "patch", "update"]
+  # Waiting for their pods to be gone needs a list; it reads no pod's content.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: stream-engines
+  annotations:
+    helm.sh/hook: pre-upgrade,post-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $sa }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+{{- range $phase := list "stop" "start" }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-stream-engines-{{ $phase }}
+  labels:
+    {{- include "industryflow.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: stream-engines-{{ $phase }}
+    app.kubernetes.io/component: database
+  annotations:
+    helm.sh/hook: {{ if eq $phase "stop" }}pre-upgrade{{ else }}post-upgrade{{ end }}
+    helm.sh/hook-weight: {{ if eq $phase "stop" }}"-5"{{ else }}"0"{{ end }}
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: stream-engines-{{ $phase }}
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $sa }}
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $.Values.securityContext.enabled }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $.Values.securityContext.runAsUser }}
+        runAsGroup: {{ $.Values.securityContext.runAsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      containers:
+        - name: stream-engines-{{ $phase }}
+          image: {{ $se.image | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          env:
+            # kubectl keeps its cache here, so the root FS stays read-only.
+            - { name: HOME, value: /tmp }
+          command: ["/bin/sh", "-euc"]
+          args:
+            - |
+              {{- if eq $phase "stop" }}
+              # A Deployment this revision adds does not exist yet; there is nothing of it to stop. Only
+              # NotFound counts as absent: any other error stops the upgrade.
+              found=""
+              {{- range $name, $_ := $engines }}
+              found="$found $(kubectl get deployment {{ printf "%s-%s" $fullname $name }} --ignore-not-found -o name)"
+              {{- end }}
+              found="$(echo $found)"
+              [ -n "$found" ] || { echo "no stream engine deployed yet"; exit 0; }
+              kubectl scale $found --replicas=0
+              deadline=$(( $(date +%s) + {{ $se.stopTimeoutSeconds }} ))
+              selector='app.kubernetes.io/instance={{ $.Release.Name }},app.kubernetes.io/name in ({{ join "," (keys $engines | sortAlpha) }})'
+              while [ -n "$(kubectl get pods -l "$selector" -o name)" ]; do
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "stream engines still running after {{ $se.stopTimeoutSeconds }}s; the upgrade stops here" >&2
+                  exit 1
+                fi
+                sleep 2
+              done
+              echo "stream engines stopped:$found"
+              {{- else }}
+              {{- range $name, $replicas := $engines }}
+              kubectl scale deployment/{{ printf "%s-%s" $fullname $name }} --replicas={{ $replicas }}
+              {{- end }}
+              {{- end }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}
+{{- end }}

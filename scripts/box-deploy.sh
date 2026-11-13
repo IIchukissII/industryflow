@@ -76,7 +76,8 @@ git log --oneline -1
 echo "== build"
 # The commit each image reports as its revision (ADR-0016 dec 8).
 export INDUSTRYFLOW_REVISION="$sha"
-# The stream engines stop for the build's memory on a small host, and start again below.
+# The stream engines stop before the backup and the schema sequence (ADR-0034 dec 11), which also
+# frees the build's memory on a small host, and start again below.
 spark_down=1
 docker compose stop "${SPARK[@]}"
 docker compose "${PROFILES[@]}" build
