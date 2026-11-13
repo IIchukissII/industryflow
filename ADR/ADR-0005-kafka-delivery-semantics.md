@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0005 — Kafka delivery semantics: at-least-once with idempotent consumers
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-10-17
+- **Date:** 2026-06-26; changed 2026-11-13
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
 - **Related:** [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (idempotent stream
   sinks), [ADR-0029](ADR-0029-spark-major-upgrades.md) (aggregation start offset)
@@ -54,7 +54,7 @@ no end-to-end guarantee, and exactly-once adds coordination to every stage.
 **Negative**
 - Every consumer must be idempotent, and manual commits cost throughput.
 - Dead-letter topics need monitoring and a handling process.
-- The aggregation stream loses the windows open at a reset (ADR-0029).
+- The aggregation stream writes the windows open at a reset short (ADR-0029 dec 3).
 
 ## Deferred
 
