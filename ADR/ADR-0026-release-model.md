@@ -51,8 +51,8 @@ outright, so a check can fail for the runner rather than the change.
     no timeouts, limits or coordinator, so each passes what the service then fails.
 12. **A build input fetched by address is pinned by a content digest the repository holds, and has a
     second source.** A required check then fails for the change, not because one host refused the
-    runner. A digest the repository holds says the bytes are the reviewed ones; a digest the serving
-    host publishes says only that the transfer was whole.
+    runner. A digest the repository holds fixes the bytes to those checked when it was pinned; a digest
+    the serving host publishes says only that the transfer was whole.
 
 ## Alternatives
 
