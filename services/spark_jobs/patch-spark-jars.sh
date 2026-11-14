@@ -15,8 +15,11 @@
 # 3. Removed because nothing here uses them: Derby (only the embedded Hive metastore loads it; no job
 #    enables Hive support) and connect-repl/ (the Spark Connect client shell; not on the job classpath).
 #
-# Every download is checked against Maven Central's published SHA-1. The script then asserts the
-# result, so a version that moves upstream fails the build instead of shipping a mixed classpath.
+# Every jar is checked against the SHA-256 committed in spark-jars.sha256, beside this script, and is
+# fetched from the first source that serves it (ADR-0026 dec 12): a source that refuses moves on to
+# the next, a digest mismatch fails the build. A jar without a pin fails it too. The script then
+# asserts the result, so a version that moves upstream fails the build instead of shipping a mixed
+# classpath.
 set -eu
 
 HADOOP_AWS_VERSION=3.4.2
@@ -25,17 +28,27 @@ NETTY_FROM=4.2.7.Final
 NETTY_TO=4.2.17.Final
 
 JARS=${SPARK_JARS_DIR:-/opt/spark/jars}
-MAVEN=https://repo1.maven.org/maven2
+PINS=${SPARK_JAR_PINS:-$(dirname "$0")/spark-jars.sha256}
+# Maven Central, then Google's mirror of it. The digest, not the host, is what is trusted.
+SOURCES=${SPARK_JAR_SOURCES:-"https://repo1.maven.org/maven2 https://maven-central.storage-download.googleapis.com/maven2"}
+
+[ -r "$PINS" ] || { echo "no jar pins at $PINS" >&2; exit 1; }
 
 # fetch <group path> <artifact> <version> <classifier or empty> <destination>
 fetch() {
     name="$2-$3${4:+-$4}.jar"
-    url="$MAVEN/$1/$2/$3/$name"
-    # The repository answers a transient error, a 404 included, now and then; a missing artifact
-    # still fails after the retries.
-    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o "$5" "$url"
-    sha1=$(curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 "$url.sha1" | cut -c1-40)
-    echo "$sha1  $5" | sha1sum -c -
+    pin=$(awk -v n="$name" '$2 == n { print $1 }' "$PINS")
+    [ -n "$pin" ] || { echo "$name has no pin in $(basename "$PINS")" >&2; exit 1; }
+    for source in $SOURCES; do
+        # A source answers a transient error now and then; one that keeps refusing is skipped.
+        if curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 -o "$5" "$source/$1/$2/$3/$name"; then
+            echo "$pin  $5" | sha256sum -c - || { rm -f "$5"; exit 1; }
+            return 0
+        fi
+        echo "$source refused $name; trying the next source" >&2
+    done
+    echo "no source served $name" >&2
+    exit 1
 }
 
 fetch org/apache/hadoop hadoop-aws "$HADOOP_AWS_VERSION" "" "$JARS/hadoop-aws-$HADOOP_AWS_VERSION.jar"

@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SHA-256 of every jar patch-spark-jars.sh fetches (ADR-0026 dec 12), sha256sum format.
+# A version change in the script needs its new lines here; the build refuses a jar without one.
+0d9a8703bcb016ce51a852d2d7295a6984d9930ad3d4a0b35cef00a0a3d7108a  bundle-2.55.14.jar
+d2d24e6b715b5656b9d238bf13b6682a07e2004dd36aad74a73aeb854319f4d9  hadoop-aws-3.4.2.jar
+fd66659c35601336df8c3586bfc504549bbedce29755dac6572287f9443c4237  netty-all-4.2.17.Final.jar
+0d249178ec0204b35a6ad3e5ac8a6c2ecb3eb496c6cdae40b8eca4fa3cb6a0c7  netty-buffer-4.2.17.Final.jar
+ac76f972446a2f72818441f746d0e73c58519a4687bf680d2b687d7dc5e28e2e  netty-codec-4.2.17.Final.jar
+3b92bc3b7d231fa6f4889b2b9281cae6b634428b8121fb1b9b5fccba1543d352  netty-codec-base-4.2.17.Final.jar
+542e718fdd8fa4f6d57bef9f91a5fa01200940cb8b381fd4c21fb5c170276c71  netty-codec-classes-quic-4.2.17.Final.jar
+425b287a1f36986a5c8edd76379a49decdf99d284f3454f3fa607a073bfb2c18  netty-codec-compression-4.2.17.Final.jar
+394f4649a824683735f28b299d0a48caff059ae30e654e2abf8b3f392af4d374  netty-codec-dns-4.2.17.Final.jar
+450af97424cf58d2d72ad4d476d9e290f2fdf69fa181c289a6e6dd176bb86a7b  netty-codec-http2-4.2.17.Final.jar
+9fcf9873e31b2899c407b42d320aaf6afeb69807e63d9a865c391b4339fa24c7  netty-codec-http3-4.2.17.Final.jar
+a5bde91ac82ab90579df6559c0bd7ea6ae37460e3f18116ab4122194283b3669  netty-codec-http-4.2.17.Final.jar
+ee5ffed638da6b7e2b4567559bd5f78b18f635cdaa4f3b6d23aa27ccf6cb57c2  netty-codec-marshalling-4.2.17.Final.jar
+350ba4c87cb8d2066d895f511605e1479da2c25e2bf5c2cf5dcb4cd34fcaae75  netty-codec-native-quic-4.2.17.Final-linux-aarch_64.jar
+9225b069850e2238126359b6d3ad00df1c8c528ce5123682b8090c09ec37bdbf  netty-codec-native-quic-4.2.17.Final-linux-x86_64.jar
+a6b5bee555259e6b955ecc45f0425a000332d35d545a9a97e5730f0e939c0065  netty-codec-native-quic-4.2.17.Final-osx-aarch_64.jar
+d8c48589adfafd798d1c4b3996d9b19dc7bd9f1785524b821388e2db73a52dd2  netty-codec-native-quic-4.2.17.Final-osx-x86_64.jar
+1540888c76d55eff98899d7f1cd109fddda137992e170ee4096871886e15f4b8  netty-codec-native-quic-4.2.17.Final-windows-x86_64.jar
+44b2fcc4bc1d6c01edafe6ae6c8a7de7c3c5bad59697a93b6b879a45a78a5387  netty-codec-protobuf-4.2.17.Final.jar
+6b5760cc512cee1f7515e25010892471f3995045f84cd6c1d1b6e6cee534733c  netty-codec-socks-4.2.17.Final.jar
+502aae2a6680e9bca3558a3fa098f06dc4d87340b8b714e925a6d690871c092a  netty-common-4.2.17.Final.jar
+4df11c7520b556c5e2c84b939182699d48fcbb09e97a6bb5e1c0b6835227d126  netty-handler-4.2.17.Final.jar
+94089bea6ba6f3248725f2bf233aa2bc70ac1547c21b9bdfc7548f710a845aa0  netty-handler-proxy-4.2.17.Final.jar
+7a4b599b9c0c29a505d3b7311f142df883fb27d0f67495a7cbaf533b0e456623  netty-resolver-4.2.17.Final.jar
+d332481c22136a68c2ee9e45e86212174932587d93a5dd4d201e196828bf9f91  netty-resolver-dns-4.2.17.Final.jar
+d2409ce3a735cbab4188d0ea5d82abed823a6a07a8389f49af4a9e1243a562bc  netty-transport-4.2.17.Final.jar
+4e21d8a2e3429d9de967a716d58119f57585786bd2f7213bf5b27770425269de  netty-transport-classes-epoll-4.2.17.Final.jar
+c6dafc0fd8514b816b9ba724a031c21de6b0fe3215773feb38b6b0bff15a9f34  netty-transport-classes-io_uring-4.2.17.Final.jar
+f0b2dd4757a22345b0b28e2856dc7ee44e5dea256cc520ddc27e4dce4ea9efb3  netty-transport-classes-kqueue-4.2.17.Final.jar
+def0629c9e99f0d896e810d94252e5eb0227e3dd660a5ec8b7b4bbf3a8b25d41  netty-transport-native-epoll-4.2.17.Final-linux-aarch_64.jar
+d896153ba0a751aeab292baad489afcb3eaf8efbe249b43873728b253fb9e9e3  netty-transport-native-epoll-4.2.17.Final-linux-riscv64.jar
+c295b1d7f46e3c7375c93fa4c8abcc3944398c5e4eb53e31587cbbf0bf559d4f  netty-transport-native-epoll-4.2.17.Final-linux-x86_64.jar
+4864d7aa6a0491363e9e73714da73c129713c9c160900a06b3e32db2502ffe6f  netty-transport-native-io_uring-4.2.17.Final-linux-aarch_64.jar
+b15521a35ad20a743158c5896c56f987ec4cc016a4cc375d28e52946474a4db4  netty-transport-native-io_uring-4.2.17.Final-linux-riscv64.jar
+94ea8dc7e00949949a1432f18cbf020388f35c8e1e2b6be77490ca557672f2f3  netty-transport-native-io_uring-4.2.17.Final-linux-x86_64.jar
+b76ed41a8cb2d074a1a5596d0d8fe0fcdf96389b198b42e0d361ba9dc2466a24  netty-transport-native-kqueue-4.2.17.Final-osx-aarch_64.jar
+de98c8c8aecb90160921abc52ee64acaac64947e359daa7121b895fc3d3b15ab  netty-transport-native-kqueue-4.2.17.Final-osx-x86_64.jar
+e01aa467b9104de54a57c08c290f70b22e53ec97cf5583c87c112170ef5832cc  netty-transport-native-unix-common-4.2.17.Final.jar

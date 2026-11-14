@@ -34,8 +34,8 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 # S3A jars, the netty patch set and the removals: patch-spark-jars.sh, shared with the job images.
-COPY patch-spark-jars.sh /tmp/patch-spark-jars.sh
-RUN sh /tmp/patch-spark-jars.sh && rm /tmp/patch-spark-jars.sh
+COPY patch-spark-jars.sh spark-jars.sha256 /tmp/
+RUN sh /tmp/patch-spark-jars.sh && rm /tmp/patch-spark-jars.sh /tmp/spark-jars.sha256
 
 # Spark -> Prometheus metrics config (worker + its executors expose /metrics/prometheus). Item 7.
 COPY metrics.properties /opt/spark/conf/metrics.properties

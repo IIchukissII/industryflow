@@ -149,3 +149,24 @@ A proof runs against the real store, never a fake, and its stack is required in 
 | `tests/config_guards/test_streaming_proof_runs.py` | The streaming proof runs |
 | `tests/config_guards/test_integration_proofs_run.py` | Every integration proof runs in a gated step |
 | `tests/config_guards/test_one_shot_exit_codes.py` | One-shot failures are not exit 0 |
+
+## ADR-0026 dec 12
+
+The Spark images fetch jars by address at build time; each is pinned in the repository and has a second source.
+
+| Code | Role |
+|---|---|
+| `services/spark_jobs/patch-spark-jars.sh` | Fetches each jar from the first source that serves it; refuses a jar without a pin or with another digest |
+| `services/spark_jobs/spark-jars.sha256` | The SHA-256 of every fetched jar, `sha256sum` format |
+| `tests/config_guards/test_spark_jar_pins.py` | The fetched versions are pinned, no other; every image running the script copies the pins |
+
+| Source | Order |
+|---|---|
+| Maven Central (`repo1.maven.org`) | First |
+| Google's mirror of Maven Central (`maven-central.storage-download.googleapis.com`) | When the first refuses |
+
+| Change | Step |
+|---|---|
+| A version in `patch-spark-jars.sh` | Download each new jar, check it against Maven Central's published SHA-1, write its SHA-256 line into `spark-jars.sha256`, remove the old lines |
+| A Spark base image with another Netty set | The build fails on `has no pin`; pin the jars it names |
+| `<source> refused <jar>; trying the next source` in a build log | No action; the build fails only if no source serves the jar |
