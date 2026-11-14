@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0026 — Release model: one trunk and a gate that runs the system
 
 - **Status:** Accepted
-- **Date:** 2026-07-13; changed 2026-11-07
+- **Date:** 2026-07-13; changed 2026-11-14
 - **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (the images certified), [ADR-0017](ADR-0017-database-tls-and-authentication.md) and [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (their "validated on the box" language)
 
 ## Context
@@ -16,7 +16,8 @@ or a component that starts on fresh state but fails on state from the version it
 integration branch is a place to run a test, not a test. The long-lived environment sees accumulated
 state, real certificates, real name resolution and the public edges; its runs after merge keep finding
 failures that pass every check, and until now they were scripts on that host, unreviewed and not
-repeatable.
+repeatable. A build input fetched by address comes from a public repository that refuses some runners
+outright, so a check can fail for the runner rather than the change.
 
 ## Decision
 
@@ -48,6 +49,10 @@ repeatable.
 11. **A check of a service's use of a store or broker runs the service's own driver and client against
     a real server of it.** Another driver binds parameters another way, and an in-process stand-in has
     no timeouts, limits or coordinator, so each passes what the service then fails.
+12. **A build input fetched by address is pinned by a content digest the repository holds, and has a
+    second source.** A required check then fails for the change, not because one host refused the
+    runner. A digest the repository holds says the bytes are the reviewed ones; a digest the serving
+    host publishes says only that the transfer was whole.
 
 ## Alternatives
 
@@ -69,12 +74,17 @@ repeatable.
 | 11 | A convenient driver for the database proofs | It cast what the service's driver refuses, and passed a write the service could not make |
 | 11 | An in-process stand-in for the shared store | It has no client timeout, and passed a read the service's client timed out on |
 | 11 | A stand-in for the broker client | It has no group coordinator, so commit, rewind and redelivery behave as the stand-in was written, not as the broker does |
+| 12 | The digest the serving host publishes beside each input | Proves the transfer, not the content, and fails with the host |
+| 12 | Rerunning a check the host refused | A required check that is red for the runner is rerun until it is ignored, and a rerun can hide a real failure |
+| 12 | A cache of verified inputs on the runner | A cold or evicted cache on a refused runner still fails, and the long-lived environment builds without it |
+| 12 | The inputs committed to the repository | Grows the repository by every version of every input |
 
 ## Consequences
 
 **Positive**
 - Start-time and upgrade failures are caught by a machine before merge.
 - The main branch and the newest image mean one written thing; patches keep a short path.
+- A required check is not red because one host refused one runner.
 
 **Negative**
 - The whole-stack gate is the most expensive check and slows as the system grows.
@@ -86,6 +96,8 @@ repeatable.
 - Synthesised state covers schema upgrades, not accumulated data, and only the latest upgrade step.
 - Each upgrade path's from-version must move with the component's major.
 - A break confined to a component outside the gate is caught only by its own build.
+- Every version change of a fetched input needs its new digests.
+- The second source is another host the build depends on, trusted only through the digest.
 
 ## Deferred
 
@@ -97,4 +109,4 @@ repeatable.
 
 ## References
 
-- [CI and required checks](../docs/operations/ci.md): manual of decisions 1-11.
+- [CI and required checks](../docs/operations/ci.md): manual of decisions 1-12.
