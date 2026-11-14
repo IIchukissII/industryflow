@@ -69,7 +69,7 @@ services:
 
   # Kafka - Message streaming
   kafka:
-    image: confluentinc/cp-kafka:7.9.10@sha256:07c3d60362e67c296f7f34b690b1240e5ecdcde4a84f5e73cab320fb4041f58c
+    image: confluentinc/cp-kafka:7.9.11@sha256:900c8308578371e874892eb6b121d15cc2f6a0a1f1be50f319746fb36d052bf6
     container_name: industryflow-kafka
     depends_on:
       zookeeper:
@@ -112,7 +112,7 @@ services:
   # server on the old one while clients are handed the new CA. Then it publishes the staged CA to
   # db-ca, the clients' default CA mount, so verify-full works with or without TLS_CERT_DIR.
   db-cert-init:
-    image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+    image: alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
     container_name: industryflow-db-cert-init
     command:
       - sh
@@ -147,7 +147,7 @@ services:
   # uid 10001; node-exporter reads them. Whichever container mounts a new volume first creates it
   # root-owned, and the jobs run with --no-deps, so the ownership is set here, on every `up`.
   backup-metrics-init:
-    image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+    image: alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
     container_name: industryflow-backup-metrics-init
     command: ["sh", "-ec", "chown 10001:10001 /m && chmod 0755 /m"]
     volumes:
@@ -158,7 +158,7 @@ services:
   # The device CA watch's success times (device-crl-refresh, ADR-0007 dec 10), written as the CA dir's
   # owner; a volume of their own, so the watch cannot write the backup jobs' series.
   device-ca-metrics-init:
-    image: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+    image: alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
     container_name: industryflow-device-ca-metrics-init
     command: ["sh", "-ec", "chown ${DEVICE_CA_UID:-1000}:${DEVICE_CA_GID:-1000} /m && chmod 0755 /m"]
     volumes:
@@ -298,7 +298,7 @@ services:
   # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
   # CAP_CHOWN, and a no-op when the volume is already owned correctly.
   minio-data-owner:
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:fc1752e8f7279a159e851c771ade5252901406da83d72cd29d1a9373cb0c5063
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:e1f3f37e8b13f34be49494f441ca01ff7be4e05d7cf04bf26681b0fe380852e1
     container_name: industryflow-minio-data-owner
     user: "0:0"
     network_mode: none
@@ -321,7 +321,7 @@ services:
   # a maintained third-party build of the same server (ADR-0025 dec 10, ADR-0009). Non-root (65532),
   # distroless: no curl, so the healthcheck speaks HTTP over bash's /dev/tcp.
   minio:
-    image: cgr.dev/chainguard/minio:latest@sha256:869ca3178831d9f521ea02258a0f0d4fbc1e9f84302e707514e1f861b860865d
+    image: cgr.dev/chainguard/minio:latest@sha256:0f9fda72fbc6bd3560ea903aec2ceefa20f6ba82628d67656f37fb370c39ae9c
     depends_on:
       minio-data-owner:
         condition: service_completed_successfully
@@ -352,7 +352,7 @@ services:
   # safe on every `up`; the services that need a bucket or principal gate on it completing.
   minio-init:
     # The -dev variant: the init script needs a shell, grep and mktemp, which the minimal one lacks.
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:fc1752e8f7279a159e851c771ade5252901406da83d72cd29d1a9373cb0c5063
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:e1f3f37e8b13f34be49494f441ca01ff7be4e05d7cf04bf26681b0fe380852e1
     container_name: industryflow-minio-init
     depends_on:
       minio:
@@ -1258,7 +1258,7 @@ services:
 
   # Prometheus - Metrics collection and storage
   prometheus:
-    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
     container_name: industryflow-prometheus
     ports:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
@@ -1288,7 +1288,7 @@ services:
   # receiver: alerts are visible in its UI and sent nowhere until the operator configures one
   # (ALERTMANAGER_CONFIG, docs/operations/monitoring.md#alert-delivery).
   alertmanager:
-    image: prom/alertmanager:v0.34.2@sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b
+    image: prom/alertmanager:v0.35.0@sha256:e638797febd034838eca8b98cdbd46f951e9bf7f178777aa8669167406a9946c
     container_name: industryflow-alertmanager
     ports:
       - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
@@ -1450,7 +1450,7 @@ services:
 
   # Grafana - Monitoring & Dashboards
   grafana:
-    image: grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
+    image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
     container_name: industryflow-grafana
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
