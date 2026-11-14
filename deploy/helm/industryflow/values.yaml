@@ -326,7 +326,7 @@ infra:
 
   kafka:
     inCluster: true
-    image: confluentinc/cp-kafka:7.9.10@sha256:07c3d60362e67c296f7f34b690b1240e5ecdcde4a84f5e73cab320fb4041f58c
+    image: confluentinc/cp-kafka:7.9.11@sha256:900c8308578371e874892eb6b121d15cc2f6a0a1f1be50f319746fb36d052bf6
     port: 9092
     # Log retention. The in-cluster broker is configured with it, and the tenant-delete job records it
     # as how long a deleted tenant's readings may remain; with an external broker, set it to that
@@ -354,7 +354,7 @@ infra:
     inCluster: true
     # Maintained third-party MinIO build (the upstream images were withdrawn). Non-root (65532),
     # distroless. Pinned by immutable digest; the tag is kept for readability.
-    image: cgr.dev/chainguard/minio:latest@sha256:869ca3178831d9f521ea02258a0f0d4fbc1e9f84302e707514e1f861b860865d
+    image: cgr.dev/chainguard/minio:latest@sha256:0f9fda72fbc6bd3560ea903aec2ceefa20f6ba82628d67656f37fb370c39ae9c
     apiPort: 9000
     consolePort: 9001
     storage: 20Gi
@@ -381,7 +381,7 @@ objectStore:
   buckets:
     sparkCheckpoint: spark-checkpoints
   # mc image for the bootstrap Job. The -dev variant carries the shell the script needs.
-  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:fc1752e8f7279a159e851c771ade5252901406da83d72cd29d1a9373cb0c5063
+  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:e1f3f37e8b13f34be49494f441ca01ff7be4e05d7cf04bf26681b0fe380852e1
 
 # ---------------------------------------------------------------------------
 # Logical database backups (tier-1 DR) — a CronJob dumps each database to S3/MinIO
