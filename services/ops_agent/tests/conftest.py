@@ -20,7 +20,7 @@ def config(tmp_path):
         values = dict(
             webhook_secret="s" * 40, prometheus_url="http://prom", loki_url="http://loki",
             alertmanager_url="http://am",
-            log_selector='{service="%s"}', runbooks_dir=REPO / "docs" / "operations", window_minutes=30,
+            log_selector='{service="%s"}', runbook_file=SERVICE / "runbook.toml", window_minutes=30,
             model_provider="anthropic", model="claude-opus-5-5", model_base_url="", model_api_key="",
             effort="medium", tools="stdio",
         )

@@ -44,7 +44,7 @@ MAX_SEEN = 10_000
 _SEVERITY = {"critical": 0, "warning": 1}
 # What the tool server may see: endpoints and paths, never a secret (ADR-0046 dec 7).
 _TOOL_ENV = ("OPS_AGENT_PROMETHEUS_URL", "OPS_AGENT_LOKI_URL", "OPS_AGENT_ALERTMANAGER_URL",
-             "OPS_AGENT_LOG_SELECTOR", "OPS_AGENT_RUNBOOKS_DIR")
+             "OPS_AGENT_LOG_SELECTOR", "OPS_AGENT_RUNBOOK")
 
 
 class McpTools:

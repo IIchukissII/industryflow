@@ -1319,8 +1319,6 @@ services:
     build:
       context: ./services/ops_agent
       dockerfile: Dockerfile
-      additional_contexts:
-        runbooks: ./docs/operations
     image: industryflow-ops-agent
     container_name: industryflow-ops-agent
     environment:

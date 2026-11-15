@@ -2,23 +2,21 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The runbooks' tables, read as a contract (ADR-0046 dec 9).
+"""The runbook rows the agent reads, its own data (ADR-0046 dec 9): `runbook.toml` beside this module.
 
-Two kinds. The alert table (`Alert | Fires when | Handling`) has one row per platform rule and is
-looked up by the alert's exact name. The symptom tables (`Symptom | Cause | Fix`) are matched to an
-alert by shared words, deterministically, and only when at least two words are shared: a single shared
-word is noise, and no row is better than a wrong one. The runbooks already hold structured rows, so no
-similarity store is needed (ADR-0046 Alternatives, dec 9).
+Two kinds. An alert row exists for every platform rule and is looked up by the alert's exact name. A
+symptom row (symptom, cause, fix) is matched to an alert by shared words, deterministically, and only when
+at least two words are shared: a single shared word is noise, and no row is better than a wrong one. The
+rows are already structured, so no similarity store is needed (ADR-0046 Alternatives, dec 9).
 """
 
 from __future__ import annotations
 
 import re
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-HEADER = ("symptom", "cause", "fix")
-ALERT_HEADER = ("alert", "fires when", "handling")
 MIN_SHARED = 2
 _WORD = re.compile(r"[a-z0-9]+")
 # Words that appear in nearly every row and alert, so they carry no signal.
@@ -37,10 +35,6 @@ class Row:
     source: str
 
 
-def _cells(line: str) -> list[str]:
-    return [c.strip() for c in line.strip().strip("|").split("|")]
-
-
 @dataclass(frozen=True)
 class AlertRow:
     alert: str
@@ -49,45 +43,19 @@ class AlertRow:
     source: str
 
 
-def _tables(text: str, header: tuple[str, ...]):
-    """The body rows of every table with exactly this header, as lists of cells."""
-    lines = text.splitlines()
-    i = 0
-    while i < len(lines):
-        if lines[i].lstrip().startswith("|") and tuple(c.lower() for c in _cells(lines[i])) == header:
-            i += 2  # the header and its separator
-            while i < len(lines) and lines[i].lstrip().startswith("|"):
-                cells = _cells(lines[i])
-                if len(cells) == len(header):
-                    yield cells
-                i += 1
-            continue
-        i += 1
+def _read(path: Path) -> dict:
+    return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
-def parse_alerts(text: str, source: str) -> dict[str, AlertRow]:
-    """The alert table's rows by alert name (the name's backticks dropped)."""
-    return {cells[0].strip("`"): AlertRow(cells[0].strip("`"), cells[1], cells[2], source)
-            for cells in _tables(text, ALERT_HEADER)}
+def load_alerts(path: Path) -> dict[str, AlertRow]:
+    """The alert rows by alert name."""
+    return {a["name"]: AlertRow(a["name"], a["fires_when"], a["handling"], a["source"])
+            for a in _read(path).get("alert", [])}
 
 
-def load_alerts(directory: Path) -> dict[str, AlertRow]:
-    rows: dict[str, AlertRow] = {}
-    for path in sorted(directory.rglob("*.md")):
-        rows.update(parse_alerts(path.read_text(encoding="utf-8"), path.name))
-    return rows
-
-
-def parse(text: str, source: str) -> list[Row]:
-    """Every row of every `Symptom | Cause | Fix` table in one markdown document."""
-    return [Row(*cells, source=source) for cells in _tables(text, HEADER)]
-
-
-def load(directory: Path) -> list[Row]:
-    rows: list[Row] = []
-    for path in sorted(directory.rglob("*.md")):
-        rows.extend(parse(path.read_text(encoding="utf-8"), path.name))
-    return rows
+def load(path: Path) -> list[Row]:
+    """Every symptom row, in the file's order."""
+    return [Row(r["symptom"], r["cause"], r["fix"], r["source"]) for r in _read(path).get("symptom", [])]
 
 
 def _words(text: str) -> set[str]:

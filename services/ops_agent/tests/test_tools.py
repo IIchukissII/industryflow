@@ -85,7 +85,7 @@ async def test_the_agent_reaches_its_tools_over_stdio(config, monkeypatch):
     import app
     from conftest import REPO
 
-    monkeypatch.setenv("OPS_AGENT_RUNBOOKS_DIR", str(REPO / "docs" / "operations"))
+    monkeypatch.setenv("OPS_AGENT_RUNBOOK", str(REPO / "services" / "ops_agent" / "runbook.toml"))
     monkeypatch.setenv("OPS_AGENT_WEBHOOK_SECRET", "s" * 40)
     mcp_tools = app.McpTools.from_config(config())
     assert "OPS_AGENT_WEBHOOK_SECRET" not in mcp_tools._target.env

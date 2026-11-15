@@ -52,8 +52,8 @@ def _reported(fn: Callable[..., Awaitable[dict[str, Any]]]) -> Callable[..., Awa
 
 def build_server(config: Config, transport: httpx.AsyncBaseTransport | None = None) -> MCPServer:
     server = MCPServer("industryflow-ops")
-    rows = runbooks.load(config.runbooks_dir) if config.runbooks_dir.is_dir() else []
-    alert_rows = runbooks.load_alerts(config.runbooks_dir) if config.runbooks_dir.is_dir() else {}
+    rows = runbooks.load(config.runbook_file) if config.runbook_file.is_file() else []
+    alert_rows = runbooks.load_alerts(config.runbook_file) if config.runbook_file.is_file() else {}
 
     def client() -> httpx.AsyncClient:
         return httpx.AsyncClient(timeout=15.0, transport=transport)

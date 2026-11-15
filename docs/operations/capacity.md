@@ -93,9 +93,5 @@ host run only the sampler.
 Reading `n` is stamped `--run-start` plus `n` microseconds, so the landed count for any prefix of a run
 is exact. Server-side latency is `http_request_duration_seconds{handler="/ingest"}` in Prometheus.
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| Client p95 in seconds and achieved rate below the offered rate; server `/ingest` p95 low | A generator process above 125 readings/s lags its own event loop | One `loadgen.py` process per 125 readings/s |
-| Timeouts in bursts; Docker host CPU drops at the same time | Load machine's network dropped out (Wi-Fi) | Wired network |
-| Edge latency rises with no server-side change | `docker stats` polling on the Docker host starves the ingest edge | Sample with `sample_host.sh` only |
-| A container missing from `analyze.py` output | Started after the sampler | Restart the sampler after the stack is up |
+Symptoms, causes and fixes of a load run are rows of the infrastructure agent's runbook data,
+`services/ops_agent/runbook.toml` (source `capacity.md`).
