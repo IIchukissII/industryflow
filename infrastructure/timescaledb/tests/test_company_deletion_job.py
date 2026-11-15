@@ -160,8 +160,9 @@ def test_completion_leaves_no_compressed_chunk_of_the_tenant(requested):
     cur, company_id = requested
     suffix = company_id.replace("-", "_")
     table = f'"tenant_{suffix}".sensor_aggregations_1min'
+    # 20 days back: past its 7-day chunk and the 5-day horizon below on any weekday (chunks align to the epoch).
     cur.execute(f"INSERT INTO {table} (time, sensor_id, equipment_id, avg_value, count_values) "
-                "VALUES (date_trunc('minute', now() - interval '10 days'), gen_random_uuid(), gen_random_uuid(), 1, 1)")
+                "VALUES (date_trunc('minute', now() - interval '20 days'), gen_random_uuid(), gen_random_uuid(), 1, 1)")
     cur.execute(f"SELECT compress_chunk(c) FROM show_chunks('{table}', older_than => now() - interval '5 days') c")
     assert cur.fetchall(), "no chunk was compressed: the case is not exercised"
     cur.execute("SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
