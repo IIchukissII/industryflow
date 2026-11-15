@@ -81,7 +81,7 @@ def test_a_one_reading_window_gets_zero_spread_compressed_or_not(tenant):
                     f"VALUES (date_trunc('minute', now() - interval '{age}'), %s, %s, 1.0, %s, %s)",
                     (sensors[name], equipment, std, n))
     # The old window's chunk compressed, as the policy leaves windows older than its horizon.
-    cur.execute(f"SELECT compress_chunk(c) FROM show_chunks('{table}', older_than => now() - interval '5 days') c")
+    cur.execute(f"SELECT compress_chunk(c, if_not_compressed => true) FROM show_chunks('{table}', older_than => now() - interval '5 days') c")
     assert cur.fetchall(), "no chunk was compressed: the compressed case is not exercised"
 
     def spreads():
