@@ -8,33 +8,38 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-27; changed 2026-11-07
 - **Parent:** ADR-0001
-- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (tracking from notebooks, dec 9), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) (the capability model applied here), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (tenant-scoped API and UI), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (the gateway that realises this record)
 
 ## Context
 
-The tracking stack is one server, one backend and one artifact bucket holding every tenant's
-experiments, runs, models and artifacts. Its authorization is per user, not per tenant, and its UI shows
-everything. A notebook needs tracking operations, not the store credential behind them. When only trusted
-code touches the store, logical scoping is the platform's normal mechanism; physical separation adds
-containment at operational cost, not a boundary mediation lacks.
+1. The tracking stack is one server, one backend and one artifact bucket holding every tenant's
+   experiments, runs, models and artifacts.
+2. Its authorization is per user, not per tenant, and its UI shows everything.
+3. A notebook needs tracking operations, not the store credential behind them.
+4. When only trusted code touches the store, logical scoping is the platform's normal mechanism;
+   physical separation adds containment at operational cost, not a boundary mediation lacks.
 
 ## Decision
 
-1. **The tracking server, its backend and the artifact store are internal; untrusted code never holds
-   their credentials, never reaches the tracking server or its backend, and reaches the artifact store
-   only under the grants of decision 3.** An authoring environment tracks with a per-session
-   capability (ADR-0012).
-2. **All tenant access to tracking and the registry is mediated by a trusted, tenant-scoping gateway.**
-   It forces every operation into the caller's tenant namespace, refuses any that would cross it, and
-   alone holds the store credentials.
-3. **One tenant dimension covers experiments and runs, registered models and artifacts.** Artifacts sit
-   under a per-tenant location; their bytes move directly between caller and store under per-object,
-   per-operation, minutes-long grants the gateway issues after checking the tenant.
+1. **The tracking server, its backend and the artifact store are internal; untrusted code never
+   holds their credentials, never reaches the tracking server or its backend, and reaches the
+   artifact store only under the grants of decision 3.** An authoring environment tracks with a
+   per-session capability (ADR-0012).
+   Rests on: 2, 3.
+2. **All tenant access to tracking and the registry is mediated by a trusted, tenant-scoping
+   gateway.** It forces every operation into the caller's tenant namespace, refuses any that would
+   cross it, and alone holds the store credentials.
+   Rests on: 1, 2, 3.
+3. **One tenant dimension covers experiments and runs, registered models and artifacts.** Artifacts
+   sit under a per-tenant location; their bytes move directly between caller and store under
+   per-object, per-operation, minutes-long grants the gateway issues after checking the tenant.
+   Rests on: 1.
 4. **The tracking server's own UI is not exposed to tenants.** Tenant browsing is served by the
    platform's tenant-scoped API and UI, which re-check the tenant on every item returned.
-5. **Isolation is realised within one shared store; per-tenant physical separation is a hardening step
-   gated on need.** A server, backend or bucket per tenant is the path if mediation proves insufficient
-   or a tenant's scale or compliance requires it.
+   Rests on: 2.
+5. **Isolation is realised within one shared store; per-tenant physical separation is a hardening
+   step gated on need.** A server, backend or bucket per tenant is the path if mediation proves
+   insufficient or a tenant's scale or compliance requires it.
+   Rests on: 4.
 
 ## Alternatives
 
@@ -51,7 +56,8 @@ containment at operational cost, not a boundary mediation lacks.
 **Positive**
 - Authoring environments log runs and register models within their own tenant.
 - Tracking and artifact credentials never reach untrusted environments.
-- The product shows a tenant its experiments and runs read-only; the tracking server's own UI stays internal.
+- The product shows a tenant its experiments and runs read-only; the tracking server's own UI stays
+  internal.
 
 **Negative**
 - The boundary rests on the gateway being correct; a bug there is a cross-tenant leak.

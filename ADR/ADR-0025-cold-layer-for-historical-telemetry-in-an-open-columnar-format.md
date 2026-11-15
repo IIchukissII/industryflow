@@ -8,44 +8,65 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-07-08; changed 2026-10-21
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md) (framing)
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant mapping), [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (scheduled jobs, object store), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) and [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (brokered reads, no secret in the kernel), [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (the cold layer's backup)
+- **Related:** [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md),
+  [ADR-0033](ADR-0033-tenant-lifecycle.md)
 
 ## Context
 
-Raw telemetry lands in a hypertable in the transactional database, whose compression shrinks storage but
-still streams rows over one connection. Training, search, backtests and drift monitoring reread long
-history, so a history read's cost sets the pace of ML work. A compressed database chunk is readable only
-by the database that wrote it.
+1. Raw telemetry lands in a hypertable in the transactional database, whose compression shrinks
+   storage but still streams rows over one connection.
+2. Training, search, backtests and drift monitoring reread long history, so a history read's cost
+   sets the pace of ML work.
+3. A compressed database chunk is readable only by the database that wrote it.
 
 ## Decision
 
-1. **Raw measurements are kept in Parquet in the object store, unbounded, for training and analysis.**
-2. **Hot-store raw retention is the live-monitoring horizon; raw rows leave only through decision 3.**
+1. **Raw measurements are kept in Parquet in the object store, unbounded, for training and
+   analysis.**
+   Rests on: 1, 2, 3.
+2. **Hot-store raw retention is the live-monitoring horizon; raw rows leave only through decision
+   3.**
+   Rests on: 1.
 3. **Export → verify → drop, ordered inside the exporter.** The drop locks writers off the day and
-   proceeds only if a fingerprint of its rows (count and order-independent digest) equals the one taken
-   at export. Each drop is recorded in its own transaction, so a crash resumes correctly.
-4. **The export is idempotent, and archived parts are immutable.** Each run exports everything past the
-   horizon not yet archived; late rows become a further part, and a part whose drop is recorded is never
-   rewritten.
-5. **Tenant isolation extends into the object store under the existing policy.** On write, tenants come
-   from the registry and map through the one tenant mapping to their own prefix (ADR-0003). On read, the
-   kernel holds no durable credential: a trusted broker resolves an audience-bound handle to one tenant
-   and vends short-lived, read-only presigned reads within its prefix (ADR-0012, ADR-0015).
+   proceeds only if a fingerprint of its rows (count and order-independent digest) equals the one
+   taken at export. Each drop is recorded in its own transaction, so a crash resumes correctly.
+   Rests on: none.
+4. **The export is idempotent, and archived parts are immutable.** Each run exports everything past
+   the horizon not yet archived; late rows become a further part, and a part whose drop is recorded
+   is never rewritten.
+   Rests on: none.
+5. **Tenant isolation extends into the object store under the existing policy.** On write, tenants
+   come from the registry and map through the one tenant mapping to their own prefix (ADR-0003). On
+   read, the kernel holds no durable credential: a trusted broker resolves an audience-bound handle
+   to one tenant and vends short-lived, read-only presigned reads within its prefix (ADR-0012,
+   ADR-0015).
+   Rests on: none.
 6. **Partition by event time; sort within each file by equipment.**
+   Rests on: 2.
 7. **The cold layer holds raw readings only; aggregates are recomputed on read.**
-8. **Parquet now; a table format on a named trigger.** The trigger is a change to the archived reading's
-   shape that readers cannot absorb by tolerating parts with and without a field, or a second writer; a
-   new sensor or tenant only adds rows.
+   Rests on: 2.
+8. **Parquet now; a table format on a named trigger.** The trigger is a change to the archived
+   reading's shape that readers cannot absorb by tolerating parts with and without a field, or a
+   second writer; a new sensor or tenant only adds rows.
+   Rests on: 3.
 9. **Orchestration is a scheduled cluster job until a real dependency graph exists.**
-10. **The object store is the one the platform already runs; the cold layer adds buckets and principals.**
-11. **The exporter is a separate job whose principal can write but not delete in the cold bucket.** The
-    stream's principal gains no access; the default engine is a single-node columnar writer.
-12. **The layer is built; table format, distributed export and aggregate history wait for triggers.**
-13. **The cold layer is mirrored by a principal that can only read it (ADR-0032 dec 4).** The mirror keeps
-    an object one backup retention period after the cold layer no longer holds it.
-14. **A tenant's cold objects are removed only by the tenant-delete job (ADR-0033 dec 4).** Its principal can
-    list and delete in the cold bucket but neither write nor read objects, so no principal both writes and
-    deletes the only copy of history.
+   Rests on: none.
+10. **The object store is the one the platform already runs; the cold layer adds buckets and
+    principals.**
+    Rests on: none.
+11. **The exporter is a separate job whose principal can write but not delete in the cold bucket.**
+    The stream's principal gains no access; the default engine is a single-node columnar writer.
+    Rests on: none.
+12. **The layer is built; table format, distributed export and aggregate history wait for
+    triggers.**
+    Rests on: none.
+13. **The cold layer is mirrored by a principal that can only read it (ADR-0032 dec 4).** The mirror
+    keeps an object one backup retention period after the cold layer no longer holds it.
+    Rests on: none.
+14. **A tenant's cold objects are removed only by the tenant-delete job (ADR-0033 dec 4).** Its
+    principal can list and delete in the cold bucket but neither write nor read objects, so no
+    principal both writes and deletes the only copy of history.
+    Rests on: none.
 
 ## Alternatives
 
@@ -73,11 +94,13 @@ by the database that wrote it.
 ## Consequences
 
 **Positive**
-- History reads are parallel, columnar and pruned; tenant isolation holds; no new store or orchestrator.
+- History reads are parallel, columnar and pruned; tenant isolation holds; no new store or
+  orchestrator.
 
 **Negative**
 - The cold layer is the only copy of old raw history; a further broker must honour revocation.
-- A day may span several parts, readers must tolerate added fields, and the backup grows without bound.
+- A day may span several parts, readers must tolerate added fields, and the backup grows without
+  bound.
 
 ## Deferred
 

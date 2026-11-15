@@ -7,36 +7,39 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-30
-- **Parent:** [ADR-0024](ADR-0024-stateful-feature-kill-switch.md) (the switch, and the operator surface
-  it deferred)
-- **Related:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (dec 5: cross-tenant
-  authority is a distinct superuser), [ADR-0031](ADR-0031-the-api-gateway-as-the-single-owner-of-the-alerting-http-surface.md) (the gateway as the
-  one HTTP surface), [ADR-0033](ADR-0033-tenant-lifecycle.md) (dec 1: privileged writes through a
-  function; dec 6: the lifecycle record), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (platform
-  data in the shared schema)
+- **Parent:** [ADR-0024](ADR-0024-stateful-feature-kill-switch.md) (the switch, and the operator
+  surface it deferred)
+- **Related:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md)
 
 ## Context
 
-The stateful-feature switch is platform-global: one flip neutralizes a feature class for every tenant.
-Only the database owner can change it, so an incident needs a person with database credentials, and
-nothing records who flipped it or when beyond the last change. The service that reads it holds read
-access only, so that it cannot trip itself. Cross-tenant authority already exists as one modelled
-superuser, verified by the API gateway, which serves the other platform operations.
+1. The stateful-feature switch is platform-global: one flip neutralizes a feature class for every
+   tenant.
+2. Only the database owner can change it, so an incident needs a person with database credentials,
+   and nothing records who flipped it or when beyond the last change.
+3. The service that reads it holds read access only, so that it cannot trip itself.
+4. Cross-tenant authority already exists as one modelled superuser, verified by the API gateway,
+   which serves the other platform operations.
 
 ## Decision
 
 1. **Only a platform superuser flips a platform switch; no tenant role can.** A flip acts on every
    tenant, and a tenant's authority ends at its own tenant (ADR-0004 dec 5).
+   Rests on: 1.
 2. **The API gateway serves the flip and the read of a switch's state and history.** It already
    verifies the session and the superuser; the inference service, which reads the switch, gains no
    write surface and no second verification.
+   Rests on: 3, 4.
 3. **The gateway writes through one privileged database function and holds no write privilege on the
-   switches.** The function accepts only a known switch and a value of its type, and records the flip
-   in the same transaction.
-4. **Every flip is appended to a durable record: the switch, the value before and after, the user and
-   the time.** The current row keeps only the last change, and the questions an incident review asks
-   are about the sequence.
+   switches.** The function accepts only a known switch and a value of its type, and records the
+   flip in the same transaction.
+   Rests on: 2, 3.
+4. **Every flip is appended to a durable record: the switch, the value before and after, the user
+   and the time.** The current row keeps only the last change, and the questions an incident review
+   asks are about the sequence.
+   Rests on: 2.
 5. **A flip that changes nothing is not recorded.** Repeating the current value is no action.
+   Rests on: 2.
 
 ## Alternatives
 

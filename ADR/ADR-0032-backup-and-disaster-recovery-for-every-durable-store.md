@@ -8,37 +8,48 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-10-24; changed 2026-11-09
 - **Parent:** ADR-0001
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (a backup holds every tenant), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capability store, dec 7; dec 8: its denials rebuilt), [ADR-0020](ADR-0020-notebook-per-user-work-persistence.md) (notebook volumes), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (cold layer, the only copy of raw history; dec 13 its mirror), [ADR-0029](ADR-0029-spark-major-upgrades.md) (checkpoints), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion), [ADR-0034](ADR-0034-platform-schema-migrations.md) (forward-only migrations), [ADR-0038](ADR-0038-model-artifacts-are-mirrored-notebook-volumes-archived-by-the-backup-job.md) (model and notebook mechanism)
+- **Related:** [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md)
 
 ## Context
 
-The cold layer past the hot horizon, model artifacts and authored notebooks exist nowhere else, and no
-database dump holds them. A backup in its source's storage, cluster or site does not survive losing that
-domain. Under schema-per-tenant every backup holds every tenant's data.
+1. The cold layer past the hot horizon, model artifacts and authored notebooks exist nowhere else,
+   and no database dump holds them.
+2. A backup in its source's storage, cluster or site does not survive losing that domain.
+3. Under schema-per-tenant every backup holds every tenant's data.
 
 ## Decision
 
-1. **Every durable store is classified, and the class decides its recovery path.** *Authoritative* stores
-   (databases, cold layer, model artifacts, authored notebooks) are backed up; *derivable* ones (capability
-   store, broker topics, streaming checkpoints, caches) record a rebuild path instead. A derivable store
-   that holds denials re-derives them before it grants anything (ADR-0015 dec 8).
+1. **Every durable store is classified, and the class decides its recovery path.** *Authoritative*
+   stores (databases, cold layer, model artifacts, authored notebooks) are backed up; *derivable*
+   ones (capability store, broker topics, streaming checkpoints, caches) record a rebuild path
+   instead. A derivable store that holds denials re-derives them before it grants anything (ADR-0015
+   dec 8).
+   Rests on: 1.
 2. **Recovery targets are declared per authoritative store.** The operations documentation owns the
    recovery-point and recovery-time objectives; a store without them is a gap.
-3. **Disaster recovery means a copy outside the failure domain.** A backup sharing storage, cluster or site
-   with its source is *undo*; disaster recovery needs a copy of every authoritative store elsewhere.
-4. **The cold layer is backed up as an object store, not as a database.** Its objects are copied to a
-   separate failure domain for as long as the cold layer keeps them. An object the cold layer no longer
-   holds leaves the copy once one backup retention period has passed, so an accidental deletion stays
-   recoverable that long and a deleted tenant's history does not outlive it.
-5. **A backup is held to the standard of the most privileged store it contains.** A principal confined
-   to the backup target and held only by the backup and restore jobs writes it; no capability, kernel,
-   tenant session or tenant-facing plane can read it.
-6. **A restore is proven by doing it.** Restores are rehearsed on a schedule against a scratch target and
-   compared with the source; an unexercised backup counts toward no recovery objective.
-7. **A schema rollback is a restore, and the migration runner enforces the backup it needs.** Migrations
-   are forward-only, so a backup precedes every upgrade and is the way back from a bad migration. The
-   runner refuses to change a database holding platform state unless a recent completed backup is recorded
-   in that database; proceeding without one is an explicit operator choice, never a default.
+   Rests on: 1.
+3. **Disaster recovery means a copy outside the failure domain.** A backup sharing storage, cluster
+   or site with its source is *undo*; disaster recovery needs a copy of every authoritative store
+   elsewhere.
+   Rests on: 2.
+4. **The cold layer is backed up as an object store, not as a database.** Its objects are copied to
+   a separate failure domain for as long as the cold layer keeps them. An object the cold layer no
+   longer holds leaves the copy once one backup retention period has passed, so an accidental
+   deletion stays recoverable that long and a deleted tenant's history does not outlive it.
+   Rests on: 1.
+5. **A backup is held to the standard of the most privileged store it contains.** A principal
+   confined to the backup target and held only by the backup and restore jobs writes it; no
+   capability, kernel, tenant session or tenant-facing plane can read it.
+   Rests on: 3.
+6. **A restore is proven by doing it.** Restores are rehearsed on a schedule against a scratch
+   target and compared with the source; an unexercised backup counts toward no recovery objective.
+   Rests on: none.
+7. **A schema rollback is a restore, and the migration runner enforces the backup it needs.**
+   Migrations are forward-only, so a backup precedes every upgrade and is the way back from a bad
+   migration. The runner refuses to change a database holding platform state unless a recent
+   completed backup is recorded in that database; proceeding without one is an explicit operator
+   choice, never a default.
+   Rests on: none.
 
 ## Alternatives
 
@@ -67,8 +78,9 @@ domain. Under schema-per-tenant every backup holds every tenant's data.
 - Restore rehearsal is recurring operational work that needs an owner.
 - A deployment without a backup job upgrades only by the explicit choice to go without one.
 - A restored database is backed up again before pending migrations apply to it.
-- Losing a derivable store loses what only it held: the broker's unconsumed readings and dead letters,
-  open aggregation windows, the capability-use events not yet written to the database, and every session.
+- Losing a derivable store loses what only it held: the broker's unconsumed readings and dead
+  letters, open aggregation windows, the capability-use events not yet written to the database, and
+  every session.
 
 ## Deferred
 

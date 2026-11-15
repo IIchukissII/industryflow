@@ -8,19 +8,20 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-26; changed 2026-11-07
 - **Parent:** none (governs the form of every other ADR)
-- **Canon:** [IIchukissII/CANON ADR-0000](https://github.com/IIchukissII/CANON/blob/main/ADR-0000-canon.md),
-  refined here for this repository
+- **Canon:** [IIchukissII/CANON
+  ADR-0000](https://github.com/IIchukissII/CANON/blob/main/ADR-0000-canon.md), refined here for this
+  repository
 
 ## Context
 
-The platform's reasoning spans service code, deployment descriptions, database scripts, configuration
-templates and documentation. Without a record of *why* a thing is the way it is, each contributor
-re-derives the reason, and the guesses diverge. A fact held in more than one place drifts, and review
-cannot tell which copy is right.
-
-The method common to every project, and to every agent working on one, is the canon. This record
-states only how this repository realises it; where the canon already decides, the decision here
-cites it instead of restating it.
+1. The platform's reasoning spans service code, deployment descriptions, database scripts,
+   configuration templates and documentation.
+2. Without a record of *why* a thing is the way it is, each contributor re-derives the reason, and
+   the guesses diverge.
+3. A fact held in more than one place drifts, and review cannot tell which copy is right.
+4. The method common to every project, and to every agent working on one, is the canon.
+5. This record states only how this repository realises it; where the canon already decides, the
+   decision here cites it instead of restating it.
 
 ## Decision
 
@@ -28,42 +29,52 @@ cites it instead of restating it.
    decision that constrains downstream artifacts (service boundaries, tenancy, data flow, delivery
    semantics, authentication, storage, observability contracts) is written down before it reaches
    code. The ADR formalises the outcome of discussion; it never replaces it.
-2. **ADRs own the why, the manual owns the how, artifacts own the what.** *(canon dec 7, 10, 19)*
-   An ADR holds context, the decision, rejected alternatives and consequences, and names its manual:
+   Rests on: 1, 2, 4.
+2. **ADRs own the why, the manual owns the how, artifacts own the what.** *(canon dec 7, 10, 19)* An
+   ADR holds context, the decision, rejected alternatives and consequences, and names its manual:
    the documentation that states how each decision works and names the code realising it, under the
    decision it follows. Concrete values (ports, topics, pool sizes, variable names, schemas, image
    tags) live in the artifact whose job is that value; the manual names that artifact and links to
    the decision for its reasons, and the ADR names neither.
+   Rests on: 1, 3, 4.
 3. **Every fact has exactly one authoritative home.** *(canon dec 7)* Another document that needs
    the value references it. Where artifacts cannot share a fact, a check reads every copy and fails
    when they disagree; where a copy is not needed, it is replaced by one shared definition.
+   Rests on: 3.
 4. **Code never silently overrides an ADR.** *(canon dec 1)* A divergence is resolved by changing
    the ADR deliberately or by changing the code.
+   Rests on: 2, 3.
 5. **An ADR states the decision in force.** *(canon dec 8)* A decision that becomes untrue is edited
    in place to the current truth, with the change date in the header and the change described in its
    pull request; the replaced choice is recorded among the alternatives with why it is rejected now.
    History lives in version control, not in the record. A reversed or replaced decision is a new
    ADR, and the old one is marked superseded.
+   Rests on: 3, 4.
 6. **The governance root is not mirrored into the ADRs it governs.** No ADR names this one as its
    parent; the relationship is inherited.
+   Rests on: 3, 5.
 7. **Status follows a lifecycle, and the maintainer accepts.** *(canon dec 10)* `Proposed` while
    under discussion, `Accepted` once the maintainer judges it binding, `Superseded` when replaced,
    `Withdrawn` when abandoned without a replacement. Acceptance means the decision is settled, not
    that it is built; acceptance is the merge that sets the status.
+   Rests on: 4.
 8. **ADRs are numbered and named uniformly.** *(canon dec 10)* Files are `ADR-NNNN-kebab-title.md`,
    numbered in order. ADR-0000 is this root, ADR-0001 the project framing, technical decisions
-   from 0002. A number is never reused; a decision number within an ADR is never renumbered,
-   because code and documents cite it.
+   from 0002. A number is never reused; a decision number within an ADR is never renumbered, because
+   code and documents cite it.
+   Rests on: 4.
 9. **Every ADR has the same compact shape.** *(canon dec 10)* A header (status, date, optional
    parent, related records with the relation), then Context, Decision (numbered), Alternatives
    (table), Consequences (positive, negative), Deferred (table), References. Alternatives hold every
    rejected alternative, one row each, with the decision number it lost to. One decision per record,
    in about a hundred lines; a record that needs more holds several decisions.
+   Rests on: 4.
 10. **Every cross-reference to a decision is checked mechanically.** *(canon dec 3, 7)* A citation
     of an ADR or of one of its numbered decisions, and a relative link between documents, must
     resolve; the check runs with the configuration guards on every change. A record compacted or a
     decision moved elsewhere otherwise leaves its citations pointing at text that no longer says
     what they claim.
+    Rests on: 3.
 
 ## Alternatives
 
@@ -103,6 +114,8 @@ cites it instead of restating it.
 ## References
 
 - [GLOSSARY.md](GLOSSARY.md): one definition per cross-cutting term.
-- M. Nygard, "Documenting Architecture Decisions" (2011): the practice this record formalises.
-- MADR (Markdown Any Decision Records): the section lineage.
+- [M. Nygard, "Documenting Architecture Decisions"
+  (2011)](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions): the practice
+  this record formalises.
+- [MADR (Markdown Any Decision Records)](https://adr.github.io/madr/): the section lineage.
 - [Decision records](../docs/architecture/decision-records.md): the manual of this record.

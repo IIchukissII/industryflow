@@ -8,52 +8,62 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-27; changed 2026-11-06
 - **Parent:** ADR-0001
-- **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (self-contained chart; deferred monitoring here), [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (the tenant-isolated path alerts stay on), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (external traffic only over the TLS edge; sessions), [ADR-0043](ADR-0043-a-platform-switch-is-flipped-by-a-platform-superuser-through-the-api-gateway-and-every-flip-is-recorded.md) (the superuser as the one platform-wide authority), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (the same sign-on pattern for the hub), [ADR-0026](ADR-0026-release-model.md) (dec 9: a release names images already built)
+- **Related:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md),
+  [ADR-0043](ADR-0043-a-platform-switch-is-flipped-by-a-platform-superuser-through-the-api-gateway-and-every-flip-is-recorded.md)
 
 ## Context
 
-Monitoring is cluster infrastructure with its own lifecycle and operator; managed deployments often use
-a provider's backend. The chart must stay self-contained and lintable offline (ADR-0009). There are two
-alert planes: platform health for operators, and tenant sensor alerts, which are tenant data and must
-not leave the tenant-isolated path.
+1. Monitoring is cluster infrastructure with its own lifecycle and operator; managed deployments
+   often use a provider's backend.
+2. The chart must stay self-contained and lintable offline (ADR-0009).
+3. There are two alert planes: platform health for operators, and tenant sensor alerts, which are
+   tenant data and must not leave the tenant-isolated path.
 
 ## Decision
 
 1. **The application chart emits integration objects, not a monitoring backend.** It renders scrape
    targets generated from the service list, platform alert rules on generic series, and dashboards
-   labelled for import, the rules and dashboards single-sourced with those the single-host deployment
-   loads; the operator-dependent objects default off. Every rule selects only series labelled as the
-   platform's own, which both deployments attach to every target.
+   labelled for import, the rules and dashboards single-sourced with those the single-host
+   deployment loads; the operator-dependent objects default off. Every rule selects only series
+   labelled as the platform's own, which both deployments attach to every target.
+   Rests on: 1, 2.
 2. **Data-store exporters ship with the chart; cluster-generic collectors come from the monitoring
    stack.** The exporters target the platform's own database, cache and broker.
-3. **The database exporter connects as a dedicated least-privilege monitoring role, in every deployment
-   shape.** A superuser there would make a compromised exporter a compromised database.
+   Rests on: 1.
+3. **The database exporter connects as a dedicated least-privilege monitoring role, in every
+   deployment shape.** A superuser there would make a compromised exporter a compromised database.
+   Rests on: none.
 4. **The monitoring backend is installed beside the chart, not in it.** Integration objects carry
    configurable labels to match the stack's selectors. On a single host the backend runs beside the
    application services, an alert router included, whose receivers the operator supplies.
+   Rests on: 1, 2.
 5. **Tenant alerts stay on the tenant-isolated path and never pass through the shared monitoring
-   stack.** An alert goes from the rules engine directly into the tenant's own store, and metrics on the
-   platform plane are operational and aggregate, never per-tenant values or alert contents.
+   stack.** An alert goes from the rules engine directly into the tenant's own store, and metrics on
+   the platform plane are operational and aggregate, never per-tenant values or alert contents.
+   Rests on: 3.
 6. **On a single host, the dashboards are reached through the platform's TLS edge when the operator
    turns that on, signed on as decision 7 sets; every other console stays on the loopback.**
    External traffic is TLS at the edge only (ADR-0004 dec 1), and the operator decides whether the
    operator plane is reachable wherever the edge is. The operator may limit it to named source
    addresses; with none named, any source reaches the sign-on.
+   Rests on: none.
 7. **The dashboards at the edge sign on from a platform superuser's session, by an assertion the
-   gateway signs for them alone.** The superuser is the platform's one cross-tenant authority (ADR-0043
-   dec 1), the operator who may read every service's logs; any other session is refused at the edge.
-   The dashboards accept an identity only under that signature, short-lived and addressed to them,
-   never from a header that network position vouches for; it names the platform user by a stable id, and
-   the role it confers is below the dashboards' own administrator, whose login stays on the loopback. A
-   write reaches them only from this origin.
+   gateway signs for them alone.** The superuser is the platform's one cross-tenant authority
+   (ADR-0043 dec 1), the operator who may read every service's logs; any other session is refused at
+   the edge. The dashboards accept an identity only under that signature, short-lived and addressed
+   to them, never from a header that network position vouches for; it names the platform user by a
+   stable id, and the role it confers is below the dashboards' own administrator, whose login stays
+   on the loopback. A write reaches them only from this origin.
+   Rests on: none.
 8. **Every image the platform builds that runs platform code and serves metrics reports the source
    revision it was built from, as a constant series; a process whose metrics cannot carry the series
-   serves it alone on a port of its own.** A deploy then shows in the same store, on the same time axis,
-   as the symptoms it may cause. The revision is fixed when the image is built, so the series names what
-   runs, not what a deployment meant to run; an image the platform does not build has no such revision.
-   A long-lived platform worker that serves no metrics and no HTTP API reports it too, alone on an
-   internal port of its own: nothing else rides on that listener, and it is no part of the worker's
-   liveness.
+   serves it alone on a port of its own.** A deploy then shows in the same store, on the same time
+   axis, as the symptoms it may cause. The revision is fixed when the image is built, so the series
+   names what runs, not what a deployment meant to run; an image the platform does not build has no
+   such revision. A long-lived platform worker that serves no metrics and no HTTP API reports it
+   too, alone on an internal port of its own: nothing else rides on that listener, and it is no part
+   of the worker's liveness.
+   Rests on: none.
 
 ## Alternatives
 
@@ -101,8 +111,8 @@ not leave the tenant-isolated path.
 **Positive**
 - The platform is observable wherever an operator-compatible stack exists, including managed ones.
 - Dashboards and rules grow without touching service definitions.
-- A single-host operator reads the dashboards in a browser over the platform's own TLS, with no second
-  login and no dashboard password exposed at the edge.
+- A single-host operator reads the dashboards in a browser over the platform's own TLS, with no
+  second login and no dashboard password exposed at the edge.
 
 **Negative**
 - Self-hosted operators install the monitoring stack once per cluster and enable the integration.
@@ -111,9 +121,12 @@ not leave the tenant-isolated path.
 - Every dashboard request through the edge costs one session check at the gateway.
 - The single host holds one more signing key, generated at install and rotated by replacing it.
 - A service exempt from decision 8 shows a deploy only as a restart.
-- The stream-processing cluster's master and workers report no revision; a change to their images shows only through its symptoms.
-- A stream-processing driver, and a worker that serves no metrics, opens one more port, for the series alone.
-- Every deploy of a new commit changes every reporting service's revision, whether its code changed or not.
+- The stream-processing cluster's master and workers report no revision; a change to their images
+  shows only through its symptoms.
+- A stream-processing driver, and a worker that serves no metrics, opens one more port, for the
+  series alone.
+- Every deploy of a new commit changes every reporting service's revision, whether its code changed
+  or not.
 
 ## Deferred
 
@@ -123,6 +136,7 @@ not leave the tenant-isolated path.
 
 ## References
 
-- [docs/operations/monitoring.md](../docs/operations/monitoring.md): toggles, role, install steps; manual of decisions 1-8.
+- [docs/operations/monitoring.md](../docs/operations/monitoring.md): toggles, role, install steps;
+  manual of decisions 1-8.
 - [deploy/observability/README.md](../deploy/observability/README.md): installing the cluster stack;
   manual of decisions 1-5.

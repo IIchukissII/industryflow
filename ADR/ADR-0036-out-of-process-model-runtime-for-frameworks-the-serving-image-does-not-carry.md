@@ -8,47 +8,55 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-10-25
 - **Parent:** [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md)
-- **Related:** [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (dec 7: the boundary
-  this record settles), [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) (declare, satisfy or
-  refuse; the gates), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 4: no author code
-  on load; the upload path), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (dec 3: outages are
-  retried), [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (toggles, network policy),
-  [ADR-0035](ADR-0035-drift-baseline.md) (baseline scores derived at the gate)
+- **Related:** [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md)
 
 ## Context
 
-The serving image is one pinned stack, and a framework it does not carry is refused at the gate.
-Neural-network frameworks and accelerators are the common case of that refusal; carrying one in the
-serving image puts a multi-gigabyte layer and a second lockstep parity burden on every deployment,
-including self-hosters who never use it. Their native artifact formats deserialise executable objects
-or need author code to rebuild the model, which the serving side does not run. Accelerators are a
-property of where a process is placed. The serving service is the only reader of the artifact store and
-owns every refusal and every score's meaning.
+1. The serving image is one pinned stack, and a framework it does not carry is refused at the gate.
+2. Neural-network frameworks and accelerators are the common case of that refusal; carrying one in
+   the serving image puts a multi-gigabyte layer and a second lockstep parity burden on every
+   deployment, including self-hosters who never use it.
+3. Their native artifact formats deserialise executable objects or need author code to rebuild the
+   model, which the serving side does not run.
+4. Accelerators are a property of where a process is placed.
+5. The serving service is the only reader of the artifact store and owns every refusal and every
+   score's meaning.
 
 ## Decision
 
 1. **A framework the serving image does not carry is served by a separate model runtime, one per
-   framework stack, deployed only where it is wanted.** A deployment without it refuses those models at
-   the gate with a reason; that is the same platform with a smaller supported set, and nothing falls back.
-2. **The runtime computes the model's raw output only; detectors, semantics and every refusal stay in
-   the serving service.** The meaning of a score keeps one home (ADR-0028 dec 1-3).
-3. **The runtime is reachable only from the serving service, holds no credential and has no egress.**
-   The serving service hands it the artifact's bytes, which the runtime keys by content digest.
-4. **The runtime keeps nothing of a request once it has answered and logs no input.** It is shared by
-   every tenant, so it holds no tenant's data between calls.
+   framework stack, deployed only where it is wanted.** A deployment without it refuses those models
+   at the gate with a reason; that is the same platform with a smaller supported set, and nothing
+   falls back.
+   Rests on: 1, 2.
+2. **The runtime computes the model's raw output only; detectors, semantics and every refusal stay
+   in the serving service.** The meaning of a score keeps one home (ADR-0028 dec 1-3).
+   Rests on: 5.
+3. **The runtime is reachable only from the serving service, holds no credential and has no
+   egress.** The serving service hands it the artifact's bytes, which the runtime keys by content
+   digest.
+   Rests on: 5.
+4. **The runtime keeps nothing of a request once it has answered and logs no input.** It is shared
+   by every tenant, so it holds no tenant's data between calls.
+   Rests on: none.
 5. **Only an open exported-graph format, loadable without author code, is admitted.** For the torch
    family that is ONNX; the framework's native and scripted formats and weights that need author
    architecture code are refused, so the framework itself never runs on the serving side.
-6. **The artifact declares the graph format version it was exported at; a runtime declares the range it
-   satisfies and joins the served supported set only while deployed.** A version outside that range is
-   refused (ADR-0027 dec 1-2, ADR-0028 dec 5).
-7. **The deployment gate loads and scores the artifact in the live runtime.** With no runtime deployed
-   nothing passes it; the gate is never simulated or replaced by a version comparison.
-8. **Models for a runtime are authored off the platform and arrive by the upload path.** The authoring
-   kernel gains no framework, and every such model meets ADR-0030 in full.
-9. **An unreachable runtime fails its models' inference as an infrastructure failure, retried like any
-   outage and never routed to another runtime.** An accelerator is where a runtime is placed, never a
-   property of a model.
+   Rests on: 3.
+6. **The artifact declares the graph format version it was exported at; a runtime declares the range
+   it satisfies and joins the served supported set only while deployed.** A version outside that
+   range is refused (ADR-0027 dec 1-2, ADR-0028 dec 5).
+   Rests on: 1.
+7. **The deployment gate loads and scores the artifact in the live runtime.** With no runtime
+   deployed nothing passes it; the gate is never simulated or replaced by a version comparison.
+   Rests on: 1.
+8. **Models for a runtime are authored off the platform and arrive by the upload path.** The
+   authoring kernel gains no framework, and every such model meets ADR-0030 in full.
+   Rests on: 2.
+9. **An unreachable runtime fails its models' inference as an infrastructure failure, retried like
+   any outage and never routed to another runtime.** An accelerator is where a runtime is placed,
+   never a property of a model.
+   Rests on: 4.
 
 ## Alternatives
 
@@ -73,12 +81,15 @@ owns every refusal and every score's meaning.
 ## Consequences
 
 **Positive**
-- Neural-network models can be served without growing the serving image or the self-hosted footprint.
+- Neural-network models can be served without growing the serving image or the self-hosted
+  footprint.
 - No new code-execution path: the graph is interpreted by the runtime, never author code.
-- Such models get a drift baseline like any other, scored through the runtime at the gate (ADR-0035).
+- Such models get a drift baseline like any other, scored through the runtime at the gate
+  (ADR-0035).
 
 **Negative**
-- A second serving process to deploy, size and watch, and an internal hop on every inference it serves.
+- A second serving process to deploy, size and watch, and an internal hop on every inference it
+  serves.
 - Models whose operations do not export to the graph format cannot be served.
 - A runtime outage stops scoring for every model it serves.
 

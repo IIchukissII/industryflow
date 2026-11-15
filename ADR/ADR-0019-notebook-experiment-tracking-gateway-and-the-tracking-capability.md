@@ -8,44 +8,51 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-28; changed 2026-11-07
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
-- **Related:** [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md) (the
-  gateway this makes concrete), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md)
-  (handles and audiences), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md)
-  (the tracking gate), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (hub identity),
-  [ADR-0039](ADR-0039-one-test-of-tenant-ownership-for-names-and-object-store-keys.md) (the one implementation of decision 5's test)
+- **Related:** [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md)
 
 ## Context
 
-ADR-0013 decides that tracking and the model registry are made multi-tenant by a trusted gateway and
-leaves the mechanism open. The tracking server is one shared, unmodified server over one metadata
-database and one bucket; its own authorization is not tenant-aware, and its credentials must stay out
-of the kernel. Artifacts are large, metadata calls small.
+1. ADR-0013 decides that tracking and the model registry are made multi-tenant by a trusted gateway
+   and leaves the mechanism open.
+2. The tracking server is one shared, unmodified server over one metadata database and one bucket;
+   its own authorization is not tenant-aware, and its credentials must stay out of the kernel.
+3. Artifacts are large, metadata calls small.
 
 ## Decision
 
 1. **The kernel reaches tracking only through a trusted gateway, with a per-session tracking
    capability.** Store credentials live only in the gateway; trusted platform code may still address
    the tracking server directly (decision 7).
-2. **Tracking is a distinct capability audience.** A tracking handle yields no SQL or API access, and
-   neither yields tracking (ADR-0015 dec 1-3).
-3. **The spawner mints the tracking handle, for the authoring profile only.** The kernel cannot mint,
-   refresh or widen it.
-4. **The kernel presents the capability as the tracking client's bearer token.** The gateway resolves
-   it in the capability store, the lookup revocation empties, and proxies as itself: the capability goes
-   no further than the gateway, which reaches the internal tracking server from its trusted position and
-   the store with its own credential.
+   Rests on: 1, 2.
+2. **Tracking is a distinct capability audience.** A tracking handle yields no SQL or API access,
+   and neither yields tracking (ADR-0015 dec 1-3).
+   Rests on: 2.
+3. **The spawner mints the tracking handle, for the authoring profile only.** The kernel cannot
+   mint, refresh or widen it.
+   Rests on: 2.
+4. **The kernel presents the capability as the tracking client's bearer token.** The gateway
+   resolves it in the capability store, the lookup revocation empties, and proxies as itself: the
+   capability goes no further than the gateway, which reaches the internal tracking server from its
+   trusted position and the store with its own credential.
+   Rests on: 2.
 5. **The gateway forces every tracking, registry and artifact operation into the caller's tenant
    namespace and refuses any that would cross it.** Names carry a prefix built from the tenant's
    immutable identifier, stripped on read, and artifacts sit under a per-tenant object-store prefix.
+   Rests on: 2.
 6. **Artifact bytes move directly between kernel and object store through gateway-minted pre-signed
    addresses, each for one object, one verb and a few minutes.** Listing and deleting move no bytes
-   and are done by the gateway; the deployed object store pre-signs, so no byte-proxying path exists.
-7. **The tracking server is unmodified and its UI stays internal.** Tenants browse models, experiments
-   and runs through the platform's session-scoped read paths, which apply decision 5's rule through
-   the same shared implementation as the gateway (ADR-0039).
+   and are done by the gateway; the deployed object store pre-signs, so no byte-proxying path
+   exists.
+   Rests on: 3.
+7. **The tracking server is unmodified and its UI stays internal.** Tenants browse models,
+   experiments and runs through the platform's session-scoped read paths, which apply decision 5's
+   rule through the same shared implementation as the gateway (ADR-0039).
+   Rests on: 2.
 8. **The capability store holds tracking handles, never store secrets.**
+   Rests on: 2.
 9. **ADR-0011's tracking gate is lifted for the authoring profile.** An authoring kernel logs runs,
    reads its runs and registers model versions within its tenant only.
+   Rests on: 1.
 
 ## Alternatives
 

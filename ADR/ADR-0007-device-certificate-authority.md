@@ -8,40 +8,52 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-26; changed 2026-10-25
 - **Parent:** ADR-0001
-- **Related:** ADR-0002 (device mTLS), ADR-0003 (vouched tenant), ADR-0004 (server cert), ADR-0009 (secrets), ADR-0033 (dec 4: a deleted tenant's devices revoked)
 
 ## Context
 
-Device ingestion authenticates with client certificates from the platform's own CA (ADR-0002). Field
-gateways generate a non-exportable key in a secure element, so the CA signs requests for keys it never
-sees. A revoked device must lose access at once, and an expired revocation list blocks every device.
+1. Device ingestion authenticates with client certificates from the platform's own CA (ADR-0002).
+2. Field gateways generate a non-exportable key in a secure element, so the CA signs requests for
+   keys it never sees.
+3. A revoked device must lose access at once, and an expired revocation list blocks every device.
 
 ## Decision
 
 1. **Two tiers: an offline root and an online issuing intermediate.** A compromised intermediate is
    replaced at the root without re-rooting the fleet.
+   Rests on: 1.
 2. **Devices generate their own keys; the CA signs requests and never holds a device key.**
+   Rests on: 2.
 3. **Tenant and device identity are a URI subject alternative name, never the common name.** One
-   shape is issued and parsed, with a canonical tenant and a restricted device-identifier character set.
-4. **A device is bound to its tenant at issuance.** An operator authorizes each request for one tenant.
+   shape is issued and parsed, with a canonical tenant and a restricted device-identifier character
+   set.
+   Rests on: 1.
+4. **A device is bound to its tenant at issuance.** An operator authorizes each request for one
+   tenant.
+   Rests on: 1.
 5. **Certificates have a bounded lifetime and are renewed with a fresh key before expiry.**
+   Rests on: 1, 2.
 6. **Revocation is checked at verification, by the terminating proxy.**
-7. **The device CA is separate from the browser-facing server certificate.** Neither chain serves the
-   other's purpose.
+   Rests on: 3.
+7. **The device CA is separate from the browser-facing server certificate.** Neither chain serves
+   the other's purpose.
+   Rests on: 1.
 8. **Revocation is a list held at the verifier, re-signed where its key lives, well before expiry.**
    The intermediate's list is re-signed routinely beside the issuing key, or from outside a cluster
    that only watches its age. The root's list is re-signed only at the offline ceremony, and every
    approaching expiry is raised in advance.
-9. **Beside each list the authority publishes a register of every certificate it issued, signed with the
-   issuing key.** It names that list and holds no key, so a verifier with only public files can check
-   that every unexpired certificate of a tenant is revoked. A tenant is revoked as a whole by one
-   operator command at the authority.
+   Rests on: 3.
+9. **Beside each list the authority publishes a register of every certificate it issued, signed with
+   the issuing key.** It names that list and holds no key, so a verifier with only public files can
+   check that every unexpired certificate of a tenant is revoked. A tenant is revoked as a whole by
+   one operator command at the authority.
+   Rests on: 3.
 10. **Every approaching certificate expiry is raised in advance, graded by what it refuses.** A CA
-   certificate of the chain refuses every device and is raised like an expiring list; a device whose
-   newest unrevoked certificate nears expiry is raised, at lower severity, as a renewal owed. The
-   watch reads only public files and trusts the register only when its signature verifies and it
-   names the current list. A device whose certificates have all expired is reported, not raised: the
-   verifier already refuses it, and revocation is what decommissions it.
+    certificate of the chain refuses every device and is raised like an expiring list; a device
+    whose newest unrevoked certificate nears expiry is raised, at lower severity, as a renewal owed.
+    The watch reads only public files and trusts the register only when its signature verifies and
+    it names the current list. A device whose certificates have all expired is reported, not raised:
+    the verifier already refuses it, and revocation is what decommissions it.
+    Rests on: 3.
 
 ## Alternatives
 
@@ -66,8 +78,8 @@ sees. A revoked device must lose access at once, and an expired revocation list 
 ## Consequences
 
 **Positive**
-- A device credential cannot be copied or its tenant spoofed; an intermediate compromise is recoverable;
-  revocation is immediate, and list expiry never stops ingestion unannounced.
+- A device credential cannot be copied or its tenant spoofed; an intermediate compromise is
+  recoverable; revocation is immediate, and list expiry never stops ingestion unannounced.
 - No CA or device certificate expires unannounced.
 
 **Negative**

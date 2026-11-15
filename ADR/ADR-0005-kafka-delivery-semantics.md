@@ -8,29 +8,34 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-26; changed 2026-11-13
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
-- **Related:** [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (idempotent stream
-  sinks), [ADR-0029](ADR-0029-spark-major-upgrades.md) (aggregation start offset)
 
 ## Context
 
-The platform exists to alert on readings, so a reading lost without trace is its worst failure; one
-processed twice is harmless if its effect is idempotent. Stages with different delivery semantics give
-no end-to-end guarantee, and exactly-once adds coordination to every stage.
+1. The platform exists to alert on readings, so a reading lost without trace is its worst failure;
+   one processed twice is harmless if its effect is idempotent.
+2. Stages with different delivery semantics give no end-to-end guarantee, and exactly-once adds
+   coordination to every stage.
 
 ## Decision
 
 1. **The Kafka pipeline provides at-least-once delivery.** Every consumer is bound by it.
+   Rests on: 1, 2.
 2. **Consumers commit offsets manually, after the work is durably done.**
+   Rests on: 1.
 3. **A processing failure never advances the offset.** An invalid message is dead-lettered at once,
-   with its reason, to a topic owned by one consumer, and an unknown failure after bounded retries; an
-   infrastructure failure is retried with capped backoff and never dead-lettered.
+   with its reason, to a topic owned by one consumer, and an unknown failure after bounded retries;
+   an infrastructure failure is retried with capped backoff and never dead-lettered.
+   Rests on: 1.
 4. **A consumer that is the only path by which a reading is kept starts a new group at the earliest
    offset.** A consumer of derived output may start at the tail, as the aggregation stream does
    (ADR-0029).
+   Rests on: 1.
 5. **Producers acknowledge fully and retry.**
-6. **Each consumer makes its effect idempotent.** An exact redelivery derives the same alert identity
-   and is a no-op; another alert of the same scope within the cooldown of event time is suppressed,
-   checked against stored alerts and serialised per scope in the database.
+   Rests on: 1.
+6. **Each consumer makes its effect idempotent.** An exact redelivery derives the same alert
+   identity and is a no-op; another alert of the same scope within the cooldown of event time is
+   suppressed, checked against stored alerts and serialised per scope in the database.
+   Rests on: 1.
 
 ## Alternatives
 

@@ -7,60 +7,70 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-29; changed 2026-11-07
-- **Parent:** [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (the capability and its
-  store)
-- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (dec 2: the
-  kernel is untrusted), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) (dec 1: per-session
-  credentials), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 3: the upload audience),
-  [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (dec 1: the capability store is derivable),
-  [ADR-0033](ADR-0033-tenant-lifecycle.md) (dec 6: the lifecycle record that outlives a tenant),
-  [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (no log backend is shipped)
+- **Parent:** [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (the
+  capability and its store)
+- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md),
+  [ADR-0033](ADR-0033-tenant-lifecycle.md)
 
 ## Context
 
-Untrusted kernel code reaches tenant data only through capabilities: opaque handles bound to one user,
-one tenant and one audience, minted into a capability store and resolved by each plane on every request.
-Nothing records that a handle was minted, used, refused or revoked, so who reached which tenant's data
-through which plane cannot be answered after the fact. The planes that resolve handles hold the
-capability store and no database principal; the store itself is derivable and not backed up. Logs are
-plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
+1. Untrusted kernel code reaches tenant data only through capabilities: opaque handles bound to one
+   user, one tenant and one audience, minted into a capability store and resolved by each plane on
+   every request.
+2. Nothing records that a handle was minted, used, refused or revoked, so who reached which tenant's
+   data through which plane cannot be answered after the fact.
+3. The planes that resolve handles hold the capability store and no database principal; the store
+   itself is derivable and not backed up.
+4. Logs are plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 
 ## Decision
 
-1. **A capability's life is recorded: its mint, its first use by each plane, its refusals (decision 8),
-   its revocation or consumption, and the start and stop of the environment it was minted for.** Each record
-   names the user, the tenant, the audience, the plane and the time. A SQL session's opening and closing
-   are recorded as decision 8 bounds them; statements are not, because the proxy relays them unread.
-2. **A handle appears in the record only as a non-secret identifier bound into its entry at mint.** The
-   handle is a bearer secret; a reader of the record must not be able to use it. A presented handle with
-   no entry is recorded by a short digest, enough to correlate repeated refusals and too short to search
-   the handle space.
-3. **A plane appends its event to a stream in the capability store, in the same atomic step as the store
-   change the event describes.** A mint or revocation and its record therefore happen together or not at
-   all, and the planes gain no database principal.
-4. **One trusted writer drains the stream into an append-only table outside every tenant schema, through
-   a privileged function.** It is written by nothing else and changed by no runtime role; the record is
-   backed up with the database and outlives the tenant, like the lifecycle record (ADR-0033 dec 6).
-5. **First use is recorded once per handle and plane; later uses are not.** Per-request records would
-   tie every data read to a write; the first use already establishes which tenant a handle reached and
-   through which plane.
+1. **A capability's life is recorded: its mint, its first use by each plane, its refusals (decision
+   8), its revocation or consumption, and the start and stop of the environment it was minted for.**
+   Each record names the user, the tenant, the audience, the plane and the time. A SQL session's
+   opening and closing are recorded as decision 8 bounds them; statements are not, because the proxy
+   relays them unread.
+   Rests on: 2.
+2. **A handle appears in the record only as a non-secret identifier bound into its entry at mint.**
+   The handle is a bearer secret; a reader of the record must not be able to use it. A presented
+   handle with no entry is recorded by a short digest, enough to correlate repeated refusals and too
+   short to search the handle space.
+   Rests on: 1.
+3. **A plane appends its event to a stream in the capability store, in the same atomic step as the
+   store change the event describes.** A mint or revocation and its record therefore happen together
+   or not at all, and the planes gain no database principal.
+   Rests on: 3.
+4. **One trusted writer drains the stream into an append-only table outside every tenant schema,
+   through a privileged function.** It is written by nothing else and changed by no runtime role;
+   the record is backed up with the database and outlives the tenant, like the lifecycle record
+   (ADR-0033 dec 6).
+   Rests on: 3, 4.
+5. **First use is recorded once per handle and plane; later uses are not.** Per-request records
+   would tie every data read to a write; the first use already establishes which tenant a handle
+   reached and through which plane.
+   Rests on: 2.
 6. **The record is read by a platform superuser for every tenant and by a tenant's administrator for
    their own.** The tenant filter is the caller's verified tenant (ADR-0003 dec 1).
-7. **A stream the writer has not drained is bounded and its lag is observable.** Losing the capability
-   store loses only what was not yet drained, and the lag alert names that window.
+   Rests on: 1, 2.
+7. **A stream the writer has not drained is bounded and its lag is observable.** Losing the
+   capability store loses only what was not yet drained, and the lag alert names that window.
+   Rests on: 3.
 8. **An event a real entry can repeat at will, a refusal or a SQL session opening or closing, is
-   recorded once per entry, plane, kind and refusal reason in a window, and the next record carries how many were not;
-   a presented value naming no entry, once per plane and value in a window.** A kernel can repeat the
-   first with its own handles at request rate, and the count, not each row, is the evidence; anyone
-   can present the second, and a repeat says nothing the first did not.
+   recorded once per entry, plane, kind and refusal reason in a window, and the next record carries
+   how many were not; a presented value naming no entry, once per plane and value in a window.** A
+   kernel can repeat the first with its own handles at request rate, and the count, not each row, is
+   the evidence; anyone can present the second, and a repeat says nothing the first did not.
+   Rests on: 1, 2.
 9. **A plane records at most a bounded number of unknown values per source address in a window;
    requests themselves are not throttled.** Distinct random values are the one flood the per-value
    window does not bound, and they arrive past the edge as well as through it. A request's source is
-   the client address the edge reports when the edge relayed it, and the connecting peer otherwise; a
-   reported address is believed from the edge alone.
+   the client address the edge reports when the edge relayed it, and the connecting peer otherwise;
+   a reported address is believed from the edge alone.
+   Rests on: 2.
 10. **The record keeps rows for a configured period, never less than thirty days, and its writer
-    expires the rest.** The floor is the database's, whoever calls it, and outlasts the suspension that
-    precedes a tenant's deletion (ADR-0033 dec 7).
+    expires the rest.** The floor is the database's, whoever calls it, and outlasts the suspension
+    that precedes a tenant's deletion (ADR-0033 dec 7).
+    Rests on: 2, 4.
 
 ## Alternatives
 
@@ -99,8 +109,8 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 
 **Negative**
 - Every capability mint, revocation and first use writes one more entry to the capability store.
-- Repeats of an unknown value within a window, and unknown values beyond a source's limit, are not in
-  the record.
+- Repeats of an unknown value within a window, and unknown values beyond a source's limit, are not
+  in the record.
 - A real entry's repeated events within a window appear only as a count on its next record, which is
   never written if the entry repeats nothing after the window.
 - A compromised writer can remove rows older than the floor.
@@ -117,5 +127,6 @@ plain text, kept briefly, and not shipped at all by the Kubernetes packaging.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): the planes and their capabilities; manual of decisions 1-10.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): the planes and their
+  capabilities; manual of decisions 1-10.
 - [SQL proxy](../services/notebook_sql_proxy/README.md): manual of decisions 1-3, 5, 8, 9.

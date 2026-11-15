@@ -7,45 +7,54 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-26
-- **Parent:** [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (its deferred mechanism for model
-  artifacts and authored notebooks)
-- **Related:** [ADR-0020](ADR-0020-notebook-per-user-work-persistence.md) (dec 5-6: per-user volumes, owned
-  and named by the hub), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 10: the upload
-  staging area), [ADR-0033](ADR-0033-tenant-lifecycle.md) (dec 4: deleted tenants leave backups by
-  ageing), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (the cold mirror this follows),
-  [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (the hub keeps no user store)
+- **Parent:** [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (its
+  deferred mechanism for model artifacts and authored notebooks)
+- **Related:** [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md),
+  [ADR-0020](ADR-0020-notebook-per-user-work-persistence.md),
+  [ADR-0030](ADR-0030-admission-of-externally-authored-models.md),
+  [ADR-0033](ADR-0033-tenant-lifecycle.md)
 
 ## Context
 
-Model artifacts live only in the tracking artifact store, and authored notebooks only in per-user work
-volumes; ADR-0032 makes both authoritative and leaves their mechanism open. The artifact store is an
-object store like the cold layer. A work volume is storage of the container runtime, named and owned by
-the hub. The backup job already reads the cold layer with a credential the tenant-facing cold broker
-also holds.
+1. Model artifacts live only in the tracking artifact store, and authored notebooks only in per-user
+   work volumes; ADR-0032 makes both authoritative and leaves their mechanism open.
+2. The artifact store is an object store like the cold layer.
+3. A work volume is storage of the container runtime, named and owned by the hub.
+4. The backup job already reads the cold layer with a credential the tenant-facing cold broker also
+   holds.
 
 ## Decision
 
 1. **Model artifacts are mirrored into the backup target the way the cold layer is.** The copy is
    incremental, verified per object, and an object gone from the source leaves the mirror after one
-   retention period (ADR-0032 dec 4), so a deleted tenant's models do not outlive it (ADR-0033 dec 4).
-2. **The upload staging area is not backed up.** It holds unadmitted bytes that nothing loads and that
-   expire on their own (ADR-0030 dec 10); they are derivable by re-uploading.
-3. **Every object mirror reads with one read-only principal held by the backup job alone.** No serving,
-   tracking or tenant-facing workload shares it, so a leaked backup credential reads nothing new to
-   them and theirs reads no backup source they do not already serve.
-4. **Each authored work volume is archived per backup run, one verified archive per volume.** Archives
-   are kept by count like the dumps; once a volume no longer exists, its archives leave after one
-   retention period.
-5. **On a Docker host the backup job reaches the volumes through the container runtime, read-only, and
-   finds them by the spawner's naming.** It mounts each into a short-lived helper with no network; it
-   never reads the hub's database. ADR-0020 dec 6 keeps deletion with the hub; reading for backup does
-   not change what the hub owns and cannot destroy a volume.
+   retention period (ADR-0032 dec 4), so a deleted tenant's models do not outlive it (ADR-0033 dec
+   4).
+   Rests on: 1, 2.
+2. **The upload staging area is not backed up.** It holds unadmitted bytes that nothing loads and
+   that expire on their own (ADR-0030 dec 10); they are derivable by re-uploading.
+   Rests on: none.
+3. **Every object mirror reads with one read-only principal held by the backup job alone.** No
+   serving, tracking or tenant-facing workload shares it, so a leaked backup credential reads
+   nothing new to them and theirs reads no backup source they do not already serve.
+   Rests on: 4.
+4. **Each authored work volume is archived per backup run, one verified archive per volume.**
+   Archives are kept by count like the dumps; once a volume no longer exists, its archives leave
+   after one retention period.
+   Rests on: 1, 3.
+5. **On a Docker host the backup job reaches the volumes through the container runtime, read-only,
+   and finds them by the spawner's naming.** It mounts each into a short-lived helper with no
+   network; it never reads the hub's database. ADR-0020 dec 6 keeps deletion with the hub; reading
+   for backup does not change what the hub owns and cannot destroy a volume.
+   Rests on: 3.
 6. **On Kubernetes a work volume is backed up by the cluster's volume-snapshot mechanism.** It binds
    any Kubernetes deployment of the authoring profile; the chart builds it when the hub runs there.
+   Rests on: 3.
 7. **The hub's own database is derivable.** The hub keeps no user store (ADR-0014 dec 1); users and
    servers return from the platform session.
-8. **A restore of each kind is rehearsed against a scratch target and compared** (ADR-0032 dec 6): the
-   model mirror object for object, an archive file for file.
+   Rests on: none.
+8. **A restore of each kind is rehearsed against a scratch target and compared** (ADR-0032 dec 6):
+   the model mirror object for object, an archive file for file.
+   Rests on: 1.
 
 ## Alternatives
 
@@ -64,10 +73,12 @@ also holds.
 ## Consequences
 
 **Positive**
-- Every authoritative store has a backup path, and the cold mirror no longer shares a tenant-facing credential.
+- Every authoritative store has a backup path, and the cold mirror no longer shares a tenant-facing
+  credential.
 
 **Negative**
-- The backup job on a Docker host holds container-runtime access, the same trust tier as the hub and log shipper.
+- The backup job on a Docker host holds container-runtime access, the same trust tier as the hub and
+  log shipper.
 - An archive of a volume in use is crash-consistent, not quiesced.
 - Kubernetes notebook backup is unbuilt until the hub runs on a cluster.
 

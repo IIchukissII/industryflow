@@ -7,42 +7,46 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-31; changed 2026-10-31
-- **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md) (dec 1: observability and analytics are in
-  scope)
-- **Related:** [ADR-0036](ADR-0036-out-of-process-model-runtime-for-frameworks-the-serving-image-does-not-carry.md) (dec 1: a separate service, deployed
-  only where it is wanted), [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (dec 4, 6:
-  injected secrets, Compose and Helm), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md)
-  (dec 4, 7: authenticated endpoints, no secrets in logs), [ADR-0046](ADR-0046-the-infrastructure-agent-explains-platform-alerts-to-operators.md)
-  (the first agent)
+- **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md) (dec 1: observability and analytics are
+  in scope)
 
 ## Context
 
-The platform gains agents that turn its own signals into text a person can act on, starting with
-infrastructure incidents and growing one task at a time. Agent frameworks and model providers change
-faster than the platform; the language model may be a hosted service or one the operator runs on a
-separate host, and a small local model calls tools less reliably than a large hosted one. Whatever is
-sent to a model leaves the platform's control, and generated text can be wrong while reading as
-authoritative.
+1. The platform gains agents that turn its own signals into text a person can act on, starting with
+   infrastructure incidents and growing one task at a time.
+2. Agent frameworks and model providers change faster than the platform; the language model may be a
+   hosted service or one the operator runs on a separate host, and a small local model calls tools
+   less reliably than a large hosted one.
+3. Whatever is sent to a model leaves the platform's control, and generated text can be wrong while
+   reading as authoritative.
 
 ## Decision
 
-1. **An agent is a standalone service with one contract: a trigger in, a note out.** Its internal flow is
-   a graph of steps; agents are added as services, never as code inside an existing one.
-2. **An agent reaches data only through tools served over MCP, configured per agent.** A tool outlives
-   any agent framework and is usable by any MCP client; reading tools are separate from any tool that
-   acts.
+1. **An agent is a standalone service with one contract: a trigger in, a note out.** Its internal
+   flow is a graph of steps; agents are added as services, never as code inside an existing one.
+   Rests on: 1, 2.
+2. **An agent reaches data only through tools served over MCP, configured per agent.** A tool
+   outlives any agent framework and is usable by any MCP client; reading tools are separate from any
+   tool that acts.
+   Rests on: 2.
 3. **The model is always reached over an API, its endpoint, provider and model chosen by
-   configuration.** No model runs in the agent's process; one protocol covers hosted services and a model
-   server on the operator's own host.
+   configuration.** No model runs in the agent's process; one protocol covers hosted services and a
+   model server on the operator's own host.
+   Rests on: 2.
 4. **Deterministic code gathers the evidence; the model only writes from it.** A statement about the
    system cites the evidence it rests on, and the model invents no figure.
+   Rests on: 3.
 5. **Every note says it is generated and names the model that wrote it.**
+   Rests on: 3.
 6. **Content is redacted before it leaves for a model, whatever the endpoint, and each sending is
-   recorded.** Each agent's record names the categories it redacts; the record keeps what was redacted
-   and when, never the redacted values.
+   recorded.** Each agent's record names the categories it redacts; the record keeps what was
+   redacted and when, never the redacted values.
+   Rests on: 3.
 7. **The graph framework is an implementation choice inside one agent, not a platform contract.**
+   Rests on: 2.
 8. **An agent is off unless the operator enables it.** It holds only the credentials its tools need,
    injected from outside the package.
+   Rests on: 3.
 
 ## Alternatives
 
@@ -84,5 +88,6 @@ authoritative.
 
 ## References
 
-- [ADR-0046](ADR-0046-the-infrastructure-agent-explains-platform-alerts-to-operators.md): the first agent.
+- [ADR-0046](ADR-0046-the-infrastructure-agent-explains-platform-alerts-to-operators.md): the first
+  agent.
 - [Monitoring](../docs/operations/monitoring.md): manual of decisions 1-8.

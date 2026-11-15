@@ -8,60 +8,71 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-26; changed 2026-11-09
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
-- **Related:** [ADR-0002](ADR-0002-ingestion-authentication-and-device-identity.md) (shared edge),
-  [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant claim),
-  [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (deployment shapes),
-  [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capabilities),
-  [ADR-0017](ADR-0017-database-tls-and-authentication.md) (shared internal CA)
+- **Related:** [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md)
 
 ## Context
 
-The HTTP API serves humans and services, a trust domain distinct from device ingestion. A long-lived
-stateless token cannot be cancelled once leaked; a credential readable by page script is exfiltrated
-by injected script; a cookie is sent automatically, which exposes cross-site request forgery.
-Self-hosted deployments serve internal hostnames no public CA issues for.
+1. The HTTP API serves humans and services, a trust domain distinct from device ingestion.
+2. A long-lived stateless token cannot be cancelled once leaked; a credential readable by page
+   script is exfiltrated by injected script; a cookie is sent automatically, which exposes
+   cross-site request forgery.
+3. Self-hosted deployments serve internal hostnames no public CA issues for.
 
 ## Decision
 
 1. **All external traffic, live sockets included, is TLS-protected; plaintext is redirected.** TLS
-   terminates at the platform's edge, whose browser and device listeners share one server certificate; plaintext is acceptable only for throwaway local
-   development.
+   terminates at the platform's edge, whose browser and device listeners share one server
+   certificate; plaintext is acceptable only for throwaway local development.
+   Rests on: 2.
 2. **A session is a short-lived JWT access token carrying the tenant claim, plus a rotating,
    server-side refresh credential.** Each refresh claims the credential atomically and issues a
    successor; the claimed credential presented again within a short grace (a concurrent refresh) is
-   answered with that successor, and later ends its session. Logout ends its session and the
-   user's notebook capabilities; compromise, a password change or reset, a move to another company,
-   and deactivating or deleting the account or its company end all the user's sessions and those
-   capabilities; the capability store's rebuild after a loss ends every session (ADR-0015 dec 8). Every request re-reads the account and refuses an access token whose session has
-   ended, and is refused while that cannot be read.
+   answered with that successor, and later ends its session. Logout ends its session and the user's
+   notebook capabilities; compromise, a password change or reset, a move to another company, and
+   deactivating or deleting the account or its company end all the user's sessions and those
+   capabilities; the capability store's rebuild after a loss ends every session (ADR-0015 dec 8).
+   Every request re-reads the account and refuses an access token whose session has ended, and is
+   refused while that cannot be read.
+   Rests on: 2.
 3. **The browser holds tokens in httpOnly, Secure, SameSite cookies set by the backend.** Every
-   state-changing request authenticated by the session cookie must echo a double-submit CSRF token in
-   a header; bearer-authenticated requests and the authentication endpoints are exempt.
-4. **Every data endpoint requires authentication.** Only probes that expose no tenant data are exempt.
+   state-changing request authenticated by the session cookie must echo a double-submit CSRF token
+   in a header; bearer-authenticated requests and the authentication endpoints are exempt.
+   Rests on: 2.
+4. **Every data endpoint requires authentication.** Only probes that expose no tenant data are
+   exempt.
+   Rests on: 1.
 5. **Authorization is scoped to the caller's tenant.** Cross-company access requires a distinct,
    explicitly modelled superuser.
+   Rests on: 1.
 6. **CORS uses an explicit origin allowlist and never combines a wildcard with credentials.**
+   Rests on: 2.
 7. **Secrets are never logged.**
+   Rests on: 2.
 8. **The browser-facing certificate's issuer follows the deployment shape (ADR-0009).** Managed uses
-   an auto-renewed public ACME certificate; self-hosted uses an internal CA whose root is installed on
-   clients once and also signs the database certificate (ADR-0017).
+   an auto-renewed public ACME certificate; self-hosted uses an internal CA whose root is installed
+   on clients once and also signs the database certificate (ADR-0017).
+   Rests on: 3.
 9. **A live socket is held to the same session as any request.** Its handshake authenticates by the
    session cookie only and is origin-checked against decision 6's allowlist; it closes when its
    credential expires, or at a periodic re-check once its session has ended or its account is
    inactive.
+   Rests on: 2.
 10. **Where the gateway sees the clients' own addresses, password guessing is slowed per account and
     source, and limited per source across accounts, never locked out.** Consecutive failures for one
-    account from one source wait exponentially longer, up to a cap, and each source's attempts on any
-    account are held to a rate; each attempt is counted before its password is checked, and one inside
-    a wait is refused unchecked. The gateway holds both, so every path to the sign-in meets them, and an
-    edge that sees the addresses holds the same limit per source in front of it; a deployment serves only the address families its edge reports that way, and an IPv6 network allotted
-    to one host counts as one source. No account is locked, as no channel exists to unlock one, and one
-    source's failures never slow the owner at another.
+    account from one source wait exponentially longer, up to a cap, and each source's attempts on
+    any account are held to a rate; each attempt is counted before its password is checked, and one
+    inside a wait is refused unchecked. The gateway holds both, so every path to the sign-in meets
+    them, and an edge that sees the addresses holds the same limit per source in front of it; a
+    deployment serves only the address families its edge reports that way, and an IPv6 network
+    allotted to one host counts as one source. No account is locked, as no channel exists to unlock
+    one, and one source's failures never slow the owner at another.
+    Rests on: none.
 11. **A platform with no account gets a superuser at start, held to a password change while its
     password is the published default.** It is created only while no account of any kind exists, in
-    the oldest active tenant or a first one; until its holder sets their own password it may read itself,
-    change that password and sign out, and nothing more. A deployment that names its own first
-    password is not held.
+    the oldest active tenant or a first one; until its holder sets their own password it may read
+    itself, change that password and sign out, and nothing more. A deployment that names its own
+    first password is not held.
+    Rests on: none.
 
 ## Alternatives
 
@@ -122,9 +133,11 @@ Self-hosted deployments serve internal hostnames no public CA issues for.
 - Every authenticated request reads the session store, and none is served while it is unreachable.
 - An attacker with many source addresses gets that handful from each of them.
 - Behind a proxy that hides the clients' addresses, no password guessing is slowed.
-- The compose deployment answers browsers on IPv4 only, and clients on its own host count as one source.
+- The compose deployment answers browsers on IPv4 only, and clients on its own host count as one
+  source.
 - A refresh whose answer is lost, retried after the grace, ends its own session.
-- Until its holder first signs in, a platform started with the defaults answers to a published password.
+- Until its holder first signs in, a platform started with the defaults answers to a published
+  password.
 - A stolen refresh credential used within the grace after a rotation is not detected.
 - A sign-in or refresh within a clock-skew allowance after an end of all the user's sessions waits
   the allowance out, since a token issued in it would count as issued before the end.

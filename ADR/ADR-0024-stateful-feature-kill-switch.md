@@ -8,31 +8,38 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-07-06; changed 2026-10-30
 - **Parent:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (extends the transform contract)
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (shared schema), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (degraded serving is visible), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (the aggregate read guarded), [ADR-0043](ADR-0043-a-platform-switch-is-flipped-by-a-platform-superuser-through-the-api-gateway-and-every-flip-is-recorded.md) (who flips it, and the record of flips)
 
 ## Context
 
-Stateful transforms read the database's materialized aggregates; when that read degrades, the per-call
-fallback still issues every failing call and gives operators no control. Removing a feature from a
-configuration changes the vector a bound model expects. The engine holds no transform-type knowledge, so
-it cannot know which transforms are stateful.
+1. Stateful transforms read the database's materialized aggregates; when that read degrades, the
+   per-call fallback still issues every failing call and gives operators no control.
+2. Removing a feature from a configuration changes the vector a bound model expects.
+3. The engine holds no transform-type knowledge, so it cannot know which transforms are stateful.
 
 ## Decision
 
-1. **Transforms declare their class at registration.** An optional stateful flag, default false, is an
-   additive extension-API change (ADR-0010 dec 3), and every statistic of a stateful type is stateful.
+1. **Transforms declare their class at registration.** An optional stateful flag, default false, is
+   an additive extension-API change (ADR-0010 dec 3), and every statistic of a stateful type is
+   stateful.
+   Rests on: 3.
 2. **One global, live switch in the database's shared schema.** A platform superuser flips it
    (ADR-0043), the serving path reads it with a short cache, and it is platform data, read
    schema-qualified (ADR-0003).
+   Rests on: 1.
 3. **Null-in-slot.** When off, each stateful slot takes its transform's neutral value (zero unless
    declared) without the transform being called, so vector shape is unchanged.
+   Rests on: 2.
 4. **The switch is checked before the substrate call.** A disabled class issues no aggregate reads.
-5. **Degraded serving is observable.** Neutralizations are logged and metered, and the inference response
-   names the neutralized features.
+   Rests on: 1.
+5. **Degraded serving is observable.** Neutralizations are logged and metered, and the inference
+   response names the neutralized features.
+   Rests on: 1.
 6. **Global and manual: the switch is platform-wide and changes only when an operator flips it.**
-7. **The switch fails open, on last-known-good.** A failed read keeps the last read value and a never-read
-   switch is enabled, because the incident it serves is an overloaded database, not an unreachable one;
-   failing closed would be auto-trip without hysteresis.
+   Rests on: 1.
+7. **The switch fails open, on last-known-good.** A failed read keeps the last read value and a
+   never-read switch is enabled, because the incident it serves is an overloaded database, not an
+   unreachable one; failing closed would be auto-trip without hysteresis.
+   Rests on: 1.
 
 ## Alternatives
 
@@ -51,7 +58,8 @@ it cannot know which transforms are stateful.
 ## Consequences
 
 **Positive**
-- A degraded aggregate read lowers feature quality instead of stopping inference, and stops being loaded.
+- A degraded aggregate read lowers feature quality instead of stopping inference, and stops being
+  loaded.
 - Every future stateful transform is covered by its tag; flipping needs no retrain.
 
 **Negative**
@@ -69,4 +77,5 @@ it cannot know which transforms are stateful.
 
 ## References
 
-- [docs/operations/monitoring.md](../docs/operations/monitoring.md): runbook and metric; manual of decisions 1-7.
+- [docs/operations/monitoring.md](../docs/operations/monitoring.md): runbook and metric; manual of
+  decisions 1-7.

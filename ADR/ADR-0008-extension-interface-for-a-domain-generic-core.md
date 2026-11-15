@@ -8,27 +8,35 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-26; changed 2026-10-17
 - **Parent:** ADR-0001
-- **Related:** ADR-0010 (the plugin mechanism and versioning), ADR-0003 (the per-tenant schema),
-  ADR-0028 (the model-adapter contract)
+- **Related:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md)
 
 ## Context
 
-The core is domain-generic and domain specifics live in extensions (ADR-0001). Domain knowledge is
-data, code or entities; each needs a place outside the core, and the platform must depend on no domain.
+1. The core is domain-generic and domain specifics live in extensions (ADR-0001).
+2. Domain knowledge is data, code or entities; each needs a place outside the core, and the platform
+   must depend on no domain.
 
 ## Decision
 
 1. **The core defines versioned extension contracts; extensions implement them and never patch the
    core.** A domain need is met by an existing or a new generic extension point.
+   Rests on: 1, 2.
 2. **Configuration is the primary extension surface.** Feature definitions, sensor mappings, alert
    rules and operating profiles are declarative.
+   Rests on: 2.
 3. **Code plugins extend behaviour where configuration cannot.** Transforms, detectors and model
    adapters register through a declared interface.
-4. **Domain data lives in extension-owned tables in the tenant schema, not as columns on core tables.**
+   Rests on: 2.
+4. **Domain data lives in extension-owned tables in the tenant schema, not as columns on core
+   tables.**
+   Rests on: 2.
 5. **Extensions target a declared extension-API version.** The compatibility rule is ADR-0010 dec 3.
+   Rests on: 1.
 6. **Extensions are packaged separately and depend on the platform, which never imports them.** An
    in-repository reference extension, loaded only when configured, demonstrates the boundary.
+   Rests on: 2.
 7. **The boundary is enforced in review.** Anything domain-named defaults to an extension.
+   Rests on: 1.
 
 ## Alternatives
 

@@ -7,43 +7,42 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-10-28; changed 2026-11-09
-- **Parent:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (dec 9: the kernel registers
-  model versions in its tenant)
-- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (dec 2: the
-  kernel is untrusted), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) (dec 1: kernel credentials),
-  [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (dec 5: the writing role),
-  [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) (dec 5: the registration gate),
-  [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (dec 1: the detector declares),
-  [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 8: provenance),
-  [ADR-0035](ADR-0035-drift-baseline.md) (dec 1, 4, 6: the supplied sample),
-  [ADR-0039](ADR-0039-one-test-of-tenant-ownership-for-names-and-object-store-keys.md) (the tenant's registry names)
+- **Parent:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md)
+  (dec 9: the kernel registers model versions in its tenant)
+- **Related:** [ADR-0035](ADR-0035-drift-baseline.md)
 
 ## Context
 
-An authoring kernel logs runs and registers model versions in its tenant's registry. Serving, drift
-monitoring and alerting act on platform models, which only the registration gate creates, and the gate
-answers a user's session; a kernel holds per-session capabilities and no session. No path carries a
-notebook-trained version into serving, and the feature sample a drift baseline needs has no way out of
-the notebook.
+1. An authoring kernel logs runs and registers model versions in its tenant's registry.
+2. Serving, drift monitoring and alerting act on platform models, which only the registration gate
+   creates, and the gate answers a user's session; a kernel holds per-session capabilities and no
+   session.
+3. No path carries a notebook-trained version into serving, and the feature sample a drift baseline
+   needs has no way out of the notebook.
 
 ## Decision
 
-1. **A notebook-registered model version becomes a platform model only when a user with a writing role
-   promotes it from the product.** Serving a model is a user's decision, taken on their session; the
-   kernel never creates a platform model and gains no credential to do so.
-2. **Promotion is registration, judged by the same gate.** The ML service reads the version and its run
-   itself, as trusted platform code; the version must be the caller's tenant's, and its run is its
-   provenance.
-3. **The promoting user binds the feature configuration and chooses the detector.** They decide what the
-   model's inputs are and what its output means on the platform; a kernel's assertion of either is not
-   taken.
+1. **A notebook-registered model version becomes a platform model only when a user with a writing
+   role promotes it from the product.** Serving a model is a user's decision, taken on their
+   session; the kernel never creates a platform model and gains no credential to do so.
+   Rests on: 2.
+2. **Promotion is registration, judged by the same gate.** The ML service reads the version and its
+   run itself, as trusted platform code; the version must be the caller's tenant's, and its run is
+   its provenance.
+   Rests on: 1, 2.
+3. **The promoting user binds the feature configuration and chooses the detector.** They decide what
+   the model's inputs are and what its output means on the platform; a kernel's assertion of either
+   is not taken.
+   Rests on: 2.
 4. **The feature sample travels as a data artifact of the version's run, under a name the platform
-   fixes.** The kernel logs it through its tracking capability; the ML service reads it as data, within
-   a size bound, and holds it to ADR-0035 dec 4. A missing or unreadable sample, or one larger than the
-   read bound (ADR-0035 dec 8), leaves the model without a baseline, and the model says why. A sample
-   with more rows than the row bound is down-sampled, not refused.
-5. **A version is promoted once.** The platform model is the record of what was served under that name
-   and version; promoting it again is refused.
+   fixes.** The kernel logs it through its tracking capability; the ML service reads it as data,
+   within a size bound, and holds it to ADR-0035 dec 4. A missing or unreadable sample, or one
+   larger than the read bound (ADR-0035 dec 8), leaves the model without a baseline, and the model
+   says why. A sample with more rows than the row bound is down-sampled, not refused.
+   Rests on: 3.
+5. **A version is promoted once.** The platform model is the record of what was served under that
+   name and version; promoting it again is refused.
+   Rests on: 2.
 
 ## Alternatives
 

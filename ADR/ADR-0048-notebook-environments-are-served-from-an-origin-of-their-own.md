@@ -9,48 +9,53 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-11-10
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (dec 2:
   the kernel is untrusted)
-- **Related:** [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (dec 2, 6,
-  7: sign-on, where the hub is served, chained sign-out), [ADR-0047](ADR-0047-one-browser-origin-for-the-app-and-every-plane-it-reaches.md)
-  (dec 2: planes on the platform origin), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md)
-  (dec 2, 3, 6, 9: the session, its cookies, the origin allowlist), [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md)
-  (dec 1, 3: what a notebook may hold), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md)
-  (dec 1, 4: capabilities and demand-minting)
+- **Related:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md),
+  [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md),
+  [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md)
 
 ## Context
 
-A kernel runs code the platform does not trust: the user's own, a package it installs, a notebook it
-copies. Its output reaches the user's browser as active content, and the notebook interface runs it.
-The kernel itself holds only scoped, revocable capabilities, and the session token never reaches it.
-
-Script runs with the standing of the origin that serves it. While the hub and the environments are
-served under a path of the platform's origin, kernel-produced script runs beside the app: the browser
-attaches the session cookies to its platform requests and lets it read the CSRF token, so it acts with
-the user's whole session, which a capability in the kernel was rejected for handing over.
-
-A content policy or a sandbox on that origin cannot confine it: same-origin script can drive the app's
-own pages. Self-hosted installs are often reached by an address or a local name with no subdomains.
+1. A kernel runs code the platform does not trust: the user's own, a package it installs, a notebook
+   it copies.
+2. Its output reaches the user's browser as active content, and the notebook interface runs it.
+3. The kernel itself holds only scoped, revocable capabilities, and the session token never reaches
+   it.
+4. Script runs with the standing of the origin that serves it.
+5. While the hub and the environments are served under a path of the platform's origin,
+   kernel-produced script runs beside the app: the browser attaches the session cookies to its
+   platform requests and lets it read the CSRF token, so it acts with the user's whole session,
+   which a capability in the kernel was rejected for handing over.
+6. A content policy or a sandbox on that origin cannot confine it: same-origin script can drive the
+   app's own pages.
+7. Self-hosted installs are often reached by an address or a local name with no subdomains.
 
 ## Decision
 
-1. **Kernel-produced active content never runs on the platform origin.** The hub and every environment
-   are served from a notebook origin that differs from the platform origin in host or port, and no
-   path of the platform origin reaches them.
+1. **Kernel-produced active content never runs on the platform origin.** The hub and every
+   environment are served from a notebook origin that differs from the platform origin in host or
+   port, and no path of the platform origin reaches them.
+   Rests on: 4, 5.
 2. **The platform origin grants the notebook origin nothing.** It is in no cross-origin or socket
    allowlist (ADR-0004 dec 6, 9), so its script can neither read a platform response nor send a
    CSRF-checked request; platform cookies that reach it are never honoured there.
+   Rests on: 5, 6.
 3. **The notebook origin is entered by a single-use ticket the platform demand-mints from the
-   session.** It is a capability of its own audience (ADR-0015 dec 1, 4): it lives seconds, names one
-   user, tenant and session, is spent by the exchange, and travels in a request body, never a URL; it
-   is no data credential and cannot be exchanged for a platform session.
+   session.** It is a capability of its own audience (ADR-0015 dec 1, 4): it lives seconds, names
+   one user, tenant and session, is spent by the exchange, and travels in a request body, never a
+   URL; it is no data credential and cannot be exchanged for a platform session.
+   Rests on: 3, 5.
 4. **The exchange opens a notebook session that is bound to the platform session and ends with it.**
-   It is bound to the session, not to an access token, so refresh rotation leaves it; the proxy checks
-   it on every request through the platform's one session verification, so every end of a platform
-   session (ADR-0004 dec 2) ends it, and sign-out stays chained (ADR-0014 dec 7).
+   It is bound to the session, not to an access token, so refresh rotation leaves it; the proxy
+   checks it on every request through the platform's one session verification, so every end of a
+   platform session (ADR-0004 dec 2) ends it, and sign-out stays chained (ADR-0014 dec 7).
+   Rests on: 5.
 5. **Framing is explicit in both directions.** The hub and every environment permit framing by the
    platform origin only, and the platform frames the notebook origin only.
+   Rests on: 6.
 6. **The form of the notebook origin follows the deployment shape, and a hub without a distinct one
    does not start.** A deployment with names serves a sibling host; one reached by an address or a
    local name serves a second port on the same host and certificate.
+   Rests on: 7.
 
 ## Alternatives
 

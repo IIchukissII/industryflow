@@ -7,34 +7,41 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-07-15; changed 2026-11-13
-- **Parent:** [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (idempotent sinks, bounded state, durable checkpoints)
-- **Related:** [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (at-least-once, so re-reading the source is safe), [ADR-0026](ADR-0026-release-model.md) (per-image smoke and box run), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (aggregate tables that see a gap on reset), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (cold layer, untouched by either path)
+- **Parent:** [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (idempotent sinks,
+  bounded state, durable checkpoints)
+- **Related:** [ADR-0026](ADR-0026-release-model.md)
 
 ## Context
 
-Structured-streaming state (offset logs, commit logs and the windowed state store of the aggregation
-job) is a private format that Spark does not promise is portable across a major version. A major
-upgrade therefore raises a data-correctness question: can the new version resume the old checkpoint,
-and if not, what happens to the state in it. ADR-0006 left a lost checkpoint as its own recovery
-concern.
-
-The sinks are idempotent on their natural key, so the checkpoint is an optimisation that lets a
-restart skip re-reading, not the system's source of truth. Whether a given boundary resumes is known
-only by running it; on 3.5 → 4.1 the checkpoint resumes, offsets and state both.
+1. Structured-streaming state (offset logs, commit logs and the windowed state store of the
+   aggregation job) is a private format that Spark does not promise is portable across a major
+   version.
+2. A major upgrade therefore raises a data-correctness question: can the new version resume the old
+   checkpoint, and if not, what happens to the state in it.
+3. ADR-0006 left a lost checkpoint as its own recovery concern.
+4. The sinks are idempotent on their natural key, so the checkpoint is an optimisation that lets a
+   restart skip re-reading, not the system's source of truth.
+5. Whether a given boundary resumes is known only by running it; on 3.5 → 4.1 the checkpoint
+   resumes, offsets and state both.
 
 ## Decision
 
-1. **A Spark major upgrade rests on the idempotent sinks, not on checkpoint portability.** Writes are
-   idempotent (ADR-0006 dec 3) and delivery is at-least-once (ADR-0005), so re-deriving a stream from
-   the source is safe and the upgrade is correct whether the checkpoint is resumed or reset.
-2. **The checkpoint is resumed when the new version can read it, established empirically per boundary
-   and never assumed.** The box run (ADR-0026 dec 6) decides. For 3.5 → 4.1 it resumes, so that upgrade
-   is a restart against the existing checkpoint with no loss.
-3. **A reset is the fallback for a boundary that does not resume, at a bounded, asymmetric cost.** The
-   stateless job re-reads and re-upserts losslessly within broker retention; the stateful job restarts at
-   the tail, so each window open at the reset is written from the readings after it.
-4. **The upgrade is proven by the per-image smoke (ADR-0026 dec 5) and the box run, not the whole-stack
-   gate, which excludes the Spark JVMs on cost.** It is an operator-run act with a documented procedure.
+1. **A Spark major upgrade rests on the idempotent sinks, not on checkpoint portability.** Writes
+   are idempotent (ADR-0006 dec 3) and delivery is at-least-once (ADR-0005), so re-deriving a stream
+   from the source is safe and the upgrade is correct whether the checkpoint is resumed or reset.
+   Rests on: 1, 2, 4.
+2. **The checkpoint is resumed when the new version can read it, established empirically per
+   boundary and never assumed.** The box run (ADR-0026 dec 6) decides. For 3.5 → 4.1 it resumes, so
+   that upgrade is a restart against the existing checkpoint with no loss.
+   Rests on: 5.
+3. **A reset is the fallback for a boundary that does not resume, at a bounded, asymmetric cost.**
+   The stateless job re-reads and re-upserts losslessly within broker retention; the stateful job
+   restarts at the tail, so each window open at the reset is written from the readings after it.
+   Rests on: 3, 4.
+4. **The upgrade is proven by the per-image smoke (ADR-0026 dec 5) and the box run, not the
+   whole-stack gate, which excludes the Spark JVMs on cost.** It is an operator-run act with a
+   documented procedure.
+   Rests on: 5.
 
 ## Alternatives
 
@@ -53,8 +60,8 @@ only by running it; on 3.5 → 4.1 the checkpoint resumes, offsets and state bot
 
 **Negative**
 - Every major must be run before it is trusted; resume on one boundary does not carry to the next.
-- A forced reset writes the windows open at it short, in the aggregate tables (ADR-0023) and in drift
-  monitoring that reads them (ADR-0021).
+- A forced reset writes the windows open at it short, in the aggregate tables (ADR-0023) and in
+  drift monitoring that reads them (ADR-0021).
 - The upgrade needs a maintenance window: the jobs stop and restart.
 
 ## Deferred
@@ -68,4 +75,5 @@ only by running it; on 3.5 → 4.1 the checkpoint resumes, offsets and state bot
 
 - [docs/architecture/stream-processing.md](../docs/architecture/stream-processing.md): checkpoint
   locations and the upgrade procedure; manual of decisions 1-4.
-- Issue #243: the Spark 3.5 → 4.1 migration whose box run established resume.
+- [Issue #243](https://github.com/IIchukissII/IndustryFlow/issues/243): the Spark 3.5 → 4.1
+  migration whose box run established resume.

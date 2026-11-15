@@ -8,31 +8,33 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-28; changed 2026-10-17
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md)
-- **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (deployment shapes, per-pod
-  egress), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (SSO),
-  [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capabilities, SQL proxy),
-  [ADR-0026](ADR-0026-release-model.md) (smoke gate)
 
 ## Context
 
-The platform runs on a single Docker host and on Kubernetes. Notebook tenant isolation comes from SSO
-identity, spawner-minted single-tenant handles and per-tenant database grants, none of which depend on
-how the per-user environment is placed. A per-pod egress allowlist has no exact equivalent on a single
-Docker host.
+1. The platform runs on a single Docker host and on Kubernetes.
+2. Notebook tenant isolation comes from SSO identity, spawner-minted single-tenant handles and
+   per-tenant database grants, none of which depend on how the per-user environment is placed.
+3. A per-pod egress allowlist has no exact equivalent on a single Docker host.
 
 ## Decision
 
-1. **The spawner is a deployment profile selected by configuration.** The hub places a per-user pod on
-   Kubernetes and a per-user container on a Docker host.
-2. **Every isolation invariant of ADR-0011 holds under both spawners and is enforced above them.** The
-   spawner only places the environment and injects the handles the layers above mint.
-3. **Kernels run non-root on both paths.** No privilege escalation; the images declare a non-root user.
-4. **Network containment differs per platform.** On Kubernetes a per-pod egress policy allowlists the
-   endpoints a kernel may reach; on a Docker host the kernel joins a dedicated network holding only the
-   hub, the trusted mediators and the object store, which keeps a route off the host because a
-   pre-signed address may name the public edge (ADR-0030).
+1. **The spawner is a deployment profile selected by configuration.** The hub places a per-user pod
+   on Kubernetes and a per-user container on a Docker host.
+   Rests on: 1.
+2. **Every isolation invariant of ADR-0011 holds under both spawners and is enforced above them.**
+   The spawner only places the environment and injects the handles the layers above mint.
+   Rests on: 2.
+3. **Kernels run non-root on both paths.** No privilege escalation; the images declare a non-root
+   user.
+   Rests on: 1.
+4. **Network containment differs per platform.** On Kubernetes a per-pod egress policy allowlists
+   the endpoints a kernel may reach; on a Docker host the kernel joins a dedicated network holding
+   only the hub, the trusted mediators and the object store, which keeps a route off the host
+   because a pre-signed address may name the public edge (ADR-0030).
+   Rests on: 1, 3.
 5. **The standalone shared Jupyter is retired, not hardened.** Any local developer notebook is
    non-root, authenticated, loopback-bound and never a product surface.
+   Rests on: none.
 
 ## Alternatives
 
@@ -47,7 +49,8 @@ Docker host.
 ## Consequences
 
 **Positive**
-- Tenant-isolated, non-root notebooks on both shapes from one hub configuration and one isolation design.
+- Tenant-isolated, non-root notebooks on both shapes from one hub configuration and one isolation
+  design.
 
 **Negative**
 - Two spawner paths and manifest sets must stay aligned.

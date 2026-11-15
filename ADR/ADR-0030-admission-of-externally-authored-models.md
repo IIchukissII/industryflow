@@ -7,50 +7,68 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-07-16; changed 2026-11-09
-- **Parent:** [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) (the artifact declares; the serving environment satisfies or refuses)
-- **Related:** [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (sole writer of the artifact store), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (declared semantics), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capability audiences), [ADR-0035](ADR-0035-drift-baseline.md) (dec 8: the drift baseline, a supplied sample and derived scores), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (the public edge), [ADR-0037](ADR-0037-no-model-load-on-the-serving-side-runs-author-code-whatever-the-provenance.md) (dec 4's rule for every provenance), [ADR-0039](ADR-0039-one-test-of-tenant-ownership-for-names-and-object-store-keys.md) (the one test of a tenant's upload area)
+- **Parent:** [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md)
+  (the artifact declares; the serving environment satisfies or refuses)
+- **Related:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md),
+  [ADR-0037](ADR-0037-no-model-load-on-the-serving-side-runs-author-code-whatever-the-provenance.md)
 
 ## Context
 
-Serious models over the cold layer's history are trained off-platform, and no decision covered an
-artifact the platform never observed being made. ADR-0027 inherited three properties from kernel
-provenance: requirements recorded by an observed environment, an empirical check with two real ends,
-and bytes from a sandbox whose author already had code execution. An upload has none of these, so an
-artifact that runs author code on load would grant code execution on the trusted side.
+1. Serious models over the cold layer's history are trained off-platform, and no decision covered an
+   artifact the platform never observed being made.
+2. ADR-0027 inherited three properties from kernel provenance: requirements recorded by an observed
+   environment, an empirical check with two real ends, and bytes from a sandbox whose author already
+   had code execution.
+3. An upload has none of these, so an artifact that runs author code on load would grant code
+   execution on the trusted side.
 
 ## Decision
 
 1. **The platform admits externally-authored model artifacts.** Off-platform training is a supported
    path; notebooks stay the experimentation surface.
+   Rests on: 1.
 2. **The tracking gateway is the one door for the bytes, because it is the store's only writer.** It
-   refuses on structure; admission policy is the serving side's, which holds only a read principal scoped
-   to the tenants' upload areas, and only the store's bootstrap holds its root credential.
-3. **An upload is authorised by an upload capability audience of its own, demand-minted by the serving
-   side from a verified session, never by a tracking capability.** The mediator resolves that opaque
-   handle and never verifies a session, since a verifier of the symmetric signature can forge one.
+   refuses on structure; admission policy is the serving side's, which holds only a read principal
+   scoped to the tenants' upload areas, and only the store's bootstrap holds its root credential.
+   Rests on: 3.
+3. **An upload is authorised by an upload capability audience of its own, demand-minted by the
+   serving side from a verified session, never by a tracking capability.** The mediator resolves
+   that opaque handle and never verifies a session, since a verifier of the symmetric signature can
+   forge one.
+   Rests on: 3.
 4. **Only artifacts loadable without executing author-supplied code are admitted.** Executable
-   serialisation, an author-chosen loader or imported module, shipped code and author-defined classes are
-   refused at registration, deployment and every load, which uses only platform loaders for admitted
-   flavors, with deserialisation off and no typed-format grant (ADR-0027 dec 13).
-5. **The uploader declares the output semantics, judged at the registration gate.** An absent, unknown or
-   unimplemented declaration for the artifact's flavor is refused; there is no default.
+   serialisation, an author-chosen loader or imported module, shipped code and author-defined
+   classes are refused at registration, deployment and every load, which uses only platform loaders
+   for admitted flavors, with deserialisation off and no typed-format grant (ADR-0027 dec 13).
+   Rests on: 3.
+5. **The uploader declares the output semantics, judged at the registration gate.** An absent,
+   unknown or unimplemented declaration for the artifact's flavor is refused; there is no default.
+   Rests on: 2, 3.
 6. **The uploader declares requirements completely, treated as an assertion, not a record.** The
    declarative check still reads what the serving image installs.
-7. **The empirical check is replaced, not dropped.** At the deployment gate the artifact must load and
-   score in the real serving image, in an isolated process, which proves it works here only.
-8. **Provenance is a first-class fact, never synthesised to look internal.** An upload is admitted only
-   at one upload under the caller's tenant's uploads area, checked at registration, deployment and every
-   load, and carries a drift baseline (ADR-0035: a feature sample matching its feature configuration)
-   or is visibly un-monitorable.
-9. **This record admits no flavor outside ADR-0027's supported set.** A runtime that serves a framework
-   out of process widens that set by ADR-0036, not here.
-10. **The upload plane is reachable through the one public edge, and bytes go client to store under a
-    single-object presigned write scoped to a staging area outside every tenant namespace.** The edge
-    serves plane and staging by sub-path on the app's own origin, so the store has no cross-origin policy.
-11. **Provenance adds no step to deploying an upload beyond the gates already decided.** A user with a
-    writing role deploys an upload that passes the deployment gate as they deploy any model (ADR-0004
-    dec 5); the gate's empirical check (dec 7), the no-author-code rule (ADR-0037 dec 1) and the
-    provenance checked at every load (dec 8) are where an upload's weaker origin is answered.
+   Rests on: 2, 3.
+7. **The empirical check is replaced, not dropped.** At the deployment gate the artifact must load
+   and score in the real serving image, in an isolated process, which proves it works here only.
+   Rests on: 2, 3.
+8. **Provenance is a first-class fact, never synthesised to look internal.** An upload is admitted
+   only at one upload under the caller's tenant's uploads area, checked at registration, deployment
+   and every load, and carries a drift baseline (ADR-0035: a feature sample matching its feature
+   configuration) or is visibly un-monitorable.
+   Rests on: 1, 3.
+9. **This record admits no flavor outside ADR-0027's supported set.** A runtime that serves a
+   framework out of process widens that set by ADR-0036, not here.
+   Rests on: 2.
+10. **The upload plane is reachable through the one public edge, and bytes go client to store under
+    a single-object presigned write scoped to a staging area outside every tenant namespace.** The
+    edge serves plane and staging by sub-path on the app's own origin, so the store has no
+    cross-origin policy.
+    Rests on: 1.
+11. **Provenance adds no step to deploying an upload beyond the gates already decided.** A user with
+    a writing role deploys an upload that passes the deployment gate as they deploy any model
+    (ADR-0004 dec 5); the gate's empirical check (dec 7), the no-author-code rule (ADR-0037 dec 1)
+    and the provenance checked at every load (dec 8) are where an upload's weaker origin is
+    answered.
+    Rests on: 2, 3.
 
 ## Alternatives
 
@@ -85,9 +103,11 @@ artifact that runs author code on load would grant code execution on the trusted
 
 **Negative**
 - The gateway takes on ingestion, with different sizes, timeouts and failure modes.
-- Unadmitted bytes rest in a staging area no tenant can address and nothing loads, with its own expiry.
+- Unadmitted bytes rest in a staging area no tenant can address and nothing loads, with its own
+  expiry.
 - An upload passes a weaker gate, and models produced with default tooling are refused.
-- The object store gains an external route that is safe only while presigned-only and staging-scoped.
+- The object store gains an external route that is safe only while presigned-only and
+  staging-scoped.
 
 ## Deferred
 

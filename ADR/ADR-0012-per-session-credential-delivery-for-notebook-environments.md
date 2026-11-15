@@ -8,15 +8,16 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-27; changed 2026-10-29
 - **Parent:** ADR-0001
-- **Related:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (the kernel invariants delivered here), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (the session a capability must not impersonate), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (capability form, minting, SQL proxy), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) and [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (writing planes), [ADR-0042](ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md) (the capability-use record)
+- **Related:** [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md)
 
 ## Context
 
-Any credential a kernel holds can be read and copied by user code, so the goal is the smallest,
-fastest-revocable, least-transferable credential, not concealment. Egress limits and single-tenant,
-read-only data reach (ADR-0011) already bound a leak. A database password is durable, usable by any
-client and revocable only by rotation. The API gateway already holds the privileged role and scopes each
-request to the caller's tenant (ADR-0003).
+1. Any credential a kernel holds can be read and copied by user code, so the goal is the smallest,
+   fastest-revocable, least-transferable credential, not concealment.
+2. Egress limits and single-tenant, read-only data reach (ADR-0011) already bound a leak.
+3. A database password is durable, usable by any client and revocable only by rotation.
+4. The API gateway already holds the privileged role and scopes each request to the caller's tenant
+   (ADR-0003).
 
 ## Decision
 
@@ -24,18 +25,25 @@ request to the caller's tenant (ADR-0003).
    and centrally revocable.** A kernel's credentials are minted at spawn by the trusted spawner and
    cannot be minted, refreshed or exchanged by the kernel; a plane held by a person may be minted on
    demand (ADR-0015 dec 4).
+   Rests on: 1.
 2. **The kernel never holds a raw database password.** Decision 4 serves SQL without one.
+   Rests on: 3.
 3. **The default data path is a per-session capability that authenticates to the data API as the
    user.** It is bound to the data API, one tenant and identity, and is not the session cookie nor
    exchangeable for a session.
+   Rests on: 1, 4.
 4. **Direct SQL goes through an authenticating proxy; the kernel presents only its capability.** The
    proxy opens the upstream session as that tenant's own read-only identity, a member of no other
-   tenant's role, so "may act as any tenant" is the proxy's alone, held as many single-tenant identities.
-5. **Capabilities are minimal and non-escalatable.** A capability carries the tenant, the identity, its
-   one plane and whether that plane may write, and cannot be presented elsewhere or broadened; a writing
-   plane is bounded by the tenant namespace its mediator enforces.
-6. **Revocation is central and immediate; lifetime is the backstop.** Ending a session invalidates its
-   capabilities at every honouring point without waiting for expiry (ADR-0015 dec 2).
+   tenant's role, so "may act as any tenant" is the proxy's alone, held as many single-tenant
+   identities.
+   Rests on: 1, 3.
+5. **Capabilities are minimal and non-escalatable.** A capability carries the tenant, the identity,
+   its one plane and whether that plane may write, and cannot be presented elsewhere or broadened; a
+   writing plane is bounded by the tenant namespace its mediator enforces.
+   Rests on: 1, 2.
+6. **Revocation is central and immediate; lifetime is the backstop.** Ending a session invalidates
+   its capabilities at every honouring point without waiting for expiry (ADR-0015 dec 2).
+   Rests on: 1.
 
 ## Alternatives
 

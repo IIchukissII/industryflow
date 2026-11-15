@@ -8,41 +8,52 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-07-06; changed 2026-11-09
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md) (framing)
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (tenant routing, shared contract), [ADR-0006](ADR-0006-spark-windowing-and-idempotent-writes.md) (watermarked windows, window contract), [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (transform registry), [ADR-0024](ADR-0024-stateful-feature-kill-switch.md) (kill-switch for the stateful class),
-  [ADR-0041](ADR-0041-a-model-s-feature-configuration-is-fixed-once-bound.md) (dec 2: a bound configuration is fixed),
-  [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (dec 7: raw readings only),
-  [ADR-0035](ADR-0035-drift-baseline.md) (dec 5: no baseline for a sample with no time)
+- **Related:** [ADR-0024](ADR-0024-stateful-feature-kill-switch.md),
+  [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md),
+  [ADR-0035](ADR-0035-drift-baseline.md),
+  [ADR-0041](ADR-0041-a-model-s-feature-configuration-is-fixed-once-bound.md)
 
 ## Context
 
-Stateful feature transforms need a windowed statistic of a sensor's recent history; the stream already
-keeps a watermarked state store and materializes per-tenant windowed aggregates. A second windowing
-mechanism on the serving side would compute the same value differently, and training and serving would
-disagree about what a feature means. Offline training data cannot read the live aggregate table.
+1. Stateful feature transforms need a windowed statistic of a sensor's recent history; the stream
+   already keeps a watermarked state store and materializes per-tenant windowed aggregates.
+2. A second windowing mechanism on the serving side would compute the same value differently, and
+   training and serving would disagree about what a feature means.
+3. Offline training data cannot read the live aggregate table.
 
 ## Decision
 
 1. **Stateful, windowed features compute in the stream's existing state store.**
+   Rests on: 1, 2.
 2. **A materialized per-tenant table is the seam between producing and consuming features.** For the
    windowed baseline it is the existing aggregate tables; a dedicated table only for what they lack.
+   Rests on: 1.
 3. **Stateless transforms stay substrate-neutral; they run wherever is cheapest.**
+   Rests on: none.
 4. **Tenant isolation is the stream partition key; output goes to the tenant schema (ADR-0003).**
+   Rests on: 1.
 5. **Per-tenant feature configuration is routed live within the shared stream, without a restart.**
-   Routing carries a configuration's creation and its edits while no model binds it; once bound, what
-   it computes is fixed (ADR-0041 dec 2), so a reload never changes a bound model's inputs.
+   Routing carries a configuration's creation and its edits while no model binds it; once bound,
+   what it computes is fixed (ADR-0041 dec 2), so a reload never changes a bound model's inputs.
+   Rests on: 1.
 6. **The transform registry holds across the stream's executor boundary** (ADR-0010).
-7. **The serving side holds no windowing state.** The baseline is a read of the aggregate, fronted by a
-   short-lived, bounded, tenant-keyed cache of returned values; the alerting worker's tenant-keyed
-   latest-value store is a snapshot join and outside this decision. The baseline is read, through the
-   cache, only for a stateful feature the kill-switch (ADR-0024 dec 4) leaves enabled.
-8. **The rest is built when a feature needs it:** stream-computed features (decisions 4–6), a dedicated
-   feature table, the rolling-statistic transform.
-9. **Offline training re-derives the served window from the raw readings (ADR-0025 dec 7).** Each row
-   gets the newest window written by its instant given the allowed lateness, with width and lateness
-   defined once in the shared contract and the statistic named explicitly; a test asserts
+   Rests on: none.
+7. **The serving side holds no windowing state.** The baseline is a read of the aggregate, fronted
+   by a short-lived, bounded, tenant-keyed cache of returned values; the alerting worker's
+   tenant-keyed latest-value store is a snapshot join and outside this decision. The baseline is
+   read, through the cache, only for a stateful feature the kill-switch (ADR-0024 dec 4) leaves
+   enabled.
+   Rests on: 2.
+8. **The rest is built when a feature needs it:** stream-computed features (decisions 4–6), a
+   dedicated feature table, the rolling-statistic transform.
+   Rests on: none.
+9. **Offline training re-derives the served window from the raw readings (ADR-0025 dec 7).** Each
+   row gets the newest window written by its instant given the allowed lateness, with width and
+   lateness defined once in the shared contract and the statistic named explicitly; a test asserts
    offline and serving agree on the same data. Every consumer that scores a stored reading reads its
-   window the same way; a row with no instant has no such window, and nothing is scored from it, saying
-   why (ADR-0035 dec 5).
+   window the same way; a row with no instant has no such window, and nothing is scored from it,
+   saying why (ADR-0035 dec 5).
+   Rests on: 2, 3.
 
 ## Alternatives
 
@@ -66,7 +77,8 @@ disagree about what a feature means. Offline training data cannot read the live 
 ## Consequences
 
 **Positive**
-- One windowing substrate with structural tenant isolation; live training and inference read the same rows.
+- One windowing substrate with structural tenant isolation; live training and inference read the
+  same rows.
 
 **Negative**
 - The offline re-derivation is a second implementation, kept equal only by its test.

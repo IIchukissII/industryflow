@@ -8,36 +8,42 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-27; changed 2026-10-17
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
-- **Related:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (edge TLS and its
-  internal CA), [ADR-0007](ADR-0007-device-certificate-authority.md) (device PKI, a separate root),
-  [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (deployment shapes)
 
 ## Context
 
-The database carries credentials and every tenant's data. Network scoping does not stop an on-network
-sniffer or an impersonator, and encryption without server authentication leaves impersonation open.
-PostgreSQL rejects private keys with loose ownership or permissions, which host and orchestrator mounts
-do not satisfy by default. Requiring TLS breaks any client not yet configured for it.
+1. The database carries credentials and every tenant's data.
+2. Network scoping does not stop an on-network sniffer or an impersonator, and encryption without
+   server authentication leaves impersonation open.
+3. PostgreSQL rejects private keys with loose ownership or permissions, which host and orchestrator
+   mounts do not satisfy by default.
+4. Requiring TLS breaks any client not yet configured for it.
 
 ## Decision
 
 1. **Clients verify the server, not merely encrypt.** Every network client checks the server
    certificate against its trust anchor, hostname included.
+   Rests on: 1, 2.
 2. **Password authentication uses SCRAM only.** MD5 is not accepted.
-3. **The server certificate is issued by the self-hosted internal CA where it is in use; a single host
-   started without it self-signs.** Either way the certificate names every client-facing hostname and
-   its root is every client's trust anchor; a self-signed certificate is kept across restarts and
-   yields to a CA-issued one once supplied.
-4. **Key ownership and permissions are fixed inside the deployment, not on the host.** A one-shot step
-   before the database stages the certificate and key into database-owned storage with the permissions
-   PostgreSQL requires.
+   Rests on: 1, 2.
+3. **The server certificate is issued by the self-hosted internal CA where it is in use; a single
+   host started without it self-signs.** Either way the certificate names every client-facing
+   hostname and its root is every client's trust anchor; a self-signed certificate is kept across
+   restarts and yields to a CA-issued one once supplied.
+   Rests on: 2.
+4. **Key ownership and permissions are fixed inside the deployment, not on the host.** A one-shot
+   step before the database stages the certificate and key into database-owned storage with the
+   permissions PostgreSQL requires.
+   Rests on: 3.
 5. **TLS changes roll out without breaking a running client.** Server offers, clients verify, server
    requires, each stage validated first.
+   Rests on: 4.
 6. **Scope is service-to-database transport.** The in-container local socket used by initialisation
    stays plaintext; the device and API edges are unaffected.
+   Rests on: 2.
 7. **On Kubernetes the certificate comes from a cluster secret, provisioned by a certificate
-   controller or supplied by the operator.** The database mounts certificate, key and root, each client
-   only the root; TLS is mandatory for every network role, monitoring included.
+   controller or supplied by the operator.** The database mounts certificate, key and root, each
+   client only the root; TLS is mandatory for every network role, monitoring included.
+   Rests on: 2.
 
 ## Alternatives
 

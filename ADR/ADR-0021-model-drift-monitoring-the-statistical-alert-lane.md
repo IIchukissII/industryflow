@@ -8,30 +8,34 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-28; changed 2026-10-25
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
-- **Related:** [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (declared detector
-  and scale), [ADR-0035](ADR-0035-drift-baseline.md) (the baseline),
-  [ADR-0022](ADR-0022-concept-drift-operator-feedback.md) (labelled drift),
-  [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (pluggable detectors)
 
 ## Context
 
-A deployed model decays silently as the live data moves away from its training data. Per-reading
-anomaly detection does not notice; drift is a windowed, statistical question on a longer timescale.
-Sensor streams carry no ground truth in real time. The alert schema reserves a statistical lane, and
-the ML service already holds a drift library and the tenant data path.
+1. A deployed model decays silently as the live data moves away from its training data.
+2. Per-reading anomaly detection does not notice; drift is a windowed, statistical question on a
+   longer timescale.
+3. Sensor streams carry no ground truth in real time.
+4. The alert schema reserves a statistical lane, and the ML service already holds a drift library
+   and the tenant data path.
 
 ## Decision
 
-1. **Drift is detected without labels: data drift and prediction drift.** Prediction drift compares the
-   declared detector's scores on its declared scale, never raw output, scoring the trailing window as
-   live inference would; a model whose detector refuses reports no prediction drift and says why.
+1. **Drift is detected without labels: data drift and prediction drift.** Prediction drift compares
+   the declared detector's scores on its declared scale, never raw output, scoring the trailing
+   window as live inference would; a model whose detector refuses reports no prediction drift and
+   says why.
+   Rests on: 1, 3.
 2. **Drift surfaces through the statistical alert lane.** A rule binds a model and a threshold.
+   Rests on: 4.
 3. **The alert service owns drift detection; the ML service computes the score.** A scheduled
    evaluator beside the rules engine applies thresholds and delegates computation over an internal
    endpoint.
+   Rests on: 4.
 4. *(withdrawn: see ADR-0035)*
 5. **Drift is evaluated on a schedule over a trailing window, independent of the per-reading path.**
+   Rests on: 2.
 6. **Every evaluation is tenant-scoped.** One model, one tenant, that tenant's data and profile.
+   Rests on: 4.
 
 ## Alternatives
 
@@ -47,8 +51,8 @@ the ML service already holds a drift library and the tenant data path.
 ## Consequences
 
 **Positive**
-- Model decay becomes an alert on the surface operators watch; the models view also evaluates a model
-  against its baseline on demand.
+- Model decay becomes an alert on the surface operators watch; the models view also evaluates a
+  model against its baseline on demand.
 
 **Negative**
 - A model without a baseline (ADR-0035), including any notebook-trained one whose author supplied no

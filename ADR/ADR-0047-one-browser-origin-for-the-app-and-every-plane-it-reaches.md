@@ -7,37 +7,34 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-11-10
-- **Parent:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (dec 3, 9:
-  the session cookies, the CSRF token and the socket origin check that need one origin)
-- **Related:** [ADR-0009](ADR-0009-kubernetes-deployment-packaged-with-helm.md) (dec 5: the cluster
-  ingress is the TLS edge), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md)
-  (dec 6: where the hub is served), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md)
-  (dec 10: the upload plane by sub-path), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md)
-  (dec 7: dashboards written only from this origin), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md)
-  (dec 3: artifact bytes between caller and store), [ADR-0048](ADR-0048-notebook-environments-are-served-from-an-origin-of-their-own.md)
-  (the notebook environments' own origin)
+- **Parent:** [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (dec
+  3, 9: the session cookies, the CSRF token and the socket origin check that need one origin)
+- **Related:** [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md)
 
 ## Context
 
-The browser session is a pair of cookies the backend sets, scoped to one site, with a CSRF token the
-page must read and echo, and a live socket admitted by its origin. Each of these holds only while the
-page and the APIs it calls share an origin.
-
-Several planes are reached from the browser besides the API: the model upload plane, the dashboards
-and the notebook hub. An alternative rejected for the upload plane rests on the one origin, yet no
-decision records it. The notebook environments run code the platform does not trust, and script
-served from the platform's origin acts with the user's session.
+1. The browser session is a pair of cookies the backend sets, scoped to one site, with a CSRF token
+   the page must read and echo, and a live socket admitted by its origin.
+2. Each of these holds only while the page and the APIs it calls share an origin.
+3. Several planes are reached from the browser besides the API: the model upload plane, the
+   dashboards and the notebook hub.
+4. An alternative rejected for the upload plane rests on the one origin, yet no decision records it.
+5. The notebook environments run code the platform does not trust, and script served from the
+   platform's origin acts with the user's session.
 
 ## Decision
 
 1. **The browser app is a single-page app served by the platform's edge, on the same origin as every
-   API it calls.** The session cookies, the CSRF token and the socket origin check (ADR-0004 dec 3, 9)
-   then hold without a cross-origin exception, and the app makes no cross-origin request; the origin
-   allowlist (ADR-0004 dec 6) names this origin for the socket check.
-2. **Every other plane the browser reaches is a sub-path of that origin, behind the same edge, except
-   the notebook environments (ADR-0048).** The upload plane and the dashboards serve only
-   platform-authored content and share the origin's session check, certificate and frame policy. A store the browser writes under a grant is a sub-path too: the edge forwards the
-   bytes, which still pass no plane (ADR-0013 dec 3), and the store exposes no cross-origin policy.
+   API it calls.** The session cookies, the CSRF token and the socket origin check (ADR-0004 dec 3,
+   9) then hold without a cross-origin exception, and the app makes no cross-origin request; the
+   origin allowlist (ADR-0004 dec 6) names this origin for the socket check.
+   Rests on: 1, 2.
+2. **Every other plane the browser reaches is a sub-path of that origin, behind the same edge,
+   except the notebook environments (ADR-0048).** The upload plane and the dashboards serve only
+   platform-authored content and share the origin's session check, certificate and frame policy. A
+   store the browser writes under a grant is a sub-path too: the edge forwards the bytes, which
+   still pass no plane (ADR-0013 dec 3), and the store exposes no cross-origin policy.
+   Rests on: 3, 4, 5.
 
 ## Alternatives
 
@@ -53,7 +50,8 @@ served from the platform's origin acts with the user's session.
 ## Consequences
 
 **Positive**
-- One certificate, one cookie scope and no cross-origin policy serve the app and every plane on its origin.
+- One certificate, one cookie scope and no cross-origin policy serve the app and every plane on its
+  origin.
 - Development serves the same paths from one origin, so the session behaves as in a deployment.
 
 **Negative**

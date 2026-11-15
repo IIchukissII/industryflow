@@ -8,27 +8,33 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-28; changed 2026-10-29
 - **Parent:** [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md)
-- **Related:** [ADR-0018](ADR-0018-notebook-hub-spawner-portability.md) (spawner parity), [ADR-0033](ADR-0033-tenant-lifecycle.md) (tenant deletion, dec 6),
-  [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (ephemeral capabilities), [ADR-0042](ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md) (the capability-use record)
+- **Related:** [ADR-0033](ADR-0033-tenant-lifecycle.md)
 
 ## Context
 
-Notebook environments are ephemeral and reclaimed when idle; without storage an author loses work on
-every restart or image upgrade. The analytics profile authors nothing. Durable work must not persist
-credentials, make compute long-lived or cross tenants.
+1. Notebook environments are ephemeral and reclaimed when idle; without storage an author loses work
+   on every restart or image upgrade.
+2. The analytics profile authors nothing.
+3. Durable work must not persist credentials, make compute long-lived or cross tenants.
 
 ## Decision
 
 1. **An authoring environment gets one durable per-user volume at a work subdirectory, not the whole
-   home.** The rest of the home, examples included, comes fresh from the image; analytics environments
-   get no storage.
+   home.** The rest of the home, examples included, comes fresh from the image; analytics
+   environments get no storage.
+   Rests on: 1, 2.
 2. **Compute stays ephemeral and is reclaimed when idle.** An idle-culler stops idle servers with a
    token scoped to listing users, reading activity and stopping servers.
+   Rests on: 1, 3.
 3. **Capabilities are never persisted.** They live only in the process and are re-minted each spawn.
-4. **No cross-tenant human administration.** Lifecycle is automatic or self-service, and the platform
-   admin role, a tenant role, is not a hub administrator.
+   Rests on: 3.
+4. **No cross-tenant human administration.** Lifecycle is automatic or self-service, and the
+   platform admin role, a tenant role, is not a hub administrator.
+   Rests on: 3.
 5. **Parity across spawners for the authoring profile.** A named volume on a Docker host, a claim on
-   Kubernetes, at the same subdirectory, which the authoring image creates owned by the non-root user.
+   Kubernetes, at the same subdirectory, which the authoring image creates owned by the non-root
+   user.
+   Rests on: 1.
 6. **The hub reclaims a deleted tenant's volumes itself and records the reclaim.** It learns of the
    deletion from the platform's durable deletion record (ADR-0033 dec 4) through a database identity
    that can only list the users awaiting a reclaim and record this one store, so no hub credential
@@ -36,6 +42,7 @@ credentials, make compute long-lived or cross tenants.
    user with no volume is reclaimed by recording that. The store is recorded only once the spawner
    backend, asked with the hub's own access by the name the spawner gives the volume, holds none of
    the tenant's volumes; one that remains is removed there, or the deletion stays pending.
+   Rests on: 3.
 
 ## Alternatives
 

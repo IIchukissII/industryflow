@@ -8,36 +8,41 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-26; changed 2026-10-17
 - **Parent:** [ADR-0001](ADR-0001-industryflow-framing.md)
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (consumes the verified tenant),
-  [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (the API trust domain),
-  [ADR-0007](ADR-0007-device-certificate-authority.md) (the device PKI)
 
 ## Context
 
-Sensor data comes from unattended gateways holding a hardware-bound key in a secure element. A bearer
-token suits them badly: nobody logs in, whoever holds it can replay it, and a tenant taken from it or
-from the request body is caller-asserted. The tenant a write lands in is a security boundary, on the
-highest-throughput path.
+1. Sensor data comes from unattended gateways holding a hardware-bound key in a secure element.
+2. A bearer token suits them badly: nobody logs in, whoever holds it can replay it, and a tenant
+   taken from it or from the request body is caller-asserted.
+3. The tenant a write lands in is a security boundary, on the highest-throughput path.
 
 ## Decision
 
 1. **Device ingestion authenticates with mutual TLS; the HTTP API keeps JWT.** The two trust domains
    keep two mechanisms.
+   Rests on: 1, 2.
 2. **mTLS terminates at the edge proxy, not in the application.** The edge verifies the client
    certificate and forwards the verified identity in request headers.
-3. **The ingestion service trusts identity headers only from its edge, under exactly one convention.**
-   The service is reachable only from the edge and reaches only the broker; each deployment names its
-   edge's header convention with no default, and refuses a request carrying another convention's
-   headers, because an edge overwrites only the headers it writes.
+   Rests on: 3.
+3. **The ingestion service trusts identity headers only from its edge, under exactly one
+   convention.** The service is reachable only from the edge and reaches only the broker; each
+   deployment names its edge's header convention with no default, and refuses a request carrying
+   another convention's headers, because an edge overwrites only the headers it writes.
+   Rests on: 3.
 4. **IndustryFlow operates its own certificate authority for device certificates.** Hierarchy,
    issuance, lifetime and revocation are ADR-0007.
-5. **Tenant and device identity are read from the verified certificate.** Never from the request body
-   or a token claim.
+   Rests on: 1.
+5. **Tenant and device identity are read from the verified certificate.** Never from the request
+   body or a token claim.
+   Rests on: 2, 3.
 6. **The ingested tenant is validated as a UUID before it routes a write.**
+   Rests on: 3.
 7. **Reference and test producers authenticate with test certificates.** No standing secret is
    committed to source or baked into an image.
+   Rests on: 2.
 8. **Ingestion accepts only mTLS and holds no database role.** It authenticates the device and
    produces to the broker.
+   Rests on: 2, 3.
 
 ## Alternatives
 

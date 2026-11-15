@@ -9,36 +9,38 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Date:** 2026-10-29; changed 2026-11-09
 - **Parent:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (one computation of a
   feature for training and serving)
-- **Related:** [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (dec 1: the output
-  contract fixed at registration), [ADR-0035](ADR-0035-drift-baseline.md) (dec 4: the
-  sample checked against the bound inputs), [ADR-0040](ADR-0040-a-notebook-registered-model-version-becomes-a-platform-model-by-promotion.md) (dec 3: the
-  promoting user binds the configuration), [ADR-0034](ADR-0034-platform-schema-migrations.md)
-  (the schema change)
 
 ## Context
 
-A model is registered bound to a feature configuration: the sensors it reads and the transforms that turn
-them into the vector it was trained on. Serving, the deployment gate and drift each read that
-configuration afresh by reference at every use. A configuration is a shared, named record a tenant can
-edit or delete, so an edit changes the input vector of every model bound to it on its next score, and
-the drift sample checked against the old inputs stops describing them. Deleting it leaves its models
-unbound and unservable. The output side of the same contract, the declared detector, is already fixed
-at registration (ADR-0028).
+1. A model is registered bound to a feature configuration: the sensors it reads and the transforms
+   that turn them into the vector it was trained on.
+2. Serving, the deployment gate and drift each read that configuration afresh by reference at every
+   use.
+3. A configuration is a shared, named record a tenant can edit or delete, so an edit changes the
+   input vector of every model bound to it on its next score, and the drift sample checked against
+   the old inputs stops describing them.
+4. Deleting it leaves its models unbound and unservable.
+5. The output side of the same contract, the declared detector, is already fixed at registration
+   (ADR-0028).
 
 ## Decision
 
-1. **A model's binding to its feature configuration is fixed at registration.** A model was trained on
-   one input vector; a different one is a different model, registered or promoted again.
+1. **A model's binding to its feature configuration is fixed at registration.** A model was trained
+   on one input vector; a different one is a different model, registered or promoted again.
+   Rests on: 1, 3.
 2. **A configuration bound by any model cannot change what it computes, and cannot be deleted.** Its
-   sensors and transforms are fixed while a model binds it, whatever that model's status; a change is a
-   new configuration. Name, description and equipment type stay editable because nothing computes from
-   them.
+   sensors and transforms are fixed while a model binds it, whatever that model's status; a change
+   is a new configuration. Name, description and equipment type stay editable because nothing
+   computes from them.
+   Rests on: 3, 4.
 3. **The refusal is the database's, and the API reports it with the models that bind the
-   configuration.** Every writer of the shared record meets the same rule, and a check made only before
-   the write could be raced.
-4. **A configuration no model binds stays fully editable and deletable; one a model binds stays fixed
-   while the model is on record, retired or not.** A retired model can be deployed again and must then
-   read the inputs it was trained on, so retiring it frees nothing.
+   configuration.** Every writer of the shared record meets the same rule, and a check made only
+   before the write could be raced.
+   Rests on: 3, 4.
+4. **A configuration no model binds stays fully editable and deletable; one a model binds stays
+   fixed while the model is on record, retired or not.** A retired model can be deployed again and
+   must then read the inputs it was trained on, so retiring it frees nothing.
+   Rests on: 3, 4.
 
 ## Alternatives
 
@@ -73,4 +75,5 @@ at registration (ADR-0028).
 
 ## References
 
-- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): the configuration API; manual of decisions 1-4.
+- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md): the configuration
+  API; manual of decisions 1-4.

@@ -8,38 +8,42 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-10-27; changed 2026-10-28
 - **Parent:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (dec 7: the shared library)
-- **Related:** [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md) (dec 2, 4:
-  mediation and read paths), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md) (dec 5, 7:
-  the namespace rule, applied by the gateway and the read paths), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md)
-  (dec 5: tenant isolation in the cold store)
 
 ## Context
 
-The shared library builds every name derived from a tenant (ADR-0003 dec 7), but whether a given name
-or object-store key belongs to a tenant is decided separately by each mediator and read path. That test
-guards the tenant boundary in every plane where tenants share a store. The copies have already
-diverged: the cold read side accepts key forms the tracking side refuses, so the same key is inside
-the tenant on one plane and refused on the other. A prefix test is only a boundary if the key means
-what it spells; a store, proxy or client that normalises a key can move it under another prefix after
-the test.
+1. The shared library builds every name derived from a tenant (ADR-0003 dec 7), but whether a given
+   name or object-store key belongs to a tenant is decided separately by each mediator and read
+   path.
+2. That test guards the tenant boundary in every plane where tenants share a store.
+3. The copies have already diverged: the cold read side accepts key forms the tracking side refuses,
+   so the same key is inside the tenant on one plane and refused on the other.
+4. A prefix test is only a boundary if the key means what it spells; a store, proxy or client that
+   normalises a key can move it under another prefix after the test.
 
 ## Decision
 
-1. **One shared implementation decides whether a name or an object-store key belongs to a tenant.** It
-   lives in the tenant-resolution library beside the names it tests; every mediator and read path uses
-   it, and the library's check refuses a service that implements it again.
+1. **One shared implementation decides whether a name or an object-store key belongs to a tenant.**
+   It lives in the tenant-resolution library beside the names it tests; every mediator and read path
+   uses it, and the library's check refuses a service that implements it again.
+   Rests on: 1, 2, 3.
 2. **A key from a caller is tested only once it is plain: no empty, current-directory or
-   parent-directory segment, no backslash and no control character.** Such a key is refused, never normalised; normalising would be
-   a second interpretation that the store, a proxy or a client can disagree with, and a line-based
-   reader of a listing splits a key holding a control character into another key. A separator leading
-   a caller's path is path syntax, not a segment of the key.
+   parent-directory segment, no backslash and no control character.** Such a key is refused, never
+   normalised; normalising would be a second interpretation that the store, a proxy or a client can
+   disagree with, and a line-based reader of a listing splits a key holding a control character into
+   another key. A separator leading a caller's path is path syntax, not a segment of the key.
+   Rests on: 4.
 3. **A key still in its encoded form is refused if it carries an escape.** Decoded, it could spell a
    segment the plain test never saw.
-4. **A caller's path is placed under its tenant's prefix by the same implementation, and only a plain
-   path is placed.** Placing and testing are one rule, so a key the implementation places is one it
-   would also accept; a listing prefix is placed by the same rule and keeps its trailing separator.
-5. **The rule holds for every object store a tenant reaches through a mediator, whatever the plane.**
-   Keys a trusted writer assembles from typed parts are not caller input and are not tested.
+   Rests on: 4.
+4. **A caller's path is placed under its tenant's prefix by the same implementation, and only a
+   plain path is placed.** Placing and testing are one rule, so a key the implementation places is
+   one it would also accept; a listing prefix is placed by the same rule and keeps its trailing
+   separator.
+   Rests on: 3, 4.
+5. **The rule holds for every object store a tenant reaches through a mediator, whatever the
+   plane.** Keys a trusted writer assembles from typed parts are not caller input and are not
+   tested.
+   Rests on: 2.
 
 ## Alternatives
 
@@ -62,8 +66,8 @@ the test.
 
 **Negative**
 - A change to the rule ships to every image that carries the library.
-- Object names with empty, current-directory or parent-directory segments, a backslash or a control character cannot be stored
-  through a mediator.
+- Object names with empty, current-directory or parent-directory segments, a backslash or a control
+  character cannot be stored through a mediator.
 
 ## Deferred
 

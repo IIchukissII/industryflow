@@ -8,47 +8,55 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-06-27; changed 2026-11-09
 - **Parent:** ADR-0001
-- **Related:** [ADR-0012](ADR-0012-per-session-credential-delivery-for-notebook-environments.md) (the properties realised here), [ADR-0011](ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md) (per-tenant read-only role), [ADR-0014](ADR-0014-notebook-hub-single-sign-on-from-the-platform-session.md) (the identity minted against; chained sign-out), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (session end revokes capabilities), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (planes added since), [ADR-0042](ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md) (the capability-use record), [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (dec 1: the store's rebuild path)
 
 ## Context
 
-Revocation must be immediate and the capability lives in untrusted code (ADR-0012). Revoking a
-self-contained token needs a shared-state lookup anyway; the platform already runs a shared expiring
-store. No general-purpose pooler resolves a capability to a tenant, and a session narrowed by a statement
-is one the client can widen again.
+1. Revocation must be immediate and the capability lives in untrusted code (ADR-0012).
+2. Revoking a self-contained token needs a shared-state lookup anyway; the platform already runs a
+   shared expiring store.
+3. No general-purpose pooler resolves a capability to a tenant, and a session narrowed by a
+   statement is one the client can widen again.
 
 ## Decision
 
-1. **A capability is an opaque, high-entropy handle backed by a short-lived entry in the shared store.**
-   The entry binds user, one tenant, audience, whether the plane may write, and expiry; the lookup that
-   authorizes a handle is the one revocation defeats.
-2. **Revocation is deletion of the entry; expiry is the backstop.** A spawn-minted entry is refreshed
-   only while its environment runs and is revoked when it stops, before a respawn, and at sign-out; an
-   open SQL session is re-checked at a bounded interval and closed when its handle no longer resolves
-   to the same binding or cannot be checked, and every honouring point denies a missing or incomplete
-   entry.
+1. **A capability is an opaque, high-entropy handle backed by a short-lived entry in the shared
+   store.** The entry binds user, one tenant, audience, whether the plane may write, and expiry; the
+   lookup that authorizes a handle is the one revocation defeats.
+   Rests on: 1, 2.
+2. **Revocation is deletion of the entry; expiry is the backstop.** A spawn-minted entry is
+   refreshed only while its environment runs and is revoked when it stops, before a respawn, and at
+   sign-out; an open SQL session is re-checked at a bounded interval and closed when its handle no
+   longer resolves to the same binding or cannot be checked, and every honouring point denies a
+   missing or incomplete entry.
+   Rests on: 1, 2.
 3. **Each plane gets its own audience-bound handle; handles are not interchangeable.** A mediator
    honours only its own audience, which also decides the admission rules where two populations meet.
+   Rests on: 1.
 4. **Minting has two modes: spawn-minting for every kernel handle, and narrow demand-minting.** The
    spawner mints a kernel's handles at spawn from the verified hub identity; the kernel cannot mint,
-   refresh or widen them. Demand-minting requires a tenant from a verified session only, one designated
-   minter named by the plane's record, a handle spent atomically by the step completing its one
-   operation, and no session secret distributed to enforce it.
-5. **Direct SQL is reached through a trusted proxy that opens each upstream session as the tenant's own
-   confined login identity.** That identity reaches only its tenant's read-only grants and can switch
-   into nothing wider, so whatever the kernel sends reaches one tenant; the role it then assumes is not
-   the boundary.
+   refresh or widen them. Demand-minting requires a tenant from a verified session only, one
+   designated minter named by the plane's record, a handle spent atomically by the step completing
+   its one operation, and no session secret distributed to enforce it.
+   Rests on: 1.
+5. **Direct SQL is reached through a trusted proxy that opens each upstream session as the tenant's
+   own confined login identity.** That identity reaches only its tenant's read-only grants and can
+   switch into nothing wider, so whatever the kernel sends reaches one tenant; the role it then
+   assumes is not the boundary.
+   Rests on: 1, 3.
 6. **The SQL proxy is a small purpose-built component, not an off-the-shelf pooler.** Each kernel
    connection is one upstream session.
+   Rests on: 3.
 7. **The store is the single capability authority and holds handles and bindings, never database or
    object-store secrets.** A reader of it sees revocable, single-tenant handles and nothing worse.
-8. **The store removes a key only when told to or when its expiry passes; a full store refuses writes;
-   a store that cannot show it was rebuilt grants nothing.** It holds denials whose absence grants, a
-   tenant's suspension and a session's end among them, so a key dropped for memory fails open, while a
-   refused write fails the mint or request that needed it. A store lost whole fails open the same way,
-   so it is trusted only once it carries a rebuild record: the platform API re-derives every suspension
-   from the registry, then writes the record, whose time ends every session issued before it; until
-   then every verifier and minter refuses.
+   Rests on: 1, 2.
+8. **The store removes a key only when told to or when its expiry passes; a full store refuses
+   writes; a store that cannot show it was rebuilt grants nothing.** It holds denials whose absence
+   grants, a tenant's suspension and a session's end among them, so a key dropped for memory fails
+   open, while a refused write fails the mint or request that needed it. A store lost whole fails
+   open the same way, so it is trusted only once it carries a rebuild record: the platform API
+   re-derives every suspension from the registry, then writes the record, whose time ends every
+   session issued before it; until then every verifier and minter refuses.
+   Rests on: 1, 2.
 
 ## Alternatives
 
@@ -82,12 +90,12 @@ is one the client can widen again.
 
 **Negative**
 - The store is on the hot path; an outage denies capabilities and closes open SQL sessions.
-- A lost store signs every user out and stops every notebook server's handles, and refuses everything
-  until the platform API has rebuilt it.
+- A lost store signs every user out and stops every notebook server's handles, and refuses
+  everything until the platform API has rebuilt it.
 - A store that fills refuses mints, sign-ins and cache writes until memory is freed, so its use is
   watched against its limit.
-- Provisioning and offboarding create and remove each tenant's login, whose credential derives from one
-  proxy-held secret, enrolled on first use; rotating that secret re-enrols every tenant.
+- Provisioning and offboarding create and remove each tenant's login, whose credential derives from
+  one proxy-held secret, enrolled on first use; rotating that secret re-enrols every tenant.
 - Notebook SQL clients present the handle as the database password.
 
 ## Deferred
@@ -98,5 +106,6 @@ is one the client can widen again.
 
 ## References
 
-- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): audiences, lifecycle values, SQL proxy; manual of decisions 1-8.
+- [docs/architecture/notebooks.md](../docs/architecture/notebooks.md): audiences, lifecycle values,
+  SQL proxy; manual of decisions 1-8.
 - [SQL proxy](../services/notebook_sql_proxy/README.md): manual of decisions 2, 5, 6.

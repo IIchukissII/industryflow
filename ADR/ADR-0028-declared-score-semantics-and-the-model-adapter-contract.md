@@ -7,37 +7,45 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **Status:** Accepted
 - **Date:** 2026-07-14; changed 2026-10-25
-- **Parent:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (its deferred model-adapter contract)
-- **Related:** [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) (the gate that refuses what the environment cannot honour), [ADR-0008](ADR-0008-extension-interface-for-a-domain-generic-core.md) (in-process default), [ADR-0021](ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md) (alerts on these scores), [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (uploads declare semantics), [ADR-0036](ADR-0036-out-of-process-model-runtime-for-frameworks-the-serving-image-does-not-carry.md) (the out-of-process runtime)
+- **Parent:** [ADR-0010](ADR-0010-extension-plugin-mechanism.md) (its deferred model-adapter
+  contract)
 
 ## Context
 
-A detector turns a model's output into a 0–1 anomaly score, and the meaning of that output cannot be
-read from its value: an outlier model's output of one means normal, a classifier's means anomaly, and an
-autoencoder emits no verdict, its signal being reconstruction error. A wrong score feeds alerts that
-operators label. The framework set is open, while the serving image is one pinned stack.
+1. A detector turns a model's output into a 0–1 anomaly score, and the meaning of that output cannot
+   be read from its value: an outlier model's output of one means normal, a classifier's means
+   anomaly, and an autoencoder emits no verdict, its signal being reconstruction error.
+2. A wrong score feeds alerts that operators label.
+3. The framework set is open, while the serving image is one pinned stack.
 
 ## Decision
 
 1. **A model's output has declared semantics, and its detector declares which it implements:
-   `anomaly_probability`, `outlier_score` (a score centred on the model's own decision boundary, negative
-   on the outlier side), `reconstruction_error`, `direct_score` (a 0–1 score the model means).** The
-   detector is chosen once at registration, recorded on the model and dispatched on by serving, which
-   refuses a model with no recorded or no available detector.
-2. **The platform never infers semantics from a prediction's value or dtype.** A detector that cannot
-   establish its model's semantics refuses to score.
+   `anomaly_probability`, `outlier_score` (a score centred on the model's own decision boundary,
+   negative on the outlier side), `reconstruction_error`, `direct_score` (a 0–1 score the model
+   means).** The detector is chosen once at registration, recorded on the model and dispatched on by
+   serving, which refuses a model with no recorded or no available detector.
+   Rests on: 1, 2.
+2. **The platform never infers semantics from a prediction's value or dtype.** A detector that
+   cannot establish its model's semantics refuses to score.
+   Rests on: 1, 2.
 3. **The built-in detectors are split by semantics, and the label is never the signal.** The
-   compatibility detector scores only through a class probability or a boundary-centred outlier score and
-   refuses otherwise; the direct-score detector refuses a value that is not finite and in range, never
-   clamping it.
-4. **An adapter declares which artifact flavors it can score.** An artifact no adapter handles is refused
-   at ADR-0027's gate.
-5. **The supported set is discovered from the registry, not maintained as a list, and it is served.** An
-   operator can ask what a deployment accepts before training.
+   compatibility detector scores only through a class probability or a boundary-centred outlier
+   score and refuses otherwise; the direct-score detector refuses a value that is not finite and in
+   range, never clamping it.
+   Rests on: 1, 2.
+4. **An adapter declares which artifact flavors it can score.** An artifact no adapter handles is
+   refused at ADR-0027's gate.
+   Rests on: 3.
+5. **The supported set is discovered from the registry, not maintained as a list, and it is
+   served.** An operator can ask what a deployment accepts before training.
+   Rests on: 3.
 6. **In-process remains the default, and autoencoders are served inside it.** A reconstructing
    scikit-learn estimator needs no new dependency, image or serving path.
-7. **Frameworks the image does not carry are refused by ADR-0027's gate unless an out-of-process runtime
-   serves them (ADR-0036).**
+   Rests on: 1, 3.
+7. **Frameworks the image does not carry are refused by ADR-0027's gate unless an out-of-process
+   runtime serves them (ADR-0036).**
+   Rests on: 3.
 
 ## Alternatives
 
@@ -61,7 +69,8 @@ operators label. The framework set is open, while the serving image is one pinne
 **Negative**
 - Thresholds tuned against inferred scores must be re-set.
 - An autoencoder registered without its training-time error scale is not scoreable.
-- A model offering only a raw or offset score is refused until re-registered with a declared semantics.
+- A model offering only a raw or offset score is refused until re-registered with a declared
+  semantics.
 - Changing a model's detector means registering it again.
 
 ## Deferred
@@ -72,5 +81,6 @@ operators label. The framework set is open, while the serving image is one pinne
 
 ## References
 
-- Issue #236: every outlier-model reading scored as an anomaly.
+- [Issue #236](https://github.com/IIchukissII/IndustryFlow/issues/236): every outlier-model reading
+  scored as an anomaly.
 - [ML and feature engineering](../docs/architecture/ml-and-features.md): manual of decisions 1-7.

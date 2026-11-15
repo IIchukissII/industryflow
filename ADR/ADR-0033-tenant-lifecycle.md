@@ -8,44 +8,57 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-10-24; changed 2026-11-07
 - **Parent:** ADR-0001
-- **Related:** [ADR-0003](ADR-0003-tenant-to-schema-resolution.md) (schema-per-tenant, the tenant mapping), [ADR-0004](ADR-0004-api-authentication-session-model-and-transport-security.md) (dec 2: suspension ends sessions), [ADR-0005](ADR-0005-kafka-delivery-semantics.md) (dec 3: refused readings are dead-lettered), [ADR-0007](ADR-0007-device-certificate-authority.md) (device revocation), [ADR-0013](ADR-0013-experiment-tracking-and-model-registry-multi-tenancy.md) (tracking store), [ADR-0015](ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md) (dec 5: per-tenant SQL identity), [ADR-0019](ADR-0019-notebook-experiment-tracking-gateway-and-the-tracking-capability.md), [ADR-0020](ADR-0020-notebook-per-user-work-persistence.md), [ADR-0025](ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) (tenant data outside the database), [ADR-0032](ADR-0032-backup-and-disaster-recovery-for-every-durable-store.md) (backups), [ADR-0034](ADR-0034-platform-schema-migrations.md) (the tenant schema), [ADR-0016](ADR-0016-observability-and-monitoring-integration.md) (dec 1: the stalled-stream alert is a platform rule), [ADR-0031](ADR-0031-the-api-gateway-as-the-single-owner-of-the-alerting-http-surface.md) (dec 2: the alert worker serves no API and no metric beyond its revision)
 
 ## Context
 
-A service that creates schemas and roles itself holds the most dangerous privilege in the database. A
-tenant's data also lives in the cold layer, tracking store, per-user volumes, capability store and backups,
-so a registry-only action orphans the rest. Stopping access must be reversible; destroying data, deliberate.
+1. A service that creates schemas and roles itself holds the most dangerous privilege in the
+   database.
+2. A tenant's data also lives in the cold layer, tracking store, per-user volumes, capability store
+   and backups, so a registry-only action orphans the rest.
+3. Stopping access must be reversible; destroying data, deliberate.
 
 ## Decision
 
-1. **A tenant is provisioned by one privileged database function, and only through it.** In one transaction
-   it creates registry entry, schema, tables, grants, read-only principal and SQL proxy login identity, for
-   callers with no schema- or role-creating privilege. The platform generates the identifier; rebuilding a tenant's objects is idempotent.
-2. **Stores outside the database are tenant-scoped by construction and created on first use.** They derive
-   from the tenant identifier through each mediator's one mapping, so none can be half-provisioned.
-3. **Offboarding has two steps: suspend, then delete.** *Suspend* is reversible: no session, capability,
-   device or database identity of the tenant is honoured or issued, and its open database sessions end.
-   Ingestion refuses the tenant's devices from a tenant-status stream the platform publishes on the
-   broker, the only store it reaches; a status not heard again within a bound is forgotten, so a
-   stalled stream lets devices through rather than halting ingestion, and a stalled stream raises a
-   platform alert. Every component that writes tenant data refuses an inactive tenant's readings from
-   the registry, so a lost or late status still fails closed where data is written. *Delete* is a
-   separate, irreversible request, valid only for a suspended tenant.
-4. **Delete removes the tenant from every store that holds its data.** One privileged, resumable operation,
-   run by a dedicated operator job and not by the API, removes it store by store and records each removal.
-   Each store is emptied through its own mediator, the tracking store through its API and its own
-   collection of what is deleted, and the notebook hub for its users' volumes. Every device certificate
-   of the tenant is revoked where the issuing key lives, and the job verifies it from the authority's
-   published, signed files before it records the store. Backups and the
-   broker's retention age the tenant out on their own schedule, and the record states when.
-5. **Removing the registry row alone is not offered.** Ending a tenant goes through decisions 3 and 4.
+1. **A tenant is provisioned by one privileged database function, and only through it.** In one
+   transaction it creates registry entry, schema, tables, grants, read-only principal and SQL proxy
+   login identity, for callers with no schema- or role-creating privilege. The platform generates
+   the identifier; rebuilding a tenant's objects is idempotent.
+   Rests on: 1.
+2. **Stores outside the database are tenant-scoped by construction and created on first use.** They
+   derive from the tenant identifier through each mediator's one mapping, so none can be
+   half-provisioned.
+   Rests on: 2.
+3. **Offboarding has two steps: suspend, then delete.** *Suspend* is reversible: no session,
+   capability, device or database identity of the tenant is honoured or issued, and its open
+   database sessions end. Ingestion refuses the tenant's devices from a tenant-status stream the
+   platform publishes on the broker, the only store it reaches; a status not heard again within a
+   bound is forgotten, so a stalled stream lets devices through rather than halting ingestion, and a
+   stalled stream raises a platform alert. Every component that writes tenant data refuses an
+   inactive tenant's readings from the registry, so a lost or late status still fails closed where
+   data is written. *Delete* is a separate, irreversible request, valid only for a suspended tenant.
+   Rests on: 3.
+4. **Delete removes the tenant from every store that holds its data.** One privileged, resumable
+   operation, run by a dedicated operator job and not by the API, removes it store by store and
+   records each removal. Each store is emptied through its own mediator, the tracking store through
+   its API and its own collection of what is deleted, and the notebook hub for its users' volumes.
+   Every device certificate of the tenant is revoked where the issuing key lives, and the job
+   verifies it from the authority's published, signed files before it records the store. Backups and
+   the broker's retention age the tenant out on their own schedule, and the record states when.
+   Rests on: 2.
+5. **Removing the registry row alone is not offered.** Ending a tenant goes through decisions 3
+   and 4.
+   Rests on: 2.
 6. **Lifecycle actions are privileged and recorded.** Provisioning, suspension and deletion are
-   platform-operator actions, each recording who did what to which tenant and when. The record is durable,
-   queryable and held outside every tenant's schema, so it outlives the tenant.
-7. **Delete is an explicit operator request after at least 30 days of suspension.** Nothing schedules it;
-   the wait leaves a mistaken suspension recoverable.
-8. **A deleted tenant's registry entry stays, as a tombstone.** It anchors the deletion record, keeps the
-   identifier from reuse, and lets every verifier refuse the tenant as a known, inactive one rather than an unknown one.
+   platform-operator actions, each recording who did what to which tenant and when. The record is
+   durable, queryable and held outside every tenant's schema, so it outlives the tenant.
+   Rests on: 1, 3.
+7. **Delete is an explicit operator request after at least 30 days of suspension.** Nothing
+   schedules it; the wait leaves a mistaken suspension recoverable.
+   Rests on: 3.
+8. **A deleted tenant's registry entry stays, as a tombstone.** It anchors the deletion record,
+   keeps the identifier from reuse, and lets every verifier refuse the tenant as a known, inactive
+   one rather than an unknown one.
+   Rests on: 3.
 
 ## Alternatives
 
@@ -91,7 +104,8 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 **Negative**
 - Every new tenant-scoped store owes a deletion path.
 - A bug in the privileged functions affects every tenant.
-- While the tenant-status stream is stalled, a suspended tenant's devices load the broker until an operator restores it.
+- While the tenant-status stream is stalled, a suspended tenant's devices load the broker until an
+  operator restores it.
 - The product's delete action suspends; a deletion is requested and carried out by operators.
 - A deletion waits on the device store until an operator revokes the tenant at the device authority.
 - A deleted tenant's data persists in backups and broker retention until each ages it out.
@@ -109,7 +123,8 @@ so a registry-only action orphans the rest. Stopping access must be reversible; 
 
 ## References
 
-- [init-scripts README](../infrastructure/timescaledb/init-scripts/README.md): manual of decisions 1, 8.
+- [init-scripts README](../infrastructure/timescaledb/init-scripts/README.md): manual of decisions
+  1, 8.
 - [stream processing](../docs/architecture/stream-processing.md): the stream's bounds; manual of
   decision 3.
 - [User management](../docs/operations/user-management.md): manual of decisions 2-7.

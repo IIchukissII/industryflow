@@ -8,57 +8,64 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Status:** Accepted
 - **Date:** 2026-10-25; changed 2026-11-09
 - **Parent:** [ADR-0021](ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md)
-- **Related:** [ADR-0021](ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md) (dec 4: the baseline decision this
-  replaces), [ADR-0028](ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md) (the declared detector that
-  scores), [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md) (dec 6: the deployment gate),
-  [ADR-0030](ADR-0030-admission-of-externally-authored-models.md) (dec 7: uploads scored at that gate; dec 8:
-  a declared baseline or visibly un-monitorable), [ADR-0040](ADR-0040-a-notebook-registered-model-version-becomes-a-platform-model-by-promotion.md)
-  (dec 4: how a notebook supplies its sample), [ADR-0041](ADR-0041-a-model-s-feature-configuration-is-fixed-once-bound.md) (the
-  bound inputs a sample matches stay fixed), [ADR-0044](ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md)
-  (dec 3: no substitute in a baseline), [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md) (dec 9: the
-  window a stored row is read with)
+- **Related:** [ADR-0023](ADR-0023-stream-materialized-feature-engineering.md),
+  [ADR-0027](ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md),
+  [ADR-0030](ADR-0030-admission-of-externally-authored-models.md),
+  [ADR-0044](ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md)
 
 ## Context
 
-Prediction drift compares the declared detector's scores on the live window with the same scores on a
-baseline (ADR-0021 dec 1). The baseline has two halves of different origin. Only whoever trained the
-model knows what it learned from, so the feature sample can come only from them. The score half must be
-what the live side computes, but when it is supplied with the sample the platform can check only that it
-is a finite number on the declared scale; a number in range can still be another quantity, computed by
-another code path or feature pipeline, and prediction drift would then fire on a model that has not
-moved. An externally authored model is scored off the platform by construction. The deployment gate is
-the last check before a model serves, and it can load and score an artifact in the serving image
-(ADR-0030 dec 7).
+1. Prediction drift compares the declared detector's scores on the live window with the same scores
+   on a baseline (ADR-0021 dec 1).
+2. The baseline has two halves of different origin.
+3. Only whoever trained the model knows what it learned from, so the feature sample can come only
+   from them.
+4. The score half must be what the live side computes, but when it is supplied with the sample the
+   platform can check only that it is a finite number on the declared scale; a number in range can
+   still be another quantity, computed by another code path or feature pipeline, and prediction
+   drift would then fire on a model that has not moved.
+5. An externally authored model is scored off the platform by construction.
+6. The deployment gate is the last check before a model serves, and it can load and score an
+   artifact in the serving image (ADR-0030 dec 7).
 
 ## Decision
 
 1. **A drift baseline is a feature sample the model's supplier provides and prediction scores the
-   platform derives.** The supplier holds what the model learned from; only the platform can guarantee
-   that both sides of the comparison come from the declared detector.
-2. **The platform derives the scores by scoring the sample through the model's declared detector in the
-   serving environment, at the deployment gate, for every model whatever its provenance.** It is the last
-   check before serving, and the one that already loads an uploaded artifact there; for any other model
-   the derivation is the gate's own load. A score column supplied with the sample is not accepted.
+   platform derives.** The supplier holds what the model learned from; only the platform can
+   guarantee that both sides of the comparison come from the declared detector.
+   Rests on: 2, 3, 4.
+2. **The platform derives the scores by scoring the sample through the model's declared detector in
+   the serving environment, at the deployment gate, for every model whatever its provenance.** It is
+   the last check before serving, and the one that already loads an uploaded artifact there; for any
+   other model the derivation is the gate's own load. A score column supplied with the sample is not
+   accepted.
+   Rests on: 4, 5, 6.
 3. **The scores are derived again at every deployment.** The gate's verdict expires with the serving
    image (ADR-0027 dec 6), and so does a score computed by the image it replaced.
+   Rests on: 4.
 4. **A sample is accepted only when its columns are the inputs of the model's bound feature
-   configuration, checked at registration; otherwise the model has no baseline and says so.** The model
-   is still registered: a missing baseline makes it visibly un-monitorable (ADR-0030 dec 8), never
-   refused and never given a guessed baseline.
-5. **A sample that cannot be scored honestly leaves the model without a prediction baseline, and drift
-   says why.** That is a detector that cannot score it, a feature that would take a substitute value
-   (ADR-0044 dec 3), and a stateful feature, whose window a sample row without its time cannot name
-   (ADR-0023 dec 9). Data drift still runs on the sample; an autoencoder still needs its declared error
-   scale (ADR-0028) before its scores mean anything.
-6. **Every registration path accepts a sample, uploads included.** The supplier, not the path, decides
-   whether the model is monitored.
+   configuration, checked at registration; otherwise the model has no baseline and says so.** The
+   model is still registered: a missing baseline makes it visibly un-monitorable (ADR-0030 dec 8),
+   never refused and never given a guessed baseline.
+   Rests on: 3.
+5. **A sample that cannot be scored honestly leaves the model without a prediction baseline, and
+   drift says why.** That is a detector that cannot score it, a feature that would take a substitute
+   value (ADR-0044 dec 3), and a stateful feature, whose window a sample row without its time cannot
+   name (ADR-0023 dec 9). Data drift still runs on the sample; an autoencoder still needs its
+   declared error scale (ADR-0028) before its scores mean anything.
+   Rests on: 4.
+6. **Every registration path accepts a sample, uploads included.** The supplier, not the path,
+   decides whether the model is monitored.
+   Rests on: 3, 5.
 7. **A baseline recorded before this decision keeps its supplied scores until the model is next
-   deployed, and is marked as supplied until then.** Its stored sample is enough to derive scores at that
-   deployment; nothing is refused retroactively (ADR-0027 dec 10).
+   deployed, and is marked as supplied until then.** Its stored sample is enough to derive scores at
+   that deployment; nothing is refused retroactively (ADR-0027 dec 10).
+   Rests on: 4.
 8. **A sample is bounded in rows, by one bound on every registration path; a longer one is evenly
-   down-sampled when accepted.** The bound is what the deployment gate scores and the store holds, so a
-   path that skipped it would make the gate's cost the supplier's choice. What the platform reads from a
-   store to obtain a sample is bounded in size, and a larger one is not read.
+   down-sampled when accepted.** The bound is what the deployment gate scores and the store holds,
+   so a path that skipped it would make the gate's cost the supplier's choice. What the platform
+   reads from a store to obtain a sample is bounded in size, and a larger one is not read.
+   Rests on: 6.
 
 ## Alternatives
 
@@ -89,8 +96,8 @@ the last check before a model serves, and it can load and score an artifact in t
 - An existing baseline becomes a derived one at its model's next deployment, without its supplier.
 
 **Negative**
-- Deployment takes longer by scoring the sample, and a model that is not an upload is now loaded at the
-  gate, which it was not before.
+- Deployment takes longer by scoring the sample, and a model that is not an upload is now loaded at
+  the gate, which it was not before.
 - A model whose detector cannot score the sample, or whose configuration has a stateful feature, is
   monitored for data drift only.
 
@@ -102,4 +109,5 @@ the last check before a model serves, and it can load and score an artifact in t
 
 ## References
 
-- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md#drift-post-apidriftevaluate): baseline and evaluation; manual of decisions 1-8.
+- [docs/architecture/ml-and-features.md](../docs/architecture/ml-and-features.md#drift-post-apidriftevaluate):
+  baseline and evaluation; manual of decisions 1-8.
