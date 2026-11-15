@@ -33,8 +33,6 @@ jobs:
               - 'scripts/ci/requirements.txt'
               - 'services/**'
               - 'libs/**'
-              # The runbooks the ops-agent tests read as a contract (ADR-0046 dec 9).
-              - 'docs/operations/**'
               - 'clients/python/**'
               - 'clients/device/**'
               # Read by the parity guards (e.g. the alert worker's config parity test), so an
@@ -118,7 +116,7 @@ jobs:
           # The cold purge's live proof (test_cold_store_live.py) needs MinIO and runs in cold-layer-integration.yml.
           - { service: tenant_delete,         path: services/tenant_delete/tests, args: "--ignore=services/tenant_delete/tests/test_cold_store_live.py" }
           # The infrastructure agent (ADR-0046): stores and model faked; its tool server also runs as
-          # a real stdio subprocess. It reads the runbooks under docs/operations.
+          # a real stdio subprocess. It reads its runbook rows from services/ops_agent/runbook.toml.
           - { service: ops_agent,           path: services/ops_agent/tests }
           # The backup image's scripts, run under bash against stand-in aws/psql/pg_* binaries.
           - { service: backup,              path: infrastructure/backup/tests, install: "pip install -r scripts/ci/requirements.txt" }

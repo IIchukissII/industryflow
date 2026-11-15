@@ -16,11 +16,8 @@ RUN echo "security refresh: ${SECURITY_REFRESH}" && pip install --no-cache-dir -
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# The runbooks the agent reads as a contract (ADR-0046 dec 9), supplied as the named build context
-# `runbooks` (docs/operations).
-COPY --from=runbooks . /app/runbooks
-
-COPY config.py redaction.py runbooks.py tools.py model.py graph.py publish.py app.py ./
+# The runbook rows the agent reads (ADR-0046 dec 9) are its own data, beside its code.
+COPY config.py redaction.py runbooks.py runbook.toml tools.py model.py graph.py publish.py app.py ./
 
 RUN useradd -u 10001 -r -s /usr/sbin/nologin appuser
 USER 10001

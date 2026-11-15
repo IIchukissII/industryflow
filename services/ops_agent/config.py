@@ -24,7 +24,7 @@ class Config:
     loki_url: str
     alertmanager_url: str
     log_selector: str
-    runbooks_dir: Path
+    runbook_file: Path
     window_minutes: int
     model_provider: str
     model: str
@@ -45,7 +45,7 @@ class Config:
             # How a service's logs are selected in the log store; `%s` is the service name. The
             # single-host stack labels container logs by their Compose service.
             log_selector=_env("OPS_AGENT_LOG_SELECTOR", '{service="%s"}'),
-            runbooks_dir=Path(_env("OPS_AGENT_RUNBOOKS_DIR", "/app/runbooks")),
+            runbook_file=Path(_env("OPS_AGENT_RUNBOOK", "/app/runbook.toml")),
             window_minutes=int(_env("OPS_AGENT_WINDOW_MINUTES", "30")),
             # `anthropic` (the Anthropic SDK) or `openai-compatible` (Mistral's API, or a model
             # server on the operator's own host) — ADR-0045 dec 3.
