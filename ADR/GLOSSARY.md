@@ -11,7 +11,7 @@ wins.
 
 ## Platform and multi-tenancy
 
-| Term | Meaning | ADR |
+| Term | Meaning | Decisions |
 |---|---|---|
 | Open-core | One open codebase under the copyleft licence; the commercial offering is a licence exception for closed integration, not withheld features | ADR-0001 dec 1, 3 |
 | Tenant | One customer organisation, identified by `company_id` (a UUID). "Tenant" in prose, `company_id` for the identifier | ADR-0001, ADR-0003 |
@@ -28,7 +28,7 @@ wins.
 
 Three separate roots of trust; never describe them as one.
 
-| Term | Meaning | ADR |
+| Term | Meaning | Decisions |
 |---|---|---|
 | Device CA | The client-authentication CA for ingestion mTLS: signs device requests, never holds a device key, signs no server certificate | ADR-0007 |
 | Public edge certificate (managed) | The browser-facing server certificate of the managed deployment: an auto-renewed public ACME certificate | ADR-0004 dec 8 |
@@ -38,7 +38,7 @@ Three separate roots of trust; never describe them as one.
 
 ## Sessions and API access
 
-| Term | Meaning | ADR |
+| Term | Meaning | Decisions |
 |---|---|---|
 | Platform session | A browser's authenticated session: it persists through refresh-credential rotation while each request carries a short-lived access token | ADR-0004 dec 2 |
 | Access token | A JWT valid for minutes, carrying the signed tenant claim | ADR-0004 dec 2, ADR-0003 dec 2 |
@@ -48,7 +48,7 @@ Three separate roots of trust; never describe them as one.
 
 ## Data pipeline
 
-| Term | Meaning | ADR |
+| Term | Meaning | Decisions |
 |---|---|---|
 | At-least-once | The Kafka guarantee: a reading is never lost but may be delivered more than once; safe because every consumer's effect is idempotent | ADR-0005 dec 1, 6 |
 | Idempotent write | A sink write with the same end state however often applied, keyed on the natural key: raw measurements first-write-wins, aggregates replace-on-conflict | ADR-0005 dec 6, ADR-0006 dec 3 |
@@ -60,7 +60,7 @@ Three separate roots of trust; never describe them as one.
 
 ## Notebooks
 
-| Term | Meaning | ADR |
+| Term | Meaning | Decisions |
 |---|---|---|
 | Notebook hub | The multi-tenant JupyterHub service that spawns per-user notebook environments | ADR-0011 dec 1 |
 | Spawner | The hub component that creates a user's environment: a per-user pod on Kubernetes (KubeSpawner), a per-user container on a Docker host (DockerSpawner), selected by configuration | ADR-0018 dec 1 |
@@ -74,7 +74,7 @@ Three separate roots of trust; never describe them as one.
 
 ## Models
 
-| Term | Meaning | ADR |
+| Term | Meaning | Decisions |
 |---|---|---|
 | Model artifact path | Authoring kernel → tracking gateway → registry → `ml_service`. What crosses is a serialised model, not a pickle: sklearn as skops, xgboost as a native booster; no load runs author code | ADR-0027, ADR-0019, ADR-0010 dec 6, ADR-0037 |
 | Train/serve parity | The artifact declares its requirements; the serving environment satisfies them or refuses the model. Per-library version constraints instantiate the rule and are a floor on divergence, not a pin | ADR-0027 dec 1, 3 |
@@ -88,7 +88,7 @@ Three separate roots of trust; never describe them as one.
 
 Self-hosted and managed are a business distinction (ADR-0001 dec 4); the deployment shapes are ADR-0009.
 
-| Term | Meaning | ADR |
+| Term | Meaning | Decisions |
 |---|---|---|
 | Self-hosted | A customer running the platform on its own infrastructure, as single-host Compose or in-cluster Helm | ADR-0001 dec 4, ADR-0009 dec 6 |
 | Managed (commercial) | IndustryFlow operating the platform as a service: Kubernetes and Helm, usually with external datastores | ADR-0001, ADR-0009 dec 1, 3 |
@@ -98,7 +98,7 @@ Self-hosted and managed are a business distinction (ADR-0001 dec 4); the deploym
 
 ## ADR vocabulary
 
-| Term | Meaning | ADR |
+| Term | Meaning | Decisions |
 |---|---|---|
 | ADR | Architecture Decision Record: the decision in force and its rationale; its manual owns the how, artifacts own the values. Files `ADR/ADR-NNNN-kebab-title.md` | ADR-0000 dec 2, 5, 8 |
 | Manual | The documentation of a decision: how it works and the code that realises it, under the decision it follows | ADR-0000 dec 2 |
