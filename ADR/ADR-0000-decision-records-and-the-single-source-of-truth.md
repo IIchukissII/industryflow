@@ -6,11 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR-0000 — Decision records and the single source of truth
 
 - **Status:** Accepted
-- **Date:** 2026-06-26; changed 2026-11-07
+- **Date:** 2026-06-26; changed 2026-11-15
 - **Parent:** none (governs the form of every other ADR)
-- **Canon:** [IIchukissII/CANON
-  ADR-0000](https://github.com/IIchukissII/CANON/blob/main/ADR-0000-canon.md), refined here for this
-  repository
+- **Canon:** [IIchukissII/CANON](https://github.com/IIchukissII/CANON)
 
 ## Context
 
