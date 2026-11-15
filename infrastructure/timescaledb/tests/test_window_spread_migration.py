@@ -67,8 +67,10 @@ def test_a_one_reading_window_gets_zero_spread_compressed_or_not(tenant):
     cur, schema = tenant
     table = f'"{schema}".sensor_aggregations_1min'
     equipment = str(uuid.uuid4())
+    # The old row 20 days back: past its 7-day chunk and the 5-day horizon below on any weekday (chunks
+    # align to the epoch).
     rows = {  # name: (age, stddev_value, count_values)
-        "old_single": ("10 days", None, 1),
+        "old_single": ("20 days", None, 1),
         "single": ("1 hour", None, 1),
         "spread": ("2 hours", 1.5, 3),
         "missing": ("3 hours", None, 4),
@@ -79,7 +81,7 @@ def test_a_one_reading_window_gets_zero_spread_compressed_or_not(tenant):
                     f"VALUES (date_trunc('minute', now() - interval '{age}'), %s, %s, 1.0, %s, %s)",
                     (sensors[name], equipment, std, n))
     # The old window's chunk compressed, as the policy leaves windows older than its horizon.
-    cur.execute(f"SELECT compress_chunk(c) FROM show_chunks('{table}', older_than => now() - interval '5 days') c")
+    cur.execute(f"SELECT compress_chunk(c, if_not_compressed => true) FROM show_chunks('{table}', older_than => now() - interval '5 days') c")
     assert cur.fetchall(), "no chunk was compressed: the compressed case is not exercised"
 
     def spreads():
