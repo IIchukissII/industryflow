@@ -9,8 +9,8 @@ Python helpers for notebooks: `feature_config_builder` builds and registers feat
 
 ## Setup
 
-The package is not part of a notebook image. Put `services/ml_service/notebooks` on the kernel's
-`sys.path` and install the shared contracts package, which `offline_baseline` reads window widths and
+The package is not part of a notebook image. Put the directory holding this utils package on the
+kernel's `sys.path` and install the shared contracts package, which `offline_baseline` reads window widths and
 lateness from (ADR-0006 dec 7):
 
 ```bash
