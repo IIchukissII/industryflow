@@ -10,7 +10,7 @@ Measured ingest capacity of the Compose stack on one host, how to reproduce it, 
 ## Measured on one node: 8 GB RAM, 4 cores
 
 Single-node deployment: the whole platform runs on the host during the test, with the default
-[performance settings](../getting-started.md#performance-settings).
+performance settings (ADR-0009 dec 6).
 
 | Running on the node | Containers |
 |---|---|
@@ -67,7 +67,7 @@ path keeps its latency, and Kafka holds what Spark has not processed yet.
 |---|---|
 | More cores on the host | Raises the CPU ceiling; the ingest path and Spark scale with cores |
 | More memory | Removes swap use under sustained load |
-| Kubernetes ([Helm chart](../../deploy/helm/industryflow/README.md)) | Ingestion, edge and Spark scale out ([high availability](high-availability.md)) |
+| Kubernetes (ADR-0009) | Ingestion, edge and Spark scale out (ADR-0009) |
 
 ## Reproduce
 
@@ -82,7 +82,7 @@ host run only the sampler.
 
 | Step | Command |
 |---|---|
-| Device certificate | `scripts/device-ca.sh issue …` ([device mTLS](device-mtls.md)) |
+| Device certificate | `scripts/device-ca.sh issue …` (ADR-0007) |
 | Sensor map | JSON object `name -> sensor UUID` of sensors in the device's tenant |
 | Start the sampler (Docker host) | `bash tests/performance/sample_host.sh /tmp/sample.log &` |
 | Load, one process per 125 readings/s | `python3 tests/performance/loadgen.py --url https://<host>:8443/ingest --cert <crt> --key <key> --ca <edge-ca.crt> --sensor-map <map.json> --equipment-id <uuid> --site-id <site> --rate 125 --duration 120 --run-start <iso-time> --csv out-K.csv --workers 2 --worker K` (K = 0, 1 for 250 readings/s) |

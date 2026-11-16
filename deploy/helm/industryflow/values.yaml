@@ -385,7 +385,7 @@ objectStore:
 
 # ---------------------------------------------------------------------------
 # Logical database backups (tier-1 DR) — a CronJob dumps each database to S3/MinIO
-# with retention. See docs/operations/backup-and-recovery.md (incl. restore + the
+# with retention. See ADR-0032 (incl. restore + the
 # tier-2 pgBackRest/PITR path). Credentials: DB_USER/DB_PASSWORD, and the backup bucket's own
 # principal BACKUP_STORE_ACCESS_KEY/SECRET_KEY (created by the minio-init Job for the in-cluster
 # store; supply the off-site store's keys when s3.endpoint points elsewhere).
@@ -522,7 +522,7 @@ observability:
   # operator's Loki, which the shipped dashboards draw as annotations. Off by default. Enabling it
   # needs secrets.data.OPS_AGENT_WEBHOOK_SECRET (>= 32 characters), the operator's endpoints below,
   # and a webhook receiver in the operator's Alertmanager pointing at the agent's Service
-  # (docs/operations/monitoring.md#infrastructure-agent).
+  # (ADR-0045 dec 1-6, 8).
   opsAgent:
     enabled: false
     image: industryflow-ops-agent

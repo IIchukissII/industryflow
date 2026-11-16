@@ -30,7 +30,7 @@ tests:
               topic: sensor-data-raw.measurements.dlq
             exp_annotations:
               summary: "Readings were dead-lettered"
-              description: "Letters reached sensor-data-raw.measurements.dlq in the last 15m. They raised no alert and were not written: docs/operations/dead-letters.md."
+              description: "Letters reached sensor-data-raw.measurements.dlq in the last 15m. They raised no alert and were not written: ADR-0005."
               services: "spark-streaming, alert-service-detector"
       # The window has passed with no new letter: it clears.
       - eval_time: 39m
@@ -53,7 +53,7 @@ tests:
               topic: sensor-data-raw.dlq
             exp_annotations:
               summary: "Readings were dead-lettered"
-              description: "Letters reached sensor-data-raw.dlq in the last 15m. They raised no alert and were not written: docs/operations/dead-letters.md."
+              description: "Letters reached sensor-data-raw.dlq in the last 15m. They raised no alert and were not written: ADR-0005."
               services: "spark-streaming, alert-service-detector"
       - eval_time: 45m
         alertname: IndustryFlowDeadLetteredReadings
@@ -227,7 +227,7 @@ tests:
               partition: "0"
             exp_annotations:
               summary: "The tenant-status stream has stalled"
-              description: "Partition 0 of tenant-status has carried no status for 5m. Ingestion has forgotten every suspension and lets those devices through; the writers still refuse them: docs/operations/monitoring.md."
+              description: "Partition 0 of tenant-status has carried no status for 5m. Ingestion has forgotten every suspension and lets those devices through; the writers still refuse them: ADR-0033 dec 3."
               services: "alert-service-detector, kafka"
       - eval_time: 50m
         alertname: IndustryFlowTenantStatusStalled

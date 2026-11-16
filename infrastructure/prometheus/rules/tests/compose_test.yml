@@ -31,7 +31,7 @@ tests:
           - exp_labels: {severity: critical, backup: databases}
             exp_annotations:
               summary: "No backup has completed recently"
-              description: "No databases backup has completed in the last two days. The job's output names the failing step: docs/operations/backup-and-recovery.md."
+              description: "No databases backup has completed in the last two days. The job's output names the failing step: ADR-0032."
               services: "db-backup, notebook-backup, timescaledb, minio"
       - eval_time: 49h
         alertname: IndustryFlowBackupNeverCompleted
@@ -53,7 +53,7 @@ tests:
           - exp_labels: {severity: critical, platform: industryflow, backup: databases}
             exp_annotations:
               summary: "No database backup has ever completed"
-              description: "No database backup has completed on this deployment. Run db-backup and schedule it: docs/operations/backup-and-recovery.md#running-backups."
+              description: "No database backup has completed on this deployment. Run db-backup and schedule it: ADR-0032 dec 1."
               services: "db-backup, timescaledb, minio"
       - eval_time: 25h
         alertname: IndustryFlowBackupStale
@@ -67,7 +67,7 @@ tests:
           - exp_labels: {severity: warning, platform: industryflow, backup: databases}
             exp_annotations:
               summary: "No restore rehearsal has ever passed"
-              description: "No database restore rehearsal has passed on this deployment, so its backups count toward no recovery objective. Run restore-rehearsal and schedule it: docs/operations/backup-and-recovery.md#restore-rehearsal."
+              description: "No database restore rehearsal has passed on this deployment, so its backups count toward no recovery objective. Run restore-rehearsal and schedule it: ADR-0032 dec 6."
               services: "restore-rehearsal, timescaledb, minio"
 
   # A weekly rehearsal keeps it quiet; one that stops passing is raised nine days after its last pass.
@@ -87,7 +87,7 @@ tests:
           - exp_labels: {severity: warning, backup: databases}
             exp_annotations:
               summary: "No restore rehearsal has passed recently"
-              description: "No databases restore rehearsal has passed in the last nine days; its backups count toward no recovery objective until one does. Its output names the table or object that differed: docs/operations/backup-and-recovery.md."
+              description: "No databases restore rehearsal has passed in the last nine days; its backups count toward no recovery objective until one does. Its output names the table or object that differed: ADR-0032."
               services: "restore-rehearsal, notebook-rehearsal, timescaledb, minio"
 
   # The device CA watch is graded by what it refuses (ADR-0007 dec 10): a CRL or CA certificate check
@@ -111,7 +111,7 @@ tests:
           - exp_labels: {severity: warning}
             exp_annotations:
               summary: "A device certificate is close to expiry"
-              description: "No device-certificate check has passed for 13h; docker logs industryflow-device-crl-refresh names the device. Renew it (docs/operations/device-mtls.md); an expired certificate is refused at ingestion."
+              description: "No device-certificate check has passed for 13h; docker logs industryflow-device-crl-refresh names the device. Renew it (ADR-0007); an expired certificate is refused at ingestion."
               services: "device-crl-refresh"
       - eval_time: 14h
         alertname: IndustryFlowDeviceCrlStale
@@ -139,7 +139,7 @@ tests:
           - exp_labels: {severity: critical}
             exp_annotations:
               summary: "Device CRL or CA certificate is close to expiry"
-              description: "No device CA check has passed for 13h; docker logs industryflow-device-crl-refresh names the CRL or certificate. Re-sign the CRL or replace the CA certificate (docs/operations/device-mtls.md). Once either expires, every device is refused at ingestion."
+              description: "No device CA check has passed for 13h; docker logs industryflow-device-crl-refresh names the CRL or certificate. Re-sign the CRL or replace the CA certificate (ADR-0007). Once either expires, every device is refused at ingestion."
               services: "device-crl-refresh, ingestion-edge"
       - eval_time: 14h
         alertname: IndustryFlowDeviceCertExpiring
@@ -160,7 +160,7 @@ tests:
           - exp_labels: {severity: critical, platform: industryflow, check: crl}
             exp_annotations:
               summary: "Device CRL or CA certificate is close to expiry"
-              description: "No device CA check has ever passed on this deployment; docker logs industryflow-device-crl-refresh names the CRL or certificate, or says the device CA is not initialized (docs/operations/device-mtls.md)."
+              description: "No device CA check has ever passed on this deployment; docker logs industryflow-device-crl-refresh names the CRL or certificate, or says the device CA is not initialized (ADR-0007)."
               services: "device-crl-refresh, ingestion-edge"
       - eval_time: 14h
         alertname: IndustryFlowDeviceCertExpiring
@@ -168,5 +168,5 @@ tests:
           - exp_labels: {severity: warning, platform: industryflow, check: certs}
             exp_annotations:
               summary: "A device certificate is close to expiry"
-              description: "No device-certificate check has ever passed on this deployment; docker logs industryflow-device-crl-refresh names the device or the register error (docs/operations/device-mtls.md)."
+              description: "No device-certificate check has ever passed on this deployment; docker logs industryflow-device-crl-refresh names the device or the register error (ADR-0007)."
               services: "device-crl-refresh"

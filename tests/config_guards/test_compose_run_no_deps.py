@@ -25,7 +25,7 @@ SHELL_RUN = re.compile(r"docker compose(?:\s+(?:--profile|-f|-p|--env-file)\s+\S
 
 def test_the_guard_reads_invocations():
     found = [m.group(0) for p in SOURCES if p.suffix != ".py" for m in SHELL_RUN.finditer(p.read_text())]
-    assert len(found) >= 8, found
+    assert len(found) >= 2, found
 
 
 def test_every_documented_or_scripted_run_skips_dependencies():

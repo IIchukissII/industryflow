@@ -5,13 +5,13 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Notebook utilities
 
-Python helpers for notebooks: `feature_config_builder` builds and registers feature configurations; `offline_baseline` re-derives the serving window baseline for training data ([ADR-0023](../../../../ADR/ADR-0023-stream-materialized-feature-engineering.md)).
+Python helpers for notebooks: `feature_config_builder` builds and registers feature configurations; `offline_baseline` re-derives the serving window baseline for training data (ADR-0023).
 
 ## Setup
 
 The package is not part of a notebook image. Put `services/ml_service/notebooks` on the kernel's
 `sys.path` and install the shared contracts package, which `offline_baseline` reads window widths and
-lateness from ([ADR-0006](../../../../ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) dec 7):
+lateness from (ADR-0006 dec 7):
 
 ```bash
 pip install <repo>/libs/industryflow_contracts
@@ -101,7 +101,7 @@ feature_config_id = config.register("<ml-service-url>", "<jwt>")
 feature_names = config.get_feature_names()
 ```
 
-A domain's sensor set lives in its extension ([ADR-0008](../../../../ADR/ADR-0008-extension-interface-for-a-domain-generic-core.md));
+A domain's sensor set lives in its extension (ADR-0008);
 `load_config("extensions/reference/reference_config.json")` starts from the reference pump.
 
 ## Troubleshooting
@@ -117,5 +117,5 @@ A domain's sensor set lives in its extension ([ADR-0008](../../../../ADR/ADR-000
 
 | Page | Topic |
 |---|---|
-| [ML and features](../../../../docs/architecture/ml-and-features.md) | Feature engineering, transformation types |
-| [extensions](../../../../docs/operations/extensions.md) | Domain extensions |
+| ML and features (ADR-0023) | Feature engineering, transformation types |
+| extensions (ADR-0008) | Domain extensions |

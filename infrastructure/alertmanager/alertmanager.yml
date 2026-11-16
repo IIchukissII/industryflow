@@ -5,7 +5,7 @@
 # Alertmanager for the platform alert rules (ADR-0016 dec 4). Receivers are the operator's: as
 # shipped, alerts are grouped and held, visible in the Alertmanager UI and Prometheus, and sent
 # nowhere. To notify, point ALERTMANAGER_CONFIG at a copy of this file with a receiver configured
-# (docs/operations/monitoring.md#alert-delivery).
+# (ADR-0016 dec 4).
 route:
   receiver: operator
   group_by: [alertname, topic]

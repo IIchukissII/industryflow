@@ -179,7 +179,7 @@ def test_the_documented_copy_back_reproduces_the_model_bucket(mirrored):
     scratch = f"ci-restore-{run}"
     root.aws("s3", "mb", f"s3://{scratch}")
     try:
-        # docs/operations/backup-and-recovery.md#model-artifacts, into a scratch bucket.
+        # ADR-0032 dec 6, into a scratch bucket.
         root.aws("s3", "sync", f"s3://{mirrored['backups']}/models/", f"s3://{scratch}/", "--exclude", "_absent.tsv")
         prefix = f"tenant_ci{run}/"
         assert root.listing(scratch, prefix) == root.listing(mirrored["models"], prefix)
