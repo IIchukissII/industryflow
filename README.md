@@ -64,6 +64,7 @@ The decision records, their manuals and the glossary are held outside this repos
 | Python style | `ruff` (`ruff.toml`), gated in CI (ADR-0026) |
 | Architecture | Code cites the decision it follows as `ADR-NNNN` or `ADR-NNNN dec N`; a change to a decision or its manual is proposed to the maintainer, never made in this repository (ADR-0000) |
 | Change | Tests, and the pages of this repository it affects, in the same pull request |
+| Checks | Every workflow's gate and the `meaning` commit status are required on `main`; `meaning` fails on a citation of a decision not in force, a relative link to nothing, or a manual naming code the commit lacks (ADR-0000 dec 10) |
 | Release | A `v*` tag on a box-validated commit of `main` (ADR-0026 dec 8-10) |
 
 ## License
