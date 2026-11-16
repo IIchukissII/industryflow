@@ -17,7 +17,7 @@ from harness import build_model, equipment, eventually, pretty, reading, send_re
 SENSORS = ("temp_1", "flow_1")
 
 # Built in the authoring image, which carries the serving stack's MLflow and scikit-learn: a model
-# without tree storage, saved in skops form with its input signature (docs/architecture/model-upload.md).
+# without tree storage, saved in skops form with its input signature (ADR-0030).
 BUILD = """
 import numpy as np, pandas as pd, mlflow.sklearn
 from mlflow.models import infer_signature

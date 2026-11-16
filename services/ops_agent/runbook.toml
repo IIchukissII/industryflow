@@ -33,7 +33,7 @@ source = "monitoring.md"
 [[alert]]
 name = "IndustryFlowCapabilityStoreRebuilt"
 fires_when = "The API gateway rebuilt the capability store in the last 15m: every suspension re-derived, every user signed out"
-handling = "Expected after a fresh install or the release that adds the record; otherwise the store was lost: `docker compose logs redis`, then [rebuild paths](backup-and-recovery.md#rebuild-paths)"
+handling = "Expected after a fresh install or the release that adds the record; otherwise the store was lost: `docker compose logs redis`, then rebuild paths (ADR-0032 dec 1)"
 source = "monitoring.md"
 
 [[alert]]
@@ -45,61 +45,61 @@ source = "monitoring.md"
 [[alert]]
 name = "IndustryFlowDeadLetteredReadings"
 fires_when = "A letter reached a `*.dlq` topic in the last 15m"
-handling = "[Dead-letter handling](dead-letters.md)"
+handling = "Dead-letter handling (ADR-0005)"
 source = "monitoring.md"
 
 [[alert]]
 name = "IndustryFlowTenantStatusStalled"
-fires_when = "A `tenant-status` partition that carried statuses within the hour has carried none for 5m; ingestion has forgotten every suspension ([ADR-0033](../../ADR/ADR-0033-tenant-lifecycle.md) dec 3)"
-handling = "`docker compose logs alert-service-detector` (`tenant-status publish failed`); `docker compose ps kafka`; [stream processing](../architecture/stream-processing.md)"
+fires_when = "A `tenant-status` partition that carried statuses within the hour has carried none for 5m; ingestion has forgotten every suspension (ADR-0033 dec 3)"
+handling = "`docker compose logs alert-service-detector` (`tenant-status publish failed`); `docker compose ps kafka`; stream processing (ADR-0033 dec 3)"
 source = "monitoring.md"
 
 [[alert]]
 name = "IndustryFlowCapabilityAuditBacklog"
 fires_when = "More than 1000 capability-use events wait to be recorded for 15m"
-handling = "The API gateway's logs (`capability audit writer`); [capability-use record](../architecture/notebooks.md#capability-use-record)"
+handling = "The API gateway's logs (`capability audit writer`); capability-use record (ADR-0042 dec 1-3, 5)"
 source = "monitoring.md"
 
 [[alert]]
 name = "IndustryFlowBackupStale"
 fires_when = "No `databases` or `notebooks` backup has completed for two days (Compose)"
-handling = "[Backup and disaster recovery](backup-and-recovery.md#running-backups); the job's output"
+handling = "Backup and disaster recovery (ADR-0032 dec 1); the job's output"
 source = "monitoring.md"
 
 [[alert]]
 name = "IndustryFlowBackupNeverCompleted"
 fires_when = "No database backup has ever completed, for a day (Compose)"
-handling = "Run and schedule `db-backup`: [running backups](backup-and-recovery.md#running-backups)"
+handling = "Run and schedule `db-backup`: running backups (ADR-0032 dec 1)"
 source = "monitoring.md"
 
 [[alert]]
 name = "IndustryFlowRestoreRehearsalStale"
 fires_when = "No restore rehearsal has passed for nine days (Compose)"
-handling = "[Restore rehearsal](backup-and-recovery.md#restore-rehearsal); its output names the table or object that differed"
+handling = "Restore rehearsal (ADR-0032 dec 6); its output names the table or object that differed"
 source = "monitoring.md"
 
 [[alert]]
 name = "IndustryFlowRestoreRehearsalNeverPassed"
 fires_when = "No database restore rehearsal has ever passed, for a week (Compose)"
-handling = "Run and schedule `restore-rehearsal`: [restore rehearsal](backup-and-recovery.md#restore-rehearsal)"
+handling = "Run and schedule `restore-rehearsal`: restore rehearsal (ADR-0032 dec 6)"
 source = "monitoring.md"
 
 [[alert]]
 name = "IndustryFlowDeviceCrlStale"
 fires_when = "No device CA `check` (CRLs and CA certificates) has passed for 13h, or none ever has; once one expires every device is refused (Compose; the chart raises it from `device-crl-check`)"
-handling = "`docker logs industryflow-device-crl-refresh` names it; [expiry watch](device-mtls.md#expiry-watch)"
+handling = "`docker logs industryflow-device-crl-refresh` names it; expiry watch (ADR-0007 dec 10)"
 source = "monitoring.md"
 
 [[alert]]
 name = "IndustryFlowDeviceCertExpiring"
 fires_when = "No `check-certs` has passed for 13h, or none ever has: a device's renewal is owed (Compose; the chart raises it from `device-cert-check`)"
-handling = "`docker logs industryflow-device-crl-refresh` names the device; renew it ([expiry watch](device-mtls.md#expiry-watch))"
+handling = "`docker logs industryflow-device-crl-refresh` names the device; renew it (ADR-0007 dec 10)"
 source = "monitoring.md"
 
 [[alert]]
 name = "IndustryFlowCapabilityEventsDropped"
 fires_when = "The writer acknowledged a capability-use event it could not record (unreadable, or refused by the database)"
-handling = "The API gateway's logs (`capability audit`) name each stream id; [capability-use record](../architecture/notebooks.md#capability-use-record)"
+handling = "The API gateway's logs (`capability audit`) name each stream id; capability-use record (ADR-0042 dec 1-3, 5)"
 source = "monitoring.md"
 
 [[symptom]]
@@ -129,7 +129,7 @@ source = "capacity.md"
 [[symptom]]
 symptom = "`box-e2e: could not remove <email>`"
 cause = "The cleanup could not reach the database"
-fix = "`$RUN api-gateway python /scripts/manage_users.py delete --email <email> --yes` ([user management](user-management.md))"
+fix = "`$RUN api-gateway python /scripts/manage_users.py delete --email <email> --yes` (ADR-0004)"
 source = "ci.md"
 
 [[symptom]]

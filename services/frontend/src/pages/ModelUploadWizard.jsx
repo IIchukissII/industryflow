@@ -192,7 +192,7 @@ function ModelUploadWizard({ onClose, onRegistered }) {
       // be PUT to from here — which is what an unconfigured deployment (no PUBLIC_BASE_URL) produces.
       const sampleUrl = new URL(Object.values(staged.urls)[0], window.location.href);
       if (sampleUrl.host !== window.location.host) {
-        return fail('stage', 'Browser upload is not configured for this deployment: the object store is not reachable at this origin. Upload from the CLI instead (docs/architecture/model-upload.md).');
+        return fail('stage', 'Browser upload is not configured for this deployment: the object store is not reachable at this origin. ADR-0030.');
       }
       mark('stage', 'ok');
 

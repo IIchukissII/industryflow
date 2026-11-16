@@ -25,7 +25,7 @@ x-api-gateway-build: &api-gateway-build
 
 # Spark checkpoint on object storage (ADR-0006). The driver reads/writes the same checkpoint as
 # the executors, so on a multi-worker cluster it must live on ONE store visible to all — MinIO
-# via S3A, not a local volume (docs/architecture/stream-processing.md). The job's SparkSession
+# via S3A, not a local volume (ADR-0006). The job's SparkSession
 # enables S3A when CHECKPOINT_LOCATION is an s3a:// URI. Set it to a local path to opt out.
 # The jobs authenticate with the checkpoint-only principal minio-init creates, never the root key:
 # it reaches the checkpoint bucket and nothing else (ADR-0025 dec 11). The job reads it under the
@@ -170,7 +170,7 @@ services:
   # and kept; its public half is re-derived from it on every run (services/api_gateway/dashboards_key.py).
   # The gateway's own image, which carries the crypto library, as root (to hand the private half to
   # the gateway's uid 10001) and with no network. The dashboards get the public half in a volume of
-  # their own. Rotation: docs/operations/monitoring.md#grafana.
+  # their own. Rotation: ADR-0016 dec 6, 7.
   dashboards-key-init:
     image: industryflow-api-gateway
     build: *api-gateway-build
@@ -1286,7 +1286,7 @@ services:
 
   # Alertmanager - routes the platform alerts Prometheus fires (ADR-0016 dec 4). Ships with no
   # receiver: alerts are visible in its UI and sent nowhere until the operator configures one
-  # (ALERTMANAGER_CONFIG, docs/operations/monitoring.md#alert-delivery).
+  # (ALERTMANAGER_CONFIG, ADR-0016 dec 4).
   alertmanager:
     image: prom/alertmanager:v0.35.0@sha256:e638797febd034838eca8b98cdbd46f951e9bf7f178777aa8669167406a9946c
     container_name: industryflow-alertmanager
@@ -1311,7 +1311,7 @@ services:
   # Infrastructure agent (ADR-0045, ADR-0046): a receiver for the operator's alert router that explains
   # each platform alert in a note, written to Loki, which the Grafana dashboards draw as annotations. Off unless
   # the `ops-agent` profile runs AND the operator's Alertmanager copy names it as a webhook receiver
-  # (docs/operations/monitoring.md#infrastructure-agent). It reaches Prometheus, Loki, Alertmanager and
+  # (ADR-0045 dec 1-6, 8). It reaches Prometheus, Loki, Alertmanager and
   # the model endpoint only: no Grafana, database, broker, Docker socket or tenant credential. It
   # refuses to start without OPS_AGENT_WEBHOOK_SECRET (at least 32 characters).
   ops-agent:
@@ -1545,7 +1545,7 @@ services:
   #   one-off:   docker compose run --rm db-backup
   #   restore:   docker compose run --rm --entrypoint db-restore.sh db-backup <db> latest
   #   schedule:  add a host cron calling the one-off command.
-  # See docs/operations/backup-and-recovery.md.
+  # See ADR-0032.
   # ==========================================================================
   db-backup:
     build:
@@ -1598,7 +1598,7 @@ services:
   # Restore rehearsal (ADR-0032 dec 6): restores the latest dumps into scratch databases
   # (<db>_rehearsal, on the same server), compares every table's rows with the rows the dump holds,
   # drops them, and reads a sample of the mirrored objects back. Weekly, like
-  # db-backup from a host cron: docs/operations/backup-and-recovery.md#restore-rehearsal.
+  # db-backup from a host cron: ADR-0032 dec 6.
   #   one-off:   docker compose --profile backup run --rm --no-deps restore-rehearsal
   restore-rehearsal:
     image: industryflow-db-backup

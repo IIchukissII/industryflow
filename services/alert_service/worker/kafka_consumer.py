@@ -258,7 +258,7 @@ class AlertKafkaConsumer:
         try:
             await self.send(
                 self._dlq_topic,
-                # The envelope both dead-letter producers write (docs/operations/dead-letters.md).
+                # The envelope both dead-letter producers write (ADR-0005).
                 value=json.dumps({
                     "original": original,
                     "reason": reason,

@@ -74,7 +74,7 @@ async def test_runbook_rows_come_from_the_real_runbooks(config):
 async def test_the_alert_table_row_is_found_by_the_exact_name(config):
     server = tools.build_server(config(), _transport([]))
     out = await _call(server, "alert_runbook", {"alertname": "IndustryFlowDeadLetteredReadings"})
-    assert out["row"]["source"] == "monitoring.md" and "dead-letters.md" in out["row"]["handling"]
+    assert out["row"]["source"] == "monitoring.md" and "ADR-0005" in out["row"]["handling"]
     assert (await _call(server, "alert_runbook", {"alertname": "NoSuchAlert"}))["row"] is None
 
 

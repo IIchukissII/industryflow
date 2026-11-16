@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Dead-letter inspection and replay (ADR-0005; docs/operations/dead-letters.md).
+# Dead-letter inspection and replay (ADR-0005; ADR-0005).
 #
 # Runs inside the Kafka container, with its console tools and python3; nothing is installed:
 #   docker compose exec -T kafka sh -s -- <command> < scripts/dead-letters.sh

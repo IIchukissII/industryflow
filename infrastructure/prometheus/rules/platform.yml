@@ -92,7 +92,7 @@ groups:
           severity: warning
         annotations:
           summary: "The tenant-status stream has stalled"
-          description: "Partition {{ $labels.partition }} of tenant-status has carried no status for 5m. Ingestion has forgotten every suspension and lets those devices through; the writers still refuse them: docs/operations/monitoring.md."
+          description: "Partition {{ $labels.partition }} of tenant-status has carried no status for 5m. Ingestion has forgotten every suspension and lets those devices through; the writers still refuse them: ADR-0033 dec 3."
           services: "alert-service-detector, kafka"
       - alert: IndustryFlowCapabilityAuditBacklog
         # The capability-use record's writer is behind (ADR-0042 dec 7): events not yet written are
@@ -130,5 +130,5 @@ groups:
           severity: warning
         annotations:
           summary: "Readings were dead-lettered"
-          description: "Letters reached {{ $labels.topic }} in the last 15m. They raised no alert and were not written: docs/operations/dead-letters.md."
+          description: "Letters reached {{ $labels.topic }} in the last 15m. They raised no alert and were not written: ADR-0005."
           services: "spark-streaming, alert-service-detector"

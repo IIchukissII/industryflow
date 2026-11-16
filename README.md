@@ -21,20 +21,20 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 | Capability | Implementation | Decision |
 |---|---|---|
-| Device ingestion | mTLS edge; tenant taken from the device certificate | [ADR-0002](ADR/ADR-0002-ingestion-authentication-and-device-identity.md), [ADR-0007](ADR/ADR-0007-device-certificate-authority.md) |
-| Stream processing | Kafka → Spark → TimescaleDB, at-least-once with idempotent writes | [ADR-0005](ADR/ADR-0005-kafka-delivery-semantics.md), [ADR-0006](ADR/ADR-0006-spark-windowing-and-idempotent-writes.md) |
-| Multi-tenancy | Schema-per-tenant; tenants provisioned at runtime | [ADR-0003](ADR/ADR-0003-tenant-to-schema-resolution.md), [ADR-0033](ADR/ADR-0033-tenant-lifecycle.md) |
-| Schema migrations | One ordered, idempotent script sequence applied by a runner and recorded in a ledger, fresh and live alike | [ADR-0034](ADR/ADR-0034-platform-schema-migrations.md) |
-| Anomaly detection | Feature transforms and detectors over MLflow-registered models; a reading missing an input is refused, never scored on a substitute; a superuser's kill switch for stateful features, every flip recorded | [ADR-0023](ADR/ADR-0023-stream-materialized-feature-engineering.md), [ADR-0028](ADR/ADR-0028-declared-score-semantics-and-the-model-adapter-contract.md), [ADR-0024](ADR/ADR-0024-stateful-feature-kill-switch.md), [ADR-0043](ADR/ADR-0043-a-platform-switch-is-flipped-by-a-platform-superuser-through-the-api-gateway-and-every-flip-is-recorded.md), [ADR-0044](ADR/ADR-0044-a-model-is-scored-on-complete-computed-input-or-not-at-all.md) |
-| Model lifecycle | Notebook versions promoted, or external models uploaded, through one registration gate; no author code on the serving side; drift baseline from a supplied sample, scores derived at deployment | [ADR-0027](ADR/ADR-0027-the-model-artifact-declares-the-serving-environment-satisfies-or-refuses.md), [ADR-0035](ADR/ADR-0035-drift-baseline.md), [ADR-0037](ADR/ADR-0037-no-model-load-on-the-serving-side-runs-author-code-whatever-the-provenance.md), [ADR-0040](ADR/ADR-0040-a-notebook-registered-model-version-becomes-a-platform-model-by-promotion.md) |
-| Alerting | Threshold, ML and statistical (model-drift) rules; operator labels | [ADR-0021](ADR/ADR-0021-model-drift-monitoring-the-statistical-alert-lane.md), [ADR-0022](ADR/ADR-0022-concept-drift-operator-feedback.md), [ADR-0031](ADR/ADR-0031-the-api-gateway-as-the-single-owner-of-the-alerting-http-surface.md) |
-| Authentication | HTTPS edge, httpOnly-cookie + CSRF platform sessions, bearer tokens for API clients; a session's tokens refused once it ends; password guessing slowed per account and source; a first-run superuser held to a password change | [ADR-0004](ADR/ADR-0004-api-authentication-session-model-and-transport-security.md) |
-| Embedded notebooks | Per-user notebook hub with capability handles, SQL proxy, tracking gateway; every capability's use recorded; experiments browsed in the console | [ADR-0011](ADR/ADR-0011-embedded-notebooks-for-analytics-and-experimentation.md), [ADR-0015](ADR/ADR-0015-notebook-capability-minting-and-the-sql-access-proxy.md), [ADR-0042](ADR/ADR-0042-capability-use-is-recorded-by-the-planes-that-resolve-it-into-one-durable-record.md) |
-| Cold layer | Parquet history in object storage | [ADR-0025](ADR/ADR-0025-cold-layer-for-historical-telemetry-in-an-open-columnar-format.md) |
-| Extensions | Domain feature transforms and detectors as plugins | [ADR-0008](ADR/ADR-0008-extension-interface-for-a-domain-generic-core.md), [ADR-0010](ADR/ADR-0010-extension-plugin-mechanism.md) |
-| Deployment | Docker Compose (single host), Helm chart (Kubernetes) | [ADR-0009](ADR/ADR-0009-kubernetes-deployment-packaged-with-helm.md) |
-| Observability | Prometheus, Grafana, Loki; platform alert rules shared by Compose and the chart, routed by Alertmanager | [ADR-0016](ADR/ADR-0016-observability-and-monitoring-integration.md) |
-| Operator agents | Agents as services: a graph behind a trigger-in, note-out contract, tools over MCP, the model over an API; the infrastructure agent explains platform alerts on the operator's dashboards | [ADR-0045](ADR/ADR-0045-agents.md), [ADR-0046](ADR/ADR-0046-the-infrastructure-agent-explains-platform-alerts-to-operators.md) |
+| Device ingestion | mTLS edge; tenant taken from the device certificate | ADR-0002, ADR-0007 |
+| Stream processing | Kafka → Spark → TimescaleDB, at-least-once with idempotent writes | ADR-0005, ADR-0006 |
+| Multi-tenancy | Schema-per-tenant; tenants provisioned at runtime | ADR-0003, ADR-0033 |
+| Schema migrations | One ordered, idempotent script sequence applied by a runner and recorded in a ledger, fresh and live alike | ADR-0034 |
+| Anomaly detection | Feature transforms and detectors over MLflow-registered models; a reading missing an input is refused, never scored on a substitute; a superuser's kill switch for stateful features, every flip recorded | ADR-0023, ADR-0028, ADR-0024, ADR-0043, ADR-0044 |
+| Model lifecycle | Notebook versions promoted, or external models uploaded, through one registration gate; no author code on the serving side; drift baseline from a supplied sample, scores derived at deployment | ADR-0027, ADR-0035, ADR-0037, ADR-0040 |
+| Alerting | Threshold, ML and statistical (model-drift) rules; operator labels | ADR-0021, ADR-0022, ADR-0031 |
+| Authentication | HTTPS edge, httpOnly-cookie + CSRF platform sessions, bearer tokens for API clients; a session's tokens refused once it ends; password guessing slowed per account and source; a first-run superuser held to a password change | ADR-0004 |
+| Embedded notebooks | Per-user notebook hub with capability handles, SQL proxy, tracking gateway; every capability's use recorded; experiments browsed in the console | ADR-0011, ADR-0015, ADR-0042 |
+| Cold layer | Parquet history in object storage | ADR-0025 |
+| Extensions | Domain feature transforms and detectors as plugins | ADR-0008, ADR-0010 |
+| Deployment | Docker Compose (single host), Helm chart (Kubernetes) | ADR-0009 |
+| Observability | Prometheus, Grafana, Loki; platform alert rules shared by Compose and the chart, routed by Alertmanager | ADR-0016 |
+| Operator agents | Agents as services: a graph behind a trigger-in, note-out contract, tools over MCP, the model over an API; the infrastructure agent explains platform alerts on the operator's dashboards | ADR-0045, ADR-0046 |
 
 ## Technology
 
@@ -52,19 +52,17 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 | Page | Covers |
 |---|---|
-| [docs/getting-started.md](docs/getting-started.md) | Running the Compose stack |
 | [docs/README.md](docs/README.md) | Index of every page |
-| [ADR/](ADR/), [ADR/GLOSSARY.md](ADR/GLOSSARY.md) | Decisions and vocabulary |
 
 ## Contributing
 
 | Step | Rule |
 |---|---|
 | Branch | From `main` |
-| Python style | `ruff` (`ruff.toml`), gated in CI ([CI](docs/operations/ci.md)) |
-| Architecture | Decisions are ADRs ([ADR-0000](ADR/ADR-0000-decision-records-and-the-single-source-of-truth.md)) |
+| Python style | `ruff` (`ruff.toml`), gated in CI (ADR-0026) |
+| Architecture | Decisions are ADRs (ADR-0000) |
 | Change | Tests and the affected docs in the same pull request |
-| Release | A `v*` tag on a box-validated commit of `main` ([box validation and releases](docs/operations/ci.md#box-validation-and-releases), [ADR-0026](ADR/ADR-0026-release-model.md)) |
+| Release | A `v*` tag on a box-validated commit of `main` (ADR-0026 dec 8-10) |
 
 ## License
 
