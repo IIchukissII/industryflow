@@ -36,6 +36,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 | Observability | Prometheus, Grafana, Loki; platform alert rules shared by Compose and the chart, routed by Alertmanager | ADR-0016 |
 | Operator agents | Agents as services: a graph behind a trigger-in, note-out contract, tools over MCP, the model over an API; the infrastructure agent explains platform alerts on the operator's dashboards | ADR-0045, ADR-0046 |
 
+The decision records, their manuals and the glossary are held outside this repository (ADR-0000).
+
 ## Technology
 
 | Layer | Components |
@@ -52,7 +54,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 | Page | Covers |
 |---|---|
-| [docs/README.md](docs/README.md) | Index of every page |
+| [docs/README.md](docs/README.md) | Index of the pages in this repository |
 
 ## Contributing
 
@@ -60,8 +62,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 |---|---|
 | Branch | From `main` |
 | Python style | `ruff` (`ruff.toml`), gated in CI (ADR-0026) |
-| Architecture | Decisions are ADRs (ADR-0000) |
-| Change | Tests and the affected docs in the same pull request |
+| Architecture | Code cites the decision it follows as `ADR-NNNN` or `ADR-NNNN dec N`; a change to a decision or its manual is proposed to the maintainer, never made in this repository (ADR-0000) |
+| Change | Tests, and the pages of this repository it affects, in the same pull request |
 | Release | A `v*` tag on a box-validated commit of `main` (ADR-0026 dec 8-10) |
 
 ## License
