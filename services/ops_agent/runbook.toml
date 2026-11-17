@@ -3,245 +3,245 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # The runbook rows the infrastructure agent reads (ADR-0046 dec 9): an alert row for every platform rule,
-# read by the alert's exact name, and symptom rows matched by shared words. `source` names the runbook the
-# row belongs to.
+# read by the alert's exact name, and symptom rows matched by shared words. `follows` cites the decision the
+# row follows.
 
 [[alert]]
 name = "IndustryFlowTargetDown"
 fires_when = "A scrape target is down for 5m"
 handling = "`docker compose ps`; the service's logs"
-source = "monitoring.md"
+follows = "ADR-0016 dec 1"
 
 [[alert]]
 name = "IndustryFlowPostgresDown"
 fires_when = "`postgres-exporter` cannot reach TimescaleDB for 5m"
 handling = "`docker compose logs timescaledb`"
-source = "monitoring.md"
+follows = "ADR-0016 dec 2"
 
 [[alert]]
 name = "IndustryFlowRedisDown"
 fires_when = "`redis-exporter` cannot reach Redis for 5m"
 handling = "`docker compose logs redis`"
-source = "monitoring.md"
+follows = "ADR-0016 dec 2"
 
 [[alert]]
 name = "IndustryFlowRedisMemoryHigh"
 fires_when = "Redis above 80% of its `maxmemory` for 10m; it never evicts, so at the limit mints, sign-ins and cache writes fail"
 handling = "`redis-cli info memory`; `redis-cli --bigkeys`; the capability-use stream's backlog (`capability_audit_backlog`)"
-source = "monitoring.md"
+follows = "ADR-0016 dec 1"
 
 [[alert]]
 name = "IndustryFlowCapabilityStoreRebuilt"
 fires_when = "The API gateway rebuilt the capability store in the last 15m: every suspension re-derived, every user signed out"
 handling = "Expected after a fresh install or the release that adds the record; otherwise the store was lost: `docker compose logs redis`, then rebuild paths (ADR-0032 dec 1)"
-source = "monitoring.md"
+follows = "ADR-0032 dec 1"
 
 [[alert]]
 name = "IndustryFlowKafkaConsumerLag"
 fires_when = "A consumer group lags more than 1000 for 10m"
 handling = "The consumer's logs"
-source = "monitoring.md"
+follows = "ADR-0016 dec 1"
 
 [[alert]]
 name = "IndustryFlowDeadLetteredReadings"
 fires_when = "A letter reached a `*.dlq` topic in the last 15m"
 handling = "Dead-letter handling (ADR-0005)"
-source = "monitoring.md"
+follows = "ADR-0005 dec 3"
 
 [[alert]]
 name = "IndustryFlowTenantStatusStalled"
 fires_when = "A `tenant-status` partition that carried statuses within the hour has carried none for 5m; ingestion has forgotten every suspension (ADR-0033 dec 3)"
 handling = "`docker compose logs alert-service-detector` (`tenant-status publish failed`); `docker compose ps kafka`; stream processing (ADR-0033 dec 3)"
-source = "monitoring.md"
+follows = "ADR-0033 dec 3"
 
 [[alert]]
 name = "IndustryFlowCapabilityAuditBacklog"
 fires_when = "More than 1000 capability-use events wait to be recorded for 15m"
 handling = "The API gateway's logs (`capability audit writer`); capability-use record (ADR-0042 dec 1-3, 5)"
-source = "monitoring.md"
+follows = "ADR-0042 dec 7"
 
 [[alert]]
 name = "IndustryFlowBackupStale"
 fires_when = "No `databases` or `notebooks` backup has completed for two days (Compose)"
 handling = "Backup and disaster recovery (ADR-0032 dec 1); the job's output"
-source = "monitoring.md"
+follows = "ADR-0032 dec 2"
 
 [[alert]]
 name = "IndustryFlowBackupNeverCompleted"
 fires_when = "No database backup has ever completed, for a day (Compose)"
 handling = "Run and schedule `db-backup`: running backups (ADR-0032 dec 1)"
-source = "monitoring.md"
+follows = "ADR-0032 dec 2"
 
 [[alert]]
 name = "IndustryFlowRestoreRehearsalStale"
 fires_when = "No restore rehearsal has passed for nine days (Compose)"
 handling = "Restore rehearsal (ADR-0032 dec 6); its output names the table or object that differed"
-source = "monitoring.md"
+follows = "ADR-0032 dec 6"
 
 [[alert]]
 name = "IndustryFlowRestoreRehearsalNeverPassed"
 fires_when = "No database restore rehearsal has ever passed, for a week (Compose)"
 handling = "Run and schedule `restore-rehearsal`: restore rehearsal (ADR-0032 dec 6)"
-source = "monitoring.md"
+follows = "ADR-0032 dec 6"
 
 [[alert]]
 name = "IndustryFlowDeviceCrlStale"
 fires_when = "No device CA `check` (CRLs and CA certificates) has passed for 13h, or none ever has; once one expires every device is refused (Compose; the chart raises it from `device-crl-check`)"
 handling = "`docker logs industryflow-device-crl-refresh` names it; expiry watch (ADR-0007 dec 10)"
-source = "monitoring.md"
+follows = "ADR-0007 dec 8"
 
 [[alert]]
 name = "IndustryFlowDeviceCertExpiring"
 fires_when = "No `check-certs` has passed for 13h, or none ever has: a device's renewal is owed (Compose; the chart raises it from `device-cert-check`)"
 handling = "`docker logs industryflow-device-crl-refresh` names the device; renew it (ADR-0007 dec 10)"
-source = "monitoring.md"
+follows = "ADR-0007 dec 10"
 
 [[alert]]
 name = "IndustryFlowCapabilityEventsDropped"
 fires_when = "The writer acknowledged a capability-use event it could not record (unreadable, or refused by the database)"
 handling = "The API gateway's logs (`capability audit`) name each stream id; capability-use record (ADR-0042 dec 1-3, 5)"
-source = "monitoring.md"
+follows = "ADR-0042 dec 4"
 
 [[symptom]]
 symptom = "Client p95 in seconds and achieved rate below the offered rate; server `/ingest` p95 low"
 cause = "A generator process above 125 readings/s lags its own event loop"
 fix = "One `loadgen.py` process per 125 readings/s"
-source = "capacity.md"
+follows = "ADR-0009 dec 6"
 
 [[symptom]]
 symptom = "Timeouts in bursts; Docker host CPU drops at the same time"
 cause = "Load machine's network dropped out (Wi-Fi)"
 fix = "Wired network"
-source = "capacity.md"
+follows = "ADR-0009 dec 6"
 
 [[symptom]]
 symptom = "Edge latency rises with no server-side change"
 cause = "`docker stats` polling on the Docker host starves the ingest edge"
 fix = "Sample with `sample_host.sh` only"
-source = "capacity.md"
+follows = "ADR-0009 dec 6"
 
 [[symptom]]
 symptom = "A container missing from `analyze.py` output"
 cause = "Started after the sampler"
 fix = "Restart the sampler after the stack is up"
-source = "capacity.md"
+follows = "ADR-0009 dec 6"
 
 [[symptom]]
 symptom = "`box-e2e: could not remove <email>`"
 cause = "The cleanup could not reach the database"
 fix = "`$RUN api-gateway python /scripts/manage_users.py delete --email <email> --yes` (ADR-0004)"
-source = "ci.md"
+follows = "ADR-0026 dec 10"
 
 [[symptom]]
 symptom = "Device journey times out"
 cause = "Spark streaming not running"
 fix = "`docker compose up -d spark-master spark-worker spark-streaming`"
-source = "ci.md"
+follows = "ADR-0026 dec 10"
 
 [[symptom]]
 symptom = "`box-deploy: \u2026 GB free after pruning \u2026 refusing`"
 cause = "Docker's disk is full beyond build cache"
 fix = "Free space (old images, volumes of removed services), or deploy with a lower `BOX_MIN_FREE_GB` knowingly"
-source = "ci.md"
+follows = "ADR-0026 dec 8"
 
 [[symptom]]
 symptom = "Release fails at `The commit is box-validated`"
 cause = "No `box-e2e` success on that commit (ADR-0026 dec 9)"
 fix = "`scripts/box-validate.sh` after deploying it"
-source = "ci.md"
+follows = "ADR-0026 dec 9"
 
 [[symptom]]
 symptom = "Every device refused"
 cause = "A CRL expired"
 fix = "`device-ca.sh crl` (and `root-crl` if the root CRL expired); on Kubernetes republish the Secret"
-source = "device-mtls.md"
+follows = "ADR-0007 dec 8"
 
 [[symptom]]
 symptom = "`device-ca.sh check` warns on the root CRL far ahead of the yearly ceremony"
 cause = "Root CRL signed with a shorter validity than `ROOT_CRL_DAYS`"
 fix = "`scripts/device-ca.sh root-crl`, then `docker compose up -d device-crl-refresh ingestion-edge`"
-source = "device-mtls.md"
+follows = "ADR-0007 dec 8"
 
 [[symptom]]
 symptom = "`device-crl-refresh` unhealthy, CRLs fresh"
 cause = "A CA certificate is inside its warning window"
 fix = "The root ceremony, named in the log"
-source = "device-mtls.md"
+follows = "ADR-0007 dec 10"
 
 [[symptom]]
 symptom = "`IndustryFlowDeviceCertExpiring` firing"
 cause = "A device's newest unrevoked certificate is inside `CERT_WARN_DAYS`"
 fix = "Renew the device named in the log (`issue` with its CSR)"
-source = "device-mtls.md"
+follows = "ADR-0007 dec 10"
 
 [[symptom]]
 symptom = "`check-certs` fails: register names CRL X, published CRL is Y"
 cause = "The CRL and the register were published separately"
 fix = "Publish `ca.crl`, `issued.tsv` and `issued.tsv.sig` together"
-source = "device-mtls.md"
+follows = "ADR-0007 dec 9"
 
 [[symptom]]
 symptom = "`device-crl-refresh` exits: device CA not initialized"
 cause = "No `deploy/device-ca/intermediate`"
 fix = "`scripts/device-ca.sh init`"
-source = "device-mtls.md"
+follows = "ADR-0007 dec 1"
 
 [[symptom]]
 symptom = "A deletion waits on `device_certificates`"
 cause = "The tenant's devices are not revoked, or the CRL and register were not republished since the request"
 fix = "`scripts/device-ca.sh revoke-tenant <company-uuid>`; on Kubernetes republish the Secret"
-source = "device-mtls.md"
+follows = "ADR-0007 dec 9"
 
 [[symptom]]
 symptom = "`tenant-delete` fails: `No such file` for `issued.tsv`"
 cause = "CA files from before the register"
 fix = "`scripts/device-ca.sh crl`; on Kubernetes republish the Secret"
-source = "device-mtls.md"
+follows = "ADR-0007 dec 9"
 
 [[symptom]]
 symptom = "Edit to `prometheus.yml` not applied"
 cause = "The single-file bind mount keeps the old inode when an editor replaces the file"
 fix = "`docker exec industryflow-prometheus promtool check config /etc/prometheus/prometheus.yml`; `docker compose restart prometheus`"
-source = "monitoring.md"
+follows = "ADR-0016 dec 4"
 
 [[symptom]]
 symptom = "`redis_up` is `0`"
 cause = "Redis down (`docker exec industryflow-redis redis-cli ping`)"
 fix = "Start `redis`, then the exporter"
-source = "monitoring.md"
+follows = "ADR-0016 dec 2"
 
 [[symptom]]
 symptom = "`pg_up` is `0`"
 cause = "`metrics_user` has no password, or the CA mount for `verify-full` is missing (`docker logs industryflow-postgres-exporter`)"
 fix = "Set the password as `12-metrics-role.sql` describes; check the CA mount"
-source = "monitoring.md"
+follows = "ADR-0016 dec 3"
 
 [[symptom]]
 symptom = "Dashboards missing"
 cause = "Dashboard files are bind-mounted one by one in `docker-compose.yml`; a new JSON file has no mount"
 fix = "Add its mount, then `docker compose up -d grafana`"
-source = "monitoring.md"
+follows = "ADR-0016 dec 1"
 
 [[symptom]]
 symptom = "No logs in Loki"
 cause = "Container neither named `industryflow-*` nor on `industryflow-network`, `industryflow-notebook-kernels` or `industryflow-ops-agent`, or promtail down (`docker logs industryflow-promtail`)"
 fix = "Give the service a `container_name` `industryflow-<service>`; `curl -s localhost:3100/ready`"
-source = "monitoring.md"
+follows = "ADR-0016 dec 4"
 
 [[symptom]]
 symptom = "LogQL parse error"
 cause = "Unquoted label value or range without a unit"
 fix = "`{job=\"docker\"}`, `[5m]`"
-source = "monitoring.md"
+follows = "ADR-0016 dec 4"
 
 [[symptom]]
 symptom = "Incident note reads \"The model could not write this note\""
 cause = "The model key is missing or wrong, the endpoint is unreachable, or the model declined; the note's `error` field names it"
 fix = "Set `ANTHROPIC_API_KEY` or `OPS_AGENT_MODEL_BASE_URL` / `OPS_AGENT_MODEL_API_KEY`; `docker compose logs ops-agent`"
-source = "monitoring.md"
+follows = "ADR-0046 dec 7"
 
 [[symptom]]
 symptom = "No incident note for a firing alert"
 cause = "The webhook is missing from `ALERTMANAGER_CONFIG`, its secret differs (`401` in `docker compose logs alertmanager`), or the `ops-agent` profile is not up"
-fix = "Add the receiver as in [Infrastructure agent](#infrastructure-agent); `docker compose --profile ops-agent up -d ops-agent`"
-source = "monitoring.md"
+fix = "Add the receiver to `ALERTMANAGER_CONFIG` (ADR-0046 dec 1); `docker compose --profile ops-agent up -d ops-agent`"
+follows = "ADR-0046 dec 1"
