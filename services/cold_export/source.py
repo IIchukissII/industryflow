@@ -152,9 +152,12 @@ class PostgresMeasurementSource:
         with closing(self._connect()) as conn, conn.cursor() as cur:
             # Verified identity: the registry the trusted job iterates, not a request value. The
             # stored schema_name is returned only to be checked against the canonical derivation.
+            # Active tenants only, as the stream writers read them (ADR-0033 dec 3): a deleted
+            # tenant's tombstone names a dropped schema, and a tenant with a deletion request is
+            # suspended, so its history is never written back after the deletion purged it.
             cur.execute(
                 "SELECT company_id, schema_name FROM public.companies "
-                "WHERE schema_name IS NOT NULL ORDER BY company_id"
+                "WHERE schema_name IS NOT NULL AND is_active ORDER BY company_id"
             )
             return [Tenant(company_id=str(cid), schema_name=schema) for cid, schema in cur.fetchall()]
 
