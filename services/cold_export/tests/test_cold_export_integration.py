@@ -145,6 +145,24 @@ def _adapters():
     return PostgresMeasurementSource(cfg.db), S3ColdStore(cfg.store)
 
 
+def test_only_active_tenants_are_listed(tenant, admin_cur):
+    """On the box every run failed: deleted tenants' tombstones name a dropped schema (ADR-0033 dec 8).
+    A suspended tenant, as one with a deletion request is, is not exported either (ADR-0033 dec 3, 4)."""
+    source, _ = _adapters()
+    tomb, suspended = str(uuid.uuid4()), str(uuid.uuid4())
+    try:
+        for cid in (tomb, suspended):
+            admin_cur.execute(
+                "INSERT INTO public.companies (company_id, company_name, schema_name, is_active) "
+                "VALUES (%s, %s, %s, false)", (cid, f"e2e-cold-{cid}", "tenant_" + cid.replace("-", "_")))
+        admin_cur.execute("UPDATE public.companies SET deleted_at = now() WHERE company_id = %s", (tomb,))
+        listed = {t.company_id for t in source.list_tenants()}
+        assert tenant["cid"] in listed, "the active tenant is listed"
+        assert not listed & {tomb, suspended}, "an inactive tenant is listed"
+    finally:
+        admin_cur.execute("DELETE FROM public.companies WHERE company_id IN (%s, %s)", (tomb, suspended))
+
+
 def test_export_verify_drop_end_to_end(tenant):
     cur, cid, schema, day = tenant["cur"], tenant["cid"], tenant["schema"], tenant["day"]
     assert _count_day(cur, schema, day) == 5  # seeded

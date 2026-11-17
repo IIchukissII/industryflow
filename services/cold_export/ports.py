@@ -80,7 +80,8 @@ class MeasurementSource(Protocol):
         ...
 
     def list_tenants(self) -> list[Tenant]:
-        """Enumerate tenants from the trusted registry, not from any request (ADR-0025 dec 5)."""
+        """Enumerate the active tenants from the trusted registry, not from any request (ADR-0025 dec 5,
+        ADR-0033 dec 3)."""
         ...
 
     def exportable_days(self, schema_name: str, older_than: date) -> list[date]:
