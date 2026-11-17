@@ -66,14 +66,32 @@ def test_the_guard_sees_the_database_clients():
     assert {"api-gateway", "tenant-delete", "notebook-sql-proxy"} <= clients, clients
 
 
+def _ledger_check(name: str) -> dict | None:
+    """A run-only job's own ledger check (ADR-0034 dec 10): `<job>-schema-ready`, reading the ledger as
+    the job's role with the runner's `verify --wait`, or, for the tracking database the ledger does not
+    cover, waiting for the job's own login."""
+    check = COMPOSE.get(f"{name}-schema-ready")
+    if not check:
+        return None
+    verifies = check.get("entrypoint") == ["sh", "/opt/migrate.sh"] and check.get("command") == ["verify", "--wait"]
+    logs_in = check["environment"].get("PGDATABASE") == "mlflow" and "SELECT 1" in " ".join(check.get("command"))
+    return check if verifies or logs_in else None
+
+
 @pytest.mark.parametrize("name", sorted(n for n, s in COMPOSE.items() if _uses_database(s)))
 def test_every_compose_database_client_waits_for_the_runner(name):
-    if name in COMPOSE_UNGATED:
-        pytest.skip("ungated by design")
+    if name in COMPOSE_UNGATED or name.endswith("-schema-ready"):
+        pytest.skip("ungated by design, or the wait itself")
     deps = COMPOSE[name].get("depends_on") or {}
-    assert isinstance(deps, dict) and deps.get("db-migrate", {}).get("condition") == (
-        "service_completed_successfully"
-    ), f"{name} uses the database but does not wait for db-migrate to complete"
+    assert isinstance(deps, dict), name
+    if deps.get("db-migrate", {}).get("condition") == "service_completed_successfully":
+        return
+    check = _ledger_check(name)
+    assert check and deps.get(f"{name}-schema-ready", {}).get("condition") == "service_completed_successfully", (
+        f"{name} uses the database but waits neither for db-migrate nor for its own ledger check")
+    env = COMPOSE[name].get("environment") or {}
+    assert any(check["environment"]["PGUSER"] in str(v) for v in env.values()), (
+        f"{name}'s ledger check reads as {check['environment']['PGUSER']}, not as the job's own role")
 
 
 def test_the_runner_is_the_only_applier_on_compose():
