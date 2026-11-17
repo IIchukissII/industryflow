@@ -13,7 +13,7 @@ serves the full reference at `/docs` and `/openapi.json`; ports: components (ADR
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | | `/auth/*`, `/users/me` | see page | Authentication (ADR-0004 dec 2) |
-| | `/api/users`, `/api/companies` | `admin` | User management (ADR-0004 dec 5) |
+| | `/api/users`, `/api/companies` | `admin`, own tenant; company create, activation change, delete and deletion: superuser | User management (ADR-0004 dec 5) |
 | GET | `/api/capability-use` | `admin` (own tenant), superuser (any) | Capability-use record (ADR-0042 dec 1-3, 5) |
 | GET | `/api/platform/switches` | superuser | Kill-switch runbook (ADR-0024 dec 2, 7) |
 | PUT | `/api/platform/switches/{key}` | superuser; body `{"value": true\|false}` | Kill-switch runbook (ADR-0024 dec 2, 7) |
@@ -65,4 +65,4 @@ The notebook hub is on an origin of its own, not a path of this one (ADR-0048 de
 | API client auth | `Authorization: Bearer <access token>` | authentication (ADR-0004 dec 2) |
 | Notebook auth | Capability handle in `X-IF-Capability` | ADR-0015 |
 | Service to service | `X-Internal-Service-Token` | authentication (ADR-0004 dec 4) |
-| Tenancy | Tenant resolved from the verified identity (JWT claim, capability handle, device-certificate SAN); a `company_id` in a request body is ignored, except on internal-token calls to `/api/inference/predict` and `/api/drift/evaluate` | ADR-0003 |
+| Tenancy | Tenant resolved from the verified identity (JWT claim, capability handle, device-certificate SAN); a `company_id` in a request body is ignored, except on internal-token calls to `/api/inference/predict` and `/api/drift/evaluate`, and on a superuser's `POST /api/users` | ADR-0003, ADR-0004 dec 5 |
