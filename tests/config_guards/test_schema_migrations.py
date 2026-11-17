@@ -86,6 +86,8 @@ def test_every_compose_database_client_waits_for_the_runner(name):
     assert isinstance(deps, dict), name
     if deps.get("db-migrate", {}).get("condition") == "service_completed_successfully":
         return
+    run_only = COMPOSE[name].get("profiles") and COMPOSE[name].get("restart") in ("no", False)
+    assert run_only, f"{name} is started with the stack, so it starts behind the completed db-migrate"
     check = _ledger_check(name)
     assert check and deps.get(f"{name}-schema-ready", {}).get("condition") == "service_completed_successfully", (
         f"{name} uses the database but waits neither for db-migrate nor for its own ledger check")
