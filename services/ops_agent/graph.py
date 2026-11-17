@@ -271,14 +271,14 @@ def build(config: Config, tools: Tools, writer: NoteWriter, publisher: Publisher
             elif entry["tool"] == "alert_runbook":
                 row = result.get("row")
                 if row:
-                    items.append((f"runbook {row['source']}, alert table (reference)", _flat(
+                    items.append((f"runbook alert table, row following {row['follows']} (reference)", _flat(
                         f"fires when: {row['fires_when']}; handling: {row['handling']}")))
                 else:
                     items.append(("runbook alert table (reference)",
                                   "the runbooks have no entry for this alert name"))
             elif entry["tool"] == "runbook_rows":
                 for row in result.get("rows", []):
-                    items.append((f"runbook {row['source']} (reference)", _flat(
+                    items.append((f"runbook row following {row['follows']} (reference)", _flat(
                         f"symptom: {row['symptom']}; cause: {row['cause']}; fix: {row['fix']}")))
                 if not result.get("rows"):
                     items.append((source, "no matching runbook row"))

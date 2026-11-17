@@ -32,7 +32,7 @@ class Row:
     symptom: str
     cause: str
     fix: str
-    source: str
+    follows: str
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,7 @@ class AlertRow:
     alert: str
     fires_when: str
     handling: str
-    source: str
+    follows: str
 
 
 def _read(path: Path) -> dict:
@@ -49,13 +49,13 @@ def _read(path: Path) -> dict:
 
 def load_alerts(path: Path) -> dict[str, AlertRow]:
     """The alert rows by alert name."""
-    return {a["name"]: AlertRow(a["name"], a["fires_when"], a["handling"], a["source"])
+    return {a["name"]: AlertRow(a["name"], a["fires_when"], a["handling"], a["follows"])
             for a in _read(path).get("alert", [])}
 
 
 def load(path: Path) -> list[Row]:
-    """Every symptom row, in the file's order."""
-    return [Row(r["symptom"], r["cause"], r["fix"], r["source"]) for r in _read(path).get("symptom", [])]
+    """Every symptom row, in the file's order. Each names the decision it follows (`follows`)."""
+    return [Row(r["symptom"], r["cause"], r["fix"], r["follows"]) for r in _read(path).get("symptom", [])]
 
 
 def _words(text: str) -> set[str]:
