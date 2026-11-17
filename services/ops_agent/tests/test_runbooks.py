@@ -37,6 +37,7 @@ def test_every_row_cites_one_decision():
     bad = [f for f in rows if not re.fullmatch(r"ADR-\d{4} dec \d+", f)]
     assert rows and not bad, f"rows citing no single decision: {bad}"
 
+
 def test_rows_match_by_shared_words_best_first():
     rows = [runbooks.Row("Redis refuses writes", "memory limit reached", "raise maxmemory", "ADR-0001 dec 1"),
             runbooks.Row("Kafka lag grows", "consumer stopped", "restart the consumer", "ADR-0001 dec 2")]

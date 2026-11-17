@@ -243,5 +243,5 @@ follows = "ADR-0046 dec 7"
 [[symptom]]
 symptom = "No incident note for a firing alert"
 cause = "The webhook is missing from `ALERTMANAGER_CONFIG`, its secret differs (`401` in `docker compose logs alertmanager`), or the `ops-agent` profile is not up"
-fix = "Add the receiver (ADR-0046 dec 1); `docker compose --profile ops-agent up -d ops-agent`"
+fix = "Add the receiver to `ALERTMANAGER_CONFIG` (ADR-0046 dec 1); `docker compose --profile ops-agent up -d ops-agent`"
 follows = "ADR-0046 dec 1"

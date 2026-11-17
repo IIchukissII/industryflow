@@ -94,4 +94,4 @@ Reading `n` is stamped `--run-start` plus `n` microseconds, so the landed count 
 is exact. Server-side latency is `http_request_duration_seconds{handler="/ingest"}` in Prometheus.
 
 Symptoms, causes and fixes of a load run are rows of the infrastructure agent's runbook data,
-`services/ops_agent/runbook.toml` (source `capacity.md`).
+`services/ops_agent/runbook.toml`, following ADR-0009 dec 6.
