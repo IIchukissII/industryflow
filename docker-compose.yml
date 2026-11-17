@@ -13,6 +13,27 @@ x-db-tls-env: &db-tls-env
   DB_SSLMODE: ${DB_SSLMODE:-verify-full}
   DB_SSLROOTCERT: /etc/ssl/industryflow/ca.crt
 x-ca-mount: &ca-mount "${TLS_CERT_DIR:-db-ca}:/etc/ssl/industryflow:ro"
+# A run-only job's ledger check (ADR-0034 dec 10): a read-only check of the ledger as the job's own role
+# holds the job back, as the chart's schema-ready init container does. It declares no dependency, so
+# `docker compose run <job>` starts the check and the job and nothing else of the stack.
+x-schema-ready: &schema-ready
+  image: timescale/timescaledb:latest-pg15@sha256:6343bdc87ca132c6b53acb26113a6bad1821d188fa39975a745f32ddd9757634
+  entrypoint: ["sh", "/opt/migrate.sh"]
+  command: ["verify", "--wait"]
+  volumes:
+    - ./infrastructure/timescaledb/migrate.sh:/opt/migrate.sh:ro
+    - ./infrastructure/timescaledb/init-scripts:/migrations:ro
+    - *ca-mount
+  networks:
+    - industryflow-network
+  restart: "no"
+x-schema-ready-env: &schema-ready-env
+  PGHOST: ${DB_HOST}
+  PGPORT: ${DB_PORT}
+  PGDATABASE: ${DB_NAME}
+  PGSSLMODE: ${DB_SSLMODE:-verify-full}
+  PGSSLROOTCERT: /etc/ssl/industryflow/ca.crt
+  MIGRATIONS_DIR: /migrations
 # The gateway's image, built once and named, so the dashboards' key one-shot runs the same image.
 x-api-gateway-build: &api-gateway-build
   context: ./services/api_gateway
@@ -1546,6 +1567,11 @@ services:
   #   restore:   docker compose run --rm --entrypoint db-restore.sh db-backup <db> latest
   #   schedule:  add a host cron calling the one-off command.
   # See ADR-0032.
+  # Every run-only job (a profile, restart "no": backup, cold-export, tenant-delete) declares no
+  # depends_on. It runs on the running stack; with a dependency, `run` brings the chain to its declared
+  # state: it re-runs the exited one-shot steps (db-cert-init) and recreates TimescaleDB or MinIO when
+  # their configuration changed since they started, under the live stream. On a stack that is not up,
+  # the job fails instead.
   # ==========================================================================
   db-backup:
     build:
@@ -1585,15 +1611,21 @@ services:
       MODEL_SOURCE_BUCKET: mlflow
       MODEL_BACKUP_PREFIX: ${BACKUP_MODEL_PREFIX:-models}
       MODEL_SOURCE_EXCLUDE_PREFIX: ${UPLOAD_STAGING_PREFIX:-_upload-staging/}
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
       - backup-metrics:/var/lib/industryflow/metrics
     networks:
       - industryflow-network
     restart: "no"
+
+  restore-rehearsal-schema-ready:
+    <<: *schema-ready
+    container_name: industryflow-restore-rehearsal-schema-ready
+    profiles: ["backup"]
+    environment:
+      <<: *schema-ready-env
+      PGUSER: ${DB_USER}
+      PGPASSWORD: ${DB_PASSWORD}
 
   # Restore rehearsal (ADR-0032 dec 6): restores the latest dumps into scratch databases
   # (<db>_rehearsal, on the same server), compares every table's rows with the rows the dump holds,
@@ -1604,17 +1636,14 @@ services:
     image: industryflow-db-backup
     container_name: industryflow-restore-rehearsal
     profiles: ["backup"]
+    depends_on:
+      restore-rehearsal-schema-ready:
+        condition: service_completed_successfully
     entrypoint: ["db-rehearse.sh"]
     environment:
       <<: *backup-env
       REHEARSAL_OBJECT_SAMPLE: ${BACKUP_REHEARSAL_OBJECT_SAMPLE:-20}
-    # Unlike db-backup, which must run before an upgrade migrates anything, the rehearsal restores
-    # dumps that name the migrated roles.
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-      minio-init:
-        condition: service_completed_successfully
+    # The rehearsal restores dumps that name the migrated roles: its ledger check holds it until they are.
     volumes:
       - *ca-mount
       - backup-metrics:/var/lib/industryflow/metrics
@@ -1646,9 +1675,6 @@ services:
     # are the script's default, which is the hub's (NOTEBOOK_VOLUME_TEMPLATE).
     group_add:
       - "${DOCKER_GID:-999}"
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - backup-metrics:/var/lib/industryflow/metrics
@@ -1668,15 +1694,21 @@ services:
       <<: *notebook-backup-env
     group_add:
       - "${DOCKER_GID:-999}"
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - backup-metrics:/var/lib/industryflow/metrics
     networks:
       - industryflow-network
     restart: "no"
+
+  cold-export-schema-ready:
+    <<: *schema-ready
+    container_name: industryflow-cold-export-schema-ready
+    profiles: ["cold-export"]
+    environment:
+      <<: *schema-ready-env
+      PGUSER: cold_export_user
+      PGPASSWORD: ${COLD_EXPORT_DB_PASSWORD:-}
 
   # Cold-layer exporter (ADR-0025). Batch, on-demand in compose (`--profile cold-export up
   # cold-export`); on k8s it is a CronJob. Exports raw sensor_measurements older than the horizon
@@ -1692,9 +1724,7 @@ services:
     container_name: industryflow-cold-export
     profiles: ["cold-export"]
     depends_on:
-      minio-init:
-        condition: service_completed_successfully
-      db-migrate:
+      cold-export-schema-ready:
         condition: service_completed_successfully
     environment:
       <<: *db-tls-env
@@ -1715,6 +1745,15 @@ services:
       - industryflow-network
     restart: "no"
 
+  tenant-delete-schema-ready:
+    <<: *schema-ready
+    container_name: industryflow-tenant-delete-schema-ready
+    profiles: ["tenant-delete"]
+    environment:
+      <<: *schema-ready-env
+      PGUSER: tenant_delete_user
+      PGPASSWORD: ${TENANT_DELETE_DB_PASSWORD:-}
+
   # Carries out requested tenant deletions, store by store (ADR-0033 dec 4). On demand:
   #   docker compose --profile tenant-delete run --rm tenant-delete
   tenant-delete:
@@ -1726,9 +1765,7 @@ services:
     container_name: industryflow-tenant-delete
     profiles: ["tenant-delete"]
     depends_on:
-      minio-init:
-        condition: service_completed_successfully
-      db-migrate:
+      tenant-delete-schema-ready:
         condition: service_completed_successfully
     environment:
       <<: *db-tls-env
@@ -1766,6 +1803,19 @@ services:
       - industryflow-network
     restart: "no"
 
+  tracking-collect-schema-ready:
+    <<: *schema-ready
+    container_name: industryflow-tracking-collect-schema-ready
+    profiles: ["tenant-delete"]
+    # The tracking database is outside the ledger: the check waits for the job's own login.
+    entrypoint: ["sh", "-c"]
+    command: ["until psql -X -qtA -c 'SELECT 1' >/dev/null; do echo 'waiting for the tracking database'; sleep 5; done"]
+    environment:
+      <<: *schema-ready-env
+      PGDATABASE: mlflow
+      PGUSER: ${MLFLOW_DB_USER}
+      PGPASSWORD: ${MLFLOW_DB_PASSWORD}
+
   # The tracking store's own collection of deleted tenants (ADR-0033 dec 4): hard-deletes the
   # experiments the gateway renamed out of every tenant's name space and soft-deleted. The tracking
   # server's image and credentials; run after tenant-delete, then run tenant-delete again.
@@ -1775,6 +1825,9 @@ services:
       dockerfile: Dockerfile
     container_name: industryflow-tracking-collect
     profiles: ["tenant-delete"]
+    depends_on:
+      tracking-collect-schema-ready:
+        condition: service_completed_successfully
     environment:
       BACKEND_STORE_URI: postgresql://${MLFLOW_DB_USER}@${DB_HOST}:${DB_PORT}/mlflow
       PGPASSWORD: ${MLFLOW_DB_PASSWORD}
@@ -1784,11 +1837,6 @@ services:
       # already-emptied prefix passes.
       MLFLOW_TRACKING_URI: http://mlflow:5000
     command: ["python", "/opt/industryflow/collect_deleted.py"]
-    depends_on:
-      mlflow:
-        condition: service_healthy
-      db-migrate:
-        condition: service_completed_successfully
     volumes:
       - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:

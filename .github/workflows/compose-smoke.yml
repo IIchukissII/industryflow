@@ -192,6 +192,9 @@ jobs:
             || { echo "::error::db-migrate did not name the missing backup"; exit 1; }
           [ "$(ledger)" = "$before" ] || { echo "::error::the refused upgrade changed the ledger"; exit 1; }
           echo "OK    the upgrade without a backup was refused; ledger unchanged ($before)"
+          # The backup is a run-only job: it starts nothing of the stack, so its target comes up first.
+          docker compose up -d --wait --wait-timeout 300 minio
+          docker compose run --rm --no-deps minio-init
           docker compose --profile backup run --rm db-backup
 
       # --wait blocks until every container with a healthcheck reports healthy, and fails if one exits.
