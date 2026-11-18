@@ -15,6 +15,7 @@ serves the full reference at `/docs` and `/openapi.json`; ports: components (ADR
 | | `/auth/*`, `/users/me` | see page | Authentication (ADR-0004 dec 2) |
 | | `/api/users`, `/api/companies` | `admin`, own tenant; company create, activation change, delete and deletion: superuser | User management (ADR-0004 dec 5) |
 | GET | `/api/capability-use` | `admin` (own tenant), superuser (any) | Capability-use record (ADR-0042 dec 1-3, 5) |
+| POST | `/api/notebook-ticket` | session | A single-use ticket into the notebook origin (ADR-0048 dec 3, 4) |
 | GET | `/api/platform/switches` | superuser | Kill-switch runbook (ADR-0024 dec 2, 7) |
 | PUT | `/api/platform/switches/{key}` | superuser; body `{"value": true\|false}` | Kill-switch runbook (ADR-0024 dec 2, 7) |
 | GET | `/api/platform/switches/{key}/changes` | superuser | Kill-switch runbook (ADR-0024 dec 2, 7) |
