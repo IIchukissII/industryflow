@@ -132,3 +132,25 @@ groups:
           summary: "Readings were dead-lettered"
           description: "Letters reached {{ $labels.topic }} in the last 15m. They raised no alert and were not written: ADR-0005."
           services: "spark-streaming, alert-service-detector"
+      - alert: IndustryFlowStatefulFeaturesNeutralized
+        # The stateful-feature kill-switch is off: every stateful slot is served neutral and every score
+        # using one is degraded (ADR-0024 dec 3, 5). Deliberate, but never silent while it lasts.
+        expr: sum(increase(ml_stateful_features_neutralized_total{platform="industryflow"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stateful features are neutralized: the kill-switch is off"
+          description: "Stateful feature slots were served neutral in the last 15m because the stateful-feature kill-switch is off; scores using them are degraded (ADR-0024)."
+          services: "ml-service-api"
+      - alert: IndustryFlowStatefulFeaturesUnavailable
+        # Stateful slots served neutral because their aggregate could not be read or has no closed window
+        # yet (ADR-0044 dec 3). A sensor's first window closes within its granularity, so only a sustained
+        # stretch fires: the store out or overloaded, or the aggregation writer stopped for a new sensor.
+        expr: sum(increase(ml_stateful_features_unavailable_total{platform="industryflow"}[5m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stateful feature aggregates are unavailable"
+          description: "Stateful feature slots have been served neutral for 15m because their aggregate was unavailable; scores using them are degraded (ADR-0044 dec 3)."
+          services: "ml-service-api, timescaledb, spark-aggregations"

@@ -232,3 +232,60 @@ tests:
       - eval_time: 50m
         alertname: IndustryFlowTenantStatusStalled
         exp_alerts: []
+
+  # Slots neutralized by the kill-switch raise it at once and it clears 15m after the last one;
+  # another stack's counter does not raise it.
+  - interval: 1m
+    input_series:
+      - series: 'ml_stateful_features_neutralized_total{platform="industryflow", job="ml-service"}'
+        values: '0x10 0+5x10 50x30'
+      - series: 'ml_stateful_features_neutralized_total{platform="other", job="ml-service"}'
+        values: '0+5x50'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: IndustryFlowStatefulFeaturesNeutralized
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: IndustryFlowStatefulFeaturesNeutralized
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Stateful features are neutralized: the kill-switch is off"
+              description: "Stateful feature slots were served neutral in the last 15m because the stateful-feature kill-switch is off; scores using them are degraded (ADR-0024)."
+              services: "ml-service-api"
+      - eval_time: 40m
+        alertname: IndustryFlowStatefulFeaturesNeutralized
+        exp_alerts: []
+
+  # Unavailable aggregates fire only when sustained: a 5m stretch (a sensor's first window) does not,
+  # a stretch past 15m does.
+  - interval: 1m
+    input_series:
+      - series: 'ml_stateful_features_unavailable_total{platform="industryflow", job="ml-service"}'
+        values: '0x5 0+1x5 5x30 5+1x40'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: IndustryFlowStatefulFeaturesUnavailable
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: IndustryFlowStatefulFeaturesUnavailable
+        exp_alerts: []
+      - eval_time: 22m
+        alertname: IndustryFlowStatefulFeaturesUnavailable
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: IndustryFlowStatefulFeaturesUnavailable
+        exp_alerts: []
+      - eval_time: 55m
+        alertname: IndustryFlowStatefulFeaturesUnavailable
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: IndustryFlowStatefulFeaturesUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Stateful feature aggregates are unavailable"
+              description: "Stateful feature slots have been served neutral for 15m because their aggregate was unavailable; scores using them are degraded (ADR-0044 dec 3)."
+              services: "ml-service-api, timescaledb, spark-aggregations"

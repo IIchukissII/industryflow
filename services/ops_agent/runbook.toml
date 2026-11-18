@@ -102,6 +102,18 @@ fires_when = "The writer acknowledged a capability-use event it could not record
 handling = "The API gateway's logs (`capability audit`) name each stream id; capability-use record (ADR-0042 dec 1-3, 5)"
 follows = "ADR-0042 dec 4"
 
+[[alert]]
+name = "IndustryFlowStatefulFeaturesNeutralized"
+fires_when = "`ml-service-api` served stateful feature slots neutral in the last 15m because the stateful-feature kill-switch is off"
+handling = "Expected while an operator holds the switch off for an overloaded database; turn it back on when the database recovers: `PUT /api/platform/switches/stateful_features_enabled` with `{\"value\": true}`; who flipped it: `GET /api/platform/switches/stateful_features_enabled/changes`"
+follows = "ADR-0024 dec 5"
+
+[[alert]]
+name = "IndustryFlowStatefulFeaturesUnavailable"
+fires_when = "`ml-service-api` has served stateful feature slots neutral for 15m because their aggregate could not be read or had no closed window"
+handling = "With a database alert or baseline read timeouts in `docker compose logs ml-service-api`, the store is out or overloaded: turn the kill-switch off (ADR-0024 dec 2); with neither, a sensor has no closed window: check `spark-aggregations` is running"
+follows = "ADR-0044 dec 3"
+
 [[symptom]]
 symptom = "Client p95 in seconds and achieved rate below the offered rate; server `/ingest` p95 low"
 cause = "A generator process above 125 readings/s lags its own event loop"
