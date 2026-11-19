@@ -3,13 +3,15 @@
 {{- /*
   ADR-0034 dec 11: on an upgrade the stream engines stop before the pending scripts run and start
   behind the completed runner, so a migration that corrects data is never outlived by the writer it
-  corrects. The stream engines are the apps built from a Spark image. Helm applies the revision's
-  resources, the db-migrate Job among them, only after its pre-upgrade hooks: the stop hook runs
-  first (weight -5, before the backup), scales their Deployments to zero and waits until no pod of
-  theirs is left. The new pods' schema-ready init containers then hold them until the ledger is
-  current; the post-upgrade hook scales each Deployment back to its declared replicas. An upgrade
-  that fails after the stop leaves the engines stopped until the next upgrade or rollback. The
-  ServiceAccount and its Role stay between upgrades: the post-upgrade hook needs them again.
+  corrects, and the way back from a failed upgrade starts them again. The stream engines are the apps
+  built from a Spark image. Helm applies the revision's resources, the db-migrate Job among them, only
+  after its pre-upgrade hooks: the stop hook runs first (weight -5, before the backup, so the backup
+  holds what the engines' checkpoints hold), records each Deployment's replicas, scales them to zero
+  and waits until no pod of theirs is left; if it fails it scales each back to what it recorded. The
+  new pods' schema-ready init containers then hold them until the ledger is current; the post-upgrade
+  hook scales each Deployment back to its declared replicas, and the same hook runs after a rollback,
+  the way back from an upgrade that failed before the runner. The ServiceAccount and its Role stay
+  between upgrades: the later hooks need them.
 */}}
 {{- $fullname := include "industryflow.fullname" . }}
 {{- $se := .Values.dbMigrations.streamEngines }}
@@ -30,7 +32,7 @@ metadata:
     {{- include "industryflow.labels" . | nindent 4 }}
     app.kubernetes.io/name: stream-engines
   annotations:
-    helm.sh/hook: pre-upgrade,post-upgrade
+    helm.sh/hook: pre-upgrade,post-upgrade,post-rollback
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation
 ---
@@ -42,7 +44,7 @@ metadata:
     {{- include "industryflow.labels" . | nindent 4 }}
     app.kubernetes.io/name: stream-engines
   annotations:
-    helm.sh/hook: pre-upgrade,post-upgrade
+    helm.sh/hook: pre-upgrade,post-upgrade,post-rollback
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation
 rules:
@@ -68,7 +70,7 @@ metadata:
     {{- include "industryflow.labels" . | nindent 4 }}
     app.kubernetes.io/name: stream-engines
   annotations:
-    helm.sh/hook: pre-upgrade,post-upgrade
+    helm.sh/hook: pre-upgrade,post-upgrade,post-rollback
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation
 roleRef:
@@ -89,7 +91,7 @@ metadata:
     app.kubernetes.io/name: stream-engines-{{ $phase }}
     app.kubernetes.io/component: database
   annotations:
-    helm.sh/hook: {{ if eq $phase "stop" }}pre-upgrade{{ else }}post-upgrade{{ end }}
+    helm.sh/hook: {{ if eq $phase "stop" }}pre-upgrade{{ else }}post-upgrade,post-rollback{{ end }}
     helm.sh/hook-weight: {{ if eq $phase "stop" }}"-5"{{ else }}"0"{{ end }}
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
@@ -141,6 +143,19 @@ spec:
               {{- end }}
               found="$(echo $found)"
               [ -n "$found" ] || { echo "no stream engine deployed yet"; exit 0; }
+              # A failure here starts again what was stopped, at the replicas it had (ADR-0034 dec 11).
+              stopped=""
+              restore() {
+                status=$?
+                if [ "$status" -ne 0 ] && [ -n "$stopped" ]; then
+                  echo "the stop failed; starting the stream engines again" >&2
+                  for pair in $stopped; do kubectl scale "${pair%=*}" --replicas="${pair#*=}" || true; done
+                fi
+              }
+              trap restore EXIT
+              for deployment in $found; do
+                stopped="$stopped $deployment=$(kubectl get "$deployment" -o jsonpath='{.spec.replicas}')"
+              done
               kubectl scale $found --replicas=0
               deadline=$(( $(date +%s) + {{ $se.stopTimeoutSeconds }} ))
               selector='app.kubernetes.io/instance={{ $.Release.Name }},app.kubernetes.io/name in ({{ join "," (keys $engines | sortAlpha) }})'
