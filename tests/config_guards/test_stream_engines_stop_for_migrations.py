@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""On an upgrade the stream engines stop before the schema sequence and start after it (ADR-0034 dec 11).
+"""On an upgrade the stream engines stop before the schema sequence and start after it, and an upgrade that
+fails starts them again (ADR-0034 dec 11).
 
 A stream engine is a service that holds a Spark checkpoint: in Compose, one whose environment names
 CHECKPOINT_LOCATION. The chart finds its engines by image, box-deploy by a hand-kept list; an engine
@@ -11,7 +12,9 @@ either of them misses keeps writing while a migration corrects its data, and not
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 
 from _repo import ROOT, helm_template, load_yaml
 
@@ -34,20 +37,25 @@ def test_the_chart_stops_every_stream_engine_and_only_them():
     assert scaled == {f"if-industryflow-{name}" for name in _compose_engines()}
 
 
-def test_the_stop_runs_before_the_backup_and_the_start_after_the_upgrade():
+def test_the_stop_runs_after_the_backup_and_the_start_after_the_upgrade_or_a_rollback():
     docs = helm_template()
     hooks = _hooks(docs)
     stop, start = (hooks["Job", "if-industryflow-stream-engines-stop"],
                    hooks["Job", "if-industryflow-stream-engines-start"])
     backup = next(d for d in docs if d["metadata"]["name"].endswith("-pre-upgrade-backup"))
     assert stop["metadata"]["annotations"]["helm.sh/hook"] == "pre-upgrade"
-    assert start["metadata"]["annotations"]["helm.sh/hook"] == "post-upgrade"
+    # A rolled-back upgrade starts the engines again (ADR-0034 dec 11).
+    assert set(start["metadata"]["annotations"]["helm.sh/hook"].split(",")) == {"post-upgrade", "post-rollback"}
     weight = lambda d: int(d["metadata"]["annotations"].get("helm.sh/hook-weight", "0"))  # noqa: E731
-    assert weight(stop) < weight(backup)
-    # The ServiceAccount and its Role exist before either Job runs.
+    # The last step before the release: a failed backup stops nothing.
+    assert weight(stop) > weight(backup)
+    assert all(weight(d) <= weight(stop) for d in docs
+               if "pre-upgrade" in (d["metadata"].get("annotations") or {}).get("helm.sh/hook", ""))
+    # The ServiceAccount and its Role exist before either Job runs, a rollback's included.
     for kind in ("ServiceAccount", "Role", "RoleBinding"):
         obj = next(d for d in hooks.values() if d["kind"] == kind)
-        assert set(obj["metadata"]["annotations"]["helm.sh/hook"].split(",")) == {"pre-upgrade", "post-upgrade"}
+        assert set(obj["metadata"]["annotations"]["helm.sh/hook"].split(",")) == \
+            {"pre-upgrade", "post-upgrade", "post-rollback"}
         assert weight(obj) < weight(stop)
     # The migrate Job is an ordinary resource, applied only after every pre-upgrade hook.
     migrate = next(d for d in docs if d["kind"] == "Job" and "-db-migrate-" in d["metadata"]["name"])
@@ -60,6 +68,47 @@ def test_the_start_restores_each_engine_to_its_declared_replicas():
         "spec"]["template"]["spec"]["containers"][0]["args"][0]
     started = dict(re.findall(r"deployment/if-industryflow-(\S+) --replicas=(\d+)", script))
     assert started == {name: str(values[name].get("replicas", 1)) for name in _compose_engines()}
+
+
+_FAKE_KUBECTL = """#!/bin/sh
+echo "$*" >> "$KUBECTL_LOG"
+case "$*" in
+  "get deployment "*" --ignore-not-found -o name") echo "deployment.apps/$3" ;;
+  "get deployment.apps/"*" -o jsonpath="*) echo 3 ;;
+  "get pods "*) [ -n "$PODS_STAY" ] && echo pod/engine-0 ;;
+esac
+exit 0
+"""
+
+
+def _run_stop(tmp_path, *, pods_stay: bool) -> tuple[int, list[str]]:
+    """Run the rendered stop script against a kubectl that records each call."""
+    script = _hooks(helm_template("--set", "dbMigrations.streamEngines.stopTimeoutSeconds=0"))[
+        "Job", "if-industryflow-stream-engines-stop"]["spec"]["template"]["spec"]["containers"][0]["args"][0]
+    (tmp_path / "kubectl").write_text(_FAKE_KUBECTL)
+    (tmp_path / "kubectl").chmod(0o755)
+    log = tmp_path / "calls"
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "KUBECTL_LOG": str(log),
+           "PODS_STAY": "1" if pods_stay else ""}
+    rc = subprocess.run(["/bin/sh", "-euc", script], env=env, capture_output=True, text=True).returncode
+    return rc, log.read_text().splitlines()
+
+
+def test_a_stop_that_fails_starts_the_engines_again_at_their_replicas(tmp_path):
+    """ADR-0034 dec 11: a failure never leaves the engines stopped; the stop's own failure, a timeout here."""
+    rc, calls = _run_stop(tmp_path, pods_stay=True)
+    assert rc != 0
+    engines = {f"deployment.apps/if-industryflow-{name}" for name in _compose_engines()}
+    restored = {c.split()[1] for c in calls if c.startswith("scale deployment.apps/") and c.endswith("--replicas=3")}
+    assert restored == engines
+    assert calls.index(next(c for c in calls if c.endswith("--replicas=0"))) < \
+        calls.index(next(c for c in calls if c.endswith("--replicas=3")))
+
+
+def test_a_stop_that_succeeds_starts_nothing(tmp_path):
+    rc, calls = _run_stop(tmp_path, pods_stay=False)
+    assert rc == 0
+    assert not any(c.endswith("--replicas=3") for c in calls)
 
 
 def _selects(selector: dict, labels: dict) -> bool:
