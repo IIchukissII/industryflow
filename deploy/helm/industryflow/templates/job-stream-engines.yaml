@@ -3,15 +3,15 @@
 {{- /*
   ADR-0034 dec 11: on an upgrade the stream engines stop before the pending scripts run and start
   behind the completed runner, so a migration that corrects data is never outlived by the writer it
-  corrects, and an upgrade that fails starts them again. The stream engines are the apps built from a
-  Spark image. Helm applies the revision's resources, the db-migrate Job among them, only after its
-  pre-upgrade hooks: the stop hook runs last (weight 5, after the backup, so a failed backup stops
-  nothing), records each Deployment's replicas, scales them to zero and waits until no pod of theirs
-  is left; if it fails it scales each back to what it recorded. The new pods' schema-ready init
-  containers then hold them until the ledger is current; the post-upgrade hook scales each Deployment
-  back to its declared replicas, and the same hook runs after a rollback, so an upgrade that fails
-  once the release is applied is rolled back (`helm upgrade --atomic`, or `helm rollback`) with its
-  engines running. The ServiceAccount and its Role stay between upgrades: the later hooks need them.
+  corrects, and the way back from a failed upgrade starts them again. The stream engines are the apps
+  built from a Spark image. Helm applies the revision's resources, the db-migrate Job among them, only
+  after its pre-upgrade hooks: the stop hook runs first (weight -5, before the backup, so the backup
+  holds what the engines' checkpoints hold), records each Deployment's replicas, scales them to zero
+  and waits until no pod of theirs is left; if it fails it scales each back to what it recorded. The
+  new pods' schema-ready init containers then hold them until the ledger is current; the post-upgrade
+  hook scales each Deployment back to its declared replicas, and the same hook runs after a rollback,
+  the way back from an upgrade that failed before the runner. The ServiceAccount and its Role stay
+  between upgrades: the later hooks need them.
 */}}
 {{- $fullname := include "industryflow.fullname" . }}
 {{- $se := .Values.dbMigrations.streamEngines }}
@@ -92,7 +92,7 @@ metadata:
     app.kubernetes.io/component: database
   annotations:
     helm.sh/hook: {{ if eq $phase "stop" }}pre-upgrade{{ else }}post-upgrade,post-rollback{{ end }}
-    helm.sh/hook-weight: {{ if eq $phase "stop" }}"5"{{ else }}"0"{{ end }}
+    helm.sh/hook-weight: {{ if eq $phase "stop" }}"-5"{{ else }}"0"{{ end }}
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 1

@@ -37,7 +37,7 @@ def test_the_chart_stops_every_stream_engine_and_only_them():
     assert scaled == {f"if-industryflow-{name}" for name in _compose_engines()}
 
 
-def test_the_stop_runs_after_the_backup_and_the_start_after_the_upgrade_or_a_rollback():
+def test_the_stop_runs_before_the_backup_and_the_start_after_the_upgrade_or_a_rollback():
     docs = helm_template()
     hooks = _hooks(docs)
     stop, start = (hooks["Job", "if-industryflow-stream-engines-stop"],
@@ -47,10 +47,8 @@ def test_the_stop_runs_after_the_backup_and_the_start_after_the_upgrade_or_a_rol
     # A rolled-back upgrade starts the engines again (ADR-0034 dec 11).
     assert set(start["metadata"]["annotations"]["helm.sh/hook"].split(",")) == {"post-upgrade", "post-rollback"}
     weight = lambda d: int(d["metadata"]["annotations"].get("helm.sh/hook-weight", "0"))  # noqa: E731
-    # The last step before the release: a failed backup stops nothing.
-    assert weight(stop) > weight(backup)
-    assert all(weight(d) <= weight(stop) for d in docs
-               if "pre-upgrade" in (d["metadata"].get("annotations") or {}).get("helm.sh/hook", ""))
+    # Before the backup: the backup holds what the engines' checkpoints hold, which are not backed up.
+    assert weight(stop) < weight(backup)
     # The ServiceAccount and its Role exist before either Job runs, a rollback's included.
     for kind in ("ServiceAccount", "Role", "RoleBinding"):
         obj = next(d for d in hooks.values() if d["kind"] == kind)
