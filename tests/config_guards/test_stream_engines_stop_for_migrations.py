@@ -93,7 +93,7 @@ def _run_stop(tmp_path, *, pods_stay: bool) -> tuple[int, list[str]]:
 
 
 def test_a_stop_that_fails_starts_the_engines_again_at_their_replicas(tmp_path):
-    """ADR-0034 dec 11: a failure never leaves the engines stopped; the stop's own failure, a timeout here."""
+    """ADR-0034 dec 11: the stop's own failure, a timeout here, starts again what it stopped."""
     rc, calls = _run_stop(tmp_path, pods_stay=True)
     assert rc != 0
     engines = {f"deployment.apps/if-industryflow-{name}" for name in _compose_engines()}
