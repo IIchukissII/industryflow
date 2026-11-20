@@ -676,6 +676,53 @@ def test_the_secret_is_sent_on_hub_routes_only(where, uri, sent):
 
 
 
+
+def _server_user(where, uri, base="/jupyter/"):
+    """$if_server_user for ``uri``, by the proxy's own map (the first matching regex wins)."""
+    body = re.search(r"map \$request_uri \$if_server_user \{(.*?)\n\s*\}", SSO_CONFIGS[where], re.S).group(1)
+    for pattern, value in re.findall(r'"~(.*?)" (\S+);', body):
+        pattern = pattern.replace("${NOTEBOOK_BASE_URL}", base).replace("{{ .Values.notebookHub.baseUrl }}", base)
+        m = re.search(pattern.replace("\\\\", "\\"), uri)
+        if m:
+            return m.group(1) if value == "$1" else value.strip('"')
+    return ""
+
+
+@pytest.mark.parametrize("where", sorted(SSO_CONFIGS))
+@pytest.mark.parametrize("uri, named", [
+    ("/jupyter/user/u-1/lab", "u-1"),
+    ("/jupyter/user/u-1", "u-1"),
+    ("/jupyter/user/u-1?token=x", "u-1"),
+    ("/jupyter/user/u-1/api/kernels/k/channels", "u-1"),
+    ("/jupyter/user/u-1/../u-2/lab", "/"),
+    ("/jupyter/user/u-1/./lab", "/"),
+    ("/jupyter/user/u-1/%2e%2e/u-2/lab", "/"),
+    ("/jupyter/user/u-1/..\\u-2/lab", "/"),
+    ("/jupyter/user/u-1/a//b", "/"),
+    ("/jupyter/user/u-1/files/notes..txt", "u-1"),
+    ("/jupyter/user/u-1/lab?next=/../x", "u-1"),
+    ("/jupyter/user//u-2/lab", "/"),
+    ("/jupyter/user/", "/"),
+    ("/jupyter/user%2Fu-2/lab", "/"),
+    ("/jupyter/user", "/"),
+    ("/jupyter/user-redirect/lab", ""),
+    ("/jupyter/hub/home", ""),
+    ("/jupyter/hub/user/u-2/", ""),
+])
+def test_a_user_route_names_the_server_it_reaches(where, uri, named):
+    # The session check admits a /user/ request only for the verified user's own server: a server
+    # accepts any hub cookie it once issued (issue #686). "/" names no account, so it is refused.
+    assert _server_user(where, uri) == named
+
+
+@pytest.mark.parametrize("where", sorted(SSO_CONFIGS))
+def test_the_session_check_is_told_the_server_a_request_reaches(where):
+    routes = (REPO / "services/api_gateway/routers/notebook_entry.py").read_text()
+    header = re.search(r'^HEADER_SERVER_USER = "([^"]+)"', routes, re.M).group(1)
+    verify = re.search(r"location = /_(?:auth_verify|notebook_auth) \{(.*?)\n\s*\}\n", SSO_CONFIGS[where], re.S).group(1)
+    assert re.search(r"proxy_set_header\s+%s\s+\$if_server_user;" % header, verify)
+
+
 _PLATFORM_COOKIES = ("ACCESS_COOKIE", "CSRF_COOKIE", "REFRESH_COOKIE")
 
 

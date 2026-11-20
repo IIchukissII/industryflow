@@ -37,6 +37,9 @@ from users import admit_session, get_user_manager
 HEADER_USER = "X-IF-User"
 HEADER_COMPANY_ID = "X-IF-Company-Id"
 HEADER_ROLE = "X-IF-Role"
+# Set by the SSO proxy on every check: the account whose single-user server the request reaches, empty
+# off /user/ routes.
+HEADER_SERVER_USER = "X-IF-Server-User"
 # Where the notebook origin sends a browser that has entered: its root, which the proxy maps to the hub.
 NOTEBOOK_HOME = "/"
 
@@ -133,6 +136,11 @@ async def verify_session(request: Request, user_manager=Depends(get_user_manager
         raise _refused("Session ended by a credential change")
     if not await _session_admits(user, nb.session_id, nb.issued_at):
         raise _refused("Session ended")
+    # Another account's server is never reached through this session (ADR-0011 dec 1): its own hub
+    # cookie, left in a shared browser, would admit the request there.
+    server_user = request.headers.get(HEADER_SERVER_USER, "")
+    if server_user and server_user != str(user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not this session's notebook server")
     return Response(
         status_code=status.HTTP_204_NO_CONTENT,
         headers={

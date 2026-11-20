@@ -313,6 +313,17 @@ data:
         default 0;
         "~^[^?]*(\.\.|%2[eEfF]|%5[cC]|//|\\\\)" 1;
     }
+    # The account whose single-user server a /user/ request reaches: chp routes it by the first segment
+    # after user/, as sent. The session check refuses it unless that is the verified user's own, since a
+    # server accepts any hub cookie it once issued, a shared browser's previous user's included. A path
+    # another hop might route differently (a dot segment, an encoded separator, an empty segment) and
+    # any other form under user/ name no account.
+    map $request_uri $if_server_user {
+        default "";
+        "~^{{ .Values.notebookHub.baseUrl }}user/[^?]*(?:/\.\.?(?:[/?]|$)|%2[eEfF]|%5[cC]|//|\\\\)" "/";
+        "~^{{ .Values.notebookHub.baseUrl }}user/([^/?]+)(?:[/?]|$)" $1;
+        "~^{{ .Values.notebookHub.baseUrl }}user(?![-\w])" "/";
+    }
     map "$if_hub_route$if_ambiguous_path" $if_sso_proxy_secret {
         default "";
         "10"    "${NOTEBOOK_SSO_PROXY_SECRET}";
@@ -371,6 +382,7 @@ data:
             proxy_set_header Content-Length "";
             proxy_set_header Cookie $if_notebook_session;
             proxy_set_header X-Original-URI $request_uri;
+            proxy_set_header X-IF-Server-User $if_server_user;
         }
 
         # The notebook origin's one public entry (ADR-0048 dec 3, ADR-0014 dec 6): a platform page posts
