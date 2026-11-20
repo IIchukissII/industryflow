@@ -30,9 +30,9 @@ class MessageValidationError(ValueError):
 class RulesUnavailable(RuntimeError):
     """The reading's tenant has no rules the worker could read: what applies to it is unknown, not
     empty, so the reading is never committed unevaluated (ADR-0005 dec 3). It fails as the read
-    failed: a dependency failure is retried until the dependency is back, any other one is retried
-    a bounded number of times and dead-lettered, so one tenant's broken rules cannot hold the
-    others' readings."""
+    failed: a dependency failure is retried until the dependency is back; any other one is
+    dead-lettered at once, replayable, since only the next rule reload can change it and a retry in
+    place would hold the other tenants' readings."""
 
     def __init__(self, company_id: str, cause: BaseException):
         super().__init__(f"rules for company {company_id} could not be read: {cause}")
