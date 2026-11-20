@@ -125,7 +125,8 @@ class AlertRuleCreate(BaseModel):
     threshold_min: Optional[float] = None
     threshold_max: Optional[float] = None
     model_id: Optional[uuid.UUID] = None
-    anomaly_threshold: Optional[float] = Field(default=0.85, ge=0.0, le=1.0)
+    # Required in the table (ADR-0044 dec 1): omitted, it is the column default; null is refused.
+    anomaly_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     ml_model_config: Optional[Dict[str, Any]] = Field(default=None, alias="model_config")
     severity: Severity = Severity.MEDIUM
     priority: int = Field(default=0, ge=0)
@@ -169,6 +170,13 @@ class AlertRuleUpdate(BaseModel):
     severity: Optional[Severity] = None
     priority: Optional[int] = Field(default=None, ge=0)
     enabled: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def _no_null_threshold(self):
+        # The rule always holds its anomaly threshold (ADR-0044 dec 1): sent, it is a number.
+        if "anomaly_threshold" in self.model_fields_set and self.anomaly_threshold is None:
+            raise ValueError("anomaly_threshold must be a number in [0.0, 1.0], not null")
+        return self
 
     def changes(self) -> Dict[str, Any]:
         d = self.model_dump(mode="json", by_alias=True, exclude_unset=True)
