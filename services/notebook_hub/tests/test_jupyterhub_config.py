@@ -554,6 +554,16 @@ def test_the_hub_does_not_start_without_a_usable_proxy_secret(value):
         os.environ["NOTEBOOK_SSO_PROXY_SECRET"] = PROXY_SECRET
 
 
+@pytest.mark.parametrize("value", ["/jupyter", "jupyter/", "/a.b/", "/a//", "/ju pyter/", ""])
+def test_the_hub_does_not_start_with_a_base_url_the_proxy_cannot_match(value):
+    # The SSO proxy matches routes by the base URL literally; one it cannot match checks no server.
+    try:
+        with pytest.raises(ValueError, match="NOTEBOOK_BASE_URL"):
+            _load("docker", NOTEBOOK_BASE_URL=value)
+    finally:
+        os.environ.pop("NOTEBOOK_BASE_URL", None)
+
+
 @pytest.mark.parametrize("profile", ["kube", "docker"])
 def test_the_proxy_secret_never_reaches_a_kernel(profile):
     _, ns, _ = _hub(profile)
@@ -674,6 +684,66 @@ def test_the_secret_is_sent_on_hub_routes_only(where, uri, sent):
     hub, ambiguous = _sso_maps(where)
     assert (bool(hub.search(uri)) and not ambiguous.search(uri)) is sent
 
+
+
+
+def _server_user(where, uri, base="/jupyter/"):
+    """$if_server_user for ``uri``, by the proxy's own map (the first matching regex wins)."""
+    body = re.search(r"map \$request_uri \$if_server_user \{(.*?)\n\s*\}", SSO_CONFIGS[where], re.S).group(1)
+    default = re.search(r'default "(.*?)";', body).group(1)
+    for pattern, value in re.findall(r'"~(.*?)" (\S+);', body):
+        pattern = pattern.replace("${NOTEBOOK_BASE_URL}", base).replace("{{ .Values.notebookHub.baseUrl }}", base)
+        m = re.search(pattern.replace("\\\\", "\\"), uri)
+        if m:
+            return m.group(1) if value == "$1" else value.strip('"')
+    return default
+
+
+@pytest.mark.parametrize("where", sorted(SSO_CONFIGS))
+@pytest.mark.parametrize("uri, named", [
+    ("/jupyter/user/u-1/lab", "u-1"),
+    ("/jupyter/user/u-1", "u-1"),
+    ("/jupyter/user/u-1?token=x", "u-1"),
+    ("/jupyter/user/u-1/api/kernels/k/channels", "u-1"),
+    ("/jupyter/user/u-1/../u-2/lab", "/"),
+    ("/jupyter/user/u-1/./lab", "/"),
+    ("/jupyter/user/u-1/%2e%2e/u-2/lab", "/"),
+    ("/jupyter/user/u-1/..\\u-2/lab", "/"),
+    ("/jupyter/user/u-1/a//b", "/"),
+    ("/jupyter/user/u-1/files/notes..txt", "u-1"),
+    ("/jupyter/user/u-1/lab?next=/../x", "u-1"),
+    ("/jupyter/user//u-2/lab", "/"),
+    ("/jupyter/user/", "/"),
+    ("/jupyter/user%2Fu-2/lab", "/"),
+    ("/jupyter/user", "/"),
+    ("/jupyter/user/u%2D1/lab", "/"),
+    ("/jupyter/%75ser/u-2/lab", "/"),
+    ("/%6Aupyter/user/u-2/api/kernels", "/"),
+    ("/jupyter%2Fuser/u-2/lab", "/"),
+    ("/jupyter\\user/u-2/lab", "/"),
+    ("//jupyter/user/u-2/lab", "/"),
+    ("/jupyter/USER/u-2/lab", "/"),
+    ("/favicon.ico", "/"),
+    ("/jupyter/user/u-1/files/My%20Notebook.ipynb", "u-1"),
+    ("/jupyter/user-redirect/lab", ""),
+    ("/jupyter/hub/home", ""),
+    ("/jupyter/hub/login?next=%2Fjupyter%2Fuser%2Fu-1", ""),
+    ("/jupyter/hub/user/u-2/", ""),
+    ("/jupyter/", ""),
+    ("/jupyter", ""),
+])
+def test_a_user_route_names_the_server_it_reaches(where, uri, named):
+    # The session check admits a /user/ request only for the verified user's own server: a server
+    # accepts any hub cookie it once issued (issue #686). "/" names no account, so it is refused.
+    assert _server_user(where, uri) == named
+
+
+@pytest.mark.parametrize("where", sorted(SSO_CONFIGS))
+def test_the_session_check_is_told_the_server_a_request_reaches(where):
+    routes = (REPO / "services/api_gateway/routers/notebook_entry.py").read_text()
+    header = re.search(r'^HEADER_SERVER_USER = "([^"]+)"', routes, re.M).group(1)
+    verify = re.search(r"location = /_(?:auth_verify|notebook_auth) \{(.*?)\n\s*\}\n", SSO_CONFIGS[where], re.S).group(1)
+    assert re.search(r"proxy_set_header\s+%s\s+\$if_server_user;" % header, verify)
 
 
 _PLATFORM_COOKIES = ("ACCESS_COOKIE", "CSRF_COOKIE", "REFRESH_COOKIE")

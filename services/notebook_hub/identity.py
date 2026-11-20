@@ -142,6 +142,19 @@ def parse_identity(headers: Mapping[str, str]) -> Identity:
     return Identity(user=user, company_id=company_id, role=role)
 
 
+# The hub's path on the notebook origin. The SSO proxy matches routes by it literally (a regex prefix),
+# so it is a path of plain segments ending in a slash: "/jupyter" would match no route there and leave
+# every server unchecked.
+BASE_URL_ENV = "NOTEBOOK_BASE_URL"
+
+
+def validate_base_url(value: str) -> str:
+    """``value`` as the hub's base URL, or ValueError naming the setting."""
+    if not re.fullmatch(r"/(?:[A-Za-z0-9_-]+/)*", value or ""):
+        raise ValueError(f"{BASE_URL_ENV} must be / or /<segment>/…/ of letters, digits, '-' and '_'; got {value!r}")
+    return value
+
+
 def validate_proxy_secret(value: str) -> str:
     """The hub's copy of the SSO proxy secret, or ValueError if it is unset or unfit.
 

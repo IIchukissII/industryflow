@@ -25,6 +25,7 @@ import users
 from capability_auth import resolve_capability
 from messaging import redis_client as redis_module
 from messaging import refresh_tokens
+from routers import notebook_entry as notebook_routes
 from users import get_user_manager
 
 PLATFORM = "https://app.example.com"  # in CORS_ORIGINS (conftest)
@@ -115,6 +116,20 @@ def test_a_platform_session_enters_and_the_proxy_gets_the_identity(world):
     assert ok.headers["X-IF-User"] == str(world.user.id)
     assert ok.headers["X-IF-Company-Id"] == str(world.user.company_id)
     assert ok.headers["X-IF-Role"] == "engineer"
+
+
+@pytest.mark.parametrize("server_user, admitted", [
+    (None, True), ("", True), ("own", True), ("other", False), ("/", False)])
+def test_a_session_reaches_only_its_own_notebook_server(world, server_user, admitted):
+    # A shared browser keeps the previous user's hub cookie; the proxy names the server a /user/ request
+    # reaches, and the session admits only its own (ADR-0011 dec 1).
+    cookie, _ = _nb_cookie(_entered(world))
+    names = {"own": str(world.user.id), "other": str(uuid.uuid4())}
+    headers = {"Cookie": f"if_nb={cookie}"}
+    if server_user is not None:
+        headers[notebook_routes.HEADER_SERVER_USER] = names.get(server_user, server_user)
+    r = world.client.get("/auth/verify", headers=headers)
+    assert r.status_code == (204 if admitted else 403), r.text
 
 
 def test_a_ticket_is_spent_once(world):

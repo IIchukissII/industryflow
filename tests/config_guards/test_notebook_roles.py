@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 
-from _repo import ROOT, load_yaml
+import pytest
+from _repo import ROOT, helm_template, load_yaml
 
 HUB_IDENTITY = ROOT / "services" / "notebook_hub" / "identity.py"
 GATEWAY_SCHEMAS = ROOT / "services" / "api_gateway" / "schemas.py"
@@ -52,3 +54,11 @@ def test_every_shipped_authoring_role_list_names_platform_roles_only():
     for where, value in shipped.items():
         listed = {r.strip() for r in value.split(",") if r.strip()}
         assert listed and listed <= roles, f"{where} lists {sorted(listed)}; platform roles: {sorted(roles)}"
+
+
+@pytest.mark.parametrize("base", ["/jupyter", "jupyter/", "/a.b/", "/a//"])
+def test_the_chart_refuses_a_base_url_its_sso_proxy_cannot_match(base):
+    # The proxy matches routes by notebookHub.baseUrl literally; one it cannot match checks no server.
+    with pytest.raises(subprocess.CalledProcessError) as refused:
+        helm_template("--set", "notebookHub.enabled=true", "--set", f"notebookHub.baseUrl={base}")
+    assert "notebookHub.baseUrl must be" in refused.value.stderr
