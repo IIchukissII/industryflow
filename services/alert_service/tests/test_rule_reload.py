@@ -43,21 +43,30 @@ def test_a_failed_read_is_reported_unread_never_as_no_rules(monkeypatch):
     monkeypatch.setattr(repository.AlertRepository, "get_tenant_schemas", schemas)
     monkeypatch.setattr(repository.AlertRepository, "get_active_rules", rules)
     loaded, unread = asyncio.run(repository.RuleRepository(None).load_all_tenant_rules())
-    assert loaded == {A: [RULE]} and unread == {B}
+    assert loaded == {A: [RULE]} and isinstance(unread[B], ConnectionResetError) and set(unread) == {B}
 
 
 def test_a_tenant_whose_reload_failed_keeps_the_rules_last_read():
     engine = RulesEngine({A: [RULE], B: [RULE]}, alert_repo=None)
-    engine.update_rules({A: []}, unread={B})
-    assert engine.tenant_rules == {A: [], B: [RULE]} and engine.unloaded == set()
+    engine.update_rules({A: []}, unread={B: ConnectionResetError()})
+    assert engine.tenant_rules == {A: [], B: [RULE]} and engine.unloaded == {}
 
 
 def test_a_tenant_never_read_is_retried_not_evaluated_against_nothing():
-    engine = RulesEngine({A: [RULE]}, alert_repo=None, unloaded={B})
+    engine = RulesEngine({A: [RULE]}, alert_repo=None, unloaded={B: ConnectionResetError("reset")})
     with pytest.raises(RulesUnavailable) as raised:
         asyncio.run(engine.evaluate(dict(READING, company_id=B), B))
     assert is_infrastructure_error(raised.value)        # the batch is rewound, its offsets not committed
-    engine.update_rules({A: [RULE]}, unread={B})          # still unread: still unloaded
-    assert engine.unloaded == {B}
+    engine.update_rules({A: [RULE]}, unread={B: ConnectionResetError()})   # still unread: still unloaded
+    assert set(engine.unloaded) == {B}
     engine.update_rules({A: [RULE], B: []})               # read: no rules is now known
-    assert engine.unloaded == set() and asyncio.run(engine.evaluate(dict(READING, company_id=B), B)) == []
+    assert engine.unloaded == {} and asyncio.run(engine.evaluate(dict(READING, company_id=B), B)) == []
+
+
+def test_a_read_that_fails_for_another_reason_is_bounded_not_a_stall():
+    """A broken tenant schema is no dependency outage: its readings take the bounded retries and the
+    dead-letter topic (ADR-0005 dec 3), so they cannot hold every other tenant's readings."""
+    engine = RulesEngine({}, alert_repo=None, unloaded={B: ValueError("column does not exist")})
+    with pytest.raises(RulesUnavailable) as raised:
+        asyncio.run(engine.evaluate(dict(READING, company_id=B), B))
+    assert not is_infrastructure_error(raised.value)

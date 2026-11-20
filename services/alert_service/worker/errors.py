@@ -29,7 +29,14 @@ class MessageValidationError(ValueError):
 
 class RulesUnavailable(RuntimeError):
     """The reading's tenant has no rules the worker could read: what applies to it is unknown, not
-    empty. A dependency failure, so the batch is retried, never committed unevaluated (ADR-0005 dec 3)."""
+    empty, so the reading is never committed unevaluated (ADR-0005 dec 3). It fails as the read
+    failed: a dependency failure is retried until the dependency is back, any other one is retried
+    a bounded number of times and dead-lettered, so one tenant's broken rules cannot hold the
+    others' readings."""
+
+    def __init__(self, company_id: str, cause: BaseException):
+        super().__init__(f"rules for company {company_id} could not be read: {cause}")
+        self.cause = cause
 
 
 def is_infrastructure_error(exc: BaseException) -> bool:
@@ -37,7 +44,7 @@ def is_infrastructure_error(exc: BaseException) -> bool:
     if isinstance(exc, MessageValidationError):
         return False
     if isinstance(exc, RulesUnavailable):
-        return True
+        return is_infrastructure_error(exc.cause)
     if isinstance(exc, (OSError, asyncio.TimeoutError, asyncpg.InterfaceError)):
         # OSError covers ConnectionError and socket failures; InterfaceError covers a closed pool
         # or a connection lost mid-call.
