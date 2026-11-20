@@ -346,6 +346,44 @@ def test_an_object_back_in_the_source_stops_ageing(env):
     assert _mirrored(env, PART).exists() and _absent(env) == {}
 
 
+def _aged_one_day(env):
+    """PART gone from the source a day ago: recorded as ageing in the mirror's state."""
+    _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")
+    _put(env, COLD, "industryflow-cold", LATE, b"PAR1-late")
+    assert _mirror(env, MIRROR_NOW=str(T0)).returncode == 0
+    (_store(env, COLD) / "industryflow-cold" / PART).unlink()
+    assert _mirror(env, MIRROR_NOW=str(T0 + DAY), MIRROR_RETAIN_DAYS="14").returncode == 0
+    assert _absent(env) == {PART: str(T0 + DAY)}
+
+
+def test_a_removal_that_fails_fails_the_mirror(env):
+    # The caller runs ageing in an `||` list, where errexit does not apply (#689).
+    _aged_one_day(env)
+    r = _mirror(env, MIRROR_NOW=str(T0 + 15 * DAY), MIRROR_RETAIN_DAYS="14", FAKE_S3_FAIL_RM="1")
+    assert r.returncode != 0 and "could not be removed" in r.stdout, r.stdout + r.stderr
+    assert _mirrored(env, PART).exists() and _absent(env) == {PART: str(T0 + DAY)}
+
+
+def test_an_ageing_state_that_cannot_be_written_fails_the_mirror(env):
+    _aged_one_day(env)
+    r = _mirror(env, MIRROR_NOW=str(T0 + 2 * DAY), FAKE_S3_FAIL_PUT="s3://backups/cold/_absent.tsv")
+    assert r.returncode != 0 and "could not be written" in r.stdout, r.stdout + r.stderr
+    assert _absent(env) == {PART: str(T0 + DAY)}  # the stored state is the run's before it
+    r = _mirror(env, MIRROR_NOW=str(T0 + 15 * DAY), MIRROR_RETAIN_DAYS="14")
+    assert r.returncode == 0 and not _mirrored(env, PART).exists()  # on its original clock
+
+
+def test_an_ageing_state_that_cannot_be_read_ages_nothing_and_fails(env):
+    # Read as no state, every clock would restart and a deleted tenant's data outlive retention.
+    _aged_one_day(env)
+    r = _mirror(env, MIRROR_NOW=str(T0 + 15 * DAY), MIRROR_RETAIN_DAYS="14",
+                FAKE_S3_FAIL_GET="s3://backups/cold/_absent.tsv")
+    assert r.returncode != 0 and "could not be read" in r.stdout, r.stdout + r.stderr
+    assert _mirrored(env, PART).exists() and _absent(env) == {PART: str(T0 + DAY)}
+    r = _mirror(env, MIRROR_NOW=str(T0 + 15 * DAY), MIRROR_RETAIN_DAYS="14")
+    assert r.returncode == 0 and not _mirrored(env, PART).exists()  # its clock was kept
+
+
 def test_an_empty_source_beside_a_populated_mirror_ages_nothing(env):
     # A wrong bucket or credential lists nothing; ageing on that would empty the backup.
     _put(env, COLD, "industryflow-cold", PART, b"PAR1-day")

@@ -72,10 +72,14 @@ def main(argv):
         obj(argv[2] + "/x").parent.mkdir(parents=True, exist_ok=True)
         return 0
     if argv[:2] == ["s3", "rm"]:
+        if os.environ.get("FAKE_S3_FAIL_RM"):
+            return 1
         obj(argv[2]).unlink()
         return 0
     if argv[:2] == ["s3", "cp"]:
         src, dst = argv[2], argv[3]
+        if src == os.environ.get("FAKE_S3_FAIL_GET") or dst == os.environ.get("FAKE_S3_FAIL_PUT"):
+            return 1
         data = sys.stdin.buffer.read() if src == "-" else (
             obj(src).read_bytes() if src.startswith("s3://") else Path(src).read_bytes())
         if dst.startswith("s3://") and os.environ.get("FAKE_S3_TRUNCATE_PUT"):

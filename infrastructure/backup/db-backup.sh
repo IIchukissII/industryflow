@@ -161,21 +161,36 @@ mirror_model_bucket() {
 
 # Remove from the mirror what the source has not held for MIRROR_RETAIN_DAYS (ADR-0032 dec 4).
 # $1 holds the run's listings (source, mirror); $2 is the mirror's prefix, $3 its label. MIRROR_NOW
-# (epoch seconds) stands in for the clock in tests.
+# (epoch seconds) stands in for the clock in tests. Every store call is checked here: the caller runs
+# it in an `||` list, where errexit does not apply.
 age_out_mirror() {
   local work="$1" prefix="$2" label="$3" state_key="${2}/_absent.tsv"
-  local retain_days="${MIRROR_RETAIN_DAYS:-${RETAIN_PER_DB:-14}}" now expired=0 key
+  local retain_days="${MIRROR_RETAIN_DAYS:-${RETAIN_PER_DB:-14}}" now expired=0 key rc=0 decided
   now="${MIRROR_NOW:-$(date -u +%s)}"
-  if ! [ -s "${work}/source" ] && grep -qv "^${state_key}"$'\t' "${work}/mirror" 2>/dev/null; then
+  if ! [ -s "${work}/source" ] && awk -F'\t' -v k="$state_key" '$1 != k { held = 1 } END { exit !held }' "${work}/mirror"; then
     # An empty source beside a populated mirror is far likelier a wrong bucket or credential than a
     # source that lost everything; ageing on it would empty the backup one retention later.
     log "  ${label} mirror: the source lists nothing but the mirror holds objects; ageing skipped"
     return 0
   fi
-  _dst_aws s3 cp "s3://${S3_BUCKET}/${state_key}" "${work}/absent" --only-show-errors 2>/dev/null \
-    || : > "${work}/absent"
-  : > "${work}/expired"; : > "${work}/absent.next"
-  awk -F'\t' -v OFS='\t' -v p="${prefix}/" -v state="$state_key" -v now="$now" \
+  # No state is only what the run's own listing of the mirror shows; a state that cannot be read is
+  # a failure, never a fresh start, which would set every ageing clock back to now.
+  awk -F'\t' -v k="$state_key" '$1 == k { found = 1 } END { exit found ? 0 : 1 }' "${work}/mirror" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    if ! _dst_aws s3 cp "s3://${S3_BUCKET}/${state_key}" "${work}/absent" --only-show-errors; then
+      log "  ${label} mirror: FAILED, the ageing state could not be read; nothing aged"
+      return 1
+    fi
+  elif [ "$rc" -eq 1 ]; then
+    : > "${work}/absent" || return 1
+  else
+    log "  ${label} mirror: FAILED, the mirror listing could not be read; nothing aged"
+    return 1
+  fi
+  : > "${work}/expired" && : > "${work}/absent.next" || return 1
+  # awk prints how many keys it decided; the two files must hold exactly that many lines, since an
+  # awk that fails to write (a full disk) may still exit 0, and a short state restarts clocks.
+  if ! decided="$(awk -F'\t' -v OFS='\t' -v p="${prefix}/" -v state="$state_key" -v now="$now" \
       -v retain=$(( retain_days * 86400 )) -v expired="${work}/expired" -v pending="${work}/absent.next" '
     FILENAME == ARGV[1] { in_source[$1] = 1; next }
     FILENAME == ARGV[2] { since[$1] = $2; next }
@@ -186,13 +201,25 @@ age_out_mirror() {
       s = (k in since) ? since[k] : now
       if (now - s >= retain) print $1 > expired
       else print k, s > pending
-    }' "${work}/source" "${work}/absent" "${work}/mirror"
+      n++
+    }
+    END { print n + 0 }' "${work}/source" "${work}/absent" "${work}/mirror")" \
+     || [ "$(( $(wc -l < "${work}/expired") + $(wc -l < "${work}/absent.next") ))" != "$decided" ]; then
+    log "  ${label} mirror: FAILED, the ageing could not be computed; nothing aged"
+    return 1
+  fi
   while IFS= read -r key <&4; do
     [ -n "$key" ] || continue
-    _dst_aws s3 rm "s3://${S3_BUCKET}/${key}" --only-show-errors
+    if ! _dst_aws s3 rm "s3://${S3_BUCKET}/${key}" --only-show-errors; then
+      log "  ${label} mirror: FAILED, ${key} could not be removed; ${expired} removed before it"
+      return 1
+    fi
     expired=$((expired + 1))
   done 4< "${work}/expired"
-  _dst_aws s3 cp "${work}/absent.next" "s3://${S3_BUCKET}/${state_key}" --only-show-errors
+  if ! _dst_aws s3 cp "${work}/absent.next" "s3://${S3_BUCKET}/${state_key}" --only-show-errors; then
+    log "  ${label} mirror: FAILED, the ageing state could not be written; ${expired} object(s) removed"
+    return 1
+  fi
   log "  ${label} mirror: ${expired} object(s) gone from the source for ${retain_days} days removed, $(wc -l < "${work}/absent.next") ageing"
 }
 
