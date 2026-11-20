@@ -280,3 +280,27 @@ def test_an_unset_password_leaves_the_role_s_password_as_it_is(cur, role_passwor
     r = _run("reapply", "00-create-roles.sh", MIGRATE_WITHOUT_BACKUP="1", TENANT_DELETE_DB_PASSWORD="")
     assert r.returncode == 0, r.stdout + r.stderr
     assert _verifies(_verifier(cur), "kept")
+
+
+def test_the_sql_proxy_role_reads_the_ledger_whenever_its_script_creates_it(cur):
+    # 28 grants the ledger to the roles that exist when it runs; the proxy role, created by 13 once its
+    # password is set, gets its grant from 13 itself (#690), or its schema-ready check is refused.
+    cur.execute("SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = 'notebook_sql_proxy')")
+    existed = cur.fetchone()[0]
+    password = _env_file().get("NOTEBOOK_SQL_PROXY_DB_PASSWORD") or os.environ.get("NOTEBOOK_SQL_PROXY_DB_PASSWORD")
+    if existed and not password:
+        _unavailable("notebook_sql_proxy exists but its password is not known here")
+    if existed:
+        cur.execute("REVOKE SELECT ON public.schema_ledger FROM notebook_sql_proxy")
+    try:
+        r = _run("reapply", "13-notebook-sql-proxy-role.sh", MIGRATE_WITHOUT_BACKUP="1",
+                 NOTEBOOK_SQL_PROXY_DB_PASSWORD=password or f"pw-{uuid.uuid4().hex}")
+        assert r.returncode == 0, r.stdout + r.stderr
+        cur.execute("SELECT has_table_privilege('notebook_sql_proxy', 'public.schema_ledger', 'SELECT')")
+        assert cur.fetchone()[0]
+    finally:
+        if existed:
+            cur.execute("GRANT SELECT ON public.schema_ledger TO notebook_sql_proxy")
+        else:
+            cur.execute("DROP OWNED BY notebook_sql_proxy")
+            cur.execute("DROP ROLE IF EXISTS notebook_sql_proxy")

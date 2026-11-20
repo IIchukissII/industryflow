@@ -200,6 +200,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
     $$;
 
     GRANT EXECUTE ON FUNCTION notebook_sql_proxy_enrol(UUID, TEXT) TO notebook_sql_proxy;
+    -- Its schema-ready check reads the ledger as this role (ADR-0034 dec 10). Granted here, with the
+    -- role: created after 28-schema-ledger-read.sql ran, it would otherwise hold no grant, and 28 is
+    -- not applied again while it is unchanged. The runner creates the ledger before any script.
+    SELECT to_regclass('public.schema_ledger') IS NOT NULL AS ledger \gset
+    \if :ledger
+        GRANT SELECT ON public.schema_ledger TO notebook_sql_proxy;
+    \endif
 EOSQL
 
-echo "  ✓ notebook_sql_proxy ready (LOGIN, member of nothing, EXECUTE on notebook_sql_proxy_enrol only)"
+echo "  ✓ notebook_sql_proxy ready (LOGIN, member of nothing, EXECUTE on notebook_sql_proxy_enrol, SELECT on the schema ledger)"
