@@ -335,15 +335,17 @@ class RuleRepository:
     def __init__(self, db_pool: asyncpg.Pool):
         self.pool = db_pool
     
-    async def load_all_tenant_rules(self) -> Dict[str, List[Dict]]:
+    async def load_all_tenant_rules(self) -> Tuple[Dict[str, List[Dict]], Dict[str, BaseException]]:
         """
-        Load rules from all tenant schemas
-        Returns: {company_id: [rules]}
+        Load rules from all tenant schemas.
+        Returns ({company_id: [rules]}, {company_id: why its rules could not be read}). A tenant whose
+        read failed gets no rules entry: no rules and unknown rules are different (ADR-0005 dec 3).
         """
         alert_repo = AlertRepository(self.pool)
         schemas = await alert_repo.get_tenant_schemas()
         
         all_rules = {}
+        unread: Dict[str, BaseException] = {}
         
         for schema in schemas:
             company_id = await alert_repo.get_company_id_from_schema(schema)
@@ -354,6 +356,6 @@ class RuleRepository:
                 logger.info(f"Loaded {len(rules)} rules for company {company_id}")
             except Exception as e:
                 logger.error(f"Failed to load rules for {company_id}: {e}")
-                all_rules[company_id] = []
+                unread[company_id] = e
         
-        return all_rules
+        return all_rules, unread

@@ -23,7 +23,7 @@ from aiokafka.errors import CommitFailedError, KafkaError, OutOfOrderSequenceNum
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
 import kafka_consumer  # noqa: E402
-from errors import MessageValidationError, is_infrastructure_error  # noqa: E402
+from errors import MessageValidationError, RulesUnavailable, is_infrastructure_error  # noqa: E402
 from kafka_consumer import AlertKafkaConsumer  # noqa: E402
 from industryflow_contracts import tenant_status  # noqa: E402
 
@@ -191,6 +191,24 @@ def test_unknown_error_is_retried_then_dead_lettered(tmp_path, sleeps):
     assert "retries exhausted" in c.producer.sent[0][1]["reason"]
     assert sleeps == [1.0, 2.0]
     assert c.consumer.commits == [{TP: 1}]
+
+
+def test_rules_unread_for_a_reason_no_retry_fixes_are_dead_lettered_at_once(tmp_path, sleeps):
+    """Only the next rule reload can change it: retried in place, each reading held the loop seconds."""
+    engine = ScriptedEngine([RulesUnavailable(CO, ValueError("column does not exist"))])
+    c = _consumer([[_record(0, _reading())]], engine, tmp_path)
+    _run(c)
+    assert len(c.producer.sent) == 1 and "could not be read" in c.producer.sent[0][1]["reason"]
+    assert sleeps == [] and c.consumer.commits == [{TP: 1}]
+
+
+def test_rules_unread_because_the_database_is_down_rewind_and_retry(tmp_path, sleeps):
+    engine = ScriptedEngine([RulesUnavailable(CO, ConnectionResetError("reset"))])
+    rec = _record(3, _reading())
+    c = _consumer([[rec], [rec]], engine, tmp_path)
+    c.consumer.committed_offset = 3
+    _run(c)
+    assert c.producer.sent == [] and c.consumer.seeks == [3] and len(engine.seen) == 1
 
 
 # --- infrastructure errors: never dead-lettered, rewound and retried ------------------------------

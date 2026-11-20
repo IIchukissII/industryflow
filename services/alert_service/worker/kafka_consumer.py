@@ -24,7 +24,7 @@ from aiokafka.errors import (
     UnknownProducerId,
 )
 
-from errors import MessageValidationError, is_infrastructure_error
+from errors import MessageValidationError, RulesUnavailable, is_infrastructure_error
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +213,8 @@ class AlertKafkaConsumer:
         - malformed or invalid reading: dead-lettered at once (no retry can fix it);
         - infrastructure failure (database, pool, network): never dead-lettered, the batch is
           rewound and retried until the dependency is back;
+        - its tenant's rules unread for another reason: dead-lettered at once, since only the next
+          rule reload can change the answer and a retry in place would hold every other reading;
         - anything else: retried KAFKA_MAX_RETRIES times, then dead-lettered.
         """
         try:
@@ -227,6 +229,12 @@ class AlertKafkaConsumer:
                 return HANDLED
             except MessageValidationError as e:
                 return await self._dead_letter(message, reason=str(e))
+            except RulesUnavailable as e:
+                if not is_infrastructure_error(e):
+                    return await self._dead_letter(message, reason=str(e))
+                logger.error(f"Rules unavailable (partition={message.partition}, offset={message.offset}); "
+                             f"will retry: {e}")
+                return RETRY_BATCH
             except Exception as e:
                 if is_infrastructure_error(e):
                     logger.error(

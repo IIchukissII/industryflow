@@ -169,8 +169,8 @@ def test_rules_load_only_for_schemas_that_are_exactly_a_tenants():
             yield CatalogConn(self.log)
 
     pool = CatalogPool()
-    rules = asyncio.run(repository.RuleRepository(pool).load_all_tenant_rules())
-    assert rules == {CO: []}
+    rules, unread = asyncio.run(repository.RuleRepository(pool).load_all_tenant_rules())
+    assert rules == {CO: []} and unread == {}
     listing = next(e for e in _statements(pool.log) if "information_schema.schemata" in e[0])
     assert listing[1] == (repository.tenancy.SCHEMA_LIKE,), "the LIKE pattern is bound, escaped, from the mapping"
 

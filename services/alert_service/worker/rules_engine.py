@@ -9,12 +9,12 @@ Schema-per-tenant architecture - UUID-based matching only
 import logging
 import math
 from collections import OrderedDict
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 import uuid
 import aiohttp
 
-from errors import MessageValidationError
+from errors import MessageValidationError, RulesUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +137,7 @@ class RulesEngine:
         alert_repo,
         feature_store=None,
         *,
+        unloaded: Optional[Dict[str, BaseException]] = None,
         ml_service_url: str = DEFAULT_ML_SERVICE_URL,
         internal_service_token: Optional[str] = None,
         cooldown_seconds: float = DEFAULT_COOLDOWN_SECONDS,
@@ -146,8 +147,11 @@ class RulesEngine:
         """
         Initialize with rules organized by tenant
         tenant_rules: {company_id: [rules]}
+        unloaded: {company_id: why its rules could not be read}: its readings fail as the read failed,
+        never evaluated against nothing (ADR-0005 dec 3)
         """
         self.tenant_rules = tenant_rules
+        self.unloaded: Dict[str, BaseException] = dict(unloaded or {})
         self.alert_repo = alert_repo
         self.feature_store = feature_store
         self.ml_service_url = ml_service_url
@@ -166,11 +170,24 @@ class RulesEngine:
         if feature_store:
             logger.info("Feature Store integration enabled")
     
-    def update_rules(self, tenant_rules: Dict[str, List[Dict]]):
-        """Update rules (called during periodic reload)"""
-        self.tenant_rules = tenant_rules
-        total = sum(len(rules) for rules in tenant_rules.values())
-        logger.info(f"Rules updated: {total} rules from {len(tenant_rules)} tenants")
+    def update_rules(self, tenant_rules: Dict[str, List[Dict]],
+                     unread: Optional[Dict[str, BaseException]] = None):
+        """Update rules (called during periodic reload). A tenant whose rules could not be read keeps the
+        rules last read for it; one never read is unloaded, so its readings fail as the read failed
+        rather than being evaluated against nothing and committed (ADR-0005 dec 3)."""
+        unread = dict(unread or {})
+        merged = dict(tenant_rules)
+        unloaded: Dict[str, BaseException] = {}
+        for company_id, cause in unread.items():
+            if company_id in self.tenant_rules and company_id not in self.unloaded:
+                merged[company_id] = self.tenant_rules[company_id]
+            else:
+                unloaded[company_id] = cause
+        self.tenant_rules = merged
+        self.unloaded = unloaded
+        total = sum(len(rules) for rules in merged.values())
+        logger.info(f"Rules updated: {total} rules from {len(merged)} tenants; "
+                    f"{len(unread) - len(unloaded)} kept from the last read, {len(unloaded)} unloaded")
 
     async def _get_sensor_name(self, sensor_id: str, company_id: str) -> str:
         """
@@ -249,6 +266,8 @@ class RulesEngine:
         Raises MessageValidationError for a reading that cannot be evaluated (see parse_reading).
         """
         sensor_data = parse_reading(sensor_data, company_id)
+        if company_id in self.unloaded:             # its rules are unknown, not empty
+            raise RulesUnavailable(company_id, self.unloaded[company_id])
         sensor_id = sensor_data['sensor_id']
         equipment_id = sensor_data['equipment_id']
         value = sensor_data['value']
