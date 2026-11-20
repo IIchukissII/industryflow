@@ -12,6 +12,10 @@
 #   * The notebooks Ingress: the notebook origin's own host (→ SSO proxy).
 # The single-user pod isolation NetworkPolicy lives in networkpolicy.yaml (same toggle).
 {{- if .Values.notebookHub.enabled }}
+{{- /* The SSO proxy matches routes by baseUrl literally; one it cannot match checks no server (ADR-0011 dec 1). */}}
+{{- if not (regexMatch "^/([A-Za-z0-9_-]+/)*$" .Values.notebookHub.baseUrl) }}
+{{- fail (printf "notebookHub.baseUrl must be / or /<segment>/.../ of letters, digits, '-' and '_'; got %q" .Values.notebookHub.baseUrl) }}
+{{- end }}
 {{- $fullname := include "industryflow.fullname" . }}
 {{- $hubSvc := printf "%s-notebook-hub" $fullname }}
 {{- $proxySvc := printf "%s-notebook-proxy" $fullname }}
@@ -313,16 +317,18 @@ data:
         default 0;
         "~^[^?]*(\.\.|%2[eEfF]|%5[cC]|//|\\\\)" 1;
     }
-    # The account whose single-user server a /user/ request reaches: chp routes it by the first segment
-    # after user/, as sent. The session check refuses it unless that is the verified user's own, since a
-    # server accepts any hub cookie it once issued, a shared browser's previous user's included. A path
-    # another hop might route differently (a dot segment, an encoded separator, an empty segment) and
-    # any other form under user/ name no account.
+    # The account whose single-user server a request reaches, for the session check, which refuses it
+    # unless that is the verified user's own: a server accepts any hub cookie it once issued, a shared
+    # browser's previous user's included. chp routes on the decoded path with empty segments dropped and
+    # backslashes read as slashes, so only literal forms are told apart: user/<name> with no encoding in
+    # the name, the hub's routes and the base itself. Every other path, and a dot segment, an encoded
+    # separator or an empty segment under user/, names no account.
     map $request_uri $if_server_user {
-        default "";
+        default "/";
         "~^{{ .Values.notebookHub.baseUrl }}user/[^?]*(?:/\.\.?(?:[/?]|$)|%2[eEfF]|%5[cC]|//|\\\\)" "/";
-        "~^{{ .Values.notebookHub.baseUrl }}user/([^/?]+)(?:[/?]|$)" $1;
-        "~^{{ .Values.notebookHub.baseUrl }}user(?![-\w])" "/";
+        "~^{{ .Values.notebookHub.baseUrl }}user/([^/?%\\\\]+)(?:[/?]|$)" $1;
+        "~^{{ .Values.notebookHub.baseUrl }}(?:hub|user-redirect)(?:[/?]|$)" "";
+        "~^{{ .Values.notebookHub.baseUrl }}?(?:[?]|$)" "";
     }
     map "$if_hub_route$if_ambiguous_path" $if_sso_proxy_secret {
         default "";

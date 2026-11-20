@@ -66,7 +66,7 @@ c = get_config()  # noqa: F821  (provided by JupyterHub at load time)
 
 # The hub is served under this path of the notebook origin (ADR-0048), whose root the SSO proxy sends
 # here. JupyterHub propagates base_url to chp and every single-user server.
-c.JupyterHub.base_url = os.environ.get("NOTEBOOK_BASE_URL", "/")
+c.JupyterHub.base_url = ident.validate_base_url(os.environ.get(ident.BASE_URL_ENV, "/"))
 
 # Migrate the hub's own state database on start, instead of refusing to boot against an older one.
 # JupyterHub 5 carries a schema its 4.x predecessor did not, and a hub that finds the old schema
