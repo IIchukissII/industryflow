@@ -27,10 +27,17 @@ class MessageValidationError(ValueError):
     """The reading itself is unprocessable. Dead-lettered without retry."""
 
 
+class RulesUnavailable(RuntimeError):
+    """The reading's tenant has no rules the worker could read: what applies to it is unknown, not
+    empty. A dependency failure, so the batch is retried, never committed unevaluated (ADR-0005 dec 3)."""
+
+
 def is_infrastructure_error(exc: BaseException) -> bool:
     """True when exc is a dependency failure that a retry can outlive (never dead-lettered)."""
     if isinstance(exc, MessageValidationError):
         return False
+    if isinstance(exc, RulesUnavailable):
+        return True
     if isinstance(exc, (OSError, asyncio.TimeoutError, asyncpg.InterfaceError)):
         # OSError covers ConnectionError and socket failures; InterfaceError covers a closed pool
         # or a connection lost mid-call.

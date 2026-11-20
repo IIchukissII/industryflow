@@ -111,17 +111,18 @@ class AlertService:
         alert_repo = AlertRepository(self.db_pool)
         
         # Load rules from all tenants
-        tenant_rules = await rule_repo.load_all_tenant_rules()
+        tenant_rules, unread = await rule_repo.load_all_tenant_rules()
         
         total_rules = sum(len(rules) for rules in tenant_rules.values())
         logger.info(f"Loaded {total_rules} rules from {len(tenant_rules)} tenants")
         
         # Initialize or update rules engine
         if self.rules_engine:
-            self.rules_engine.update_rules(tenant_rules)
+            self.rules_engine.update_rules(tenant_rules, unread)
         else:
             self.rules_engine = RulesEngine(
                 tenant_rules=tenant_rules,
+                unloaded=unread,
                 alert_repo=alert_repo,
                 feature_store=self.feature_store,
                 ml_service_url=config.ML_SERVICE_URL,
