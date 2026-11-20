@@ -97,3 +97,9 @@ def test_a_failed_call_is_rolled_back_and_raises():
 def test_the_user_store_never_shares_the_request_session():
     # Its commits would otherwise commit a route's pending writes on the get_db session.
     assert "session" not in inspect.signature(database.get_user_db).parameters
+
+
+def test_a_released_user_stays_readable():
+    # Each call commits: a factory that expired on commit would leave every returned user unloaded,
+    # and reading it in async code would fail.
+    assert database.AsyncSessionLocal.kw["expire_on_commit"] is False
