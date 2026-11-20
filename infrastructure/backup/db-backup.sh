@@ -165,9 +165,9 @@ mirror_model_bucket() {
 # it in an `||` list, where errexit does not apply.
 age_out_mirror() {
   local work="$1" prefix="$2" label="$3" state_key="${2}/_absent.tsv"
-  local retain_days="${MIRROR_RETAIN_DAYS:-${RETAIN_PER_DB:-14}}" now expired=0 key
+  local retain_days="${MIRROR_RETAIN_DAYS:-${RETAIN_PER_DB:-14}}" now expired=0 key rc=0 decided
   now="${MIRROR_NOW:-$(date -u +%s)}"
-  if ! [ -s "${work}/source" ] && grep -qv "^${state_key}"$'\t' "${work}/mirror" 2>/dev/null; then
+  if ! [ -s "${work}/source" ] && awk -F'\t' -v k="$state_key" '$1 != k { held = 1 } END { exit !held }' "${work}/mirror"; then
     # An empty source beside a populated mirror is far likelier a wrong bucket or credential than a
     # source that lost everything; ageing on it would empty the backup one retention later.
     log "  ${label} mirror: the source lists nothing but the mirror holds objects; ageing skipped"
@@ -175,16 +175,22 @@ age_out_mirror() {
   fi
   # No state is only what the run's own listing of the mirror shows; a state that cannot be read is
   # a failure, never a fresh start, which would set every ageing clock back to now.
-  if awk -F'\t' -v k="$state_key" '$1 == k { found = 1 } END { exit !found }' "${work}/mirror"; then
+  awk -F'\t' -v k="$state_key" '$1 == k { found = 1 } END { exit found ? 0 : 1 }' "${work}/mirror" || rc=$?
+  if [ "$rc" -eq 0 ]; then
     if ! _dst_aws s3 cp "s3://${S3_BUCKET}/${state_key}" "${work}/absent" --only-show-errors; then
       log "  ${label} mirror: FAILED, the ageing state could not be read; nothing aged"
       return 1
     fi
+  elif [ "$rc" -eq 1 ]; then
+    : > "${work}/absent" || return 1
   else
-    : > "${work}/absent"
+    log "  ${label} mirror: FAILED, the mirror listing could not be read; nothing aged"
+    return 1
   fi
-  : > "${work}/expired"; : > "${work}/absent.next"
-  awk -F'\t' -v OFS='\t' -v p="${prefix}/" -v state="$state_key" -v now="$now" \
+  : > "${work}/expired" && : > "${work}/absent.next" || return 1
+  # awk prints how many keys it decided; the two files must hold exactly that many lines, since an
+  # awk that fails to write (a full disk) may still exit 0, and a short state restarts clocks.
+  if ! decided="$(awk -F'\t' -v OFS='\t' -v p="${prefix}/" -v state="$state_key" -v now="$now" \
       -v retain=$(( retain_days * 86400 )) -v expired="${work}/expired" -v pending="${work}/absent.next" '
     FILENAME == ARGV[1] { in_source[$1] = 1; next }
     FILENAME == ARGV[2] { since[$1] = $2; next }
@@ -195,7 +201,13 @@ age_out_mirror() {
       s = (k in since) ? since[k] : now
       if (now - s >= retain) print $1 > expired
       else print k, s > pending
-    }' "${work}/source" "${work}/absent" "${work}/mirror"
+      n++
+    }
+    END { print n + 0 }' "${work}/source" "${work}/absent" "${work}/mirror")" \
+     || [ "$(( $(wc -l < "${work}/expired") + $(wc -l < "${work}/absent.next") ))" != "$decided" ]; then
+    log "  ${label} mirror: FAILED, the ageing could not be computed; nothing aged"
+    return 1
+  fi
   while IFS= read -r key <&4; do
     [ -n "$key" ] || continue
     if ! _dst_aws s3 rm "s3://${S3_BUCKET}/${key}" --only-show-errors; then

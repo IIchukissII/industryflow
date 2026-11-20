@@ -368,6 +368,9 @@ def test_an_ageing_state_that_cannot_be_written_fails_the_mirror(env):
     _aged_one_day(env)
     r = _mirror(env, MIRROR_NOW=str(T0 + 2 * DAY), FAKE_S3_FAIL_PUT="s3://backups/cold/_absent.tsv")
     assert r.returncode != 0 and "could not be written" in r.stdout, r.stdout + r.stderr
+    assert _absent(env) == {PART: str(T0 + DAY)}  # the stored state is the run's before it
+    r = _mirror(env, MIRROR_NOW=str(T0 + 15 * DAY), MIRROR_RETAIN_DAYS="14")
+    assert r.returncode == 0 and not _mirrored(env, PART).exists()  # on its original clock
 
 
 def test_an_ageing_state_that_cannot_be_read_ages_nothing_and_fails(env):
