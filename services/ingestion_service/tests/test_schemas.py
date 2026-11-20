@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The reading schema rejects a timestamp beyond the clock-skew bound at the edge."""
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
@@ -42,6 +43,31 @@ def test_the_endpoint_refuses_a_future_reading_and_produces_nothing(client, make
     body = dict(sample_body, timestamp=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat())
     r = c.post("/ingest", json=body, headers={"x-client-verify": "SUCCESS", "x-client-cert": quote(pem)})
     assert r.status_code == 422
+    assert produced == []
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "1e999", '"NaN"', '"inf"'])
+def test_the_endpoint_refuses_a_value_that_is_not_a_finite_number(client, make_cert, sample_body, value):
+    # ADR-0044 dec 1. The body is sent as written: Python's JSON reads NaN, Infinity and 1e999.
+    c, produced = client
+    pem = make_cert(f"industryflow:tenant/{uuid.uuid4()}/device/gw-01")
+    body = json.dumps(dict(sample_body, value=0.0)).replace('"value": 0.0', f'"value": {value}')
+    r = c.post("/ingest", content=body, headers={"content-type": "application/json", "x-client-verify": "SUCCESS",
+                                                 "x-client-cert": quote(pem)})
+    assert r.status_code == 422, r.text
+    assert produced == []
+
+
+@pytest.mark.parametrize("value", ["[NaN]", '{"x": NaN}', "NaN"])
+def test_a_non_finite_number_inside_a_refused_body_is_a_422(client, make_cert, sample_body, value):
+    # The 422 echoes the refused input, here holding NaN: as a whole body missing a field, or nested.
+    c, produced = client
+    pem = make_cert(f"industryflow:tenant/{uuid.uuid4()}/device/gw-01")
+    body = {k: v for k, v in sample_body.items() if k != "sensor_id"} if value == "NaN" else sample_body
+    text = json.dumps(dict(body, value=0.0)).replace('"value": 0.0', f'"value": {value}')
+    r = c.post("/ingest", content=text, headers={"content-type": "application/json", "x-client-verify": "SUCCESS",
+                                                 "x-client-cert": quote(pem)})
+    assert r.status_code == 422, r.text
     assert produced == []
 
 

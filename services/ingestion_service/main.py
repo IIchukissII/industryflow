@@ -6,13 +6,17 @@
 IndustryFlow Ingestion Service
 High-throughput sensor data ingestion endpoint (Port 8003)
 """
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from industryflow_contracts import build_info
 from aiokafka import AIOKafkaConsumer
 from datetime import datetime, timezone
 import asyncio
+import math
 import logging
 
 from config import get_settings
@@ -39,6 +43,22 @@ app = FastAPI(
     description="High-throughput sensor data ingestion endpoint",
     version="1.0.0"
 )
+
+@app.exception_handler(RequestValidationError)
+async def _invalid_body(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """FastAPI's 422, with every non-finite number in an echoed input as text: JSON has no NaN or
+    Infinity, so the default handler would fail on the very value it refuses and answer 500."""
+    def _text(value):
+        if isinstance(value, float) and not math.isfinite(value):
+            return str(value)
+        if isinstance(value, dict):
+            return {k: _text(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_text(v) for v in value]
+        return value
+    return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        content={"detail": _text(jsonable_encoder(exc.errors()))})
+
 
 # No CORS middleware: only devices call this service, over mTLS, never a browser (ADR-0002).
 
