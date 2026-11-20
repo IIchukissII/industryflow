@@ -76,6 +76,11 @@ def test_a_one_reading_window_gets_zero_spread_compressed_or_not(tenant):
         "missing": ("3 hours", None, 4),
     }
     sensors = {name: str(uuid.uuid4()) for name in rows}
+    # The test compresses the old chunk itself; the table's own policy (14 days) would race it.
+    cur.execute("SELECT alter_job(job_id, scheduled => false) FROM timescaledb_information.jobs "
+                "WHERE proc_name = 'policy_compression' AND hypertable_schema = %s "
+                "AND hypertable_name = 'sensor_aggregations_1min'", (schema,))
+    assert cur.fetchall(), "no compression policy found to pause"
     for name, (age, std, n) in rows.items():
         cur.execute(f"INSERT INTO {table} (time, sensor_id, equipment_id, avg_value, stddev_value, count_values) "
                     f"VALUES (date_trunc('minute', now() - interval '{age}'), %s, %s, 1.0, %s, %s)",
