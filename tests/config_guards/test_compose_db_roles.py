@@ -18,7 +18,7 @@ COMPOSE = load_yaml("docker-compose.yml")["services"]
 def _init_script_passwords() -> set[str]:
     found = set()
     for script in (ROOT / "infrastructure" / "timescaledb" / "init-scripts").iterdir():
-        found |= set(re.findall(r"\$\{?([A-Z_]+_DB_PASSWORD)", script.read_text()))
+        found |= set(re.findall(r"\b([A-Z][A-Z_]*_DB_PASSWORD)\b", script.read_text()))
     assert found, "no init script reads a role password — the guard is not looking"
     return found
 
@@ -73,3 +73,17 @@ def test_the_default_client_ca_mount_holds_the_ca_db_cert_init_staged():
     assert any(re.search(rf"cp \S+ {re.escape(t)}/ca\.crt", script) for t in targets), (
         f"db-cert-init never writes ca.crt into {targets}"
     )
+
+
+def test_every_login_role_has_its_password_set_on_every_application():
+    # 00-create-roles.sh creates each role without a password and sets every listed one on each
+    # application (ADR-0034 dec 2): a login role missing from ROLE_PASSWORDS never gets one.
+    script = (ROOT / "infrastructure" / "timescaledb" / "init-scripts" / "00-create-roles.sh").read_text()
+    created = set(re.findall(r"CREATE ROLE (\w+) WITH LOGIN", script))
+    listed = re.search(r'ROLE_PASSWORDS="\n(.*?)"\n', script, re.S)
+    assert created and listed, "00-create-roles.sh no longer has the shape this guard reads"
+    pairs = dict(line.split() for line in listed.group(1).splitlines() if line.strip())
+    assert set(pairs) == created, (
+        f"login roles with no password step: {sorted(created - set(pairs))}; "
+        f"listed but never created: {sorted(set(pairs) - created)}")
+    assert all(v.endswith("_DB_PASSWORD") for v in pairs.values()), pairs
