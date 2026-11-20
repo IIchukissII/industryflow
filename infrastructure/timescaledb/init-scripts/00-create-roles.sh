@@ -18,7 +18,7 @@ echo "Creating Application Roles"
 echo "=========================================="
 
 # Every role is created without a password; set_passwords below sets each one on every application.
-# Quoted heredoc: no shell expansion, so no secret is ever part of the SQL text.
+# Quoted heredoc: no shell expansion; this part reads no secret.
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'EOSQL'
     -- =============================================================================
     -- CREATE APPLICATION ROLES
@@ -141,8 +141,8 @@ EOSQL
 # Each role's password, set on every application whether or not the role existed before, so
 # re-applying this script sets a password enabled, rotated, or lost to a restore of the globals
 # (dumped without passwords). A role whose variable is unset keeps the password it has. psql reads
-# each password from the environment (\getenv) and quotes it itself (:'pw'): it is never part of the
-# SQL text, and never on a command line.
+# each password from the environment (\getenv) and quotes it itself (:'pw'): it is never in this
+# script's text or on a command line; the server hashes it (password_encryption = scram-sha-256).
 ROLE_PASSWORDS="
 api_gateway_user API_GATEWAY_DB_PASSWORD
 spark_streaming_user SPARK_STREAMING_DB_PASSWORD
