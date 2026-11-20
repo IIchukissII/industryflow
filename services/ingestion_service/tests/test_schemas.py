@@ -58,6 +58,19 @@ def test_the_endpoint_refuses_a_value_that_is_not_a_finite_number(client, make_c
     assert produced == []
 
 
+@pytest.mark.parametrize("value", ["[NaN]", '{"x": NaN}', "NaN"])
+def test_a_non_finite_number_inside_a_refused_body_is_a_422(client, make_cert, sample_body, value):
+    # The 422 echoes the refused input, here holding NaN: as a whole body missing a field, or nested.
+    c, produced = client
+    pem = make_cert(f"industryflow:tenant/{uuid.uuid4()}/device/gw-01")
+    body = {k: v for k, v in sample_body.items() if k != "sensor_id"} if value == "NaN" else sample_body
+    text = json.dumps(dict(body, value=0.0)).replace('"value": 0.0', f'"value": {value}')
+    r = c.post("/ingest", content=text, headers={"content-type": "application/json", "x-client-verify": "SUCCESS",
+                                                 "x-client-cert": quote(pem)})
+    assert r.status_code == 422, r.text
+    assert produced == []
+
+
 def test_the_readings_contract_is_what_ingestion_accepts():
     # A device builds its body from industryflow_contracts.readings; ingestion validates it here.
     from industryflow_contracts import readings

@@ -111,6 +111,7 @@ def test_a_backlog_is_kept_from_the_earliest_offset_and_unwritable_readings_are_
         stream.reading(3, sensor_id=unknown): "unknown_sensor",
         stream.reading(4, timestamp=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat()):
             "future_timestamp",
+        stream.reading(5, value=float("nan")): "non_finite_value",
     }
     valid = [stream.reading(i) for i in range(500)]
     stream.send(valid[:250] + list(invalid) + valid[250:])

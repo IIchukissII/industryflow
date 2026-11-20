@@ -46,15 +46,18 @@ app = FastAPI(
 
 @app.exception_handler(RequestValidationError)
 async def _invalid_body(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """FastAPI's 422, with a non-finite input echoed as text: JSON has no NaN or Infinity, so the
-    default handler would fail on the very value it refuses and answer 500."""
-    def _echo(error):
-        value = error.get("input")
+    """FastAPI's 422, with every non-finite number in an echoed input as text: JSON has no NaN or
+    Infinity, so the default handler would fail on the very value it refuses and answer 500."""
+    def _text(value):
         if isinstance(value, float) and not math.isfinite(value):
-            error = {**error, "input": str(value)}
-        return error
+            return str(value)
+        if isinstance(value, dict):
+            return {k: _text(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_text(v) for v in value]
+        return value
     return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                        content={"detail": jsonable_encoder([_echo(e) for e in exc.errors()])})
+                        content={"detail": _text(jsonable_encoder(exc.errors()))})
 
 
 # No CORS middleware: only devices call this service, over mTLS, never a browser (ADR-0002).
