@@ -605,8 +605,8 @@ class RulesEngine:
             return None
 
         try:
-            # Get anomaly threshold from rule config
-            anomaly_threshold = rule.get('anomaly_threshold', 0.85)
+            # The rule's own threshold: the column refuses NULL, so none is substituted.
+            anomaly_threshold = rule['anomaly_threshold']
 
             # Call ML inference endpoint (authenticated service-to-service call).
             async with aiohttp.ClientSession() as session:

@@ -93,3 +93,14 @@ def test_update_carries_only_what_was_sent():
 def test_mode_switch_requires_a_known_mode():
     with pytest.raises(ValidationError):
         DetectionModeSwitch(detection_type="hybrid")
+
+
+def test_a_rule_always_holds_its_anomaly_threshold():
+    # An ML rule stored with no threshold was scored with none and never fired (#688).
+    with pytest.raises(ValidationError, match="anomaly_threshold"):
+        AlertRuleCreate(**_base(detection_type="ml", anomaly_threshold=None))
+    with pytest.raises(ValidationError, match="anomaly_threshold"):
+        AlertRuleUpdate(anomaly_threshold=None)
+    assert AlertRuleCreate(**_base(detection_type="ml")).columns()["anomaly_threshold"] == 0.85
+    assert "anomaly_threshold" not in AlertRuleUpdate(name="r").changes()
+    assert AlertRuleUpdate(anomaly_threshold=0.4).changes()["anomaly_threshold"] == 0.4
