@@ -209,4 +209,4 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
     \endif
 EOSQL
 
-echo "  ✓ notebook_sql_proxy ready (LOGIN, member of nothing, EXECUTE on notebook_sql_proxy_enrol only)"
+echo "  ✓ notebook_sql_proxy ready (LOGIN, member of nothing, EXECUTE on notebook_sql_proxy_enrol, SELECT on the schema ledger)"

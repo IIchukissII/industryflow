@@ -299,6 +299,8 @@ def test_the_sql_proxy_role_reads_the_ledger_whenever_its_script_creates_it(cur)
         cur.execute("SELECT has_table_privilege('notebook_sql_proxy', 'public.schema_ledger', 'SELECT')")
         assert cur.fetchone()[0]
     finally:
-        if not existed:
+        if existed:
+            cur.execute("GRANT SELECT ON public.schema_ledger TO notebook_sql_proxy")
+        else:
             cur.execute("DROP OWNED BY notebook_sql_proxy")
             cur.execute("DROP ROLE IF EXISTS notebook_sql_proxy")
