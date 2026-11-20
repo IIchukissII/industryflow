@@ -56,6 +56,13 @@ def test_a_missing_required_field_is_rejected(spark, field):
     assert reasons(spark, [reading(**{field: None})]) == [rg.MISSING_OR_MALFORMED]
 
 
+@pytest.mark.parametrize("value", [b"NaN", b"Infinity", b"-Infinity", b"1e999", b'"NaN"'])
+def test_a_value_that_is_not_a_finite_number_is_rejected(spark, value):
+    # ADR-0044 dec 1: in the hypertable it would turn its window's mean and spread into NaN.
+    body = json.dumps(reading(value=0.0)).encode().replace(b'"value": 0.0', b'"value": ' + value)
+    assert reasons(spark, [body]) == [rg.NON_FINITE_VALUE]
+
+
 def test_malformed_json_and_an_unparseable_timestamp_are_rejected(spark):
     assert reasons(spark, [b"{not json", reading(timestamp="yesterday-ish")]) == \
         [rg.MISSING_OR_MALFORMED, rg.MISSING_OR_MALFORMED]

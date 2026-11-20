@@ -5,8 +5,8 @@
 """
 Which Kafka readings the Spark jobs write, and where the others go.
 
-A reading that can never be written — malformed, missing a required field, with an id that is not a
-UUID, stamped further in the future than clocks can disagree, or naming a tenant, sensor or
+A reading that can never be written — malformed, missing a required field, with a value that is not
+a finite number, with an id that is not a UUID, stamped further in the future than clocks can disagree, or naming a tenant, sensor or
 equipment that does not exist — used to fail the whole micro-batch. Spark then retried the same
 batch forever (ADR-0006 dec 4), so one bad reading halted ingestion for every tenant. Other such
 readings were filtered out silently while the offset moved on. Both break ADR-0005 dec 3: a message
@@ -51,6 +51,7 @@ DEFAULT_DLQ_TOPIC = "sensor-data-raw.measurements.dlq"
 
 # Rejection reasons, as published in the dead-letter envelope.
 MISSING_OR_MALFORMED = "missing_or_malformed_field"
+NON_FINITE_VALUE = "non_finite_value"
 INVALID_COMPANY_ID = "invalid_company_id"
 INVALID_DEVICE_ID = "invalid_sensor_or_equipment_id"
 FUTURE_TIMESTAMP = "future_timestamp"
@@ -193,9 +194,12 @@ def rejection_reason(max_future_skew_seconds: int = MAX_FUTURE_SKEW_SECONDS):
         cond = F.col(field).isNull()
         missing = cond if missing is None else (missing | cond)
     bad_device = ~F.col("sensor_id").rlike(UUID_PATTERN) | ~F.col("equipment_id").rlike(UUID_PATTERN)
+    # NaN or ±Infinity (`NaN`, `Infinity`, `1e999` all parse): a reading of nothing (ADR-0044 dec 1).
+    non_finite = F.isnan(F.col("value")) | (F.abs(F.col("value")) == F.lit(float("inf")))
     horizon = F.expr(f"current_timestamp() + INTERVAL {int(max_future_skew_seconds)} SECONDS")
     return (
         F.when(missing, F.lit(MISSING_OR_MALFORMED))
+        .when(non_finite, F.lit(NON_FINITE_VALUE))
         .when(~F.col("company_id").rlike(UUID_PATTERN), F.lit(INVALID_COMPANY_ID))
         .when(bad_device, F.lit(INVALID_DEVICE_ID))
         .when(F.col("time") > horizon, F.lit(FUTURE_TIMESTAMP))

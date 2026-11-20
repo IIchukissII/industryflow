@@ -21,7 +21,8 @@ class SensorDataInput(BaseModel):
     sensor_id: uuid.UUID = Field(..., description="Sensor UUID")
     equipment_id: uuid.UUID = Field(..., description="Equipment UUID")
     site_id: str = Field(..., min_length=1, max_length=100)
-    value: float = Field(..., description="Sensor reading value")
+    # A finite number: NaN or ±Infinity is a reading of nothing (ADR-0044 dec 1).
+    value: float = Field(..., allow_inf_nan=False, description="Sensor reading value, a finite number")
     unit: Optional[str] = Field(None, max_length=20, description="Unit of measurement")
     quality_code: Optional[int] = Field(None, ge=0, le=2, description="0=good, 1=uncertain, 2=bad")
 

@@ -6,7 +6,6 @@
 import uuid
 from enum import Enum
 from typing import Any, Dict, Literal, Optional
-from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 from fastapi_users import schemas
 
@@ -185,42 +184,3 @@ class DetectionModeSwitch(BaseModel):
 
     def changes(self) -> Dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
-
-
-# ============================================================================
-# Sensor Data Ingestion Schemas
-# ============================================================================
-
-class SensorDataInput(BaseModel):
-    """
-    Input schema for authenticated sensor data ingestion.
-    company_id is NOT included here - it's forced from JWT token.
-    """
-    timestamp: datetime = Field(..., description="Sensor reading timestamp")
-    sensor_id: uuid.UUID = Field(..., description="Sensor UUID")
-    equipment_id: uuid.UUID = Field(..., description="Equipment UUID")
-    site_id: str = Field(..., min_length=1, max_length=100)
-    value: float = Field(..., description="Sensor reading value")
-    unit: Optional[str] = Field(None, max_length=20, description="Unit of measurement")
-    quality_code: Optional[int] = Field(None, ge=0, le=2, description="0=good, 1=uncertain, 2=bad")
-
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "timestamp": "2025-10-11T10:30:00Z",
-            "sensor_id": "2e9bf157-d0f0-4618-9286-c792ee54c127",
-            "equipment_id": "ef9791ba-4fba-4d78-ab76-eb7094933f99",
-            "site_id": "factory_north",
-            "value": 75.5,
-            "unit": "°C",
-            "quality_code": 0
-        }
-    })
-
-
-class SensorDataResponse(BaseModel):
-    """Response after successful data ingestion"""
-    status: str = "accepted"
-    message: str
-    company_id: str
-    sensor_id: uuid.UUID
-    timestamp: datetime
