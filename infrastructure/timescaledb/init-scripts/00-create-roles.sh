@@ -17,45 +17,46 @@ echo "=========================================="
 echo "Creating Application Roles"
 echo "=========================================="
 
-# Create roles with passwords from environment variables
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+# Every role is created without a password; set_passwords below sets each one on every application.
+# Quoted heredoc: no shell expansion; this part reads no secret.
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'EOSQL'
     -- =============================================================================
     -- CREATE APPLICATION ROLES
     -- =============================================================================
     
-    DO \$\$
+    DO $$
     BEGIN
         -- API Gateway Role
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'api_gateway_user') THEN
-            EXECUTE format('CREATE ROLE api_gateway_user WITH LOGIN PASSWORD %L', '${API_GATEWAY_DB_PASSWORD}');
+            CREATE ROLE api_gateway_user WITH LOGIN;
         END IF;
 
         -- (No ingestion_service role: ingestion is mTLS-only and never touches the DB — ADR-0002.)
 
         -- Spark Streaming Role
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'spark_streaming_user') THEN
-            EXECUTE format('CREATE ROLE spark_streaming_user WITH LOGIN PASSWORD %L', '${SPARK_STREAMING_DB_PASSWORD}');
+            CREATE ROLE spark_streaming_user WITH LOGIN;
         END IF;
         
         -- Alert Service Role
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'alert_service_user') THEN
-            EXECUTE format('CREATE ROLE alert_service_user WITH LOGIN PASSWORD %L', '${ALERT_SERVICE_DB_PASSWORD}');
+            CREATE ROLE alert_service_user WITH LOGIN;
         END IF;
         
         -- ML Service Role
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'ml_service_user') THEN
-            EXECUTE format('CREATE ROLE ml_service_user WITH LOGIN PASSWORD %L', '${ML_SERVICE_DB_PASSWORD}');
+            CREATE ROLE ml_service_user WITH LOGIN;
         END IF;
         
         -- MLflow Role
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mlflow_user') THEN
-            EXECUTE format('CREATE ROLE mlflow_user WITH LOGIN PASSWORD %L', '${MLFLOW_DB_PASSWORD}');
+            CREATE ROLE mlflow_user WITH LOGIN;
         END IF;
 
         -- Metrics exporter role: read-only monitoring via the built-in pg_monitor role
         -- (pg_stat_*, etc.) — NOT the superuser. Consumed by the postgres-exporter.
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'metrics_user') THEN
-            EXECUTE format('CREATE ROLE metrics_user WITH LOGIN PASSWORD %L', '${METRICS_DB_PASSWORD}');
+            CREATE ROLE metrics_user WITH LOGIN;
         END IF;
         GRANT pg_monitor TO metrics_user;
 
@@ -65,7 +66,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
         -- granted per-tenant in 04 / migration 16) — never table ownership. Password may be unset
         -- when the cold-export job is not deployed; the role is still created so grants resolve.
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'cold_export_user') THEN
-            EXECUTE format('CREATE ROLE cold_export_user WITH LOGIN PASSWORD %L', '${COLD_EXPORT_DB_PASSWORD}');
+            CREATE ROLE cold_export_user WITH LOGIN;
         END IF;
 
         -- Tenant-delete job role (ADR-0033 dec 4). It holds no table privilege: it reads the pending
@@ -73,16 +74,16 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
         -- 26-company-deletion-job.sql, the last of which drops the tenant's database objects.
         -- Password may be unset when the job is not deployed; the role is still created so grants resolve.
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tenant_delete_user') THEN
-            EXECUTE format('CREATE ROLE tenant_delete_user WITH LOGIN PASSWORD %L', '${TENANT_DELETE_DB_PASSWORD}');
+            CREATE ROLE tenant_delete_user WITH LOGIN;
         END IF;
 
         -- Notebook hub reclaim role (ADR-0020 dec 6). No table privilege: it lists the users awaiting
         -- a volume reclaim and records that one store, only through 27-notebook-volume-reclaim.sql.
         -- Password may be unset when the notebook stack is not deployed; the role is still created.
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'notebook_hub_reclaim_user') THEN
-            EXECUTE format('CREATE ROLE notebook_hub_reclaim_user WITH LOGIN PASSWORD %L', '${NOTEBOOK_HUB_RECLAIM_DB_PASSWORD}');
+            CREATE ROLE notebook_hub_reclaim_user WITH LOGIN;
         END IF;
-    END \$\$;
+    END $$;
     
     -- =============================================================================
     -- ROLE CONFIGURATION
@@ -136,6 +137,36 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     -- SELECT on public.companies is granted in 01-init-schema.sql, after that table is
     -- created (this roles script runs before it).
 EOSQL
+
+# Each role's password, set on every application whether or not the role existed before, so
+# re-applying this script sets a password enabled, rotated, or lost to a restore of the globals
+# (dumped without passwords). A role whose variable is unset keeps the password it has. psql reads
+# each password from the environment (\getenv) and quotes it itself (:'pw'): it is never in this
+# script's text or on a command line; the server hashes it (password_encryption = scram-sha-256).
+ROLE_PASSWORDS="
+api_gateway_user API_GATEWAY_DB_PASSWORD
+spark_streaming_user SPARK_STREAMING_DB_PASSWORD
+alert_service_user ALERT_SERVICE_DB_PASSWORD
+ml_service_user ML_SERVICE_DB_PASSWORD
+mlflow_user MLFLOW_DB_PASSWORD
+metrics_user METRICS_DB_PASSWORD
+cold_export_user COLD_EXPORT_DB_PASSWORD
+tenant_delete_user TENANT_DELETE_DB_PASSWORD
+notebook_hub_reclaim_user NOTEBOOK_HUB_RECLAIM_DB_PASSWORD
+"
+
+set_passwords() {
+  echo "SET client_min_messages = warning;"
+  while read -r role var; do
+    [ -n "$role" ] || continue
+    [ -n "${!var:-}" ] || { echo "\\echo '  $role: $var unset, password unchanged'"; continue; }
+    echo "\\getenv pw $var"
+    echo "ALTER ROLE $role PASSWORD :'pw';"
+    echo "\\echo '  $role: password set'"
+  done <<< "$ROLE_PASSWORDS"
+}
+
+set_passwords | psql -X -q -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"
 
 echo "✓ api_gateway_user (50 connections)"
 echo "✓ spark_streaming_user (50 connections)"

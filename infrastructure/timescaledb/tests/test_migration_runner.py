@@ -10,11 +10,14 @@ is applied again over that live state, migrations and definitions alike, which i
 without a ledger does on its first run and what dec 2 promises is safe. A migration edited after it
 was applied is refused, and the ledger is left as it was. A pending script on a database holding a
 tenant is refused unless a recent backup is recorded in it (ADR-0032 dec 7), written by the backup
-script's own recording step.
+script's own recording step. Re-applying the role script sets the password of a role that exists.
 
 Requires a running database brought up by db-migrate (db-tenant-isolation.yml stands one up) and
 psql; skips when either is missing, and fails instead under IF_REQUIRE_LIVE_STACK=1.
 """
+import base64
+import hashlib
+import hmac
 import os
 import re
 import shutil
@@ -234,3 +237,46 @@ def test_a_refused_reapply_leaves_the_ledger_as_it_was(cur, no_backup):
     cur.execute("SELECT script, digest, applied_at FROM public.schema_ledger ORDER BY script")
     assert cur.fetchall() == before
     assert _run("verify").returncode == 0
+
+
+def _verifies(verifier, password) -> bool:
+    """Whether a SCRAM-SHA-256 verifier (pg_authid.rolpassword) was made from the password."""
+    iterations, salt = verifier.split("$")[1].split(":")
+    stored = verifier.split("$")[2].split(":")[0]
+    salted = hashlib.pbkdf2_hmac("sha256", password.encode(), base64.b64decode(salt), int(iterations))
+    client = hmac.new(salted, b"Client Key", hashlib.sha256).digest()
+    return hashlib.sha256(client).digest() == base64.b64decode(stored)
+
+
+@pytest.fixture
+def role_password(cur):
+    """tenant_delete_user's verifier, put back after the test."""
+    cur.execute("SELECT rolpassword FROM pg_authid WHERE rolname = 'tenant_delete_user'")
+    (before,) = cur.fetchone()
+    yield
+    if before is None:
+        cur.execute("ALTER ROLE tenant_delete_user PASSWORD NULL")
+    else:
+        cur.execute("ALTER ROLE tenant_delete_user PASSWORD %s", (before,))
+
+
+def _verifier(cur):
+    cur.execute("SELECT rolpassword FROM pg_authid WHERE rolname = 'tenant_delete_user'")
+    return cur.fetchone()[0]
+
+
+def test_reapplying_the_role_script_sets_a_password_on_an_existing_role(cur, role_password):
+    # An existing role without a password: a globals restore (dumped without passwords), or a plane
+    # enabled after its script ran. Then a rotation. Each reapply sets the password it is given.
+    cur.execute("ALTER ROLE tenant_delete_user PASSWORD NULL")
+    for password in (f"set-{uuid.uuid4().hex}", f"rotated-'\"$;{uuid.uuid4().hex}"):
+        r = _run("reapply", "00-create-roles.sh", MIGRATE_WITHOUT_BACKUP="1", TENANT_DELETE_DB_PASSWORD=password)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert _verifies(_verifier(cur), password)
+
+
+def test_an_unset_password_leaves_the_role_s_password_as_it_is(cur, role_password):
+    cur.execute("ALTER ROLE tenant_delete_user PASSWORD 'kept'")
+    r = _run("reapply", "00-create-roles.sh", MIGRATE_WITHOUT_BACKUP="1", TENANT_DELETE_DB_PASSWORD="")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _verifies(_verifier(cur), "kept")

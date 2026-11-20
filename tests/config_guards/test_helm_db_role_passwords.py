@@ -56,7 +56,7 @@ def test_the_secret_and_the_container_carry_the_same_role_passwords(toggle):
 def test_every_password_an_init_script_reads_reaches_the_container():
     consumed = set()
     for script in (ROOT / "infrastructure" / "timescaledb" / "init-scripts").iterdir():
-        consumed |= set(re.findall(r"\$\{?([A-Z_]+_DB_PASSWORD)", script.read_text()))
+        consumed |= set(re.findall(r"\b([A-Z][A-Z_]*_DB_PASSWORD)\b", script.read_text()))
     assert consumed, "no init script reads a role password — the guard is not looking"
     # With every optional plane on, every role an init script can create must be served.
     _, env = _secret_and_env(TOGGLES["notebooks"])
