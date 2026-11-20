@@ -7,7 +7,6 @@ from typing import AsyncGenerator
 from config import get_settings
 from db_tls import db_ssl_context
 from sqlalchemy import text
-from fastapi import Depends
 from fastapi_users.db import SQLAlchemyUserDatabase
 from models.user import User
 
@@ -61,8 +60,41 @@ async def close_engine():
     """Close the pool's connections on shutdown."""
     await engine.dispose()
 
-async def get_user_db(session: AsyncSession = Depends(get_db)):
+class ReleasingUserDatabase(SQLAlchemyUserDatabase):
+    """The user store, on a session of its own that ends its transaction after every call.
+
+    Every request authenticates through it before its data session opens; a transaction left open by
+    a read (or by the refresh after a write) would hold that connection to the end of the request, so
+    each request would hold two and a burst of them would exhaust the pool waiting for their second.
+    Ended, the connection is back in the pool before the request's next one is taken. Loaded users
+    stay readable: the factory does not expire on commit.
     """
-    Dependency for getting user database adapter for fastapi-users.
-    """
-    yield SQLAlchemyUserDatabase(session, User)
+
+    RELEASED = ("get", "get_by_email", "get_by_oauth_account", "create", "update", "delete",
+                "add_oauth_account", "update_oauth_account")
+
+
+def _released(name):
+    call = getattr(SQLAlchemyUserDatabase, name)
+
+    async def released(self, *args, **kwargs):
+        try:
+            result = await call(self, *args, **kwargs)
+        except BaseException:
+            await self.session.rollback()
+            raise
+        await self.session.commit()
+        return result
+
+    released.__name__ = name
+    return released
+
+
+for _name in ReleasingUserDatabase.RELEASED:
+    setattr(ReleasingUserDatabase, _name, _released(_name))
+
+
+async def get_user_db():
+    """The fastapi-users user store, on its own session (ReleasingUserDatabase), never the request's."""
+    async with AsyncSessionLocal() as session:
+        yield ReleasingUserDatabase(session, User)
