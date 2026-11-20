@@ -79,7 +79,7 @@ BEGIN
     -- ADR-0044 dec 3, ADR-0022 dec 2: a degraded alert as data, copied onto its label (defined in
     -- 35-*, resolved at call time).
     PERFORM add_degraded_columns_to_alerts(v_schema_name);
-    -- ADR-0044 dec 1: a rule always holds its anomaly threshold (defined in 37-*, resolved at call time).
+    -- A rule always holds its anomaly threshold (defined in 37-*, resolved at call time).
     PERFORM add_anomaly_threshold_required_to_rules(v_schema_name);
 
     -- Grant table permissions

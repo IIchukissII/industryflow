@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""An alert rule always holds its anomaly threshold (ADR-0044 dec 1; script 37).
+"""An alert rule always holds its anomaly threshold (script 37).
 
 A rule stored with none before the script is given the column's default, the column then refuses
 NULL, a second run changes nothing, and a tenant provisioned afterwards has the column required.

@@ -96,7 +96,7 @@ def test_mode_switch_requires_a_known_mode():
 
 
 def test_a_rule_always_holds_its_anomaly_threshold():
-    # ADR-0044 dec 1: an ML rule stored with no threshold was scored with none and never fired (#688).
+    # An ML rule stored with no threshold was scored with none and never fired (#688).
     with pytest.raises(ValidationError, match="anomaly_threshold"):
         AlertRuleCreate(**_base(detection_type="ml", anomaly_threshold=None))
     with pytest.raises(ValidationError, match="anomaly_threshold"):

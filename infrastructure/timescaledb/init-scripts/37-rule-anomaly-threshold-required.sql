@@ -4,7 +4,7 @@
 
 -- migration-kind: definition
 
--- An alert rule always holds its anomaly threshold (ADR-0044 dec 1).
+-- An alert rule always holds its anomaly threshold.
 --
 -- The column was nullable, and an ML rule stored with NULL was scored with no threshold: the model
 -- refused every request and the rule never fired. A rule stored so is given the column's default,
@@ -23,7 +23,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION add_anomaly_threshold_required_to_rules IS
-    'An alert rule always holds its anomaly threshold (ADR-0044 dec 1)';
+    'An alert rule always holds its anomaly threshold: NULL is refused';
 
 DO $$
 DECLARE

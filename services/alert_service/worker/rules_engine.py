@@ -605,7 +605,7 @@ class RulesEngine:
             return None
 
         try:
-            # The rule's own threshold: the column refuses NULL (ADR-0044 dec 1), so none is substituted.
+            # The rule's own threshold: the column refuses NULL, so none is substituted.
             anomaly_threshold = rule['anomaly_threshold']
 
             # Call ML inference endpoint (authenticated service-to-service call).

@@ -100,7 +100,7 @@ export function ruleSentenceParts(rule) {
   const model = ruleModelParts(rule);
   if (rule.detection_type === 'ml') {
     return [seg('Model rule. '), ...capFirst(model), seg(' scores readings from '), ...target,
-      seg('; the rule fires past an anomaly threshold of '), mono(rule.anomaly_threshold ?? 0.85), sev];
+      seg('; the rule fires past an anomaly threshold of '), mono(rule.anomaly_threshold), sev];
   }
   if (rule.detection_type === 'statistical') {
     return [seg('Drift rule. Fires when '), ...model, seg(' passes a drifted-feature share of '),
