@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import report_server  # noqa: E402
 
 PREFIX = "/user/u/"
+FRAME = "frame-ancestors https://app.example.com"
 HUB_ENV = {
     "JUPYTERHUB_API_TOKEN": "t", "JUPYTERHUB_CLIENT_ID": "jupyterhub-user-u",
     "JUPYTERHUB_API_URL": "http://127.0.0.1:1/hub/api", "JUPYTERHUB_BASE_URL": "/",
@@ -36,7 +37,9 @@ def app(tmp_path_factory):
     os.environ.update(HUB_ENV, HOME=str(home))
     from jupyterhub.singleuser import make_singleuser_app
     server = make_singleuser_app(report_server.ReportServerApp)()
-    server.initialize(argv=["--port=0", "--ip=127.0.0.1", f"--ServerApp.root_dir={home}"])
+    # The frame policy as the hub's spawner passes it (jupyterhub_config.py, c.Spawner.args).
+    server.initialize(argv=["--port=0", "--ip=127.0.0.1", f"--ServerApp.root_dir={home}",
+                            "--ServerApp.tornado_settings={'headers': {'Content-Security-Policy': \"" + FRAME + "\"}}"])
     try:
         yield server
     finally:
@@ -66,6 +69,30 @@ def test_the_reports_status_and_hub_callback_are_served(app):
     assert _handler(app, PREFIX + "reports/overview") == "ReportRenderHandler"
     assert _handler(app, PREFIX + "api/status") == "APIStatusHandler"
     assert _handler(app, PREFIX + "oauth_callback") == "OAuthCallbackHandler"
+
+
+def test_over_http_code_routes_are_absent_and_reports_need_the_hub_with_its_frame_policy(app):
+    from tornado.httpclient import AsyncHTTPClient
+    from tornado.httpserver import HTTPServer
+    from tornado.testing import bind_unused_port
+
+    async def fetch_all():
+        sock, port = bind_unused_port()
+        server = HTTPServer(app.web_app)
+        server.add_sockets([sock])
+        try:
+            client = AsyncHTTPClient()
+            return {path: await client.fetch(f"http://127.0.0.1:{port}{PREFIX}{path}", follow_redirects=False,
+                                             raise_error=False)
+                    for path in ("reports", "reports/overview", "api/kernels", "api/contents")}
+        finally:
+            server.stop()
+
+    answers = asyncio.run(fetch_all())
+    for path in ("reports", "reports/overview"):
+        assert answers[path].code == 302 and "/hub/" in answers[path].headers["Location"], path
+        assert answers[path].headers["Content-Security-Policy"].startswith(FRAME), path
+    assert answers["api/kernels"].code == answers["api/contents"].code == 404
 
 
 def test_the_server_lands_on_the_reports_and_loads_no_extension(app):

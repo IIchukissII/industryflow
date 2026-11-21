@@ -14,6 +14,7 @@ type and injected as a literal, and comes back as HTML without its inputs.
 from __future__ import annotations
 
 import ast
+import asyncio
 import html
 import math
 import os
@@ -36,6 +37,9 @@ DEFAULT_REPORTS_DIR = "/opt/industryflow/reports"
 # How long one report may run before it is stopped.
 REPORT_TIMEOUT_SECONDS = 300
 MAX_TEXT_PARAMETER = 200
+# Reports one server runs at once; another request waits its turn.
+MAX_CONCURRENT_REPORTS = 2
+_running = asyncio.Semaphore(MAX_CONCURRENT_REPORTS)
 _NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -135,7 +139,8 @@ async def render(path: Path, given: dict[str, str]) -> str:
     bind_parameters(nb, given)
     client = NotebookClient(nb, timeout=REPORT_TIMEOUT_SECONDS, kernel_name="python3",
                             resources={"metadata": {"path": str(path.parent)}})
-    await client.async_execute()
+    async with _running:
+        await client.async_execute()
     exporter = HTMLExporter(exclude_input=True, exclude_input_prompt=True, exclude_output_prompt=True)
     body, _ = exporter.from_notebook_node(nb)
     return body
