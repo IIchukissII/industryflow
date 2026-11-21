@@ -86,3 +86,26 @@ def test_a_firing_already_explained_before_a_restart_is_not_explained_again(conf
 
 def test_a_repeat_after_the_routers_repeat_interval_is_still_the_same_firing():
     assert service.SEEN_TTL_SECONDS > 4 * 3600
+
+
+class FailingOncePublisher(FakePublisher):
+    def __init__(self):
+        super().__init__()
+        self.failures = 1
+
+    async def publish(self, note):
+        if self.failures:
+            self.failures -= 1
+            raise RuntimeError("log store unreachable")
+        await super().publish(note)
+
+
+def test_a_firing_whose_note_failed_is_explained_on_its_next_repeat(config):
+    publisher = FailingOncePublisher()
+    with _client(config, publisher) as client:
+        assert _post(client, {"alerts": [ALERT]}).json()["accepted"] == 1
+        _settle(client)
+        assert publisher.notes == []
+        assert _post(client, {"alerts": [ALERT]}).json()["accepted"] == 1
+        _settle(client)
+    assert len(publisher.notes) == 1

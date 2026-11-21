@@ -116,7 +116,9 @@ def create_app(config: Config, tools: Any = None, writer: Any = None, publisher:
                 await state["graph"].ainvoke({"alert": alert})
                 log.info("note published for %s", name)
             except Exception:  # noqa: BLE001 — one alert's failure never stops the receiver
-                log.exception("no note for %s", name)
+                # A firing is seen once its note exists; a failure leaves it to the router's next repeat.
+                seen.pop(key, None)
+                log.exception("no note for %s; explained again on its next repeat", name)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
