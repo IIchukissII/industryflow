@@ -83,6 +83,12 @@ Rows with no written window yet get `0.0`, the serving fallback; a row missing i
 missing. A frame holding more than one
 equipment's history needs `group_cols=["equipment_id"]` (or its equivalent).
 
+| Timestamp | Read as |
+|---|---|
+| Naive | UTC |
+| Aware (`Z`, an offset, a time-zone-aware column) | Its UTC instant; rows are ordered by instant, not by the column's text |
+| Missing | No window: the row's window features stay missing, and a `UserWarning` counts such rows |
+
 ## Example
 
 ```python
