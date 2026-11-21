@@ -52,6 +52,7 @@ DEFAULT_DLQ_TOPIC = "sensor-data-raw.measurements.dlq"
 # Rejection reasons, as published in the dead-letter envelope.
 MISSING_OR_MALFORMED = "missing_or_malformed_field"
 NON_FINITE_VALUE = "non_finite_value"
+VALUE_OUT_OF_RANGE = "value_out_of_range"
 INVALID_COMPANY_ID = "invalid_company_id"
 INVALID_DEVICE_ID = "invalid_sensor_or_equipment_id"
 FUTURE_TIMESTAMP = "future_timestamp"
@@ -200,6 +201,8 @@ def rejection_reason(max_future_skew_seconds: int = MAX_FUTURE_SKEW_SECONDS):
     return (
         F.when(missing, F.lit(MISSING_OR_MALFORMED))
         .when(non_finite, F.lit(NON_FINITE_VALUE))
+        # Finite but beyond the bound: it would overflow its window's mean and spread.
+        .when(F.abs(F.col("value")) > F.lit(readings.MAX_VALUE_MAGNITUDE), F.lit(VALUE_OUT_OF_RANGE))
         .when(~F.col("company_id").rlike(UUID_PATTERN), F.lit(INVALID_COMPANY_ID))
         .when(bad_device, F.lit(INVALID_DEVICE_ID))
         .when(F.col("time") > horizon, F.lit(FUTURE_TIMESTAMP))

@@ -13,9 +13,10 @@ operator names in EXTENSION_MODULES — never a named extension directly.
 """
 import importlib
 import logging
-import math
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List
+
+from industryflow_contracts import readings
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,9 @@ logger = logging.getLogger(__name__)
 # equipment without the named sensor, and any read error but an outage, where it answered None; it
 # takes an optional `as_of`, and a transform scoring a stored reading is handed one bound to that
 # reading's instant (ADR-0044 dec 1, 4; ADR-0023 dec 9).
-EXTENSION_API_VERSION = "0.6.0"
+# 0.7.0 breaks: `sensor_value` and `missing_sensors` refuse a finite value beyond the platform's bound
+# on a reading (readings.MAX_VALUE_MAGNITUDE) as they refuse a non-finite one (ADR-0044 dec 1).
+EXTENSION_API_VERSION = "0.7.0"
 
 
 @dataclass
@@ -87,7 +90,8 @@ class StatefulUnavailable(Exception):
 
 
 def _finite(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    """A number, finite and within the platform's bound on a reading (ADR-0044 dec 1)."""
+    return readings.value_in_range(value)
 
 
 def sensor_value(sensor_data: Dict[str, Any], sensor: str) -> float:

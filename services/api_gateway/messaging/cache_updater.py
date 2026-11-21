@@ -77,13 +77,13 @@ async def update_redis_cache():
                         # Update Redis for each sensor
                         for row in rows:
                             await redis_client.set_sensor_value(
+                                company_id=company_id,
                                 sensor_id=str(row['sensor_id']),
                                 value=float(row['value']),
                                 metadata={
                                     "timestamp": row['time'].isoformat() if row['time'] else None,
                                     "equipment_id": str(row['equipment_id']) if row['equipment_id'] else None,
                                     "site_id": row['site_id'],
-                                    "company_id": company_id,  # Derived from schema name
                                     "unit": row['unit'],
                                     "quality_code": row['quality_code']
                                 },

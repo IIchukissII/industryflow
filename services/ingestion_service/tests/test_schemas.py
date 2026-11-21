@@ -46,7 +46,7 @@ def test_the_endpoint_refuses_a_future_reading_and_produces_nothing(client, make
     assert produced == []
 
 
-@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "1e999", '"NaN"', '"inf"'])
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "1e999", '"NaN"', '"inf"', "1e308", "-1.5e308", "1.1e150"])
 def test_the_endpoint_refuses_a_value_that_is_not_a_finite_number(client, make_cert, sample_body, value):
     # ADR-0044 dec 1. The body is sent as written: Python's JSON reads NaN, Infinity and 1e999.
     c, produced = client

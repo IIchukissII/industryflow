@@ -34,6 +34,7 @@ Rows with no written window yet (the start of a history) get the neutral ``0.0``
 transform degrades to when no aggregate row exists, so the two agree on cold start too. A row missing
 its own reading stays missing: serving refuses such a reading (ADR-0044 dec 1).
 """
+import warnings
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
@@ -56,7 +57,10 @@ def _epoch_seconds(timestamps: pd.Series) -> pd.Series:
     # Convert to seconds by *casting the resolution*, not by dividing raw integers: the integer
     # backing a datetime64 is nanoseconds on pandas 2 but can be milliseconds or microseconds on
     # pandas 3, so a hardcoded 1e9 divisor silently buckets every row into one window there.
-    return pd.to_datetime(timestamps).astype("datetime64[s]").astype("int64")
+    # An aware time (a `Z` or offset in a CSV, a UTC Parquet export) is its instant in UTC; a naive
+    # one is read as UTC, as the platform stores every reading.
+    instants = pd.to_datetime(timestamps, utc=True).dt.tz_localize(None)
+    return instants.astype("datetime64[s]").astype("int64")
 
 
 def window_index(timestamps: pd.Series, granularity: str) -> pd.Series:
@@ -108,10 +112,20 @@ def add_window_features(
     # The row order the caller hands us is not necessarily time order — training frames are often
     # shuffled before engineering — and a causal computation is meaningless on shuffled rows. Sort a
     # copy, compute, then restore the caller's original order so downstream joins/labels still line up.
+    # Sorted by instant, not by the column as given: strings with different offsets do not sort in
+    # time order.
     original_index = df.index
-    df = df.sort_values(group_cols + [timestamp_col])
-    df["_window"] = window_index(df[timestamp_col], granularity)
-    df["_closed"] = latest_written_window(df[timestamp_col], granularity)
+    # A row with no instant has no window (ADR-0023 dec 9): it enters no window's statistic and its
+    # features stay missing, never a value from a window it was never in.
+    untimed = pd.to_datetime(df[timestamp_col], utc=True).isna()
+    if untimed.any():
+        warnings.warn(f"{int(untimed.sum())} row(s) have no {timestamp_col}: they enter no window and "
+                      "their window features are missing", stacklevel=2)
+    left_out = df[untimed]
+    df = df[~untimed]
+    df = df.assign(_t=_epoch_seconds(df[timestamp_col])).sort_values(group_cols + ["_t"])
+    df["_window"] = df["_t"] // GRANULARITY_SECONDS[granularity]
+    df["_closed"] = windows.latest_emitted_window(df["_t"], granularity)
 
     transformations: List[dict] = []
     for sensor in sensor_cols:
@@ -144,7 +158,8 @@ def add_window_features(
             df[f"{sensor}{suffix}"] = column.mask(baseline.isna(), 0.0)
             transformations.append(feature_config(sensor, stat_type, granularity))
 
-    df = df.drop(columns=["_window", "_closed"]).reindex(original_index)
+    df = df.drop(columns=["_t", "_window", "_closed"])
+    df = pd.concat([df, left_out]).reindex(original_index)
     return df, transformations
 
 

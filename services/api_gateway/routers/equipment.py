@@ -16,6 +16,7 @@ from uuid import UUID
 import logging
 from dependencies import get_db_with_tenant, get_current_user_with_company, get_writer_with_company
 from models.user import User
+from request_ids import Uuid
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/equipment", tags=["equipment"])
@@ -35,7 +36,7 @@ class EquipmentCreate(BaseModel):
 class EquipmentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    sensor_count: Optional[int] = None
+    sensor_count: Optional[int] = Field(default=None, gt=0)
     expected_sensors: Optional[List[UUID]] = None
 
 DISPLAY_NAME_MAX = 100  # sensors.display_name is VARCHAR(100) (init script 22)
@@ -98,7 +99,7 @@ async def list_equipment(
 
 @router.get("/{equipment_id}")
 async def get_equipment(
-    equipment_id: str,
+    equipment_id: Uuid,
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(get_current_user_with_company)
 ):
@@ -161,7 +162,7 @@ async def create_equipment(
 
 @router.put("/{equipment_id}")
 async def update_equipment(
-    equipment_id: str,
+    equipment_id: Uuid,
     equipment: EquipmentUpdate,
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(get_writer_with_company)
@@ -197,7 +198,7 @@ async def update_equipment(
 
 @router.delete("/{equipment_id}", status_code=204)
 async def delete_equipment(
-    equipment_id: str,
+    equipment_id: Uuid,
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(get_writer_with_company)
 ):
@@ -214,7 +215,7 @@ async def delete_equipment(
 
 @router.get("/{equipment_id}/sensors")
 async def get_equipment_sensors(
-    equipment_id: str,
+    equipment_id: Uuid,
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(get_current_user_with_company)
 ):
@@ -237,7 +238,7 @@ async def get_equipment_sensors(
 
 @router.post("/{equipment_id}/sensors", status_code=201)
 async def add_sensor(
-    equipment_id: str,
+    equipment_id: Uuid,
     sensor: SensorCreate,
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(get_writer_with_company)
@@ -279,8 +280,8 @@ async def add_sensor(
 
 @router.patch("/{equipment_id}/sensors/{sensor_id}")
 async def update_sensor(
-    equipment_id: str,
-    sensor_id: str,
+    equipment_id: Uuid,
+    sensor_id: Uuid,
     sensor: SensorUpdate,
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(get_writer_with_company)
@@ -302,8 +303,8 @@ async def update_sensor(
 
 @router.delete("/{equipment_id}/sensors/{sensor_id}", status_code=204)
 async def remove_sensor(
-    equipment_id: str,
-    sensor_id: str,
+    equipment_id: Uuid,
+    sensor_id: Uuid,
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(get_writer_with_company)
 ):
@@ -328,7 +329,7 @@ async def remove_sensor(
 
 @router.post("/{equipment_id}/sensors/bulk", status_code=201)
 async def add_sensors_bulk(
-    equipment_id: str,
+    equipment_id: Uuid,
     bulk_data: BulkSensorCreate,
     db: AsyncSession = Depends(get_db_with_tenant),
     current_user: User = Depends(get_writer_with_company)

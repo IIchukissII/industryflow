@@ -91,6 +91,43 @@ class Edge:
         return self.client.request(method, path, headers=headers or {}, **kw)
 
 
+class Browser:
+    """One browser: the platform origin and the notebook origin, each with the cookies a browser keeps
+    for it, and the headers a page there sends."""
+
+    def __init__(self, settings):
+        self.platform_origin = settings["IF_E2E_EDGE"].rstrip("/")
+        self.notebook_origin = settings["IF_E2E_NOTEBOOKS"].rstrip("/")
+        ctx = ssl_context(settings["IF_E2E_CA"])
+        self.platform = httpx.Client(base_url=self.platform_origin, verify=ctx, timeout=30.0)
+        self.notebooks = httpx.Client(base_url=self.notebook_origin, verify=ctx, timeout=60.0)
+
+    def close(self):
+        self.platform.close()
+        self.notebooks.close()
+
+    def sign_in(self, email, password):
+        r = self.platform.post("/auth/login", data={"username": email, "password": password.reveal()},
+                               headers={"Origin": self.platform_origin})
+        assert r.status_code == 200, (r.status_code, r.text[:300])
+
+    def page_post(self, path):
+        """A state-changing request from a platform page: its origin and the CSRF token."""
+        return self.platform.post(path, headers={"Origin": self.platform_origin,
+                                                 "X-CSRF-Token": self.platform.cookies.get("if_csrf", "")})
+
+    def ticket(self):
+        r = self.page_post("/api/notebook-ticket")
+        assert r.status_code == 200, (r.status_code, r.text[:300])
+        body = r.json()
+        assert body["origin"] == self.notebook_origin and body["entry"] == f"{self.notebook_origin}/enter"
+        return body["ticket"]
+
+    def enter(self, ticket, origin=None):
+        return self.notebooks.post("/enter", data={"ticket": ticket},
+                                   headers={"Origin": origin or self.platform_origin})
+
+
 class Environment:
     """The deployment's host, through its Docker socket and its own scripts (the compose directory is
     mounted at the host's path, so compose resolves its bind mounts as on the host)."""

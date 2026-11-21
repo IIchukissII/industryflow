@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
 import redis.asyncio as redis
+from industryflow_contracts import tenancy
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +96,8 @@ class FeatureStore:
         Returns:
             Redis key string
         """
-        tenant = str(uuid.UUID(str(company_id)))
         equipment = str(uuid.UUID(str(equipment_id)))
-        return f"features:{tenant}:{equipment}:{sensor_name}"
+        return f"{tenancy.feature_reading_prefix(company_id)}{equipment}:{sensor_name}"
 
     async def store_reading(
         self,

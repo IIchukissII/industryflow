@@ -13,13 +13,14 @@ import io
 
 from dependencies import get_tenant_db, resolve_tenant_context, TenantContext
 from models.schemas import TrainingDataResponse, TrainingDataPoint
+from request_ids import Uuid
 
 router = APIRouter(prefix="/api/training-data", tags=["Training Data"])
 logger = logging.getLogger(__name__)
 
 @router.get("/equipment/{equipment_id}/stream")
 async def stream_training_data_csv(
-    equipment_id: str,
+    equipment_id: Uuid,
     ctx: TenantContext = Depends(resolve_tenant_context),
     lookback_days: int = Query(30, ge=1, le=365, description="Days of historical data"),
     min_quality: float = Query(0.8, ge=0.0, le=1.0, description="Minimum quality code (0-1)"),
@@ -125,7 +126,7 @@ async def stream_training_data_csv(
 
 @router.get("/equipment/{equipment_id}", response_model=TrainingDataResponse)
 async def get_training_data_for_equipment(
-    equipment_id: str,
+    equipment_id: Uuid,
     ctx: TenantContext = Depends(resolve_tenant_context),
     lookback_days: int = Query(30, ge=1, le=365, description="Days of historical data"),
     min_quality: float = Query(0.8, ge=0.0, le=1.0, description="Minimum quality code (0-1)"),

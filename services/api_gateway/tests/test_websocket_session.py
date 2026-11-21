@@ -48,7 +48,7 @@ def world(monkeypatch):
         u = state.users.get(str(user_id))
         return u if u is not None and u.is_active else None
 
-    async def no_sensors():
+    async def no_sensors(company_id):
         return {}
 
     monkeypatch.setattr(ws, "_load_active_user", load_active_user)

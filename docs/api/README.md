@@ -62,6 +62,7 @@ The notebook hub is on an origin of its own, not a path of this one (ADR-0048 de
 | Topic | Rule | Source |
 |---|---|---|
 | Transport | HTTPS for external traffic; websocket over `wss://` | ADR-0004 |
+| Request values | A path or query identifier is a UUID and a `limit` is bounded (alerts 1-1000); a value outside is 422, never a 500 from the database | `services/api_gateway/request_ids.py` |
 | Browser auth | httpOnly cookies + double-submit CSRF (`X-CSRF-Token`) | authentication (ADR-0004 dec 3) |
 | API client auth | `Authorization: Bearer <access token>` | authentication (ADR-0004 dec 2) |
 | Notebook auth | Capability handle in `X-IF-Capability` | ADR-0015 |
