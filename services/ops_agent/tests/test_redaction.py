@@ -98,8 +98,20 @@ def test_clock_times_versions_and_ports_are_not_addresses():
     ('access_token="abc def"', "def"),
     ("client_secret: 'two words'", "words"),
     ('{"password": "with \\"escaped\\" quote"}', "escaped"),
+    # A line cut short inside a quoted value, and values with a backslash.
+    ('password="hunter2', "hunter2"),
+    ("password=a\\bc", "a\\bc"),
+    ("password=abc\\def", "def"),
 ])
 def test_credentials_in_dicts_escaped_json_and_quoted_phrases_are_replaced(raw, secret):
     out = Redactor()(raw)
     assert secret not in out and "<secret-1>" in out, out
-    assert "password" in out or "token" in out or "secret" in out or "api_key" in out, out
+    assert out.count("<secret-") == 1, out
+
+
+def test_a_long_run_of_backslashes_is_redacted_in_bounded_time():
+    import time
+    start = time.monotonic()
+    out = Redactor()('password="' + "\\" * 5000)
+    assert time.monotonic() - start < 1.0
+    assert "<secret-1>" in out

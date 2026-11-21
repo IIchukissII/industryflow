@@ -54,11 +54,14 @@ _PATTERNS: list[tuple[str, re.Pattern[str], Callable[[str], bool] | None]] = [
     ("secret", re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]*:(?P<v>[^@\s/]+)@"), None),
     # key=value and key: value, the key bare or quoted (a JSON object, a Python dict's repr, either
     # escaped inside another string). A quoted value runs to its own closing quote, spaces and escaped
-    # quotes included.
+    # quotes included; the body's two branches are disjoint, so no input backtracks without bound.
     ("secret", re.compile(
-        rf"(?i)(?<![A-Za-z0-9]){_KEY}{_QUOTE}?\s*[=:]\s*(?P<q>{_QUOTE})(?P<v>(?:\\.|(?!(?P=q)).)+?)(?P=q)"), None),
+        rf"(?i)(?<![A-Za-z0-9]){_KEY}{_QUOTE}?\s*[=:]\s*(?P<q>{_QUOTE})(?P<v>(?:\\.|(?!(?P=q))[^\\])+?)(?P=q)"),
+     None),
+    # Then any value left: bare, or opened by a quote that never closes (a line cut short). A value
+    # already replaced starts with `<`, which no value here does.
     ("secret", re.compile(
-        rf"(?i)(?<![A-Za-z0-9]){_KEY}{_QUOTE}?\s*[=:]\s*(?P<v>[^\s,;&\"'<>\\]{{2,}})"), None),
+        rf"(?i)(?<![A-Za-z0-9]){_KEY}{_QUOTE}?\s*[=:]\s*{_QUOTE}?(?P<v>[^\s,;&\"'<>]{{2,}})"), None),
     ("tenant", re.compile(rf"(?<![{_HEX}]){_UUID}(?![{_HEX}])"), None),
     ("tenant", re.compile(rf"(?<![{_HEX}])[{_HEX}]{{32}}(?![{_HEX}])"), None),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+(?:@|%40)[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), None),
