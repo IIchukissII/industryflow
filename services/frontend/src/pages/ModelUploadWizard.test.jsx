@@ -151,4 +151,3 @@ describe('model upload wizard transport failure', () => {
       .toBe(['mint', 'stage', 'transfer', 'admit', 'register'].indexOf(stage));
   });
 });
-
