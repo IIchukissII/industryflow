@@ -24,7 +24,7 @@ class SensorDataInput(BaseModel):
     # A finite number within the platform's bound: NaN or ±Infinity is a reading of nothing, and a
     # larger magnitude overflows its window's statistics (ADR-0044 dec 1).
     value: float = Field(..., allow_inf_nan=False, ge=-MAX_VALUE_MAGNITUDE, le=MAX_VALUE_MAGNITUDE,
-                         description="Sensor reading value, a finite number of magnitude at most 1e150")
+                         description=f"Sensor reading value, a finite number of magnitude at most {MAX_VALUE_MAGNITUDE:g}")
     unit: Optional[str] = Field(None, max_length=20, description="Unit of measurement")
     quality_code: Optional[int] = Field(None, ge=0, le=2, description="0=good, 1=uncertain, 2=bad")
 

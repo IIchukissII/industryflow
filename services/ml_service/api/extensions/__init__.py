@@ -40,7 +40,9 @@ logger = logging.getLogger(__name__)
 # equipment without the named sensor, and any read error but an outage, where it answered None; it
 # takes an optional `as_of`, and a transform scoring a stored reading is handed one bound to that
 # reading's instant (ADR-0044 dec 1, 4; ADR-0023 dec 9).
-EXTENSION_API_VERSION = "0.6.0"
+# 0.7.0 breaks: `sensor_value` and `missing_sensors` refuse a finite value beyond the platform's bound
+# on a reading (readings.MAX_VALUE_MAGNITUDE) as they refuse a non-finite one (ADR-0044 dec 1).
+EXTENSION_API_VERSION = "0.7.0"
 
 
 @dataclass

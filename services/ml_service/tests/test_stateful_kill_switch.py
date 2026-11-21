@@ -106,10 +106,11 @@ def test_extension_api_version_bumped_minor():
     declarations, 0.4.0 ADR-0044's refusals (`sensor_value`, `StatefulUnavailable`): the engine no
     longer turns a transform's exception into zero, which within 0.x a minor may change. 0.5.0 makes
     the baseline provider's window required (ADR-0044 dec 2), 0.6.0 makes it refuse an unknown sensor
-    and fail on any error but an outage, read as of a stored reading's instant (ADR-0044 dec 1, 4).
+    and fail on any error but an outage, read as of a stored reading's instant (ADR-0044 dec 1, 4),
+    0.7.0 makes `sensor_value` refuse a value beyond the platform's bound on a reading (ADR-0044 dec 1).
     """
     major, minor, _ = EXTENSION_API_VERSION.split(".")
-    assert (int(major), int(minor)) == (0, 6)
+    assert (int(major), int(minor)) == (0, 7)
 
 
 # --------------------------------------------------------------- null-in-slot, and ZERO calls
