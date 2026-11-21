@@ -28,6 +28,8 @@ _UUID = rf"[{_HEX}]{{8}}[-_][{_HEX}]{{4}}[-_][{_HEX}]{{4}}[-_][{_HEX}]{{4}}[-_][
 # A key that names a credential, anywhere in an identifier: password, POSTGRES_PASSWORD, access_token,
 # client_secret, aws_secret_access_key, api-key.
 _KEY = r"[A-Za-z0-9_.-]*(?:passw(?:or)?d|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)[A-Za-z0-9_.-]*"
+# A quote around a key or a value, escaped or not: ", ', \" or \'.
+_QUOTE = r"\\?[\"']"
 
 
 def _is_ip(text: str) -> bool:
@@ -50,9 +52,13 @@ _PATTERNS: list[tuple[str, re.Pattern[str], Callable[[str], bool] | None]] = [
     ("secret", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"), None),
     # scheme://user:password@host — the password only.
     ("secret", re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]*:(?P<v>[^@\s/]+)@"), None),
-    # "key": "value" and key=value / key: value, quoted or not.
-    ("secret", re.compile(rf"(?i)\"{_KEY}\"\s*:\s*\"(?P<v>[^\"]+)\""), None),
-    ("secret", re.compile(rf"(?i)(?<![A-Za-z0-9]){_KEY}\s*[=:]\s*[\"']?(?P<v>[^\s,;&\"'<>]{{2,}})"), None),
+    # key=value and key: value, the key bare or quoted (a JSON object, a Python dict's repr, either
+    # escaped inside another string). A quoted value runs to its own closing quote, spaces and escaped
+    # quotes included.
+    ("secret", re.compile(
+        rf"(?i)(?<![A-Za-z0-9]){_KEY}{_QUOTE}?\s*[=:]\s*(?P<q>{_QUOTE})(?P<v>(?:\\.|(?!(?P=q)).)+?)(?P=q)"), None),
+    ("secret", re.compile(
+        rf"(?i)(?<![A-Za-z0-9]){_KEY}{_QUOTE}?\s*[=:]\s*(?P<v>[^\s,;&\"'<>\\]{{2,}})"), None),
     ("tenant", re.compile(rf"(?<![{_HEX}]){_UUID}(?![{_HEX}])"), None),
     ("tenant", re.compile(rf"(?<![{_HEX}])[{_HEX}]{{32}}(?![{_HEX}])"), None),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+(?:@|%40)[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), None),

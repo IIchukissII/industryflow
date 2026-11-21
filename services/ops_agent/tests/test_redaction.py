@@ -89,3 +89,17 @@ def test_identifiers_hidden_inside_names_or_encodings_are_replaced(raw, value, c
 def test_clock_times_versions_and_ports_are_not_addresses():
     line = "2026-10-31 10:42:31 spark 4.1.3 on port 8000 retried 3x; ratio 1.2.3"
     assert Redactor()(line) == line
+
+
+@pytest.mark.parametrize("raw,secret", [
+    ("settings {'password': 'hunter2xyz'}", "hunter2xyz"),
+    ('msg="{\\"password\\": \\"hunter2xyz\\"}"', "hunter2xyz"),
+    ("msg='{\\'api_key\\': \\'k3y-value\\'}'", "k3y-value"),
+    ('access_token="abc def"', "def"),
+    ("client_secret: 'two words'", "words"),
+    ('{"password": "with \\"escaped\\" quote"}', "escaped"),
+])
+def test_credentials_in_dicts_escaped_json_and_quoted_phrases_are_replaced(raw, secret):
+    out = Redactor()(raw)
+    assert secret not in out and "<secret-1>" in out, out
+    assert "password" in out or "token" in out or "secret" in out or "api_key" in out, out
