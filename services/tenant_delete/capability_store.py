@@ -50,12 +50,12 @@ def _bound_to(raw, company_id: str) -> bool:
     return isinstance(record, dict) and str(record.get("company_id", "")).lower() == company_id
 
 
-def _names_user(raw, users: set) -> bool:
+def _names_user(raw, users: set, field: str) -> bool:
     try:
         record = json.loads(_s(raw))
     except (TypeError, ValueError):
         return False
-    return isinstance(record, dict) and str(record.get("uid", "")) in users
+    return isinstance(record, dict) and str(record.get(field, "")) in users
 
 
 def _entry_facts(raw) -> dict:
@@ -95,6 +95,11 @@ class CapabilityStore:
                 found.append(key)
         return found
 
+    def _naming(self, prefix: str, users: set, field: str) -> list:
+        """Keys under ``prefix`` whose JSON value names one of ``users`` in ``field``."""
+        return [_s(k) for k in self._redis.scan_iter(match=f"{prefix}*", count=500)
+                if _names_user(self._redis.get(k), users, field)]
+
     def purge(self, company_id: str, user_ids: list, requested_at=None) -> Removal:
         company_id = company_id.lower()
         handles = set(self._matching(f"{_KEY_PREFIX}*", company_id))
@@ -108,19 +113,20 @@ class CapabilityStore:
             indexes += [index, upload, refresh_index, session_record.user_ended_key(user)]
         # The record of each rotated refresh token of these users (ADR-0004 dec 2): it names its user.
         users = {str(u) for u in user_ids}
-        rotations = [_s(k) for k in self._redis.scan_iter(match=f"{session_record.ROTATED_REFRESH_PREFIX}*", count=500)
-                     if _names_user(self._redis.get(k), users)]
+        rotations = self._naming(session_record.ROTATED_REFRESH_PREFIX, users, "uid")
+        # Each notebook session of these users (ADR-0048 dec 4): it names its user.
+        notebook_sessions = self._naming(session_record.NOTEBOOK_SESSION_PREFIX, users, "user")
         features = [_s(k) for k in self._redis.scan_iter(match=f"{_FEATURES_PREFIX}{company_id}:*", count=500)]
         latest = self._matching(f"{_LATEST_PREFIX}*", company_id)
         for key in sorted(handles):
             self._revoke(key, company_id)
-        keys = sessions + indexes + rotations + features + latest
+        keys = sessions + indexes + rotations + notebook_sessions + features + latest
         for start in range(0, len(keys), 500):
             self._redis.delete(*keys[start:start + 500])
         # A lost marker would let a verifier honour a stray handle of the tenant: put it back.
         self._redis.set(denials.suspended_key(company_id), "1")
         return Removal(detail={"handles": len(handles), "sessions": len(sessions), "user_indexes": len(indexes),
-                               "refresh_rotations": len(rotations),
+                               "refresh_rotations": len(rotations), "notebook_sessions": len(notebook_sessions),
                                "feature_snapshots": len(features), "latest_readings": len(latest)})
 
     def _revoke(self, key: str, company_id: str) -> None:
