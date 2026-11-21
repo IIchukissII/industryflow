@@ -7,7 +7,9 @@
 # and posts its result as the `box-e2e` status of the commit deployed there. A versioned release is cut
 # only from a commit whose status is success (.github/workflows/release.yml).
 #
-#   scripts/box-validate.sh <ssh-target> [compose-dir]      e.g. scripts/box-validate.sh me@box ~/industryflow
+#   scripts/box-validate.sh <ssh-target> [compose-dir]      e.g. scripts/box-validate.sh me@box industryflow
+#
+# compose-dir is read on the remote host, relative to its home; quote a ~ so the local shell keeps it.
 #
 # Needs `gh` signed in with permission to post commit statuses. The environment must run the commit,
 # deployed by scripts/box-deploy.sh as an upgrade from a box-validated commit; the first validation of
