@@ -67,7 +67,7 @@ jobs:
     # fake has no client timeouts, which hid #501 (libs/industryflow_contracts/industryflow_contracts/testing.py).
     services:
       redis:
-        image: redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+        image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
         ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 2s --health-retries 15
