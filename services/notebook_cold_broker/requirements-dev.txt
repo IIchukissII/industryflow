@@ -5,8 +5,8 @@
 # Test deps. policy.py is pure; the broker app is tested with a fake object store via
 # FastAPI's TestClient (no S3).
 pytest==9.2.0
-pytest-asyncio==1.4.1
-fastapi==0.162.0
+pytest-asyncio==1.5.0
+fastapi==0.164.0
 httpx==0.28.1
 # The capability store the tests run on (industryflow_contracts.testing): the service's own client
 # against a real server in CI, fakeredis with Lua locally.
