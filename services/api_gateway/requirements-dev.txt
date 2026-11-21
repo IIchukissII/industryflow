@@ -7,10 +7,10 @@
 -r requirements.txt
 
 pytest==9.2.0
-pytest-asyncio==1.4.1.post1
+pytest-asyncio==1.5.0
 # Starlette's TestClient needs it (it raises at import without one). test_auth_surface.py drives the
 # real fastapi-users routers through it — the only place the auth surface is actually exercised.
-httpx2==2.16.0
+httpx2==2.16.2
 # Reads docker-compose.yml and the Helm values in the deployment guards (test_db_connection_budget.py).
 pyyaml==6.0.3
 # A real stream and consumer group for the capability-audit writer's tests (test_capability_audit_drain.py).
