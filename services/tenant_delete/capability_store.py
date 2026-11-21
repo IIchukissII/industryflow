@@ -26,6 +26,7 @@ import uuid
 from industryflow_contracts import capability_audit as audit
 from industryflow_contracts import denials
 from industryflow_contracts import sessions as session_record
+from industryflow_contracts import tenancy
 
 from .job import Removal
 
@@ -34,8 +35,6 @@ _USER_INDEX_PREFIX = "nbcap-user:"
 _UPLOAD_INDEX_PREFIX = "nbcap-upload-user:"
 _REFRESH_PREFIX = "refresh:"
 _REFRESH_USER_PREFIX = "refresh-user:"
-_FEATURES_PREFIX = "features:"
-_LATEST_PREFIX = "sensor:latest:"
 
 
 def _s(value):
@@ -100,6 +99,9 @@ class CapabilityStore:
         return [_s(k) for k in self._redis.scan_iter(match=f"{prefix}*", count=500)
                 if _names_user(self._redis.get(k), users, field)]
 
+    def _prefixed(self, prefix: str) -> list:
+        return [_s(k) for k in self._redis.scan_iter(match=f"{prefix}*", count=500)]
+
     def purge(self, company_id: str, user_ids: list, requested_at=None) -> Removal:
         company_id = company_id.lower()
         handles = set(self._matching(f"{_KEY_PREFIX}*", company_id))
@@ -116,8 +118,8 @@ class CapabilityStore:
         rotations = self._naming(session_record.ROTATED_REFRESH_PREFIX, users, "uid")
         # Each notebook session of these users (ADR-0048 dec 4): it names its user.
         notebook_sessions = self._naming(session_record.NOTEBOOK_SESSION_PREFIX, users, "user")
-        features = [_s(k) for k in self._redis.scan_iter(match=f"{_FEATURES_PREFIX}{company_id}:*", count=500)]
-        latest = [_s(k) for k in self._redis.scan_iter(match=f"{_LATEST_PREFIX}{company_id}:*", count=500)]
+        features = self._prefixed(tenancy.feature_reading_prefix(company_id))
+        latest = self._prefixed(tenancy.latest_reading_prefix(company_id))
         for key in sorted(handles):
             self._revoke(key, company_id)
         keys = sessions + indexes + rotations + notebook_sessions + features + latest

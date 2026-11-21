@@ -10,15 +10,15 @@ schema, so another tenant may choose the same one.
 import json
 from typing import Dict, Any
 import redis.asyncio as aioredis
+from industryflow_contracts import tenancy
 
 from config import get_settings
 
 settings = get_settings()
-LATEST_PREFIX = "sensor:latest:"
 
 
 def latest_key(company_id: str, sensor_id: str) -> str:
-    return f"{LATEST_PREFIX}{company_id}:{sensor_id}"
+    return tenancy.latest_reading_prefix(company_id) + str(sensor_id)
 
 
 class RedisClient:
@@ -57,7 +57,7 @@ class RedisClient:
             "value": value,
             "timestamp": metadata.get("timestamp"),
             "equipment_id": metadata.get("equipment_id"),
-            "company_id": company_id,
+            "company_id": tenancy.canonical_company_id(company_id),
             "site_id": metadata.get("site_id"),
             "unit": metadata.get("unit"),
             "quality_code": metadata.get("quality_code")
@@ -70,12 +70,13 @@ class RedisClient:
     
     async def get_all_sensors(self, company_id: str) -> Dict[str, Dict[str, Any]]:
         """The tenant's cached sensor values, by sensor id."""
-        prefix = latest_key(company_id, "")
+        prefix = tenancy.latest_reading_prefix(company_id)
         result = {}
         async for key in self.redis.scan_iter(match=f"{prefix}*", count=500):
-            data = await self.redis.get(key)
+            sensor_id = tenancy.owned_name(prefix, key)
+            data = await self.redis.get(key) if sensor_id else None
             if data:
-                result[key[len(prefix):]] = json.loads(data)
+                result[sensor_id] = json.loads(data)
         return result
 
 # Global Redis client instance

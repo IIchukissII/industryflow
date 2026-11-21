@@ -40,6 +40,9 @@ PACKAGE = ROOT / "libs" / "industryflow_contracts" / "industryflow_contracts"
 TENANT_NAME = re.compile(
     r"(?<![A-Za-z0-9])tenant_(?:reader_|sqlproxy_)?(?:$|[{%\\<\[(]|[0-9a-fA-F]{8}[-_])"
 )
+# A tenant's key prefix in the shared store (``sensor:latest:<uuid>:``, ``features:<uuid>:``): the prefix
+# ending the literal or a placeholder following it.
+STORE_KEY = re.compile(r"(?<![\w:-])(?:sensor:latest|features):(?:$|\{)")
 TABLES = {w.table for w in windows.WINDOWS.values()}
 GRANULARITIES = set(windows.WINDOWS)
 
@@ -115,6 +118,8 @@ def violations(path: Path):
     for node in _string_literals(tree):
         if TENANT_NAME.search(node.value):
             found.append(f"{path}:{node.lineno}: builds a tenant name inline: {node.value!r}")
+        if STORE_KEY.search(node.value):
+            found.append(f"{path}:{node.lineno}: builds a tenant store key inline: {node.value!r}")
         if node.value in TABLES:
             found.append(f"{path}:{node.lineno}: restates an aggregation table: {node.value!r}")
     for node in ast.walk(tree):
@@ -184,6 +189,7 @@ def test_the_scan_finds_the_definitions_it_forbids_elsewhere():
     found = violations(PACKAGE / "tenancy.py")
     assert any("builds a tenant name" in v for v in found)
     assert any("tests tenant ownership" in v for v in found)
+    assert sum("builds a tenant store key" in v for v in found) == 2
     found = violations(PACKAGE / "windows.py")
     assert any("restates an aggregation table" in v for v in found)
     assert any("window table keyed by granularity" in v for v in found)

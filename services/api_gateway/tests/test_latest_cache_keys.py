@@ -6,7 +6,7 @@
 
 import asyncio
 
-import fakeredis
+from industryflow_contracts import testing
 
 from messaging.redis_client import RedisClient
 
@@ -18,10 +18,13 @@ SENSOR = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 def test_two_tenants_with_one_sensor_id_each_read_their_own_value():
     async def run():
         client = RedisClient()
-        client.redis = fakeredis.FakeAsyncRedis(decode_responses=True)
+        client.redis = await testing.async_redis(decode_responses=True)
         await client.set_sensor_value(A, SENSOR, 1.0, {"timestamp": "t"})
         await client.set_sensor_value(B, SENSOR, 2.0, {"timestamp": "t"})
-        return await client.get_all_sensors(A), await client.get_all_sensors(B)
+        try:
+            return await client.get_all_sensors(A), await client.get_all_sensors(B)
+        finally:
+            await client.redis.aclose()
 
     a, b = asyncio.run(run())
     assert a == {SENSOR: {**a[SENSOR], "value": 1.0, "company_id": A}}
