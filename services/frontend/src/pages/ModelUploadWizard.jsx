@@ -164,7 +164,13 @@ function ModelUploadWizard({ onClose, onRegistered }) {
     setPhase('running');
     setFailure(null);
     setTransferred(0);
-    const mark = (k, s) => setStatus((prev) => ({ ...prev, [k]: s }));
+    setStatus({});
+    // The stage running now, held here: `status` in this closure is the render's, not the run's.
+    let running = 'mint';
+    const mark = (k, s) => {
+      if (s === 'run') running = k;
+      setStatus((prev) => ({ ...prev, [k]: s }));
+    };
     const fail = (stage, msg, refusal = false) => { mark(stage, 'fail'); setFailure({ stage, msg, refusal }); setPhase('error'); };
 
     try {
@@ -240,10 +246,9 @@ function ModelUploadWizard({ onClose, onRegistered }) {
       setPhase('done');
     } catch {
       // A thrown error is a transport failure, not a reasoned refusal.
-      const running = STAGES.map((s) => s.key).find((k) => status[k] === 'run') || 'mint';
       fail(running, 'A step could not be reached, so the upload stopped. Check your connection and try again.');
     }
-  }, [files, meta, status, sample]);
+  }, [files, meta, sample]);
 
   return (
     <div className="uw-scrim" onClick={phase === 'running' ? undefined : onClose}>
