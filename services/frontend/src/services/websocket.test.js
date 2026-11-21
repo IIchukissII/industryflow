@@ -7,7 +7,7 @@ import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 // The socket lives no longer than the access cookie: the gateway closes it with 4401 when the
 // token expires, and the client refreshes the session once and reconnects. 1008 is final.
 const post = vi.fn();
-vi.mock('./api', () => ({ default: { post: (...a) => post(...a) } }));
+vi.mock('./session', () => ({ refreshSession: (...a) => post('/auth/refresh', ...a) }));
 
 class FakeSocket {
   static instances = [];
@@ -133,6 +133,17 @@ describe('websocket session handling', () => {
     service.subscribe(() => {});
     FakeSocket.instances[0].onclose({ code: 4401 });
     service.disconnect();
+    settle({});
+    await flush();
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+
+  test('the last listener leaving closes the socket and cancels a pending refresh', async () => {
+    let settle;
+    post.mockReturnValue(new Promise((r) => { settle = r; }));
+    const unsubscribe = service.subscribe(() => {});
+    FakeSocket.instances[0].onclose({ code: 4401 });
+    unsubscribe();
     settle({});
     await flush();
     expect(FakeSocket.instances).toHaveLength(1);

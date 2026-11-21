@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { WS_URL } from '../config';
-import api from './api';
+import { refreshSession } from './session';
 
 // Close code the gateway sends when the session's access token has expired (routers/websocket.py).
 const SESSION_EXPIRED = 4401;
@@ -31,6 +31,10 @@ class WebSocketService {
   /** A socket open or opening, or a reconnect waiting on its backoff or on a refresh. */
   _active() {
     return this.ws !== null || this.reconnectTimer !== null || this.refreshing !== null;
+  }
+
+  _listened() {
+    return this.messageListeners.size > 0 || this.errorListeners.size > 0;
   }
 
   _report(error) {
@@ -93,11 +97,12 @@ class WebSocketService {
           return;
         }
         this.refreshedSinceMessage = true;
-        const refresh = api.post('/auth/refresh').then(
+        // The one refresh the whole app shares: a rotating refresh token is spent by its first use.
+        const refresh = refreshSession().then(
           () => {
             if (this.refreshing !== refresh) return;
             this.refreshing = null;
-            this._open();
+            if (this._listened()) this._open();
           },
           () => {
             if (this.refreshing !== refresh) return;
@@ -109,10 +114,10 @@ class WebSocketService {
         return;
       }
       // Reconnect for transient closes as long as anyone is still listening.
-      if (this.messageListeners.size || this.errorListeners.size) {
+      if (this._listened()) {
         this.reconnectTimer = setTimeout(() => {
           this.reconnectTimer = null;
-          this._open();
+          if (this._listened()) this._open();
         }, this.reconnectInterval);
       }
     };
@@ -129,15 +134,9 @@ class WebSocketService {
     return () => {
       if (onMessage) this.messageListeners.delete(onMessage);
       if (onError) this.errorListeners.delete(onError);
+      // The last listener gone: nothing keeps the socket, or a reconnect waiting for one.
+      if (!this._listened()) this.disconnect();
     };
-  }
-
-  /**
-   * Back-compat entry point (used by the app shell): registers listeners and ensures the
-   * connection is open. Equivalent to subscribe() without the unsubscribe handle.
-   */
-  connect(onMessage, onError) {
-    this.subscribe(onMessage, onError);
   }
 
   /** Tear the connection down entirely (app teardown). Individual components unsubscribe. */
