@@ -132,6 +132,18 @@ def cold_key_prefix(company_id) -> str:
     return cold_object_prefix(company_id) + "/"
 
 
+def latest_reading_prefix(company_id) -> str:
+    """The tenant's key prefix for its latest readings in the shared store, ``sensor:latest:<uuid>:``;
+    a sensor id is unique only within its tenant, so the key is the prefix and the sensor id."""
+    return f"sensor:latest:{canonical_company_id(company_id)}:"
+
+
+def feature_reading_prefix(company_id) -> str:
+    """The tenant's key prefix for the alert worker's recent readings in the shared store,
+    ``features:<uuid>:``, followed by equipment and sensor name."""
+    return f"features:{canonical_company_id(company_id)}:"
+
+
 # --------------------------------------------------------------------------- ownership (ADR-0039)
 #
 # Whether a name or an object-store key belongs to a tenant is decided here and nowhere else. Each

@@ -273,7 +273,7 @@ async def _stream(websocket: WebSocket, session: SocketSession, select_sensors, 
             # Build the update. A transient data-side error (Redis/DB hiccup) is logged and
             # retried WITHOUT dropping the socket — keep `continue` scoped to data only.
             try:
-                all_sensors = await redis_client.get_all_sensors()
+                all_sensors = await redis_client.get_all_sensors(company_id)
                 sensors = {
                     sensor_id: data
                     for sensor_id, data in all_sensors.items()

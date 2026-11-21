@@ -185,7 +185,7 @@ def test_cache_endpoint_carries_the_display_name(client_for, monkeypatch):
                                            "display_name": "Light", "equipment_id": EQ,
                                            "equipment_name": "Cabinet"}]})
 
-    async def all_sensors():
+    async def all_sensors(company_id):
         return {SENSOR: {"value": 1.0, "company_id": str(company)}}
 
     monkeypatch.setattr(cache.redis_client, "redis", object())

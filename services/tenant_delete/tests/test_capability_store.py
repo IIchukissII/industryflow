@@ -38,8 +38,9 @@ def _store():
         "notebook-session:nb-b": json.dumps({"user": "someone-else", "sid": "s", "iat": 1, "cred": "c"}),
         f"features:{A}:e1:temperature": "[]",
         f"features:{B}:e1:temperature": "[]",
-        "sensor:latest:s-a": json.dumps({"company_id": A, "value": 1}),
-        "sensor:latest:s-b": json.dumps({"company_id": B, "value": 2}),
+        # One sensor id chosen by both tenants: each keeps its own key.
+        f"sensor:latest:{A}:s-1": json.dumps({"company_id": A, "value": 1}),
+        f"sensor:latest:{B}:s-1": json.dumps({"company_id": B, "value": 2}),
         f"nbcap-suspended:{B}": "1",
     }
     for k, v in kv.items():
@@ -63,7 +64,7 @@ def _events(redis):
 def test_everything_of_the_tenant_goes_and_nothing_of_another():
     redis = _store()
     removal = CapabilityStore(redis).purge(A, [U])
-    assert _keys(redis) == {"nbcap:h-b", f"features:{B}:e1:temperature", "sensor:latest:s-b",
+    assert _keys(redis) == {"nbcap:h-b", f"features:{B}:e1:temperature", f"sensor:latest:{B}:s-1",
                             f"nbcap-suspended:{B}", f"nbcap-suspended:{A}", audit.STREAM_KEY,
                             "refresh-rotated:old-b", "notebook-session:nb-b"}
     assert removal.detail == {"handles": 4, "sessions": 1, "user_indexes": 4, "refresh_rotations": 1,
