@@ -93,7 +93,8 @@ export default function Core({ user }) {
     };
     fetchInitialData();
 
-    websocketService.connect(
+    // Its own subscription: leaving the page drops only its listeners, never a chart's.
+    const unsubscribe = websocketService.subscribe(
       (data) => {
         if (data.type === 'sensor_update' && data.sensors) {
           setSensors(data.sensors);
@@ -106,7 +107,7 @@ export default function Core({ user }) {
         setWsConnected(false);
       }
     );
-    return () => websocketService.disconnect();
+    return unsubscribe;
   }, []);
 
   // Open alerts reduced to a per-sensor health: critical → crit, high/medium → warn, worst wins.
