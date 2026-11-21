@@ -60,3 +60,9 @@ def latest_emitted_window(epoch_seconds, granularity: str):
     """
     w = window(granularity)
     return (epoch_seconds - w.lateness_seconds) // w.width_seconds - 1
+
+
+def stored_time(m, granularity: str):
+    """The time window ``m``'s row is stored at, in epoch seconds: the window's end, ``(m + 1) * width``,
+    as the aggregation job writes it. Element-wise like ``latest_emitted_window``."""
+    return (m + 1) * window(granularity).width_seconds

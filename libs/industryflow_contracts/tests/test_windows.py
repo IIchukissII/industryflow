@@ -37,6 +37,14 @@ def test_latest_emitted_window(granularity, t, expected):
     assert windows.latest_emitted_window(t, granularity) == expected
 
 
+@pytest.mark.parametrize("granularity,m,expected", [
+    ("1min", 36120 // 60, 36180),
+    ("1hour", 9, 36000),
+])
+def test_a_window_is_stored_at_its_end(granularity, m, expected):
+    assert windows.stored_time(m, granularity) == expected
+
+
 def test_an_unknown_granularity_is_refused_by_name():
     with pytest.raises(ValueError, match="1min"):
         windows.window("2min")

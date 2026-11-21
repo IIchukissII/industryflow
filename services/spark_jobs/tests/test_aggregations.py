@@ -103,6 +103,17 @@ def test_a_non_finite_reading_is_left_out_of_its_window(spark):
     assert row["stddev_value"] == pytest.approx(2 ** 0.5)
 
 
+def test_a_window_is_stored_at_the_time_the_contract_names(spark):
+    # The as-of baseline read bounds by windows.stored_time (ADR-0023 dec 9): the job's row time must be it.
+    from industryflow_contracts import windows
+    w0 = (datetime.now(timezone.utc) - timedelta(minutes=30)).replace(second=0, microsecond=0)
+    kafka_like = spark.createDataFrame([(json.dumps(_reading(w0 + timedelta(seconds=10), 1.0)), "t", 0, 0)],
+                                       "value string, topic string, partition int, offset long")
+    (row,) = job.aggregate_readings(parse_readings(kafka_like), "1min").collect()
+    m = int(w0.timestamp()) // 60
+    assert row["time"].astimezone(timezone.utc).timestamp() == windows.stored_time(m, "1min")
+
+
 # --- every window carries its spread ------------------------------------------------------------
 
 def test_a_window_of_one_reading_has_zero_spread(spark):
