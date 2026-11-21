@@ -13,9 +13,10 @@ operator names in EXTENSION_MODULES — never a named extension directly.
 """
 import importlib
 import logging
-import math
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List
+
+from industryflow_contracts import readings
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,8 @@ class StatefulUnavailable(Exception):
 
 
 def _finite(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    """A number, finite and within the platform's bound on a reading (ADR-0044 dec 1)."""
+    return readings.value_in_range(value)
 
 
 def sensor_value(sensor_data: Dict[str, Any], sensor: str) -> float:

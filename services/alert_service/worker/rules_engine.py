@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 import uuid
 import aiohttp
 
+from industryflow_contracts import readings
+
 from errors import MessageValidationError, RulesUnavailable
 
 logger = logging.getLogger(__name__)
@@ -78,6 +80,9 @@ def parse_reading(sensor_data: Any, company_id: Any) -> Dict[str, Any]:
         raise MessageValidationError(f"value is not a number: {value!r}") from None
     if not math.isfinite(value):
         raise MessageValidationError(f"value is not finite: {value!r}")
+    if not readings.value_in_range(value):
+        raise MessageValidationError(
+            f"value {value!r} is beyond the bound of {readings.MAX_VALUE_MAGNITUDE:g} (ADR-0044 dec 1)")
     reading['value'] = value
 
     for field in ('time', 'timestamp'):

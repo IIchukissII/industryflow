@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 import uuid
 
-from industryflow_contracts.readings import MAX_FUTURE_SKEW_SECONDS
+from industryflow_contracts.readings import MAX_FUTURE_SKEW_SECONDS, MAX_VALUE_MAGNITUDE
 
 class SensorDataInput(BaseModel):
     """
@@ -21,8 +21,10 @@ class SensorDataInput(BaseModel):
     sensor_id: uuid.UUID = Field(..., description="Sensor UUID")
     equipment_id: uuid.UUID = Field(..., description="Equipment UUID")
     site_id: str = Field(..., min_length=1, max_length=100)
-    # A finite number: NaN or ±Infinity is a reading of nothing (ADR-0044 dec 1).
-    value: float = Field(..., allow_inf_nan=False, description="Sensor reading value, a finite number")
+    # A finite number within the platform's bound: NaN or ±Infinity is a reading of nothing, and a
+    # larger magnitude overflows its window's statistics (ADR-0044 dec 1).
+    value: float = Field(..., allow_inf_nan=False, ge=-MAX_VALUE_MAGNITUDE, le=MAX_VALUE_MAGNITUDE,
+                         description="Sensor reading value, a finite number of magnitude at most 1e150")
     unit: Optional[str] = Field(None, max_length=20, description="Unit of measurement")
     quality_code: Optional[int] = Field(None, ge=0, le=2, description="0=good, 1=uncertain, 2=bad")
 
