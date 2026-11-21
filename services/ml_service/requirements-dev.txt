@@ -10,7 +10,7 @@ redis==8.1.0
 # (ADR-0042; test_upload_capability.py).
 fakeredis==2.40.0
 # The feature_engineering package __init__ imports its engine, which imports numpy.
-numpy==2.5.4
+numpy==2.5.5
 pytest==9.2.0
 pytest-asyncio==1.5.0
 # Model-drift tests (ADR-0021) exercise the real evidently compute path, and the drift package

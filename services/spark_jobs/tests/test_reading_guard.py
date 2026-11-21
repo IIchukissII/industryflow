@@ -63,6 +63,17 @@ def test_a_value_that_is_not_a_finite_number_is_rejected(spark, value):
     assert reasons(spark, [body]) == [rg.NON_FINITE_VALUE]
 
 
+@pytest.mark.parametrize("value", [1e308, -1.5e308, 1.1e150])
+def test_a_finite_value_beyond_the_bound_is_rejected(spark, value):
+    # ADR-0044 dec 1: two such readings in one window overflow its mean and spread.
+    assert reasons(spark, [reading(value=value)]) == [rg.VALUE_OUT_OF_RANGE]
+
+
+def test_a_value_at_the_bound_is_writable(spark):
+    from industryflow_contracts.readings import MAX_VALUE_MAGNITUDE
+    assert reasons(spark, [reading(value=MAX_VALUE_MAGNITUDE), reading(value=-MAX_VALUE_MAGNITUDE)]) == [None, None]
+
+
 def test_malformed_json_and_an_unparseable_timestamp_are_rejected(spark):
     assert reasons(spark, [b"{not json", reading(timestamp="yesterday-ish")]) == \
         [rg.MISSING_OR_MALFORMED, rg.MISSING_OR_MALFORMED]

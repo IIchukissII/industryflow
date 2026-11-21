@@ -28,7 +28,7 @@ import uuid
 
 import pytest
 
-from harness import Edge, Environment, Secret, issue_device
+from harness import Browser, Edge, Environment, Secret, issue_device
 
 REQUIRED = ("IF_E2E_EDGE", "IF_E2E_NOTEBOOKS", "IF_E2E_INGEST", "IF_E2E_CA", "IF_E2E_SUPERUSER_EMAIL",
             "IF_E2E_SUPERUSER_PASSWORD", "IF_E2E_COMPOSE_DIR", "IF_E2E_WORK", "IF_E2E_AUTHORING_IMAGE")
@@ -99,3 +99,11 @@ def tenant(edge, root, env):
 def device(env, tenant, settings):
     """A certificate for a device of the run's tenant, as the operator enrols one (scripts/device-ca.sh)."""
     return issue_device(env, settings["IF_E2E_COMPOSE_DIR"], tenant["company_id"], f"e2e-dev-{tenant['run']}")
+
+
+@pytest.fixture
+def browser(settings):
+    """One browser on the platform origin and the notebook origin (ADR-0048)."""
+    b = Browser(settings)
+    yield b
+    b.close()

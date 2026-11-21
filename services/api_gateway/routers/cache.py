@@ -32,11 +32,9 @@ async def get_cached_sensors(
         if redis_client.redis is None:
             raise HTTPException(status_code=503, detail="Redis not connected")
 
-        # Get all sensors from cache
-        all_sensors = await redis_client.get_all_sensors()
-
-        # Filter by user's company_id
+        # The tenant's own keys, and of those only the entries bound to it
         company_id = str(current_user.company_id)
+        all_sensors = await redis_client.get_all_sensors(company_id)
 
         print(f"🔍 CACHE: Filtering {len(all_sensors)} sensors for company {company_id}")
 

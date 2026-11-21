@@ -35,6 +35,7 @@ def _evaluate(reading, company_id=CO):
     ({"sensor_id": SENSOR, "value": None}, CO, "value"),
     ({"sensor_id": SENSOR, "value": "hot"}, CO, "value"),
     ({"sensor_id": SENSOR, "value": float("nan")}, CO, "finite"),
+    ({"sensor_id": SENSOR, "value": 1e308}, CO, "bound"),
     ({"sensor_id": SENSOR, "value": True}, CO, "value"),
     ({"sensor_id": "temp-1", "value": 1.0}, CO, "sensor_id"),
     ({"sensor_id": SENSOR, "equipment_id": "eq-1", "value": 1.0}, CO, "equipment_id"),
