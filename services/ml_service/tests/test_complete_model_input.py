@@ -41,6 +41,7 @@ IDENTITY = [{"name": "a", "type": "identity", "sensor": "a"}, {"name": "b", "typ
     ({}, ["a", "b"]),
     ({"a": None, "b": 2.0}, ["a"]),
     ({"a": math.nan, "b": math.inf}, ["a", "b"]),
+    ({"a": 1e308, "b": -1.5e308}, ["a", "b"]),
     ({"a": "1.0", "b": True}, ["a", "b"]),
 ])
 async def test_a_reading_lacking_a_declared_sensor_is_refused_naming_them(reading, missing):

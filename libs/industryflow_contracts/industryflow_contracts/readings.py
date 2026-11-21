@@ -10,6 +10,7 @@ body (ADR-0002 dec 3), so the body has no tenant field.
 """
 from __future__ import annotations
 
+import math
 import ssl
 from typing import Any, Dict, Optional
 
@@ -17,6 +18,18 @@ from typing import Any, Dict, Optional
 # future is a device clock fault: on the stream it would drag the aggregation watermark ahead and
 # close every live window early. Ingestion refuses it at the edge; the stream dead-letters it.
 MAX_FUTURE_SKEW_SECONDS = 300
+
+# The largest magnitude a reading's value may have (ADR-0044 dec 1). A window's spread sums squares of
+# its values: at this bound a window of up to 10^8 readings keeps every sum finite (1e150² · 1e8 =
+# 1e308, below the largest double), and no measured quantity comes near it.
+MAX_VALUE_MAGNITUDE = 1e150
+
+
+def value_in_range(value) -> bool:
+    """Whether a reading's value is a number, finite and within the bound (ADR-0044 dec 1)."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+            and abs(value) <= MAX_VALUE_MAGNITUDE)
+
 
 # The body's fields: required ones, then the optional ones a device may add.
 REQUIRED_FIELDS = ("timestamp", "sensor_id", "equipment_id", "site_id", "value")
