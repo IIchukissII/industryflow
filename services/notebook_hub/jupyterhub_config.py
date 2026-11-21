@@ -318,12 +318,14 @@ async def bind_identity_and_profile(spawner):
     spawner.cpu_limit = resources["cpu_limit"]
     spawner.mem_limit = resources["mem_limit"]
 
-    # Per-profile image + landing surface (ADR-0011 dec 5): authoring gets JupyterLab + the DS
-    # stack; analytics gets the Voila read-only renderer (no free-form code editor). Works the
-    # same for DockerSpawner and KubeSpawner — both honour spawner.image / spawner.default_url.
+    # Per-profile image + server (ADR-0011 dec 5): authoring gets JupyterLab + the DS stack;
+    # analytics gets the report server, which serves rendered reports and no route that runs a
+    # user's code. Named here as well as in its image, so the hub, not the image, decides it. Works
+    # the same for DockerSpawner and KubeSpawner.
     spawner.image = ident.image_for_profile(profile, os.environ)
     if profile == ident.PROFILE_ANALYTICS:
-        spawner.default_url = "/voila"
+        spawner.environment[ident.SINGLEUSER_APP_ENV] = ident.ANALYTICS_SERVER_APP
+        spawner.default_url = "/reports"
 
     # Mint per-session, single-tenant capabilities and inject the handles (ADR-0015): the kernel's
     # only data credentials — opaque handles, not DB passwords, revocable by deleting their store
@@ -473,7 +475,7 @@ if SPAWNER == "docker":
     c.DockerSpawner.pre_spawn_hook = bind_identity_and_profile
     # The per-user image is chosen per profile in the hook (above); set a class default so the
     # image is runnable standalone, and the network it shares with the hub + proxy.
-    c.DockerSpawner.image = os.environ.get("NOTEBOOK_IMAGE_AUTHORING") or os.environ.get("NOTEBOOK_IMAGE", "")
+    c.DockerSpawner.image = os.environ.get(ident.AUTHORING_IMAGE_ENV, "")
     c.DockerSpawner.network_name = os.environ["NOTEBOOK_NETWORK"]
     c.DockerSpawner.use_internal_ip = True
     # Ephemeral by default (ADR-0011 dec 1): drop the container when the server stops.

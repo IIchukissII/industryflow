@@ -125,11 +125,11 @@ def test_image_for_profile_uses_per_profile_env():
     assert ident.image_for_profile(ident.PROFILE_ANALYTICS, env) == "if-analytics:1"
 
 
-def test_image_for_profile_falls_back_to_single_image():
-    # A one-image dev setup (legacy NOTEBOOK_IMAGE) serves both profiles.
-    env = {"NOTEBOOK_IMAGE": "if-notebook:dev"}
-    assert ident.image_for_profile(ident.PROFILE_AUTHORING, env) == "if-notebook:dev"
-    assert ident.image_for_profile(ident.PROFILE_ANALYTICS, env) == "if-notebook:dev"
+def test_no_single_image_serves_both_profiles():
+    # The authoring image would give a read-only user a full environment (ADR-0011 dec 5).
+    env = {"NOTEBOOK_IMAGE": "if-notebook:dev", "NOTEBOOK_IMAGE_AUTHORING": "if-authoring:1"}
+    with pytest.raises(KeyError, match="NOTEBOOK_IMAGE_ANALYTICS"):
+        ident.image_for_profile(ident.PROFILE_ANALYTICS, env)
 
 
 def test_image_for_profile_requires_some_image():
