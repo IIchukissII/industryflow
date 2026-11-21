@@ -117,7 +117,7 @@ class CapabilityStore:
         # Each notebook session of these users (ADR-0048 dec 4): it names its user.
         notebook_sessions = self._naming(session_record.NOTEBOOK_SESSION_PREFIX, users, "user")
         features = [_s(k) for k in self._redis.scan_iter(match=f"{_FEATURES_PREFIX}{company_id}:*", count=500)]
-        latest = self._matching(f"{_LATEST_PREFIX}*", company_id)
+        latest = [_s(k) for k in self._redis.scan_iter(match=f"{_LATEST_PREFIX}{company_id}:*", count=500)]
         for key in sorted(handles):
             self._revoke(key, company_id)
         keys = sessions + indexes + rotations + notebook_sessions + features + latest
