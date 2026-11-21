@@ -44,7 +44,8 @@ BASE_ENV = {
     "NOTEBOOK_ORIGIN": "https://app.example.com:8444",
     "REDIS_HOST": "localhost",
     "REDIS_PORT": "6379",
-    "NOTEBOOK_IMAGE": "industryflow/notebook:test",
+    "NOTEBOOK_IMAGE_AUTHORING": "industryflow/notebook-authoring:test",
+    "NOTEBOOK_IMAGE_ANALYTICS": "industryflow/notebook-analytics:test",
     "NOTEBOOK_NETWORK": "industryflow-network",  # DockerSpawner profile requires it
     # A test value of the SSO proxy's secret (ADR-0014 dec 3); the hub refuses to start without one.
     "NOTEBOOK_SSO_PROXY_SECRET": "0123456789abcdef0123456789abcdef",
@@ -601,6 +602,12 @@ def test_the_configured_mapping_selects_the_spawn_profile(configured, role, prof
         _spawn(ns, spawner)
         assert spawner.environment["INDUSTRYFLOW_PROFILE"] == profile
         assert spawner.extra_create_kwargs["labels"]["industryflow.io/profile"] == profile
+        # The read-only profile runs the report server on its own image, landing on the reports.
+        analytics = profile == "analytics"
+        assert (spawner.environment.get("JUPYTERHUB_SINGLEUSER_APP") == "report_server.ReportServerApp") is analytics
+        assert spawner.image == f"industryflow/notebook-{profile}:test"
+        if analytics:
+            assert spawner.default_url == "/reports"
     finally:
         os.environ.pop("NOTEBOOK_AUTHORING_ROLES", None)
 

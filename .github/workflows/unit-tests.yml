@@ -118,6 +118,8 @@ jobs:
           # The infrastructure agent (ADR-0046): stores and model faked; its tool server also runs as
           # a real stdio subprocess. It reads its runbook rows from services/ops_agent/runbook.toml.
           - { service: ops_agent,           path: services/ops_agent/tests }
+          # The analytics profile's report server, wrapped as the hub runs it, executing on a real kernel.
+          - { service: notebook_analytics,  path: services/notebook_hub/analytics/tests, install: "pip install -r services/notebook_hub/analytics/requirements-dev.txt" }
           # The backup image's scripts, run under bash against stand-in aws/psql/pg_* binaries.
           - { service: backup,              path: infrastructure/backup/tests, install: "pip install -r scripts/ci/requirements.txt" }
           # The notebook client is packaged (pyproject extras), so it overrides the install.

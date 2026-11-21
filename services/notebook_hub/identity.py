@@ -222,21 +222,21 @@ def select_profile(role: str, authoring_roles: frozenset[str]) -> str:
 
 
 # Per-profile single-user images (ADR-0011 dec 5): the authoring profile gets the JupyterLab + DS
-# image; the analytics profile gets the Voila read-only renderer. Env names the deployment sets.
+# image; the analytics profile gets the report server's. Env names the deployment sets.
 ANALYTICS_IMAGE_ENV = "NOTEBOOK_IMAGE_ANALYTICS"
 AUTHORING_IMAGE_ENV = "NOTEBOOK_IMAGE_AUTHORING"
+# The analytics profile's single-user server: rendered reports, no route that runs a user's code.
+SINGLEUSER_APP_ENV = "JUPYTERHUB_SINGLEUSER_APP"
+ANALYTICS_SERVER_APP = "report_server.ReportServerApp"
 _PROFILE_IMAGE_ENV = {PROFILE_ANALYTICS: ANALYTICS_IMAGE_ENV, PROFILE_AUTHORING: AUTHORING_IMAGE_ENV}
 
 
 def image_for_profile(profile: str, env: Mapping[str, str]) -> str:
-    """The single-user image for a profile: its per-profile env var, else the legacy single
-    ``NOTEBOOK_IMAGE`` (back-compat / a one-image dev setup). Raises if neither is set."""
-    image = env.get(_PROFILE_IMAGE_ENV[profile]) or env.get("NOTEBOOK_IMAGE")
+    """The single-user image for a profile, from its own env var; raises if it is unset. No image
+    serves both: the authoring image would give a read-only user a full environment."""
+    image = env.get(_PROFILE_IMAGE_ENV[profile])
     if not image:
-        raise KeyError(
-            f"no image configured for the {profile} profile "
-            f"(set {_PROFILE_IMAGE_ENV[profile]} or NOTEBOOK_IMAGE)"
-        )
+        raise KeyError(f"no image configured for the {profile} profile (set {_PROFILE_IMAGE_ENV[profile]})")
     return image
 
 

@@ -1027,7 +1027,7 @@ services:
   # ==========================================================================
 
   # Build-only: the two per-user images the hub spawns by role profile (ADR-0011 dec 5) — authoring
-  # (JupyterLab + DS stack) and analytics (Voila read-only dashboards). Never started directly
+  # (JupyterLab + DS stack) and analytics (the report server: rendered reports only). Never started directly
   # (DockerSpawner runs per-user copies); `command: true` makes an accidental `up` a no-op.
   notebook-authoring:
     profiles: ["notebooks"]
@@ -1043,6 +1043,8 @@ services:
     build:
       context: ./clients/python
       dockerfile: ../../services/notebook_hub/Dockerfile.analytics
+      additional_contexts:
+        analytics: ./services/notebook_hub/analytics
     image: industryflow-notebook-analytics
     command: ["true"]
     restart: "no"

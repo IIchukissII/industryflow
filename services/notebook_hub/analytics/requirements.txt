@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The analytics server (report_server.py), installed by Dockerfile.analytics. jupyterhub tracks the
+# hub's pin (scripts/check_jupyterhub_parity.py follows this file from the Dockerfile).
+jupyterhub==6.1.1
+jupyter-server==2.21.1
+nbclient==0.11.0
+nbconvert==7.17.2
+nbformat==5.11.1
+ipykernel==7.4.0

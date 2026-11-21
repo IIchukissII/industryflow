@@ -11,6 +11,8 @@ and leaves the spawn images behind. The build passes, the hub starts, and every 
 `jupyterhub-singleuser` from a different major than the hub that manages it.
 
 Spawn images are found by GLOB, so a new `Dockerfile.<profile>` is checked without editing this file.
+An image that installs a requirements file from a build context named after a directory beside the
+hub (`COPY --from=<dir> requirements.txt`) is pinned by that file.
 """
 
 from __future__ import annotations
@@ -23,6 +25,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 HUB_REQUIREMENTS = "services/notebook_hub/requirements.txt"
 SPAWN_DOCKERFILE_GLOB = "services/notebook_hub/Dockerfile.*"
 PIN = re.compile(r"(?<![\w-])jupyterhub==([0-9][^\s\\]*)")
+CONTEXT_REQUIREMENTS = re.compile(r"COPY\s+--from=([\w-]+)\s+requirements\.txt\b")
+
+
+def _image_pins(root: Path, dockerfile: Path) -> list[str]:
+    text = dockerfile.read_text()
+    pins = PIN.findall(text)
+    for context in CONTEXT_REQUIREMENTS.findall(text):
+        requirements = root / "services/notebook_hub" / context / "requirements.txt"
+        if requirements.is_file():
+            pins += PIN.findall(requirements.read_text())
+    return pins
 
 
 def find_mismatches(root: Path = REPO_ROOT) -> list[str]:
@@ -35,7 +48,7 @@ def find_mismatches(root: Path = REPO_ROOT) -> list[str]:
     if not images:
         problems.append(f"no spawn images match {SPAWN_DOCKERFILE_GLOB}")
     for df in images:
-        pins = PIN.findall(df.read_text())
+        pins = _image_pins(root, df)
         rel = df.relative_to(root)
         if not pins:
             problems.append(f"{rel}: no jupyterhub== pin (the hub runs {want})")

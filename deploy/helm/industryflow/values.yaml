@@ -856,7 +856,7 @@ notebookHub:
   # Ingress serves it with ingress.tls.secretName, whose certificate must name this host too.
   host: notebooks.industryflow.local
   # Per-user images the hub spawns by role profile (ADR-0011 dec 5): authoring = JupyterLab + the
-  # lean DS stack; analytics = Voila read-only dashboards. Referenced by the spawner, not run as
+  # lean DS stack; analytics = the report server (rendered reports only). Referenced by the spawner, not run as
   # chart workloads. Pin by digest in production like the other first-party images.
   singleUser:
     authoring: { image: industryflow-notebook-authoring, digest: "" }

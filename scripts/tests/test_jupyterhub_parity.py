@@ -47,3 +47,14 @@ def test_sibling_packages_are_not_mistaken_for_the_pin(tmp_path):
 
 def test_repo_is_consistent():
     assert find_mismatches() == []
+
+
+def test_an_image_pinned_by_its_contexts_requirements_is_checked(tmp_path):
+    root = make(tmp_path, "6.0.1", {"authoring": "6.0.1"})
+    d = root / "services/notebook_hub"
+    (d / "analytics").mkdir()
+    (d / "Dockerfile.analytics").write_text("COPY --from=analytics requirements.txt /tmp/r.txt\n")
+    (d / "analytics/requirements.txt").write_text("jupyterhub==6.0.1\n")
+    assert find_mismatches(root) == []
+    (d / "analytics/requirements.txt").write_text("jupyterhub==5.5.0\n")
+    assert find_mismatches(root) == ["services/notebook_hub/Dockerfile.analytics: jupyterhub==5.5.0, hub runs 6.0.1"]
