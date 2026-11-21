@@ -337,19 +337,20 @@ async def test_a_known_sensor_with_no_window_yet_is_none():
     assert await provider.compute_rolling_mean(COMPANY_ID, EQUIPMENT_ID, "pressure", "1min") is None
 
 
-@pytest.mark.parametrize("granularity, at, start", [
-    # closed(t) = floor((t - lateness) / width) - 1, from the window contract (ADR-0023 dec 9).
-    ("1min", "2026-11-09T12:10:30+00:00", "2026-11-09T12:07:00+00:00"),
-    ("1hour", "2026-11-09T12:10:30+00:00", "2026-11-09T10:00:00+00:00"),
+@pytest.mark.parametrize("granularity, at, stored", [
+    # closed(t) = floor((t - lateness) / width) - 1, from the window contract (ADR-0023 dec 9); the
+    # aggregation job stores that window's row at its end: 12:07-12:08 at 12:08, 10:00-11:00 at 11:00.
+    ("1min", "2026-11-09T12:10:30+00:00", "2026-11-09T12:08:00+00:00"),
+    ("1hour", "2026-11-09T12:10:30+00:00", "2026-11-09T11:00:00+00:00"),
 ])
 @pytest.mark.asyncio
-async def test_as_of_reads_the_window_written_by_that_instant(granularity, at, start):
+async def test_as_of_reads_the_window_written_by_that_instant(granularity, at, stored):
     from datetime import datetime
     pool = _FakePool(_FakeConn(row={"sensor_id": "s", "avg_value": 70.0, "stddev_value": 1.5}))
     provider = AggregateBaselineProvider(pool, cache_ttl_seconds=60.0)
     await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", granularity,
                                     as_of=datetime.fromisoformat(at))
-    assert pool.conn.args[-1][2] == datetime.fromisoformat(start)
+    assert pool.conn.args[-1][2] == datetime.fromisoformat(stored)
     assert "a.time <= $3::timestamptz" in pool.conn.fetched[-1]
     # A past window is not cached, so a drift pass cannot evict the live entries; live is read live.
     await provider.compute_baseline(COMPANY_ID, EQUIPMENT_ID, "pressure", granularity,
