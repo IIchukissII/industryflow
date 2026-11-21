@@ -8,7 +8,7 @@ REST API endpoints for alert history management with schema-per-tenant routing
 The gateway is the single HTTP surface for alert history, acknowledgement, operator labels and
 precision (ADR-0031 decision 1).
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import List, Optional
@@ -19,6 +19,7 @@ from enum import Enum
 
 from dependencies import get_db_with_tenant, get_current_user_with_company, get_writer_with_company
 from models.user import User
+from request_ids import Uuid
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts History"])
 
@@ -229,22 +230,21 @@ async def _fetch_alerts(db, company_id, where_sql, params):
 
 @router.get("", response_model=List[AlertResponse])
 async def list_alerts(
-        sensor_id: Optional[str] = None,
-        equipment_id: Optional[str] = None,
+        sensor_id: Optional[Uuid] = None,
+        equipment_id: Optional[Uuid] = None,
         severity: Optional[Severity] = None,
         acknowledged: Optional[bool] = None,
         condition: Optional[str] = None,
-        model_id: Optional[str] = None,
-        limit: int = 100,
+        model_id: Optional[Uuid] = None,
+        limit: int = Query(100, ge=1, le=1000),
         db: AsyncSession = Depends(get_db_with_tenant),
         current_user: User = Depends(get_current_user_with_company)
 ):
     """List recent alerts for the authenticated user's company (schema-routed).
 
     Filters: sensor_id, equipment_id, severity, acknowledged, condition (e.g. 'drift',
-    'retrain_recommended' — ADR-0021/0022), model_id. limit default 100, capped at 1000.
+    'retrain_recommended' — ADR-0021/0022), model_id. limit default 100, at most 1000.
     """
-    limit = min(limit, 1000)
     clauses, params = [], {"limit": limit}
     # UUID columns compared as text so a string query param binds cleanly under asyncpg.
     for col, val in (("sensor_id", sensor_id), ("equipment_id", equipment_id), ("model_id", model_id)):
@@ -265,7 +265,7 @@ async def list_alerts(
 
 @router.get("/unacknowledged", response_model=List[AlertResponse])
 async def list_unacknowledged_alerts(
-        limit: int = 50,
+        limit: int = Query(50, ge=1, le=1000),
         db: AsyncSession = Depends(get_db_with_tenant),
         current_user: User = Depends(get_current_user_with_company)
 ):
@@ -275,7 +275,7 @@ async def list_unacknowledged_alerts(
 
 @router.get("/critical", response_model=List[AlertResponse])
 async def list_critical_alerts(
-        limit: int = 50,
+        limit: int = Query(50, ge=1, le=1000),
         db: AsyncSession = Depends(get_db_with_tenant),
         current_user: User = Depends(get_current_user_with_company)
 ):
@@ -360,8 +360,8 @@ async def label_alert(
 
 @router.get("/label-metrics", response_model=PrecisionMetrics)
 async def alert_label_metrics(
-        model_id: Optional[str] = None,
-        rule_id: Optional[str] = None,
+        model_id: Optional[Uuid] = None,
+        rule_id: Optional[Uuid] = None,
         days: int = 30,
         bucket: Bucket = Bucket.day,
         db: AsyncSession = Depends(get_db_with_tenant),

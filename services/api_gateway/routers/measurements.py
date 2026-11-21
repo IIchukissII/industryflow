@@ -12,6 +12,7 @@ import logging
 
 from dependencies import get_tenant_db, resolve_tenant_context, TenantContext
 from models.schemas import SensorMeasurement
+from request_ids import Uuid
 
 router = APIRouter(prefix="/api/measurements", tags=["Measurements"])
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 async def get_measurements(
         ctx: TenantContext = Depends(resolve_tenant_context),
         sensor_id: Optional[UUID] = Query(None, description="Filter by sensor ID"),
-        equipment_id: Optional[str] = Query(None, description="Filter by equipment ID"),
+        equipment_id: Optional[Uuid] = Query(None, description="Filter by equipment ID"),
         start: Optional[datetime] = Query(None, description="Only measurements at/after this time (inclusive)"),
         end: Optional[datetime] = Query(None, description="Only measurements at/before this time (inclusive)"),
         order: str = Query("desc", pattern="^(asc|desc)$", description="Time order: 'asc' for analytics, 'desc' (default) for newest-first"),

@@ -10,6 +10,7 @@ from datetime import datetime
 
 from dependencies import get_tenant_db, resolve_tenant_context, TenantContext
 from models import SensorAggregation
+from request_ids import Uuid
 
 router = APIRouter(prefix="/api/aggregations", tags=["Aggregations"])
 
@@ -21,8 +22,8 @@ VALID_WINDOWS = ["1min", "5min", "1hour"]
 async def get_aggregations(
         window: str = Path(..., description="Aggregation window: 1min, 5min, or 1hour"),
         ctx: TenantContext = Depends(resolve_tenant_context),
-        sensor_id: Optional[str] = Query(None, description="Filter by sensor ID"),
-        equipment_id: Optional[str] = Query(None, description="Filter by equipment ID"),
+        sensor_id: Optional[Uuid] = Query(None, description="Filter by sensor ID"),
+        equipment_id: Optional[Uuid] = Query(None, description="Filter by equipment ID"),
         start: Optional[datetime] = Query(None, description="Only windows at/after this time (inclusive)"),
         end: Optional[datetime] = Query(None, description="Only windows at/before this time (inclusive)"),
         order: str = Query("desc", pattern="^(asc|desc)$", description="Time order: 'asc' for analytics, 'desc' (default) for newest-first"),
@@ -175,7 +176,7 @@ async def get_latest_aggregations(
 @router.get("/combined/{sensor_id}", response_model=dict)
 async def get_combined_aggregations(
         ctx: TenantContext = Depends(resolve_tenant_context),
-        sensor_id: str = Path(..., description="Sensor ID to fetch all timeframes for"),
+        sensor_id: Uuid = Path(..., description="Sensor ID to fetch all timeframes for"),
         limit: int = Query(100, ge=1, le=500, description="Maximum results per timeframe"),
         db: AsyncSession = Depends(get_tenant_db)
 ):
