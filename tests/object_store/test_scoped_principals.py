@@ -211,3 +211,10 @@ def test_half_a_key_pair_is_an_error_not_a_skip(home):
 def test_an_unconfigured_principal_is_skipped_and_says_so(home):
     r = _init(home, BACKUP_STORE_ACCESS_KEY="", BACKUP_STORE_SECRET_KEY="")
     assert r.returncode == 0 and "principal db-backup: not configured" in r.stdout
+
+
+def test_a_bucket_the_store_refuses_fails_the_init(home):
+    # Not the last bucket of the loop, whose status alone would reach errexit (#697).
+    r = _init(home, SPARK_CHECKPOINT_BUCKET="Not_A_Valid_Bucket")
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "bucket ready: Not_A_Valid_Bucket" not in r.stdout

@@ -44,8 +44,11 @@ until mc alias set "$ALIAS" "$MINIO_ENDPOINT" "$MINIO_ROOT_ACCESS_KEY" "$MINIO_R
   echo "waiting for the object store at $MINIO_ENDPOINT ..."; sleep 2
 done
 
+# One command per line: errexit does not see a failure inside an `&&` list.
 for bucket in "${SPARK_CHECKPOINT_BUCKET:-}" "${ARTIFACT_BUCKET:-}" "${BACKUP_BUCKET:-}" "${COLD_STORE_BUCKET:-}"; do
-  [ -n "$bucket" ] && mc mb -p "$ALIAS/$bucket" >/dev/null && echo "bucket ready: $bucket"
+  [ -n "$bucket" ] || continue
+  mc mb -p "$ALIAS/$bucket" >/dev/null
+  echo "bucket ready: $bucket"
 done
 
 # Expire abandoned uploads (ADR-0030). An artifact is staged before it is judged, so unadmitted bytes

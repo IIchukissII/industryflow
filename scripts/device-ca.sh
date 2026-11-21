@@ -187,7 +187,10 @@ cmd_issue() {
     -in "$csr" -out "$tmp/device.crt" -extensions device_cert
   serial=$(openssl x509 -in "$tmp/device.crt" -noout -serial | sed 's/^serial=//')
   mv "$tmp/device.crt" "$out/$serial.crt"
-  [ -f "$tmp/device.key" ] && mv "$tmp/device.key" "$out/$serial.key"
+  # An if, not an `&&` list: errexit does not see a failed move there, and the key is removed with $tmp.
+  if [ -f "$tmp/device.key" ]; then
+    mv "$tmp/device.key" "$out/$serial.key"
+  fi
   rm -rf "$tmp"
   # Full chain for the device to present (leaf + intermediate).
   cat "$out/$serial.crt" "$INT/intermediate.crt" > "$out/$serial.chain.crt"
