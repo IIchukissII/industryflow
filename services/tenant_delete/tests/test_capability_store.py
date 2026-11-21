@@ -33,6 +33,9 @@ def _store():
         # Rotated refresh tokens: the tenant's user's goes, another user's stays.
         "refresh-rotated:old-a": json.dumps({"uid": U, "sid": "s", "at": 1, "successor": None}),
         "refresh-rotated:old-b": json.dumps({"uid": "someone-else", "sid": "s", "at": 1, "successor": None}),
+        # Notebook sessions: the tenant's user's goes, another user's stays.
+        "notebook-session:nb-a": json.dumps({"user": U, "sid": "s", "iat": 1, "cred": "c"}),
+        "notebook-session:nb-b": json.dumps({"user": "someone-else", "sid": "s", "iat": 1, "cred": "c"}),
         f"features:{A}:e1:temperature": "[]",
         f"features:{B}:e1:temperature": "[]",
         "sensor:latest:s-a": json.dumps({"company_id": A, "value": 1}),
@@ -62,9 +65,9 @@ def test_everything_of_the_tenant_goes_and_nothing_of_another():
     removal = CapabilityStore(redis).purge(A, [U])
     assert _keys(redis) == {"nbcap:h-b", f"features:{B}:e1:temperature", "sensor:latest:s-b",
                             f"nbcap-suspended:{B}", f"nbcap-suspended:{A}", audit.STREAM_KEY,
-                            "refresh-rotated:old-b"}
+                            "refresh-rotated:old-b", "notebook-session:nb-b"}
     assert removal.detail == {"handles": 4, "sessions": 1, "user_indexes": 4, "refresh_rotations": 1,
-                              "feature_snapshots": 1, "latest_readings": 1}
+                              "notebook_sessions": 1, "feature_snapshots": 1, "latest_readings": 1}
 
 
 def test_the_suspension_marker_stays_and_is_restored_if_lost():

@@ -29,6 +29,9 @@ USER_ENDED_PREFIX = "sessions-ended-at:"
 # What a claimed refresh token was rotated into (JSON naming its user as ``uid``), kept for the
 # token's lifetime so that presenting it again can be told apart: a concurrent refresh, or a reuse.
 ROTATED_REFRESH_PREFIX = "refresh-rotated:"
+# A notebook session (ADR-0048 dec 4): JSON naming its user as ``user`` and the platform session it
+# was opened from, kept for the refresh token's lifetime.
+NOTEBOOK_SESSION_PREFIX = "notebook-session:"
 
 # How far the clocks of the gateway's replicas may disagree: a token issued this long after an end of
 # all the user's sessions still counts as issued before it.

@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from industryflow_contracts import capability_audit as audit
+from industryflow_contracts import sessions
 
 AUDIENCE_NOTEBOOK = "notebook"
 # The capability store's namespace every plane shares (ADR-0015 dec 1).
@@ -34,7 +35,7 @@ _TICKET_PREFIX = "nbcap:"
 # Long enough for the page to hand the ticket to the notebook origin, short enough to be worthless
 # afterwards.
 TICKET_TTL_SECONDS = 30
-_SESSION_PREFIX = "notebook-session:"
+_SESSION_PREFIX = sessions.NOTEBOOK_SESSION_PREFIX
 # The notebook origin's own cookie: host-only, httpOnly, never a platform cookie.
 SESSION_COOKIE = "if_nb"
 PLANE = "api_gateway"
