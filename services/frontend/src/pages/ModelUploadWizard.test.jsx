@@ -129,3 +129,25 @@ describe('model upload wizard registration', () => {
     expect(screen.getByRole('button', { name: /Upload & register/ })).toBeEnabled();
   });
 });
+
+describe('model upload wizard transport failure', () => {
+  test.each([
+    ['transfer', (url) => url === '/store/MLmodel'],
+    ['admit', (url) => url.endsWith('/commit')],
+  ])('a failure reaching %s is shown at that stage, with no spinner left', async (stage, unreachable) => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (unreachable(url)) return Promise.reject(new TypeError('Failed to fetch'));
+      if (url.endsWith('/stage')) return respond({ upload_id: 'u1', urls: { MLmodel: '/store/MLmodel' } });
+      if (url.endsWith('/commit')) return respond({ artifact_uri: 's3://models/u1' });
+      return respond({});
+    }));
+    await declare();
+    fireEvent.click(screen.getByRole('button', { name: /Upload & register/ }));
+    await screen.findByText(/could not be reached/);
+    const steps = [...document.querySelectorAll('.uw-step')];
+    expect(steps.filter((li) => li.classList.contains('fail'))).toHaveLength(1);
+    expect(steps.filter((li) => li.classList.contains('run'))).toHaveLength(0);
+    expect(steps.findIndex((li) => li.classList.contains('fail')))
+      .toBe(['mint', 'stage', 'transfer', 'admit', 'register'].indexOf(stage));
+  });
+});
