@@ -34,6 +34,7 @@ Rows with no written window yet (the start of a history) get the neutral ``0.0``
 transform degrades to when no aggregate row exists, so the two agree on cold start too. A row missing
 its own reading stays missing: serving refuses such a reading (ADR-0044 dec 1).
 """
+import warnings
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
@@ -114,6 +115,14 @@ def add_window_features(
     # Sorted by instant, not by the column as given: strings with different offsets do not sort in
     # time order.
     original_index = df.index
+    # A row with no instant has no window (ADR-0023 dec 9): it enters no window's statistic and its
+    # features stay missing, never a value from a window it was never in.
+    untimed = pd.to_datetime(df[timestamp_col], utc=True).isna()
+    if untimed.any():
+        warnings.warn(f"{int(untimed.sum())} row(s) have no {timestamp_col}: they enter no window and "
+                      "their window features are missing", stacklevel=2)
+    left_out = df[untimed]
+    df = df[~untimed]
     df = df.assign(_t=_epoch_seconds(df[timestamp_col])).sort_values(group_cols + ["_t"])
     df["_window"] = df["_t"] // GRANULARITY_SECONDS[granularity]
     df["_closed"] = windows.latest_emitted_window(df["_t"], granularity)
@@ -149,7 +158,8 @@ def add_window_features(
             df[f"{sensor}{suffix}"] = column.mask(baseline.isna(), 0.0)
             transformations.append(feature_config(sensor, stat_type, granularity))
 
-    df = df.drop(columns=["_t", "_window", "_closed"]).reindex(original_index)
+    df = df.drop(columns=["_t", "_window", "_closed"])
+    df = pd.concat([df, left_out]).reindex(original_index)
     return df, transformations
 
 

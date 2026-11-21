@@ -45,3 +45,14 @@ def test_the_reference_frame_has_a_written_window():
     # At 10:04:30 the newest written window is 10:01 (two minutes' lateness), holding the 10:01:20
     # reading: the comparison above is not all neutral zeros.
     assert EXPECTED[-1] == 10.0
+
+
+def test_a_row_with_no_time_enters_no_window_and_has_no_feature():
+    stamps = [NAIVE_UTC[0], None, *NAIVE_UTC[1:]]
+    df = pd.DataFrame({"timestamp": stamps, "pressure": [VALUES[0], 1000.0, *VALUES[1:]]})
+    with pytest.warns(UserWarning, match="1 row"):
+        out, _ = offline_baseline.add_window_features(df, ["pressure"], granularity="1min",
+                                                      stats=("window_mean",))
+    features = out["pressure_window_mean"].tolist()
+    assert pd.isna(features[1])
+    assert [features[0], *features[2:]] == EXPECTED
