@@ -6,7 +6,7 @@
 # import), so most tests need only pytest + pytest-asyncio. trustme generates a throwaway CA +
 # server cert for the upstream-TLS integration test (a fake Postgres-TLS server, no real DB).
 pytest==9.2.0
-pytest-asyncio==1.4.1
+pytest-asyncio==1.5.0
 trustme==1.2.1
 # The capability store the tests run on (industryflow_contracts.testing): the service's own client
 # against a real server in CI, fakeredis with Lua locally.
