@@ -7,7 +7,7 @@
 Proves, for the statement as written in baseline_provider.py on asyncpg:
 
   * live, it reads the sensor's newest window;
-  * as of an instant, the newest window at or before that window start, an older one;
+  * as of a bound, the newest window stored at or before it, an older one;
   * a known sensor with no window yet answers its row with no value (unavailable);
   * an equipment without that sensor, or an equipment the tenant does not have, answers nothing
     (refused as unknown input).

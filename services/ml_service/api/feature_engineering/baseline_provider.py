@@ -92,12 +92,13 @@ class UnknownBaselineInput(FeatureRefused):
 
 
 def _window_bound(as_of: datetime, granularity: str) -> datetime:
-    """The start of the newest window written by ``as_of``: the row a reading at ``as_of`` was or
-    would have been scored with (ADR-0023 dec 9), from the one window contract."""
+    """The stored time of the newest window written by ``as_of``: the row a reading at ``as_of`` was or
+    would have been scored with (ADR-0023 dec 9), from the one window contract, which says where the
+    aggregation job stores that row."""
     if as_of.tzinfo is None:
         raise ValueError("a baseline as of a time needs an aware time")
     m = windows.latest_emitted_window(int(as_of.timestamp()), granularity)
-    return datetime.fromtimestamp(m * windows.window(granularity).width_seconds, tz=timezone.utc)
+    return datetime.fromtimestamp(windows.stored_time(m, granularity), tz=timezone.utc)
 
 
 class AsOf:
