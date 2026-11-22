@@ -133,6 +133,10 @@ spec:
             # Platform roles that get the authoring profile (ADR-0014 dec 4).
             - name: NOTEBOOK_AUTHORING_ROLES
               value: {{ .Values.notebookHub.authoringRoles | quote }}
+            # The tenant's cap on notebook environments running at once (ADR-0049); empty takes the
+            # shipped default, and the hub refuses to start on a value it cannot read.
+            - name: TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS
+              value: {{ .Values.config.TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS | default "" | quote }}
             # Capability store (ADR-0015) — the same Redis the rest of the platform uses.
             - name: REDIS_URL
               value: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}

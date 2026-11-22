@@ -24,6 +24,8 @@ from schemas import SensorDataInput, SensorDataResponse
 from dependencies import get_ingestion_identity
 from kafka_producer import AsyncKafkaProducerSingleton, send_sensor_data
 import tenant_status
+import quota
+import redis.asyncio as aioredis
 
 # Configure logging
 logging.basicConfig(
@@ -36,6 +38,9 @@ settings = get_settings()
 
 # The tenant-status follower (startup_event); cancelled on shutdown.
 _status_task = None
+# The shared count of tenant quotas (ADR-0049 dec 4). A client connects lazily, so an unreachable
+# store at start admits readings without their cap and alerts, rather than stopping ingestion (dec 8).
+quota_store = aioredis.from_url(settings.QUOTA_REDIS_URL, socket_connect_timeout=0.5, socket_timeout=0.5)
 
 # FastAPI app
 app = FastAPI(
@@ -112,6 +117,7 @@ async def shutdown_event():
 
     if _status_task is not None:
         _status_task.cancel()
+    await quota_store.aclose()
 
     # Close Kafka producer
     await AsyncKafkaProducerSingleton.close()
@@ -152,6 +158,17 @@ async def ingest_sensor_data(
     """
     try:
         company_id_str = identity["company_id"]
+
+        # The tenant's readings cap (ADR-0049): refused before it is produced, so the device keeps
+        # the reading and sends it again.
+        cap = tenant_status.status.overrides(company_id_str).get(
+            quota.CAP, settings.READINGS_PER_SECOND_DEFAULT)
+        if not await quota.admit(quota_store, company_id_str, cap):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Tenant at its quota of {cap} readings per second",
+                headers={"Retry-After": "1"},
+            )
         
         # Build Kafka message
         kafka_message = {

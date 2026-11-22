@@ -28,6 +28,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import capabilities as cap  # noqa: E402
 import identity as ident  # noqa: E402
+import quota  # noqa: E402
 
 # Which spawner profile this deployment runs (ADR-0018). Default kube preserves the original
 # Kubernetes behaviour; the Compose deployment sets NOTEBOOK_SPAWNER=docker.
@@ -189,6 +190,19 @@ PROFILE_RESOURCES = {
 _STORE = None
 
 
+_QUOTA_STORE = None
+
+
+def _quota_store():
+    """The shared store's client for tenant quotas (ADR-0049), built once per hub process."""
+    global _QUOTA_STORE
+    if _QUOTA_STORE is None:
+        import redis  # runtime dep; imported lazily so config import doesn't require it
+
+        _QUOTA_STORE = redis.Redis.from_url(os.environ["REDIS_URL"], socket_timeout=2)
+    return _QUOTA_STORE
+
+
 def _capability_store():
     """The Redis-backed capability store (ADR-0015 dec 7), built once per hub process."""
     global _STORE
@@ -298,6 +312,14 @@ async def bind_identity_and_profile(spawner):
         company_id=auth_state.get("company_id", ""),
         role=auth_state.get("role", ""),
     )
+    # The tenant's cap on environments running at once (ADR-0049, ADR-0011 dec 7): refused before
+    # anything is minted or started, naming the cap.
+    try:
+        await quota.admit(spawner, who.company_id, _quota_store())
+    except quota.AtCap as refused:
+        spawner.log.warning("tenant %s at its cap of %d notebook environment(s); %s refused",
+                            who.company_id, refused.cap, spawner._log_name)
+        raise web.HTTPError(429, str(refused)) from None
     # The profile is chosen by role, not offered to the user (ADR-0011 dec 5, ADR-0014 dec 4).
     profile = ident.select_profile(who.role, AUTHORING_ROLES)
     # Identity only — this carries no data credential (ADR-0014 dec 5).

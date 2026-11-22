@@ -5,7 +5,7 @@
 import os
 from functools import lru_cache
 
-from industryflow_contracts import tenant_status
+from industryflow_contracts import quotas, tenant_status
 
 # The header conventions a terminating mTLS edge uses to forward the verified client
 # certificate (ADR-0002 dec 2): our compose nginx edge sets X-Client-*, ingress-nginx
@@ -17,8 +17,9 @@ class Settings:
     """Configuration for Ingestion Service - NO DEFAULTS.
 
     Ingestion is device-only and stateless: it authenticates producers by mTLS, produces to
-    Kafka and reads the tenant-status stream from it. It holds no database role, no JWT secret
-    and no CORS policy (ADR-0002): no browser ever calls it.
+    Kafka and reads the tenant-status stream from it, and counts each tenant's readings in the
+    shared count of tenant quotas. It holds no database role, no JWT secret and no CORS policy
+    (ADR-0002): no browser ever calls it.
     """
 
     # Server
@@ -37,7 +38,15 @@ class Settings:
     # publishes it under the same name. The default is the shared contract's.
     KAFKA_TOPIC_TENANT_STATUS: str = os.getenv("KAFKA_TOPIC_TENANT_STATUS", tenant_status.DEFAULT_TOPIC)
 
+    # The shared count of tenant quotas (ADR-0002 dec 3, ADR-0049 dec 4): counters only.
+    QUOTA_REDIS_URL: str = os.getenv("QUOTA_REDIS_URL", "")
+
     def __init__(self):
+        # The platform default of the readings cap (ADR-0049 dec 2, 6); a mistyped value stops the
+        # service here rather than leaving tenants uncapped.
+        self.READINGS_PER_SECOND_DEFAULT = quotas.defaults()[quotas.READINGS_PER_SECOND]
+        if not self.QUOTA_REDIS_URL:
+            raise RuntimeError("QUOTA_REDIS_URL must be set: the shared count of tenant quotas")
         if not self.KAFKA_TOPIC_SENSOR_DATA:
             raise RuntimeError("KAFKA_TOPIC_SENSOR_DATA must be set")
         if self.DEVICE_IDENTITY_HEADERS not in DEVICE_IDENTITY_HEADER_CONVENTIONS:

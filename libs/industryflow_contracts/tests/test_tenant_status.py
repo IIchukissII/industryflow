@@ -41,3 +41,24 @@ def test_encode_refuses_a_non_uuid_and_a_non_bool():
 
 def test_a_consumer_trusts_several_intervals_before_forgetting():
     assert tenant_status.STALE_AFTER_SECONDS >= 3 * tenant_status.PUBLISH_INTERVAL_SECONDS
+
+
+def test_a_tenants_overrides_ride_its_status_and_are_left_out_when_none():
+    _key, value = tenant_status.encode(CID, True, {"readings_per_second": 40})
+    assert tenant_status.decode_message(value) == (CID, True, {"readings_per_second": 40})
+    _key, bare = tenant_status.encode(CID, True)
+    assert "caps" not in json.loads(bare)
+    assert tenant_status.decode_message(bare) == (CID, True, {})
+
+
+def test_an_unknown_cap_or_value_is_dropped_so_the_tenant_takes_its_default():
+    value = json.dumps({"company_id": CID, "active": True,
+                        "caps": {"readings_per_second": 0, "disk": 5, "notebook_environments": 2}}).encode()
+    assert tenant_status.decode_message(value) == (CID, True, {"notebook_environments": 2})
+
+
+def test_encode_refuses_an_override_that_is_not_a_cap_or_a_count():
+    with pytest.raises(ValueError):
+        tenant_status.encode(CID, True, {"disk": 5})
+    with pytest.raises(ValueError):
+        tenant_status.encode(CID, True, {"readings_per_second": True})

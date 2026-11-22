@@ -68,7 +68,8 @@ def test_compose_ingestion_reachable_only_from_the_edge():
     assert "industryflow-network" not in service_nets
     assert sorted(service_nets) == ["ingestion-back", "ingestion-front"]
 
-    # Who else shares each network: the edge in front, Kafka behind, nobody else.
+    # Who else shares each network: the edge in front, Kafka and the shared count of tenant quotas
+    # behind (ADR-0002 dec 3), nobody else.
     text = _read("docker-compose.yml")
     services = re.findall(r"^  ([a-z0-9-]+):\n", text.split("\nvolumes:")[0], re.M)
     members = {"ingestion-front": set(), "ingestion-back": set()}
@@ -79,7 +80,7 @@ def test_compose_ingestion_reachable_only_from_the_edge():
                 if net in members:
                     members[net].add(name)
     assert members["ingestion-front"] == {"ingestion-edge", "ingestion-service"}
-    assert members["ingestion-back"] == {"kafka", "ingestion-service"}
+    assert members["ingestion-back"] == {"kafka", "redis", "ingestion-service"}
 
     for net in members:
         assert re.search(rf"^  {net}:\n(?:    .*\n)*?    internal: true$", text, re.M), net

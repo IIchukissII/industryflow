@@ -29,6 +29,7 @@ COPY dependencies.py .
 COPY schemas.py .
 COPY kafka_producer.py .
 COPY tenant_status.py .
+COPY quota.py .
 COPY main.py .
 
 # Set Python path

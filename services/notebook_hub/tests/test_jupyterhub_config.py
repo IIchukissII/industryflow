@@ -73,6 +73,10 @@ def _load_ns(profile: str, **overrides):
         cfg = Config()
         namespace = {"c": cfg, "get_config": lambda: cfg, "__file__": str(CONFIG), "__name__": "__main__"}
         exec(compile(CONFIG.read_text(), str(CONFIG), "exec"), namespace)  # noqa: S102
+        # The shared store of tenant quotas, empty: the defaults hold (ADR-0049).
+        from industryflow_contracts import testing
+
+        namespace["_QUOTA_STORE"] = testing.sync_redis(rebuilt=False)
         return cfg, namespace
     finally:
         sys.path.remove(str(HUB_DIR))
@@ -148,6 +152,8 @@ class _User:
         self.name = name
         self._state = {"company_id": company_id, "role": role}
         self.spawners = {}
+        # The hub's record of users, which the quota check reads (quota.running_for).
+        self.settings = {"users": {name: self}}
 
     async def get_auth_state(self):
         return self._state
@@ -977,3 +983,20 @@ def test_docker_removes_a_container_still_mounting_the_deleted_users_volume():
     assert [(m, a) for m, a, _ in calls] == [
         ("containers", ()), ("remove_container", ("c0ffee000000",)), ("remove_volume", (volume,))]
     assert calls[1][2] == {"force": True}
+
+
+def test_a_spawn_over_the_tenants_cap_is_refused_before_anything_is_minted(monkeypatch):
+    """ADR-0049 dec 3: the start is refused, naming the cap, and no capability is minted for it."""
+    from tornado import web
+
+    _, ns, store = _hub()
+    monkeypatch.setattr(ns["quota"], "DEFAULT", 1)
+    tenant = str(uuid.uuid4())
+    running = _Spawner(_User("u-1", tenant))
+    asking = _Spawner(_User("u-2", tenant))
+    asking.user.settings["users"].update(running.user.settings["users"])
+    running.user.spawners[""] = running
+    with pytest.raises(web.HTTPError) as refused:
+        _spawn(ns, asking)
+    assert refused.value.status_code == 429 and "1 notebook environment" in refused.value.log_message
+    assert _handles(store) == set()

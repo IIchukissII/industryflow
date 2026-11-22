@@ -11,3 +11,5 @@ asyncpg==0.32.0
 redis==8.1.0
 PyYAML==6.0.3
 pytest==9.2.0
+# The in-process store industryflow_contracts.testing falls back to without IF_TEST_REDIS_URL.
+fakeredis==2.40.0

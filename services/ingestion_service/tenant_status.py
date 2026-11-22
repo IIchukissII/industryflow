@@ -14,6 +14,9 @@ The stream sheds load; it does not enforce. A status not heard again within
 ``tenant_status.STALE_AFTER_SECONDS`` is forgotten, and a tenant never heard of is let through, so a
 stopped publisher can neither strand a reactivated tenant nor halt ingestion. The writers of tenant
 data refuse a suspended tenant from the registry itself.
+
+A status also carries the tenant's quota overrides (ADR-0049 dec 2); a tenant forgotten as stale takes
+the platform defaults again.
 """
 import asyncio
 import logging
@@ -31,30 +34,38 @@ REFUSED = Counter(
 
 
 class TenantStatus:
-    """The last status heard for each tenant, with when it was heard."""
+    """The last status heard for each tenant, its quota overrides, and when it was heard."""
 
     def __init__(self, stale_after: float = tenant_status.STALE_AFTER_SECONDS, clock=time.monotonic):
         self._stale_after = stale_after
         self._clock = clock
-        self._heard: dict[str, tuple[bool, float]] = {}
+        self._heard: dict[str, tuple[bool, dict, float]] = {}
 
     def apply(self, value: bytes) -> None:
         try:
-            company_id, active = tenant_status.decode(value)
+            company_id, active, caps = tenant_status.decode_message(value)
         except ValueError:
             logger.warning("ignored a message on the tenant-status stream that is not a status")
             return
-        self._heard[company_id] = (active, self._clock())
+        self._heard[company_id] = (active, caps, self._clock())
 
-    def is_suspended(self, company_id: str) -> bool:
+    def _fresh(self, company_id: str):
         heard = self._heard.get(company_id)
         if heard is None:
-            return False
-        active, at = heard
-        if self._clock() - at > self._stale_after:
+            return None
+        if self._clock() - heard[2] > self._stale_after:
             del self._heard[company_id]
-            return False
-        return not active
+            return None
+        return heard
+
+    def is_suspended(self, company_id: str) -> bool:
+        heard = self._fresh(company_id)
+        return heard is not None and not heard[0]
+
+    def overrides(self, company_id: str) -> dict:
+        """The tenant's quota overrides as last heard; none once its status is stale."""
+        heard = self._fresh(company_id)
+        return dict(heard[1]) if heard is not None else {}
 
 
 status = TenantStatus()

@@ -73,8 +73,9 @@ def test_the_kernels_network_is_collected():
 
 
 def test_ingestion_stays_reachable_only_from_its_edge():
-    # Collected by name, not by joining the collector or anything else to the ingestion networks.
+    # Collected by name, not by joining the collector or anything else to the ingestion networks. Its
+    # members are the edge, Kafka and the shared count of tenant quotas (ADR-0002 dec 3).
     nets = _networks(COMPOSE["services"]["ingestion-service"])
     others = sorted(n for n, s in COMPOSE["services"].items()
-                    if n not in {"ingestion-service", "ingestion-edge", "kafka"} and _networks(s) & nets)
+                    if n not in {"ingestion-service", "ingestion-edge", "kafka", "redis"} and _networks(s) & nets)
     assert not others, f"on the ingestion networks: {others}"

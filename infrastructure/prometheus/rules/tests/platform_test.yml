@@ -289,3 +289,53 @@ tests:
               summary: "Stateful feature aggregates are unavailable"
               description: "Stateful feature slots have been served neutral for 15m because their aggregate was unavailable; scores using them are degraded (ADR-0044 dec 3)."
               services: "ml-service-api, timescaledb, spark-aggregations"
+
+  # Quota refusals fire per cap only when sustained: a 5m burst does not, refusals past 15m do.
+  - interval: 1m
+    input_series:
+      - series: 'tenant_quota_refusals{platform="industryflow", job="api-gateway", pid="1", cap="readings_per_second"}'
+        values: '0x5 0+10x5 50x30 50+3x40'
+      - series: 'tenant_quota_refusals{platform="industryflow", job="api-gateway", pid="2", cap="readings_per_second"}'
+        values: '0x5 0+10x5 50x30 50+3x40'
+      - series: 'tenant_quota_refusals{platform="other", job="api-gateway", pid="1", cap="readings_per_second"}'
+        values: '0+10x80'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: IndustryFlowTenantQuotaRefusals
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: IndustryFlowTenantQuotaRefusals
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: IndustryFlowTenantQuotaRefusals
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              cap: readings_per_second
+            exp_annotations:
+              summary: "Tenants are being refused at a quota cap"
+              description: "Demands have been refused at the readings_per_second cap for 15m. Read which tenants at GET /api/platform/quotas/refusals, then raise a tenant's override or the default (ADR-0049)."
+              services: "ingestion-service, notebook-hub, api-gateway"
+
+  # A count that cannot be read fires at once: no cap holds meanwhile.
+  - interval: 1m
+    input_series:
+      - series: 'tenant_quota_count_unavailable_total{platform="industryflow", job="ingestion-service", cap="readings_per_second"}'
+        values: '0x10 0+1x3 3x20'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: IndustryFlowTenantQuotaCountUnavailable
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: IndustryFlowTenantQuotaCountUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              cap: readings_per_second
+            exp_annotations:
+              summary: "Tenant quotas are not enforced: the shared count is unreachable"
+              description: "Demands were admitted without their readings_per_second cap in the last 5m because the shared count could not be read; no cap holds until it can (ADR-0049 dec 8)."
+              services: "ingestion-service, redis"
+      - eval_time: 30m
+        alertname: IndustryFlowTenantQuotaCountUnavailable
+        exp_alerts: []
