@@ -28,6 +28,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import capabilities as cap  # noqa: E402
 import identity as ident  # noqa: E402
+import quota  # noqa: E402
 
 # Which spawner profile this deployment runs (ADR-0018). Default kube preserves the original
 # Kubernetes behaviour; the Compose deployment sets NOTEBOOK_SPAWNER=docker.
@@ -189,6 +190,32 @@ PROFILE_RESOURCES = {
 _STORE = None
 
 
+_QUOTA_STORE = None
+_OVERRIDE_STORE = None
+
+
+def _override_store():
+    """The capability store's client the tenant quota overrides are read from (ADR-0049): the alert
+    worker copies them there, out of reach of the device-facing ingestion service."""
+    global _OVERRIDE_STORE
+    if _OVERRIDE_STORE is None:
+        import redis  # runtime dep; imported lazily so config import doesn't require it
+
+        _OVERRIDE_STORE = redis.Redis.from_url(os.environ["REDIS_URL"], socket_timeout=2)
+    return _OVERRIDE_STORE
+
+
+def _quota_store():
+    """The shared count of tenant quotas (ADR-0049), a store apart from the capability store, where
+    the hub records its refusals; built once per hub process."""
+    global _QUOTA_STORE
+    if _QUOTA_STORE is None:
+        import redis  # runtime dep; imported lazily so config import doesn't require it
+
+        _QUOTA_STORE = redis.Redis.from_url(os.environ["QUOTA_REDIS_URL"], socket_timeout=2)
+    return _QUOTA_STORE
+
+
 def _capability_store():
     """The Redis-backed capability store (ADR-0015 dec 7), built once per hub process."""
     global _STORE
@@ -204,6 +231,11 @@ async def revoke_server_capabilities(spawner):
     (ADR-0012 dec 6, ADR-0015 dec 2). Each live one is recorded as revoked, and the environment as
     stopped, with why (ADR-0042 dec 1): the reason a hub path that stopped it left on the spawner,
     else an ordinary stop (the user, the culler, a logout, a failed spawn)."""
+    if getattr(spawner, "_quota_refused", False):
+        # A start refused at its tenant's quota minted nothing and started nothing (ADR-0049 dec 3).
+        spawner._quota_refused = False
+        spawner._stop_reason = None
+        return
     reason = getattr(spawner, "_stop_reason", None) or cap.REASON_SERVER_STOPPED
     spawner._stop_reason = None
     # The tenant the server was started for (bind_identity_and_profile); the login's current one only
@@ -298,6 +330,16 @@ async def bind_identity_and_profile(spawner):
         company_id=auth_state.get("company_id", ""),
         role=auth_state.get("role", ""),
     )
+    # The tenant's cap on environments running at once (ADR-0049, ADR-0011 dec 7): refused before
+    # anything is minted or started, naming the cap.
+    try:
+        await quota.admit(spawner, who.company_id, _override_store(), _quota_store())
+    except quota.AtCap as refused:
+        spawner.log.warning("tenant %s at its cap of %d notebook environment(s); %s refused",
+                            who.company_id, refused.cap, spawner._log_name)
+        # Nothing started, so its stop records nothing (revoke_server_capabilities).
+        spawner._quota_refused = True
+        raise web.HTTPError(429, str(refused)) from None
     # The profile is chosen by role, not offered to the user (ADR-0011 dec 5, ADR-0014 dec 4).
     profile = ident.select_profile(who.role, AUTHORING_ROLES)
     # Identity only — this carries no data credential (ADR-0014 dec 5).

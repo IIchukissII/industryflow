@@ -39,13 +39,13 @@ WRITES = [
 ]
 
 # Write routes outside the tenant-data writer gate, each with its own authorization:
-# authentication, self-service, user administration (admin), tenant provisioning and platform switches
-# (superuser).
+# authentication, self-service, user administration (admin), tenant provisioning, platform switches and
+# tenant quotas (superuser).
 OWN_AUTHORIZATION = {
     "/auth/jwt/login", "/auth/jwt/logout", "/auth/login", "/auth/refresh", "/auth/logout",
     "/users/me", "/api/users", "/api/users/{user_id}",
     "/api/companies", "/api/companies/{company_id}", "/api/companies/{company_id}/deletion",
-    "/api/platform/switches/{key}",
+    "/api/platform/switches/{key}", "/api/platform/quotas/tenants/{company_id}/{cap}",
     # Entering the notebook origin: every role has a notebook profile (ADR-0011 dec 5), and the ticket
     # writes no tenant data; the exchange is authorized by the ticket (ADR-0048 dec 3).
     "/api/notebook-ticket", "/auth/notebook-entry",

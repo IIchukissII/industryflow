@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     REDIS_HOST: str
     REDIS_PORT: int
     REDIS_DB: int
+    # The shared count of tenant quotas (ADR-0049), a store apart from the capability store.
+    QUOTA_REDIS_URL: str
 
     # JWT Configuration
     JWT_SECRET_KEY: str

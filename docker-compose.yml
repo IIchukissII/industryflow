@@ -315,6 +315,29 @@ services:
       - industryflow-network
     restart: unless-stopped
 
+  # The shared count of tenant quotas (ADR-0049 dec 4; ADR-0002 dec 3): per-tenant counters, every key
+  # expiring, no credential; nothing in it is trusted as a cap. Apart from the capability store, so the
+  # device-facing ingestion service reaches no tenant's handles (ADR-0033 dec 3). Derivable: no volume,
+  # no persistence; under memory pressure it evicts the keys nearest their expiry.
+  quota-redis:
+    image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+    container_name: industryflow-quota-redis
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 64mb
+      --maxmemory-policy volatile-ttl
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - industryflow-network
+      - ingestion-back
+    restart: unless-stopped
+
   # Fix ownership of a data volume written by an earlier root-run MinIO image. The server below
   # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
   # CAP_CHOWN, and a no-op when the volume is already owned correctly.
@@ -701,6 +724,11 @@ services:
       EDGE_PROXY_PEERS: frontend
       # Password sign-in slowed per account and source, the source as the edge reports it (ADR-0004 dec 10).
       SIGN_IN_THROTTLE: per-source
+      # The tenant quota defaults the platform API shows beside each override, and the shared count it
+      # reads the refusals from (ADR-0049).
+      TENANT_QUOTA_READINGS_PER_SECOND: ${TENANT_QUOTA_READINGS_PER_SECOND:-}
+      TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS: ${TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS:-}
+      QUOTA_REDIS_URL: redis://quota-redis:6379/0
       # The first-run superuser, created only on a platform with no account (ADR-0004 dec 11). Unset: the
       # published defaults, and the account must change its password before anything else.
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
@@ -795,15 +823,19 @@ services:
       # ingestion-edge forwards the verified cert as X-Client-*; nothing else is read.
       DEVICE_IDENTITY_HEADERS: x-client
       INGESTION_WORKERS: 2
-    # Ingestion is stateless: mTLS-authenticated, Kafka-only. No database role (ADR-0002).
+      # The shared count of tenant quotas (ADR-0002 dec 3, ADR-0049 dec 4): counters only.
+      QUOTA_REDIS_URL: redis://quota-redis:6379/0
+      # The tenant's readings cap: a whole number or off; unset takes the shipped default (ADR-0049).
+      TENANT_QUOTA_READINGS_PER_SECOND: ${TENANT_QUOTA_READINGS_PER_SECOND:-}
+    # Ingestion is stateless: mTLS-authenticated, Kafka and the quota count only. No database role (ADR-0002).
     depends_on:
       kafka:
         # Wait for Kafka to be READY, not just started — otherwise the producer can hit a
         # not-yet-ready broker on a recreate. (The producer also retries bootstrap as a
         # belt-and-suspenders for k8s, where there is no depends_on.)
         condition: service_healthy
-    # Only the edge reaches it, and it reaches only Kafka (ADR-0002 dec 3). Not on
-    # industryflow-network, where every other container could bypass the edge.
+    # Only the edge reaches it, and it reaches only Kafka and the quota count (ADR-0002 dec 3). Not
+    # on industryflow-network, where every other container could bypass the edge.
     networks:
       - ingestion-front
       - ingestion-back
@@ -1065,6 +1097,10 @@ services:
       NOTEBOOK_IMAGE_ANALYTICS: industryflow-notebook-analytics
       # Platform roles that get the authoring profile (ADR-0014 dec 4); an unknown role stops the hub.
       NOTEBOOK_AUTHORING_ROLES: ${NOTEBOOK_AUTHORING_ROLES:-admin,engineer}
+      # The tenant's cap on notebook environments running at once (ADR-0049); unset takes the default.
+      TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS: ${TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS:-}
+      # The shared count of tenant quotas: where it records its refusals (ADR-0049).
+      QUOTA_REDIS_URL: redis://quota-redis:6379/0
       # Kernels spawn onto the dedicated kernel network, not the platform network (ADR-0018 dec 4).
       NOTEBOOK_NETWORK: industryflow-notebook-kernels
       HUB_CONNECT_IP: notebook-hub
@@ -1907,7 +1943,8 @@ networks:
     name: industryflow-notebook-kernels
     driver: bridge
   # The ingestion plane (ADR-0002 dec 3): ingestion-service trusts identity headers, so only
-  # the mTLS edge may reach it (ingestion-front), and it reaches only Kafka (ingestion-back).
+  # the mTLS edge may reach it (ingestion-front), and it reaches only Kafka and the shared count of
+  # tenant quotas (ingestion-back).
   # Both internal: neither needs a route off the host.
   ingestion-front:
     name: industryflow-ingestion-front

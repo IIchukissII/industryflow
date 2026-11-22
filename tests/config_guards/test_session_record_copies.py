@@ -71,6 +71,9 @@ def test_every_verifier_of_an_access_token_reads_the_record():
 # --- one store: a reader on another database finds no record and admits every ended session ------
 
 SHARED_STORE = "redis://redis:6379/0"
+# The one store that is not it: the shared count of tenant quotas (ADR-0049 dec 4), apart from the
+# capability store so ingestion reaches no tenant's handles (ADR-0002 dec 3). Named by its own key.
+QUOTA_KEY, QUOTA_STORE = "QUOTA_REDIS_URL", "redis://quota-redis:6379/0"
 
 
 def _compose_env():
@@ -86,8 +89,10 @@ def test_every_compose_service_names_the_one_store():
     urls = {(name, key): str(value) for name, env in _compose_env() for key, value in env.items()
             if str(value).startswith("redis://") or "REDIS_URL:-redis://" in str(value)}
     assert any(key == "SESSION_REDIS_URL" for _, key in urls), "the scan finds no session-store URL"
-    wrong = {k: v for k, v in urls.items() if v != SHARED_STORE}
-    assert not wrong, f"a Redis URL that is not {SHARED_STORE}, or that the environment can override: {wrong}"
+    wrong = {k: v for k, v in urls.items() if v != (QUOTA_STORE if k[1] == QUOTA_KEY else SHARED_STORE)}
+    assert not wrong, f"a Redis URL that is not its store's, or that the environment can override: {wrong}"
+    quota_users = {name for name, key in urls if key == QUOTA_KEY}
+    assert quota_users == {"ingestion-service", "api-gateway", "notebook-hub"}, quota_users
     gateway = dict(_compose_env())["api-gateway"]
     assert (gateway["REDIS_HOST"], str(gateway["REDIS_PORT"]), str(gateway["REDIS_DB"])) == ("redis", "6379", "0")
 
@@ -97,7 +102,10 @@ def test_helm_names_the_one_store_for_the_gateway_and_the_session_readers():
     value = {line.split(":", 1)[0].strip(): line.split(":", 1)[1].strip() for line in lines
              if line.startswith("  ") and not line.strip().startswith(("#", "{{")) and ":" in line}
     urls = {key for key in value if key.endswith("REDIS_URL")}
-    assert {"SESSION_REDIS_URL", "CAPABILITY_REDIS_URL"} <= urls, f"the scan finds no store URL: {urls}"
-    assert all(value[key] == value["REDIS_URL"] for key in urls), {key: value[key] for key in urls}
+    assert {"SESSION_REDIS_URL", "CAPABILITY_REDIS_URL", QUOTA_KEY} <= urls, f"the scan finds no store URL: {urls}"
+    shared = urls - {QUOTA_KEY}
+    assert all(value[key] == value["REDIS_URL"] for key in shared), {key: value[key] for key in shared}
+    assert value[QUOTA_KEY].endswith('"redis://%s:%v/0" (include "industryflow.quotaRedisHost" .) '
+                                     '.Values.infra.quotaRedis.port | quote }}'), value[QUOTA_KEY]
     assert value["REDIS_DB"] == '"0"' and value["REDIS_URL"].endswith('"redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}')
     assert value["REDIS_PORT"] == "{{ .Values.infra.redis.port | quote }}"

@@ -118,6 +118,7 @@ DECLARE
     v_missing TEXT[];
     v_users INTEGER := 0;
     v_drops INTEGER := 0;
+    v_quotas INTEGER := 0;
     v_detail JSONB;
 BEGIN
     PERFORM public.company_provisioning_guard();
@@ -143,7 +144,9 @@ BEGIN
             USING ERRCODE = '55000', HINT = 'stores_pending';
     END IF;
 
-    SELECT c.schema_name INTO v_schema FROM public.companies c WHERE c.company_id = p_company_id;
+    -- The registry row locked: a quota override set concurrently (set_tenant_quota locks it too) either
+    -- commits before this and is deleted below, or waits and finds the tenant deleted (ADR-0049 dec 7).
+    SELECT c.schema_name INTO v_schema FROM public.companies c WHERE c.company_id = p_company_id FOR UPDATE;
     IF v_schema IS DISTINCT FROM 'tenant_' || replace(p_company_id::text, '-', '_') THEN
         RAISE EXCEPTION 'company % does not map to its canonical schema', p_company_id USING ERRCODE = '22023';
     END IF;
@@ -180,9 +183,16 @@ BEGIN
         DELETE FROM public.cold_export_drops e WHERE e.schema_name = v_schema;
         GET DIAGNOSTICS v_drops = ROW_COUNT;
     END IF;
+    -- The tenant's quota overrides end with it (ADR-0049 dec 7; init script 38); the record of their
+    -- changes stays, as the lifecycle record does.
+    IF to_regclass('public.tenant_quota_overrides') IS NOT NULL THEN
+        DELETE FROM public.tenant_quota_overrides q WHERE q.company_id = p_company_id;
+        GET DIAGNOSTICS v_quotas = ROW_COUNT;
+    END IF;
 
     v_detail := jsonb_build_object('schema', v_schema, 'roles', jsonb_build_array(v_login, v_reader),
-                                   'users', v_users, 'cold_export_drops', v_drops);
+                                   'users', v_users, 'cold_export_drops', v_drops,
+                                   'quota_overrides', v_quotas);
     INSERT INTO public.company_deletion_steps (company_id, store, detail)
     VALUES (p_company_id, 'database', v_detail)
     ON CONFLICT (company_id, store) DO NOTHING;

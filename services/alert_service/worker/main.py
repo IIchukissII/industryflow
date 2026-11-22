@@ -262,6 +262,7 @@ class AlertService:
         self.status_task = asyncio.create_task(tenant_status_publisher.run(
             self.db_pool, self.kafka_consumer.send,
             config.KAFKA_TOPIC_TENANT_STATUS, config.TENANT_STATUS_PUBLISH_SECONDS,
+            self.feature_store.redis_client,  # the capability store: the hub reads the copies there
         ))
 
         logger.info("Alert Detection Service is running")

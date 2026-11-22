@@ -154,3 +154,25 @@ groups:
           summary: "Stateful feature aggregates are unavailable"
           description: "Stateful feature slots have been served neutral for 15m because their aggregate was unavailable; scores using them are degraded (ADR-0044 dec 3)."
           services: "ml-service-api, timescaledb, spark-aggregations"
+      - alert: IndustryFlowTenantQuotaRefusals
+        # A tenant held at a quota cap is a sizing question for the operator (ADR-0049 dec 5). Per cap,
+        # never per tenant (ADR-0016 dec 5): which tenants, a superuser reads from the platform API.
+        # Every gateway worker reports the shared count, so its growth is read from the largest; a
+        # count lost with the store falls, and a fall is no refusal. A burst does not fire; 15m does.
+        expr: max by (cap) (delta(tenant_quota_refusals{platform="industryflow"}[5m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tenants are being refused at a quota cap"
+          description: "Demands have been refused at the {{ $labels.cap }} cap for 15m. Read which tenants at GET /api/platform/quotas/refusals, then raise a tenant's override or the default (ADR-0049)."
+          services: "ingestion-service, notebook-hub, api-gateway"
+      - alert: IndustryFlowTenantQuotaCountUnavailable
+        # The shared count could not be read, so readings were admitted without their cap (ADR-0049 dec 8).
+        expr: sum by (cap) (increase(tenant_quota_count_unavailable_total{platform="industryflow"}[5m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tenant quotas are not enforced: the shared count is unreachable"
+          description: "Demands were admitted without their {{ $labels.cap }} cap in the last 5m because the shared count could not be read; no cap holds until it can (ADR-0049 dec 8)."
+          services: "ingestion-service, redis"

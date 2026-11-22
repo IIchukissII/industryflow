@@ -20,3 +20,5 @@ cryptography==50.0.2
 prometheus-fastapi-instrumentator==8.1.0
 # Imported directly for the suspension counters (tenant_status.py), not only through the instrumentator.
 prometheus-client==0.26.0
+# The shared count of tenant quotas (quota.py, ADR-0049 dec 4); the same pin as the other services.
+redis==8.1.0

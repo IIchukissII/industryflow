@@ -18,12 +18,12 @@ from routers import (
     health, measurements, aggregations, websocket, cache,
     training_data, alerts_history, companies,
     equipment, alert_rules, auth_tokens, notebook_entry, user_admin, capability_use, platform_switches,
-    dashboards_assertion,
+    tenant_quotas, dashboards_assertion,
 )
 from database import close_engine, engine
 from messaging.redis_client import redis_client
 from messaging.cache_updater import update_redis_cache
-from messaging import capability_audit_drain
+from messaging import capability_audit_drain, quota_metrics, quota_store
 
 # Authentication imports
 from users import auth_backend, fastapi_users, ACCESS_COOKIE
@@ -74,11 +74,13 @@ async def lifespan(_app: FastAPI):
     audit_task = asyncio.create_task(capability_audit_drain.run(redis_client.redis, engine))
     # The capability store's denials, re-derived whenever it lacks its rebuild record (ADR-0015 dec 8).
     rebuild_task = asyncio.create_task(capability_store_rebuild.run(redis_client.redis, engine))
+    # Tenant quota refusals, per cap, on the platform plane (ADR-0049 dec 5).
+    quota_task = asyncio.create_task(quota_metrics.run(quota_store.quota_store()))
 
     yield
 
     # Shutdown
-    for task in (cache_task, audit_task, rebuild_task, first_run_task):
+    for task in (cache_task, audit_task, rebuild_task, quota_task, first_run_task):
         task.cancel()
         try:
             await task
@@ -189,6 +191,7 @@ app.include_router(companies.router)
 app.include_router(equipment.router)
 app.include_router(capability_use.router)
 app.include_router(platform_switches.router)
+app.include_router(tenant_quotas.router)
 
 
 @app.get("/", tags=["Root"])

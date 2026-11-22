@@ -118,6 +118,14 @@ role cannot be put in one and forgotten in the other (it would be created with n
 {{- end -}}
 
 {{/* Resolve the Redis host. */}}
+{{- define "industryflow.quotaRedisHost" -}}
+{{- if .Values.infra.quotaRedis.inCluster -}}
+{{- printf "%s-quota-redis" (include "industryflow.fullname" .) -}}
+{{- else -}}
+{{- required "infra.quotaRedis.external.host is required when inCluster=false" .Values.infra.quotaRedis.external.host -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "industryflow.redisHost" -}}
 {{- if .Values.infra.redis.inCluster -}}
 {{- printf "%s-redis" (include "industryflow.fullname" .) -}}

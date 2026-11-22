@@ -25,6 +25,7 @@ os.environ.setdefault("INGESTION_SERVICE_PORT", "8003")
 os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 os.environ.setdefault("KAFKA_TOPIC_SENSOR_DATA", "sensor-data-raw")
 os.environ.setdefault("DEVICE_IDENTITY_HEADERS", "x-client")
+os.environ.setdefault("QUOTA_REDIS_URL", "redis://localhost:6379/0")
 
 from cryptography import x509  # noqa: E402
 from cryptography.hazmat.primitives import hashes, serialization  # noqa: E402
@@ -95,10 +96,11 @@ def edge(monkeypatch):
 
 @pytest.fixture
 def client(monkeypatch):
-    """A TestClient with Kafka mocked.
+    """A TestClient with Kafka mocked and the shared quota count in memory.
 
     Yields ``(test_client, produced)`` where ``produced`` is a list that captures every
-    message the service would have published to Kafka.
+    message the service would have published to Kafka. ``main.quota_store`` is the test store
+    (industryflow_contracts.testing: a real server in CI), empty for each test.
     """
     from fastapi.testclient import TestClient
 
@@ -134,6 +136,10 @@ def client(monkeypatch):
 
     monkeypatch.setattr(tenant_status, "follow", no_follow, raising=True)
     monkeypatch.setattr(tenant_status, "status", tenant_status.TenantStatus(), raising=True)
+
+    from industryflow_contracts import testing
+
+    monkeypatch.setattr(main, "quota_store", testing.AnyLoopRedis(rebuilt=False), raising=True)
 
     with TestClient(main.app) as c:
         yield c, produced
