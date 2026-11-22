@@ -19,3 +19,4 @@ Readiness per area and the open gaps. Item numbers are stable; ADRs cite them.
 | 8 | Resilience | PodDisruptionBudgets, pod anti-affinity, opt-in CPU HPA (ADR-0009) | Stateful backends are single instances; operators or managed HA are a per-environment choice (ADR-0009) |
 | 9 | Spark / edge | `SPARK_MASTER` (default `local[*]`) set only in the job's SparkSession builder; the ingestion edge re-resolves `ingestion-service` per request (`resolver 127.0.0.11`, variable upstream) | — |
 | 10 | Capacity | One Compose node with 8 GB and 4 cores, running the whole platform, sustains 500 readings/s ([capacity](capacity.md)) | Ingest is one reading per HTTPS request; past ~875 readings/s a single host is CPU-bound |
+| 11 | Tenant quotas | Per-tenant caps on readings per second and notebook environments running at once; defaults from `TENANT_QUOTA_*` (250, 3), a superuser's per-tenant override (ADR-0049) | No caps on stored data or SQL proxy query load (ADR-0049 Deferred) |
