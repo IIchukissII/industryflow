@@ -7,9 +7,9 @@
 # included routers in `_IncludedRouter` objects with no `.path`, which the 6.x instrumentator's
 # route-name resolver cannot introspect — it 500s every request, including /health. 0.143 sits
 # inside mlflow's fastapi<1.
-fastapi==0.163.2
+fastapi==0.165.0
 uvicorn[standard]==0.54.0
-pydantic==2.14.3
+pydantic==2.14.4
 
 # Database
 asyncpg==0.32.0
@@ -22,7 +22,7 @@ python-multipart==0.0.34
 
 # MLflow integration
 mlflow==3.18.0
-boto3==1.44.5
+boto3==1.44.6
 
 # ML libraries for inference.
 #
