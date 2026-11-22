@@ -92,7 +92,7 @@ def test_every_compose_service_names_the_one_store():
     wrong = {k: v for k, v in urls.items() if v != (QUOTA_STORE if k[1] == QUOTA_KEY else SHARED_STORE)}
     assert not wrong, f"a Redis URL that is not its store's, or that the environment can override: {wrong}"
     quota_users = {name for name, key in urls if key == QUOTA_KEY}
-    assert quota_users == {"ingestion-service", "api-gateway", "alert-service-detector", "notebook-hub"}, quota_users
+    assert quota_users == {"ingestion-service", "api-gateway", "notebook-hub"}, quota_users
     gateway = dict(_compose_env())["api-gateway"]
     assert (gateway["REDIS_HOST"], str(gateway["REDIS_PORT"]), str(gateway["REDIS_DB"])) == ("redis", "6379", "0")
 

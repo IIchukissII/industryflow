@@ -128,6 +128,12 @@ def test_a_tenants_overrides_ride_its_status_and_are_copied_for_the_hub():
     assert all(0 < ttl <= tenant_status.STALE_AFTER_SECONDS for _v, ttl in copies.values())
 
 
+@pytest.fixture(autouse=True)
+def fresh_publisher(monkeypatch):
+    monkeypatch.setattr(publisher, "_last_overrides", {})
+    monkeypatch.setattr(publisher, "_copied", set())
+
+
 def test_unreadable_overrides_or_store_never_hold_back_the_statuses():
     sent = []
     asyncio.run(publisher.publish_once(Pool(_rows(), fail_overrides=True), _send_into(sent), "t", DownStore()))
@@ -136,3 +142,27 @@ def test_unreadable_overrides_or_store_never_hold_back_the_statuses():
     overrides = [{"company_id": ACTIVE, "cap": "readings_per_second", "value": 40}]
     asyncio.run(publisher.publish_once(Pool(_rows(), overrides=overrides), _send_into(sent), "t", DownStore()))
     assert sent[0] == (ACTIVE, True, {"readings_per_second": 40})
+
+
+def test_a_round_that_cannot_read_the_overrides_sends_the_last_ones_read():
+    sent = []
+    overrides = [{"company_id": ACTIVE, "cap": "readings_per_second", "value": 2000}]
+    asyncio.run(publisher.publish_once(Pool(_rows(), overrides=overrides), _send_into(sent), "t"))
+    sent.clear()
+    asyncio.run(publisher.publish_once(Pool(_rows(), fail_overrides=True), _send_into(sent), "t"))
+    assert sent[0] == (ACTIVE, True, {"readings_per_second": 2000})
+
+
+def test_a_cleared_overrides_copy_is_deleted_on_the_next_round():
+    overrides = [{"company_id": ACTIVE, "cap": "notebook_environments", "value": 5}]
+
+    async def run():
+        store = await testing.async_redis(rebuilt=False, decode_responses=True)
+        send = _send_into([])
+        await publisher.publish_once(Pool(_rows(), overrides=overrides), send, "t", store)
+        before = sorted(await store.keys("quota:cap:*"))
+        await publisher.publish_once(Pool(_rows(), overrides=[]), send, "t", store)
+        return before, sorted(await store.keys("quota:cap:*"))
+
+    before, after = asyncio.run(run())
+    assert before == [f"quota:cap:notebook_environments:{ACTIVE}"] and after == []

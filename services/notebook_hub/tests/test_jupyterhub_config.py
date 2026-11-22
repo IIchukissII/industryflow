@@ -76,7 +76,7 @@ def _load_ns(profile: str, **overrides):
         # The shared store of tenant quotas, empty: the defaults hold (ADR-0049).
         from industryflow_contracts import testing
 
-        namespace["_QUOTA_STORE"] = testing.sync_redis(rebuilt=False)
+        namespace["_QUOTA_STORE"] = namespace["_OVERRIDE_STORE"] = testing.sync_redis(rebuilt=False)
         return cfg, namespace
     finally:
         sys.path.remove(str(HUB_DIR))
@@ -169,7 +169,7 @@ class _Spawner:
         self.extra_labels = {}
         self.log = logging.getLogger("test-spawner")
         self._log_name = f"{user.name}:{name}"
-        self.active, self.pending = True, None
+        self.active, self.pending, self.ready = True, None, True
 
 
 def _hub(profile="docker"):
@@ -1000,3 +1000,8 @@ def test_a_spawn_over_the_tenants_cap_is_refused_before_anything_is_minted(monke
         _spawn(ns, asking)
     assert refused.value.status_code == 429 and "1 notebook environment" in refused.value.log_message
     assert _handles(store) == set()
+    # Its stop, which JupyterHub runs after a failed start, records no stop of an environment that
+    # never started (ADR-0042).
+    before = _events(store)
+    asyncio.run(ns["revoke_server_capabilities"](asking))
+    assert _events(store) == before

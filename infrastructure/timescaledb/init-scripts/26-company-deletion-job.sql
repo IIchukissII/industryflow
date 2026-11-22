@@ -144,7 +144,9 @@ BEGIN
             USING ERRCODE = '55000', HINT = 'stores_pending';
     END IF;
 
-    SELECT c.schema_name INTO v_schema FROM public.companies c WHERE c.company_id = p_company_id;
+    -- The registry row locked: a quota override set concurrently (set_tenant_quota locks it too) either
+    -- commits before this and is deleted below, or waits and finds the tenant deleted (ADR-0049 dec 7).
+    SELECT c.schema_name INTO v_schema FROM public.companies c WHERE c.company_id = p_company_id FOR UPDATE;
     IF v_schema IS DISTINCT FROM 'tenant_' || replace(p_company_id::text, '-', '_') THEN
         RAISE EXCEPTION 'company % does not map to its canonical schema', p_company_id USING ERRCODE = '22023';
     END IF;

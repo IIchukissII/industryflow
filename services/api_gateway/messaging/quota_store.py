@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The shared count of tenant quotas (ADR-0049 dec 4): a store apart from the capability store, holding
-expiring counters and override copies only. The gateway reads the refusal counts from it."""
+expiring counters only. The gateway reads the refusal counts from it."""
 from typing import Optional
 
 import redis.asyncio as aioredis

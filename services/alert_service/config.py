@@ -63,8 +63,6 @@ class AlertServiceConfig:
     # Latest-value snapshot store the ML rules read (ADR-0023 dec 7). Required: the worker refuses
     # to start without it rather than silently running ML rules against nothing.
     REDIS_URL = os.getenv('REDIS_URL')
-    # The shared count of tenant quotas (ADR-0049): the publisher copies each override there for the hub.
-    QUOTA_REDIS_URL = os.getenv('QUOTA_REDIS_URL')
     # A reading older than this is not part of the current snapshot, so a sensor that stopped
     # reporting cannot be scored as if its last value were current.
     FEATURE_MAX_AGE_SECONDS = float(os.getenv('FEATURE_MAX_AGE_SECONDS', '300'))
@@ -130,7 +128,6 @@ class AlertServiceConfig:
         'KAFKA_TOPIC_SENSOR_DATA',
         'KAFKA_GROUP_ID',
         'REDIS_URL',
-        'QUOTA_REDIS_URL',
     )
 
     # Settings that no longer exist. One still set would be silently ignored, telling its author a

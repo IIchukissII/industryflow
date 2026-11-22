@@ -351,7 +351,7 @@ infra:
     external: { host: "", port: 6379 }
 
   # The shared count of tenant quotas (ADR-0049 dec 4): its own store, apart from the capability store,
-  # holding only expiring counters and override copies; no volume, evicts nearest-expiry keys.
+  # holding only expiring counters; no volume, evicts nearest-expiry keys.
   quotaRedis:
     inCluster: true
     image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe

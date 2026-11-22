@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 {{- /*
-The shared count of tenant quotas (ADR-0049 dec 4; ADR-0002 dec 3): per-tenant counters and the
-override copies the hub reads, every key expiring, no credential. A store of its own, apart from the
+The shared count of tenant quotas (ADR-0049 dec 4; ADR-0002 dec 3): per-tenant counters, every key
+expiring, no credential; nothing in it is trusted as a cap. A store of its own, apart from the
 capability store, so the device-facing ingestion service reaches no tenant's handles (ADR-0033 dec 3).
 Derivable: no volume, and under memory pressure it evicts the keys nearest their expiry; a lost count
 only restarts (ADR-0049 dec 7).

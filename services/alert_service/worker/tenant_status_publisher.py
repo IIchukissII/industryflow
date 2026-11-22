@@ -13,10 +13,11 @@ the registry and the capability store. The whole registry goes out every ``inter
 suspension reaches ingestion within one interval.
 
 Each tenant's quota overrides ride its status (ADR-0049 dec 2): ingestion reads them from the stream,
-and the hub, which is off the broker, from an expiring copy in the quota store (``quotas.cap_key``)
-that this writes on the same tick. Both expire as a status goes stale, so a stopped publisher returns
-every tenant to the platform defaults. An override the round cannot read leaves the status itself to
-go out: suspension must not wait on a quota.
+and the hub, which is off the broker, from an expiring copy (``quotas.cap_key``) that this writes on
+the same tick to the capability store, which the hub trusts and the device-facing ingestion service
+cannot reach (ADR-0033 dec 3). Both expire as a status goes stale, so a stopped publisher returns every
+tenant to the platform defaults; a cleared override's copy is deleted on the next tick. A round that
+cannot read the overrides sends the last ones read: suspension must not wait on a quota.
 """
 import asyncio
 import logging
@@ -65,28 +66,45 @@ async def registry_status(pool) -> list[tuple[str, bool]]:
     return status
 
 
+# The last overrides read, sent again while a read fails, so one unreadable round does not drop every
+# tenant to the defaults; and the copies written for the hub, so a cleared override's copy is deleted.
+_last_overrides: dict = {}
+_copied: set = set()
+
+
 async def publish_once(pool, send, topic: str, store=None) -> int:
     """Send one status message per tenant, with its overrides, and copy the overrides to ``store`` for
     the hub; returns how many statuses were sent."""
+    global _last_overrides
     status = await registry_status(pool)
     try:
-        overrides = await registry_overrides(pool)
-    except Exception as e:  # noqa: BLE001 - the statuses go out without the overrides
-        logger.error("tenant quota overrides unreadable; statuses sent without them: %s", e)
-        overrides = {}
+        overrides = _last_overrides = await registry_overrides(pool)
+    except Exception as e:  # noqa: BLE001 - the statuses go out with the last overrides read
+        logger.error("tenant quota overrides unreadable; the last ones read are sent: %s", e)
+        overrides = _last_overrides
     for company_id, active in status:
         key, value = tenant_status.encode(company_id, active, overrides.get(company_id))
         await send(topic, value=value, key=key)
-    if store is not None and overrides:
-        try:
-            async with store.pipeline(transaction=False) as pipe:
-                for company_id, caps in overrides.items():
-                    for cap, value in caps.items():
-                        pipe.set(quotas.cap_key(cap, company_id), value, ex=tenant_status.STALE_AFTER_SECONDS)
-                await pipe.execute()
-        except Exception as e:  # noqa: BLE001 - the hub falls back to the defaults as the copies expire
-            logger.error("tenant quota overrides not copied to the quota store: %s", e)
+    if store is not None:
+        await _copy_for_the_hub(store, overrides)
     return len(status)
+
+
+async def _copy_for_the_hub(store, overrides: dict) -> None:
+    """Write each override's expiring copy, and delete the copy of one cleared since the last round."""
+    global _copied
+    keys = {quotas.cap_key(cap, company_id): value
+            for company_id, caps in overrides.items() for cap, value in caps.items()}
+    try:
+        async with store.pipeline(transaction=False) as pipe:
+            for key, value in keys.items():
+                pipe.set(key, value, ex=tenant_status.STALE_AFTER_SECONDS)
+            for gone in _copied - keys.keys():
+                pipe.delete(gone)
+            await pipe.execute()
+        _copied = set(keys)
+    except Exception as e:  # noqa: BLE001 - the hub falls back to the defaults as the copies expire
+        logger.error("tenant quota overrides not copied for the hub: %s", e)
 
 
 async def run(pool, send, topic: str, interval: float, store=None):

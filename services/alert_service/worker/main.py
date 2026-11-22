@@ -9,7 +9,6 @@ A worker with no HTTP API of its own; alerting's HTTP surface is the API gateway
 """
 import asyncio
 import asyncpg
-import redis.asyncio
 import signal
 import logging
 import sys
@@ -263,8 +262,7 @@ class AlertService:
         self.status_task = asyncio.create_task(tenant_status_publisher.run(
             self.db_pool, self.kafka_consumer.send,
             config.KAFKA_TOPIC_TENANT_STATUS, config.TENANT_STATUS_PUBLISH_SECONDS,
-            redis.asyncio.from_url(config.QUOTA_REDIS_URL, decode_responses=True,
-                                   socket_connect_timeout=2, socket_timeout=2),
+            self.feature_store.redis_client,  # the capability store: the hub reads the copies there
         ))
 
         logger.info("Alert Detection Service is running")

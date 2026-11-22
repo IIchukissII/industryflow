@@ -7,8 +7,8 @@
 Each cap has a platform default in the deployment's configuration (``TENANT_QUOTA_<CAP>``): a positive
 whole number, or ``off``; unset takes the shipped default, which is finite (ADR-0049 dec 6). A platform
 superuser may override a cap for one tenant; the override is the tenant's data in the database, and
-reaches the enforcing services on the tenant-status stream and as an expiring copy in the shared
-store (``cap_key``). Every service reads the same names and the same parse from here.
+reaches ingestion on the tenant-status stream and the hub as an expiring copy in the capability store
+(``cap_key``), which the device-facing ingestion service cannot reach. Every service reads the same names and the same parse from here.
 
 Standard library only: this is imported by every service image.
 """
@@ -80,8 +80,7 @@ def effective(default: Optional[int], override: Optional[int]) -> Optional[int]:
 
 
 # ── The quota store (ADR-0049 dec 4, 5; ADR-0002 dec 3): a Redis apart from the capability store ────
-# Counters and override copies, every key expiring, no credential: a lost store only restarts them
-# (ADR-0049 dec 7).
+# Counters only, every key expiring, no credential: a lost store only restarts them (ADR-0049 dec 7).
 
 # A tenant's readings in one second of the clock: a fixed one-second window.
 READINGS_WINDOW_SECONDS = 1
@@ -114,7 +113,8 @@ def refusals_total_key(cap: str) -> str:
     return f"quota:refusals-total:{check_cap(cap)}"
 
 
-# A tenant's override, as the publisher copies it from the registry for the hub. It expires as a
-# tenant-status message goes stale, so a stopped publisher returns every tenant to the defaults.
+# A tenant's override, as the publisher copies it from the registry into the capability store for the
+# hub (not the quota store, which ingestion can write). It expires as a tenant-status message goes
+# stale, so a stopped publisher returns every tenant to the defaults.
 def cap_key(cap: str, company_id) -> str:
     return f"quota:cap:{check_cap(cap)}:{tenancy.canonical_company_id(company_id)}"
