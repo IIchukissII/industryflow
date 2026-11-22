@@ -19,6 +19,9 @@ serves the full reference at `/docs` and `/openapi.json`; ports: components (ADR
 | GET | `/api/platform/switches` | superuser | Kill-switch runbook (ADR-0024 dec 2, 7) |
 | PUT | `/api/platform/switches/{key}` | superuser; body `{"value": true\|false}` | Kill-switch runbook (ADR-0024 dec 2, 7) |
 | GET | `/api/platform/switches/{key}/changes` | superuser | Kill-switch runbook (ADR-0024 dec 2, 7) |
+| GET | `/api/platform/quotas`, `/api/platform/quotas/tenants/{company_id}` | superuser | Tenant quota defaults, overrides, effective caps (ADR-0049 dec 2) |
+| PUT | `/api/platform/quotas/tenants/{company_id}/{cap}` | superuser; body `{"value": n\|null}` | Set or clear a tenant's override (ADR-0049 dec 2) |
+| GET | `/api/platform/quotas/tenants/{company_id}/changes`, `/api/platform/quotas/refusals` | superuser | Override changes; which tenants a cap refused (ADR-0049 dec 2, 5) |
 | | `/api/alert-rules`, `/api/alerts` | session; writes `engineer`, `admin` | Alerting (ADR-0031 dec 1) |
 | GET | `/api/measurements`, `/api/measurements/latest`, `/api/measurements/{sensor_id}` | session or `api` capability handle (read-only) | Raw readings |
 | GET | `/api/aggregations/{window}`, `/api/aggregations/{window}/latest`, `/api/aggregations/combined/{sensor_id}` | session or `api` capability handle | Aggregates (`1min`, `5min`, `1hour`); `start`, `end`, `order`, `limit` ≤ 1000 |
