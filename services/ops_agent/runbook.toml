@@ -114,6 +114,18 @@ fires_when = "`ml-service-api` has served stateful feature slots neutral for 15m
 handling = "With a database alert or baseline read timeouts in `docker compose logs ml-service-api`, the store is out or overloaded: turn the kill-switch off (ADR-0024 dec 2); with neither, a sensor has no closed window: check `spark-aggregations` is running"
 follows = "ADR-0044 dec 3"
 
+[[alert]]
+name = "IndustryFlowTenantQuotaRefusals"
+fires_when = "Demands have been refused at one tenant quota cap (`readings_per_second` or `notebook_environments`) for 15m"
+handling = "`GET /api/platform/quotas/refusals` (superuser) names the tenants; raise one with `PUT /api/platform/quotas/tenants/{company_id}/{cap}`, or the default `TENANT_QUOTA_<CAP>` if every tenant is held"
+follows = "ADR-0049 dec 5"
+
+[[alert]]
+name = "IndustryFlowTenantQuotaCountUnavailable"
+fires_when = "`ingestion-service` admitted readings without their cap because it could not reach the quota store"
+handling = "`docker compose ps quota-redis`; `docker compose logs quota-redis`; no reading is lost meanwhile, only the cap is waived"
+follows = "ADR-0049 dec 8"
+
 [[symptom]]
 symptom = "Client p95 in seconds and achieved rate below the offered rate; server `/ingest` p95 low"
 cause = "A generator process above 125 readings/s lags its own event loop"
