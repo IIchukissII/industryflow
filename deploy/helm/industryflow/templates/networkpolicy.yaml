@@ -51,8 +51,8 @@ spec:
     {{- end }}
 ---
 # Least privilege (ADR-0002): ingestion is mTLS-only and stateless. Its only egress is DNS, Kafka
-# (produce) and the shared count of tenant quotas in Redis (ADR-0049) — it must NOT be able to reach
-# TimescaleDB.
+# (produce) and the shared count of tenant quotas (ADR-0049) — it must NOT be able to reach TimescaleDB
+# or the capability store.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -75,7 +75,7 @@ spec:
           port: 53
     # Kafka brokers, and the shared count of tenant quotas (ADR-0002 dec 3, ADR-0049 dec 4).
     {{- include "industryflow.egressTo" (dict "ctx" . "dep" "kafka" "name" "kafka" "port" .Values.infra.kafka.port) | trim | nindent 4 }}
-    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "redis" "name" "redis" "port" .Values.infra.redis.port) | trim | nindent 4 }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "quotaRedis" "name" "quota-redis" "port" .Values.infra.quotaRedis.port) | trim | nindent 4 }}
 {{- end }}
 {{- if and .Values.networkPolicy.enabled (index .Values.apps "api-gateway").enabled }}
 ---
@@ -105,6 +105,8 @@ spec:
     {{- include "industryflow.egressTo" (dict "ctx" . "dep" "timescaledb" "name" "timescaledb" "port" .Values.infra.timescaledb.port) | trim | nindent 4 }}
     # Redis.
     {{- include "industryflow.egressTo" (dict "ctx" . "dep" "redis" "name" "redis" "port" .Values.infra.redis.port) | trim | nindent 4 }}
+    # The shared count of tenant quotas: refusal counts for the platform API and its metrics (ADR-0049).
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "quotaRedis" "name" "quota-redis" "port" .Values.infra.quotaRedis.port) | trim | nindent 4 }}
 {{- end }}
 {{- if and .Values.networkPolicy.enabled .Values.notebookHub.enabled }}
 ---

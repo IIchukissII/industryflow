@@ -13,7 +13,7 @@ the registry and the capability store. The whole registry goes out every ``inter
 suspension reaches ingestion within one interval.
 
 Each tenant's quota overrides ride its status (ADR-0049 dec 2): ingestion reads them from the stream,
-and the hub, which is off the broker, from an expiring copy in the shared store (``quotas.cap_key``)
+and the hub, which is off the broker, from an expiring copy in the quota store (``quotas.cap_key``)
 that this writes on the same tick. Both expire as a status goes stale, so a stopped publisher returns
 every tenant to the platform defaults. An override the round cannot read leaves the status itself to
 go out: suspension must not wait on a quota.
@@ -85,7 +85,7 @@ async def publish_once(pool, send, topic: str, store=None) -> int:
                         pipe.set(quotas.cap_key(cap, company_id), value, ex=tenant_status.STALE_AFTER_SECONDS)
                 await pipe.execute()
         except Exception as e:  # noqa: BLE001 - the hub falls back to the defaults as the copies expire
-            logger.error("tenant quota overrides not copied to the shared store: %s", e)
+            logger.error("tenant quota overrides not copied to the quota store: %s", e)
     return len(status)
 
 

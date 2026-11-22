@@ -28,6 +28,7 @@ os.environ.setdefault("API_GATEWAY_DB_PASSWORD", "test")
 os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("REDIS_PORT", "6379")
 os.environ.setdefault("REDIS_DB", "0")
+os.environ.setdefault("QUOTA_REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 os.environ.setdefault("CORS_ORIGINS", "https://app.example.com")
 

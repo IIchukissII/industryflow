@@ -313,7 +313,28 @@ services:
       retries: 3
     networks:
       - industryflow-network
-      # Ingestion counts each tenant's readings here (ADR-0049 dec 4); it reaches nothing else of it.
+    restart: unless-stopped
+
+  # The shared count of tenant quotas (ADR-0049 dec 4; ADR-0002 dec 3): per-tenant counters and the
+  # override copies the hub reads, every key expiring, no credential. Apart from the capability store,
+  # so the device-facing ingestion service reaches no tenant's handles (ADR-0033 dec 3). Derivable: no
+  # volume, no persistence; under memory pressure it evicts the keys nearest their expiry.
+  quota-redis:
+    image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+    container_name: industryflow-quota-redis
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 64mb
+      --maxmemory-policy volatile-ttl
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - industryflow-network
       - ingestion-back
     restart: unless-stopped
 
@@ -703,9 +724,11 @@ services:
       EDGE_PROXY_PEERS: frontend
       # Password sign-in slowed per account and source, the source as the edge reports it (ADR-0004 dec 10).
       SIGN_IN_THROTTLE: per-source
-      # The tenant quota defaults the platform API shows beside each override (ADR-0049).
+      # The tenant quota defaults the platform API shows beside each override, and the shared count it
+      # reads the refusals from (ADR-0049).
       TENANT_QUOTA_READINGS_PER_SECOND: ${TENANT_QUOTA_READINGS_PER_SECOND:-}
       TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS: ${TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS:-}
+      QUOTA_REDIS_URL: redis://quota-redis:6379/0
       # The first-run superuser, created only on a platform with no account (ADR-0004 dec 11). Unset: the
       # published defaults, and the account must change its password before anything else.
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
@@ -801,7 +824,7 @@ services:
       DEVICE_IDENTITY_HEADERS: x-client
       INGESTION_WORKERS: 2
       # The shared count of tenant quotas (ADR-0002 dec 3, ADR-0049 dec 4): counters only.
-      QUOTA_REDIS_URL: redis://redis:6379/0
+      QUOTA_REDIS_URL: redis://quota-redis:6379/0
       # The tenant's readings cap: a whole number or off; unset takes the shipped default (ADR-0049).
       TENANT_QUOTA_READINGS_PER_SECOND: ${TENANT_QUOTA_READINGS_PER_SECOND:-}
     # Ingestion is stateless: mTLS-authenticated, Kafka and the quota count only. No database role (ADR-0002).
@@ -919,6 +942,8 @@ services:
       KAFKA_GROUP_ID: ${KAFKA_GROUP_ID}
       # Latest-value snapshot the ML rules read; the worker refuses to start without it.
       REDIS_URL: redis://redis:6379/0
+      # The shared count of tenant quotas: the override copies the hub reads (ADR-0049).
+      QUOTA_REDIS_URL: redis://quota-redis:6379/0
       RULE_RELOAD_INTERVAL: ${RULE_RELOAD_INTERVAL:-60}
       ALERT_COOLDOWN_SECONDS: ${ALERT_COOLDOWN_SECONDS:-300}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
@@ -1076,6 +1101,8 @@ services:
       NOTEBOOK_AUTHORING_ROLES: ${NOTEBOOK_AUTHORING_ROLES:-admin,engineer}
       # The tenant's cap on notebook environments running at once (ADR-0049); unset takes the default.
       TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS: ${TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS:-}
+      # The shared count of tenant quotas: override copies and refusal counts (ADR-0049).
+      QUOTA_REDIS_URL: redis://quota-redis:6379/0
       # Kernels spawn onto the dedicated kernel network, not the platform network (ADR-0018 dec 4).
       NOTEBOOK_NETWORK: industryflow-notebook-kernels
       HUB_CONNECT_IP: notebook-hub
@@ -1919,7 +1946,7 @@ networks:
     driver: bridge
   # The ingestion plane (ADR-0002 dec 3): ingestion-service trusts identity headers, so only
   # the mTLS edge may reach it (ingestion-front), and it reaches only Kafka and the shared count of
-  # tenant quotas in Redis (ingestion-back).
+  # tenant quotas (ingestion-back).
   # Both internal: neither needs a route off the host.
   ingestion-front:
     name: industryflow-ingestion-front

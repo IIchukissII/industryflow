@@ -194,12 +194,13 @@ _QUOTA_STORE = None
 
 
 def _quota_store():
-    """The shared store's client for tenant quotas (ADR-0049), built once per hub process."""
+    """The shared count of tenant quotas (ADR-0049), a store apart from the capability store; built once
+    per hub process."""
     global _QUOTA_STORE
     if _QUOTA_STORE is None:
         import redis  # runtime dep; imported lazily so config import doesn't require it
 
-        _QUOTA_STORE = redis.Redis.from_url(os.environ["REDIS_URL"], socket_timeout=2)
+        _QUOTA_STORE = redis.Redis.from_url(os.environ["QUOTA_REDIS_URL"], socket_timeout=2)
     return _QUOTA_STORE
 
 

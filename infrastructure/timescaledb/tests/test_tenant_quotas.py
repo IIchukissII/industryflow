@@ -9,7 +9,7 @@ and the alert worker's own roles with their own statements on their drivers (ser
   * a value equal to the current one changes and records nothing; NULL returns the tenant to the default,
   * an unknown cap, a value out of range, or a tenant that does not exist is refused,
   * no runtime role writes the overrides or their record directly, and the alert worker reads them,
-  * the deletion job removes a tenant's overrides and their record with its database objects (dec 7).
+  * the deletion job removes a tenant's overrides with its database objects, and keeps their record (dec 7).
 
 Requires a running database with the init scripts applied (the CI workflow stands one up via docker
 compose). When no database is reachable it skips.
@@ -156,7 +156,7 @@ def test_no_runtime_role_writes_the_overrides_or_their_record_directly(tenant, r
         _as(cur, role, sql)
 
 
-def test_deleting_the_tenant_deletes_its_overrides_and_their_record(tenant):
+def test_deleting_the_tenant_deletes_its_overrides_and_keeps_their_record(tenant):
     cur, company_id, who = tenant
     _set(company_id, "readings_per_second", 40, who)
     _set(company_id, "notebook_environments", 2, who)
@@ -171,7 +171,7 @@ def test_deleting_the_tenant_deletes_its_overrides_and_their_record(tenant):
     assert detail["quota_overrides"] == 2
     cur.execute("SELECT (SELECT count(*) FROM public.tenant_quota_overrides WHERE company_id = %s), "
                 "(SELECT count(*) FROM public.tenant_quota_changes WHERE company_id = %s)", (cid, cid))
-    assert cur.fetchone() == (0, 0)
+    assert cur.fetchone() == (0, 2)
     # A deleted tenant takes no new override.
     with pytest.raises(Exception) as refused:
         _set(company_id, "readings_per_second", 5, who)

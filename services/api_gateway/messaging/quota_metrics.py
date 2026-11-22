@@ -4,7 +4,7 @@
 
 """Tenant quota refusals on the platform plane (ADR-0049 dec 5).
 
-Ingestion and the hub add every refusal to a count with no tenant in the shared store
+Ingestion and the hub add every refusal to a count with no tenant in the quota store
 (``quotas.refusals_total_key``). Each gateway worker reads those counts every ``EVERY_SECONDS`` into
 ``tenant_quota_refusals``, one series per cap and never a tenant (ADR-0016 dec 5), which the operator's
 alert reads by its growth. Which tenants were refused, a superuser reads at GET
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 EVERY_SECONDS = 15
 
 REFUSALS = Gauge("tenant_quota_refusals",
-                 "Demands refused at a tenant quota cap, as the shared count holds them (ADR-0049); per cap",
+                 "Demands refused at a tenant quota cap, as the quota store holds them (ADR-0049); per cap",
                  ["cap"])
 
 

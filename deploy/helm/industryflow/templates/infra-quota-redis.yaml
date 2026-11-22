@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- /*
+The shared count of tenant quotas (ADR-0049 dec 4; ADR-0002 dec 3): per-tenant counters and the
+override copies the hub reads, every key expiring, no credential. A store of its own, apart from the
+capability store, so the device-facing ingestion service reaches no tenant's handles (ADR-0033 dec 3).
+Derivable: no volume, and under memory pressure it evicts the keys nearest their expiry; a lost count
+only restarts (ADR-0049 dec 7).
+*/}}
+{{- if .Values.infra.quotaRedis.inCluster }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "industryflow.fullname" . }}-quota-redis
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: quota-redis
+spec:
+  selector:
+    app.kubernetes.io/name: quota-redis
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: redis
+      port: {{ .Values.infra.quotaRedis.port }}
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "industryflow.fullname" . }}-quota-redis
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: quota-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: quota-redis
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: quota-redis
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.infra.quotaRedis.image | quote }}
+          args: ["redis-server", "--save", "", "--appendonly", "no",
+                 "--maxmemory", {{ .Values.infra.quotaRedis.maxmemory | quote }}, "--maxmemory-policy", "volatile-ttl"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { cpu: 250m, memory: 128Mi }
+{{- end }}

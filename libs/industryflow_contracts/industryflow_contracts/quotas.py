@@ -79,8 +79,9 @@ def effective(default: Optional[int], override: Optional[int]) -> Optional[int]:
     return override if override is not None else default
 
 
-# ── The shared store (ADR-0049 dec 4, 5; ADR-0002 dec 3) ─────────────────────────────────────────────
-# Counters only, every key expiring: a lost store only restarts the counts (ADR-0049 dec 7).
+# ── The quota store (ADR-0049 dec 4, 5; ADR-0002 dec 3): a Redis apart from the capability store ────
+# Counters and override copies, every key expiring, no credential: a lost store only restarts them
+# (ADR-0049 dec 7).
 
 # A tenant's readings in one second of the clock: a fixed one-second window.
 READINGS_WINDOW_SECONDS = 1
@@ -92,6 +93,8 @@ def readings_key(company_id, second: int) -> str:
 
 
 # Which tenants a cap refused, per day: read by a superuser, never on the platform plane (ADR-0049 dec 5).
+# Every key naming a tenant is a day's and expires after REFUSALS_KEEP_DAYS, so a deleted tenant leaves
+# the store within that time.
 REFUSALS_KEEP_DAYS = 8
 
 
@@ -100,9 +103,9 @@ def refusals_key(cap: str, day: str) -> str:
     return f"quota:refusals:{check_cap(cap)}:{day}"
 
 
-def refused_last_key(cap: str) -> str:
-    """The hash ``company_id -> unix time of the last refusal`` of ``cap``."""
-    return f"quota:refused-last:{check_cap(cap)}"
+def refused_last_key(cap: str, day: str) -> str:
+    """The hash ``company_id -> unix time of its last refusal`` of ``cap`` on ``day``."""
+    return f"quota:refused-last:{check_cap(cap)}:{day}"
 
 
 def refusals_total_key(cap: str) -> str:

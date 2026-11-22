@@ -23,7 +23,7 @@ from routers import (
 from database import close_engine, engine
 from messaging.redis_client import redis_client
 from messaging.cache_updater import update_redis_cache
-from messaging import capability_audit_drain, quota_metrics
+from messaging import capability_audit_drain, quota_metrics, quota_store
 
 # Authentication imports
 from users import auth_backend, fastapi_users, ACCESS_COOKIE
@@ -75,7 +75,7 @@ async def lifespan(_app: FastAPI):
     # The capability store's denials, re-derived whenever it lacks its rebuild record (ADR-0015 dec 8).
     rebuild_task = asyncio.create_task(capability_store_rebuild.run(redis_client.redis, engine))
     # Tenant quota refusals, per cap, on the platform plane (ADR-0049 dec 5).
-    quota_task = asyncio.create_task(quota_metrics.run(redis_client.redis))
+    quota_task = asyncio.create_task(quota_metrics.run(quota_store.quota_store()))
 
     yield
 

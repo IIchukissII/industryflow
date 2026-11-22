@@ -10,8 +10,8 @@
 --          whole number, or NULL to return the tenant to the default, changes the override and
 --          appends the change to public.tenant_quota_changes in one transaction (dec 2). The gateway
 --          holds no write privilege on either table; the alert worker reads the overrides to carry
---          them on the tenant-status stream. The deletion job removes a tenant's overrides and their
---          record with its database objects (26, dec 7).
+--          them on the tenant-status stream. The deletion job removes a tenant's overrides with its
+--          database objects (26, dec 7); the record of changes stays, as the lifecycle record does.
 
 -- =============================================================================
 -- THE OVERRIDES (dec 2, 7)

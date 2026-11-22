@@ -123,7 +123,7 @@ def test_which_tenants_were_refused_is_read_from_the_store_summed_over_the_days(
         day = today.strftime("%Y%m%d")
         await store.hset(quotas.refusals_key("readings_per_second", day), mapping={str(TENANT): 4, other: 1})
         await store.hset(quotas.refusals_key("readings_per_second", "19990101"), mapping={str(TENANT): 99})
-        await store.hset(quotas.refused_last_key("readings_per_second"), str(TENANT), int(today.timestamp()))
+        await store.hset(quotas.refused_last_key("readings_per_second", day), str(TENANT), int(today.timestamp()))
         await store.hset(quotas.refusals_key("notebook_environments", day), mapping={other: 2})
         return await tq.list_refusals(days=7, user=ROOT)
 

@@ -80,7 +80,7 @@ def test_compose_ingestion_reachable_only_from_the_edge():
                 if net in members:
                     members[net].add(name)
     assert members["ingestion-front"] == {"ingestion-edge", "ingestion-service"}
-    assert members["ingestion-back"] == {"kafka", "redis", "ingestion-service"}
+    assert members["ingestion-back"] == {"kafka", "quota-redis", "ingestion-service"}
 
     for net in members:
         assert re.search(rf"^  {net}:\n(?:    .*\n)*?    internal: true$", text, re.M), net

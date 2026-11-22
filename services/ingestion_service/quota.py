@@ -5,13 +5,13 @@
 """A tenant's cap on device readings per second (ADR-0049 dec 1, 3, 4, 8).
 
 The cap is the tenant's override heard on the tenant-status stream, else the platform default from
-``TENANT_QUOTA_READINGS_PER_SECOND``. Every replica counts in the shared store (ADR-0002 dec 3), one
+``TENANT_QUOTA_READINGS_PER_SECOND``. Every replica counts in the quota store (ADR-0002 dec 3), one
 key per tenant and second of the clock, so the cap holds across replicas. A reading over the cap is
 refused before it is produced, so the device keeps it and sends it again (dec 3).
 
 When the store cannot be reached the reading is admitted and the failure counted on this service's
 metrics, which alerts the operator (dec 8): only the cap is waived, the reading's other checks still
-hold. A refusal is counted in the shared store, per tenant for a superuser to read through the API
+hold. A refusal is counted in the quota store, per tenant for a superuser to read through the API
 gateway, and in a count with no tenant that the gateway reports on the platform plane (dec 5).
 """
 import logging
@@ -28,7 +28,7 @@ CAP = quotas.READINGS_PER_SECOND
 
 COUNT_UNAVAILABLE = Counter(
     "tenant_quota_count_unavailable_total",
-    "Demands admitted without their cap because the shared count could not be read (ADR-0049 dec 8)",
+    "Demands admitted without their cap because the quota store could not be read (ADR-0049 dec 8)",
     ["cap"],
 )
 
@@ -56,12 +56,14 @@ async def admit(store, company_id: str, cap: Optional[int], now: Optional[float]
 
 async def _record_refusal(store, company_id: str, now: float) -> None:
     """Count the refusal against the tenant and in the tenantless total; a failure loses only the count."""
-    day_key = quotas.refusals_key(CAP, datetime.fromtimestamp(now, timezone.utc).strftime("%Y%m%d"))
+    day = datetime.fromtimestamp(now, timezone.utc).strftime("%Y%m%d")
+    keep = quotas.REFUSALS_KEEP_DAYS * 86400
     try:
         async with store.pipeline(transaction=False) as pipe:
-            pipe.hincrby(day_key, company_id, 1)
-            pipe.expire(day_key, quotas.REFUSALS_KEEP_DAYS * 86400)
-            pipe.hset(quotas.refused_last_key(CAP), company_id, int(now))
+            pipe.hincrby(quotas.refusals_key(CAP, day), company_id, 1)
+            pipe.expire(quotas.refusals_key(CAP, day), keep)
+            pipe.hset(quotas.refused_last_key(CAP, day), company_id, int(now))
+            pipe.expire(quotas.refused_last_key(CAP, day), keep)
             pipe.incr(quotas.refusals_total_key(CAP))
             await pipe.execute()
     except Exception as e:  # noqa: BLE001 - the refusal itself stands

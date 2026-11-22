@@ -105,7 +105,7 @@ def test_a_refusal_is_recorded_against_the_tenant_and_in_the_tenantless_total(
 
     with main.quota_store.sync() as store:
         day = store.hgetall(quotas.refusals_key("readings_per_second", "20270115"))
-        last = store.hget(quotas.refused_last_key("readings_per_second"), tenant)
+        last = store.hget(quotas.refused_last_key("readings_per_second", "20270115"), tenant)
         ttl = store.ttl(quotas.refusals_key("readings_per_second", "20270115"))
         total = store.get(quotas.refusals_total_key("readings_per_second"))
     assert int(total) == 2

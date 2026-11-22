@@ -112,5 +112,7 @@ def test_a_refusal_is_recorded_against_the_tenant_and_in_the_tenantless_total(st
     days = [k for k in store.keys("quota:refusals:notebook_environments:*")]
     assert len(days) == 1 and int(store.hget(days[0], TENANT)) == 2
     assert 0 < store.ttl(days[0]) <= quotas.REFUSALS_KEEP_DAYS * 86400
-    assert store.hget(quotas.refused_last_key("notebook_environments"), TENANT) is not None
+    lasts = list(store.keys("quota:refused-last:notebook_environments:*"))
+    assert len(lasts) == 1 and store.hget(lasts[0], TENANT) is not None
+    assert 0 < store.ttl(lasts[0]) <= quotas.REFUSALS_KEEP_DAYS * 86400
     assert int(store.get(quotas.refusals_total_key("notebook_environments"))) == 2

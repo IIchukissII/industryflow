@@ -43,5 +43,6 @@ def test_an_override_wins_and_an_off_default_stays_off_without_one():
 def test_the_store_keys_name_the_canonical_tenant_and_only_known_caps():
     assert quotas.readings_key(CID.upper(), 17) == f"quota:readings:{CID}:17"
     assert quotas.cap_key("notebook_environments", CID) == f"quota:cap:notebook_environments:{CID}"
+    assert quotas.refused_last_key("readings_per_second", "20261122") == "quota:refused-last:readings_per_second:20261122"
     with pytest.raises(ValueError):
         quotas.refusals_key("disk", "20261122")

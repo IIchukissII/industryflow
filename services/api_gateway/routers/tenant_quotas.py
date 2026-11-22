@@ -10,7 +10,7 @@ through ``set_tenant_quota()``, which records the change in the same transaction
 (infrastructure/timescaledb/init-scripts/38-tenant-quotas.sql); the gateway holds no write privilege on
 the overrides. The alert worker carries them to ingestion and the hub within one tenant-status interval.
 
-Which tenants a cap refused is read here, from the shared store's per-day counts, and nowhere on the
+Which tenants a cap refused is read here, from the quota store's per-day counts, and nowhere on the
 platform plane, whose metrics count refusals per cap only (ADR-0049 dec 5; ADR-0016 dec 5).
 """
 from datetime import datetime, timedelta, timezone
@@ -180,10 +180,10 @@ async def list_changes(company_id: UUID,
 
 
 def _store():
-    """The shared store holding the refusal counts (isolated for tests)."""
-    from messaging.redis_client import redis_client
+    """The shared count of tenant quotas, holding the refusal counts (isolated for tests)."""
+    from messaging.quota_store import quota_store
 
-    return redis_client.redis
+    return quota_store()
 
 
 @router.get("/refusals", response_model=List[Refusals])
@@ -195,11 +195,13 @@ async def list_refusals(days: int = Query(7, ge=1, le=quotas.REFUSALS_KEEP_DAYS)
     out: List[Refusals] = []
     for cap in quotas.CAPS:
         counts: Dict[str, int] = {}
+        last: Dict[str, int] = {}
         for back in range(days):
             day = (today - timedelta(days=back)).strftime("%Y%m%d")
             for company_id, n in (await store.hgetall(quotas.refusals_key(cap, day))).items():
                 counts[company_id] = counts.get(company_id, 0) + int(n)
-        last = await store.hgetall(quotas.refused_last_key(cap))
+            for company_id, at in (await store.hgetall(quotas.refused_last_key(cap, day))).items():
+                last[company_id] = max(last.get(company_id, 0), int(at))
         for company_id, n in counts.items():
             at = last.get(company_id)
             out.append(Refusals(cap=cap, company_id=company_id, refusals=n,

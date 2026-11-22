@@ -181,11 +181,11 @@ BEGIN
         DELETE FROM public.cold_export_drops e WHERE e.schema_name = v_schema;
         GET DIAGNOSTICS v_drops = ROW_COUNT;
     END IF;
-    -- The tenant's quota overrides and their record are its data and end with it (ADR-0049 dec 7, 38).
+    -- The tenant's quota overrides end with it (ADR-0049 dec 7, 38); the record of their changes stays,
+    -- as the lifecycle record does.
     IF to_regclass('public.tenant_quota_overrides') IS NOT NULL THEN
         DELETE FROM public.tenant_quota_overrides q WHERE q.company_id = p_company_id;
         GET DIAGNOSTICS v_quotas = ROW_COUNT;
-        DELETE FROM public.tenant_quota_changes q WHERE q.company_id = p_company_id;
     END IF;
 
     v_detail := jsonb_build_object('schema', v_schema, 'roles', jsonb_build_array(v_login, v_reader),

@@ -137,6 +137,9 @@ spec:
             # shipped default, and the hub refuses to start on a value it cannot read.
             - name: TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS
               value: {{ .Values.config.TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS | default "" | quote }}
+            # The shared count of tenant quotas: the override copies and refusal counts (ADR-0049).
+            - name: QUOTA_REDIS_URL
+              value: {{ printf "redis://%s:%v/0" (include "industryflow.quotaRedisHost" .) .Values.infra.quotaRedis.port | quote }}
             # Capability store (ADR-0015) — the same Redis the rest of the platform uses.
             - name: REDIS_URL
               value: {{ printf "redis://%s:%v/0" (include "industryflow.redisHost" .) .Values.infra.redis.port | quote }}
