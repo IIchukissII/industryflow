@@ -38,12 +38,12 @@ async def update_redis_cache():
                 total_sensors = 0
 
                 for tenant in tenants:
-                    # The one canonical mapping, so only a UUID-derived identifier reaches the SQL
-                    # (ADR-0003).
-                    company_id = tenancy.canonical_company_id(tenant)
-                    schema_name = tenancy.schema_name(company_id)
-
                     try:
+                        # The one canonical mapping, so only a UUID-derived identifier reaches the
+                        # SQL (ADR-0003).
+                        company_id = tenancy.canonical_company_id(tenant)
+                        schema_name = tenancy.schema_name(company_id)
+
                         # Latest value for each sensor in this tenant: one (sensor_id, time DESC)
                         # index probe per sensor. A DISTINCT ON over the window reads every row of
                         # the last hour on each poll, which grows with the ingest rate.
@@ -90,7 +90,7 @@ async def update_redis_cache():
                         total_sensors += len(rows)
                         
                     except Exception as e:
-                        print(f"✗ Error querying {schema_name}: {e}")
+                        print(f"✗ Error querying tenant {tenant}: {e}")
                         continue
                 
                 if total_sensors > 0:

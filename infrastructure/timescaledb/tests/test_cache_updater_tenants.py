@@ -19,6 +19,8 @@ import uuid
 import pytest
 
 psycopg2 = pytest.importorskip("psycopg2")
+tenancy = pytest.importorskip("industryflow_contracts.tenancy")
+from psycopg2 import errors  # noqa: E402
 
 import service_sql  # noqa: E402
 
@@ -62,12 +64,11 @@ def tenant():
                              (f"cache-tenants-{uuid.uuid4().hex[:8]}",))
     company_id = str(company_id)
     yield cur, company_id
-    suffix = company_id.replace("-", "_")
     cur.execute("DELETE FROM public.company_deletions WHERE company_id = %s", (company_id,))
     cur.execute("DELETE FROM public.company_lifecycle_events WHERE company_id = %s", (company_id,))
-    cur.execute(f'DROP SCHEMA IF EXISTS "tenant_{suffix}" CASCADE')
-    cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
-    cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
+    cur.execute(f'DROP SCHEMA IF EXISTS "{tenancy.schema_name(company_id)}" CASCADE')
+    cur.execute(f'DROP ROLE IF EXISTS "{tenancy.sql_login_name(company_id)}"')
+    cur.execute(f'DROP ROLE IF EXISTS "{tenancy.reader_role_name(company_id)}"')
     cur.execute("DELETE FROM public.companies WHERE company_id = %s", (company_id,))
     conn.close()
 
@@ -76,24 +77,29 @@ def _listed():
     return {str(row["company_id"]) for row in service_sql.run(ACTIVE_TENANTS, role=GATEWAY)}
 
 
-def _suspend(cur, company_id):
-    _as(cur, "SELECT * FROM public.update_company(%s, NULL, false)", (company_id,))
+def _set_active(cur, company_id, active):
+    _as(cur, "SELECT * FROM public.update_company(%s, NULL, %s)", (company_id, active))
 
 
 def test_an_active_tenant_is_listed_and_a_suspended_one_is_not(tenant):
     cur, company_id = tenant
     assert company_id in _listed()
-    _suspend(cur, company_id)
+    _set_active(cur, company_id, False)
     assert company_id not in _listed()
 
 
-def test_a_tenant_with_a_deletion_request_is_not_listed_once_its_schema_is_gone(tenant):
+def test_a_tenant_with_a_deletion_request_is_never_listed_again(tenant):
+    """The request cannot be undone, so the tenant cannot return to the list while the delete job
+    drops its schema."""
     cur, company_id = tenant
-    _suspend(cur, company_id)
+    assert company_id in _listed()
+    _set_active(cur, company_id, False)
     # As the superuser: only the clock is moved, the way 30 days of waiting would.
     cur.execute("UPDATE public.companies SET suspended_at = now() - interval '31 days' "
                 "WHERE company_id = %s", (company_id,))
     _as(cur, "SELECT * FROM public.request_company_deletion(%s, %s)", (company_id, str(uuid.uuid4())))
+    with pytest.raises(errors.ObjectNotInPrerequisiteState):
+        _set_active(cur, company_id, True)
     # What the delete job does to the database store.
-    cur.execute(f'DROP SCHEMA "tenant_{company_id.replace("-", "_")}" CASCADE')
+    cur.execute(f'DROP SCHEMA "{tenancy.schema_name(company_id)}" CASCADE')
     assert company_id not in _listed()
