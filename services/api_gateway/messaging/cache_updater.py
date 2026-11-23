@@ -11,10 +11,17 @@ from sqlalchemy import text
 from database import engine
 from messaging.redis_client import redis_client
 
+# The tenants whose latest readings are cached: the registry's active ones (ADR-0003 dec 1, never a
+# scan of schema names). A suspended tenant is refused everywhere its readings could be read, and a
+# deletion is valid only for a suspended tenant and irreversible (ADR-0033 dec 3), so a tenant whose
+# schema the delete job drops is never listed.
+ACTIVE_TENANTS_SELECT = text("SELECT company_id FROM public.companies WHERE is_active")
+
+
 async def update_redis_cache():
     """
     Background task that continuously updates Redis with latest sensor values.
-    Schema-per-tenant aware: queries from all tenant schemas.
+    Schema-per-tenant aware: queries each active tenant's schema.
     Runs every 2 seconds.
     """
     print("✓ Redis cache updater started (schema-per-tenant mode)")
@@ -26,27 +33,17 @@ async def update_redis_cache():
             async with engine.connect() as conn:
                 # Autocommit: one tenant's failed query must not abort the sweep for the others.
                 conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
-                # Get all tenant schemas
-                tenant_schemas = (await conn.execute(text("""
-                    SELECT schema_name
-                    FROM information_schema.schemata
-                    WHERE schema_name LIKE :pattern
-                """), {"pattern": tenancy.SCHEMA_LIKE})).mappings().all()
+                tenants = (await conn.execute(ACTIVE_TENANTS_SELECT)).scalars().all()
 
                 total_sensors = 0
 
-                # Query from each tenant schema
-                for schema_row in tenant_schemas:
-                    # Read the company_id back out of the schema name and rebuild the schema through
-                    # the one canonical mapping, so only a UUID-derived identifier reaches the SQL
-                    # (ADR-0003); a look-alike schema that is not a tenant's is skipped.
+                for tenant in tenants:
                     try:
-                        company_id = tenancy.company_id_from_schema(schema_row['schema_name'])
-                    except ValueError:
-                        continue
-                    schema_name = tenancy.schema_name(company_id)
+                        # The one canonical mapping, so only a UUID-derived identifier reaches the
+                        # SQL (ADR-0003).
+                        company_id = tenancy.canonical_company_id(tenant)
+                        schema_name = tenancy.schema_name(company_id)
 
-                    try:
                         # Latest value for each sensor in this tenant: one (sensor_id, time DESC)
                         # index probe per sensor. A DISTINCT ON over the window reads every row of
                         # the last hour on each poll, which grows with the ingest rate.
@@ -93,12 +90,12 @@ async def update_redis_cache():
                         total_sensors += len(rows)
                         
                     except Exception as e:
-                        print(f"✗ Error querying {schema_name}: {e}")
+                        print(f"✗ Error querying tenant {tenant}: {e}")
                         continue
                 
                 if total_sensors > 0:
                     zero_cycles = 0
-                    print(f"✓ Updated {total_sensors} sensors in Redis cache from {len(tenant_schemas)} tenants")
+                    print(f"✓ Updated {total_sensors} sensors in Redis cache from {len(tenants)} tenants")
                 else:
                     # No fresh measurements anywhere in the last hour: the usual cause is the
                     # raw-measurements writer (spark-streaming / kafka_to_timescaledb.py) being
@@ -107,7 +104,7 @@ async def update_redis_cache():
                     if zero_cycles % 30 == 0:
                         print(
                             f"⚠ Cache updater: 0 fresh sensor_measurements in the last hour across "
-                            f"{len(tenant_schemas)} tenant(s) — is spark-streaming "
+                            f"{len(tenants)} tenant(s) — is spark-streaming "
                             f"(raw-measurements writer) running?"
                         )
                     zero_cycles += 1

@@ -59,6 +59,7 @@ jobs:
               - 'services/api_gateway/routers/capability_use.py'
               - 'services/api_gateway/routers/platform_switches.py'
               - 'services/api_gateway/routers/tenant_quotas.py'
+              - 'services/api_gateway/messaging/cache_updater.py'
               # The engine tests' stand-in for that SQL and the scenario table test_alert_dedup_hypertable.py
               # runs on both, holding the fake to the hypertable.
               - 'services/alert_service/tests/fake_alert_store.py'
