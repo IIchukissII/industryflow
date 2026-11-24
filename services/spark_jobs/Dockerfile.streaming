@@ -109,8 +109,11 @@ EXPOSE 9108
 # Run the streaming job. The master is NOT set here — the job reads it from SPARK_MASTER
 # (default local[*]) in its SparkSession builder, so the master has one source of truth.
 # Passing --master here would be a misleading no-op (the builder's .master() overrides it).
+# A stable metrics namespace: without it every metric name carries the application's id, so each
+# restart adds a new set of names to Prometheus.
 CMD ["/opt/spark/bin/spark-submit", \
      "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.4,org.postgresql:postgresql:42.7.4", \
      "--conf", "spark.sql.streaming.checkpointLocation=/opt/spark/checkpoints", \
+     "--conf", "spark.metrics.namespace=industryflow_streaming", \
      "--py-files", "/app/spark_streaming/reading_guard.py,/app/spark_streaming/industryflow_contracts.zip", \
      "/app/spark_streaming/kafka_to_timescaledb.py"]

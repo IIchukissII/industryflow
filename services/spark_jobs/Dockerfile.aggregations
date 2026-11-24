@@ -109,8 +109,11 @@ EXPOSE 9108
 
 # Run the aggregations job. Master is set once via SPARK_MASTER (default local[*]) in the
 # job's SparkSession builder — not here — so there is a single source of truth.
+# A stable metrics namespace: without it every metric name carries the application's id, so each
+# restart adds a new set of names to Prometheus.
 CMD ["/opt/spark/bin/spark-submit", \
      "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.4,org.postgresql:postgresql:42.7.4", \
      "--conf", "spark.sql.streaming.checkpointLocation=/opt/spark/checkpoints", \
+     "--conf", "spark.metrics.namespace=industryflow_aggregations", \
      "--py-files", "/app/spark_streaming/aggregation_windows.py,/app/spark_streaming/reading_guard.py,/app/spark_streaming/industryflow_contracts.zip", \
      "/app/spark_streaming/kafka_aggregations.py"]
