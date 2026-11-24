@@ -77,7 +77,10 @@ def test_an_unreachable_count_admits_the_reading_and_counts_the_failure(client, 
     import quota
 
     class Down:
-        def pipeline(self, transaction=True):
+        async def evalsha(self, *args):
+            raise ConnectionError("store unreachable")
+
+        async def eval(self, *args):
             raise ConnectionError("store unreachable")
 
         async def aclose(self):
@@ -124,3 +127,19 @@ def test_the_count_keys_expire(client, make_cert, sample_body, default_cap, froz
     with main.quota_store.sync() as store:
         ttl = store.ttl(quotas.readings_key(tenant, 1_800_000_000))
     assert 0 < ttl <= quotas.READINGS_KEY_TTL_SECONDS
+
+
+def test_the_count_loads_its_script_on_a_store_that_has_none(client, make_cert, sample_body, default_cap,
+                                                            frozen_second):
+    """A restarted or new store holds no script: the first reading loads it and is still counted."""
+    import main
+
+    c, produced = client
+    default_cap(2)
+    tenant = str(uuid.uuid4())
+    with main.quota_store.sync() as store:
+        store.script_flush()
+    answers = [c.post("/ingest", json=sample_body, headers=_headers(make_cert, tenant)).status_code for _ in range(3)]
+    assert answers == [202, 202, 429]
+    with main.quota_store.sync() as store:
+        assert int(store.get(quotas.readings_key(tenant, 1_800_000_000))) == 3

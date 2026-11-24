@@ -8,5 +8,7 @@
 
 pytest==9.2.0
 httpx==0.28.1
-# The shared quota count in memory for the request-path tests (main.quota_store).
+# The shared quota count in memory for the request-path tests (main.quota_store), with Lua for its
+# counting script.
 fakeredis==2.40.0
+lupa==2.8

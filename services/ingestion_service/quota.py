@@ -14,6 +14,7 @@ metrics, which alerts the operator (dec 8): only the cap is waived, the reading'
 hold. A refusal is counted in the quota store, per tenant for a superuser to read through the API
 gateway, and in a count with no tenant that the gateway reports on the platform plane (dec 5).
 """
+import hashlib
 import logging
 import time
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from typing import Optional
 
 from industryflow_contracts import quotas
 from prometheus_client import Counter
+from redis.exceptions import NoScriptError
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,24 @@ COUNT_UNAVAILABLE = Counter(
 )
 
 
+# One reading counted in one command: the script runs atomically, so the second's key never exists
+# without its expiry, and a reading costs one round trip with no transaction around it.
+COUNT_SCRIPT = """
+local n = redis.call('INCR', KEYS[1])
+if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return n
+"""
+COUNT_SCRIPT_SHA = hashlib.sha1(COUNT_SCRIPT.encode()).hexdigest()
+
+
+async def _count(store, key: str) -> int:
+    """The reading's place in its second: the script by its digest, loaded on the first miss."""
+    try:
+        return await store.evalsha(COUNT_SCRIPT_SHA, 1, key, quotas.READINGS_KEY_TTL_SECONDS)
+    except NoScriptError:
+        return await store.eval(COUNT_SCRIPT, 1, key, quotas.READINGS_KEY_TTL_SECONDS)
+
+
 async def admit(store, company_id: str, cap: Optional[int], now: Optional[float] = None) -> bool:
     """Whether the tenant may produce one more reading this second under ``cap`` (``None`` is off)."""
     if cap is None:
@@ -40,10 +60,7 @@ async def admit(store, company_id: str, cap: Optional[int], now: Optional[float]
     now = time.time() if now is None else now
     key = quotas.readings_key(company_id, int(now))
     try:
-        async with store.pipeline(transaction=True) as pipe:
-            pipe.incr(key)
-            pipe.expire(key, quotas.READINGS_KEY_TTL_SECONDS)
-            count, _ = await pipe.execute()
+        count = await _count(store, key)
     except Exception as e:  # noqa: BLE001 - any store failure admits the reading (dec 8)
         COUNT_UNAVAILABLE.labels(cap=CAP).inc()
         logger.warning("quota count unavailable, reading admitted without its cap: %s", e)
