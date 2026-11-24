@@ -339,7 +339,10 @@ async def bind_identity_and_profile(spawner):
                             who.company_id, refused.cap, spawner._log_name)
         # Nothing started, so its stop records nothing (revoke_server_capabilities).
         spawner._quota_refused = True
-        raise web.HTTPError(429, str(refused)) from None
+        error = web.HTTPError(429, str(refused))
+        # What the user's page shows: JupyterHub renders a failed start's jupyterhub_message only.
+        error.jupyterhub_message = str(refused)
+        raise error from None
     # The profile is chosen by role, not offered to the user (ADR-0011 dec 5, ADR-0014 dec 4).
     profile = ident.select_profile(who.role, AUTHORING_ROLES)
     # Identity only — this carries no data credential (ADR-0014 dec 5).
