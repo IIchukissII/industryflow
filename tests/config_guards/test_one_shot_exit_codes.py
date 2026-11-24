@@ -271,7 +271,8 @@ def test_the_guard_reads_the_invocations():
     # The box deploy's schema step is seen, and passes by its exit code.
     deploy = [t for t, _ in units["scripts/box-deploy.sh"]]
     assert ["up", "--no-deps", "--exit-code-from", "db-migrate", "db-migrate"] in deploy, deploy
-    assert any(t[:2] == ["--profile", "notebooks"] and t[-2:] == ["up", "-d"] for t in deploy), deploy
+    # The upgrade removes the containers of services the checkout no longer defines.
+    assert any(t[:2] == ["--profile", "notebooks"] and t[-3:] == ["up", "-d", "--remove-orphans"] for t in deploy), deploy
     assert [t for t, _ in units["tests/e2e/harness.py"]], "the e2e harness's compose calls are not read"
 
 

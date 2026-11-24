@@ -68,7 +68,7 @@ def _copies(dockerfile: str) -> list[list[str]]:
 
 def test_every_image_running_the_script_copies_its_pins():
     images = [p for p in JOBS.glob("Dockerfile.*") if any(SCRIPT_NAME in c for c in _copies(p.read_text()))]
-    assert len(images) >= 3, "the Spark images were not found"
+    assert len(images) >= 2, "the Spark images were not found"
     for image in images:
         copy = next(c for c in _copies(image.read_text()) if SCRIPT_NAME in c)
         assert "spark-jars.sha256" in copy, f"{image.name} runs the script without its pins"

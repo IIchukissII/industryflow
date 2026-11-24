@@ -517,70 +517,9 @@ services:
   # PHASE 2: SPARK STREAMING SERVICES
   # ==========================================================================
 
-  # Spark Master
-  spark-master:
-    # The stock image on the SAME Spark as the job/worker images' base (services/spark_jobs/
-    # Dockerfile.*); a master behind its workers is a mixed-version cluster. Guarded by
-    # scripts/check_spark_version_parity.py.
-    image: apache/spark:4.1.4-java21-python3@sha256:847f91f8bb2f28d632064dfe632d423020f8fd60b27c7704c0e5bf5b0c6432c7
-    container_name: industryflow-spark-master
-    ports:
-      - "127.0.0.1:7077:7077"
-      - "127.0.0.1:8083:8080"
-    environment:
-      SPARK_MASTER_HOST: spark-master
-      SPARK_MASTER_PORT: 7077
-      SPARK_MASTER_WEBUI_PORT: 8080
-      # The master and worker daemons' own heap (Spark's default is 1g); not the jobs' memory.
-      SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEMORY:-256m}
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
-    volumes:
-      # Stock image: mount the PrometheusServlet config so the master serves
-      # /metrics/master/prometheus on 8080 (the built images bake it in). Item 7.
-      - ./services/spark_jobs/metrics.properties:/opt/spark/conf/metrics.properties:ro
-    networks:
-      - industryflow-network
-    restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
-    mem_limit: ${SPARK_MASTER_MEM_LIMIT:-384m}
-    # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
-    # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
-    cpu_shares: ${SPARK_CPU_SHARES:-256}
-
-  # Spark Worker — a SCALABLE pool: no container_name and no published port (the worker dials out
-  # to the master and registers its own web UI there), so `SPARK_WORKER_REPLICAS` / `--scale
-  # spark-worker=N` brings up N workers without name/port clashes. Inspect them via the master UI.
-  spark-worker:
-    # Built (not the stock image) so executors have psycopg2 for the TimescaleDB writes.
-    build:
-      context: ./services/spark_jobs
-      dockerfile: Dockerfile.worker
-    depends_on:
-      - spark-master
-    environment:
-      <<: *db-tls-env
-      SPARK_WORKER_CORES: 4
-      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-1g}
-      SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEMORY:-256m}
-      SPARK_WORKER_WEBUI_PORT: 8081
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
-    volumes:
-      - *ca-mount  # executor runs psycopg2 here; needs the CA to verify the DB cert (ADR-0017)
-    # The executor writes Structured-Streaming STATE-store deltas to the checkpoint and the driver
-    # (the spark-* job containers) reads them, so both must see ONE store. That store is now MinIO
-    # via S3A (CHECKPOINT_LOCATION=s3a://…), shared by every node over the network — so this worker
-    # needs NO local checkpoint volume and the cluster can scale to N workers (ADR-0006).
-    deploy:
-      replicas: ${SPARK_WORKER_REPLICAS:-1}
-    networks:
-      - industryflow-network
-    restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
-    mem_limit: ${SPARK_WORKER_MEM_LIMIT:-2304m}
-    # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
-    # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
-    cpu_shares: ${SPARK_CPU_SHARES:-256}
-
+  # The Spark jobs run in local mode, each its own driver with its executors inside it, as on
+  # Kubernetes (one pod per job): on one host a master and a worker pool add no capacity, only their
+  # daemons and executors. SPARK_MASTER is the one setting that chooses where a job runs.
   # Spark Streaming - Raw sensor data to TimescaleDB
   spark-streaming:
     build:
@@ -595,19 +534,14 @@ services:
         condition: service_healthy
       db-migrate:
         condition: service_completed_successfully
-      spark-master:
-        condition: service_started
       minio-init:
         condition: service_completed_successfully
     environment:
       <<: [*db-tls-env, *spark-s3a-env]
       # Spark configuration
-      SPARK_MASTER: spark://spark-master:7077
-      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-512m}
-      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-512m}
-      # Resource budget on the shared worker (ADR-0006): cores capped so streaming +
-      # aggregations coexist (sum <= SPARK_WORKER_CORES). Raise these / add workers to scale.
-      SPARK_CORES_MAX: ${SPARK_STREAMING_CORES_MAX:-1}
+      # Local mode: the threads are the job's cores; the executors share the driver's heap.
+      SPARK_MASTER: local[${SPARK_STREAMING_CORES:-2}]
+      SPARK_DRIVER_MEMORY: ${SPARK_STREAMING_DRIVER_MEMORY:-896m}
       SPARK_SQL_SHUFFLE_PARTITIONS: ${SPARK_SHUFFLE_PARTITIONS:-8}
 
       # Kafka configuration
@@ -626,7 +560,7 @@ services:
       - industryflow-network
     restart: unless-stopped
     # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
-    mem_limit: ${SPARK_STREAMING_MEM_LIMIT:-1g}
+    mem_limit: ${SPARK_STREAMING_MEM_LIMIT:-1536m}
     # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
     # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
     cpu_shares: ${SPARK_CPU_SHARES:-256}
@@ -645,19 +579,15 @@ services:
         condition: service_healthy
       db-migrate:
         condition: service_completed_successfully
-      spark-master:
-        condition: service_started
       minio-init:
         condition: service_completed_successfully
     environment:
       <<: [*db-tls-env, *spark-s3a-env]
       # Spark configuration
-      SPARK_MASTER: spark://spark-master:7077
-      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-512m}
-      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-512m}
-      # Aggregations runs 3 windowed streams; give it the larger share of the worker
-      # (sum with streaming <= SPARK_WORKER_CORES). Raise / add workers to scale.
-      SPARK_CORES_MAX: ${SPARK_AGG_CORES_MAX:-3}
+      # Local mode: the threads are the job's cores (three windowed streams); the executors share
+      # the driver's heap.
+      SPARK_MASTER: local[${SPARK_AGGREGATIONS_CORES:-3}]
+      SPARK_DRIVER_MEMORY: ${SPARK_AGGREGATIONS_DRIVER_MEMORY:-896m}
       # Window-state partitions per query. A change starts fresh checkpoints (ADR-0006 dec 8).
       SPARK_SQL_SHUFFLE_PARTITIONS: ${SPARK_AGG_STATE_PARTITIONS:-2}
 
@@ -677,7 +607,7 @@ services:
       - industryflow-network
     restart: unless-stopped
     # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
-    mem_limit: ${SPARK_AGG_MEM_LIMIT:-1g}
+    mem_limit: ${SPARK_AGGREGATIONS_MEM_LIMIT:-1536m}
     # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
     # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
     cpu_shares: ${SPARK_CPU_SHARES:-256}

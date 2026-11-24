@@ -91,7 +91,7 @@ def test_workflows_run_the_compose_pin_of_every_image_compose_runs():
     assert not drift, "workflows pin a different build than compose:\n" + "\n".join(drift)
 
 
-# spark-master's version against the job images is scripts/check_spark_version_parity.py's job.
+# Any stock Spark image's version against the job images is scripts/check_spark_version_parity.py's job.
 
 
 def test_dependabot_watches_the_root_compose_file():
