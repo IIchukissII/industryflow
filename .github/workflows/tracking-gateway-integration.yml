@@ -64,7 +64,8 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Provide compose env
-        run: cp .env.example .env
+        # The memory budget is derived from the runner (scripts/host-memory.py); compose needs it.
+        run: cp .env.example .env && python3 scripts/host-memory.py
 
       - name: Start TimescaleDB + MinIO + Redis
         # `up --wait` returns once a one-shot has started; the runner is run to completion.
@@ -212,7 +213,8 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Provide compose env
-        run: cp .env.example .env
+        # The memory budget is derived from the runner (scripts/host-memory.py); compose needs it.
+        run: cp .env.example .env && python3 scripts/host-memory.py
 
       - name: Start TimescaleDB + MinIO + Redis
         # `up --wait` returns once a one-shot has started; the runner is run to completion.

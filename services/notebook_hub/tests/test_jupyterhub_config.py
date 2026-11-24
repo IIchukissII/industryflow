@@ -49,6 +49,8 @@ BASE_ENV = {
     "NOTEBOOK_NETWORK": "industryflow-network",  # DockerSpawner profile requires it
     # A test value of the SSO proxy's secret (ADR-0014 dec 3); the hub refuses to start without one.
     "NOTEBOOK_SSO_PROXY_SECRET": "0123456789abcdef0123456789abcdef",
+    # A Docker host's notebook share (ADR-0018 dec 6), large enough that no other test meets it.
+    "NOTEBOOK_MEMORY_SHARE_MIB": str(1024 * 1024),
 }
 PROXY_SECRET = BASE_ENV["NOTEBOOK_SSO_PROXY_SECRET"]
 
@@ -170,6 +172,8 @@ class _Spawner:
         self.log = logging.getLogger("test-spawner")
         self._log_name = f"{user.name}:{name}"
         self.active, self.pending, self.ready = True, None, True
+        # A real spawner's memory limit until the spawn hook sets it.
+        self.mem_limit = None
 
 
 def _hub(profile="docker"):
@@ -1009,3 +1013,59 @@ def test_a_spawn_over_the_tenants_cap_is_refused_before_anything_is_minted(monke
     before = _events(store)
     asyncio.run(ns["revoke_server_capabilities"](asking))
     assert _events(store) == before
+
+
+def test_a_docker_hub_without_a_notebook_share_does_not_start():
+    """ADR-0018 dec 6: on a Docker host the share is derived from the host (scripts/host-memory.py)."""
+    for missing in (None, "", "0", "1.5G"):
+        with pytest.raises(RuntimeError, match="NOTEBOOK_MEMORY_SHARE_MIB"):
+            _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB=missing)
+    # Kubernetes places a pod by its request: the hub keeps no share there.
+    assert _load_ns("kube", NOTEBOOK_MEMORY_SHARE_MIB=None)[1]["NOTEBOOK_SHARE"] is None
+
+
+def test_on_a_docker_host_a_profiles_limit_is_its_fraction_of_the_notebook_share():
+    """ADR-0018 dec 6: environments grow with the host; on Kubernetes the profile's fixed limit holds."""
+    ns = _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB="2000")[1]
+    mib = 1024 * 1024
+    assert ns["profile_memory"]("authoring") == 1000 * mib
+    assert ns["profile_memory"]("analytics") == 700 * mib
+    kube = _load_ns("kube")[1]
+    assert kube["profile_memory"]("authoring") == 4 * 1024 * mib
+
+
+def test_a_start_is_admitted_only_while_its_memory_fits_the_notebook_share():
+    """ADR-0018 dec 6: the share counts every tenant's environments; a start that does not fit is
+    refused, naming why, before anything is minted, and holds no place."""
+    from jupyterhub.utils import format_exception
+    from tornado import web
+
+    # 2000 MiB: an authoring environment takes 1000, an analytics one 700.
+    _, ns, store = _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB="2000") + (_store(),)
+    ns["_STORE"] = store
+    users = {}
+
+    def asking(name, role):
+        user = _User(name, str(uuid.uuid4()), role=role)
+        users[name] = user
+        for u in users.values():
+            u.settings["users"] = users
+        spawner = _Spawner(user)
+        user.spawners[""] = spawner
+        return spawner
+
+    author, viewer = asking("author", "engineer"), asking("viewer-1", "observer")
+    _spawn(ns, author)
+    _spawn(ns, viewer)
+    assert author._quota_admitted and viewer._quota_admitted and author.mem_limit == 1000 * 1024 * 1024
+    second = asking("author-2", "engineer")
+    with pytest.raises(web.HTTPError) as refused:
+        _spawn(ns, second)
+    shown, _html = format_exception(refused.value, only_jupyterhub=True)
+    assert refused.value.status_code == 429
+    assert "hold 1700 of its 2000 MiB" in shown and "1000 MiB environment does not fit" in shown
+    assert not second._quota_admitted
+    second.active = False
+    # A stopped environment frees its place.
+    viewer.active = False
+    _spawn(ns, asking("author-3", "engineer"))

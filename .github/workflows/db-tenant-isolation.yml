@@ -81,7 +81,8 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Provide compose env
-        run: cp .env.example .env
+        # The memory budget is derived from the runner (scripts/host-memory.py); compose needs it.
+        run: cp .env.example .env && python3 scripts/host-memory.py
 
       - name: Start TimescaleDB + Redis and apply the schema sequence (incl. the notebook_sql_proxy role)
         # `up --wait` returns once a one-shot has started; the runner is run to completion.

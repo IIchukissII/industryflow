@@ -35,6 +35,17 @@ CAP = quotas.NOTEBOOK_ENVIRONMENTS
 DEFAULT: Optional[int] = quotas.defaults(os.environ)[CAP]
 
 
+class NoRoom(Exception):
+    """The host's notebook share cannot hold one more environment of this size (ADR-0018 dec 6)."""
+
+    def __init__(self, share: int, held: int, need: int):
+        mib = 1024 * 1024
+        super().__init__(f"The notebook environments running on this host already hold {held // mib} of its "
+                         f"{share // mib} MiB for notebooks; a new {need // mib} MiB environment does not fit. "
+                         "Try again when one stops, or ask your platform operator.")
+        self.share, self.held, self.need = share, held, need
+
+
 class AtCap(Exception):
     """The tenant runs as many environments as its cap allows."""
 
@@ -85,18 +96,36 @@ async def running_for(this_spawner, company_id: str) -> int:
     return count
 
 
+def memory_held(this_spawner) -> int:
+    """The memory limits, in bytes, of every server other than ``this_spawner`` that holds a place, of
+    any tenant: what the host's notebook share already carries."""
+    held = 0
+    for user in list(this_spawner.user.settings["users"].values()):
+        for spawner in list(user.spawners.values()):
+            if spawner is not this_spawner and _counts(spawner):
+                held += int(spawner.mem_limit or 0)
+    return held
+
+
 # One check at a time: the hub is one process, and a count taken while another start is between its
 # count and its admission would let both through.
 _ADMISSION = asyncio.Lock()
 
 
-async def admit(spawner, company_id: str, override_store, count_store) -> None:
+async def admit(spawner, company_id: str, override_store, count_store,
+                need: int = 0, share: Optional[int] = None) -> None:
     """Raise ``AtCap`` when the tenant already holds its cap of environments, recording the refusal in
-    ``count_store``; else mark the start as holding a place. The cap is read from ``override_store``."""
+    ``count_store``; with a notebook ``share`` (bytes, a Docker host's: ADR-0018 dec 6), raise ``NoRoom``
+    when the servers holding a place and this one's ``need`` exceed it; else mark the start as holding
+    a place. The cap is read from ``override_store``."""
     spawner._quota_admitted = False
     async with _ADMISSION:
         cap = await asyncio.to_thread(tenant_cap, override_store, company_id)
         if cap is None or await running_for(spawner, company_id) < cap:
+            if share is not None:
+                held = memory_held(spawner)
+                if held + need > share:
+                    raise NoRoom(share, held, need)
             spawner._quota_admitted = True
             return
     await asyncio.to_thread(_record_refusal, count_store, company_id, time.time())

@@ -45,6 +45,8 @@ jobs:
       - name: Provide compose env
         run: |
           cp .env.example .env
+          # The memory budget is derived from the runner (scripts/host-memory.py); compose needs it.
+          python3 scripts/host-memory.py
           # The hub encrypts the tenant/role it hands the spawn hook (auth_state); the placeholder is
           # not a key, and the hub exits rather than start without a real one.
           sed -i "s|^JUPYTERHUB_CRYPT_KEY=.*|JUPYTERHUB_CRYPT_KEY=$(openssl rand -hex 32)|" .env

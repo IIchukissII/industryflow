@@ -76,8 +76,8 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-      # The image's default heap is 512M, committed at start; the chart's 256m (infra-kafka.yaml).
-      KAFKA_HEAP_OPTS: "-Xms256m -Xmx256m"
+      # The image's default heap is 512M, committed at start, whatever the limit; derived from the limit.
+      KAFKA_HEAP_OPTS: ${ZOOKEEPER_HEAP_OPTS:?run scripts/host-memory.py}
     volumes:
       - zookeeper-data:/var/lib/zookeeper/data
       - zookeeper-logs:/var/lib/zookeeper/log
@@ -89,6 +89,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    mem_limit: ${ZOOKEEPER_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Kafka - Message streaming
   kafka:
@@ -112,7 +113,7 @@ services:
       # The tenant-delete job records this as how long a deleted tenant's readings may remain.
       KAFKA_LOG_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS:-168}
       # The image defaults to a 1g heap; the broker leans on the page cache, not the heap.
-      KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS:--Xms512m -Xmx512m}
+      KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS:?run scripts/host-memory.py}
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
@@ -124,8 +125,9 @@ services:
       - industryflow-network
       - ingestion-back
     restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
-    mem_limit: ${KAFKA_MEM_LIMIT:-1g}
+    # Its share of the host's memory (scripts/host-memory.py): past it the container reclaims and swaps its
+    # own pages, not another service's.
+    mem_limit: ${KAFKA_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Stages the TimescaleDB TLS cert into a postgres-owned volume with 0600 perms (ADR-0017):
   # Postgres refuses a key it doesn't own / that is group-readable, which a bind mount can't
@@ -228,6 +230,13 @@ services:
       - config_file=/etc/postgresql/postgresql.conf
       - -c
       - hba_file=/etc/postgresql/pg_hba.conf
+      # Memory follows the container's limit (scripts/host-memory.py); later -c settings outrank the file.
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:?run scripts/host-memory.py}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:?run scripts/host-memory.py}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:?run scripts/host-memory.py}
     volumes:
       - timescaledb-data:/var/lib/postgresql/data
       - ./infrastructure/timescaledb/config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
@@ -241,6 +250,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    mem_limit: ${TIMESCALEDB_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Platform schema migrations (ADR-0034 dec 4, 7-10): applies the pending numbered scripts in
   # order and records each in the ledger, then exits. It is the only applier, on a fresh volume
@@ -316,6 +326,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    mem_limit: ${REDIS_MEM_LIMIT:?run scripts/host-memory.py}
 
   # The shared count of tenant quotas (ADR-0049 dec 4; ADR-0002 dec 3): per-tenant counters, every key
   # expiring, no credential; nothing in it is trusted as a cap. Apart from the capability store, so the
@@ -339,6 +350,7 @@ services:
       - industryflow-network
       - ingestion-back
     restart: unless-stopped
+    mem_limit: ${QUOTA_REDIS_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Fix ownership of a data volume written by an earlier root-run MinIO image. The server below
   # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
@@ -390,6 +402,7 @@ services:
       - industryflow-network
       - notebook-kernels
     restart: unless-stopped
+    mem_limit: ${MINIO_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Object-store bootstrap (infrastructure/minio/minio-init.sh — the same script the Helm chart's
   # minio-init Job runs): the buckets, the upload-staging expiry, and one SCOPED principal per
@@ -510,8 +523,9 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
-    mem_limit: ${MLFLOW_MEM_LIMIT:-768m}
+    # Its share of the host's memory (scripts/host-memory.py): past it the container reclaims and swaps its
+    # own pages, not another service's.
+    mem_limit: ${MLFLOW_MEM_LIMIT:?run scripts/host-memory.py}
 
   # ==========================================================================
   # PHASE 2: SPARK STREAMING SERVICES
@@ -541,7 +555,7 @@ services:
       # Spark configuration
       # Local mode: the threads are the job's cores; the executors share the driver's heap.
       SPARK_MASTER: local[${SPARK_STREAMING_CORES:-2}]
-      SPARK_DRIVER_MEMORY: ${SPARK_STREAMING_DRIVER_MEMORY:-896m}
+      SPARK_DRIVER_MEMORY: ${SPARK_STREAMING_DRIVER_MEMORY:?run scripts/host-memory.py}
       SPARK_SQL_SHUFFLE_PARTITIONS: ${SPARK_SHUFFLE_PARTITIONS:-8}
 
       # Kafka configuration
@@ -559,8 +573,9 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
-    mem_limit: ${SPARK_STREAMING_MEM_LIMIT:-1536m}
+    # Its share of the host's memory (scripts/host-memory.py): past it the container reclaims and swaps its
+    # own pages, not another service's.
+    mem_limit: ${SPARK_STREAMING_MEM_LIMIT:?run scripts/host-memory.py}
     # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
     # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
     cpu_shares: ${SPARK_CPU_SHARES:-256}
@@ -587,7 +602,7 @@ services:
       # Local mode: the threads are the job's cores (three windowed streams); the executors share
       # the driver's heap.
       SPARK_MASTER: local[${SPARK_AGGREGATIONS_CORES:-3}]
-      SPARK_DRIVER_MEMORY: ${SPARK_AGGREGATIONS_DRIVER_MEMORY:-896m}
+      SPARK_DRIVER_MEMORY: ${SPARK_AGGREGATIONS_DRIVER_MEMORY:?run scripts/host-memory.py}
       # Window-state partitions per query. A change starts fresh checkpoints (ADR-0006 dec 8).
       SPARK_SQL_SHUFFLE_PARTITIONS: ${SPARK_AGG_STATE_PARTITIONS:-2}
 
@@ -606,8 +621,9 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    # Hard ceiling: past it the kernel stops this container, not the host (docs/operations/capacity.md).
-    mem_limit: ${SPARK_AGGREGATIONS_MEM_LIMIT:-1536m}
+    # Its share of the host's memory (scripts/host-memory.py): past it the container reclaims and swaps its
+    # own pages, not another service's.
+    mem_limit: ${SPARK_AGGREGATIONS_MEM_LIMIT:?run scripts/host-memory.py}
     # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
     # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
     cpu_shares: ${SPARK_CPU_SHARES:-256}
@@ -682,6 +698,7 @@ services:
       - industryflow-network
       - notebook-kernels
     restart: unless-stopped
+    mem_limit: ${API_GATEWAY_MEM_LIMIT:?run scripts/host-memory.py}
     healthcheck:
       # python-slim has no curl; use stdlib urllib (always present in the image).
       test: [ "CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)" ]
@@ -736,6 +753,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    mem_limit: ${FRONTEND_MEM_LIMIT:?run scripts/host-memory.py}
 
   ingestion-service:
     container_name: industryflow-ingestion-service
@@ -772,6 +790,7 @@ services:
       - ingestion-front
       - ingestion-back
     restart: unless-stopped
+    mem_limit: ${INGESTION_SERVICE_MEM_LIMIT:?run scripts/host-memory.py}
 
   # mTLS ingestion edge (ADR-0002): verifies device client certs against the device CA +
   # CRL and forwards the verified identity to ingestion-service (the only way in).
@@ -794,6 +813,7 @@ services:
       - industryflow-network
       - ingestion-front
     restart: unless-stopped
+    mem_limit: ${INGESTION_EDGE_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Re-signs the issuing intermediate's CRL before it expires (ADR-0007 dec 8). An expired CRL
   # makes the edge refuse EVERY device. It uses only the intermediate key, which already lives in
@@ -850,6 +870,7 @@ services:
       - ./scripts/device-ca.sh:/opt/device-ca.sh:ro
       - device-ca-metrics:/metrics
     restart: unless-stopped
+    mem_limit: ${DEVICE_CRL_REFRESH_MEM_LIMIT:?run scripts/host-memory.py}
 
   # ==========================================================================
   # ALERT SERVICE - Worker (Detection Engine)
@@ -898,6 +919,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    mem_limit: ${ALERT_SERVICE_DETECTOR_MEM_LIMIT:?run scripts/host-memory.py}
     healthcheck:
       # No HTTP API. The consumer loop touches a heartbeat file on every poll; healthcheck.py
       # fails once it is stale, so a loop that died or hung shows unhealthy, not just a live PID.
@@ -973,6 +995,7 @@ services:
       mlflow:
         condition: service_started
     restart: unless-stopped
+    mem_limit: ${ML_SERVICE_API_MEM_LIMIT:?run scripts/host-memory.py}
     healthcheck:
       # python-slim has no curl; use stdlib urllib (always present in the image).
       test: [ "CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8002/health').status==200 else 1)" ]
@@ -1094,6 +1117,7 @@ services:
         aliases: [notebook-hub-public]
       notebook-kernels: {}
     restart: unless-stopped
+    mem_limit: ${NOTEBOOK_HUB_MEM_LIMIT:?run scripts/host-memory.py}
 
   # SQL access proxy (ADR-0015): authoring kernels connect with a normal Postgres driver, using
   # their opaque SQL capability handle as the password. The proxy resolves the handle to a tenant,
@@ -1137,6 +1161,7 @@ services:
       - industryflow-network
       - notebook-kernels
     restart: unless-stopped
+    mem_limit: ${NOTEBOOK_SQL_PROXY_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Experiment-tracking gateway (ADR-0019): authoring kernels point their MLflow client here
   # (MLFLOW_TRACKING_URI) with their tracking capability as the bearer token. The gateway scopes
@@ -1184,6 +1209,7 @@ services:
       - industryflow-network
       - notebook-kernels
     restart: unless-stopped
+    mem_limit: ${NOTEBOOK_TRACKING_GATEWAY_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Cold-store broker (ADR-0025 dec 5, read side): resolves a notebook's cold capability to one
   # tenant and vends read-only, tenant-prefix-scoped pre-signed GET URLs for the cold layer. Holds
@@ -1214,6 +1240,7 @@ services:
       - industryflow-network
       - notebook-kernels
     restart: unless-stopped
+    mem_limit: ${NOTEBOOK_COLD_BROKER_MEM_LIMIT:?run scripts/host-memory.py}
 
   # SSO reverse proxy (ADR-0014, ADR-0048): everything the notebook origin serves. Exchanges the
   # platform's ticket for a notebook session, checks it via api-gateway /auth/verify on every request
@@ -1242,6 +1269,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    mem_limit: ${NOTEBOOK_SSO_MEM_LIMIT:?run scripts/host-memory.py}
 
   # ==========================================================================
   # MONITORING STACK
@@ -1269,6 +1297,7 @@ services:
       - industryflow-network
       - ops-agent
     restart: unless-stopped
+    mem_limit: ${PROMETHEUS_MEM_LIMIT:?run scripts/host-memory.py}
     healthcheck:
       test: ["CMD", "wget", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
       interval: 30s
@@ -1293,6 +1322,7 @@ services:
       - industryflow-network
       - ops-agent
     restart: unless-stopped
+    mem_limit: ${ALERTMANAGER_MEM_LIMIT:?run scripts/host-memory.py}
     healthcheck:
       test: ["CMD", "wget", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
       interval: 30s
@@ -1333,6 +1363,7 @@ services:
     networks:
       - ops-agent
     restart: unless-stopped
+    mem_limit: ${OPS_AGENT_MEM_LIMIT:?run scripts/host-memory.py}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8095/healthz', timeout=3)"]
       interval: 30s
@@ -1353,6 +1384,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    mem_limit: ${CADVISOR_MEM_LIMIT:?run scripts/host-memory.py}
     command:
       - '--housekeeping_interval=30s'
       - '--docker_only=true'
@@ -1389,6 +1421,7 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
+    mem_limit: ${NODE_EXPORTER_MEM_LIMIT:?run scripts/host-memory.py}
 
   # PostgreSQL Exporter - Database metrics. Connects as the read-only monitoring role (pg_monitor),
   # never the superuser (ADR-0016 dec 3) — the same role and TLS mode as the Helm exporter.
@@ -1409,6 +1442,7 @@ services:
       db-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+    mem_limit: ${POSTGRES_EXPORTER_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Redis Exporter - Cache metrics
   redis-exporter:
@@ -1423,6 +1457,7 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
+    mem_limit: ${REDIS_EXPORTER_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Kafka Exporter - Kafka metrics
   kafka-exporter:
@@ -1438,6 +1473,7 @@ services:
       kafka:
         condition: service_healthy
     restart: unless-stopped
+    mem_limit: ${KAFKA_EXPORTER_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Grafana - Monitoring & Dashboards
   grafana:
@@ -1495,6 +1531,7 @@ services:
       dashboards-key-init:
         condition: service_completed_successfully
     restart: unless-stopped
+    mem_limit: ${GRAFANA_MEM_LIMIT:?run scripts/host-memory.py}
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/grafana/api/health || exit 1"]
       interval: 30s
@@ -1515,6 +1552,7 @@ services:
       - industryflow-network
       - ops-agent
     restart: unless-stopped
+    mem_limit: ${LOKI_MEM_LIMIT:?run scripts/host-memory.py}
     # No healthcheck: the Loki 3 image is distroless (no shell, no wget) and its binary has no health
     # subcommand, so any in-container probe reports unhealthy forever. Prometheus scrapes it instead
     # (job `loki`), and `up` is its health signal.
@@ -1536,6 +1574,7 @@ services:
     depends_on:
       - loki
     restart: unless-stopped
+    mem_limit: ${PROMTAIL_MEM_LIMIT:?run scripts/host-memory.py}
 
   # ==========================================================================
   # DATABASE BACKUPS (tier-1 DR) — on-demand / cron-driven, not a long-running

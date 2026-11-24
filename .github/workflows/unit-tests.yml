@@ -164,7 +164,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Provide compose env
-        run: cp .env.example .env
+        # The memory budget is derived from the runner (scripts/host-memory.py); compose needs it.
+        run: cp .env.example .env && python3 scripts/host-memory.py
       - name: Start ZooKeeper + Kafka
         run: docker compose up -d --wait zookeeper kafka
       - uses: actions/setup-python@v7
@@ -202,7 +203,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Provide compose env
-        run: cp .env.example .env
+        # The memory budget is derived from the runner (scripts/host-memory.py); compose needs it.
+        run: cp .env.example .env && python3 scripts/host-memory.py
       # `up --wait` returns once a one-shot has started; the one-shots are run to completion.
       - name: Start Kafka, TimescaleDB and MinIO; apply the schema; create the buckets
         run: |

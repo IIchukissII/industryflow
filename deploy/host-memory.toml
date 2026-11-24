@@ -1,0 +1,125 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The single host's memory budget (ADR-0018 dec 6; manual: docs/getting-started.md, Performance
+# settings). Each long-running Compose service's memory limit is its share of the host's memory;
+# scripts/host-memory.py derives the limits, the heaps under them and the notebook share from the
+# host and writes them into .env. A limit bounds the service's resident memory: past it the service
+# swaps its own pages, not another's.
+#
+# reserve: the kernel, Docker, the page cache the database and the broker read through, and the
+#   one-shot jobs (backups, migrations), none of which has a share of its own.
+# notebook_min: the least notebook share the budget may leave; below it the script refuses. Each notebook
+#   profile's memory limit on a single host is a fraction of the share (services/notebook_hub), so the
+#   least share is what keeps the smallest profile usable.
+# The notebook share is what the services and the reserve leave.
+
+reserve = 0.12
+notebook_min = 0.15
+
+[postgres]
+# Fractions of timescaledb's limit.
+POSTGRES_SHARED_BUFFERS = 0.25
+POSTGRES_EFFECTIVE_CACHE_SIZE = 0.75
+POSTGRES_MAINTENANCE_WORK_MEM = 0.10
+
+[services.zookeeper]
+share = 0.015
+heap = { kind = "jvm-opts", var = "ZOOKEEPER_HEAP_OPTS", fraction = 0.5, min_mib = 64 }
+
+[services.kafka]
+share = 0.055
+heap = { kind = "jvm-opts", var = "KAFKA_HEAP_OPTS", fraction = 0.6, min_mib = 256 }
+
+[services.timescaledb]
+share = 0.055
+
+[services.redis]
+share = 0.008
+
+[services.quota-redis]
+share = 0.004
+
+[services.minio]
+share = 0.040
+
+[services.mlflow]
+share = 0.012
+
+[services.spark-streaming]
+share = 0.135
+heap = { kind = "size", var = "SPARK_STREAMING_DRIVER_MEMORY", fraction = 0.65, min_mib = 512 }
+
+[services.spark-aggregations]
+share = 0.160
+heap = { kind = "size", var = "SPARK_AGGREGATIONS_DRIVER_MEMORY", fraction = 0.65, min_mib = 512 }
+
+[services.api-gateway]
+share = 0.021
+
+[services.frontend]
+share = 0.002
+
+[services.ingestion-service]
+share = 0.016
+
+[services.ingestion-edge]
+share = 0.005
+
+[services.device-crl-refresh]
+share = 0.002
+
+[services.alert-service-detector]
+share = 0.007
+
+[services.ml-service-api]
+share = 0.035
+
+[services.notebook-hub]
+share = 0.026
+
+[services.notebook-sql-proxy]
+share = 0.004
+
+[services.notebook-tracking-gateway]
+share = 0.006
+
+[services.notebook-cold-broker]
+share = 0.004
+
+[services.notebook-sso]
+share = 0.002
+
+[services.prometheus]
+share = 0.030
+
+[services.alertmanager]
+share = 0.003
+
+[services.ops-agent]
+share = 0.011
+
+[services.cadvisor]
+share = 0.006
+
+[services.node-exporter]
+share = 0.002
+
+[services.postgres-exporter]
+share = 0.002
+
+[services.redis-exporter]
+share = 0.002
+
+[services.kafka-exporter]
+share = 0.002
+
+[services.grafana]
+share = 0.032
+
+[services.loki]
+share = 0.017
+
+[services.promtail]
+share = 0.009
