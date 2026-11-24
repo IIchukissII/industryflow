@@ -999,6 +999,10 @@ def test_a_spawn_over_the_tenants_cap_is_refused_before_anything_is_minted(monke
     with pytest.raises(web.HTTPError) as refused:
         _spawn(ns, asking)
     assert refused.value.status_code == 429 and "1 notebook environment" in refused.value.log_message
+    # The page the user gets names the cap: JupyterHub's failed-start page shows only what this gives.
+    from jupyterhub.utils import format_exception
+    shown, _html = format_exception(refused.value, only_jupyterhub=True)
+    assert shown and "1 notebook environment" in shown
     assert _handles(store) == set()
     # Its stop, which JupyterHub runs after a failed start, records no stop of an environment that
     # never started (ADR-0042).
