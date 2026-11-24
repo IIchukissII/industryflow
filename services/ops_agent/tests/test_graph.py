@@ -155,7 +155,7 @@ async def test_a_tool_error_reaches_the_note_with_its_cause(config):
 def test_metrics_are_narrowed_to_the_alerts_own_series():
     """On the box, TargetDown for redis-exporter carried every down target of the window."""
     series = [{"metric": {"__name__": "up", "instance": "redis-exporter:9121", "job": "redis"}},
-              {"metric": {"__name__": "up", "instance": "spark-master:8080", "job": "spark-master"}}]
+              {"metric": {"__name__": "up", "instance": "spark-streaming:4040", "job": "spark-driver"}}]
     alert = {"labels": {"alertname": "IndustryFlowTargetDown", "severity": "critical",
                         "instance": "redis-exporter:9121", "job": "redis"}}
     assert graph._own_series(series, alert) == series[:1]

@@ -433,7 +433,7 @@ jobs:
           MUST = [("notebook-hub", 8081), ("api-gateway", 8000), ("notebook-sql-proxy", 6432),
                   ("notebook-tracking-gateway", 5050), ("notebook-cold-broker", 5060), ("minio", 9000)]
           MUST_NOT = [("redis", 6379), ("mlflow", 5000), ("kafka", 29092), ("zookeeper", 2181),
-                      ("timescaledb", 5432), ("spark-master", 7077), ("ml-service-api", 8002),
+                      ("timescaledb", 5432), ("ml-service-api", 8002),
                       ("prometheus", 9090), ("loki", 3100), ("notebook-hub", 8000),
                       (gw, 5000), (gw, 9000), (gw, 9090), (gw, 3100), (gw, 8000), (gw, 6379)]
           def reach(host, port):

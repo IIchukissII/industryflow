@@ -5,11 +5,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # rebuild_spark_services.sh
-# Rebuild the Spark services (job drivers and the executor pool) with updated code
-# Usage: ./rebuild_spark_services.sh [streaming|aggregations|worker|all]
-#   all (default) rebuilds the worker pool as well as both jobs: the executors run on spark-worker,
-#   so a change to its image (Dockerfile.worker, patch-spark-jars.sh, the Spark version) reaches the
-#   cluster only when the worker is rebuilt too. "both" is kept as an alias of "all".
+# Rebuild the Spark jobs with updated code. Each runs in local mode, its executors inside it.
+# Usage: ./rebuild_spark_services.sh [streaming|aggregations|all]   ("both" is an alias of "all")
 
 set -euo pipefail  # Exit on error, undefined variable, or pipe failure
 
@@ -54,7 +51,6 @@ log_info "Rebuilding: $SERVICE"
 echo ""
 
 # Rebuild one compose service: stop, remove container and image, build without cache, start.
-# spark-worker is a scalable pool with no container_name, so it is addressed by service name only.
 rebuild_service() {
     local service="$1"
     log_info "=== Rebuilding ${service} ==="
@@ -96,8 +92,7 @@ rebuild_service() {
     echo ""
 }
 
-# Main logic. The worker goes first: the job drivers register with the cluster and ask it for
-# executors, which should already run the new worker image.
+# Main logic.
 case $SERVICE in
     streaming)
         rebuild_service spark-streaming
@@ -105,16 +100,12 @@ case $SERVICE in
     aggregations)
         rebuild_service spark-aggregations
         ;;
-    worker)
-        rebuild_service spark-worker
-        ;;
     all|both)
-        rebuild_service spark-worker
         rebuild_service spark-streaming
         rebuild_service spark-aggregations
         ;;
     *)
-        log_error "Invalid argument. Use: streaming, aggregations, worker, or all"
+        log_error "Invalid argument. Use: streaming, aggregations, or all"
         exit 1
         ;;
 esac
@@ -124,4 +115,4 @@ log_info ""
 log_info "Next steps:"
 log_info "1. Check logs for any errors"
 log_info "2. Verify data is flowing to TimescaleDB"
-log_info "3. Monitor the Spark master UI at http://localhost:8083 (compose publishes the master's 8080 on 8083)"
+log_info "3. Check each job's micro-batches in its log: sudo docker compose logs -f spark-streaming"

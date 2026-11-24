@@ -25,7 +25,7 @@ scrape_configs:
         filters:
           - name: name
             values: ['^/?industryflow-']
-      # And by network: the notebook kernels and the scaled spark-worker carry no fixed name. A
+      # And by network: the notebook kernels carry no fixed name. A
       # container both select is one target (one target group per job, keyed by container id).
       - host: unix:///var/run/docker.sock
         refresh_interval: 5s

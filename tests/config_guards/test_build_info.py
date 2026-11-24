@@ -141,7 +141,6 @@ def test_every_served_revision_is_scraped():
 EXEMPT = {
     "frontend": "serves static files; no metrics",
     "mlflow": "the stock tracking server; serves no metrics the platform scrapes",
-    "spark-worker": "the stock worker; executors run only code the driver ships, and the driver reports",
     "notebook-hub": "the stock hub with platform configuration; its own metrics are not scraped",
     "notebook-sql-proxy": "serves no metrics",
     "notebook-tracking-gateway": "serves no metrics",

@@ -58,8 +58,8 @@ def test_the_job_starts_every_store_builds_the_image_and_requires_the_stack():
     job = _jobs()[JOB]
     runs = _runs(job)
     ups = "\n".join(line for line in runs.splitlines() if re.search(r"docker compose up\b", line))
-    # The job's executors run on the worker, as deployed; without one the application only waits.
-    for service in ("kafka", "timescaledb", "minio", "spark-master", "spark-worker"):
+    # The jobs run in local mode, as deployed: their executors are inside the job's own container.
+    for service in ("kafka", "timescaledb", "minio"):
         assert re.search(rf"(?<![\w-]){service}(?![\w-])", ups), f"the job does not start {service}"
     assert "docker compose run --rm db-migrate" in runs, "the job applies no schema"
     # An attached `up` exits 0 whatever the one-shot did; `run` exits with it.

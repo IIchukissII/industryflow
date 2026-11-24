@@ -25,7 +25,7 @@
 #
 # A failure never leaves the stream engines stopped: they are started again on any exit.
 set -euo pipefail
-SPARK=(spark-master spark-worker spark-streaming spark-aggregations)
+SPARK=(spark-streaming spark-aggregations)
 spark_down=0
 restore_spark() {
     if [ "$spark_down" = 1 ]; then
@@ -86,7 +86,8 @@ docker compose --profile backup run --rm --no-deps db-backup
 echo "== schema"
 docker compose up --no-deps --exit-code-from db-migrate db-migrate
 echo "== up"
-docker compose "${UP_PROFILES[@]}" up -d
+# --remove-orphans: a service the checkout no longer defines stops with the upgrade, not after it.
+docker compose "${UP_PROFILES[@]}" up -d --remove-orphans
 # The edges cache their upstreams' addresses: the device edge is recreated, the web edge reloaded.
 docker compose up -d --no-deps --force-recreate ingestion-edge
 docker compose exec -T frontend nginx -s reload

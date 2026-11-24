@@ -118,12 +118,6 @@ scrape_configs:
       - targets: ['alert-service-detector:9108']
         labels:
           platform: industryflow
-  - job_name: 'spark-master'
-    metrics_path: '/metrics/master/prometheus'
-    static_configs:
-      - targets: ['spark-master:8080']
-        labels:
-          platform: industryflow
 
   # Loki has no container healthcheck (distroless image), so `up` here is its health signal.
   - job_name: 'loki'

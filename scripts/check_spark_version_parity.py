@@ -18,18 +18,17 @@ coordinates behind, and nothing downstream objects:
 That is the whole failure mode, and it is silent in both directions — which is why it is checked
 here, statically, rather than left to a build that has no reason to complain.
 
-The same version is written outside the Dockerfiles too, and drifts the same way: the compose file
-runs the stock `apache/spark` image as the cluster master, the test suite pins `pyspark`, and job
-code has carried its own connector coordinate. Every one of them must be the Dockerfiles' version.
-A master on one patch and workers on another is a cluster the images never tested.
+The same version is written outside the Dockerfiles too, and drifts the same way: a compose file or
+manifest that names a stock `apache/spark` image, the test suite's `pyspark` pin, and job code that
+carries its own connector coordinate. Every one of them must be the Dockerfiles' version.
 
 This is a declarative check, in the sense of `check_model_env_parity.py`: it compares what the files
 SAY, before anything is built. It is not the authority on whether the connector works — the image
 smoke and the box run are. It is the authority on whether the repository contradicts itself.
 
 The JDK is the second fact the images fix, and it drifts the same way. A base tag without `-javaNN`
-takes whatever JDK the image's default tag points at; the compose master and the CI job that runs the
-Spark tests on the runner each carry their own. Each must name the images' Java.
+takes whatever JDK the image's default tag points at; a stock image in compose and the CI job that
+runs the Spark tests on the runner each carry their own. Each must name the images' Java.
 
 Every file set is found by GLOB, deliberately. Naming files would make this script one more list
 whose omission fails silently: a new `Dockerfile.<job>`, compose file or job module added next to the

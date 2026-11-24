@@ -159,7 +159,7 @@ follows = "ADR-0026 dec 10"
 [[symptom]]
 symptom = "Device journey times out"
 cause = "Spark streaming not running"
-fix = "`docker compose up -d spark-master spark-worker spark-streaming`"
+fix = "`docker compose up -d spark-streaming`"
 follows = "ADR-0026 dec 10"
 
 [[symptom]]

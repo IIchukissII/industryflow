@@ -20,9 +20,8 @@ over verified TLS as its own role. Each outcome is read back from the store it l
   exits (ADR-0006 dec 4, 6) with no offset advanced: the readings of the failed batch are written
   once the job runs again (dec 3).
 
-Needs the compose stack's kafka, timescaledb (migrated), minio (initialised), spark-master and a
-spark-worker with a free core and executor's memory for one more application (on a host that also
-runs the deployed jobs, stop one of them first), and the built spark-streaming image. The outage
+Needs the compose stack's kafka, timescaledb (migrated) and minio (initialised), and the built
+spark-streaming image; the job runs in local mode as deployed, its executors inside its container. The outage
 test stops the database. It skips when the database is not reachable; IF_REQUIRE_LIVE_STACK=1, set
 by the CI job that starts them, turns that skip into a failure.
 """

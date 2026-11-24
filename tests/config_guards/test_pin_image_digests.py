@@ -21,9 +21,8 @@ from pin_image_digests import first_party_images, render_overlay  # noqa: E402
 
 VALUES = load_yaml("deploy/helm/industryflow/values.yaml")
 
-# Published by images.yml but deliberately not deployed by the chart: Helm runs Spark in local mode,
-# so the standalone worker image has no workload here.
-NOT_DEPLOYED_BY_CHART = {"industryflow-spark-worker"}
+# Published by images.yml but deliberately not deployed by the chart.
+NOT_DEPLOYED_BY_CHART: set[str] = set()
 
 
 def _published() -> set[str]:
