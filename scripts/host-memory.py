@@ -85,16 +85,22 @@ def platform_limits(shares: dict, tier: str, swap_mib: int | None = None) -> dic
     resident, cold = float(tiers[tier]["resident_mib"]), float(tiers[tier]["cold_mib"])
     headroom = float(shares["headroom"])
     swapped = 1.0 if swap_mib is None or cold == 0 else min(1.0, swap_mib / (cold * headroom))
-    # A limit of 0 is no limit to Docker: every service keeps at least the floor.
-    floor = int(shares["floor_mib"])
+    # A small service's bursts (a worker, a burst of connections) are an amount, not a fraction: each part
+    # keeps at least the margin over its measurement. It also keeps every limit above 0, which Docker reads
+    # as none.
+    margin = int(shares["margin_mib"])
     probes = {"python": int(shares["probe"]["python_mib"])}
+
+    def held(mib: float) -> float:
+        return max(mib * headroom, mib + margin)
+
     out = {}
     for name, s in shares["services"].items():
-        part = cold * float(s["cold"]) * headroom
+        res, part = resident * float(s["resident"]), cold * float(s["cold"])
         # A healthcheck's interpreter runs beside the service, whatever its size (``probe``).
         probe = probes[s["probe"]] if "probe" in s else 0
-        mem = max(int(resident * float(s["resident"]) * headroom + part * (1 - swapped)) + probe, floor)
-        out[name] = (mem, max(mem, int(resident * float(s["resident"]) * headroom + part) + probe))
+        mem = int(held(res) + part * headroom * (1 - swapped)) + probe
+        out[name] = (mem, max(mem, int(held(res) + part * headroom) + probe))
     return out
 
 

@@ -11,7 +11,9 @@
 # platform leaves of the host.
 #
 # headroom: each part's margin over its measurement.
-# floor_mib: the least limit of any service; Docker reads 0 as none and refuses less than 6 MiB.
+# margin_mib: the least margin of a service's resident part over its measurement: a small service's bursts
+#   (an nginx reload's workers, a burst of TLS connections) are an amount, not a fraction. It also keeps every
+#   limit above 0, which Docker reads as none.
 # [reserve]: what runs beside the containers, measured: the host's own processes (Docker, containerd, the
 #   kernel's own memory outside every cgroup) and the one-shot jobs (the backup); times the headroom. A
 #   container's page cache is charged to the container, not here.
@@ -24,7 +26,7 @@
 # effective_cache_size is the planner's guess of the cache it reads through: half the reserve, as before.
 
 headroom = 1.10
-floor_mib = 16
+margin_mib = 16
 notebook_min_mib = 1056
 tier = "250/s"
 
