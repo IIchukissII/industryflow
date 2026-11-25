@@ -75,10 +75,8 @@ so what is measured is the need and not a limit.
 | End-to-end journeys | `scripts/box-e2e.sh` with 240/s beside it, 15 min | 27 ms | 0 beyond the tenant's own cap |
 | Start | every service recreated, sampled each second, 5 min | | |
 
-| Tier | Resident | Cold | Windows |
-|---|---|---|---|
-| 250/s | 5 512 MiB | 2 861 MiB | rest, 250/s, journeys; start |
-| 500/s | 5 462 MiB | 2 872 MiB | rest, 500/s, journeys; start |
+The tiers, every service's resident and cold need, the reserve and the probe are recorded in
+`deploy/host-memory.toml`, each with its measurement; this page holds how they are measured.
 
 | Part | Counted from cgroup v2 | Must sit in |
 |---|---|---|
@@ -86,27 +84,17 @@ so what is measured is the need and not a limit.
 | Cold | peak of resident + `memory.swap.current` over the windows and the start, less the resident peak | Swap |
 
 A start touches every page once and is over in seconds: its peak counts toward what a service may hold
-(memory and swap), not toward what it keeps in memory. Sampled every 10 s, a start's peak is missed; the
-alert worker was stopped at its start (out of memory) until the start window was measured.
+(memory and swap), not toward what it keeps in memory. Sampled every 10 s, a start's peak is missed: the start is
+sampled each second.
 
 Load changes the need by under 2% between rest and 500/s: the JVM heaps and the Python processes are
-fixed. The journeys raise the idle services' resident need (`ml-service-api` 34 → 405 MiB, `mlflow`
-14 → 83 MiB), so a tier always includes them.
+fixed. The journeys raise the idle services' resident need several times over (`ml-service-api`,
+`mlflow`), so a tier always includes them. Outside the containers: Docker, containerd and the kernel's
+memory outside every cgroup, and the backup as the one-shot job beside the platform.
 
-| Largest needs (500/s) | Resident | Cold |
-|---|---|---|
-| `spark-aggregations` | 1 275 MiB | 444 MiB |
-| `spark-streaming` | 1 239 MiB | 418 MiB |
-| `ml-service-api` | 405 MiB | 557 MiB |
-| `grafana` | 244 MiB | 233 MiB |
-| `minio` | 364 MiB | 17 MiB |
-| `kafka` | 290 MiB | 265 MiB |
-| `mlflow` | 83 MiB | 360 MiB |
-
-| Beside the containers | Measured |
-|---|---|
-| Docker, containerd, the kernel outside every cgroup | 605 MiB |
-| A database backup (`db-backup`) | 85 MiB |
+A healthcheck that runs Python starts an interpreter in the container every interval, too short for the
+sampler: it is measured on its own, as `docker exec <container> python -c "import resource, urllib.request;
+print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)"` (MiB).
 
 ### Measure a tier
 
@@ -124,7 +112,7 @@ fixed. The journeys raise the idle services' resident need (`ml-service-api` 34 
 | Option | Effect |
 |---|---|
 | More cores on the host | Raises the CPU ceiling; the ingest path and Spark scale with cores |
-| More memory | A notebook share ([memory](#memory)); the platform's own need does not grow with the host |
+| More memory | A notebook share ([memory](#memory)); with enough swap, the platform's own need does not grow with the host |
 | Kubernetes (ADR-0009) | Ingestion, edge and Spark scale out (ADR-0009) |
 
 ## Reproduce

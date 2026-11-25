@@ -165,3 +165,12 @@ def test_the_least_notebook_share_holds_one_authoring_session():
     hub = (ROOT / "services" / "notebook_hub" / "jupyterhub_config.py").read_text()
     authoring = float(re.search(r"ident\.PROFILE_AUTHORING:\s*([0-9.]+),\s*\n\}", hub).group(1))
     assert int(SHARES["notebook_min_mib"]) >= 480 * float(SHARES["headroom"]) / authoring
+
+
+@pytest.mark.parametrize("tier", sorted(SHARES["tiers"]))
+def test_the_host_a_tier_was_measured_on_holds_the_platform(tier):
+    """The reference host runs the platform at every tier it measured, with its swap holding the cold part."""
+    measured = SHARES["tiers"][tier]
+    host = int(measured["reference_host_mib"])
+    cold = sum(b - m for m, b in host_memory.platform_limits(SHARES, tier).values())
+    host_memory.budget(SHARES, host, cold, tier)
