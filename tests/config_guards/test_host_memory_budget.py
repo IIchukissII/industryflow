@@ -90,6 +90,28 @@ def test_no_service_runs_without_a_limit(tier):
         assert 6 <= mem <= both, f"{name}: {mem}m memory, {both}m with swap"
 
 
+def _python_probe(service: dict) -> bool:
+    """Whether the service's healthcheck runs Python: compose's, else its image's HEALTHCHECK."""
+    hc = service.get("healthcheck")
+    if hc is not None:
+        test = hc.get("test", [])
+        return "python" in " ".join(test if isinstance(test, list) else [test])
+    build = service.get("build")
+    if not isinstance(build, dict):
+        return False
+    dockerfile = ROOT / build.get("context", ".") / build.get("dockerfile", "Dockerfile")
+    m = re.search(r"^HEALTHCHECK(?:[^\n]*\\\n)*[^\n]*", dockerfile.read_text(), flags=re.M)
+    return bool(m and "python" in m.group(0))
+
+
+def test_every_python_probe_is_in_the_budget():
+    """Both sides: a Python healthcheck the budget does not count stops its container at the probe; one it
+    counts that no longer exists holds memory for nothing."""
+    probed = {n for n in _long_running() if _python_probe(COMPOSE[n])}
+    counted = {n for n, s in SHARES["services"].items() if s.get("probe") == "python"}
+    assert probed == counted, f"probed, not counted: {sorted(probed - counted)}; counted, not probed: {sorted(counted - probed)}"
+
+
 def test_the_hub_is_given_the_notebook_share():
     env = COMPOSE["notebook-hub"]["environment"]
     assert env.get("NOTEBOOK_MEMORY_SHARE_MIB") == "${NOTEBOOK_MEMORY_SHARE_MIB:?run scripts/host-memory.py}"

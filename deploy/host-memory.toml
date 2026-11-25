@@ -28,6 +28,14 @@ floor_mib = 16
 notebook_min_mib = 1056
 tier = "250/s"
 
+# [probe]: a healthcheck that runs Python inside the container (compose or its image) starts an interpreter
+#   every interval, charged to the container; measured as its peak, added to both limits of each service
+#   with probe = "python". A sampler at 10 s catches it only by chance, so it is counted on its own.
+
+[probe]
+python_mib = 19
+measured = 2026-11-25
+
 [reserve]
 host_mib = 605
 one_shot_mib = 85
@@ -91,23 +99,27 @@ cold = 0.0059
 # measured: resident 83 MiB, cold 360 MiB
 resident = 0.0152
 cold = 0.1253
+probe = "python"
 
 [services.spark-streaming]
 # measured: resident 1239 MiB, cold 418 MiB
 resident = 0.2268
 cold = 0.1455
+probe = "python"
 heap = { kind = "size", var = "SPARK_STREAMING_DRIVER_MEMORY", fraction = 0.50, min_mib = 512 }
 
 [services.spark-aggregations]
 # measured: resident 1275 MiB, cold 444 MiB
 resident = 0.2334
 cold = 0.1546
+probe = "python"
 heap = { kind = "size", var = "SPARK_AGGREGATIONS_DRIVER_MEMORY", fraction = 0.575, min_mib = 512 }
 
 [services.api-gateway]
 # measured: resident 146 MiB, cold 139 MiB
 resident = 0.0267
 cold = 0.0484
+probe = "python"
 
 [services.frontend]
 # measured: resident 5 MiB, cold 3 MiB
@@ -133,11 +145,13 @@ cold = 0.0007
 # measured: resident 21 MiB, cold 34 MiB
 resident = 0.0038
 cold = 0.0118
+probe = "python"
 
 [services.ml-service-api]
 # measured: resident 405 MiB, cold 557 MiB
 resident = 0.0741
 cold = 0.1939
+probe = "python"
 
 [services.notebook-hub]
 # measured: resident 223 MiB, cold 37 MiB
@@ -178,6 +192,7 @@ cold = 0.0000
 # measured: resident 197 MiB, cold 0 MiB
 resident = 0.0361
 cold = 0.0000
+probe = "python"
 
 [services.cadvisor]
 # measured: resident 39 MiB, cold 3 MiB
