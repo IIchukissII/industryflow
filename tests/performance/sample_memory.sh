@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Runs ON the Docker host while a tier is measured (docs/operations/capacity.md#memory, ADR-0018 dec 6).
+# Runs ON the Docker host while a tier is measured (docs/operations/capacity.md#memory, ADR-0050 dec 1-3).
 # Every interval (default 10 s), each running container's memory from cgroup v2, in MiB:
 #   <epoch> <name> <anon> <shmem> <kernel> <file_mapped> <swap>
 # Not memory.current: it holds the page cache, which the kernel reclaims. A container that restarts or goes

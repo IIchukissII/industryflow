@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""A tier's measured memory need (docs/operations/capacity.md#memory, ADR-0018 dec 6), from a log of
+"""A tier's measured memory need (docs/operations/capacity.md#memory, ADR-0050 dec 1-3), from a log of
 sample_memory.sh, as the lines of deploy/host-memory.toml.
 
     memory_need.py LOG --tier 500/s --readings-per-second 500 --host-mib 7765 [--start WINDOW] WINDOW [...]

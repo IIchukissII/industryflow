@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The single host's memory budget (ADR-0009 dec 6, ADR-0018 dec 6): every long-running Compose service's
+"""The single host's memory budget (ADR-0050; the notebook share, ADR-0018 dec 6): every long-running Compose service's
 memory and swap limits and heaps, from the platform's measured need at its ingest tier, and the notebook
 share the platform leaves of the host.
 
