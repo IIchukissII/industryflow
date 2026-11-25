@@ -73,16 +73,21 @@ so what is measured is the need and not a limit.
 | 250/s | 300 s | 26–27 ms | 0 beyond the tenant's own cap |
 | 500/s | 300 s | 75–250 ms | 0 |
 | End-to-end journeys | `scripts/box-e2e.sh` with 240/s beside it, 15 min | 27 ms | 0 beyond the tenant's own cap |
+| Start | every service recreated, sampled each second, 5 min | | |
 
 | Tier | Resident | Cold | Windows |
 |---|---|---|---|
-| 250/s | 5 512 MiB | 2 581 MiB | rest, 250/s, journeys |
-| 500/s | 5 462 MiB | 2 600 MiB | rest, 500/s, journeys |
+| 250/s | 5 512 MiB | 2 861 MiB | rest, 250/s, journeys; start |
+| 500/s | 5 462 MiB | 2 872 MiB | rest, 500/s, journeys; start |
 
 | Part | Counted from cgroup v2 | Must sit in |
 |---|---|---|
 | Resident | peak of `anon` + `shmem` + `kernel` + `file_mapped` beyond `shmem` | Memory |
-| Cold | peak of resident + `memory.swap.current`, less the resident peak | Swap |
+| Cold | peak of resident + `memory.swap.current` over the windows and the start, less the resident peak | Swap |
+
+A start touches every page once and is over in seconds: its peak counts toward what a service may hold
+(memory and swap), not toward what it keeps in memory. Sampled every 10 s, a start's peak is missed; the
+alert worker was stopped at its start (out of memory) until the start window was measured.
 
 Load changes the need by under 2% between rest and 500/s: the JVM heaps and the Python processes are
 fixed. The journeys raise the idle services' resident need (`ml-service-api` 34 → 405 MiB, `mlflow`
@@ -93,9 +98,10 @@ fixed. The journeys raise the idle services' resident need (`ml-service-api` 34 
 | `spark-aggregations` | 1 275 MiB | 444 MiB |
 | `spark-streaming` | 1 239 MiB | 418 MiB |
 | `ml-service-api` | 405 MiB | 557 MiB |
+| `grafana` | 244 MiB | 233 MiB |
 | `minio` | 364 MiB | 17 MiB |
 | `kafka` | 290 MiB | 265 MiB |
-| `mlflow` | 83 MiB | 321 MiB |
+| `mlflow` | 83 MiB | 360 MiB |
 
 | Beside the containers | Measured |
 |---|---|
@@ -109,7 +115,8 @@ fixed. The journeys raise the idle services' resident need (`ml-service-api` 34 
 | Loose limits (keeps the heaps) | `python3 scripts/host-memory.py`, then set every `*_MEM_LIMIT` and `*_MEMSWAP_LIMIT` in the block to `4096m`; `docker compose` with every profile the host runs (`--profile notebooks --profile ops-agent`) `up -d`; check each container's `HostConfig.Memory` |
 | Start the sampler (Docker host) | `bash tests/performance/sample_memory.sh /tmp/memory.log &` |
 | Windows | rest 5 min; the tier's rate for 5 min ([reproduce](#reproduce)); `scripts/box-e2e.sh` with ingest beside it |
-| The tier's lines | `python3 tests/performance/memory_need.py /tmp/memory.log <start>:<end> … --tier <rate>/s --readings-per-second <rate> --host-mib <MemTotal MiB>` |
+| Start | a second sampler at 1 s (`sample_memory.sh <log> 1`), then `up -d --force-recreate` of every long-running service; 5 min |
+| The tier's lines | `python3 tests/performance/memory_need.py <logs joined> <start>:<end> … --start <start>:<end> --tier <rate>/s --readings-per-second <rate> --host-mib <MemTotal MiB>` |
 | Restore | `python3 scripts/host-memory.py`; the same `up -d` |
 
 ## Raising capacity
