@@ -8,8 +8,8 @@ memory limit and heaps, and the notebook share, derived from the host's memory.
 
     scripts/host-memory.py [--env .env] [--mem-total-mb N] [--print]
 
-Reads the shares from deploy/host-memory.toml and the host's MemTotal from /proc/meminfo (or
---mem-total-mb), and writes them as variables into a block of the env file between two marker lines,
+Reads the shares from deploy/host-memory.toml and the memory the Docker engine has for its containers
+(`docker info`: the host's on Linux, the virtual machine's under Docker Desktop; or --mem-total-mb), and writes them as variables into a block of the env file between two marker lines,
 replacing the block it wrote before; the rest of the file is the operator's and is kept. Compose reads
 the variables; a service whose variable is missing does not start. Run it once before the first `up`
 and again after the host's memory changes; scripts/box-deploy.sh runs it on every deploy.
@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import re
+import subprocess
 import sys
 import tomllib
 
@@ -33,10 +34,15 @@ MIB = 1024 * 1024
 
 
 def mem_total_mib() -> int:
-    for line in pathlib.Path("/proc/meminfo").read_text().splitlines():
-        if line.startswith("MemTotal:"):
-            return int(line.split()[1]) // 1024
-    raise SystemExit("host-memory: no MemTotal in /proc/meminfo")
+    """The memory the Docker engine has for its containers, in MiB."""
+    try:
+        out = subprocess.run(["docker", "info", "--format", "{{.MemTotal}}"], capture_output=True, text=True,
+                             timeout=30, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        raise SystemExit(f"host-memory: cannot ask Docker for its memory ({e}); pass --mem-total-mb") from None
+    if not out.isdigit() or int(out) <= 0:
+        raise SystemExit(f"host-memory: Docker reports no memory total ({out!r}); pass --mem-total-mb")
+    return int(out) // MIB
 
 
 def limit_var(service: str) -> str:

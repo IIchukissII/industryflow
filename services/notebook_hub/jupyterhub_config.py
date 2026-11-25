@@ -414,7 +414,7 @@ async def bind_identity_and_profile(spawner):
         spawner.extra_labels = {**getattr(spawner, "extra_labels", {}), **labels}
 
     spawner.cpu_limit = resources["cpu_limit"]
-    spawner.mem_limit = need
+    # The memory limit was set with the admission (quota.admit).
 
     # Per-profile image + server (ADR-0011 dec 5): authoring gets JupyterLab + the DS stack;
     # analytics gets the report server, which serves rendered reports and no route that runs a

@@ -125,8 +125,8 @@ services:
       - industryflow-network
       - ingestion-back
     restart: unless-stopped
-    # Its share of the host's memory (scripts/host-memory.py): past it the container reclaims and swaps its
-    # own pages, not another service's.
+    # Its share of the host's memory (scripts/host-memory.py): past it the kernel reclaims this container's
+    # own pages, swaps them where the host has swap, and stops it last, never another service.
     mem_limit: ${KAFKA_MEM_LIMIT:?run scripts/host-memory.py}
 
   # Stages the TimescaleDB TLS cert into a postgres-owned volume with 0600 perms (ADR-0017):
@@ -523,8 +523,8 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    # Its share of the host's memory (scripts/host-memory.py): past it the container reclaims and swaps its
-    # own pages, not another service's.
+    # Its share of the host's memory (scripts/host-memory.py): past it the kernel reclaims this container's
+    # own pages, swaps them where the host has swap, and stops it last, never another service.
     mem_limit: ${MLFLOW_MEM_LIMIT:?run scripts/host-memory.py}
 
   # ==========================================================================
@@ -573,8 +573,8 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    # Its share of the host's memory (scripts/host-memory.py): past it the container reclaims and swaps its
-    # own pages, not another service's.
+    # Its share of the host's memory (scripts/host-memory.py): past it the kernel reclaims this container's
+    # own pages, swaps them where the host has swap, and stops it last, never another service.
     mem_limit: ${SPARK_STREAMING_MEM_LIMIT:?run scripts/host-memory.py}
     # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
     # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.
@@ -621,8 +621,8 @@ services:
     networks:
       - industryflow-network
     restart: unless-stopped
-    # Its share of the host's memory (scripts/host-memory.py): past it the container reclaims and swaps its
-    # own pages, not another service's.
+    # Its share of the host's memory (scripts/host-memory.py): past it the kernel reclaims this container's
+    # own pages, swaps them where the host has swap, and stops it last, never another service.
     mem_limit: ${SPARK_AGGREGATIONS_MEM_LIMIT:?run scripts/host-memory.py}
     # Lower CPU weight than the ingest path (default 1024): under contention ingest keeps its latency
     # and Kafka buffers what Spark falls behind on; idle CPU stays available to Spark.

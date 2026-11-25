@@ -40,9 +40,10 @@ class NoRoom(Exception):
 
     def __init__(self, share: int, held: int, need: int):
         mib = 1024 * 1024
-        super().__init__(f"The notebook environments running on this host already hold {held // mib} of its "
-                         f"{share // mib} MiB for notebooks; a new {need // mib} MiB environment does not fit. "
-                         "Try again when one stops, or ask your platform operator.")
+        # What the user sees names no other tenant's use; the hub's log carries what is held.
+        super().__init__(f"This host's {share // mib} MiB for notebook environments is in use; a new "
+                         f"{need // mib} MiB environment does not fit. Try again when one stops, or ask your "
+                         "platform operator.")
         self.share, self.held, self.need = share, held, need
 
 
@@ -113,7 +114,7 @@ _ADMISSION = asyncio.Lock()
 
 
 async def admit(spawner, company_id: str, override_store, count_store,
-                need: int = 0, share: Optional[int] = None) -> None:
+                *, need: int, share: Optional[int] = None) -> None:
     """Raise ``AtCap`` when the tenant already holds its cap of environments, recording the refusal in
     ``count_store``; with a notebook ``share`` (bytes, a Docker host's: ADR-0018 dec 6), raise ``NoRoom``
     when the servers holding a place and this one's ``need`` exceed it; else mark the start as holding
@@ -126,6 +127,8 @@ async def admit(spawner, company_id: str, override_store, count_store,
                 held = memory_held(spawner)
                 if held + need > share:
                     raise NoRoom(share, held, need)
+            # The place and its size are taken together, under the lock, so the next check counts both.
+            spawner.mem_limit = need
             spawner._quota_admitted = True
             return
     await asyncio.to_thread(_record_refusal, count_store, company_id, time.time())

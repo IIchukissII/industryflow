@@ -1063,7 +1063,9 @@ def test_a_start_is_admitted_only_while_its_memory_fits_the_notebook_share():
         _spawn(ns, second)
     shown, _html = format_exception(refused.value, only_jupyterhub=True)
     assert refused.value.status_code == 429
-    assert "hold 1700 of its 2000 MiB" in shown and "1000 MiB environment does not fit" in shown
+    assert "2000 MiB for notebook environments is in use" in shown and "1000 MiB environment does not fit" in shown
+    # No other tenant's use reaches the user's page.
+    assert "1700" not in shown
     assert not second._quota_admitted
     second.active = False
     # A stopped environment frees its place.
