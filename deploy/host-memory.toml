@@ -2,124 +2,218 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# The single host's memory budget (ADR-0018 dec 6; manual: docs/getting-started.md, Performance
-# settings). Each long-running Compose service's memory limit is its share of the host's memory;
-# scripts/host-memory.py derives the limits, the heaps under them and the notebook share from the
-# host and writes them into .env. A limit bounds the service's resident memory: past it the service
-# swaps its own pages, not another's.
+# The single host's memory budget (ADR-0018 dec 6; manual: docs/getting-started.md, Memory budget).
+# A service's memory follows the software and the load, not the host: each tier is the platform's need at
+# one ingest rate, measured on a reference host (docs/operations/capacity.md#memory), never chosen. The
+# need has two parts: resident, the pages in use (anon, shmem, kernel, mapped code), which must sit in
+# memory; and cold, the pages held but untouched, which may sit in swap. Each service has a weight in both.
+# scripts/host-memory.py derives every limit and heap from the tier, and the notebook share from what the
+# platform leaves of the host.
 #
-# reserve: the kernel, Docker, the page cache the database and the broker read through, and the
-#   one-shot jobs (backups, migrations), none of which has a share of its own.
-# notebook_min: the least notebook share the budget may leave; below it the script refuses. Each notebook
-#   profile's memory limit on a single host is a fraction of the share (services/notebook_hub), so the
-#   least share is what keeps the smallest profile usable.
-# The notebook share is what the services and the reserve leave.
+# headroom: each part's margin over its measurement.
+# floor_mib: the least limit of any service; Docker reads 0 as none and refuses less than 6 MiB.
+# [reserve]: what runs beside the containers, measured: the host's own processes (Docker, containerd, the
+#   kernel's own memory outside every cgroup) and the one-shot jobs (the backup); times the headroom. A
+#   container's page cache is charged to the container, not here.
+# notebook_min_mib: a smaller notebook share is written as 0, and the hub refuses every start: one authoring
+#   session, measured at up to 480 MiB (ADR-0018 dec 6), times the headroom, as the authoring profile's half
+#   of the share (services/notebook_hub, PROFILE_SHARE).
+# tier: the default; an operator sets MEMORY_TIER in .env.
+# A heap is a fraction of its service's memory limit, chosen so that at the measured tier it is the heap
+# the measurement ran with; Postgres settings likewise, of timescaledb's limit or of the reserve.
+# effective_cache_size is the planner's guess of the cache it reads through: half the reserve, as before.
 
-reserve = 0.12
-notebook_min = 0.15
+headroom = 1.10
+floor_mib = 16
+notebook_min_mib = 1056
+tier = "250/s"
+
+[reserve]
+host_mib = 605
+one_shot_mib = 85
+measured = 2026-11-25
+
+[tiers."250/s"]
+resident_mib = 5512
+cold_mib = 2581
+readings_per_second = 250
+reference_host_mib = 7765
+measured = 2026-11-25
+
+[tiers."500/s"]
+resident_mib = 5462
+cold_mib = 2600
+readings_per_second = 500
+reference_host_mib = 7765
+measured = 2026-11-25
 
 [postgres]
-# Fractions of timescaledb's limit.
-POSTGRES_SHARED_BUFFERS = 0.25
-POSTGRES_EFFECTIVE_CACHE_SIZE = 0.75
-POSTGRES_MAINTENANCE_WORK_MEM = 0.10
+POSTGRES_SHARED_BUFFERS = { of = "limit", fraction = 0.45 }
+POSTGRES_MAINTENANCE_WORK_MEM = { of = "limit", fraction = 0.15 }
+POSTGRES_EFFECTIVE_CACHE_SIZE = { of = "reserve", fraction = 0.5 }
+
+# Weights of the 500/s tier, measured with each service's resident and cold need beside it.
 
 [services.zookeeper]
-share = 0.015
-heap = { kind = "jvm-opts", var = "ZOOKEEPER_HEAP_OPTS", fraction = 0.5, min_mib = 64 }
+# measured: resident 40 MiB, cold 42 MiB
+resident = 0.0073
+cold = 0.0162
+heap = { kind = "jvm-opts", var = "ZOOKEEPER_HEAP_OPTS", fraction = 1.0, min_mib = 64 }
 
 [services.kafka]
-share = 0.055
-heap = { kind = "jvm-opts", var = "KAFKA_HEAP_OPTS", fraction = 0.6, min_mib = 256 }
+# measured: resident 290 MiB, cold 265 MiB
+resident = 0.0531
+cold = 0.1019
+heap = { kind = "jvm-opts", var = "KAFKA_HEAP_OPTS", fraction = 0.80, min_mib = 256 }
 
 [services.timescaledb]
-share = 0.055
+# measured: resident 212 MiB, cold 42 MiB
+resident = 0.0388
+cold = 0.0162
 
 [services.redis]
-share = 0.008
+# measured: resident 3 MiB, cold 1 MiB
+resident = 0.0005
+cold = 0.0004
 
 [services.quota-redis]
-share = 0.004
+# measured: resident 1 MiB, cold 2 MiB
+resident = 0.0002
+cold = 0.0008
 
 [services.minio]
-share = 0.040
+# measured: resident 364 MiB, cold 17 MiB
+resident = 0.0666
+cold = 0.0065
 
 [services.mlflow]
-share = 0.012
+# measured: resident 83 MiB, cold 321 MiB
+resident = 0.0152
+cold = 0.1235
 
 [services.spark-streaming]
-share = 0.135
-heap = { kind = "size", var = "SPARK_STREAMING_DRIVER_MEMORY", fraction = 0.65, min_mib = 512 }
+# measured: resident 1239 MiB, cold 418 MiB
+resident = 0.2268
+cold = 0.1608
+heap = { kind = "size", var = "SPARK_STREAMING_DRIVER_MEMORY", fraction = 0.50, min_mib = 512 }
 
 [services.spark-aggregations]
-share = 0.160
-heap = { kind = "size", var = "SPARK_AGGREGATIONS_DRIVER_MEMORY", fraction = 0.65, min_mib = 512 }
+# measured: resident 1275 MiB, cold 444 MiB
+resident = 0.2334
+cold = 0.1708
+heap = { kind = "size", var = "SPARK_AGGREGATIONS_DRIVER_MEMORY", fraction = 0.575, min_mib = 512 }
 
 [services.api-gateway]
-share = 0.021
+# measured: resident 146 MiB, cold 139 MiB
+resident = 0.0267
+cold = 0.0535
 
 [services.frontend]
-share = 0.002
+# measured: resident 5 MiB, cold 3 MiB
+resident = 0.0009
+cold = 0.0012
 
 [services.ingestion-service]
-share = 0.016
+# measured: resident 117 MiB, cold 33 MiB
+resident = 0.0214
+cold = 0.0127
 
 [services.ingestion-edge]
-share = 0.005
+# measured: resident 15 MiB, cold 0 MiB
+resident = 0.0027
+cold = 0.0000
 
 [services.device-crl-refresh]
-share = 0.002
+# measured: resident 0 MiB, cold 0 MiB
+resident = 0.0000
+cold = 0.0000
 
 [services.alert-service-detector]
-share = 0.007
+# measured: resident 21 MiB, cold 30 MiB
+resident = 0.0038
+cold = 0.0115
 
 [services.ml-service-api]
-share = 0.035
+# measured: resident 405 MiB, cold 557 MiB
+resident = 0.0741
+cold = 0.2142
 
 [services.notebook-hub]
-share = 0.026
+# measured: resident 223 MiB, cold 37 MiB
+resident = 0.0408
+cold = 0.0142
 
 [services.notebook-sql-proxy]
-share = 0.004
+# measured: resident 0 MiB, cold 22 MiB
+resident = 0.0000
+cold = 0.0085
 
 [services.notebook-tracking-gateway]
-share = 0.006
+# measured: resident 32 MiB, cold 40 MiB
+resident = 0.0059
+cold = 0.0154
 
 [services.notebook-cold-broker]
-share = 0.004
+# measured: resident 1 MiB, cold 65 MiB
+resident = 0.0002
+cold = 0.0250
 
 [services.notebook-sso]
-share = 0.002
+# measured: resident 0 MiB, cold 4 MiB
+resident = 0.0000
+cold = 0.0015
 
 [services.prometheus]
-share = 0.030
+# measured: resident 190 MiB, cold 23 MiB
+resident = 0.0348
+cold = 0.0088
 
 [services.alertmanager]
-share = 0.003
+# measured: resident 29 MiB, cold 0 MiB
+resident = 0.0053
+cold = 0.0000
 
 [services.ops-agent]
-share = 0.011
+# measured: resident 197 MiB, cold 0 MiB
+resident = 0.0361
+cold = 0.0000
 
 [services.cadvisor]
-share = 0.006
+# measured: resident 39 MiB, cold 2 MiB
+resident = 0.0071
+cold = 0.0008
 
 [services.node-exporter]
-share = 0.002
+# measured: resident 12 MiB, cold 0 MiB
+resident = 0.0022
+cold = 0.0000
 
 [services.postgres-exporter]
-share = 0.002
+# measured: resident 14 MiB, cold 0 MiB
+resident = 0.0026
+cold = 0.0000
 
 [services.redis-exporter]
-share = 0.002
+# measured: resident 11 MiB, cold 0 MiB
+resident = 0.0020
+cold = 0.0000
 
 [services.kafka-exporter]
-share = 0.002
+# measured: resident 14 MiB, cold 0 MiB
+resident = 0.0026
+cold = 0.0000
 
 [services.grafana]
-share = 0.032
+# measured: resident 244 MiB, cold 75 MiB
+resident = 0.0447
+cold = 0.0288
 
 [services.loki]
-share = 0.017
+# measured: resident 178 MiB, cold 14 MiB
+resident = 0.0326
+cold = 0.0054
 
 [services.promtail]
-share = 0.009
+# measured: resident 62 MiB, cold 4 MiB
+resident = 0.0114
+cold = 0.0015

@@ -172,8 +172,9 @@ class _Spawner:
         self.log = logging.getLogger("test-spawner")
         self._log_name = f"{user.name}:{name}"
         self.active, self.pending, self.ready = True, None, True
-        # A real spawner's memory limit until the spawn hook sets it.
+        # A real spawner's memory limit until the spawn hook sets it, and its host settings.
         self.mem_limit = None
+        self.extra_host_config = {}
 
 
 def _hub(profile="docker"):
@@ -1017,7 +1018,7 @@ def test_a_spawn_over_the_tenants_cap_is_refused_before_anything_is_minted(monke
 
 def test_a_docker_hub_without_a_notebook_share_does_not_start():
     """ADR-0018 dec 6: on a Docker host the share is derived from the host (scripts/host-memory.py)."""
-    for missing in (None, "", "0", "1.5G"):
+    for missing in (None, "", "-1", "1.5G"):
         with pytest.raises(RuntimeError, match="NOTEBOOK_MEMORY_SHARE_MIB"):
             _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB=missing)
     # Kubernetes places a pod by its request: the hub keeps no share there.
@@ -1041,7 +1042,7 @@ def test_a_start_is_admitted_only_while_its_memory_fits_the_notebook_share():
     from tornado import web
 
     # 2000 MiB: an authoring environment takes 1000, an analytics one 700.
-    _, ns, store = _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB="2000") + (_store(),)
+    cfg, ns, store = _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB="2000") + (_store(),)
     ns["_STORE"] = store
     users = {}
 
@@ -1051,6 +1052,8 @@ def test_a_start_is_admitted_only_while_its_memory_fits_the_notebook_share():
         for u in users.values():
             u.settings["users"] = users
         spawner = _Spawner(user)
+        # What a real DockerSpawner starts with: the hub's containment settings.
+        spawner.extra_host_config = dict(cfg.DockerSpawner.extra_host_config)
         user.spawners[""] = spawner
         return spawner
 
@@ -1058,6 +1061,9 @@ def test_a_start_is_admitted_only_while_its_memory_fits_the_notebook_share():
     _spawn(ns, author)
     _spawn(ns, viewer)
     assert author._quota_admitted and viewer._quota_admitted and author.mem_limit == 1000 * 1024 * 1024
+    # No swap beyond its limit; the hub's containment settings are kept.
+    assert author.extra_host_config["memswap_limit"] == author.mem_limit
+    assert author.extra_host_config["cap_drop"] == ["ALL"]
     second = asking("author-2", "engineer")
     with pytest.raises(web.HTTPError) as refused:
         _spawn(ns, second)
@@ -1090,3 +1096,22 @@ def test_a_servers_memory_limit_outlives_a_hub_restart():
     assert not rebuilt.mem_limit
     rebuilt.load_state(state)
     assert rebuilt.mem_limit == 1000 * 1024 * 1024
+
+
+def test_a_host_the_platform_fills_refuses_every_start_naming_why():
+    """ADR-0018 dec 6: a notebook share of 0 (scripts/host-memory.py, below its minimum) is a share, not an
+    error: the hub starts and refuses every start before anything is minted, and no start runs unlimited."""
+    from jupyterhub.utils import format_exception
+    from tornado import web
+
+    _, ns, store = _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB="0") + (_store(),)
+    ns["_STORE"] = store
+    assert ns["NOTEBOOK_SHARE"] == 0
+    user = _User("author", str(uuid.uuid4()), role="engineer")
+    spawner = _Spawner(user)
+    user.spawners[""] = spawner
+    with pytest.raises(web.HTTPError) as refused:
+        _spawn(ns, spawner)
+    shown, _html = format_exception(refused.value, only_jupyterhub=True)
+    assert refused.value.status_code == 429 and "none for notebook environments" in shown
+    assert not spawner._quota_admitted and spawner.mem_limit is None

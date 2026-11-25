@@ -4,18 +4,28 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The single host's memory budget (ADR-0009 dec 6, ADR-0018 dec 6): every long-running Compose service's
-memory limit and heaps, and the notebook share, derived from the host's memory.
+memory and swap limits and heaps, from the platform's measured need at its ingest tier, and the notebook
+share the platform leaves of the host.
 
-    scripts/host-memory.py [--env .env] [--mem-total-mb N] [--print]
+    scripts/host-memory.py [--env .env] [--tier T] [--mem-total-mb N] [--swap-total-mb N] [--print]
 
-Reads the shares from deploy/host-memory.toml and the memory the Docker engine has for its containers
-(`docker info`: the host's on Linux, the virtual machine's under Docker Desktop; or --mem-total-mb), and writes them as variables into a block of the env file between two marker lines,
-replacing the block it wrote before; the rest of the file is the operator's and is kept. Compose reads
-the variables; a service whose variable is missing does not start. Run it once before the first `up`
-and again after the host's memory changes; scripts/box-deploy.sh runs it on every deploy.
+A service's memory follows the software and the load, not the host, so deploy/host-memory.toml holds the
+platform's measured need per ingest tier in two parts, and each service's weight in each: resident, the
+pages it keeps in use, which must sit in memory; and cold, the pages it holds but does not touch, which
+may sit in swap. A service's memory limit is its resident part times the headroom, and its memory-and-swap
+limit adds its cold part. The host's memory holds every resident part, the reserve and the notebook
+share; its swap holds every cold part.
 
-Refuses (exit 2) when the shares and the reserve leave no notebook share, so a budget that does not fit
-the host is not written.
+The host is the memory the Docker engine has for its containers (`docker info`: the host's on Linux, the
+virtual machine's under Docker Desktop) and the swap of /proc/meminfo, or --mem-total-mb and
+--swap-total-mb for planning. The tier is --tier, else MEMORY_TIER in the env file, else the file's
+default. The values are written into a block of the env file between two marker lines, replacing the
+block written before; the rest of the file is the operator's and is kept. Compose reads them; a service
+whose variable is missing does not start. scripts/box-deploy.sh runs this on every deploy.
+
+Refuses (exit 2), writing nothing, when the platform at the tier and the reserve do not fit the host's
+memory, or its cold part does not fit the swap. A notebook share below its minimum (one authoring
+session) is written as 0: the hub then refuses every start, naming why.
 """
 from __future__ import annotations
 
@@ -45,40 +55,91 @@ def mem_total_mib() -> int:
     return int(out) // MIB
 
 
+def swap_total_mib() -> int:
+    """The host's swap, in MiB (Linux)."""
+    try:
+        for line in pathlib.Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("SwapTotal:"):
+                return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    raise SystemExit("host-memory: no SwapTotal in /proc/meminfo; pass --swap-total-mb")
+
+
 def limit_var(service: str) -> str:
     return re.sub(r"[^A-Z0-9]", "_", service.upper()) + "_MEM_LIMIT"
 
 
-def budget(shares: dict, host_mib: int) -> dict:
-    """Every variable of the budget, by name. ``ValueError`` when the budget does not fit the host."""
-    services = shares["services"]
-    reserve = float(shares["reserve"])
-    used = reserve + sum(float(s["share"]) for s in services.values())
-    notebook = round(1.0 - used, 6)
-    if notebook < float(shares["notebook_min"]):
-        raise ValueError(f"shares and reserve take {used:.0%} of the host; the notebook share would be "
-                         f"{notebook:.0%}, below its minimum {float(shares['notebook_min']):.0%}")
+def swap_limit_var(service: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "_", service.upper()) + "_MEMSWAP_LIMIT"
+
+
+def platform_limits(shares: dict, tier: str) -> dict:
+    """Each service's ``(memory, memory and swap)`` limits in MiB at ``tier``: its weights of the tier's
+    measured resident and cold need, times the headroom. ``ValueError`` for a tier the file does not hold."""
+    tiers = shares["tiers"]
+    if tier not in tiers:
+        raise ValueError(f"no tier {tier!r}; measured tiers: {', '.join(tiers)}")
+    resident, cold = float(tiers[tier]["resident_mib"]), float(tiers[tier]["cold_mib"])
+    headroom = float(shares["headroom"])
+    # A limit of 0 is no limit to Docker: every service keeps at least the floor.
+    floor = int(shares["floor_mib"])
     out = {}
-    limits = {}
-    for name, s in services.items():
-        mib = int(host_mib * float(s["share"]))
-        limits[name] = mib
-        out[limit_var(name)] = f"{mib}m"
-    for name, s in services.items():
+    for name, s in shares["services"].items():
+        mem = max(int(resident * float(s["resident"]) * headroom), floor)
+        out[name] = (mem, mem + int(cold * float(s["cold"]) * headroom))
+    return out
+
+
+def reserve_mib(shares: dict) -> int:
+    """What runs beside the containers, measured, times the headroom."""
+    r = shares["reserve"]
+    return int((int(r["host_mib"]) + int(r["one_shot_mib"])) * float(shares["headroom"]))
+
+
+def budget(shares: dict, host_mib: int, swap_mib: int, tier: str) -> dict:
+    """Every variable of the budget, by name. ``ValueError`` when the platform does not fit the host."""
+    limits = platform_limits(shares, tier)
+    reserve = reserve_mib(shares)
+    resident = sum(mem for mem, _ in limits.values())
+    cold = sum(both - mem for mem, both in limits.values())
+    left = host_mib - resident - reserve
+    if left < 0:
+        raise ValueError(f"the platform at {tier} keeps {resident} MiB in memory and the reserve is {reserve} MiB; "
+                         f"this host has {host_mib} MiB. Choose a lower tier or a host of at least "
+                         f"{resident + reserve} MiB")
+    if cold > swap_mib:
+        raise ValueError(f"the platform at {tier} holds {cold} MiB it does not touch, for swap; this host has "
+                         f"{swap_mib} MiB of swap")
+    out = {}
+    for name, (mem, both) in limits.items():
+        out[limit_var(name)] = f"{mem}m"
+        out[swap_limit_var(name)] = f"{both}m"
+    for name, s in shares["services"].items():
         heap = s.get("heap")
         if heap is None:
             continue
-        mib = max(int(limits[name] * float(heap["fraction"])), int(heap.get("min_mib", 0)))
+        mib = max(int(limits[name][0] * float(heap["fraction"])), int(heap.get("min_mib", 0)))
         if heap["kind"] == "jvm-opts":
             out[heap["var"]] = f"-Xms{mib}m -Xmx{mib}m"
         elif heap["kind"] == "size":
             out[heap["var"]] = f"{mib}m"
         else:
             raise ValueError(f"{name}: unknown heap kind {heap['kind']!r}")
-    for var, of in shares.get("postgres", {}).items():
-        out[var] = f"{int(limits['timescaledb'] * float(of))}MB"
-    out["NOTEBOOK_MEMORY_SHARE_MIB"] = str(int(host_mib * notebook))
+    for var, setting in shares.get("postgres", {}).items():
+        of = limits["timescaledb"][0] if setting["of"] == "limit" else reserve
+        out[var] = f"{int(of * float(setting['fraction']))}MB"
+    notebook = left if left >= int(shares["notebook_min_mib"]) else 0
+    out["NOTEBOOK_MEMORY_SHARE_MIB"] = str(notebook)
     return out
+
+
+def env_tier(env: pathlib.Path) -> str | None:
+    """MEMORY_TIER in the operator's part of the env file."""
+    if not env.exists():
+        return None
+    m = re.search(r"^MEMORY_TIER=(.+)$", env.read_text(), flags=re.M)
+    return m.group(1).strip().strip("\"'") if m else None
 
 
 def write_block(env: pathlib.Path, values: dict) -> None:
@@ -94,18 +155,27 @@ def write_block(env: pathlib.Path, values: dict) -> None:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--env", default=str(ROOT / ".env"))
+    p.add_argument("--tier", help="ingest tier; default MEMORY_TIER in the env file, else the file's tier")
     p.add_argument("--mem-total-mb", type=int)
+    p.add_argument("--swap-total-mb", type=int)
     p.add_argument("--print", action="store_true", help="print the budget, write nothing")
     a = p.parse_args()
+    shares = tomllib.loads(SHARES.read_text())
+    env = pathlib.Path(a.env)
+    tier = a.tier or env_tier(env) or shares["tier"]
     host = a.mem_total_mb or mem_total_mib()
+    swap = a.swap_total_mb if a.swap_total_mb is not None else swap_total_mib()
     try:
-        values = budget(tomllib.loads(SHARES.read_text()), host)
+        values = budget(shares, host, swap, tier)
         if a.print:
             print("\n".join(f"{k}={v}" for k, v in values.items()))
         else:
-            write_block(pathlib.Path(a.env), values)
-            print(f"host-memory: {host} MiB; notebook share {values['NOTEBOOK_MEMORY_SHARE_MIB']} MiB; "
-                  f"{len(values)} variables in {a.env}")
+            write_block(env, values)
+            print(f"host-memory: {host} MiB at {tier}; notebook share {values['NOTEBOOK_MEMORY_SHARE_MIB']} MiB; "
+                  f"{len(values)} variables in {env}")
+        if values["NOTEBOOK_MEMORY_SHARE_MIB"] == "0":
+            print(f"host-memory: the platform at {tier} leaves less than {shares['notebook_min_mib']} MiB of this "
+                  "host for notebooks; the hub refuses every start", file=sys.stderr)
     except ValueError as e:
         print(f"host-memory: {e}", file=sys.stderr)
         return 2

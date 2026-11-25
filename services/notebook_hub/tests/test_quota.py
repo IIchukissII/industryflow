@@ -149,3 +149,12 @@ def test_concurrent_checks_admit_no_more_than_the_cap(store, monkeypatch):
     outcomes = asyncio.run(all_at_once())
     assert sum(o is None for o in outcomes) == 1
     assert all(isinstance(o, quota.AtCap) for o in outcomes if o is not None)
+
+
+def test_against_a_share_a_start_of_no_size_is_never_admitted(store):
+    """ADR-0018 dec 6: a memory limit of 0 means none; such a start would run unbounded on the host."""
+    users = hub()
+    with pytest.raises(quota.NoRoom):
+        asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=0, share=1024 * MIB))
+    with pytest.raises(quota.NoRoom, match="none for notebook environments"):
+        asyncio.run(quota.admit(asking(users, "eve", TENANT), TENANT, store, store, need=MIB, share=0))

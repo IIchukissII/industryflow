@@ -42,8 +42,9 @@ def _notebook_share():
     if SPAWNER != "docker":
         return None
     raw = os.environ.get("NOTEBOOK_MEMORY_SHARE_MIB", "").strip()
-    if not raw.isdigit() or int(raw) <= 0:
-        raise RuntimeError("NOTEBOOK_MEMORY_SHARE_MIB must be a positive number of MiB on a Docker host: "
+    # 0 is a share: a host the platform fills, where every start is refused, naming why.
+    if not raw.isdigit():
+        raise RuntimeError("NOTEBOOK_MEMORY_SHARE_MIB must be a number of MiB on a Docker host: "
                            "run scripts/host-memory.py")
     return int(raw) * 1024 * 1024
 
@@ -410,6 +411,9 @@ async def bind_identity_and_profile(spawner):
         existing_labels.update(labels)
         existing["labels"] = existing_labels
         spawner.extra_create_kwargs = existing
+        # No swap beyond the limit (ADR-0018 dec 6): an environment's memory is in use, and the host's swap
+        # holds only the platform's cold pages (scripts/host-memory.py). Docker would allow the limit again.
+        spawner.extra_host_config = {**dict(spawner.extra_host_config or {}), "memswap_limit": spawner.mem_limit}
     else:
         spawner.extra_labels = {**getattr(spawner, "extra_labels", {}), **labels}
 

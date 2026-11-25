@@ -41,9 +41,14 @@ class NoRoom(Exception):
     def __init__(self, share: int, held: int, need: int):
         mib = 1024 * 1024
         # What the user sees names no other tenant's use; the hub's log carries what is held.
-        super().__init__(f"This host's {share // mib} MiB for notebook environments is in use; a new "
-                         f"{need // mib} MiB environment does not fit. Try again when one stops, or ask your "
-                         "platform operator.")
+        if share == 0:
+            message = ("This host's memory is taken by the platform's own services; it has none for notebook "
+                       "environments. Ask your platform operator.")
+        else:
+            message = (f"This host's {share // mib} MiB for notebook environments is in use; a new "
+                       f"{need // mib} MiB environment does not fit. Try again when one stops, or ask your "
+                       "platform operator.")
+        super().__init__(message)
         self.share, self.held, self.need = share, held, need
 
 
@@ -125,7 +130,8 @@ async def admit(spawner, company_id: str, override_store, count_store,
         if cap is None or await running_for(spawner, company_id) < cap:
             if share is not None:
                 held = memory_held(spawner)
-                if held + need > share:
+                # A start of no size would run without a limit: never admitted against a share.
+                if need <= 0 or held + need > share:
                     raise NoRoom(share, held, need)
             # The place and its size are taken together, under the lock, so the next check counts both.
             spawner.mem_limit = need

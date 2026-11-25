@@ -116,7 +116,10 @@ def test_the_kill_switch_degrades_alerts_until_it_is_turned_back_on(settings, ro
     again = root.put(SWITCH, json={"value": False}).json()
     assert again["changed"] is False
     changes = root.get(f"{SWITCH}/changes").json()
-    assert len(changes) == len(before) + 1, "a flip is recorded once, a repeat not at all (ADR-0043 dec 4, 5)"
+    # The list is a page (newest 50): count what is newer than the last change before the flip, not lengths.
+    last = before[0]["change_id"] if before else 0
+    new = [c for c in changes if c["change_id"] > last]
+    assert len(new) == 1, "a flip is recorded once, a repeat not at all (ADR-0043 dec 4, 5)"
     me = root.get("/users/me").json()
     assert (changes[0]["old_value"], changes[0]["new_value"], str(changes[0]["changed_by"])) == (True, False, str(me["id"]))
 
