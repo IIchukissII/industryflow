@@ -1054,6 +1054,8 @@ services:
       NOTEBOOK_AUTHORING_ROLES: ${NOTEBOOK_AUTHORING_ROLES:-admin,engineer}
       # The tenant's cap on notebook environments running at once (ADR-0049); unset takes the default.
       TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS: ${TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS:-}
+      # The host's notebook share (ADR-0018 dec 6): a start is admitted only while its memory fits.
+      NOTEBOOK_MEMORY_SHARE_MIB: ${NOTEBOOK_MEMORY_SHARE_MIB:?run scripts/host-memory.py}
       # The shared count of tenant quotas: where it records its refusals (ADR-0049).
       QUOTA_REDIS_URL: redis://quota-redis:6379/0
       # Kernels spawn onto the dedicated kernel network, not the platform network (ADR-0018 dec 4).

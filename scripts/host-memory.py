@@ -72,7 +72,6 @@ def budget(shares: dict, host_mib: int) -> dict:
     for var, of in shares.get("postgres", {}).items():
         out[var] = f"{int(limits['timescaledb'] * float(of))}MB"
     out["NOTEBOOK_MEMORY_SHARE_MIB"] = str(int(host_mib * notebook))
-    out["HOST_MEMORY_MIB"] = str(host_mib)
     return out
 
 

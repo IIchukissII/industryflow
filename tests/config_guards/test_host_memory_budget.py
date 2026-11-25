@@ -46,10 +46,17 @@ def test_the_budget_names_exactly_the_long_running_services():
     assert set(SHARES["services"]) == _long_running()
 
 
-def test_every_budget_variable_compose_asks_for_is_one_the_script_writes():
+def test_compose_asks_for_exactly_the_variables_the_script_writes():
+    """Both sides: a variable compose asks for and the script does not write stops every compose command; one
+    the script writes and compose never passes on (the hub's notebook share) leaves its reader without it."""
     asked = set(re.findall(r"\$\{([A-Z0-9_]+):\?run scripts/host-memory\.py\}", COMPOSE_TEXT))
     written = set(host_memory.budget(SHARES, REFERENCE_HOST_MIB))
-    assert asked and not asked - written, f"compose asks for what the budget does not write: {sorted(asked - written)}"
+    assert asked == written, f"asked, not written: {sorted(asked - written)}; written, not asked: {sorted(written - asked)}"
+
+
+def test_the_hub_is_given_the_notebook_share():
+    env = COMPOSE["notebook-hub"]["environment"]
+    assert env.get("NOTEBOOK_MEMORY_SHARE_MIB") == "${NOTEBOOK_MEMORY_SHARE_MIB:?run scripts/host-memory.py}"
 
 
 def test_the_budget_fits_the_reference_host_with_a_notebook_share():

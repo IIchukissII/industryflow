@@ -307,6 +307,9 @@ async def keep_capabilities_alive(spawner) -> bool:
     return live > 0
 
 
+MEM_LIMIT_STATE = "industryflow_mem_limit"
+
+
 def with_capability_lifecycle(base):
     """The deployment's spawner class with the capability lifecycle attached (ADR-0015 dec 2).
 
@@ -332,6 +335,20 @@ def with_capability_lifecycle(base):
             if self._capabilities_revoked:
                 return 0
             return await super().poll()
+
+        # The memory limit a running server was started with outlives a hub restart in its state, so
+        # the notebook share still counts it (ADR-0018 dec 6, quota.memory_held); a restarted hub
+        # rebuilds the spawner from configuration, where it has none.
+        def get_state(self):
+            state = super().get_state()
+            if self.mem_limit:
+                state[MEM_LIMIT_STATE] = int(self.mem_limit)
+            return state
+
+        def load_state(self, state):
+            super().load_state(state)
+            if state.get(MEM_LIMIT_STATE):
+                self.mem_limit = int(state[MEM_LIMIT_STATE])
 
         async def poll_and_notify(self):
             status = await super().poll_and_notify()
