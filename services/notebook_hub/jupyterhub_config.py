@@ -34,6 +34,23 @@ import quota  # noqa: E402
 # Kubernetes behaviour; the Compose deployment sets NOTEBOOK_SPAWNER=docker.
 SPAWNER = os.environ.get("NOTEBOOK_SPAWNER", "kube").strip().lower()
 
+# The host's notebook share (ADR-0018 dec 6): on a Docker host the part of its memory the platform's
+# services leave, derived by scripts/host-memory.py; a start is admitted only when its memory limit
+# fits beside the environments already holding a place. On Kubernetes the scheduler places a pod by its
+# request, so the hub keeps no share there.
+def _notebook_share():
+    if SPAWNER != "docker":
+        return None
+    raw = os.environ.get("NOTEBOOK_MEMORY_SHARE_MIB", "").strip()
+    # 0 is a share: a host the platform fills, where every start is refused, naming why.
+    if not raw.isdigit():
+        raise RuntimeError("NOTEBOOK_MEMORY_SHARE_MIB must be a number of MiB on a Docker host: "
+                           "run scripts/host-memory.py")
+    return int(raw) * 1024 * 1024
+
+
+NOTEBOOK_SHARE = _notebook_share()
+
 # Capability lifetime (ADR-0015 dec 2). The store entry's lifetime is only the backstop: the hub
 # refreshes a healthy server's handles on every spawner poll (Spawner.poll_interval, 30s by
 # default) and deletes them when the server stops, is respawned, or its user logs out. So this
@@ -104,6 +121,7 @@ c.Spawner.args = [
 # ---------------------------------------------------------------------------
 from jupyterhub.auth import Authenticator  # noqa: E402
 from jupyterhub.handlers import BaseHandler  # noqa: E402
+from jupyterhub.traitlets import ByteSpecification  # noqa: E402
 from tornado import web  # noqa: E402
 
 
@@ -185,6 +203,19 @@ PROFILE_RESOURCES = {
     ident.PROFILE_ANALYTICS: {"cpu_limit": 0.5, "mem_limit": "1G"},
     ident.PROFILE_AUTHORING: {"cpu_limit": 2.0, "mem_limit": "4G"},
 }
+# On a Docker host a profile's memory limit is its fraction of the notebook share (ADR-0018 dec 6), so the
+# environments grow with the host; on Kubernetes the fixed limit above is the pod's request.
+PROFILE_SHARE = {
+    ident.PROFILE_ANALYTICS: 0.35,
+    ident.PROFILE_AUTHORING: 0.5,
+}
+
+
+def profile_memory(profile: str) -> int:
+    """The memory limit, in bytes, of an environment of ``profile`` on this deployment."""
+    if NOTEBOOK_SHARE is not None:
+        return int(NOTEBOOK_SHARE * PROFILE_SHARE[profile])
+    return ByteSpecification().validate(None, PROFILE_RESOURCES[profile]["mem_limit"])
 
 
 _STORE = None
@@ -277,6 +308,9 @@ async def keep_capabilities_alive(spawner) -> bool:
     return live > 0
 
 
+MEM_LIMIT_STATE = "industryflow_mem_limit"
+
+
 def with_capability_lifecycle(base):
     """The deployment's spawner class with the capability lifecycle attached (ADR-0015 dec 2).
 
@@ -302,6 +336,20 @@ def with_capability_lifecycle(base):
             if self._capabilities_revoked:
                 return 0
             return await super().poll()
+
+        # The memory limit a running server was started with outlives a hub restart in its state, so
+        # the notebook share still counts it (ADR-0018 dec 6, quota.memory_held); a restarted hub
+        # rebuilds the spawner from configuration, where it has none.
+        def get_state(self):
+            state = super().get_state()
+            if self.mem_limit:
+                state[MEM_LIMIT_STATE] = int(self.mem_limit)
+            return state
+
+        def load_state(self, state):
+            super().load_state(state)
+            if state.get(MEM_LIMIT_STATE):
+                self.mem_limit = int(state[MEM_LIMIT_STATE])
 
         async def poll_and_notify(self):
             status = await super().poll_and_notify()
@@ -330,21 +378,28 @@ async def bind_identity_and_profile(spawner):
         company_id=auth_state.get("company_id", ""),
         role=auth_state.get("role", ""),
     )
-    # The tenant's cap on environments running at once (ADR-0049, ADR-0011 dec 7): refused before
-    # anything is minted or started, naming the cap.
+    # The profile is chosen by role, not offered to the user (ADR-0011 dec 5, ADR-0014 dec 4).
+    profile = ident.select_profile(who.role, AUTHORING_ROLES)
+    resources = PROFILE_RESOURCES[profile]
+    # The tenant's cap on environments running at once (ADR-0049, ADR-0011 dec 7), and on a Docker host
+    # the notebook share (ADR-0018 dec 6): refused before anything is minted or started, naming why.
     try:
-        await quota.admit(spawner, who.company_id, _override_store(), _quota_store())
-    except quota.AtCap as refused:
-        spawner.log.warning("tenant %s at its cap of %d notebook environment(s); %s refused",
-                            who.company_id, refused.cap, spawner._log_name)
+        need = profile_memory(profile)
+        await quota.admit(spawner, who.company_id, _override_store(), _quota_store(), need=need,
+                          share=NOTEBOOK_SHARE)
+    except (quota.AtCap, quota.NoRoom) as refused:
+        if isinstance(refused, quota.AtCap):
+            spawner.log.warning("tenant %s at its cap of %d notebook environment(s); %s refused",
+                                who.company_id, refused.cap, spawner._log_name)
+        else:
+            spawner.log.warning("notebook share full (%d of %d MiB held, %d MiB asked); %s refused",
+                                refused.held >> 20, refused.share >> 20, refused.need >> 20, spawner._log_name)
         # Nothing started, so its stop records nothing (revoke_server_capabilities).
         spawner._quota_refused = True
         error = web.HTTPError(429, str(refused))
         # What the user's page shows: JupyterHub renders a failed start's jupyterhub_message only.
         error.jupyterhub_message = str(refused)
         raise error from None
-    # The profile is chosen by role, not offered to the user (ADR-0011 dec 5, ADR-0014 dec 4).
-    profile = ident.select_profile(who.role, AUTHORING_ROLES)
     # Identity only — this carries no data credential (ADR-0014 dec 5).
     spawner.environment.update(ident.pod_environment(who, profile))
 
@@ -356,12 +411,14 @@ async def bind_identity_and_profile(spawner):
         existing_labels.update(labels)
         existing["labels"] = existing_labels
         spawner.extra_create_kwargs = existing
+        # No swap beyond the limit (ADR-0018 dec 6): an environment's memory is in use, and the host's swap
+        # holds only the platform's cold pages (scripts/host-memory.py). Docker would allow the limit again.
+        spawner.extra_host_config = {**dict(spawner.extra_host_config or {}), "memswap_limit": spawner.mem_limit}
     else:
         spawner.extra_labels = {**getattr(spawner, "extra_labels", {}), **labels}
 
-    resources = PROFILE_RESOURCES[profile]
     spawner.cpu_limit = resources["cpu_limit"]
-    spawner.mem_limit = resources["mem_limit"]
+    # The memory limit was set with the admission (quota.admit).
 
     # Per-profile image + server (ADR-0011 dec 5): authoring gets JupyterLab + the DS stack;
     # analytics gets the report server, which serves rendered reports and no route that runs a
