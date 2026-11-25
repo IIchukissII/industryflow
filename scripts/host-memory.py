@@ -14,7 +14,7 @@ platform's measured need per ingest tier in two parts, and each service's weight
 pages it keeps in use, which must sit in memory; and cold, the pages it holds but does not touch, which
 may sit in swap. A service's memory limit is its resident part times the headroom, and its memory-and-swap
 limit adds its cold part. The host's memory holds every resident part, the reserve and the notebook
-share; its swap holds every cold part.
+share; its swap holds the cold parts, and what of them the swap cannot hold sits in memory too.
 
 The host is the memory the Docker engine has for its containers (`docker info`: the host's on Linux, the
 virtual machine's under Docker Desktop) and the swap of /proc/meminfo, or --mem-total-mb and
@@ -24,7 +24,7 @@ block written before; the rest of the file is the operator's and is kept. Compos
 whose variable is missing does not start. scripts/box-deploy.sh runs this on every deploy.
 
 Refuses (exit 2), writing nothing, when the platform at the tier and the reserve do not fit the host's
-memory, or its cold part does not fit the swap. A notebook share below its minimum (one authoring
+memory. A notebook share below its minimum (one authoring
 session) is written as 0: the hub then refuses every start, naming why.
 """
 from __future__ import annotations
@@ -74,20 +74,24 @@ def swap_limit_var(service: str) -> str:
     return re.sub(r"[^A-Z0-9]", "_", service.upper()) + "_MEMSWAP_LIMIT"
 
 
-def platform_limits(shares: dict, tier: str) -> dict:
+def platform_limits(shares: dict, tier: str, swap_mib: int | None = None) -> dict:
     """Each service's ``(memory, memory and swap)`` limits in MiB at ``tier``: its weights of the tier's
-    measured resident and cold need, times the headroom. ``ValueError`` for a tier the file does not hold."""
+    measured resident and cold need, times the headroom. With ``swap_mib`` smaller than the cold part, the
+    cold pages that do not fit the swap sit in memory: each service's memory limit takes the same fraction
+    of its cold part. ``ValueError`` for a tier the file does not hold."""
     tiers = shares["tiers"]
     if tier not in tiers:
         raise ValueError(f"no tier {tier!r}; measured tiers: {', '.join(tiers)}")
     resident, cold = float(tiers[tier]["resident_mib"]), float(tiers[tier]["cold_mib"])
     headroom = float(shares["headroom"])
+    swapped = 1.0 if swap_mib is None or cold == 0 else min(1.0, swap_mib / (cold * headroom))
     # A limit of 0 is no limit to Docker: every service keeps at least the floor.
     floor = int(shares["floor_mib"])
     out = {}
     for name, s in shares["services"].items():
-        mem = max(int(resident * float(s["resident"]) * headroom), floor)
-        out[name] = (mem, mem + int(cold * float(s["cold"]) * headroom))
+        part = cold * float(s["cold"]) * headroom
+        mem = max(int(resident * float(s["resident"]) * headroom + part * (1 - swapped)), floor)
+        out[name] = (mem, max(mem, int(resident * float(s["resident"]) * headroom + part)))
     return out
 
 
@@ -99,18 +103,14 @@ def reserve_mib(shares: dict) -> int:
 
 def budget(shares: dict, host_mib: int, swap_mib: int, tier: str) -> dict:
     """Every variable of the budget, by name. ``ValueError`` when the platform does not fit the host."""
-    limits = platform_limits(shares, tier)
+    limits = platform_limits(shares, tier, swap_mib)
     reserve = reserve_mib(shares)
     resident = sum(mem for mem, _ in limits.values())
-    cold = sum(both - mem for mem, both in limits.values())
     left = host_mib - resident - reserve
     if left < 0:
-        raise ValueError(f"the platform at {tier} keeps {resident} MiB in memory and the reserve is {reserve} MiB; "
-                         f"this host has {host_mib} MiB. Choose a lower tier or a host of at least "
-                         f"{resident + reserve} MiB")
-    if cold > swap_mib:
-        raise ValueError(f"the platform at {tier} holds {cold} MiB it does not touch, for swap; this host has "
-                         f"{swap_mib} MiB of swap")
+        raise ValueError(f"the platform at {tier} keeps {resident} MiB in memory (with {swap_mib} MiB of swap) and "
+                         f"the reserve is {reserve} MiB; this host has {host_mib} MiB. Choose a lower tier, more "
+                         f"swap, or a host of at least {resident + reserve} MiB")
     out = {}
     for name, (mem, both) in limits.items():
         out[limit_var(name)] = f"{mem}m"

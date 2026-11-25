@@ -84,6 +84,8 @@ def test_compose_asks_for_exactly_the_variables_the_script_writes(tier):
 @pytest.mark.parametrize("tier", sorted(SHARES["tiers"]))
 def test_no_service_runs_without_a_limit(tier):
     """Docker reads a limit of 0 as none, and refuses one under 6 MiB."""
+    for name, (mem, both) in host_memory.platform_limits(SHARES, tier, 0).items():
+        assert 6 <= mem <= both, f"{name}: {mem}m memory, {both}m with swap"
     for name, (mem, both) in host_memory.platform_limits(SHARES, tier).items():
         assert 6 <= mem <= both, f"{name}: {mem}m memory, {both}m with swap"
 
@@ -107,8 +109,19 @@ def test_a_host_the_platform_does_not_fit_is_refused():
     tier = SHARES["tiers"][SHARES["tier"]]
     with pytest.raises(ValueError, match="keeps .* in memory"):
         host_memory.budget(SHARES, int(tier["resident_mib"]) // 2, LARGE_SWAP_MIB, SHARES["tier"])
-    with pytest.raises(ValueError, match="of swap"):
-        host_memory.budget(SHARES, LARGE_HOST_MIB, int(tier["cold_mib"]) // 2, SHARES["tier"])
+
+
+def test_without_swap_the_cold_pages_sit_in_memory():
+    """A host without swap holds the whole need in memory; with half the swap, half the cold part."""
+    t = SHARES["tier"]
+    full = host_memory.platform_limits(SHARES, t, LARGE_SWAP_MIB)
+    none = host_memory.platform_limits(SHARES, t, 0)
+    for name in full:
+        assert none[name][0] == none[name][1] >= full[name][1] - 1, name
+        assert none[name][1] == full[name][1], name
+    cold = sum(b - m for m, b in full.values())
+    half = host_memory.platform_limits(SHARES, t, cold // 2)
+    assert abs(sum(b - m for m, b in half.values()) - cold // 2) < len(full) + 1
 
 
 def test_below_its_minimum_the_notebook_share_is_none():

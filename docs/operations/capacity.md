@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Capacity
 
-Measured ingest capacity of the Compose stack on one host, how to reproduce it, and how to raise it.
+Measured ingest capacity and memory need of the Compose stack on one host, how to reproduce them, and how to raise capacity.
 
 ## Measured on one node: 8 GB RAM, 4 cores
 
@@ -15,7 +15,7 @@ performance settings (ADR-0009 dec 6).
 | Running on the node | Containers |
 |---|---|
 | Ingest path | `ingestion-edge`, `ingestion-service`, `kafka`, `zookeeper` |
-| Stream processing | `spark-master`, `spark-worker`, `spark-streaming`, `spark-aggregations` |
+| Stream processing | `spark-master`, `spark-worker`, `spark-streaming`, `spark-aggregations` (the 2026-10-18 run; local mode since #743) |
 | Storage | `timescaledb`, `minio`, `redis` |
 | Platform | `frontend`, `api-gateway`, `alert-service-detector`, `ml-service-api`, `mlflow` |
 | Notebooks profile | `notebook-hub`, `notebook-sso`, `notebook-sql-proxy`, `notebook-tracking-gateway`, `notebook-cold-broker` |
@@ -61,12 +61,63 @@ Ceiling: about 875 readings/s, bound by CPU.**
 Spark runs at a lower CPU weight than the ingest path (`SPARK_CPU_SHARES`). Under contention the ingest
 path keeps its latency, and Kafka holds what Spark has not processed yet.
 
+## Memory
+
+The platform's need per ingest tier, the source of `deploy/host-memory.toml` (manual: Getting started, Memory budget).
+Measured 2026-11-25 on the 8 GB node (7 765 MiB, 4 095 MiB swap), every container under a 4 GiB limit,
+so what is measured is the need and not a limit.
+
+| Window | Load | Device p95 | Errors |
+|---|---|---|---|
+| Rest | none | | |
+| 250/s | 300 s | 26–27 ms | 0 beyond the tenant's own cap |
+| 500/s | 300 s | 75–250 ms | 0 |
+| End-to-end journeys | `scripts/box-e2e.sh` with 240/s beside it, 15 min | 27 ms | 0 beyond the tenant's own cap |
+
+| Tier | Resident | Cold | Windows |
+|---|---|---|---|
+| 250/s | 5 512 MiB | 2 581 MiB | rest, 250/s, journeys |
+| 500/s | 5 462 MiB | 2 600 MiB | rest, 500/s, journeys |
+
+| Part | Counted from cgroup v2 | Must sit in |
+|---|---|---|
+| Resident | peak of `anon` + `shmem` + `kernel` + `file_mapped` beyond `shmem` | Memory |
+| Cold | peak of resident + `memory.swap.current`, less the resident peak | Swap |
+
+Load changes the need by under 2% between rest and 500/s: the JVM heaps and the Python processes are
+fixed. The journeys raise the idle services' resident need (`ml-service-api` 34 → 405 MiB, `mlflow`
+14 → 83 MiB), so a tier always includes them.
+
+| Largest needs (500/s) | Resident | Cold |
+|---|---|---|
+| `spark-aggregations` | 1 275 MiB | 444 MiB |
+| `spark-streaming` | 1 239 MiB | 418 MiB |
+| `ml-service-api` | 405 MiB | 557 MiB |
+| `minio` | 364 MiB | 17 MiB |
+| `kafka` | 290 MiB | 265 MiB |
+| `mlflow` | 83 MiB | 321 MiB |
+
+| Beside the containers | Measured |
+|---|---|
+| Docker, containerd, the kernel outside every cgroup | 605 MiB |
+| A database backup (`db-backup`) | 85 MiB |
+
+### Measure a tier
+
+| Step | Command |
+|---|---|
+| Loose limits (keeps the heaps) | `python3 scripts/host-memory.py`, then set every `*_MEM_LIMIT` and `*_MEMSWAP_LIMIT` in the block to `4096m`; `docker compose` with every profile the host runs (`--profile notebooks --profile ops-agent`) `up -d`; check each container's `HostConfig.Memory` |
+| Start the sampler (Docker host) | `bash tests/performance/sample_memory.sh /tmp/memory.log &` |
+| Windows | rest 5 min; the tier's rate for 5 min ([reproduce](#reproduce)); `scripts/box-e2e.sh` with ingest beside it |
+| The tier's lines | `python3 tests/performance/memory_need.py /tmp/memory.log <start>:<end> … --tier <rate>/s --readings-per-second <rate> --host-mib <MemTotal MiB>` |
+| Restore | `python3 scripts/host-memory.py`; the same `up -d` |
+
 ## Raising capacity
 
 | Option | Effect |
 |---|---|
 | More cores on the host | Raises the CPU ceiling; the ingest path and Spark scale with cores |
-| More memory | Removes swap use under sustained load |
+| More memory | A notebook share ([memory](#memory)); the platform's own need does not grow with the host |
 | Kubernetes (ADR-0009) | Ingestion, edge and Spark scale out (ADR-0009) |
 
 ## Reproduce
