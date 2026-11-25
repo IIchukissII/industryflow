@@ -1073,25 +1073,20 @@ def test_a_start_is_admitted_only_while_its_memory_fits_the_notebook_share():
     _spawn(ns, asking("author-3", "engineer"))
 
 
-@pytest.mark.parametrize("profile", ["docker", "kube"])
-def test_a_servers_memory_limit_outlives_a_hub_restart(profile):
+def test_a_servers_memory_limit_outlives_a_hub_restart():
     """ADR-0018 dec 6: a restarted hub rebuilds each running server's spawner from its saved state; the
-    limit it started with is in that state, so the notebook share still counts it."""
-    cfg, ns = _load_ns(profile)
+    limit it started with is in that state, so the notebook share still counts it. The Docker host's
+    spawner class itself; the Kubernetes one is not built here (it would reach a cluster), and keeps
+    no share to count."""
+    cfg, ns = _load_ns("docker")
     cls = cfg.JupyterHub.spawner_class
     user = _User("author", str(uuid.uuid4()), role="engineer")
-    user.id, user.url = 1, "/user/author/"  # what KubeSpawner names a pod by
-    async def restart():
-        # KubeSpawner starts its reflectors on the running loop.
-        started = cls(user=user, config=cfg)
-        started.mem_limit = 1000 * 1024 * 1024
-        state = started.get_state()
-        rebuilt = cls(user=user, config=cfg)
-        before = rebuilt.mem_limit
-        rebuilt.load_state(state)
-        return state, before, rebuilt.mem_limit
-
-    state, before, after = asyncio.run(restart())
+    user.id, user.url = 1, "/user/author/"
+    started = cls(user=user, config=cfg)
+    started.mem_limit = 1000 * 1024 * 1024
+    state = started.get_state()
     assert state[ns["MEM_LIMIT_STATE"]] == 1000 * 1024 * 1024
-    assert not before
-    assert after == 1000 * 1024 * 1024
+    rebuilt = cls(user=user, config=cfg)
+    assert not rebuilt.mem_limit
+    rebuilt.load_state(state)
+    assert rebuilt.mem_limit == 1000 * 1024 * 1024
