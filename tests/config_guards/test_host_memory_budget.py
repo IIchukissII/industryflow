@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The single host's memory budget (ADR-0018 dec 6, ADR-0009 dec 6): every long-running Compose service
+"""The single host's memory budget (ADR-0050, ADR-0018 dec 6): every long-running Compose service
 holds a part of the platform's measured need at its ingest tier, and the notebook share is what the
 platform leaves of the host.
 
@@ -160,7 +160,7 @@ def test_the_environment_template_sets_no_budget_variable():
 
 
 def test_the_least_notebook_share_holds_one_authoring_session():
-    """notebook_min_mib is one authoring session (480 MiB, ADR-0018 dec 6) times the headroom, as the
+    """notebook_min_mib is one authoring session (480 MiB, ADR-0050 dec 4) times the headroom, as the
     authoring profile's fraction of the share, which the hub holds (PROFILE_SHARE)."""
     hub = (ROOT / "services" / "notebook_hub" / "jupyterhub_config.py").read_text()
     authoring = float(re.search(r"ident\.PROFILE_AUTHORING:\s*([0-9.]+),\s*\n\}", hub).group(1))

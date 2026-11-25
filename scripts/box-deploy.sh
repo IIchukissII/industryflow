@@ -74,7 +74,7 @@ if [ "${BOX_DEPLOY_SHA:-}" != "$sha" ]; then
 fi
 git log --oneline -1
 echo "== memory budget"
-# Every limit and heap, and the notebook share, derived from this host (ADR-0018 dec 6).
+# Every limit and heap, and the notebook share, derived from this host (ADR-0050).
 python3 scripts/host-memory.py
 echo "== build"
 # The commit each image reports as its revision (ADR-0016 dec 8).

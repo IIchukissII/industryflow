@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# The single host's memory budget (ADR-0018 dec 6; manual: docs/getting-started.md, Memory budget).
+# The single host's memory budget (ADR-0050; manual: docs/getting-started.md, Memory budget).
 # A service's memory follows the software and the load, not the host: each tier is the platform's need at
 # one ingest rate, measured on a reference host (docs/operations/capacity.md#memory), never chosen. The
 # need has two parts: resident, the pages in use (anon, shmem, kernel, mapped code), which must sit in
@@ -18,7 +18,7 @@
 #   kernel's own memory outside every cgroup) and the one-shot jobs (the backup); times the headroom. A
 #   container's page cache is charged to the container, not here.
 # notebook_min_mib: a smaller notebook share is written as 0, and the hub refuses every start: one authoring
-#   session, measured at up to 480 MiB (ADR-0018 dec 6), times the headroom, as the authoring profile's half
+#   session, measured at up to 480 MiB (ADR-0050 dec 4), times the headroom, as the authoring profile's half
 #   of the share (services/notebook_hub, PROFILE_SHARE).
 # tier: the default; an operator sets MEMORY_TIER in .env.
 # A heap is a fraction of its service's memory limit, chosen so that at the measured tier it is the heap
