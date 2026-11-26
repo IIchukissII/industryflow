@@ -50,6 +50,12 @@ async def main():
     base = datetime.fromisoformat(a.run_start)
     # One step per reading of the whole run, in whole microseconds: the send schedule's own spacing.
     step_us = max(1, round(1_000_000 / (a.rate * a.workers)))
+    # The edge refuses a reading stamped past its clock by more than the contract's skew: such a run
+    # would only measure refusals.
+    last = base + timedelta(microseconds=int(a.rate * a.duration) * a.workers * step_us)
+    if last > datetime.now(base.tzinfo) + timedelta(seconds=readings.MAX_FUTURE_SKEW_SECONDS):
+        raise SystemExit(f"--run-start {a.run_start}: the run's last reading would be stamped more than "
+                         f"{readings.MAX_FUTURE_SKEW_SECONDS} s ahead of now; use now")
     ctx = readings.device_tls_context(a.cert, a.key, a.ca)
     limits = httpx.Limits(max_connections=a.connections, max_keepalive_connections=a.connections)
     rows = []

@@ -132,7 +132,7 @@ host run only the sampler.
 | Sensor map | JSON object `name -> sensor UUID` of sensors of an equipment provisioned for the test, in the device's tenant; never a tenant's own sensors, whose charts and data the run's readings would join |
 | Start the sampler (Docker host) | `bash tests/performance/sample_host.sh /tmp/sample.log &` |
 | Load, one process per 125 readings/s | `python3 tests/performance/loadgen.py --url https://<host>:8443/ingest --cert <crt> --key <key> --ca <edge-ca.crt> --sensor-map <map.json> --equipment-id <uuid> --site-id <site> --rate 125 --duration 120 --run-start <now, ISO with offset> --csv out-K.csv --workers 2 --worker K` (K = 0, 1 for 250 readings/s) |
-| Count landed rows | `SELECT count(*) FROM "<tenant-schema>".sensor_measurements WHERE time >= '<run-start>' AND time < '<run-start>'::timestamptz + '<sent × step_us> microseconds'::interval` (`sent` summed over the workers, `step_us` from the summary) |
+| Count landed rows | `SELECT count(*) FROM "<tenant-schema>".sensor_measurements WHERE sensor_id IN (<the sensor map's UUIDs>) AND time >= '<run-start>' AND time < '<run-start>'::timestamptz + '<sent × step_us> microseconds'::interval` (`sent` summed over the workers, each sending the same count; `step_us` from the summary) |
 | Stop the sampler | `kill %1` in the sampler's shell |
 | Summarize host and containers | `python3 tests/performance/analyze.py /tmp/sample.log <start-epoch> <end-epoch>` |
 
