@@ -4,10 +4,12 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, LineSeries, AreaSeries, CandlestickSeries } from 'lightweight-charts';
-import { getMeasurements, getCombinedAggregations } from '../services/api';
+import { getMeasurements, getReadingsInWindow, getAggregatesInWindow } from '../services/api';
 import websocketService from '../services/websocket';
 import ChartControls from './ChartControls';
-import { dedupeAscending } from '../utils/series';
+import {
+  dedupeAscending, toSecondPoints, windowOf, resolutionFor, resolutionFits, POINTS_PER_REQUEST,
+} from '../utils/series';
 import { sensorLabel } from '../utils/sensors';
 import './SensorChart.css';
 
@@ -32,16 +34,41 @@ const fmt = (v) =>
 const fmtTime = (t) =>
   t == null ? '' : new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+// The axis and the crosshair in the viewer's local time, as the readout above them; the chart's own
+// default is UTC. Tick types: 0 year, 1 month, 2 day of month, 3 time, 4 time with seconds.
+const local = (t) => new Date(t * 1000);
+const tickMark = (t, type) => {
+  const d = local(t);
+  if (type === 0) return String(d.getFullYear());
+  if (type === 1) return d.toLocaleDateString([], { month: 'short' });
+  if (type === 2) return d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+  // 24-hour ticks: a 12-hour label with seconds is wider than the space between ticks.
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false, ...(type === 4 ? { second: '2-digit' } : {}) });
+};
+const crosshairTime = (t) =>
+  local(t).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+const fmtWhen = (ms) => new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+const count = (n) => n.toLocaleString();
+
+// How often the drawn window is read again, so it keeps ending now; raw readings also arrive live.
+const RELOAD_MS = 30000;
+
 
 const SensorChart = ({ sensorId, name, unit }) => {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
-  const seriesKeyRef = useRef(null); // `${chartType}|${timeframe}` — series identity
+  const seriesKeyRef = useRef(null); // `${chartType}|${resolution}` — series identity
 
-  const [selectedTimeframe, setSelectedTimeframe] = useState('raw');
+  const [selectedWindow, setSelectedWindow] = useState('1h');
+  const [selectedResolution, setSelectedResolution] = useState('auto');
   const [selectedChartType, setSelectedChartType] = useState('line');
-  const [selectedTimeRange, setSelectedTimeRange] = useState('100');
+  // What the last load drew: the resolution (auto, or a fallback from raw) and why, if it differs
+  // from what was asked; and, for an empty window, when the sensor's latest reading arrived.
+  const [drawn, setDrawn] = useState(() => resolutionFor('auto', '1h'));
+  const [notice, setNotice] = useState(null);
+  const [lastSeen, setLastSeen] = useState(null);
 
   const [status, setStatus] = useState('loading'); // loading | ready | empty | error
   const [meta, setMeta] = useState({ name: null, unit: '' });
@@ -50,8 +77,9 @@ const SensorChart = ({ sensorId, name, unit }) => {
   const [live, setLive] = useState(false);     // a WS tick landed recently
 
   // effective chart type (candlestick needs OHLC, so it degrades to line on raw)
-  const chartType =
-    selectedChartType === 'candlestick' && isRaw(selectedTimeframe) ? 'line' : selectedChartType;
+  const typeFor = (resolution) =>
+    selectedChartType === 'candlestick' && isRaw(resolution) ? 'line' : selectedChartType;
+  const chartType = typeFor(drawn);
 
   // --- chart lifecycle: created ONCE, sized by a ResizeObserver ----------------------------
   useEffect(() => {
@@ -63,7 +91,8 @@ const SensorChart = ({ sensorId, name, unit }) => {
       height: 300,
       layout: { background: { color: SURFACE }, textColor: '#9aa0ac', fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" },
       grid: { vertLines: { visible: false }, horzLines: { color: '#161c2c' } },
-      timeScale: { timeVisible: true, secondsVisible: true, borderVisible: false },
+      timeScale: { timeVisible: true, secondsVisible: true, borderVisible: false, tickMarkFormatter: tickMark },
+      localization: { timeFormatter: crosshairTime },
       rightPriceScale: { borderVisible: false },
       crosshair: {
         mode: 1,
@@ -96,11 +125,11 @@ const SensorChart = ({ sensorId, name, unit }) => {
     };
   }, []);
 
-  // ensure the right series exists for the current type/timeframe; returns it
-  const ensureSeries = useCallback((type) => {
+  // ensure the right series exists for the type and resolution; returns it
+  const ensureSeries = useCallback((type, resolution) => {
     const chart = chartRef.current;
     if (!chart) return null;
-    const key = `${type}|${selectedTimeframe}`;
+    const key = `${type}|${resolution}`;
     if (seriesRef.current && seriesKeyRef.current === key) return seriesRef.current;
 
     if (seriesRef.current) {
@@ -126,47 +155,78 @@ const SensorChart = ({ sensorId, name, unit }) => {
     seriesRef.current = series;
     seriesKeyRef.current = key;
     return series;
-  }, [selectedTimeframe]);
+  }, []);
 
-  // --- historical load: on sensor / timeframe / type / range change ------------------------
+  // --- the window's load: on sensor / window / resolution / type change, then every RELOAD_MS ----
   useEffect(() => {
     if (!sensorId) return;
     let cancelled = false;
+    const win = windowOf(selectedWindow);
+    const typeOf = (resolution) =>
+      selectedChartType === 'candlestick' && isRaw(resolution) ? 'line' : selectedChartType;
 
-    const load = async () => {
+    const load = async (fit) => {
       setStatus((s) => (s === 'ready' ? s : 'loading'));
       try {
+        const end = new Date();
+        const start = new Date(end.getTime() - win.seconds * 1000);
+        let resolution = resolutionFor(selectedResolution, selectedWindow);
         let data = [];
-        if (isRaw(selectedTimeframe)) {
-          const rows = await getMeasurements(sensorId, parseInt(selectedTimeRange, 10));
+        let note = null;
+
+        if (isRaw(resolution)) {
+          const rows = await getReadingsInWindow(sensorId, start, end, POINTS_PER_REQUEST);
+          if (rows === null) throw new Error('readings did not load');
+          if (rows.length >= POINTS_PER_REQUEST) {
+            // More readings than one request returns: raw would show only the newest slice of the window.
+            if (selectedResolution === 'auto' && resolutionFits('1min', win.seconds)) {
+              resolution = '1min';
+              note = `More than ${count(POINTS_PER_REQUEST)} readings in this window: showing 1-minute averages.`;
+            } else {
+              note = `More than ${count(POINTS_PER_REQUEST)} readings in this window: showing the newest ${count(POINTS_PER_REQUEST)}.`;
+            }
+          }
+          if (isRaw(resolution)) {
+            const { points, merged } = toSecondPoints(rows);
+            data = points;
+            if (!note && merged) note = `${count(merged)} readings share a second with a later one: each second shows its last.`;
+          }
+        }
+        if (!isRaw(resolution)) {
+          const agg = await getAggregatesInWindow(sensorId, resolution, start, end, POINTS_PER_REQUEST);
+          if (agg === null) throw new Error('aggregates did not load');
+          const at = (i) => Math.floor(new Date(i.time).getTime() / 1000);
           data = dedupeAscending(
-            (rows || []).map((r) => ({ time: new Date(r.time).getTime() / 1000, value: r.value }))
-          );
-        } else {
-          const combined = await getCombinedAggregations(sensorId, parseInt(selectedTimeRange, 10));
-          const agg = combined?.timeframes?.[selectedTimeframe]?.data || [];
-          data = dedupeAscending(
-            chartType === 'candlestick'
-              ? agg.map((i) => ({
-                  time: new Date(i.time).getTime() / 1000,
-                  open: i.avg_value, high: i.max_value, low: i.min_value, close: i.avg_value,
-                }))
-              : agg.map((i) => ({ time: new Date(i.time).getTime() / 1000, value: i.avg_value }))
+            typeOf(resolution) === 'candlestick'
+              ? agg.map((i) => ({ time: at(i), open: i.avg_value, high: i.max_value, low: i.min_value, close: i.avg_value }))
+              : agg.map((i) => ({ time: at(i), value: i.avg_value }))
           );
         }
         if (cancelled) return;
 
-        const series = ensureSeries(chartType);
+        const series = ensureSeries(typeOf(resolution), resolution);
         if (!series) return;
         series.setData(data);
-        chartRef.current.timeScale().fitContent(); // fit ONLY on a query change, never per tick
+        if (fit) chartRef.current.timeScale().fitContent(); // fit on a query change, never on a reload
+        setDrawn(resolution);
+        setNotice(note);
 
         if (data.length) {
+          // The readout is the sensor's latest reading, never an average: an aggregate view reads it.
+          const newest = isRaw(resolution) ? null : await getMeasurements(sensorId, 1);
+          if (cancelled) return;
           const last = data[data.length - 1];
-          setLatest({ value: last.value != null ? last.value : last.close, time: last.time });
+          setLatest(newest?.length
+            ? { value: newest[0].value, time: Math.floor(new Date(newest[0].time).getTime() / 1000) }
+            : { value: last.value, time: last.time });
+          setLastSeen(null);
           setStatus('ready');
         } else {
+          // An empty window says when the sensor was last heard from, not only that it is empty.
+          const newest = await getMeasurements(sensorId, 1);
+          if (cancelled) return;
           setLatest(null);
+          setLastSeen(newest?.length ? new Date(newest[0].time).getTime() : null);
           setStatus('empty');
         }
       } catch (err) {
@@ -174,14 +234,10 @@ const SensorChart = ({ sensorId, name, unit }) => {
       }
     };
 
-    load();
-    // aggregated views can't be poked per-tick; refresh them gently (no series churn, no re-fit)
-    let timer = null;
-    if (!supportsLiveTick(selectedTimeframe, chartType)) {
-      timer = setInterval(load, 30000);
-    }
-    return () => { cancelled = true; if (timer) clearInterval(timer); };
-  }, [sensorId, selectedTimeframe, chartType, selectedTimeRange, ensureSeries]);
+    load(true);
+    const timer = setInterval(() => load(false), RELOAD_MS);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [sensorId, selectedWindow, selectedResolution, selectedChartType, ensureSeries]);
 
   // --- live updates: append this sensor's WS ticks incrementally (no redraw) ----------------
   useEffect(() => {
@@ -199,16 +255,17 @@ const SensorChart = ({ sensorId, name, unit }) => {
           : { name: label || m.name, unit: entry.unit || m.unit });
       setLive(true);
 
-      if (entry.value == null || !supportsLiveTick(selectedTimeframe, chartType)) return;
+      if (entry.value == null) return;
+      // Whole seconds, as the loaded points: a second's later reading replaces its point.
       const point = { time: Math.floor(msg.timestamp), value: entry.value };
+      setLatest(point);
       const series = seriesRef.current;
-      if (series) {
+      if (series && supportsLiveTick(drawn, chartType)) {
         try { series.update(point); } catch { /* out-of-order tick — ignore */ }
-        setLatest(point);
       }
     });
     return unsub;
-  }, [sensorId, selectedTimeframe, chartType]);
+  }, [sensorId, drawn, chartType]);
 
   // clear the "live" pulse if ticks stop arriving
   useEffect(() => {
@@ -239,20 +296,27 @@ const SensorChart = ({ sensorId, name, unit }) => {
       </div>
 
       <ChartControls
-        selectedTimeframe={selectedTimeframe}
-        onTimeframeChange={setSelectedTimeframe}
+        selectedWindow={selectedWindow}
+        onWindowChange={setSelectedWindow}
+        selectedResolution={selectedResolution}
+        onResolutionChange={setSelectedResolution}
+        drawnResolution={drawn}
         selectedChartType={selectedChartType}
         onChartTypeChange={setSelectedChartType}
-        selectedTimeRange={selectedTimeRange}
-        onTimeRangeChange={setSelectedTimeRange}
       />
+      {notice && <p className="sensor-chart__notice" role="status">{notice}</p>}
 
       <div className="sensor-chart__canvas-wrap">
         <div ref={containerRef} className="sensor-chart__canvas" />
         {status !== 'ready' && (
           <div className="sensor-chart__overlay">
             {status === 'loading' && <span className="sensor-chart__spinner" aria-label="Loading" />}
-            {status === 'empty' && <span>No readings in this range yet</span>}
+            {status === 'empty' && (
+              <span>
+                No readings in the last {windowOf(selectedWindow).label}.
+                {lastSeen ? ` The latest arrived ${fmtWhen(lastSeen)}.` : ' This sensor has sent none yet.'}
+              </span>
+            )}
             {status === 'error' && <span className="sensor-chart__err">The chart could not load its data.</span>}
           </div>
         )}
