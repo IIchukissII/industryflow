@@ -4,8 +4,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The single host's memory budget (ADR-0050; the notebook share, ADR-0018 dec 6): every long-running Compose service's
-memory and swap limits and heaps, from the platform's measured need at its ingest tier, and the notebook
-share the platform leaves of the host.
+memory and swap limits and heaps, from the platform's measured need at its ingest tier, the notebook
+share and swap the platform leaves of the host, and each notebook profile's least limit and swap.
 
     scripts/host-memory.py [--env .env] [--tier T] [--mem-total-mb N] [--swap-total-mb N] [--print]
 
@@ -16,6 +16,11 @@ may sit in swap. A service's memory limit is its resident part times the headroo
 limit adds its cold part. The host's memory holds every resident part, the reserve and the notebook
 share; its swap holds the cold parts, and what of them the swap cannot hold sits in memory too.
 
+A notebook session is measured in the same two parts, per profile (ADR-0050 dec 5): its resident part
+times the headroom is a session's least memory limit, its cold part times the headroom its swap. The swap
+the platform's cold parts leave is the notebooks' swap; when it cannot hold one authoring session's cold
+part, every session holds its cold part in memory.
+
 The host is the memory the Docker engine has for its containers (`docker info`: the host's on Linux, the
 virtual machine's under Docker Desktop) and the swap of /proc/meminfo, or --mem-total-mb and
 --swap-total-mb for planning. The tier is --tier, else MEMORY_TIER in the env file, else the file's
@@ -24,8 +29,8 @@ block written before; the rest of the file is the operator's and is kept. Compos
 whose variable is missing does not start. scripts/box-deploy.sh runs this on every deploy.
 
 Refuses (exit 2), writing nothing, when the platform at the tier and the reserve do not fit the host's
-memory. A notebook share below its minimum (one authoring
-session) is written as 0: the hub then refuses every start, naming why.
+memory. A notebook share below one authoring session's least memory limit is written as 0: the hub then
+refuses every start, naming why.
 """
 from __future__ import annotations
 
@@ -104,6 +109,25 @@ def platform_limits(shares: dict, tier: str, swap_mib: int | None = None) -> dic
     return out
 
 
+def session_var(profile: str, part: str) -> str:
+    return f"NOTEBOOK_{profile.upper()}_{part}_MIB"
+
+
+def session_limits(shares: dict, swap_left: int) -> tuple[dict, int]:
+    """Each notebook profile's ``(least memory limit, swap)`` in MiB (ADR-0050 dec 5), its measured
+    resident part and cold part times the headroom, and the notebooks' swap. With ``swap_left`` too small
+    for one authoring session's cold part, every session's cold part sits in its memory limit and the
+    notebooks have no swap."""
+    headroom, margin = float(shares["headroom"]), int(shares["margin_mib"])
+    out = {}
+    for profile, s in shares["sessions"].items():
+        res, cold = float(s["resident_mib"]), float(s["cold_mib"])
+        out[profile] = (int(max(res * headroom, res + margin)), int(cold * headroom))
+    if swap_left < out["authoring"][1]:
+        return {p: (mem + swap, 0) for p, (mem, swap) in out.items()}, 0
+    return out, swap_left
+
+
 def reserve_mib(shares: dict) -> int:
     """What runs beside the containers, measured, times the headroom."""
     r = shares["reserve"]
@@ -138,8 +162,13 @@ def budget(shares: dict, host_mib: int, swap_mib: int, tier: str) -> dict:
     for var, setting in shares.get("postgres", {}).items():
         of = limits["timescaledb"][0] if setting["of"] == "limit" else reserve
         out[var] = f"{int(of * float(setting['fraction']))}MB"
-    notebook = left if left >= int(shares["notebook_min_mib"]) else 0
-    out["NOTEBOOK_MEMORY_SHARE_MIB"] = str(notebook)
+    swap_left = max(0, swap_mib - sum(both - mem for mem, both in limits.values()))
+    sessions, swap_share = session_limits(shares, swap_left)
+    out["NOTEBOOK_MEMORY_SHARE_MIB"] = str(left if left >= sessions["authoring"][0] else 0)
+    out["NOTEBOOK_SWAP_SHARE_MIB"] = str(swap_share)
+    for profile, (mem, swap) in sessions.items():
+        out[session_var(profile, "MIN")] = str(mem)
+        out[session_var(profile, "SWAP")] = str(swap)
     return out
 
 
@@ -180,11 +209,13 @@ def main() -> int:
             print("\n".join(f"{k}={v}" for k, v in values.items()))
         else:
             write_block(env, values)
-            print(f"host-memory: {host} MiB at {tier}; notebook share {values['NOTEBOOK_MEMORY_SHARE_MIB']} MiB; "
+            print(f"host-memory: {host} MiB at {tier}; notebook share {values['NOTEBOOK_MEMORY_SHARE_MIB']} MiB, "
+                  f"swap {values['NOTEBOOK_SWAP_SHARE_MIB']} MiB; "
                   f"{len(values)} variables in {env}")
         if values["NOTEBOOK_MEMORY_SHARE_MIB"] == "0":
-            print(f"host-memory: the platform at {tier} leaves less than {shares['notebook_min_mib']} MiB of this "
-                  "host for notebooks; the hub refuses every start", file=sys.stderr)
+            print(f"host-memory: the platform at {tier} leaves less than one authoring session "
+                  f"({values[session_var('authoring', 'MIN')]} MiB) of this host for notebooks; the hub refuses "
+                  "every start", file=sys.stderr)
     except ValueError as e:
         print(f"host-memory: {e}", file=sys.stderr)
         return 2

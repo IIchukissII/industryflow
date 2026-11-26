@@ -17,9 +17,10 @@
 # [reserve]: what runs beside the containers, measured: the host's own processes (Docker, containerd, the
 #   kernel's own memory outside every cgroup) and the one-shot jobs (the backup); times the headroom. A
 #   container's page cache is charged to the container, not here.
-# notebook_min_mib: a smaller notebook share is written as 0, and the hub refuses every start: one authoring
-#   session, measured at up to 480 MiB (ADR-0050 dec 4), times the headroom, as the authoring profile's half
-#   of the share (services/notebook_hub, PROFILE_SHARE).
+# [sessions.<profile>]: one notebook session's need, measured like a service's on the reference journey
+#   (docs/operations/capacity.md#memory, ADR-0050 dec 5). Its resident part times the headroom is a session's
+#   least memory limit, its cold part times the headroom its swap. A notebook share below one authoring
+#   session's least limit is written as 0, and the hub refuses every start.
 # tier: the default; an operator sets MEMORY_TIER in .env.
 # A heap is a fraction of its service's memory limit, chosen so that at the measured tier it is the heap
 # the measurement ran with; Postgres settings likewise, of timescaledb's limit or of the reserve.
@@ -27,7 +28,6 @@
 
 headroom = 1.10
 margin_mib = 16
-notebook_min_mib = 1056
 tier = "250/s"
 
 # [probe]: a healthcheck that runs Python inside the container (compose or its image) starts an interpreter
@@ -38,200 +38,210 @@ tier = "250/s"
 python_mib = 19
 measured = 2026-11-25
 
+[sessions.authoring]
+resident_mib = 570
+cold_mib = 1077
+measured = 2026-11-26
+
+[sessions.analytics]
+resident_mib = 51
+cold_mib = 112
+measured = 2026-11-26
+
 [reserve]
 host_mib = 605
 one_shot_mib = 85
 measured = 2026-11-25
 
 [tiers."250/s"]
-resident_mib = 5512
-cold_mib = 2861
+resident_mib = 6072
+cold_mib = 3220
 readings_per_second = 250
 reference_host_mib = 7765
-measured = 2026-11-25
+measured = 2026-11-26
 
 [tiers."500/s"]
-resident_mib = 5462
-cold_mib = 2872
+resident_mib = 6077
+cold_mib = 3219
 readings_per_second = 500
 reference_host_mib = 7765
-measured = 2026-11-25
+measured = 2026-11-26
 
 [postgres]
-POSTGRES_SHARED_BUFFERS = { of = "limit", fraction = 0.45 }
-POSTGRES_MAINTENANCE_WORK_MEM = { of = "limit", fraction = 0.15 }
+POSTGRES_SHARED_BUFFERS = { of = "limit", fraction = 0.3302 }
+POSTGRES_MAINTENANCE_WORK_MEM = { of = "limit", fraction = 0.1101 }
 POSTGRES_EFFECTIVE_CACHE_SIZE = { of = "reserve", fraction = 0.5 }
 
 # Weights of the 500/s tier, measured with each service's resident and cold need beside it. The cold need
 # includes a start's peak: a start touches every page once, and what it does not keep may sit in swap.
 
 [services.zookeeper]
-# measured: resident 40 MiB, cold 42 MiB
-resident = 0.0073
-cold = 0.0146
+# measured: resident 32 MiB, cold 46 MiB
+resident = 0.0053
+cold = 0.0143
 heap = { kind = "jvm-opts", var = "ZOOKEEPER_HEAP_OPTS", fraction = 1.0, min_mib = 64 }
 
 [services.kafka]
-# measured: resident 290 MiB, cold 265 MiB
-resident = 0.0531
-cold = 0.0923
-heap = { kind = "jvm-opts", var = "KAFKA_HEAP_OPTS", fraction = 0.80, min_mib = 256 }
+# measured: resident 297 MiB, cold 309 MiB
+resident = 0.0489
+cold = 0.0960
+heap = { kind = "jvm-opts", var = "KAFKA_HEAP_OPTS", fraction = 0.78, min_mib = 256 }
 
 [services.timescaledb]
-# measured: resident 212 MiB, cold 42 MiB
-resident = 0.0388
-cold = 0.0146
+# measured: resident 290 MiB, cold 48 MiB
+resident = 0.0477
+cold = 0.0149
 
 [services.redis]
-# measured: resident 3 MiB, cold 1 MiB
-resident = 0.0005
+# measured: resident 4 MiB, cold 1 MiB
+resident = 0.0007
 cold = 0.0003
 
 [services.quota-redis]
-# measured: resident 1 MiB, cold 2 MiB
-resident = 0.0002
-cold = 0.0007
+# measured: resident 2 MiB, cold 2 MiB
+resident = 0.0003
+cold = 0.0006
 
 [services.minio]
-# measured: resident 364 MiB, cold 17 MiB
-resident = 0.0666
-cold = 0.0059
+# measured: resident 352 MiB, cold 18 MiB
+resident = 0.0579
+cold = 0.0056
 
 [services.mlflow]
-# measured: resident 83 MiB, cold 360 MiB
-resident = 0.0152
-cold = 0.1253
+# measured: resident 106 MiB, cold 353 MiB
+resident = 0.0174
+cold = 0.1097
 probe = "python"
 
 [services.spark-streaming]
-# measured: resident 1239 MiB, cold 418 MiB
-resident = 0.2268
-cold = 0.1455
+# measured: resident 1362 MiB, cold 321 MiB
+resident = 0.2241
+cold = 0.0997
 probe = "python"
-heap = { kind = "size", var = "SPARK_STREAMING_DRIVER_MEMORY", fraction = 0.50, min_mib = 512 }
+heap = { kind = "size", var = "SPARK_STREAMING_DRIVER_MEMORY", fraction = 0.4601, min_mib = 512 }
 
 [services.spark-aggregations]
-# measured: resident 1275 MiB, cold 444 MiB
-resident = 0.2334
-cold = 0.1546
+# measured: resident 1356 MiB, cold 385 MiB
+resident = 0.2231
+cold = 0.1196
 probe = "python"
-heap = { kind = "size", var = "SPARK_AGGREGATIONS_DRIVER_MEMORY", fraction = 0.575, min_mib = 512 }
+heap = { kind = "size", var = "SPARK_AGGREGATIONS_DRIVER_MEMORY", fraction = 0.5461, min_mib = 512 }
 
 [services.api-gateway]
-# measured: resident 146 MiB, cold 139 MiB
-resident = 0.0267
-cold = 0.0484
+# measured: resident 194 MiB, cold 170 MiB
+resident = 0.0319
+cold = 0.0528
 probe = "python"
 
 [services.frontend]
-# measured: resident 5 MiB, cold 3 MiB
-resident = 0.0009
-cold = 0.0010
+# measured: resident 7 MiB, cold 4 MiB
+resident = 0.0012
+cold = 0.0012
 
 [services.ingestion-service]
-# measured: resident 117 MiB, cold 34 MiB
-resident = 0.0214
-cold = 0.0118
+# measured: resident 118 MiB, cold 108 MiB
+resident = 0.0194
+cold = 0.0336
 
 [services.ingestion-edge]
-# measured: resident 15 MiB, cold 0 MiB
-resident = 0.0027
-cold = 0.0000
+# measured: resident 19 MiB, cold 3 MiB
+resident = 0.0031
+cold = 0.0009
 
 [services.device-crl-refresh]
-# measured: resident 0 MiB, cold 2 MiB
+# measured: resident 0 MiB, cold 3 MiB
 resident = 0.0000
-cold = 0.0007
+cold = 0.0009
 
 [services.alert-service-detector]
-# measured: resident 21 MiB, cold 34 MiB
-resident = 0.0038
-cold = 0.0118
+# measured: resident 34 MiB, cold 43 MiB
+resident = 0.0056
+cold = 0.0134
 probe = "python"
 
 [services.ml-service-api]
-# measured: resident 405 MiB, cold 557 MiB
-resident = 0.0741
-cold = 0.1939
+# measured: resident 554 MiB, cold 567 MiB
+resident = 0.0912
+cold = 0.1761
 probe = "python"
 
 [services.notebook-hub]
-# measured: resident 223 MiB, cold 37 MiB
-resident = 0.0408
-cold = 0.0129
+# measured: resident 164 MiB, cold 210 MiB
+resident = 0.0270
+cold = 0.0652
 
 [services.notebook-sql-proxy]
-# measured: resident 0 MiB, cold 26 MiB
-resident = 0.0000
-cold = 0.0091
+# measured: resident 16 MiB, cold 22 MiB
+resident = 0.0026
+cold = 0.0068
 
 [services.notebook-tracking-gateway]
-# measured: resident 32 MiB, cold 48 MiB
-resident = 0.0059
-cold = 0.0167
+# measured: resident 34 MiB, cold 72 MiB
+resident = 0.0056
+cold = 0.0224
 
 [services.notebook-cold-broker]
-# measured: resident 1 MiB, cold 72 MiB
-resident = 0.0002
-cold = 0.0251
+# measured: resident 2 MiB, cold 122 MiB
+resident = 0.0003
+cold = 0.0379
 
 [services.notebook-sso]
 # measured: resident 0 MiB, cold 4 MiB
 resident = 0.0000
-cold = 0.0014
+cold = 0.0012
 
 [services.prometheus]
-# measured: resident 190 MiB, cold 46 MiB
-resident = 0.0348
-cold = 0.0160
+# measured: resident 223 MiB, cold 37 MiB
+resident = 0.0367
+cold = 0.0115
 
 [services.alertmanager]
-# measured: resident 29 MiB, cold 0 MiB
+# measured: resident 32 MiB, cold 10 MiB
 resident = 0.0053
-cold = 0.0000
+cold = 0.0031
 
 [services.ops-agent]
-# measured: resident 197 MiB, cold 0 MiB
-resident = 0.0361
-cold = 0.0000
+# measured: resident 92 MiB, cold 121 MiB
+resident = 0.0151
+cold = 0.0376
 probe = "python"
 
 [services.cadvisor]
-# measured: resident 39 MiB, cold 3 MiB
-resident = 0.0071
-cold = 0.0010
+# measured: resident 44 MiB, cold 6 MiB
+resident = 0.0072
+cold = 0.0019
 
 [services.node-exporter]
-# measured: resident 12 MiB, cold 0 MiB
-resident = 0.0022
+# measured: resident 19 MiB, cold 0 MiB
+resident = 0.0031
 cold = 0.0000
 
 [services.postgres-exporter]
-# measured: resident 14 MiB, cold 0 MiB
-resident = 0.0026
+# measured: resident 20 MiB, cold 0 MiB
+resident = 0.0033
 cold = 0.0000
 
 [services.redis-exporter]
-# measured: resident 11 MiB, cold 2 MiB
-resident = 0.0020
-cold = 0.0007
+# measured: resident 13 MiB, cold 2 MiB
+resident = 0.0021
+cold = 0.0006
 
 [services.kafka-exporter]
-# measured: resident 14 MiB, cold 0 MiB
-resident = 0.0026
+# measured: resident 17 MiB, cold 0 MiB
+resident = 0.0028
 cold = 0.0000
 
 [services.grafana]
-# measured: resident 244 MiB, cold 233 MiB
-resident = 0.0447
-cold = 0.0811
+# measured: resident 417 MiB, cold 177 MiB
+resident = 0.0686
+cold = 0.0550
 
 [services.loki]
-# measured: resident 178 MiB, cold 14 MiB
-resident = 0.0326
-cold = 0.0049
+# measured: resident 187 MiB, cold 28 MiB
+resident = 0.0308
+cold = 0.0087
 
 [services.promtail]
-# measured: resident 62 MiB, cold 27 MiB
-resident = 0.0114
-cold = 0.0094
+# measured: resident 70 MiB, cold 27 MiB
+resident = 0.0115
+cold = 0.0084

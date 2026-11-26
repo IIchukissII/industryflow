@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The single host's memory budget (ADR-0050, ADR-0018 dec 6): every long-running Compose service
-holds a part of the platform's measured need at its ingest tier, and the notebook share is what the
-platform leaves of the host.
+holds a part of the platform's measured need at its ingest tier, the notebook share and swap are what
+the platform leaves of the host, and a notebook session's least limit and swap are its measured need.
 
 A service without a limit takes memory from every other when it grows, and a limit that is a fraction of
 the host is wrong on every host but one: a service's memory follows the software and the load. Both sides
@@ -112,9 +112,29 @@ def test_every_python_probe_is_in_the_budget():
     assert probed == counted, f"probed, not counted: {sorted(probed - counted)}; counted, not probed: {sorted(counted - probed)}"
 
 
-def test_the_hub_is_given_the_notebook_share():
+def test_the_hub_is_given_the_notebook_share_and_each_sessions_need():
+    """Both sides: every notebook value the script writes reaches the hub, and the hub reads each."""
     env = COMPOSE["notebook-hub"]["environment"]
-    assert env.get("NOTEBOOK_MEMORY_SHARE_MIB") == "${NOTEBOOK_MEMORY_SHARE_MIB:?run scripts/host-memory.py}"
+    hub = (ROOT / "services" / "notebook_hub" / "jupyterhub_config.py").read_text()
+    written = [k for k in host_memory.budget(SHARES, LARGE_HOST_MIB, LARGE_SWAP_MIB, SHARES["tier"])
+               if k.startswith("NOTEBOOK_") and k.endswith("_MIB")]
+    assert len(written) == 2 + 2 * len(SHARES["sessions"])
+    for name in written:
+        assert env.get(name) == "${%s:?run scripts/host-memory.py}" % name, name
+    assert '_mib_env("NOTEBOOK_MEMORY_SHARE_MIB")' in hub and '_mib_env("NOTEBOOK_SWAP_SHARE_MIB")' in hub
+    assert 'f"NOTEBOOK_{p.upper()}_MIN_MIB"' in hub and 'f"NOTEBOOK_{p.upper()}_SWAP_MIB"' in hub
+
+
+def test_every_notebook_profile_has_a_measured_session():
+    """ADR-0050 dec 5: a session's need is measured per profile, dated; the hub's profiles and the
+    budget's sessions are the same set."""
+    hub = (ROOT / "services" / "notebook_hub" / "jupyterhub_config.py").read_text()
+    shares = re.search(r"PROFILE_SHARE = \{(.*?)\}", hub, flags=re.S).group(1)
+    profiles = {m.lower() for m in re.findall(r"ident\.PROFILE_([A-Z]+):", shares)}
+    assert profiles == set(SHARES["sessions"])
+    for name, session in SHARES["sessions"].items():
+        assert int(session["resident_mib"]) > 0 and int(session["cold_mib"]) >= 0, name
+        assert isinstance(session["measured"], datetime.date), name
 
 
 def test_a_larger_host_gives_the_notebooks_what_it_adds():
@@ -146,11 +166,39 @@ def test_without_swap_the_cold_pages_sit_in_memory():
     assert abs(sum(b - m for m, b in half.values()) - cold // 2) < len(full) + 1
 
 
-def test_below_its_minimum_the_notebook_share_is_none():
+def test_below_one_authoring_session_the_notebook_share_is_none():
     limits = sum(mem for mem, _ in host_memory.platform_limits(SHARES, SHARES["tier"]).values())
-    # A host the platform fits, with less than the minimum left for notebooks.
-    host = limits + host_memory.reserve_mib(SHARES) + int(SHARES["notebook_min_mib"]) // 2
-    assert host_memory.budget(SHARES, host, LARGE_SWAP_MIB, SHARES["tier"])["NOTEBOOK_MEMORY_SHARE_MIB"] == "0"
+    least = host_memory.session_limits(SHARES, LARGE_SWAP_MIB)[0]["authoring"][0]
+    base = limits + host_memory.reserve_mib(SHARES)
+    below = host_memory.budget(SHARES, base + least - 1, LARGE_SWAP_MIB, SHARES["tier"])
+    at = host_memory.budget(SHARES, base + least, LARGE_SWAP_MIB, SHARES["tier"])
+    assert below["NOTEBOOK_MEMORY_SHARE_MIB"] == "0" and at["NOTEBOOK_MEMORY_SHARE_MIB"] == str(least)
+
+
+def test_a_sessions_least_limit_and_swap_are_its_measured_need():
+    """ADR-0050 dec 5: resident times the headroom (at least the margin over it), cold times the headroom."""
+    headroom, margin = float(SHARES["headroom"]), int(SHARES["margin_mib"])
+    sessions, _ = host_memory.session_limits(SHARES, LARGE_SWAP_MIB)
+    for name, s in SHARES["sessions"].items():
+        res, cold = int(s["resident_mib"]), int(s["cold_mib"])
+        assert sessions[name] == (int(max(res * headroom, res + margin)), int(cold * headroom)), name
+
+
+def test_the_notebooks_swap_is_what_the_platforms_cold_parts_leave():
+    t = SHARES["tier"]
+    held = sum(b - m for m, b in host_memory.platform_limits(SHARES, t, LARGE_SWAP_MIB).values())
+    out = host_memory.budget(SHARES, LARGE_HOST_MIB, LARGE_SWAP_MIB, t)
+    assert int(out["NOTEBOOK_SWAP_SHARE_MIB"]) == LARGE_SWAP_MIB - held
+
+
+def test_without_swap_for_one_session_its_cold_part_sits_in_memory():
+    """ADR-0050 dec 2, 5: what the swap cannot hold sits in memory, and no session is admitted swap."""
+    sessions, _ = host_memory.session_limits(SHARES, LARGE_SWAP_MIB)
+    out = host_memory.budget(SHARES, LARGE_HOST_MIB, 0, SHARES["tier"])
+    assert out["NOTEBOOK_SWAP_SHARE_MIB"] == "0"
+    for name, (mem, swap) in sessions.items():
+        assert out[host_memory.session_var(name, "MIN")] == str(mem + swap), name
+        assert out[host_memory.session_var(name, "SWAP")] == "0", name
 
 
 def test_the_environment_template_sets_no_budget_variable():
@@ -159,18 +207,9 @@ def test_the_environment_template_sets_no_budget_variable():
     assert not written & set_there, f".env.example sets budget variables: {sorted(written & set_there)}"
 
 
-def test_the_least_notebook_share_holds_one_authoring_session():
-    """notebook_min_mib is one authoring session (480 MiB, ADR-0050 dec 4) times the headroom, as the
-    authoring profile's fraction of the share, which the hub holds (PROFILE_SHARE)."""
-    hub = (ROOT / "services" / "notebook_hub" / "jupyterhub_config.py").read_text()
-    authoring = float(re.search(r"ident\.PROFILE_AUTHORING:\s*([0-9.]+),\s*\n\}", hub).group(1))
-    assert int(SHARES["notebook_min_mib"]) >= 480 * float(SHARES["headroom"]) / authoring
-
-
 @pytest.mark.parametrize("tier", sorted(SHARES["tiers"]))
-def test_the_host_a_tier_was_measured_on_holds_the_platform(tier):
-    """The reference host runs the platform at every tier it measured, with its swap holding the cold part."""
+def test_a_tiers_need_was_held_by_the_host_it_was_measured_on(tier):
+    """A measurement is of a host that ran it: the tier's resident need fits that host's memory. Its budget,
+    with the headroom, the margins and the reserve, may not (ADR-0050: the 8 GB reference host)."""
     measured = SHARES["tiers"][tier]
-    host = int(measured["reference_host_mib"])
-    cold = sum(b - m for m, b in host_memory.platform_limits(SHARES, tier).values())
-    host_memory.budget(SHARES, host, cold, tier)
+    assert int(measured["resident_mib"]) < int(measured["reference_host_mib"]), tier
