@@ -87,6 +87,10 @@
   pointer-events: none;
 }
 .sensor-chart__err { color: var(--warn); }
+.sensor-chart__overlay > span { max-width: 36ch; text-align: center; line-height: 1.5; }
+
+/* why the chart draws other than asked: a fallback from raw, or readings folded into one second */
+.sensor-chart__notice { margin: -6px 0 10px; font-size: 12px; color: var(--muted); }
 
 .sensor-chart__spinner {
   width: 22px;

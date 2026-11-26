@@ -5,11 +5,13 @@
 """Open-loop load generator for the device ingest edge (docs/operations/capacity.md).
 
 Sends --rate readings/s for --duration s through the mTLS edge, one reading per request, round-robin
-over the sensors in --sensor-map (a JSON object of name -> sensor UUID in the device's tenant). Each
-reading is stamped --run-start plus its sequence number in microseconds, so (time, sensor_id) never
-collides and landed rows can be counted exactly. Run one process per 125 readings/s: a busier process
-lags its own event loop, which shows up as latency and a lower achieved rate. N processes take
---workers N, --worker 0..N-1 and the same --run-start; their sequences interleave.
+over the sensors in --sensor-map (a JSON object of name -> sensor UUID in the device's tenant). Reading
+n is stamped --run-start plus n times the run's step, 1 / (rate x workers) seconds: the readings span
+the run as a device's would, (time, sensor_id) never collides, and landed rows can be counted exactly.
+Use a --run-start of now, on an equipment provisioned for the test: its readings are the run's. Run one
+process per 125 readings/s: a busier process lags its own event loop, which shows up as latency and a
+lower achieved rate. N processes take --workers N, --worker 0..N-1 and the same --run-start; their
+sequences interleave.
 
 Writes one CSV row per request (start, seq, status, ms) to --csv and prints a JSON summary. SIGTERM or
 SIGINT stops sending, waits for requests in flight, then writes both; use a new --csv path per run.
@@ -46,6 +48,14 @@ async def main():
 
     sensors = list(json.load(open(a.sensor_map)).values())
     base = datetime.fromisoformat(a.run_start)
+    # One step per reading of the whole run, in whole microseconds: the send schedule's own spacing.
+    step_us = max(1, round(1_000_000 / (a.rate * a.workers)))
+    # The edge refuses a reading stamped past its clock by more than the contract's skew: such a run
+    # would only measure refusals.
+    last = base + timedelta(microseconds=int(a.rate * a.duration) * a.workers * step_us)
+    if last > datetime.now(base.tzinfo) + timedelta(seconds=readings.MAX_FUTURE_SKEW_SECONDS):
+        raise SystemExit(f"--run-start {a.run_start}: the run's last reading would be stamped more than "
+                         f"{readings.MAX_FUTURE_SKEW_SECONDS} s ahead of now; use now")
     ctx = readings.device_tls_context(a.cert, a.key, a.ca)
     limits = httpx.Limits(max_connections=a.connections, max_keepalive_connections=a.connections)
     rows = []
@@ -59,7 +69,7 @@ async def main():
     async with httpx.AsyncClient(verify=ctx, limits=limits, timeout=10.0) as client:
         async def send(seq):
             body = readings.reading(
-                timestamp=(base + timedelta(microseconds=seq)).isoformat(),
+                timestamp=(base + timedelta(microseconds=seq * step_us)).isoformat(),
                 sensor_id=sensors[seq % len(sensors)], equipment_id=a.equipment_id, site_id=a.site_id,
                 value=float(seq % 1000) / 10.0, unit="u", quality_code=0,
             )
@@ -95,7 +105,7 @@ async def main():
         w.writerows(rows)
     ok = sorted(r[3] for r in rows if r[2] in (200, 202))
     print(json.dumps({
-        "rate": a.rate, "sent": len(rows), "ok": len(ok), "errors": len(rows) - len(ok),
+        "rate": a.rate, "step_us": step_us, "sent": len(rows), "ok": len(ok), "errors": len(rows) - len(ok),
         "achieved_per_s": round(len(rows) / elapsed, 1),
         "p50_ms": round(ok[len(ok) // 2], 1) if ok else None,
         "p95_ms": round(ok[int(len(ok) * 0.95)], 1) if ok else None,

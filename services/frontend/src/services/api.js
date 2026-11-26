@@ -60,12 +60,30 @@ export const getMeasurements = async (sensorId, limit = 100) => {
   }
 };
 
-export const getCombinedAggregations = async (sensorId, limit = 20) => {
+// A sensor's raw readings in [start, end], newest first, at most `limit` of them; null on failure, so a
+// chart can tell "none in the window" from "could not load".
+export const getReadingsInWindow = async (sensorId, start, end, limit) => {
   try {
-    const response = await api.get(`/api/aggregations/combined/${sensorId}?limit=${limit}`);
+    const q = new URLSearchParams({ sensor_id: sensorId, start: start.toISOString(), end: end.toISOString(),
+      order: 'desc', limit: String(limit) });
+    const response = await api.get(`/api/measurements?${q}`);
     return response.data;
   } catch (error) {
-    console.error('Error fetching combined aggregations:', error);
+    console.error('Error fetching readings:', error);
+    return null;
+  }
+};
+
+// A sensor's aggregate buckets of `resolution` (1min, 5min, 1hour) in [start, end], oldest first; null on
+// failure.
+export const getAggregatesInWindow = async (sensorId, resolution, start, end, limit) => {
+  try {
+    const q = new URLSearchParams({ sensor_id: sensorId, start: start.toISOString(), end: end.toISOString(),
+      order: 'asc', limit: String(limit) });
+    const response = await api.get(`/api/aggregations/${resolution}?${q}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching aggregates:', error);
     return null;
   }
 };
