@@ -10,4 +10,4 @@
 pyspark==4.1.4
 pytest==9.2.0
 # The image-module guard reads the Helm values (the jobs' liveness command).
-pyyaml==6.0.3
+pyyaml==6.0.4

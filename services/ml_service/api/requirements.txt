@@ -22,7 +22,7 @@ python-multipart==0.0.34
 
 # MLflow integration
 mlflow==3.18.0
-boto3==1.44.6
+boto3==1.44.11
 
 # ML libraries for inference.
 #
@@ -54,7 +54,7 @@ pandas==2.3.3
 evidently==0.7.23
 
 # Feature Store
-redis[asyncio]==8.1.0
+redis[asyncio]==8.2.0
 
 # Prometheus metrics
 prometheus-fastapi-instrumentator==8.1.0
