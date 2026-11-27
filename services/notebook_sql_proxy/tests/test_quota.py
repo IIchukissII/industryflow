@@ -2,8 +2,9 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""A tenant's SQL sessions are counted across replicas, under its cap and every tenant's total
-(ADR-0049 dec 4, 8, 9, 10), on the store the proxy runs on (industryflow_contracts.testing)."""
+"""A tenant's SQL sessions are counted across replicas under its cap, on the store the proxy runs on
+(industryflow_contracts.testing), and every tenant's together held by each replica's own part of the
+total, which no store outage lifts (ADR-0049 dec 4, 8, 9, 10)."""
 import json
 import os
 import sys
@@ -59,12 +60,52 @@ async def test_every_tenant_together_stays_within_the_total():
     await q.open(A, 2, now=1000)
     await q.open(A, 2, now=1000)
     await q.open(B, 2, now=1000)
-    with pytest.raises(AtCap, match="NOTEBOOK_SQL_SESSIONS_TOTAL=3") as refused:
+    with pytest.raises(AtCap, match="NOTEBOOK_SQL_SESSIONS_TOTAL, 3 on this proxy") as refused:
         await q.open(B, 2, now=1000)
     assert refused.value.cap == quotas.SQL_SESSIONS_TOTAL_ENV
     assert int(await store.get(quotas.SQL_SESSIONS_TOTAL_REFUSALS_KEY)) == 1
     # A refusal at the total takes no place from the tenant's own count.
     assert await store.zcard(quotas.sql_sessions_key(B)) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_total_holds_while_the_store_is_unreadable():
+    """The tenant's cap is waived (dec 8); this replica's part of the total is not (dec 10)."""
+    capabilities = await testing.async_redis()
+    q = SessionQuota(capabilities, _Down(), DEFAULTS, 2)
+    first = await q.open(A, 1, now=1000)
+    await q.open(A, 1, now=1000)               # over the tenant's cap of 1: waived while unreadable
+    with pytest.raises(AtCap) as refused:
+        await q.open(B, 1, now=1000)
+    assert refused.value.cap == quotas.SQL_SESSIONS_TOTAL_ENV
+    await first.release()
+    await q.open(B, 1, now=1000)               # a place given back is taken again
+
+
+@pytest.mark.asyncio
+async def test_each_replica_holds_its_own_part_and_the_parts_add_up_to_the_total():
+    store = await testing.async_redis()
+    _defaults, share = quota.settings({"NOTEBOOK_SQL_SESSIONS_TOTAL": "4", "SQL_PROXY_REPLICAS": "2"})
+    replicas = [SessionQuota(store, store, DEFAULTS, share) for _ in range(2)]
+    opened = 0
+    for replica in replicas:
+        for _ in range(3):
+            try:
+                await replica.open(A, None, now=1000)
+                opened += 1
+            except AtCap:
+                pass
+    assert share == 2 and opened == 4
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_at_the_tenants_cap_gives_back_its_place_in_the_total():
+    store, q = await _quota(total=2)
+    await q.open(A, 1, now=1000)
+    for _ in range(5):
+        with pytest.raises(AtCap):
+            await q.open(A, 1, now=1000)
+    await q.open(B, 1, now=1000)               # the refusals above took no place
 
 
 @pytest.mark.asyncio
@@ -173,11 +214,14 @@ async def test_the_limits_are_the_overrides_copied_for_the_proxy_else_the_defaul
     assert await q.limits(B) == quota.Limits(2, 300, 60)
 
 
-def test_the_settings_refuse_a_value_the_contract_cannot_read():
-    defaults, total = quota.settings({"TENANT_QUOTA_SQL_SESSIONS": "off", "NOTEBOOK_SQL_SESSIONS_TOTAL": "40"})
-    assert defaults[quotas.SQL_SESSIONS] is None and total == 40
-    with pytest.raises(ValueError, match="NOTEBOOK_SQL_SESSIONS_TOTAL"):
-        quota.settings({"NOTEBOOK_SQL_SESSIONS_TOTAL": "off"})
+def test_the_settings_give_each_replica_its_part_and_refuse_what_they_cannot_read():
+    defaults, share = quota.settings({"TENANT_QUOTA_SQL_SESSIONS": "off", "NOTEBOOK_SQL_SESSIONS_TOTAL": "40"})
+    assert defaults[quotas.SQL_SESSIONS] is None and share == 40
+    assert quota.settings({"NOTEBOOK_SQL_SESSIONS_TOTAL": "50", "SQL_PROXY_REPLICAS": "3"})[1] == 16
+    for env in ({"NOTEBOOK_SQL_SESSIONS_TOTAL": "off"}, {"SQL_PROXY_REPLICAS": "two"},
+                {"SQL_PROXY_REPLICAS": "0"}, {"NOTEBOOK_SQL_SESSIONS_TOTAL": "2", "SQL_PROXY_REPLICAS": "3"}):
+        with pytest.raises(ValueError):
+            quota.settings(env)
 
 
 class _Backend:

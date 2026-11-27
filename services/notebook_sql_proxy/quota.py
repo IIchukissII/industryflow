@@ -11,13 +11,18 @@ the capability store on every tenant-status tick (``quotas.cap_key``), else the 
 session and could lift any limit set inside it, so the proxy holds all three from outside (dec 9): it
 counts sessions here, and ``load.SessionLoad`` times statements and idle transactions on the wire.
 
-A session holds a lease in two sorted sets of the quota store, the tenant's and every tenant's together,
-scored by the lease's expiry (``quotas.sql_sessions_key``, ``quotas.SQL_SESSIONS_ALL_KEY``). Every proxy
-replica counts in the same sets (dec 4); an open session renews its lease on each capability re-check,
-and one whose proxy stopped without ending it leaves the count when its lease runs out. The total is the
-notebook share of the database's connections (``NOTEBOOK_SQL_SESSIONS_TOTAL``, dec 10).
+A session holds a lease in the tenant's sorted set of the quota store, scored by the lease's expiry
+(``quotas.sql_sessions_key``). Every proxy replica counts in the same set (dec 4); an open session renews
+its lease on each capability re-check, and one whose proxy stopped without ending it leaves the count when
+its lease runs out.
 
-When the quota store cannot be reached the session is admitted without its count (dec 8), and the
+Every tenant's sessions together are held to the notebook share of the database's connections
+(``NOTEBOOK_SQL_SESSIONS_TOTAL``, dec 10) by each replica's fixed part of it, the total divided by the
+replicas (``SQL_PROXY_REPLICAS``), counted in the replica's own process. The parts add up to the share
+whatever the number of replicas, and hold while the quota store is unreadable: the database's
+connections never depend on it.
+
+When the quota store cannot be reached the tenant's cap is waived and the session admitted (dec 8), and the
 failure is counted in the capability store, which the proxy reaches whenever it serves a session at all
 and the API gateway reports on the platform plane: the proxy exports no metrics of its own, since
 kernels reach it. A refusal is counted per tenant in the quota store, for a superuser to read through
@@ -65,21 +70,16 @@ def quota_store_client(url: str):
     return aioredis.from_url(url, socket_connect_timeout=STORE_TIMEOUT_SECONDS,
                              socket_timeout=STORE_TIMEOUT_SECONDS)
 
-# Admits a session if its tenant and every tenant together are under their caps, in one atomic step, so
-# two replicas at the edge cannot both take the last place. Expired leases are dropped first.
-#   KEYS: the tenant's set, every tenant's set
-#   ARGV: now, lease expiry, session id, the tenant's cap (-1 off), the total, the sets' expiry
-# Returns 0 admitted, 1 the tenant is at its cap, 2 every tenant together is at the total.
+# Admits a session if its tenant is under its cap, in one atomic step, so two replicas at the edge cannot
+# both take the last place. Expired leases are dropped first.
+#   KEYS: the tenant's set
+#   ARGV: now, lease expiry, session id, the tenant's cap, the set's expiry
+# Returns 0 admitted, 1 the tenant is at its cap.
 ADMIT_SCRIPT = """
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
-redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[1])
-local cap = tonumber(ARGV[4])
-if cap >= 0 and redis.call('ZCARD', KEYS[1]) >= cap then return 1 end
-if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[5]) then return 2 end
+if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[4]) then return 1 end
 redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3])
-redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
-redis.call('EXPIRE', KEYS[1], ARGV[6])
-redis.call('EXPIRE', KEYS[2], ARGV[6])
+redis.call('EXPIRE', KEYS[1], ARGV[5])
 return 0
 """
 ADMIT_SCRIPT_SHA = hashlib.sha1(ADMIT_SCRIPT.encode()).hexdigest()
@@ -102,26 +102,54 @@ class AtCap(Exception):
                        f"({cap}); close one or ask your platform operator to raise the limit.")
         else:
             message = ("The platform's SQL sessions for notebooks are all in use "
-                       f"({quotas.SQL_SESSIONS_TOTAL_ENV}={limit}); try again shortly, or ask your "
-                       "platform operator.")
+                       f"({quotas.SQL_SESSIONS_TOTAL_ENV}, {limit} on this proxy); try again shortly, or "
+                       "ask your platform operator.")
         super().__init__(message)
         self.cap, self.limit = cap, limit
 
 
+REPLICAS_ENV = "SQL_PROXY_REPLICAS"
+
+
 def settings(environ: Mapping[str, str]) -> tuple[dict, int]:
-    """The platform defaults of the SQL caps and the total of every tenant's sessions, from the
-    configuration; ``ValueError`` on a value the contract cannot read, so the proxy does not start."""
+    """The platform defaults of the SQL caps, and this replica's part of the total of every tenant's
+    sessions: the total divided by the replicas, rounded down, so the parts never exceed it. ``ValueError``
+    on a value that cannot be read or a part below one session, so the proxy does not start."""
     defaults = quotas.defaults(environ)
-    return {cap: defaults[cap] for cap in CAPS}, quotas.sql_sessions_total(environ)
+    total = quotas.sql_sessions_total(environ)
+    raw = (environ.get(REPLICAS_ENV) or "1").strip()
+    try:
+        replicas = int(raw)
+    except ValueError:
+        raise ValueError(f"{REPLICAS_ENV} must be a whole number, got {raw!r}") from None
+    if replicas < 1 or total // replicas < 1:
+        raise ValueError(f"{quotas.SQL_SESSIONS_TOTAL_ENV}={total} gives {REPLICAS_ENV}={raw} replicas "
+                         "no session each")
+    return {cap: defaults[cap] for cap in CAPS}, total // replicas
+
+
+class _Place:
+    """A session's place in this replica's part of the total, given back once when the session ends."""
+
+    def __init__(self, quota: "SessionQuota"):
+        self._quota = quota
+        self._held = True
+
+    def give_back(self) -> None:
+        if self._held:
+            self._held = False
+            self._quota._open -= 1
 
 
 class Lease:
-    """One session's place in the count; renewed while the session lives, released when it ends."""
+    """One session's place in the tenant's count and in this replica's part of the total; renewed while
+    the session lives, released when it ends."""
 
-    def __init__(self, store, company_id: str, session_id: str):
+    def __init__(self, store, company_id: str, session_id: str, place: _Place):
         self._store = store
-        self._keys = (quotas.sql_sessions_key(company_id), quotas.SQL_SESSIONS_ALL_KEY)
+        self._keys = (quotas.sql_sessions_key(company_id),)
         self._session_id = session_id
+        self._place = place
 
     async def renew(self, now: Optional[float] = None) -> None:
         """Push the lease's expiry on; a failure only lets it run out early, which admits more (dec 8)."""
@@ -136,6 +164,7 @@ class Lease:
             log.warning("SQL session lease not renewed: %s", e)
 
     async def release(self) -> None:
+        self._place.give_back()
         try:
             async with self._store.pipeline(transaction=False) as pipe:
                 for key in self._keys:
@@ -146,23 +175,30 @@ class Lease:
 
 
 class _Unleased:
-    """The place of a session admitted while the count could not be read: nothing to renew or release."""
+    """A session admitted while the tenant's count could not be read: its place in this replica's part of
+    the total only, nothing in the store to renew or release."""
+
+    def __init__(self, place: _Place):
+        self._place = place
 
     async def renew(self, now: Optional[float] = None) -> None:
         return None
 
     async def release(self) -> None:
-        return None
+        self._place.give_back()
 
 
 class SessionQuota:
     """The SQL caps of a tenant and the count of its sessions, for every session the proxy opens."""
 
-    def __init__(self, capability_store, quota_store, defaults: Mapping[str, Optional[int]], total: int):
+    def __init__(self, capability_store, quota_store, defaults: Mapping[str, Optional[int]], share: int):
         self._capabilities = capability_store
         self._count = quota_store
         self._defaults = dict(defaults)
-        self._total = total
+        # This replica's part of the total, and its sessions open now: one process, one event loop, so
+        # the count needs no lock.
+        self._share = share
+        self._open = 0
 
     async def limits(self, company_id: str) -> Limits:
         """The tenant's caps: each its override from the capability store, else the platform default."""
@@ -184,28 +220,37 @@ class SessionQuota:
             return self._defaults[cap]
 
     async def open(self, company_id: str, cap: Optional[int], now: Optional[float] = None):
-        """A lease for one more session of the tenant under ``cap``; ``AtCap`` when it or the total is
-        reached. A store that cannot be read admits the session without a lease (dec 8)."""
+        """A lease for one more session of the tenant under ``cap``; ``AtCap`` when this replica's part of
+        the total is full or the tenant is at its cap. A store that cannot be read waives the tenant's cap
+        (dec 8), never the part of the total, which this process counts."""
         now = time.time() if now is None else now
+        if self._open >= self._share:
+            await self._record_total_refusal()
+            raise AtCap(quotas.SQL_SESSIONS_TOTAL_ENV, self._share)
+        self._open += 1
+        place = _Place(self)
+        if cap is None:
+            return _Unleased(place)
         session_id = uuid.uuid4().hex
-        keys = (quotas.sql_sessions_key(company_id), quotas.SQL_SESSIONS_ALL_KEY)
-        args = (now, now + LEASE_SECONDS, session_id, -1 if cap is None else cap, self._total, LEASE_SECONDS)
+        keys = (quotas.sql_sessions_key(company_id),)
+        args = (now, now + LEASE_SECONDS, session_id, cap, LEASE_SECONDS)
         try:
             try:
-                verdict = await self._count.evalsha(ADMIT_SCRIPT_SHA, 2, *keys, *args)
+                verdict = await self._count.evalsha(ADMIT_SCRIPT_SHA, 1, *keys, *args)
             except NoScriptError:
-                verdict = await self._count.eval(ADMIT_SCRIPT, 2, *keys, *args)
-        except Exception as e:  # noqa: BLE001 - any store failure admits the session (dec 8)
+                verdict = await self._count.eval(ADMIT_SCRIPT, 1, *keys, *args)
+        except Exception as e:  # noqa: BLE001 - any store failure waives the tenant's cap (dec 8)
             log.warning("SQL session count unavailable, session admitted without its cap: %s", e)
             await self._count_unavailable()
-            return _Unleased()
+            return _Unleased(place)
+        except BaseException:
+            place.give_back()
+            raise
         if int(verdict) == 0:
-            return Lease(self._count, company_id, session_id)
-        if int(verdict) == 1:
-            await self.record_refusal(quotas.SQL_SESSIONS, company_id, now)
-            raise AtCap(quotas.SQL_SESSIONS, cap)
-        await self._record_total_refusal()
-        raise AtCap(quotas.SQL_SESSIONS_TOTAL_ENV, self._total)
+            return Lease(self._count, company_id, session_id, place)
+        place.give_back()
+        await self.record_refusal(quotas.SQL_SESSIONS, company_id, now)
+        raise AtCap(quotas.SQL_SESSIONS, cap)
 
     async def _count_unavailable(self) -> None:
         try:

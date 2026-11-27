@@ -97,3 +97,15 @@ def test_compose_runs_the_same_postgresql_conf():
     db = load_yaml("docker-compose.yml")["services"]["timescaledb"]
     assert "config_file=/etc/postgresql/postgresql.conf" in db["command"]
     assert "./infrastructure/timescaledb/config/postgresql.conf:/etc/postgresql/postgresql.conf:ro" in db["volumes"]
+
+
+def test_each_sql_proxy_replica_is_told_how_many_share_the_total():
+    """Each replica holds the total divided by the replicas (ADR-0049 dec 10): a replica told a smaller
+    number than run would hold a larger part, and the parts would exceed the budget."""
+    docs = helm_template("--set", "notebookHub.enabled=true")
+    proxy = find(docs, "Deployment", "-notebook-sql-proxy")
+    env = {e["name"]: e.get("value") for e in proxy["spec"]["template"]["spec"]["containers"][0]["env"]}
+    assert env["SQL_PROXY_REPLICAS"] == str(proxy["spec"]["replicas"])
+    service = load_yaml("docker-compose.yml")["services"]["notebook-sql-proxy"]
+    assert "SQL_PROXY_REPLICAS" not in service["environment"] and "replicas" not in service.get("deploy", {}), \
+        "compose runs one proxy, which unset SQL_PROXY_REPLICAS means"

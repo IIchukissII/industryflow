@@ -69,4 +69,3 @@ def test_the_total_of_sql_sessions_is_finite_and_never_off():
 
 def test_the_sql_session_sets_name_the_canonical_tenant():
     assert quotas.sql_sessions_key(CID.upper()) == f"quota:sql-sessions:{CID}"
-    assert quotas.SQL_SESSIONS_ALL_KEY != quotas.sql_sessions_key(CID)

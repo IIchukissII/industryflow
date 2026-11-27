@@ -84,8 +84,9 @@ def defaults(environ: Mapping[str, str] = os.environ) -> dict:
 
 
 # The SQL sessions of every tenant together (ADR-0049 dec 10): the share of the database's connections its
-# budget gives them (infrastructure/timescaledb/config/postgresql.conf). A platform setting, not a tenant's
-# cap: no override, and never off, since an unbounded sum is what the budget exists to prevent.
+# budget gives them (infrastructure/timescaledb/config/postgresql.conf), divided among the SQL proxy's
+# replicas. A platform setting, not a tenant's cap: no override, and never off, since an unbounded sum is
+# what the budget exists to prevent.
 SQL_SESSIONS_TOTAL_ENV = "NOTEBOOK_SQL_SESSIONS_TOTAL"
 SQL_SESSIONS_TOTAL_SHIPPED = 50
 
@@ -141,12 +142,10 @@ def refusals_total_key(cap: str) -> str:
     return f"quota:refusals-total:{check_cap(cap)}"
 
 
-# A tenant's SQL sessions open now, and every tenant's together (ADR-0049 dec 4, 9, 10): sorted sets of
-# session leases scored by their expiry, so a session whose proxy stopped without ending it leaves the
-# count when its lease runs out. Every replica of the SQL proxy counts in the same two sets.
-SQL_SESSIONS_ALL_KEY = "quota:sql-sessions:all"
-
-
+# A tenant's SQL sessions open now (ADR-0049 dec 4, 9): a sorted set of session leases scored by their
+# expiry, so a session whose proxy stopped without ending it leaves the count when its lease runs out.
+# Every replica of the SQL proxy counts in the same set. Every tenant's together are not counted here:
+# each replica holds its own part of the total (dec 10), so the total never depends on this store.
 def sql_sessions_key(company_id) -> str:
     return f"quota:sql-sessions:{tenancy.canonical_company_id(company_id)}"
 
