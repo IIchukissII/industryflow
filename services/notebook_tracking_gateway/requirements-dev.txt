@@ -12,8 +12,8 @@ pytest-asyncio==1.5.0
 fastapi==0.165.0
 httpx==0.28.1
 # admission.py parses the artifact manifest (safe_load only). Mirrors requirements.txt.
-PyYAML==6.0.3
+PyYAML==6.0.4
 # The contract's real Lua deciding a race between two commits on one upload handle
 # (test_capability_record.py).
-fakeredis==2.40.0
+fakeredis==2.41.0
 lupa==2.8
