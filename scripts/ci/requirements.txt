@@ -7,5 +7,5 @@
 # workflow, so the dependency bot moves them (tests/config_guards/test_workflow_tool_pins.py).
 pip-audit==2.10.1
 pytest==9.2.0
-pyyaml==6.0.3
-ruff==0.17.5
+pyyaml==6.0.4
+ruff==0.17.6

@@ -5,20 +5,20 @@
 # fastapi moves together with prometheus-fastapi-instrumentator (below): fastapi >= 0.138
 # wraps included routers in _IncludedRouter objects with no .path, which instrumentator
 # 6.x could not introspect (every request, including /health, 500'd). Bump them as a pair.
-fastapi==0.164.0
+fastapi==0.165.0
 uvicorn[standard]==0.54.0
 asyncpg==0.32.0
 sqlalchemy[asyncio]==2.0.58
-pydantic==2.14.3
+pydantic==2.14.4
 pydantic-settings==2.16.3
-redis==8.1.0
+redis==8.2.0
 
 # FastAPI Users - Authentication
 fastapi-users[sqlalchemy]==15.0.5
 # Imported directly to read an access token's session claims (users.py); the one fastapi-users signs with.
 PyJWT[crypto]==2.15.1
 python-jose[cryptography]==3.5.0
-passlib[bcrypt]==1.7.4
+passlib[bcrypt]==1.9.5
 
 aiokafka==0.15.0
 python-snappy==0.7.3
