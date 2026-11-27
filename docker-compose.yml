@@ -94,7 +94,7 @@ services:
 
   # Kafka - Message streaming
   kafka:
-    image: confluentinc/cp-kafka:7.9.11@sha256:900c8308578371e874892eb6b121d15cc2f6a0a1f1be50f319746fb36d052bf6
+    image: confluentinc/cp-kafka:7.9.11@sha256:f7a89f291c0e151783240d3a87f1469b0cdbffd32a18330d5a0ecd3efb120305
     container_name: industryflow-kafka
     depends_on:
       zookeeper:
@@ -364,7 +364,7 @@ services:
   # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
   # CAP_CHOWN, and a no-op when the volume is already owned correctly.
   minio-data-owner:
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:242581d345b69d17d2c43eed9b2eef0fe0a281489c13d7733281616bcb6cc192
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:7b25821631cc4df8379aea8965a4d9e0e228879b0100a12c071b7d3e09ffebe4
     container_name: industryflow-minio-data-owner
     user: "0:0"
     network_mode: none
@@ -387,7 +387,7 @@ services:
   # a maintained third-party build of the same server (ADR-0025 dec 10, ADR-0009). Non-root (65532),
   # distroless: no curl, so the healthcheck speaks HTTP over bash's /dev/tcp.
   minio:
-    image: cgr.dev/chainguard/minio:latest@sha256:e9cf6b99c226e9539ed0f14b6f00e37b07da153c7ba1f4f8709c807574b471ec
+    image: cgr.dev/chainguard/minio:latest@sha256:b288eaa709ba2f799a39e9a8ceda71a08fabf90109b12c90badba9afff29485c
     depends_on:
       minio-data-owner:
         condition: service_completed_successfully
@@ -420,7 +420,7 @@ services:
   # safe on every `up`; the services that need a bucket or principal gate on it completing.
   minio-init:
     # The -dev variant: the init script needs a shell, grep and mktemp, which the minimal one lacks.
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:242581d345b69d17d2c43eed9b2eef0fe0a281489c13d7733281616bcb6cc192
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:7b25821631cc4df8379aea8965a4d9e0e228879b0100a12c071b7d3e09ffebe4
     container_name: industryflow-minio-init
     depends_on:
       minio:
@@ -854,7 +854,7 @@ services:
   # IndustryFlowDeviceCertExpiring (warning) from them. The healthcheck is `check` alone. It holds a
   # signing key, so it has no network at all and runs as the CA dir's owner (DEVICE_CA_UID/GID).
   device-crl-refresh:
-    image: alpine/openssl:3.5.9@sha256:96e53bf9b9041fdc8a33ea61356688506bbddc368c70d6e8a9acdd28475e8537
+    image: alpine/openssl:3.5.9@sha256:9698e7956c08e713265da24c4587205beba3eaa6af2b319d73575d30a6ff033e
     container_name: industryflow-device-crl-refresh
     network_mode: none
     user: "${DEVICE_CA_UID:-1000}:${DEVICE_CA_GID:-1000}"
@@ -1454,7 +1454,7 @@ services:
 
   # Node Exporter - System metrics
   node-exporter:
-    image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    image: prom/node-exporter:v1.13.1@sha256:7296504d4ada44b7d7ab4431e27e9f9900d8488f8d55842f4b12ae2704e16dfe
     container_name: industryflow-node-exporter
     command:
       - '--path.procfs=/host/proc'
@@ -1508,7 +1508,7 @@ services:
 
   # Redis Exporter - Cache metrics
   redis-exporter:
-    image: oliver006/redis_exporter:v1.97.0@sha256:f5f903fbe77571d455ede0453b084d6840bc62fc105efac001034421cab83b99
+    image: oliver006/redis_exporter:v1.99.0@sha256:2c0cdc2452096b5af460d870e72fa6ee2ebb971780f443a616885685d2c0ebad
     container_name: industryflow-redis-exporter
     environment:
       REDIS_ADDR: "redis:6379"
@@ -1541,7 +1541,7 @@ services:
 
   # Grafana - Monitoring & Dashboards
   grafana:
-    image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
+    image: grafana/grafana:13.3.2@sha256:81556409ba48b2b922e0adb69a2511337d8ba7578f11962eefa6149a2d815101
     container_name: industryflow-grafana
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"

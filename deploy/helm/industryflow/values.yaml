@@ -326,7 +326,7 @@ infra:
 
   kafka:
     inCluster: true
-    image: confluentinc/cp-kafka:7.9.11@sha256:900c8308578371e874892eb6b121d15cc2f6a0a1f1be50f319746fb36d052bf6
+    image: confluentinc/cp-kafka:7.9.11@sha256:f7a89f291c0e151783240d3a87f1469b0cdbffd32a18330d5a0ecd3efb120305
     port: 9092
     # Log retention. The in-cluster broker is configured with it, and the tenant-delete job records it
     # as how long a deleted tenant's readings may remain; with an external broker, set it to that
@@ -363,7 +363,7 @@ infra:
     inCluster: true
     # Maintained third-party MinIO build (the upstream images were withdrawn). Non-root (65532),
     # distroless. Pinned by immutable digest; the tag is kept for readability.
-    image: cgr.dev/chainguard/minio:latest@sha256:e9cf6b99c226e9539ed0f14b6f00e37b07da153c7ba1f4f8709c807574b471ec
+    image: cgr.dev/chainguard/minio:latest@sha256:b288eaa709ba2f799a39e9a8ceda71a08fabf90109b12c90badba9afff29485c
     apiPort: 9000
     consolePort: 9001
     storage: 20Gi
@@ -390,7 +390,7 @@ objectStore:
   buckets:
     sparkCheckpoint: spark-checkpoints
   # mc image for the bootstrap Job. The -dev variant carries the shell the script needs.
-  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:242581d345b69d17d2c43eed9b2eef0fe0a281489c13d7733281616bcb6cc192
+  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:7b25821631cc4df8379aea8965a4d9e0e228879b0100a12c071b7d3e09ffebe4
 
 # ---------------------------------------------------------------------------
 # Logical database backups (tier-1 DR) — a CronJob dumps each database to S3/MinIO
@@ -582,7 +582,7 @@ observability:
       port: 9187
     redis:
       enabled: true
-      image: oliver006/redis_exporter:v1.97.0@sha256:f5f903fbe77571d455ede0453b084d6840bc62fc105efac001034421cab83b99
+      image: oliver006/redis_exporter:v1.99.0@sha256:2c0cdc2452096b5af460d870e72fa6ee2ebb971780f443a616885685d2c0ebad
       port: 9121
     kafka:
       enabled: true
@@ -845,7 +845,7 @@ ingress:
       caCertWarnDays: 90
       # No successful check for this long raises the alert (two missed 6-hourly runs).
       alertAfterSeconds: 46800
-      image: alpine/openssl:3.5.9@sha256:96e53bf9b9041fdc8a33ea61356688506bbddc368c70d6e8a9acdd28475e8537
+      image: alpine/openssl:3.5.9@sha256:9698e7956c08e713265da24c4587205beba3eaa6af2b319d73575d30a6ff033e
     # Fails, raising IndustryFlowDeviceCertExpiring (warning: one device, not the fleet), while a
     # device's newest unrevoked certificate is within warnDays of expiry: renewal is owed
     # (ADR-0007 dec 10). Reads issued.tsv and issued.tsv.sig from the device-CA Secret.
@@ -854,7 +854,7 @@ ingress:
       schedule: "47 */6 * * *"
       warnDays: 14
       alertAfterSeconds: 46800
-      image: alpine/openssl:3.5.9@sha256:96e53bf9b9041fdc8a33ea61356688506bbddc368c70d6e8a9acdd28475e8537
+      image: alpine/openssl:3.5.9@sha256:9698e7956c08e713265da24c4587205beba3eaa6af2b319d73575d30a6ff033e
 
 # ---------------------------------------------------------------------------
 # NetworkPolicies: ingestion-service admits only the cluster TLS edge, the ingress controller's own
