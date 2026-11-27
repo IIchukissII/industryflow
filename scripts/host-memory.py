@@ -16,10 +16,11 @@ may sit in swap. A service's memory limit is its resident part times the headroo
 limit adds its cold part. The host's memory holds every resident part, the reserve and the notebook
 share; its swap holds the cold parts, and what of them the swap cannot hold sits in memory too.
 
-A notebook session is measured in the same two parts, per profile (ADR-0050 dec 5): its resident part
-times the headroom is a session's least memory limit, its cold part times the headroom its swap. The swap
-the platform's cold parts leave is the notebooks' swap; when it cannot hold one authoring session's cold
-part, every session holds its cold part in memory.
+A notebook session is measured in the same two parts, per profile (ADR-0050 dec 5): its memory limit is
+its profile's size (size_mib), never below its resident part times the headroom, and its swap its cold
+part times the headroom; neither grows with the host. The swap the platform's cold parts leave is the
+notebooks' swap; when it cannot hold one authoring session's cold part, every session holds its cold part
+in memory, its limit then never below both parts.
 
 The host is the memory the Docker engine has for its containers (`docker info`: the host's on Linux, the
 virtual machine's under Docker Desktop) and the swap of /proc/meminfo, or --mem-total-mb and
@@ -29,7 +30,7 @@ block written before; the rest of the file is the operator's and is kept. Compos
 whose variable is missing does not start. scripts/box-deploy.sh runs this on every deploy.
 
 Refuses (exit 2), writing nothing, when the platform at the tier and the reserve do not fit the host's
-memory. A notebook share below one authoring session's least memory limit is written as 0: the hub then
+memory. A notebook share below one authoring session's memory limit is written as 0: the hub then
 refuses every start, naming why.
 """
 from __future__ import annotations

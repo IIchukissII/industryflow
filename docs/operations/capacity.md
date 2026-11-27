@@ -120,7 +120,8 @@ print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)"` (MiB).
 
 A session's need is measured per profile on the reference journey (ADR-0050 dec 5), with the platform
 under the tier's loose limits and the hub given a share that admits it. Its resident part times the
-headroom is a session's least memory limit, its cold part times the headroom its swap.
+headroom is the least a session's memory limit may be, below its profile's size (authoring 4096 MiB,
+analytics 1024 MiB); its cold part times the headroom is its swap.
 
 | Profile | Reference journey | Resident | Cold |
 |---|---|---|---|
@@ -147,7 +148,7 @@ the session may hold, not toward what it keeps in memory.
 | Option | Effect |
 |---|---|
 | More cores on the host | Raises the CPU ceiling; the ingest path and Spark scale with cores |
-| More memory | The platform needs 7 824 MiB of memory at either measured tier; what a host has beyond it is the notebook share ([memory](#memory)): a 9 GB host about 1.2 GB (one authoring session), a 12 GB host about 4.4 GB. With enough swap, the platform's own need does not grow with the host |
+| More memory | The platform needs 7 824 MiB of memory at either measured tier; what a host has beyond it is the notebook share ([memory](#memory)): a 9 GB host about 1.4 GB, below one authoring session (4096 MiB), so it admits none; a 12 GB host about 4.4 GB, one authoring session. Each further 4 GiB admits one more authoring session, or four analytics ones. With enough swap, the platform's own need does not grow with the host |
 | Kubernetes (ADR-0009) | Ingestion, edge and Spark scale out (ADR-0009) |
 
 ## Reproduce
