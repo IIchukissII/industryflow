@@ -27,8 +27,8 @@ or one that cannot be read, holds nothing (dec 8); the API gateway alerts on its
 """
 import asyncio
 import logging
+from dataclasses import dataclass, field
 
-from config import config
 from industryflow_contracts import quotas, tenancy, tenant_status
 
 logger = logging.getLogger(__name__)
@@ -51,11 +51,14 @@ USAGE_SELECT = """
     FROM public.tenant_storage_usage
 """
 
-# The platform defaults of the stored-data caps and how old a measurement may be, from the worker's
-# configuration (config.py, the one reader of its environment).
-DEFAULTS = {quotas.STORED_DATABASE_GIB: config.TENANT_QUOTA_STORED_DATABASE_GIB,
-            quotas.STORED_OBJECT_GIB: config.TENANT_QUOTA_STORED_OBJECT_GIB}
-USAGE_STALE_SECONDS = config.TENANT_USAGE_STALE_SECONDS
+@dataclass(frozen=True)
+class StoredCaps:
+    """The platform defaults of the stored-data caps and how old a measurement may be. The worker's main
+    passes its configuration's (config.py, the one reader of its environment); unset, the shipped ones."""
+
+    defaults: dict = field(default_factory=lambda: {cap: quotas.SHIPPED_DEFAULTS[cap]
+                                                    for cap in quotas.STORED_CAPS.values()})
+    stale_seconds: float = quotas.USAGE_STALE_SHIPPED
 
 
 async def registry_usage(pool) -> dict:
@@ -74,12 +77,12 @@ async def registry_usage(pool) -> dict:
     return held
 
 
-def over_caps(usage: dict, overrides: dict) -> frozenset:
+def over_caps(usage: dict, overrides: dict, stored: StoredCaps) -> frozenset:
     """The stored-data caps a tenant is over, from its measurements (bytes, age) and its overrides."""
-    caps = {cap: quotas.effective(DEFAULTS[cap], overrides.get(cap)) for cap in quotas.STORED_CAPS.values()}
+    caps = {cap: quotas.effective(stored.defaults[cap], overrides.get(cap)) for cap in quotas.STORED_CAPS.values()}
     # Ages are the database's, so the measurement's time is its age before a "now" of zero.
     measured = {store: (size, -age) for store, (size, age) in usage.items()}
-    return quotas.stored_over(measured, caps, now=0.0, stale_after=USAGE_STALE_SECONDS)
+    return quotas.stored_over(measured, caps, now=0.0, stale_after=stored.stale_seconds)
 
 
 async def registry_overrides(pool) -> dict:
@@ -115,7 +118,7 @@ _last_overrides: dict = {}
 _copied: set = set()
 
 
-async def publish_once(pool, send, topic: str, store=None) -> int:
+async def publish_once(pool, send, topic: str, store=None, stored: StoredCaps | None = None) -> int:
     """Send one status message per tenant, with its overrides, and copy the overrides to ``store`` for
     the hub; returns how many statuses were sent."""
     global _last_overrides
@@ -131,7 +134,8 @@ async def publish_once(pool, send, topic: str, store=None) -> int:
         logger.error("tenant storage measurements unreadable; no stored-data cap holds this round: %s", e)
         usage = {}
     registered = {company_id for company_id, _active in status}
-    over = {company_id: over_caps(held, overrides.get(company_id, {}))
+    stored = stored or StoredCaps()
+    over = {company_id: over_caps(held, overrides.get(company_id, {}), stored)
             for company_id, held in usage.items() if company_id in registered}
     for company_id, active in status:
         key, value = tenant_status.encode(company_id, active, overrides.get(company_id),
@@ -162,12 +166,12 @@ async def _copy_for_the_hub(store, overrides: dict, over: dict | None = None) ->
         logger.error("tenant quota overrides not copied for the hub: %s", e)
 
 
-async def run(pool, send, topic: str, interval: float, store=None):
+async def run(pool, send, topic: str, interval: float, store=None, stored: StoredCaps | None = None):
     """Publish the whole registry every ``interval`` seconds. A failed round is logged and retried on
     the next tick: the writers refuse a suspended tenant from the registry meanwhile."""
     while True:
         try:
-            count = await publish_once(pool, send, topic, store)
+            count = await publish_once(pool, send, topic, store, stored)
             logger.debug("published the status of %d tenants to %s", count, topic)
         except asyncio.CancelledError:
             raise

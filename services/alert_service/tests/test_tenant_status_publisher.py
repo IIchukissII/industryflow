@@ -185,31 +185,29 @@ def _usage(company_id, store, gib, age=60.0):
     return {"company_id": company_id, "store": store, "bytes": int(gib * (1 << 30)), "age": age}
 
 
-def test_a_tenant_over_a_stored_cap_is_named_on_its_status_and_copied_for_the_tracking_gateway(monkeypatch):
+def test_a_tenant_over_a_stored_cap_is_named_on_its_status_and_copied_for_the_tracking_gateway():
     """ADR-0049 dec 11, 12: its fresh measurement against the cap that holds for it, its override first."""
     from industryflow_contracts import quotas
 
-    monkeypatch.setitem(publisher.DEFAULTS, quotas.STORED_DATABASE_GIB, 10)
-    monkeypatch.setitem(publisher.DEFAULTS, quotas.STORED_OBJECT_GIB, 10)
+    stored = publisher.StoredCaps(defaults={quotas.STORED_DATABASE_GIB: 10, quotas.STORED_OBJECT_GIB: 10},
+                                  stale_seconds=3600)
     usage = [_usage(ACTIVE, "database", 11), _usage(ACTIVE, "object", 11),
-             _usage(SUSPENDED, "object", 11, age=publisher.USAGE_STALE_SECONDS + 1)]
+             _usage(SUSPENDED, "object", 11, age=3601)]
     overrides = [{"company_id": ACTIVE, "cap": quotas.STORED_OBJECT_GIB, "value": 20}]
     sent = []
 
     async def run():
         store = await testing.async_redis()
-        await publisher.publish_once(Pool(_rows(), overrides=overrides, usage=usage), _send_with_over(sent), "t", store)
-        return store
+        await publisher.publish_once(Pool(_rows(), overrides=overrides, usage=usage), _send_with_over(sent), "t",
+                                     store, stored)
+        return (await store.get(quotas.over_key(quotas.STORED_DATABASE_GIB, ACTIVE)),
+                await store.get(quotas.over_key(quotas.STORED_OBJECT_GIB, ACTIVE)))
 
-    store = asyncio.run(run())
+    database_copy, object_copy = asyncio.run(run())
     over = {company_id: tenant_over for company_id, _active, _caps, tenant_over in sent}
     assert over[ACTIVE] == {quotas.STORED_DATABASE_GIB}      # the object override of 20 GiB holds it under
     assert over[SUSPENDED] == frozenset()                     # a stale measurement holds nothing (dec 8)
-
-    async def copies():
-        return (await store.get(quotas.over_key(quotas.STORED_DATABASE_GIB, ACTIVE)),
-                await store.get(quotas.over_key(quotas.STORED_OBJECT_GIB, ACTIVE)))
-    assert asyncio.run(copies())[0] is not None and asyncio.run(copies())[1] is None
+    assert database_copy is not None and object_copy is None
 
 
 def test_unreadable_measurements_hold_no_stored_cap_and_the_statuses_still_go_out():

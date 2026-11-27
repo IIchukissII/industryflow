@@ -214,8 +214,8 @@ def test_the_job_measures_a_tenants_chunks_and_records_through_its_functions(ten
     cur.execute(f'''INSERT INTO "{schema}".equipment (equipment_type, name, sensor_count)
                     VALUES ('pump', 'p1', 1) RETURNING equipment_id''')
     [(equipment,)] = cur.fetchall()
-    cur.execute(f'''INSERT INTO "{schema}".sensors (equipment_id, sensor_name, sensor_type)
-                    VALUES (%s, 's1', 'temperature') RETURNING sensor_id''', (equipment,))
+    cur.execute(f'''INSERT INTO "{schema}".sensors (equipment_id, sensor_name, sensor_type, position)
+                    VALUES (%s, 's1', 'temperature', 1) RETURNING sensor_id''', (equipment,))
     [(sensor,)] = cur.fetchall()
     cur.execute(f'''INSERT INTO "{schema}".sensor_measurements (time, sensor_id, equipment_id, site_id, value)
                     SELECT now() - make_interval(secs => g), %s, %s, 'site', g
