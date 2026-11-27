@@ -105,6 +105,53 @@ class _Down:
     eval = evalsha
 
 
+class _Watched:
+    """One store seen as one of two: records every key it is asked for, so a test can hold each key to
+    the store it belongs in (the quota store and the capability store are two servers in a deployment)."""
+
+    def __init__(self, store):
+        self._store, self.keys = store, set()
+
+    def __getattr__(self, name):
+        attr = getattr(self._store, name)
+        if name in ("get", "incr", "zcard"):
+            async def call(key, *a, **k):
+                self.keys.add(key if isinstance(key, str) else key.decode())
+                return await attr(key, *a, **k)
+            return call
+        if name in ("evalsha", "eval"):
+            async def script(body, numkeys, *rest, **k):
+                self.keys.update(str(x) for x in rest[:numkeys])
+                return await attr(body, numkeys, *rest, **k)
+            return script
+        if name == "pipeline":
+            watched = self
+
+            def pipeline(*a, **k):
+                pipe = attr(*a, **k)
+
+                class _Pipe:
+                    async def __aenter__(self):
+                        self._p = await pipe.__aenter__()
+                        return self
+
+                    async def __aexit__(self, *exc):
+                        return await pipe.__aexit__(*exc)
+
+                    def __getattr__(self, op):
+                        method = getattr(self._p, op)
+                        if op == "execute":
+                            return method
+
+                        def queued(key, *a, **k):
+                            watched.keys.add(key)
+                            return method(key, *a, **k)
+                        return queued
+                return _Pipe()
+            return pipeline
+        return attr
+
+
 @pytest.mark.asyncio
 async def test_an_unreadable_count_admits_and_is_counted_where_the_gateway_reads_it():
     capabilities = await testing.async_redis()
@@ -172,3 +219,73 @@ async def test_a_session_over_its_cap_opens_no_backend_and_one_under_it_is_timed
     with pytest.raises(proxy.SessionRefused, match="sql_sessions"):
         await proxy.serve_connection(handle, store, lambda b: opened.append(b) or _Backend(), quota=q)
     assert opened == []
+
+
+@pytest.mark.asyncio
+async def test_each_key_is_in_its_own_store():
+    """Overrides and the unavailable count in the capability store; leases and refusals in the quota store."""
+    store = await testing.async_redis()
+    capabilities, count = _Watched(store), _Watched(store)
+    q = SessionQuota(capabilities, count, DEFAULTS, 10)
+    await q.limits(A)
+    lease = await q.open(A, 1, now=1000)
+    await lease.renew(now=1001)
+    with pytest.raises(AtCap):
+        await q.open(A, 1, now=1002)
+    await lease.release()
+    assert capabilities.keys and all(k.startswith("quota:cap:") for k in capabilities.keys), capabilities.keys
+    assert count.keys and all(k.startswith(("quota:sql-sessions:", "quota:refus")) for k in count.keys), count.keys
+
+
+@pytest.mark.asyncio
+async def test_while_the_count_is_unreadable_a_revoked_handle_is_still_refused():
+    """Only the cap is waived (dec 8): the handle's own check still refuses, and no backend opens."""
+    capabilities = await testing.async_redis()
+    q = SessionQuota(capabilities, _Down(), DEFAULTS, 10)
+    opened = []
+    assert await proxy.serve_connection("revoked", capabilities, lambda b: opened.append(b), quota=q) is False
+    assert opened == []
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_quota_store_admits_within_its_timeout():
+    """A store that accepts and never answers must not hold the session: the real client times out."""
+    import asyncio
+    import time
+
+    async def silent(reader, writer):
+        await asyncio.sleep(30)
+
+    server = await asyncio.start_server(silent, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    capabilities = await testing.async_redis()
+    q = SessionQuota(capabilities, quota.quota_store_client(f"redis://127.0.0.1:{port}/0"), DEFAULTS, 10)
+    try:
+        started = time.monotonic()
+        lease = await asyncio.wait_for(q.open(A, 1), 10)
+        assert time.monotonic() - started < 3
+        await lease.release()
+        assert int(await capabilities.get(quotas.count_unavailable_key(quotas.SQL_SESSIONS))) == 1
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("seconds", [0, -1, quota.LEASE_SECONDS / 2 + 1, quota.LEASE_SECONDS])
+def test_a_recheck_too_slow_to_renew_the_lease_stops_the_proxy(seconds):
+    with pytest.raises(ValueError, match="SQL_PROXY_REVALIDATE_SECONDS"):
+        quota.check_renewal(seconds)
+    assert quota.check_renewal(15) == 15 and quota.check_renewal(1) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_backend_that_cannot_be_built_releases_its_place():
+    store = await testing.async_redis()
+    q = SessionQuota(store, store, {**DEFAULTS, quotas.SQL_SESSIONS: 1}, 10)
+    handle = await _bound_handle(store)
+
+    def broken(_binding):
+        raise RuntimeError("no backend")
+
+    with pytest.raises(RuntimeError):
+        await proxy.serve_connection(handle, store, broken, quota=q)
+    await q.open(A, 1)     # the place was released, not left to lapse

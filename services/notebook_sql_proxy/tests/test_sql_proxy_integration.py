@@ -361,8 +361,18 @@ def test_a_session_over_its_tenants_cap_is_refused_naming_it(stack):
             _proxy_connect(_mint(stack["rc"], company_id=cid))
     finally:
         first.close()
-    # Closing the first frees its place.
-    _proxy_connect(_mint(stack["rc"], company_id=cid)).close()
+    # Closing the first frees its place, once the proxy has seen it close.
+    import time
+
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            _proxy_connect(_mint(stack["rc"], company_id=cid)).close()
+            return
+        except psycopg2.OperationalError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.2)
 
 
 def test_a_statement_past_its_cap_is_cancelled_naming_it_though_the_kernel_lifts_the_database_limit(stack):

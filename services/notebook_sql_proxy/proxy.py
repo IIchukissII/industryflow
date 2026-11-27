@@ -128,7 +128,12 @@ async def serve_connection(
             await lease.renew()
         return True
 
-    backend = backend_factory(binding)
+    try:
+        backend = backend_factory(binding)
+    except BaseException:
+        if lease is not None:
+            await lease.release()
+        raise
     opened_at: Optional[float] = None
     try:
         await backend.connect()

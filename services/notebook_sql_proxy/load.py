@@ -8,7 +8,8 @@ The relay stays byte-transparent: it reads only where each message begins and en
 never what a statement says. A statement is under way from the kernel's first message after the
 database last said ReadyForQuery until it says so again; every simple Query and every Sync the kernel
 sends is answered by exactly one ReadyForQuery, so a pipelined client's next statement starts its own
-time when the one before it is answered. ReadyForQuery also says whether a transaction is open: one
+time when the one before it is answered (a FunctionCall is answered so too, so it is counted with
+them). ReadyForQuery also says whether a transaction is open: one
 that stays open with nothing under way is an idle transaction.
 
 A statement past its cap is cancelled the way a client cancels one, by a CancelRequest quoting the
@@ -40,8 +41,9 @@ HOLD_MAX = 1 << 16
 
 # ReadyForQuery's transaction status: in a transaction, or in a failed one. Idle is wire.TXN_IDLE.
 _IN_TRANSACTION = (b"T", b"E")
-# What the kernel sends that the database answers with one ReadyForQuery each: a simple Query, a Sync.
-_ANSWERED = (wire.MSG_QUERY, b"S")
+# What the kernel sends that the database answers with one ReadyForQuery each: a simple Query, a Sync,
+# a FunctionCall. One left out would let its ReadyForQuery stop the clock of the statement after it.
+_ANSWERED = (wire.MSG_QUERY, b"S", b"F")
 
 
 class Frames:

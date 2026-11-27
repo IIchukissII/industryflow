@@ -44,6 +44,27 @@ CAPS = (quotas.SQL_SESSIONS, quotas.SQL_STATEMENT_SECONDS, quotas.SQL_IDLE_TRANS
 # so it outlives several missed renewals and a stopped proxy's sessions leave the count within it.
 LEASE_SECONDS = 60
 
+# How long the proxy waits on the quota store before it admits a session without its count (dec 8): a
+# stalled store must not hold every new session, as ingestion's readings are not held (0.5 s there too).
+STORE_TIMEOUT_SECONDS = 0.5
+
+
+def check_renewal(revalidate_seconds: float) -> float:
+    """The re-check interval, if a lease renewed at it cannot lapse while its session lives: at most half
+    the lease, so one missed renewal still leaves the lease in force. ``ValueError`` otherwise."""
+    if not 0 < revalidate_seconds <= LEASE_SECONDS / 2:
+        raise ValueError(f"SQL_PROXY_REVALIDATE_SECONDS must be more than 0 and at most {LEASE_SECONDS / 2:g}: "
+                         f"it renews each session's {LEASE_SECONDS} s lease in the SQL session count")
+    return revalidate_seconds
+
+
+def quota_store_client(url: str):
+    """The quota store's client: one that gives up within ``STORE_TIMEOUT_SECONDS``."""
+    import redis.asyncio as aioredis
+
+    return aioredis.from_url(url, socket_connect_timeout=STORE_TIMEOUT_SECONDS,
+                             socket_timeout=STORE_TIMEOUT_SECONDS)
+
 # Admits a session if its tenant and every tenant together are under their caps, in one atomic step, so
 # two replicas at the edge cannot both take the last place. Expired leases are dropped first.
 #   KEYS: the tenant's set, every tenant's set

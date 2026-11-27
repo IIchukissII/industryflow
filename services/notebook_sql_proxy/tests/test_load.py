@@ -319,3 +319,17 @@ async def test_the_backend_ends_a_session_whose_transaction_idles_past_its_cap(f
     finally:
         k_writer.close()
         await pg.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_pipelined_function_call_does_not_stop_the_clock_of_the_statement_after_it():
+    """A FunctionCall is answered by its own ReadyForQuery; uncounted, that answer would read as the end
+    of the long statement pipelined behind it, which would then run past its cap."""
+    session, clock, cancels, _ = _load(statement=10)
+    session.client_message(b"F")
+    session.client_message(wire.MSG_QUERY)
+    clock.now = 1
+    session.upstream_message(b"Z", _ready())     # the FunctionCall answered; the Query still runs
+    clock.now = 12
+    await session.tick()
+    assert cancels == [12]

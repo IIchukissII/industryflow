@@ -683,7 +683,7 @@ async def main() -> None:  # pragma: no cover - cluster-bound entry point
     redis_url = os.environ["SQL_PROXY_REDIS_URL"]
     # How often an open session re-checks its capability (ADR-0012 dec 6): the longest a revoked
     # handle keeps a session it already opened.
-    revalidate_seconds = float(os.environ.get("SQL_PROXY_REVALIDATE_SECONDS", "15"))
+    revalidate_seconds = quotas_sql.check_renewal(float(os.environ.get("SQL_PROXY_REVALIDATE_SECONDS", "15")))
     # Upstream TLS (ADR-0017): verify-full by default, against the internal CA mounted as the
     # standard DB client root. Set SQL_PROXY_DB_SSLMODE=disable only for a dev DB without certs.
     sslmode = os.environ.get("SQL_PROXY_DB_SSLMODE", "verify-full")
@@ -703,7 +703,8 @@ async def main() -> None:  # pragma: no cover - cluster-bound entry point
     # The tenant's SQL caps (ADR-0049 dec 9, 10): its overrides from the capability store, the count of
     # sessions in the quota store. A setting the contract cannot read stops the proxy here.
     defaults, total = quotas_sql.settings(os.environ)
-    quota = quotas_sql.SessionQuota(store, aioredis.from_url(os.environ["QUOTA_REDIS_URL"]), defaults, total)
+    quota = quotas_sql.SessionQuota(store, quotas_sql.quota_store_client(os.environ["QUOTA_REDIS_URL"]),
+                                    defaults, total)
 
     def backend_factory(binding, client_reader, client_writer):
         return PostgresBackend(
