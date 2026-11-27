@@ -11,6 +11,9 @@
 {{- if .Values.notebookHub.enabled }}
 {{- $fullname := include "industryflow.fullname" . }}
 {{- $svc := printf "%s-notebook-sql-proxy" $fullname }}
+{{- /* One replica: cancellation keys are process-local. Each replica holds its part of the total of
+     every tenant's SQL sessions, the total divided by this number (ADR-0049 dec 10). */}}
+{{- $replicas := 1 }}
 ---
 apiVersion: v1
 kind: Service
@@ -36,7 +39,7 @@ metadata:
     {{- include "industryflow.labels" . | nindent 4 }}
     app.kubernetes.io/name: notebook-sql-proxy
 spec:
-  replicas: 1
+  replicas: {{ $replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: notebook-sql-proxy
@@ -100,6 +103,20 @@ spec:
                 secretKeyRef:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-sql-proxy") }}
                   key: NOTEBOOK_SQL_PROXY_TENANT_KEY
+            # A tenant's SQL caps (ADR-0049 dec 9, 10): the defaults beside each tenant's override in the
+            # capability store, and the count of sessions in the quota store, which kernels do not reach.
+            - name: TENANT_QUOTA_SQL_SESSIONS
+              value: {{ .Values.config.TENANT_QUOTA_SQL_SESSIONS | default "" | quote }}
+            - name: TENANT_QUOTA_SQL_STATEMENT_SECONDS
+              value: {{ .Values.config.TENANT_QUOTA_SQL_STATEMENT_SECONDS | default "" | quote }}
+            - name: TENANT_QUOTA_SQL_IDLE_TRANSACTION_SECONDS
+              value: {{ .Values.config.TENANT_QUOTA_SQL_IDLE_TRANSACTION_SECONDS | default "" | quote }}
+            - name: NOTEBOOK_SQL_SESSIONS_TOTAL
+              value: {{ .Values.notebookHub.sqlProxy.sessionsTotal | default "" | quote }}
+            - name: SQL_PROXY_REPLICAS
+              value: {{ $replicas | quote }}
+            - name: QUOTA_REDIS_URL
+              value: {{ printf "redis://%s:%v/0" (include "industryflow.quotaRedisHost" .) .Values.infra.quotaRedis.port | quote }}
             # Upstream TLS to TimescaleDB (ADR-0017): verify the server cert against the same
             # internal CA every DB client trusts, mounted below at tls.db.mountPath.
             {{- if .Values.tls.db.enabled }}

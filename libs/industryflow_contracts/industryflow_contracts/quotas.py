@@ -7,8 +7,9 @@
 Each cap has a platform default in the deployment's configuration (``TENANT_QUOTA_<CAP>``): a positive
 whole number, or ``off``; unset takes the shipped default, which is finite (ADR-0049 dec 6). A platform
 superuser may override a cap for one tenant; the override is the tenant's data in the database, and
-reaches ingestion on the tenant-status stream and the hub as an expiring copy in the capability store
-(``cap_key``), which the device-facing ingestion service cannot reach. Every service reads the same names and the same parse from here.
+reaches ingestion on the tenant-status stream, and the hub and the SQL proxy as an expiring copy in the
+capability store (``cap_key``), which the device-facing ingestion service cannot reach. Every service
+reads the same names and the same parse from here.
 
 Standard library only: this is imported by every service image.
 """
@@ -19,15 +20,23 @@ from typing import Mapping, Optional
 
 from . import tenancy
 
-# The caps (ADR-0049 dec 1): device readings per second, and notebook environments running at once.
+# The caps (ADR-0049 dec 1, 9): device readings per second, notebook environments running at once, and a
+# tenant's SQL load through the SQL proxy: sessions open at once, seconds one statement may run, seconds a
+# transaction may stay idle.
 READINGS_PER_SECOND = "readings_per_second"
 NOTEBOOK_ENVIRONMENTS = "notebook_environments"
-CAPS = (READINGS_PER_SECOND, NOTEBOOK_ENVIRONMENTS)
+SQL_SESSIONS = "sql_sessions"
+SQL_STATEMENT_SECONDS = "sql_statement_seconds"
+SQL_IDLE_TRANSACTION_SECONDS = "sql_idle_transaction_seconds"
+CAPS = (READINGS_PER_SECOND, NOTEBOOK_ENVIRONMENTS, SQL_SESSIONS, SQL_STATEMENT_SECONDS,
+        SQL_IDLE_TRANSACTION_SECONDS)
 
 # The shipped defaults (ADR-0049 dec 6), sized against the reference node of docs/operations/capacity.md
 # (one 8 GB, 4-core node: 500 readings/s with headroom; a notebook environment takes up to 4 GB), so
-# one tenant cannot take the whole node.
-SHIPPED_DEFAULTS = {READINGS_PER_SECOND: 250, NOTEBOOK_ENVIRONMENTS: 3}
+# one tenant cannot take the whole node. A tenant's SQL sessions are a tenth of the notebook share of
+# the database's connections (SQL_SESSIONS_TOTAL_SHIPPED).
+SHIPPED_DEFAULTS = {READINGS_PER_SECOND: 250, NOTEBOOK_ENVIRONMENTS: 3, SQL_SESSIONS: 5,
+                    SQL_STATEMENT_SECONDS: 300, SQL_IDLE_TRANSACTION_SECONDS: 60}
 
 # The configuration naming each cap's platform default.
 ENV = {cap: f"TENANT_QUOTA_{cap.upper()}" for cap in CAPS}
@@ -74,6 +83,26 @@ def defaults(environ: Mapping[str, str] = os.environ) -> dict:
     return {cap: parse_setting(cap, environ.get(ENV[cap])) for cap in CAPS}
 
 
+# The SQL sessions of every tenant together (ADR-0049 dec 10): the share of the database's connections its
+# budget gives them (infrastructure/timescaledb/config/postgresql.conf), divided among the SQL proxy's
+# replicas. A platform setting, not a tenant's cap: no override, and never off, since an unbounded sum is
+# what the budget exists to prevent.
+SQL_SESSIONS_TOTAL_ENV = "NOTEBOOK_SQL_SESSIONS_TOTAL"
+SQL_SESSIONS_TOTAL_SHIPPED = 50
+
+
+def sql_sessions_total(environ: Mapping[str, str] = os.environ) -> int:
+    """The configured total of every tenant's SQL sessions; ``ValueError`` on a value it cannot read."""
+    raw = environ.get(SQL_SESSIONS_TOTAL_ENV)
+    if raw is None or raw.strip() == "":
+        return SQL_SESSIONS_TOTAL_SHIPPED
+    try:
+        return check_value(int(raw.strip()))
+    except ValueError:
+        raise ValueError(f"{SQL_SESSIONS_TOTAL_ENV} must be a whole number from 1 to {MAX_VALUE}, "
+                         f"got {raw!r}") from None
+
+
 def effective(default: Optional[int], override: Optional[int]) -> Optional[int]:
     """The cap that holds for a tenant: its override, else the platform default (``None`` is off)."""
     return override if override is not None else default
@@ -113,8 +142,28 @@ def refusals_total_key(cap: str) -> str:
     return f"quota:refusals-total:{check_cap(cap)}"
 
 
+# A tenant's SQL sessions open now (ADR-0049 dec 4, 9): a sorted set of session leases scored by their
+# expiry, so a session whose proxy stopped without ending it leaves the count when its lease runs out.
+# Every replica of the SQL proxy counts in the same set. Every tenant's together are not counted here:
+# each replica holds its own part of the total (dec 10), so the total never depends on this store.
+def sql_sessions_key(company_id) -> str:
+    return f"quota:sql-sessions:{tenancy.canonical_company_id(company_id)}"
+
+
+# Refusals at the total of every tenant's SQL sessions: a platform ceiling, not a tenant's cap, so a count
+# with no tenant only, which the API gateway reports on the platform plane (ADR-0049 dec 5, 10).
+SQL_SESSIONS_TOTAL_REFUSALS_KEY = "quota:refusals-total:sql_sessions_total"
+
+
+# Sessions the SQL proxy admitted without their count because the quota store could not be read
+# (ADR-0049 dec 8): counted in the capability store, since the quota store is the one that failed, and
+# reported by the API gateway on the platform plane. Per cap, no tenant.
+def count_unavailable_key(cap: str) -> str:
+    return f"quota:count-unavailable:{check_cap(cap)}"
+
+
 # A tenant's override, as the publisher copies it from the registry into the capability store for the
-# hub (not the quota store, which ingestion can write). It expires as a tenant-status message goes
+# hub and the SQL proxy (not the quota store, which ingestion can write). It expires as a tenant-status message goes
 # stale, so a stopped publisher returns every tenant to the defaults.
 def cap_key(cap: str, company_id) -> str:
     return f"quota:cap:{check_cap(cap)}:{tenancy.canonical_company_id(company_id)}"

@@ -2,12 +2,15 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""max_connections must cover the sum of the per-role CONNECTION LIMITs the init scripts set, in
-both deployments: compose mounts postgresql.conf, and the chart must run the same file (it used to
-run the image default, 100 connections, below what the roles may open).
+"""max_connections must cover the sum of the per-role CONNECTION LIMITs the init scripts set and the
+notebook share, the SQL sessions of every tenant together (ADR-0049 dec 10), in both deployments:
+compose mounts postgresql.conf, and the chart must run the same file (it used to run the image default,
+100 connections, below what the roles may open).
 
 Both sides are lists that drift apart silently: a new role with its own limit, or a raised limit,
-lets the roles together exhaust the server while each stays under its own ceiling.
+lets the roles together exhaust the server while each stays under its own ceiling. A limit the sum
+cannot read is refused rather than left out: the tenant logins once carried one set through format(),
+20 each, which this sum never saw, so a few tenants could take every connection the budget gave others.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from __future__ import annotations
 import re
 
 from _repo import ROOT, find, helm_template, load_yaml
+from industryflow_contracts import quotas
 
 INIT = ROOT / "infrastructure" / "timescaledb" / "init-scripts"
 CONF = ROOT / "infrastructure" / "timescaledb" / "config" / "postgresql.conf"
@@ -29,6 +33,28 @@ def _role_limits() -> dict[str, int]:
     return limits
 
 
+def test_every_connection_limit_is_one_the_sum_reads():
+    """A CONNECTION LIMIT outside `ALTER ROLE <name> CONNECTION LIMIT <n>` (a format() string, a CREATE
+    ROLE) is one the budget does not count; -1, no limit, is the tenant logins' (the proxy caps them)."""
+    unread = []
+    for script in sorted(INIT.iterdir()):
+        text = re.sub(r"--[^\n]*", "", script.read_text())  # a comment sets no limit
+        counted = len(re.findall(r"ALTER ROLE \w+ CONNECTION LIMIT \d+", text))
+        limited = len(re.findall(r"CONNECTION LIMIT \d+", text))
+        if limited != counted:
+            unread.append(script.name)
+    assert not unread, f"a CONNECTION LIMIT the budget cannot read in {unread}"
+
+
+def test_the_shipped_files_take_the_shipped_notebook_share():
+    """The budget counts the shipped total of SQL sessions; a deployment file that set its own would
+    open more than max_connections was sized for."""
+    proxy = load_yaml("docker-compose.yml")["services"]["notebook-sql-proxy"]["environment"]
+    assert proxy[quotas.SQL_SESSIONS_TOTAL_ENV] == f"${{{quotas.SQL_SESSIONS_TOTAL_ENV}:-}}"
+    values = load_yaml("deploy/helm/industryflow/values.yaml")
+    assert values["notebookHub"]["sqlProxy"]["sessionsTotal"] == "", "the chart sets its own total"
+
+
 def _conf(name: str) -> int:
     m = re.search(rf"^{name}\s*=\s*(\d+)", CONF.read_text(), re.M)
     assert m, f"{name} is not set in postgresql.conf"
@@ -38,10 +64,11 @@ def _conf(name: str) -> int:
 def test_max_connections_covers_every_role_ceiling():
     limits = _role_limits()
     assert len(limits) >= 8, f"found only {sorted(limits)} — the guard is not reading the scripts"
-    budget = sum(limits.values()) + _conf("superuser_reserved_connections")
+    share = quotas.SQL_SESSIONS_TOTAL_SHIPPED
+    budget = sum(limits.values()) + share + _conf("superuser_reserved_connections")
     assert _conf("max_connections") > budget, (
         f"max_connections={_conf('max_connections')} does not exceed the role ceilings "
-        f"{limits} + reserved = {budget}"
+        f"{limits} + the notebook share {share} + reserved = {budget}"
     )
 
 
@@ -70,3 +97,15 @@ def test_compose_runs_the_same_postgresql_conf():
     db = load_yaml("docker-compose.yml")["services"]["timescaledb"]
     assert "config_file=/etc/postgresql/postgresql.conf" in db["command"]
     assert "./infrastructure/timescaledb/config/postgresql.conf:/etc/postgresql/postgresql.conf:ro" in db["volumes"]
+
+
+def test_each_sql_proxy_replica_is_told_how_many_share_the_total():
+    """Each replica holds the total divided by the replicas (ADR-0049 dec 10): a replica told a smaller
+    number than run would hold a larger part, and the parts would exceed the budget."""
+    docs = helm_template("--set", "notebookHub.enabled=true")
+    proxy = find(docs, "Deployment", "-notebook-sql-proxy")
+    env = {e["name"]: e.get("value") for e in proxy["spec"]["template"]["spec"]["containers"][0]["env"]}
+    assert env["SQL_PROXY_REPLICAS"] == str(proxy["spec"]["replicas"])
+    service = load_yaml("docker-compose.yml")["services"]["notebook-sql-proxy"]
+    assert "SQL_PROXY_REPLICAS" not in service["environment"] and "replicas" not in service.get("deploy", {}), \
+        "compose runs one proxy, which unset SQL_PROXY_REPLICAS means"

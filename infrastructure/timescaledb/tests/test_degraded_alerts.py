@@ -36,6 +36,7 @@ import service_sql  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "services", "alert_service", "worker"))
 
 import repository  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 HISTORY = "services/api_gateway/routers/alerts_history.py"
 WORKER = "services/alert_service/worker/repository.py"
@@ -71,7 +72,7 @@ def tenant():
         yield cur, schema, str(company_id)
     finally:
         cur.execute("SET search_path TO public")
-        cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
         cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
         cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
         conn.close()

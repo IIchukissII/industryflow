@@ -37,6 +37,7 @@ import pytest
 
 psycopg2 = pytest.importorskip("psycopg2")
 from psycopg2 import errors  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 
 def _skip(reason):
@@ -113,7 +114,7 @@ def stack():
     finally:
         kernel.close()
         for cid, schema in (a, b):
-            cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
             cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{_suffix(cid)}"')
             cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{_suffix(cid)}"')
         admin.close()

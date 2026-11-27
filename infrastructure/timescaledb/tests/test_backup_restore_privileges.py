@@ -30,6 +30,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from industryflow_contracts import testing  # noqa: E402
 
 psycopg2 = pytest.importorskip("psycopg2")
 
@@ -200,7 +201,7 @@ def stack():
         _drop_database(acur, target)
     cur.execute(f"DROP TABLE IF EXISTS public.{GATEWAY_TABLE}")
     cur.execute(f'DROP ROLE IF EXISTS "{PROBE_ROLE}"')
-    cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+    cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
     cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
     cur.execute(f'DROP ROLE IF EXISTS "{reader}"')
     cur.execute("DELETE FROM public.companies WHERE company_id = %s", (str(company_id),))

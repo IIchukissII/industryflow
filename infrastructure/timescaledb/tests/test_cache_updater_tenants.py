@@ -23,6 +23,7 @@ tenancy = pytest.importorskip("industryflow_contracts.tenancy")
 from psycopg2 import errors  # noqa: E402
 
 import service_sql  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 GATEWAY = "api_gateway_user"
 ACTIVE_TENANTS = service_sql.statement("services/api_gateway/messaging/cache_updater.py",
@@ -66,7 +67,7 @@ def tenant():
     yield cur, company_id
     cur.execute("DELETE FROM public.company_deletions WHERE company_id = %s", (company_id,))
     cur.execute("DELETE FROM public.company_lifecycle_events WHERE company_id = %s", (company_id,))
-    cur.execute(f'DROP SCHEMA IF EXISTS "{tenancy.schema_name(company_id)}" CASCADE')
+    cur.execute(testing.drop_tenant_schema_sql(f'{tenancy.schema_name(company_id)}'))
     cur.execute(f'DROP ROLE IF EXISTS "{tenancy.sql_login_name(company_id)}"')
     cur.execute(f'DROP ROLE IF EXISTS "{tenancy.reader_role_name(company_id)}"')
     cur.execute("DELETE FROM public.companies WHERE company_id = %s", (company_id,))

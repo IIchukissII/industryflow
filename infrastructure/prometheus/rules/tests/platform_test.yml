@@ -335,7 +335,52 @@ tests:
             exp_annotations:
               summary: "Tenant quotas are not enforced: the shared count is unreachable"
               description: "Demands were admitted without their readings_per_second cap in the last 5m because the shared count could not be read; no cap holds until it can (ADR-0049 dec 8)."
-              services: "ingestion-service, redis"
+              services: "ingestion-service, notebook-sql-proxy, quota-redis"
       - eval_time: 30m
         alertname: IndustryFlowTenantQuotaCountUnavailable
         exp_alerts: []
+
+  # A SQL session admitted without its count, as two gateway workers report the proxy's count: fires at
+  # once; the count lost with the store (a fall) is no admission.
+  - interval: 1m
+    input_series:
+      - series: 'tenant_quota_count_unavailable{platform="industryflow", job="api-gateway", instance="w1", cap="sql_sessions"}'
+        values: '0x10 1 2 2x20 0x10'
+      - series: 'tenant_quota_count_unavailable{platform="industryflow", job="api-gateway", instance="w2", cap="sql_sessions"}'
+        values: '0x10 1 2 2x20 0x10'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: IndustryFlowTenantQuotaCountUnavailable
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: IndustryFlowTenantQuotaCountUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              cap: sql_sessions
+            exp_annotations:
+              summary: "Tenant quotas are not enforced: the shared count is unreachable"
+              description: "Demands were admitted without their sql_sessions cap in the last 5m because the shared count could not be read; no cap holds until it can (ADR-0049 dec 8)."
+              services: "ingestion-service, notebook-sql-proxy, quota-redis"
+      - eval_time: 36m
+        alertname: IndustryFlowTenantQuotaCountUnavailable
+        exp_alerts: []
+
+  # Every tenant's SQL sessions at their total: a burst does not fire, 15m of refusals does.
+  - interval: 1m
+    input_series:
+      - series: 'tenant_quota_total_refusals{platform="industryflow", job="api-gateway", instance="w1"}'
+        values: '0x10 1x5 1+1x60'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: IndustryFlowNotebookSqlSessionsFull
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: IndustryFlowNotebookSqlSessionsFull
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Notebook SQL sessions are refused: every tenant's together are at their total"
+              description: "SQL sessions have been refused at NOTEBOOK_SQL_SESSIONS_TOTAL for 15m. Raise it with max_connections, or lower tenants' sql_sessions caps (ADR-0049 dec 10)."
+              services: "notebook-sql-proxy, api-gateway"

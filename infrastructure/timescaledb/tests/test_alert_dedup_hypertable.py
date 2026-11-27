@@ -45,6 +45,7 @@ FakeAlertStore = _load("services/alert_service/tests/fake_alert_store.py").FakeA
 
 from repository import AlertRepository  # noqa: E402
 from test_alert_dedup_live import _dsn  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 WINDOW = timedelta(seconds=300)
 WRITERS = 8
@@ -139,7 +140,7 @@ async def _run():
         return outcomes, sorted(chunks), across, creating
     finally:
         async with pool.acquire() as conn:
-            await conn.execute(f'DROP SCHEMA IF EXISTS "tenant_{suffix}" CASCADE')
+            await conn.execute(testing.drop_tenant_schema_sql(f'tenant_{suffix}'))
             await conn.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
             await conn.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
         await pool.close()

@@ -84,15 +84,19 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
         END IF;
 
         -- No password here: the role cannot authenticate until the proxy enrols its verifier.
+        -- No connection limit either: a tenant's sessions are capped by the proxy, from the
+        -- configuration and the tenant's override, and every tenant's together within the
+        -- database's connection budget (ADR-0049 dec 9, 10). A limit fixed here would be a second
+        -- cap, set in code, whose sum grows with every tenant.
         v_can_login := CASE WHEN v_suspended THEN 'NOLOGIN' ELSE 'LOGIN' END;
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_login) THEN
             EXECUTE format(
                 'CREATE ROLE %I %s NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION '
-                'NOBYPASSRLS CONNECTION LIMIT 20', v_login, v_can_login);
+                'NOBYPASSRLS CONNECTION LIMIT -1', v_login, v_can_login);
         ELSE
             EXECUTE format(
                 'ALTER ROLE %I %s NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION '
-                'NOBYPASSRLS CONNECTION LIMIT 20', v_login, v_can_login);
+                'NOBYPASSRLS CONNECTION LIMIT -1', v_login, v_can_login);
         END IF;
 
         -- Exactly two memberships. Anything else this login can SET ROLE into is a way out of

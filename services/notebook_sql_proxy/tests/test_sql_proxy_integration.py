@@ -17,7 +17,10 @@ fake tests cannot:
     verbatim; Postgres refuses them, because the session user can reach nothing else;
   * a revoked handle is refused (no backend opened), and revoking it ends a session already open;
   * an API-audience handle is refused at the SQL proxy (planes are not interchangeable);
-  * a notebook interrupt (libpq's CancelRequest) cancels the running query.
+  * a notebook interrupt (libpq's CancelRequest) cancels the running query;
+  * a tenant's SQL caps hold from outside the session (ADR-0049 dec 9): a session over its tenant's
+    cap is refused naming it, a statement past its cap is cancelled naming it even after the kernel
+    lifts the database's own statement_timeout, and a transaction idle past its cap ends the session.
 
 It drives the proxy as a kernel does: a Postgres client presenting the capability handle in
 place of the password (ADR-0015 dec 5). Kernel→proxy is plaintext cleartext-password (the proxy
@@ -41,6 +44,7 @@ from psycopg2 import errors  # noqa: E402
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import binding as b  # noqa: E402  — reuse the proxy's own key/role derivation, don't reinvent
+from industryflow_contracts import testing  # noqa: E402
 
 # This is the live-stack cross-tenant isolation proof: it needs a real TimescaleDB + Redis + the
 # running proxy (the `notebooks` compose profile), so it is marked `integration` and deselected
@@ -132,8 +136,14 @@ def stack():
         )
         return cid, schema
 
-    a = make_tenant()
-    b_tenant = make_tenant()
+    made = []
+
+    def tenant():
+        made.append(make_tenant())
+        return made[-1]
+
+    a = tenant()
+    b_tenant = tenant()
 
     # Fail fast (skip) if the proxy port isn't even open — a valid handle must connect.
     good = _mint(rc, company_id=str(a[0]))
@@ -141,8 +151,8 @@ def stack():
         probe = _proxy_connect(good)
         probe.close()
     except Exception as e:  # noqa: BLE001
-        for _cid, schema in (a, b_tenant):
-            cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        for _cid, schema in made:
+            cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
             cur.execute(f'DROP ROLE IF EXISTS "{b.tenant_login_role(str(_cid))}"')
             cur.execute(f'DROP ROLE IF EXISTS "{b.reader_role(str(_cid))}"')
         conn.close()
@@ -150,10 +160,10 @@ def stack():
                     f"{os.getenv('PROXY_PORT', '6432')}: {e}")
 
     try:
-        yield {"cur": cur, "rc": rc, "a": a, "b": b_tenant}
+        yield {"cur": cur, "rc": rc, "a": a, "b": b_tenant, "tenant": tenant}
     finally:
-        for _cid, schema in (a, b_tenant):
-            cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        for _cid, schema in made:
+            cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
             cur.execute(f'DROP ROLE IF EXISTS "{b.tenant_login_role(str(_cid))}"')
             cur.execute(f'DROP ROLE IF EXISTS "{b.reader_role(str(_cid))}"')
         conn.close()
@@ -330,3 +340,72 @@ def test_a_notebook_interrupt_cancels_the_running_query(stack, kernel):
     t.join(timeout=30)
     assert outcome.get("result") == "cancelled"
     assert time.monotonic() - started < 30
+
+
+# ------------------------------------------------------------------- a tenant's SQL caps (ADR-0049 dec 9)
+
+def _capped(stack, **caps):
+    """A fresh tenant whose overrides are ``caps``, copied where the publisher copies them for the proxy."""
+    from industryflow_contracts import quotas
+
+    cid, _schema = stack["tenant"]()
+    for cap, value in caps.items():
+        stack["rc"].set(quotas.cap_key(cap, str(cid)), value, ex=300)
+    return str(cid)
+
+
+def test_a_session_over_its_tenants_cap_is_refused_naming_it(stack):
+    cid = _capped(stack, sql_sessions=1)
+    first = _proxy_connect(_mint(stack["rc"], company_id=cid))
+    try:
+        with pytest.raises(psycopg2.OperationalError, match="sql_sessions"):
+            _proxy_connect(_mint(stack["rc"], company_id=cid))
+    finally:
+        first.close()
+    # Closing the first frees its place, once the proxy has seen it close.
+    import time
+
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            _proxy_connect(_mint(stack["rc"], company_id=cid)).close()
+            return
+        except psycopg2.OperationalError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.2)
+
+
+def test_a_statement_past_its_cap_is_cancelled_naming_it_though_the_kernel_lifts_the_database_limit(stack):
+    import time
+
+    cid = _capped(stack, sql_statement_seconds=1)
+    conn = _proxy_connect(_mint(stack["rc"], company_id=cid))
+    conn.autocommit = True
+    try:
+        cur = conn.cursor()
+        cur.execute("SET statement_timeout = 0")       # the kernel's own limit: lifted
+        started = time.monotonic()
+        with pytest.raises(errors.QueryCanceled, match="sql_statement_seconds"):
+            cur.execute("SELECT pg_sleep(60)")
+        assert time.monotonic() - started < 15
+        cur.execute("SELECT 1")                         # the session goes on
+        assert cur.fetchone() == (1,)
+    finally:
+        conn.close()
+
+
+def test_a_transaction_idle_past_its_cap_ends_the_session(stack):
+    import time
+
+    cid = _capped(stack, sql_idle_transaction_seconds=1)
+    conn = _proxy_connect(_mint(stack["rc"], company_id=cid))
+    try:
+        cur = conn.cursor()                             # psycopg2 opens a transaction on the first statement
+        cur.execute("SET idle_in_transaction_session_timeout = 0")
+        cur.execute("SELECT 1")
+        time.sleep(4)
+        with pytest.raises((psycopg2.OperationalError, psycopg2.InterfaceError)):
+            cur.execute("SELECT 1")
+    finally:
+        conn.close()

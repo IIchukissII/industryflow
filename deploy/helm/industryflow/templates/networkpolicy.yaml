@@ -301,8 +301,9 @@ spec:
     {{- include "industryflow.egressTo" (dict "ctx" . "dep" "minio" "name" "minio" "port" .Values.infra.minio.apiPort) | trim | nindent 4 }}
 {{- end }}
 ---
-# The SQL proxy reaches only TimescaleDB (privileged login) and Redis (capability lookup), plus
-# DNS. It is the sole bridge between untrusted kernels and the database (ADR-0015).
+# The SQL proxy reaches only TimescaleDB (privileged login), Redis (capability lookup) and the quota
+# store (the count of a tenant's SQL sessions, ADR-0049 dec 9), plus DNS. It is the sole bridge
+# between untrusted kernels and the database (ADR-0015).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -323,4 +324,5 @@ spec:
           port: 53
     {{- include "industryflow.egressTo" (dict "ctx" . "dep" "timescaledb" "name" "timescaledb" "port" .Values.infra.timescaledb.port) | trim | nindent 4 }}
     {{- include "industryflow.egressTo" (dict "ctx" . "dep" "redis" "name" "redis" "port" .Values.infra.redis.port) | trim | nindent 4 }}
+    {{- include "industryflow.egressTo" (dict "ctx" . "dep" "quotaRedis" "name" "quota-redis" "port" .Values.infra.quotaRedis.port) | trim | nindent 4 }}
 {{- end }}

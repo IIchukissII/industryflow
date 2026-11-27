@@ -689,6 +689,9 @@ services:
       # reads the refusals from (ADR-0049).
       TENANT_QUOTA_READINGS_PER_SECOND: ${TENANT_QUOTA_READINGS_PER_SECOND:-}
       TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS: ${TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS:-}
+      TENANT_QUOTA_SQL_SESSIONS: ${TENANT_QUOTA_SQL_SESSIONS:-}
+      TENANT_QUOTA_SQL_STATEMENT_SECONDS: ${TENANT_QUOTA_SQL_STATEMENT_SECONDS:-}
+      TENANT_QUOTA_SQL_IDLE_TRANSACTION_SECONDS: ${TENANT_QUOTA_SQL_IDLE_TRANSACTION_SECONDS:-}
       QUOTA_REDIS_URL: redis://quota-redis:6379/0
       # The first-run superuser, created only on a platform with no account (ADR-0004 dec 11). Unset: the
       # published defaults, and the account must change its password before anything else.
@@ -1173,10 +1176,21 @@ services:
       # internal CA every DB client trusts.
       SQL_PROXY_DB_SSLMODE: ${DB_SSLMODE:-verify-full}
       SQL_PROXY_DB_SSLROOTCERT: /etc/ssl/industryflow/ca.crt
+      # A tenant's SQL caps (ADR-0049 dec 9): the defaults, beside each tenant's override copied into
+      # the capability store; the count of sessions in the quota store, which kernels do not reach.
+      TENANT_QUOTA_SQL_SESSIONS: ${TENANT_QUOTA_SQL_SESSIONS:-}
+      TENANT_QUOTA_SQL_STATEMENT_SECONDS: ${TENANT_QUOTA_SQL_STATEMENT_SECONDS:-}
+      TENANT_QUOTA_SQL_IDLE_TRANSACTION_SECONDS: ${TENANT_QUOTA_SQL_IDLE_TRANSACTION_SECONDS:-}
+      # Every tenant's sessions together: the notebook share of the database's connection budget
+      # (ADR-0049 dec 10; postgresql.conf). Raising it raises max_connections by as much.
+      NOTEBOOK_SQL_SESSIONS_TOTAL: ${NOTEBOOK_SQL_SESSIONS_TOTAL:-}
+      QUOTA_REDIS_URL: redis://quota-redis:6379/0
     volumes:
       - *ca-mount
     depends_on:
       redis:
+        condition: service_started
+      quota-redis:
         condition: service_started
       db-migrate:
         condition: service_completed_successfully

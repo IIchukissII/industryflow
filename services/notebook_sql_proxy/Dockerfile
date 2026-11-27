@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY --from=contracts . /tmp/industryflow-contracts
 RUN pip install --no-cache-dir /tmp/industryflow-contracts && rm -rf /tmp/industryflow-contracts
 
-COPY binding.py proxy.py wire.py scram.py server.py ./
+COPY binding.py proxy.py wire.py scram.py server.py quota.py load.py ./
 
 # Run as a non-root user (uid 10001).
 RUN useradd -u 10001 -r -s /usr/sbin/nologin appuser

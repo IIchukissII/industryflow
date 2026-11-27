@@ -145,3 +145,22 @@ def test_the_tenantless_refusal_counts_reach_the_platform_metrics_per_cap():
     asyncio.run(run())
     assert quota_metrics.REFUSALS.labels(cap="notebook_environments")._value.get() == 7
     assert quota_metrics.REFUSALS.labels(cap="readings_per_second")._value.get() == 0
+
+
+def test_the_sql_proxys_counts_reach_the_platform_metrics():
+    """The proxy exports no metrics (kernels reach it): its refusals at the total come from the quota
+    store, and its sessions admitted without a count from the capability store (ADR-0049 dec 8, 10)."""
+    from messaging import quota_metrics
+
+    async def run():
+        # One server stands for both stores here: their keys do not meet.
+        store = await testing.async_redis(rebuilt=False, decode_responses=True)
+        await store.set(quotas.SQL_SESSIONS_TOTAL_REFUSALS_KEY, 4)
+        await store.set(quotas.refusals_total_key(quotas.SQL_STATEMENT_SECONDS), 2)
+        await store.set(quotas.count_unavailable_key(quotas.SQL_SESSIONS), 3)
+        await quota_metrics.read_once(store, store)
+
+    asyncio.run(run())
+    assert quota_metrics.TOTAL_REFUSALS._value.get() == 4
+    assert quota_metrics.REFUSALS.labels(cap="sql_statement_seconds")._value.get() == 2
+    assert quota_metrics.COUNT_UNAVAILABLE.labels(cap="sql_sessions")._value.get() == 3

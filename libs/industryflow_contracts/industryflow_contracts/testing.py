@@ -19,6 +19,7 @@ Imported by tests only; its dependencies are the tests' own (the ``dev`` extra) 
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from .denials import STORE_REBUILT_KEY
@@ -215,3 +216,30 @@ async def pass_audit_windows(client: Any) -> None:
         keys = [k async for k in client.scan_iter(match=f"{prefix}*")]
         if keys:
             await client.delete(*keys)
+
+
+# ── Dropping a tenant schema a test made ─────────────────────────────────────────────────────────────
+# Each hypertable by name first, then the schema. A hypertable's compressed chunks live in the
+# extension's internal schema, not the tenant's, so ``DROP SCHEMA ... CASCADE`` leaves them, with their
+# grants to the tenant's reader role, which then cannot be dropped. The background compression job
+# compresses a test's old readings whenever it runs, so a teardown that dropped only the schema failed at
+# random (``role tenant_reader_<uuid> cannot be dropped``). The deletion job drops a tenant the same way
+# (26-company-deletion-job.sql). tests/config_guards/test_test_teardowns.py refuses a bare schema drop.
+
+_SCHEMA = re.compile(r"tenant_[0-9a-f_]{36}")
+
+
+def drop_tenant_schema_sql(schema: str) -> str:
+    """One statement that drops the tenant schema ``schema`` and every hypertable chunk of it."""
+    if not _SCHEMA.fullmatch(schema):
+        raise ValueError(f"not a tenant schema name: {schema!r}")
+    return f"""DO $drop$
+DECLARE t TEXT;
+BEGIN
+    FOR t IN SELECT h.hypertable_name FROM timescaledb_information.hypertables h
+             WHERE h.hypertable_schema = '{schema}' LOOP
+        EXECUTE format('DROP TABLE %I.%I CASCADE', '{schema}', t);
+    END LOOP;
+    EXECUTE format('DROP SCHEMA IF EXISTS %I CASCADE', '{schema}');
+END
+$drop$"""

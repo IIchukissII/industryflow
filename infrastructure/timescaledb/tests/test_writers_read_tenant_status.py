@@ -22,6 +22,7 @@ psycopg2 = pytest.importorskip("psycopg2")
 from psycopg2 import errors  # noqa: E402
 
 import service_sql  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 WRITERS = ("spark_streaming_user", "alert_service_user")
 
@@ -73,7 +74,7 @@ def tenant():
                              (f"writers-status-{uuid.uuid4().hex[:8]}",))
     schema = f"tenant_{str(company_id).replace('-', '_')}"
     yield cur, company_id, schema
-    cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+    cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
     cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{schema[len("tenant_"):]}"')
     cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{schema[len("tenant_"):]}"')
     cur.execute("DELETE FROM public.companies WHERE company_id = %s", (str(company_id),))

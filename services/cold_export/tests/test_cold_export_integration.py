@@ -37,6 +37,7 @@ from cold_export.exporter import run_export  # noqa: E402
 from cold_export.naming import company_id_to_prefix, manifest_key, parquet_key, part_file  # noqa: E402
 from cold_export.source import RUN_LOCK_KEY, PostgresMeasurementSource  # noqa: E402
 from cold_export.store import S3ColdStore  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -115,7 +116,7 @@ def tenant(admin_cur):
         yield t
     finally:
         if schema:
-            cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
             cur.execute("DELETE FROM public.cold_export_drops WHERE schema_name = %s", (schema,))
         cur.execute("DELETE FROM public.companies WHERE company_id = %s", (str(cid),))
 

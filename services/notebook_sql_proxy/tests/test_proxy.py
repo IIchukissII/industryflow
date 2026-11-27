@@ -41,7 +41,7 @@ class FakeBackend:
     async def execute(self, sql):
         self.executed.append(sql)
 
-    async def relay(self, still_authorized):
+    async def relay(self, still_authorized, **_):
         self.relayed = True
         self.still_authorized = still_authorized
 
@@ -150,7 +150,7 @@ class _RelayUntil(FakeBackend):
         super().__init__()
         self._checks, self._fail_with = checks, fail_with
 
-    async def relay(self, still_authorized):
+    async def relay(self, still_authorized, **_):
         await super().relay(still_authorized)
         if self._fail_with is not None:
             raise self._fail_with
@@ -231,7 +231,7 @@ async def test_a_session_ended_by_revocation_records_why():
     store = await _store({f"{b._KEY_PREFIX}good": _sql_record(cid, hid)})
 
     class _RevokedMidSession(_RelayUntil):
-        async def relay(self, still_authorized):
+        async def relay(self, still_authorized, **_):
             await store.delete(f"{b._KEY_PREFIX}good")
             await super().relay(still_authorized)
 
@@ -247,7 +247,7 @@ async def test_a_failed_recheck_and_a_relay_error_are_recorded_as_such():
     store = await _store({f"{b._KEY_PREFIX}good": _sql_record(cid, hid)})
 
     class _StoreDown(_RelayUntil):
-        async def relay(self, still_authorized):
+        async def relay(self, still_authorized, **_):
             await FakeBackend.relay(self, still_authorized)
             original = store.get
 

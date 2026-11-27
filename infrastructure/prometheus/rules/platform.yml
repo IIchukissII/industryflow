@@ -168,11 +168,28 @@ groups:
           description: "Demands have been refused at the {{ $labels.cap }} cap for 15m. Read which tenants at GET /api/platform/quotas/refusals, then raise a tenant's override or the default (ADR-0049)."
           services: "ingestion-service, notebook-hub, api-gateway"
       - alert: IndustryFlowTenantQuotaCountUnavailable
-        # The shared count could not be read, so readings were admitted without their cap (ADR-0049 dec 8).
-        expr: sum by (cap) (increase(tenant_quota_count_unavailable_total{platform="industryflow"}[5m])) > 0
+        # The shared count could not be read, so demands were admitted without their cap (ADR-0049 dec 8):
+        # readings, counted by ingestion; SQL sessions, counted by the SQL proxy in the capability store
+        # and reported by every gateway worker, so read from the largest, a fall being no admission.
+        expr: >-
+          (sum by (cap) (increase(tenant_quota_count_unavailable_total{platform="industryflow"}[5m])) > 0)
+          or
+          (max by (cap) (delta(tenant_quota_count_unavailable{platform="industryflow"}[5m])) > 0)
         labels:
           severity: warning
         annotations:
           summary: "Tenant quotas are not enforced: the shared count is unreachable"
           description: "Demands were admitted without their {{ $labels.cap }} cap in the last 5m because the shared count could not be read; no cap holds until it can (ADR-0049 dec 8)."
-          services: "ingestion-service, redis"
+          services: "ingestion-service, notebook-sql-proxy, quota-redis"
+      - alert: IndustryFlowNotebookSqlSessionsFull
+        # Every tenant's SQL sessions together reached the notebook share of the database's connections
+        # (ADR-0049 dec 10): a sizing question, as a tenant held at its cap is. Read from the largest
+        # gateway worker; a burst does not fire, 15m does.
+        expr: max(delta(tenant_quota_total_refusals{platform="industryflow"}[5m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Notebook SQL sessions are refused: every tenant's together are at their total"
+          description: "SQL sessions have been refused at NOTEBOOK_SQL_SESSIONS_TOTAL for 15m. Raise it with max_connections, or lower tenants' sql_sessions caps (ADR-0049 dec 10)."
+          services: "notebook-sql-proxy, api-gateway"

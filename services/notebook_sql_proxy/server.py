@@ -41,9 +41,12 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 import binding as policy
+import quota as quotas_sql
 import wire
 from binding import SqlBinding
-from proxy import StillAuthorized, serve_connection
+from load import Frames, SessionLoad
+from proxy import Refused, SessionRefused, StillAuthorized, serve_connection
+from quota import Limits
 
 log = logging.getLogger("notebook_sql_proxy")
 
@@ -216,9 +219,9 @@ async def authenticate_client(
     return startup.params, await request_handle(reader, writer)
 
 
-async def reject_client(writer: asyncio.StreamWriter, message: str) -> None:
-    """Send a FATAL ErrorResponse to a kernel whose handle was refused, then close."""
-    writer.write(wire.build_error_response(message))
+async def reject_client(writer: asyncio.StreamWriter, message: str, *, code: str = "28000") -> None:
+    """Send a FATAL ErrorResponse to a kernel whose handle or session was refused, then close."""
+    writer.write(wire.build_error_response(message, code=code))
     with _suppress():
         await writer.drain()
     writer.close()
@@ -410,23 +413,33 @@ class CancelRegistry:
         upstream = self.resolve(pid, key)
         if upstream is None:
             return False
-        cfg = self._config
-        reader, writer = await open_upstream(
-            cfg.host, cfg.port, cfg.ssl_context, require_tls=cfg.require_tls
-        )
-        try:
-            writer.write(wire.build_cancel_request(*upstream))
-            await writer.drain()
-        finally:
-            with _suppress():
-                writer.close()
+        await send_cancel(self._config, upstream)
         return True
+
+
+async def send_cancel(config: UpstreamConfig, upstream_key: Tuple[int, int]) -> None:
+    """Cancel what the upstream session holding ``upstream_key`` runs, as a client does: a CancelRequest
+    on a connection of its own, closed with no reply."""
+    reader, writer = await open_upstream(
+        config.host, config.port, config.ssl_context, require_tls=config.require_tls
+    )
+    try:
+        writer.write(wire.build_cancel_request(*upstream_key))
+        await writer.drain()
+    finally:
+        with _suppress():
+            writer.close()
 
 
 # --------------------------------------------------------------------- backend
 
+# How often a session's statement and idle-transaction clocks are read against its caps.
+LOAD_TICK_SECONDS = 1.0
+
+
 class PostgresBackend:
-    """Live upstream session for one kernel: tenant login, SET ROLE, relay, revocation, cancel."""
+    """Live upstream session for one kernel: tenant login, SET ROLE, relay, revocation, cancel, and
+    its tenant's statement and idle-transaction caps (ADR-0049 dec 9)."""
 
     def __init__(
         self,
@@ -446,6 +459,8 @@ class PostgresBackend:
         self._revalidate_seconds = revalidate_seconds
         self._upstream = UpstreamConnection(config)
         self.revoked = False
+        # The cap that ended the session, if one did (recorded as the session's end).
+        self.ended_by: Optional[str] = None
 
     async def connect(self) -> None:
         """Open the session as the tenant's own login, enrolling it once if the database refuses.
@@ -469,9 +484,10 @@ class PostgresBackend:
         """Run one setup statement (SET ROLE / search_path / read-only)."""
         await self._upstream.execute(sql)
 
-    async def relay(self, still_authorized: Optional[StillAuthorized] = None) -> None:
-        """Complete the kernel handshake, then pipe bytes both ways until either side closes or the
-        capability stops resolving."""
+    async def relay(self, still_authorized: Optional[StillAuthorized] = None, *,
+                    limits: Optional[Limits] = None, refused: Optional[Refused] = None) -> None:
+        """Complete the kernel handshake, then pipe bytes both ways until either side closes, the
+        capability stops resolving, or a cap of ``limits`` ends the session."""
         cancel_pid: Optional[int] = None
         # The kernel sees a normal startup completion: AuthenticationOk, the upstream's
         # ParameterStatus messages (buffered during connect), the proxy's own BackendKeyData, then
@@ -485,20 +501,67 @@ class PostgresBackend:
         self._client_writer.write(wire.build_ready_for_query())
         await self._client_writer.drain()
 
-        watchdog = None
+        load = self._load(limits, refused)
+        to_kernel = Frames(hold=(wire.MSG_READY_FOR_QUERY, wire.MSG_ERROR_RESPONSE),
+                           on_message=load.upstream_message) if load else None
+        to_database = Frames(on_begin=load.client_message) if load else None
+        # The kernel's stream is written by the relay and, to end a session, by the clock: one at a time.
+        writing = asyncio.Lock()
+
+        watchers = []
         if still_authorized is not None:
-            watchdog = asyncio.create_task(self._watch(still_authorized))
+            watchers.append(asyncio.create_task(self._watch(still_authorized)))
+        if load is not None:
+            watchers.append(asyncio.create_task(self._clock(load, to_kernel, writing)))
         try:
             await asyncio.gather(
-                _pipe(self._client_reader, self._upstream.writer),
-                _pipe(self._upstream.reader, self._client_writer),
+                _pipe(self._client_reader, self._upstream.writer, frames=to_database),
+                _pipe(self._upstream.reader, self._client_writer, frames=to_kernel, lock=writing),
             )
         finally:
-            if watchdog is not None:
-                watchdog.cancel()
-                await asyncio.gather(watchdog, return_exceptions=True)
+            for watcher in watchers:
+                watcher.cancel()
+            await asyncio.gather(*watchers, return_exceptions=True)
             if cancel_pid is not None:
                 self._cancels.unregister(cancel_pid)
+
+    def _load(self, limits: Optional[Limits], refused: Optional[Refused]) -> Optional[SessionLoad]:
+        """The session's clocks, when a statement or idle-transaction cap holds for it."""
+        if limits is None or (limits.statement_seconds is None and limits.idle_transaction_seconds is None):
+            return None
+
+        async def cancel() -> None:
+            if self._upstream.backend_key is None:
+                return
+            try:
+                await send_cancel(self._config, self._upstream.backend_key)
+            except Exception:  # noqa: BLE001 - the grace period ends the session if this did not
+                log.exception("could not cancel a statement past its cap")
+
+        async def count(cap: str) -> None:
+            if refused is not None:
+                await refused(cap)
+
+        return SessionLoad(limits.statement_seconds, limits.idle_transaction_seconds,
+                           cancel=cancel, refused=count)
+
+    async def _clock(self, load: SessionLoad, to_kernel: Frames, writing: asyncio.Lock) -> None:
+        """Read the session's clocks every tick; end the session when a cap says so, telling the kernel
+        why where a message ends (a session ended mid-message is closed without it)."""
+        while True:
+            await asyncio.sleep(LOAD_TICK_SECONDS)
+            cap = await load.tick()
+            if cap is None:
+                continue
+            self.ended_by = cap
+            log.info("SQL session ended at %s: company_id=%s", cap, self._binding.company_id)
+            async with writing:
+                if to_kernel.at_boundary and not self._client_writer.is_closing():
+                    self._client_writer.write(load.ending(cap))
+                    with _suppress():
+                        await asyncio.wait_for(self._client_writer.drain(), timeout=5)
+            await self.close()
+            return
 
     async def _watch(self, still_authorized: StillAuthorized) -> None:
         """Re-check the capability for the life of the session; end the session once it fails.
@@ -528,16 +591,27 @@ class PostgresBackend:
                 self._client_writer.close()
 
 
-async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    """Copy bytes from ``reader`` to ``writer`` until EOF, then half-close the writer."""
+async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
+                frames: Optional[Frames] = None, lock: Optional[asyncio.Lock] = None) -> None:
+    """Copy bytes from ``reader`` to ``writer`` until EOF, then half-close the writer. With ``frames``,
+    what is copied is what the frames pass on; with ``lock``, each write holds it."""
     try:
         while True:
             chunk = await reader.read(65536)
             if not chunk:
                 break
-            writer.write(chunk)
-            await writer.drain()
-    except (ConnectionError, asyncio.IncompleteReadError):
+            if frames is not None:
+                chunk = frames.feed(chunk)
+                if not chunk:
+                    continue
+            if lock is None:
+                writer.write(chunk)
+                await writer.drain()
+            else:
+                async with lock:
+                    writer.write(chunk)
+                    await writer.drain()
+    except (ConnectionError, asyncio.IncompleteReadError, wire.ProtocolError):
         pass
     finally:
         with _suppress():
@@ -552,6 +626,7 @@ async def handle_client(
     store,
     backend_factory,
     cancels: Optional[CancelRegistry] = None,
+    quota: Optional[quotas_sql.SessionQuota] = None,
 ) -> None:
     """Authenticate one kernel and, if its handle is valid, bind it to its tenant and relay.
 
@@ -578,8 +653,13 @@ async def handle_client(
         return backend_factory(binding, reader, writer)
 
     peer = writer.get_extra_info("peername")
-    served = await serve_connection(handle, store, factory,
-                                    source=peer[0] if isinstance(peer, (tuple, list)) and peer else None)
+    try:
+        served = await serve_connection(handle, store, factory, quota=quota,
+                                        source=peer[0] if isinstance(peer, (tuple, list)) and peer else None)
+    except SessionRefused as refused:
+        # too_many_connections: what a driver reports when a server has no session to give.
+        await reject_client(writer, str(refused), code="53300")
+        return
     if not served:
         await reject_client(writer, "capability handle refused")
 
@@ -603,7 +683,7 @@ async def main() -> None:  # pragma: no cover - cluster-bound entry point
     redis_url = os.environ["SQL_PROXY_REDIS_URL"]
     # How often an open session re-checks its capability (ADR-0012 dec 6): the longest a revoked
     # handle keeps a session it already opened.
-    revalidate_seconds = float(os.environ.get("SQL_PROXY_REVALIDATE_SECONDS", "15"))
+    revalidate_seconds = quotas_sql.check_renewal(float(os.environ.get("SQL_PROXY_REVALIDATE_SECONDS", "15")))
     # Upstream TLS (ADR-0017): verify-full by default, against the internal CA mounted as the
     # standard DB client root. Set SQL_PROXY_DB_SSLMODE=disable only for a dev DB without certs.
     sslmode = os.environ.get("SQL_PROXY_DB_SSLMODE", "verify-full")
@@ -620,6 +700,11 @@ async def main() -> None:  # pragma: no cover - cluster-bound entry point
     )
     store = aioredis.from_url(redis_url)
     cancels = CancelRegistry(config)
+    # The tenant's SQL caps (ADR-0049 dec 9, 10): its overrides from the capability store, the count of
+    # sessions in the quota store. A setting the contract cannot read stops the proxy here.
+    defaults, total = quotas_sql.settings(os.environ)
+    quota = quotas_sql.SessionQuota(store, quotas_sql.quota_store_client(os.environ["QUOTA_REDIS_URL"]),
+                                    defaults, total)
 
     def backend_factory(binding, client_reader, client_writer):
         return PostgresBackend(
@@ -628,7 +713,7 @@ async def main() -> None:  # pragma: no cover - cluster-bound entry point
         )
 
     async def on_connect(reader, writer):
-        await handle_client(reader, writer, store, backend_factory, cancels)
+        await handle_client(reader, writer, store, backend_factory, cancels, quota)
 
     server = await asyncio.start_server(on_connect, listen_host, listen_port)
     async with server:

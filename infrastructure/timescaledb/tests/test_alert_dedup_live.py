@@ -26,6 +26,7 @@ asyncpg = pytest.importorskip("asyncpg")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "services", "alert_service", "worker"))
 
 from repository import AlertRepository  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 WRITERS = 8
 
@@ -102,7 +103,7 @@ async def _run():
             return results, rows, paths
         finally:
             async with pool.acquire() as conn:
-                await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+                await conn.execute(testing.drop_tenant_schema_sql(f'{schema}'))
                 await conn.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{str(company_id).replace("-", "_")}"')
                 await conn.execute(f'DROP ROLE IF EXISTS "tenant_reader_{str(company_id).replace("-", "_")}"')
     finally:

@@ -23,6 +23,7 @@ psycopg2 = pytest.importorskip("psycopg2")
 
 import service_sql  # noqa: E402
 from test_degraded_alerts import _connect  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 PROVIDER = "services/ml_service/api/feature_engineering/baseline_provider.py"
 T0 = datetime(2026, 11, 9, 12, 0, tzinfo=timezone.utc)
@@ -60,7 +61,7 @@ def tenant():
         yield schema, uuid.UUID(str(equipment))
     finally:
         cur.execute("SET search_path TO public")
-        cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
         cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
         cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
         conn.close()
