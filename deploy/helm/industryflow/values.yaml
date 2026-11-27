@@ -628,11 +628,15 @@ config:
   # (ADR-0004 Deferred). "per-source" also needs EDGE_PROXY_PEERS; the gateway refuses it without.
   SIGN_IN_THROTTLE: "off"
   # Tenant quotas (ADR-0049): each cap's platform default, a whole number or "off"; empty takes the
-  # shipped default (250 readings/s, 3 notebook environments). A superuser overrides one for a tenant
-  # through PUT /api/platform/quotas/tenants/{company_id}/{cap}. Read by ingestion, the hub and the
-  # API gateway; a value they cannot read stops them.
+  # shipped default (250 readings/s, 3 notebook environments, 5 SQL sessions, 300 s per SQL statement,
+  # 60 s per idle SQL transaction). A superuser overrides one for a tenant through
+  # PUT /api/platform/quotas/tenants/{company_id}/{cap}. Read by ingestion, the hub, the SQL proxy and
+  # the API gateway; a value they cannot read stops them.
   TENANT_QUOTA_READINGS_PER_SECOND: ""
   TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS: ""
+  TENANT_QUOTA_SQL_SESSIONS: ""
+  TENANT_QUOTA_SQL_STATEMENT_SECONDS: ""
+  TENANT_QUOTA_SQL_IDLE_TRANSACTION_SECONDS: ""
   # The first-run superuser's address and tenant, on a platform with no account (ADR-0004 dec 11).
   # Empty: admin@example.com in a tenant named Default. Its password is the published default,
   # which the account must change before anything else.
@@ -906,6 +910,9 @@ notebookHub:
     image: industryflow-notebook-sql-proxy
     digest: ""
     port: 6432
+    # Every tenant's SQL sessions together (ADR-0049 dec 10): the notebook share of the database's
+    # connection budget. Empty takes 50; raising it raises max_connections in postgresql.conf by as much.
+    sessionsTotal: ""
     resources:
       requests: { cpu: 50m, memory: 64Mi }
       limits: { cpu: 250m, memory: 128Mi }

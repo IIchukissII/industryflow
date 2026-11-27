@@ -13,9 +13,9 @@ the registry and the capability store. The whole registry goes out every ``inter
 suspension reaches ingestion within one interval.
 
 Each tenant's quota overrides ride its status (ADR-0049 dec 2): ingestion reads them from the stream,
-and the hub, which is off the broker, from an expiring copy (``quotas.cap_key``) that this writes on
-the same tick to the capability store, which the hub trusts and the device-facing ingestion service
-cannot reach (ADR-0033 dec 3). Both expire as a status goes stale, so a stopped publisher returns every
+and the hub and the SQL proxy, which are off the broker, from an expiring copy (``quotas.cap_key``) that
+this writes on the same tick to the capability store, which they trust and the device-facing ingestion
+service cannot reach (ADR-0033 dec 3). Both expire as a status goes stale, so a stopped publisher returns every
 tenant to the platform defaults; a cleared override's copy is deleted on the next tick. A round that
 cannot read the overrides sends the last ones read: suspension must not wait on a quota.
 """

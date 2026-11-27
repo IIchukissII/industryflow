@@ -7,7 +7,8 @@ and the alert worker's own roles with their own statements on their drivers (ser
 
   * an override set changes the tenant's cap and appends one record, with its actor, before and after,
   * a value equal to the current one changes and records nothing; NULL returns the tenant to the default,
-  * an unknown cap, a value out of range, or a tenant that does not exist is refused,
+  * an unknown cap, a value out of range, or a tenant that does not exist is refused, and every cap of
+    the contract is one the database takes,
   * no runtime role writes the overrides or their record directly, and the alert worker reads them,
   * the deletion job removes a tenant's overrides with its database objects, and keeps their record (dec 7).
 
@@ -125,6 +126,18 @@ def test_an_unknown_cap_or_a_value_out_of_range_is_refused(tenant, cap, value, s
     with pytest.raises(Exception) as refused:
         _set(company_id, cap, value, who)
     assert service_sql.sqlstate(refused.value) == state
+
+
+def test_every_cap_of_the_contract_is_one_the_database_takes(tenant):
+    """The database's list of caps is the contract's: an override of each is set, and its record kept."""
+    from industryflow_contracts import quotas
+
+    cur, company_id, who = tenant
+    for cap in quotas.CAPS:
+        assert _set(company_id, cap, 7, who)["changed"] is True, cap
+    assert _overrides(company_id) == {cap: 7 for cap in quotas.CAPS}
+    cur.execute("SELECT cap FROM public.tenant_quota_caps")
+    assert {r[0] for r in cur.fetchall()} == set(quotas.CAPS)
 
 
 def test_a_tenant_that_does_not_exist_is_refused(tenant):

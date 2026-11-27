@@ -237,7 +237,7 @@ async def test_handle_client_authorizes_valid_handle_and_builds_backend():
         async def execute(self, sql):
             built.setdefault("sql", []).append(sql)
 
-        async def relay(self, still_authorized):
+        async def relay(self, still_authorized, **_):
             built["relayed"] = True
 
         async def close(self):

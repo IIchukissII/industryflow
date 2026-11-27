@@ -17,14 +17,42 @@
 -- THE OVERRIDES (dec 2, 7)
 -- =============================================================================
 
+-- The closed list of caps (dec 1): its one home in the database, the same list as the contract's
+-- (libs/industryflow_contracts/industryflow_contracts/quotas.py), which a test holds equal. A new cap is
+-- added here; one no longer in the contract stays, as an override of it may.
+CREATE TABLE IF NOT EXISTS public.tenant_quota_caps (cap TEXT PRIMARY KEY);
+INSERT INTO public.tenant_quota_caps (cap) VALUES
+    ('readings_per_second'),
+    ('notebook_environments'),
+    ('sql_sessions'),
+    ('sql_statement_seconds'),
+    ('sql_idle_transaction_seconds')
+ON CONFLICT (cap) DO NOTHING;
+
+COMMENT ON TABLE public.tenant_quota_caps IS
+    'The caps a tenant quota override may name (ADR-0049 dec 1)';
+
 CREATE TABLE IF NOT EXISTS public.tenant_quota_overrides (
     company_id UUID NOT NULL REFERENCES public.companies (company_id),
-    cap TEXT NOT NULL CHECK (cap IN ('readings_per_second', 'notebook_environments')),
+    cap TEXT NOT NULL REFERENCES public.tenant_quota_caps (cap),
     value INTEGER NOT NULL CHECK (value BETWEEN 1 AND 1000000),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_by UUID NOT NULL,
     PRIMARY KEY (company_id, cap)
 );
+
+-- A database from before the list was a table checked the cap against a list of its own.
+ALTER TABLE public.tenant_quota_overrides DROP CONSTRAINT IF EXISTS tenant_quota_overrides_cap_check;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conrelid = 'public.tenant_quota_overrides'::regclass
+                     AND conname = 'tenant_quota_overrides_cap_fkey') THEN
+        ALTER TABLE public.tenant_quota_overrides ADD CONSTRAINT tenant_quota_overrides_cap_fkey
+            FOREIGN KEY (cap) REFERENCES public.tenant_quota_caps (cap);
+    END IF;
+END
+$$;
 
 COMMENT ON TABLE public.tenant_quota_overrides IS
     'A tenant''s override of a cap''s platform default (ADR-0049 dec 2); written only through set_tenant_quota()';
@@ -71,9 +99,7 @@ BEGIN
     IF p_actor_id IS NULL THEN
         RAISE EXCEPTION 'a quota change needs its actor' USING ERRCODE = '22004';
     END IF;
-    -- The closed list of caps: a new cap is added here, in the table's check and in the contract
-    -- (libs/industryflow_contracts/industryflow_contracts/quotas.py).
-    IF p_cap IS NULL OR p_cap NOT IN ('readings_per_second', 'notebook_environments') THEN
+    IF p_cap IS NULL OR NOT EXISTS (SELECT 1 FROM public.tenant_quota_caps k WHERE k.cap = p_cap) THEN
         RAISE EXCEPTION 'unknown tenant quota %', p_cap USING ERRCODE = '22023';
     END IF;
     IF p_value IS NOT NULL AND p_value NOT BETWEEN 1 AND 1000000 THEN
@@ -113,7 +139,7 @@ COMMENT ON FUNCTION public.set_tenant_quota(UUID, TEXT, INTEGER, UUID) IS
 -- PRIVILEGES: the gateway changes overrides only through the function; the alert worker reads them
 -- =============================================================================
 
-REVOKE ALL ON public.tenant_quota_overrides, public.tenant_quota_changes FROM PUBLIC;
+REVOKE ALL ON public.tenant_quota_caps, public.tenant_quota_overrides, public.tenant_quota_changes FROM PUBLIC;
 REVOKE ALL ON SEQUENCE public.tenant_quota_changes_change_id_seq FROM PUBLIC;
 GRANT SELECT ON public.tenant_quota_overrides, public.tenant_quota_changes TO api_gateway_user;
 GRANT SELECT (company_id, cap, value) ON public.tenant_quota_overrides TO alert_service_user;

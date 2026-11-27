@@ -18,6 +18,10 @@ longer resolves to the same binding.
 Each presented handle's outcome, and each session's opening and closing with why it ended, are
 recorded into the capability-use record (ADR-0042 dec 1); the statements relayed are not.
 
+A resolved handle's session is then held to its tenant's SQL caps (ADR-0049 dec 9, 10; ``quota.py``):
+it is refused, naming the cap, when its tenant or every tenant together already has its sessions open,
+and once open its statements and idle transactions are timed against the tenant's caps by the relay.
+
 This module is the connection orchestration, written against a ``Backend`` protocol so the
 policy is testable with a fake backend. The real backend — the Postgres wire: the tenant login,
 enrolment, the byte relay and cancellation — is ``server.PostgresBackend``.
@@ -32,10 +36,16 @@ from industryflow_contracts import capability_audit as audit
 
 from binding import (SqlBinding, record_resolution, record_session, resolve_sql_outcome,
                      session_setup_statements)
+from quota import AtCap, Limits, SessionQuota
 
 log = logging.getLogger("notebook_sql_proxy")
 
 StillAuthorized = Callable[[], Awaitable[bool]]
+Refused = Callable[[str], Awaitable[None]]
+
+
+class SessionRefused(Exception):
+    """A resolved handle whose session a cap refused; the message names the cap, for the kernel."""
 
 
 class Backend(Protocol):
@@ -43,7 +53,8 @@ class Backend(Protocol):
 
     async def connect(self) -> None: ...
     async def execute(self, sql: str) -> None: ...
-    async def relay(self, still_authorized: StillAuthorized) -> None: ...
+    async def relay(self, still_authorized: StillAuthorized, *, limits: Optional[Limits] = None,
+                    refused: Optional[Refused] = None) -> None: ...
     async def close(self) -> None: ...
 
 
@@ -61,6 +72,7 @@ async def serve_connection(
     backend_factory: Callable[[SqlBinding], Backend],
     *,
     source: Optional[str] = None,
+    quota: Optional[SessionQuota] = None,
 ) -> bool:
     """Authorize a kernel connection and, if valid, bind it to its tenant and relay.
 
@@ -70,6 +82,9 @@ async def serve_connection(
     The outcome is recorded before anything is served (ADR-0042 dec 1, 5): the handle's first use
     here, or the refusal. A record that cannot be written refuses the connection by raising, as a
     store that cannot answer the lookup does. The session's opening and closing are recorded too.
+
+    With a ``quota``, a session its tenant's caps refuse raises ``SessionRefused`` before any backend
+    is opened; one admitted holds its lease until it ends, renewed on every re-check.
     """
     binding, reason, facts = await resolve_sql_outcome(store.get, handle)
     await record_resolution(store, handle, binding, reason, facts, source=source)
@@ -80,7 +95,21 @@ async def serve_connection(
                  None if facts.get("handle_id") else audit.presented_digest(handle))
         return False
 
-    # Why the session ended, when the re-check ended it rather than either side closing.
+    limits: Optional[Limits] = None
+    lease = None
+    if quota is not None:
+        limits = await quota.limits(binding.company_id)
+        try:
+            lease = await quota.open(binding.company_id, limits.sessions)
+        except AtCap as refused:
+            log.info("SQL session refused at %s: company_id=%s user=%s", refused.cap, binding.company_id,
+                     binding.user)
+            raise SessionRefused(str(refused)) from None
+
+    async def count_refusal(cap: str) -> None:
+        await quota.record_refusal(cap, binding.company_id)
+
+    # Why the session ended, when the re-check or a cap ended it rather than either side closing.
     ended: dict = {}
 
     async def still_authorized() -> bool:
@@ -95,6 +124,8 @@ async def serve_connection(
             ended.setdefault("reason", "capability_revoked")
             ended.setdefault("refusal", refusal or "rebound")
             return False
+        if lease is not None:
+            await lease.renew()
         return True
 
     backend = backend_factory(binding)
@@ -105,12 +136,17 @@ async def serve_connection(
             await backend.execute(statement)
         await record_session(store, audit.SQL_SESSION_OPENED, binding)
         opened_at = time.monotonic()
-        await backend.relay(still_authorized)
+        await backend.relay(still_authorized, limits=limits,
+                            refused=count_refusal if quota is not None else None)
+        if getattr(backend, "ended_by", None):
+            ended.setdefault("reason", backend.ended_by)
     except BaseException:
         ended.setdefault("reason", "error")
         raise
     finally:
         await backend.close()
+        if lease is not None:
+            await lease.release()
         if opened_at is not None:
             await _record_closed(store, binding, ended, time.monotonic() - opened_at)
     return True
