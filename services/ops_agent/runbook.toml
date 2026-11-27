@@ -116,15 +116,21 @@ follows = "ADR-0044 dec 3"
 
 [[alert]]
 name = "IndustryFlowTenantQuotaRefusals"
-fires_when = "Demands have been refused at one tenant quota cap (`readings_per_second` or `notebook_environments`) for 15m"
+fires_when = "Demands have been refused at one tenant quota cap (`readings_per_second`, `notebook_environments`, `sql_sessions`, `sql_statement_seconds`, `sql_idle_transaction_seconds`) for 15m"
 handling = "`GET /api/platform/quotas/refusals` (superuser) names the tenants; raise one with `PUT /api/platform/quotas/tenants/{company_id}/{cap}`, or the default `TENANT_QUOTA_<CAP>` if every tenant is held"
 follows = "ADR-0049 dec 5"
 
 [[alert]]
 name = "IndustryFlowTenantQuotaCountUnavailable"
-fires_when = "`ingestion-service` admitted readings without their cap because it could not reach the quota store"
-handling = "`docker compose ps quota-redis`; `docker compose logs quota-redis`; no reading is lost meanwhile, only the cap is waived"
+fires_when = "`ingestion-service` admitted readings, or `notebook-sql-proxy` SQL sessions, without their tenant's cap because it could not reach the quota store"
+handling = "`docker compose ps quota-redis`; `docker compose logs quota-redis`; no reading is lost meanwhile, only the cap is waived; the SQL session total still holds per proxy replica"
 follows = "ADR-0049 dec 8"
+
+[[alert]]
+name = "IndustryFlowNotebookSqlSessionsFull"
+fires_when = "`notebook-sql-proxy` has refused SQL sessions for 15m because every tenant's together held its replica's part of `NOTEBOOK_SQL_SESSIONS_TOTAL`"
+handling = "`GET /api/platform/quotas/refusals` (superuser) shows which tenants hold sessions at their cap; lower a tenant's `sql_sessions`, or raise `NOTEBOOK_SQL_SESSIONS_TOTAL` and `max_connections` in `postgresql.conf` by as much"
+follows = "ADR-0049 dec 10"
 
 [[symptom]]
 symptom = "Client p95 in seconds and achieved rate below the offered rate; server `/ingest` p95 low"
