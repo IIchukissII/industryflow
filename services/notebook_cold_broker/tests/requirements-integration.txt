@@ -7,5 +7,5 @@
 # compose network so the broker's pre-signed-URL host (minio:9000) resolves.
 pytest==9.2.0
 requests==2.34.2
-redis==8.1.0
-boto3==1.44.6
+redis==8.2.0
+boto3==1.44.11

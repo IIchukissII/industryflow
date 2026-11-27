@@ -15,4 +15,4 @@ scikit-learn==1.9.1
 mlflow-skinny==3.18.0
 skops==0.16.0
 # The promotion proof mints the tracking capability as the hub's spawner writes it.
-redis==8.1.0
+redis==8.2.0

@@ -7,7 +7,7 @@
 # (minio:9000) resolves.
 pytest==9.2.0
 requests==2.34.2
-redis==8.1.0
+redis==8.2.0
 
 # The serving-load proof logs a real model the way a kernel does, so these match the kernel's pins
 # (clients/python/kernel/requirements.txt). They share the model-stack bot group with it.

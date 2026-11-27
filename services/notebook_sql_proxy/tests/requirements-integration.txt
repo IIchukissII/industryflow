@@ -7,4 +7,4 @@
 # psycopg2-binary kept in step with infrastructure/timescaledb/tests/requirements.txt so the two
 # can be co-installed into one env in db-tenant-isolation.yml without a pin collision.
 psycopg2-binary==2.9.13
-redis==8.1.0
+redis==8.2.0
