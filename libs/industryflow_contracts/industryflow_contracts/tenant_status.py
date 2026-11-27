@@ -14,7 +14,8 @@ registry itself, are what enforce suspension.
 
 A message may also carry the tenant's quota overrides (``caps``, ADR-0049 dec 2): a cap the message
 does not name takes the platform default, so a consumer that forgets a stale status also returns that
-tenant to the defaults.
+tenant to the defaults. And the stored-data caps the tenant is over (``over``, dec 12), whose demand
+is refused; a consumer that forgets a stale status refuses nothing for them.
 
 Standard library only: this is imported by every service image.
 """
@@ -32,21 +33,26 @@ PUBLISH_INTERVAL_SECONDS = 10
 STALE_AFTER_SECONDS = 6 * PUBLISH_INTERVAL_SECONDS
 
 
-def encode(company_id, active: bool, caps=None) -> tuple[bytes, bytes]:
+def encode(company_id, active: bool, caps=None, over=()) -> tuple[bytes, bytes]:
     """The (key, value) of one tenant's status message. The key is the canonical company_id; ``caps``
-    maps a cap to the tenant's override, and is left out when there is none."""
+    maps a cap to the tenant's override, and is left out when there is none; ``over`` names the
+    stored-data caps the tenant is over, left out when none."""
     canonical = tenancy.canonical_company_id(company_id)
     if not isinstance(active, bool):
         raise ValueError("active must be a bool")
     body = {"company_id": canonical, "active": active}
     if caps:
         body["caps"] = {quotas.check_cap(cap): quotas.check_value(value) for cap, value in caps.items()}
+    if over:
+        stored = set(quotas.STORED_CAPS.values())
+        body["over"] = sorted(cap for cap in over if quotas.check_cap(cap) in stored)
     return canonical.encode(), json.dumps(body).encode()
 
 
-def decode_message(value: bytes) -> tuple[str, bool, dict]:
-    """``(canonical company_id, active, caps)`` from a message value; ``ValueError`` if it is not one.
-    A cap or value this version does not know is dropped, not refused: the tenant takes its default."""
+def decode_message(value: bytes) -> tuple[str, bool, dict, frozenset]:
+    """``(canonical company_id, active, caps, over)`` from a message value; ``ValueError`` if it is not
+    one. A cap or value this version does not know is dropped, not refused: the tenant takes its default,
+    and an ``over`` this version does not know refuses nothing."""
     try:
         body = json.loads(value)
     except (TypeError, ValueError) as e:
@@ -61,10 +67,13 @@ def decode_message(value: bytes) -> tuple[str, bool, dict]:
                 caps[quotas.check_cap(cap)] = quotas.check_value(val)
             except ValueError:
                 continue
-    return tenancy.canonical_company_id(body.get("company_id")), body["active"], caps
+    stored = set(quotas.STORED_CAPS.values())
+    over = body.get("over")
+    over = frozenset(c for c in over if c in stored) if isinstance(over, list) else frozenset()
+    return tenancy.canonical_company_id(body.get("company_id")), body["active"], caps, over
 
 
 def decode(value: bytes) -> tuple[str, bool]:
     """``(canonical company_id, active)`` from a message value; ``ValueError`` if it is not one."""
-    company_id, active, _caps = decode_message(value)
+    company_id, active, _caps, _over = decode_message(value)
     return company_id, active

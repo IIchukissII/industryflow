@@ -59,6 +59,7 @@ PRINCIPALS = {
     "cold-export-rw": ("COLD_STORE", "t-cold-writer"),
     "cold-broker-ro": ("COLD_READ", "t-cold-reader"),
     "tenant-delete-cold": ("TENANT_DELETE_COLD", "t-cold-deleter"),
+    "tenant-usage": ("TENANT_USAGE_STORE", "t-usage"),
 }
 CP, ART, BAK, COLD = (BUCKETS[k] for k in ("SPARK_CHECKPOINT_BUCKET", "ARTIFACT_BUCKET", "BACKUP_BUCKET", "COLD_STORE_BUCKET"))
 UPLOADED = f"{ART}/tenant_aaaa/uploads/u1/model.skops"
@@ -158,6 +159,8 @@ ALLOWED = {
                        ("list", f"{COLD}/")],
     # Lists a tenant's prefix and removes what is under it, nothing more.
     "tenant-delete-cold": [("list", f"{COLD}/tenant_cccc/"), ("delete", DELETED_TENANT_COLD)],
+    # Measures each tenant's prefixes in both buckets (ADR-0049 dec 11): lists them, nothing more.
+    "tenant-usage": [("list", f"{COLD}/tenant_aaaa/"), ("list", f"{ART}/tenant_aaaa/")],
 }
 
 REFUSED = {
@@ -183,6 +186,11 @@ REFUSED = {
     "tenant-delete-cold": [("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("put", f"{COLD}/tenant_aaaa/x"),
                            ("delete", f"{COLD}/not-a-tenant/x"), ("delete", TRACKED),
                            ("delete", f"{BAK}/timescaledb/a.dump"), ("get", TRACKED)],
+    # Reads, writes and deletes nothing it measures (ADR-0049 dec 13), and lists only tenant prefixes.
+    "tenant-usage": [("get", TRACKED), ("get", f"{COLD}/tenant_aaaa/year=2026/p.parquet"),
+                     ("put", f"{ART}/tenant_aaaa/x"), ("put", f"{COLD}/tenant_aaaa/x"), ("delete", TRACKED),
+                     ("delete", f"{COLD}/tenant_aaaa/year=2026/p.parquet"), ("list", f"{COLD}/not-a-tenant/"),
+                     ("list", f"{BAK}/"), ("list", f"{CP}/state/")],
 }
 
 

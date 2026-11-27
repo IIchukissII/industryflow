@@ -116,7 +116,7 @@ follows = "ADR-0044 dec 3"
 
 [[alert]]
 name = "IndustryFlowTenantQuotaRefusals"
-fires_when = "Demands have been refused at one tenant quota cap (`readings_per_second`, `notebook_environments`, `sql_sessions`, `sql_statement_seconds`, `sql_idle_transaction_seconds`) for 15m"
+fires_when = "Demands have been refused at one tenant quota cap (`readings_per_second`, `notebook_environments`, `sql_sessions`, `sql_statement_seconds`, `sql_idle_transaction_seconds`, `stored_database_gib`, `stored_object_gib`) for 15m"
 handling = "`GET /api/platform/quotas/refusals` (superuser) names the tenants; raise one with `PUT /api/platform/quotas/tenants/{company_id}/{cap}`, or the default `TENANT_QUOTA_<CAP>` if every tenant is held"
 follows = "ADR-0049 dec 5"
 
@@ -124,6 +124,12 @@ follows = "ADR-0049 dec 5"
 name = "IndustryFlowTenantQuotaCountUnavailable"
 fires_when = "`ingestion-service` admitted readings, or `notebook-sql-proxy` SQL sessions, without their tenant's cap because it could not reach the quota store"
 handling = "`docker compose ps quota-redis`; `docker compose logs quota-redis`; no reading is lost meanwhile, only the cap is waived; the SQL session total still holds per proxy replica"
+follows = "ADR-0049 dec 8"
+
+[[alert]]
+name = "IndustryFlowTenantStorageUnmeasured"
+fires_when = "Tenants have had no storage measurement newer than `TENANT_USAGE_STALE_SECONDS` for 30m, so no stored-data cap holds for them"
+handling = "`docker compose --profile tenant-usage run --rm tenant-usage` and read its log (host schedule: hourly); on Kubernetes the `tenant-usage` CronJob's last Job; `GET /api/platform/quotas/tenants/{company_id}` shows each store's `measured_at`"
 follows = "ADR-0049 dec 8"
 
 [[alert]]

@@ -19,7 +19,7 @@ from rules_engine import RulesEngine
 from kafka_consumer import AlertKafkaConsumer
 from feature_store import FeatureStore
 import tenant_status_publisher
-from industryflow_contracts import build_info
+from industryflow_contracts import build_info, quotas
 
 # Configure logging
 logging.basicConfig(
@@ -263,6 +263,11 @@ class AlertService:
             self.db_pool, self.kafka_consumer.send,
             config.KAFKA_TOPIC_TENANT_STATUS, config.TENANT_STATUS_PUBLISH_SECONDS,
             self.feature_store.redis_client,  # the capability store: the hub reads the copies there
+            # The stored-data caps a tenant's measurements are held to (ADR-0049 dec 11, 12).
+            tenant_status_publisher.StoredCaps(
+                defaults={quotas.STORED_DATABASE_GIB: config.TENANT_QUOTA_STORED_DATABASE_GIB,
+                          quotas.STORED_OBJECT_GIB: config.TENANT_QUOTA_STORED_OBJECT_GIB},
+                stale_seconds=config.TENANT_USAGE_STALE_SECONDS),
         ))
 
         logger.info("Alert Detection Service is running")

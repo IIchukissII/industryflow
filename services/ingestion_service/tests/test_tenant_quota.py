@@ -143,3 +143,39 @@ def test_the_count_loads_its_script_on_a_store_that_has_none(client, make_cert, 
     assert answers == [202, 202, 429]
     with main.quota_store.sync() as store:
         assert int(store.get(quotas.readings_key(tenant, 1_800_000_000))) == 3
+
+
+def test_a_tenant_over_a_stored_cap_is_refused_its_readings_naming_the_cap(
+        client, make_cert, sample_body, default_cap, frozen_second):
+    """ADR-0049 dec 12: refused before production, so the device keeps the reading; counted per cap."""
+    import main
+    import tenant_status
+
+    c, produced = client
+    default_cap(None)
+    tenant, other = str(uuid.uuid4()), str(uuid.uuid4())
+    tenant_status.status.apply(contract.encode(tenant, True, over={quotas.STORED_OBJECT_GIB})[1])
+    refused = c.post("/ingest", json=sample_body, headers=_headers(make_cert, tenant))
+    assert refused.status_code == 507 and "stored_object_gib" in refused.json()["detail"]
+    assert int(refused.headers["retry-after"]) > 1
+    assert produced == []
+    assert c.post("/ingest", json=sample_body, headers=_headers(make_cert, other)).status_code == 202
+    with main.quota_store.sync() as store:
+        total = store.get(quotas.refusals_total_key(quotas.STORED_OBJECT_GIB))
+    assert int(total) == 1
+    # A status no longer naming the cap admits the tenant again.
+    tenant_status.status.apply(contract.encode(tenant, True)[1])
+    assert c.post("/ingest", json=sample_body, headers=_headers(make_cert, tenant)).status_code == 202
+
+
+def test_a_reading_refused_for_a_stored_cap_takes_no_place_in_the_count_per_second(
+        client, make_cert, sample_body, default_cap, frozen_second):
+    import tenant_status
+
+    c, _produced = client
+    default_cap(1)
+    tenant = str(uuid.uuid4())
+    tenant_status.status.apply(contract.encode(tenant, True, over={quotas.STORED_DATABASE_GIB})[1])
+    assert c.post("/ingest", json=sample_body, headers=_headers(make_cert, tenant)).status_code == 507
+    tenant_status.status.apply(contract.encode(tenant, True)[1])
+    assert c.post("/ingest", json=sample_body, headers=_headers(make_cert, tenant)).status_code == 202

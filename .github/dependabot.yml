@@ -69,6 +69,7 @@ updates:
       - "/services/cold_export"
       - "/services/cold_export/tests"
       - "/services/tenant_delete"
+      - "/services/tenant_usage"
       - "/tests/object_store"
       - "/services/spark_jobs"
       - "/infrastructure/timescaledb/tests"

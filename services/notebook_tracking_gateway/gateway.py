@@ -60,6 +60,7 @@ import policy
 import routes
 import scoping
 import staging
+import stored
 
 _MLFLOW_PREFIX = "/api/2.0/mlflow/"
 # The upload plane's own surface (ADR-0030). Deliberately not under MLflow's namespace: it is not
@@ -161,7 +162,7 @@ def _bearer(request: Request) -> str:
 
 def build_app(capabilities: CapabilityStore, upstream: Upstream, artifacts: ArtifactStore,
               bucket: str = "", *, operator_token: Optional[str] = None,
-              edge: Optional[audit.EdgePeers] = None) -> FastAPI:
+              edge: Optional[audit.EdgePeers] = None, quota_store=None) -> FastAPI:
     app = FastAPI(title="IndustryFlow notebook tracking gateway")
     # The edge relays uploads; only its reported client address is a refusal's source (ADR-0042 dec 9).
     edge = edge or audit.EdgePeers("")
@@ -199,6 +200,9 @@ def build_app(capabilities: CapabilityStore, upstream: Upstream, artifacts: Arti
         if request.method == "DELETE":
             artifacts.delete(key)
             return JSONResponse({})
+        if request.method == "PUT":
+            # A tenant over its object-store cap writes nothing more there (ADR-0049 dec 12).
+            await stored.refuse_if_over(capabilities, quota_store, binding.company_id)
         # PUT (upload) / GET (download): 307 to a single-object pre-signed URL — requests/MLflow
         # follows it, re-sending the body for PUT, so the gateway is never in the byte path.
         verb = "PUT" if request.method == "PUT" else "GET"
@@ -276,6 +280,8 @@ def build_app(capabilities: CapabilityStore, upstream: Upstream, artifacts: Arti
         if admission.MANIFEST_NAME not in safe:
             # Without it there is nothing to judge, and judging is the point of the plane.
             raise HTTPException(status_code=400, detail=f"an artifact must carry its {admission.MANIFEST_NAME} manifest")
+        # An upload is admitted into the tenant's prefix of the object store (ADR-0049 dec 12).
+        await stored.refuse_if_over(capabilities, quota_store, binding.company_id)
 
         token = policy.tenant_token(binding.company_id)
         upload_id = staging.new_upload_id()
@@ -683,8 +689,10 @@ def main() -> None:  # pragma: no cover - cluster-bound entry point
 
     # Unset: the operator plane is not served at all, and a tenant deletion waits on this store.
     operator_token = os.environ.get("TRACKING_OPERATOR_TOKEN") or None
+    # The shared count of tenant quotas, where a refusal at the object-store cap is counted (ADR-0049 dec 5).
+    quota_store = aioredis.from_url(os.environ["QUOTA_REDIS_URL"], socket_connect_timeout=0.5, socket_timeout=0.5)
     app = build_app(store, _HttpUpstream(), _S3Store(), bucket=bucket, operator_token=operator_token,
-                    edge=audit.EdgePeers(os.environ.get("EDGE_PROXY_PEERS", "")))
+                    edge=audit.EdgePeers(os.environ.get("EDGE_PROXY_PEERS", "")), quota_store=quota_store)
     uvicorn.run(app, host=os.environ.get("TRACKING_HOST", "0.0.0.0"), port=int(os.environ.get("TRACKING_PORT", "5050")))
 
 

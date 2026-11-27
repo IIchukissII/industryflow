@@ -10,7 +10,10 @@ and the alert worker's own roles with their own statements on their drivers (ser
   * an unknown cap, a value out of range, or a tenant that does not exist is refused, and every cap of
     the contract is one the database takes,
   * no runtime role writes the overrides or their record directly, and the alert worker reads them,
-  * the deletion job removes a tenant's overrides with its database objects, and keeps their record (dec 7).
+  * the deletion job removes a tenant's overrides with its database objects, and keeps their record (dec 7),
+  * the measurement job measures a tenant's database bytes, its hypertables' chunks included, and records
+    each store's measurement only through its two functions; the alert worker reads them; no other role
+    records one, and a deleted tenant's measurements go with it (dec 11, 7).
 
 Requires a running database with the init scripts applied (the CI workflow stands one up via docker
 compose). When no database is reachable it skips.
@@ -32,6 +35,8 @@ PUBLISHER = "services/alert_service/worker/tenant_status_publisher.py"
 GATEWAY = "api_gateway_user"
 WORKER = "alert_service_user"
 JOB = "tenant_delete_user"
+USAGE_JOB = "services/tenant_usage/source.py"
+USAGE = "tenant_usage_user"
 
 
 def _connect():
@@ -75,6 +80,7 @@ def tenant():
         cur.execute("RESET ROLE")
         cur.execute("DELETE FROM public.tenant_quota_overrides WHERE company_id = %s", (str(company_id),))
         cur.execute("DELETE FROM public.tenant_quota_changes WHERE company_id = %s", (str(company_id),))
+        cur.execute("DELETE FROM public.tenant_storage_usage WHERE company_id = %s", (str(company_id),))
         for table in ("company_deletion_steps", "company_deletions", "company_lifecycle_events"):
             cur.execute(f"DELETE FROM public.{table} WHERE company_id = %s", (str(company_id),))
         cur.execute(testing.drop_tenant_schema_sql(f'tenant_{suffix}'))
@@ -190,3 +196,93 @@ def test_deleting_the_tenant_deletes_its_overrides_and_keeps_their_record(tenant
     with pytest.raises(Exception) as refused:
         _set(company_id, "readings_per_second", 5, who)
     assert service_sql.sqlstate(refused.value) == "P0002"
+
+
+
+def test_the_job_measures_a_tenants_chunks_and_records_through_its_functions(tenant):
+    cur, company_id, _who = tenant
+    cid = str(company_id)
+    cur.execute("SELECT schema_name FROM public.companies WHERE company_id = %s", (cid,))
+    [(schema,)] = cur.fetchall()
+    measure = service_sql.statement(USAGE_JOB, "MEASURE")
+
+    def measured():
+        return next(r["bytes"] for r in service_sql.run(measure, (), role=USAGE) if str(r["company_id"]) == cid)
+
+    empty = measured()
+    # Readings land in chunks outside the schema; the measurement grows with them.
+    cur.execute(f'''INSERT INTO "{schema}".equipment (equipment_type, name, sensor_count)
+                    VALUES ('pump', 'p1', 1) RETURNING equipment_id''')
+    [(equipment,)] = cur.fetchall()
+    cur.execute(f'''INSERT INTO "{schema}".sensors (equipment_id, sensor_name, sensor_type, position)
+                    VALUES (%s, 's1', 'temperature', 1) RETURNING sensor_id''', (equipment,))
+    [(sensor,)] = cur.fetchall()
+    cur.execute(f'''INSERT INTO "{schema}".sensor_measurements (time, sensor_id, equipment_id, site_id, value)
+                    SELECT now() - make_interval(secs => g), %s, %s, 'site', g
+                    FROM generate_series(1, 20000) g''', (sensor, equipment))
+    grown = measured()
+    assert grown > empty + 500_000, (empty, grown)
+
+    record = service_sql.statement(USAGE_JOB, "RECORD")
+    service_sql.run(record, (cid, "database", grown), role=USAGE)
+    service_sql.run(record, (cid, "object", 42), role=USAGE)
+    rows = service_sql.run(service_sql.statement(PUBLISHER, "USAGE_SELECT"), (), role=WORKER)
+    mine = {r["store"]: r for r in rows if str(r["company_id"]) == cid}
+    assert mine["object"]["bytes"] == 42 and mine["database"]["bytes"] == grown
+    assert 0 <= mine["object"]["age"] < 60
+
+
+@pytest.mark.parametrize("role, sql", [
+    (GATEWAY, "SELECT public.record_tenant_storage_usage(gen_random_uuid(), 'object', 1)"),
+    (WORKER, "SELECT public.record_tenant_storage_usage(gen_random_uuid(), 'object', 1)"),
+    (WORKER, "UPDATE public.tenant_storage_usage SET bytes = 0"),
+    (USAGE, "SELECT * FROM public.tenant_storage_usage"),
+    (USAGE, "DELETE FROM public.tenant_storage_usage"),
+    (USAGE, "SELECT * FROM public.companies"),
+])
+def test_only_the_job_records_a_measurement_and_only_through_its_function(tenant, role, sql):
+    cur, _company_id, _who = tenant
+    with pytest.raises(errors.InsufficientPrivilege):
+        _as(cur, role, sql)
+
+
+def test_an_unknown_store_or_a_negative_size_is_refused(tenant):
+    cur, company_id, _who = tenant
+    for store, size in (("disk", 1), ("object", -1)):
+        with pytest.raises(Exception) as refused:
+            _as(cur, USAGE, "SELECT public.record_tenant_storage_usage(%s, %s, %s)", (str(company_id), store, size))
+        assert service_sql.sqlstate(refused.value) == "22023"
+
+
+def test_deleting_the_tenant_deletes_its_measurements(tenant):
+    cur, company_id, who = tenant
+    cid = str(company_id)
+    _as(cur, USAGE, "SELECT public.record_tenant_storage_usage(%s, 'object', 7)", (cid,))
+    _as(cur, GATEWAY, "SELECT * FROM public.update_company(%s, NULL, false)", (cid,))
+    cur.execute("UPDATE public.companies SET suspended_at = now() - interval '31 days' WHERE company_id = %s", (cid,))
+    _as(cur, GATEWAY, "SELECT * FROM public.request_company_deletion(%s, %s)", (cid, str(who)))
+    [(stores,)] = _as(cur, JOB, "SELECT public.company_deletion_required_stores()")
+    for store in stores:
+        _as(cur, JOB, "SELECT public.record_company_deletion_step(%s, %s, NULL, '{}'::jsonb)", (cid, store))
+    _as(cur, JOB, "SELECT public.complete_company_deletion(%s, interval '14 days')", (cid,))
+    cur.execute("SELECT count(*) FROM public.tenant_storage_usage WHERE company_id = %s", (cid,))
+    assert cur.fetchone() == (0,)
+    # A run that overlaps the deletion records nothing for it.
+    _as(cur, USAGE, "SELECT public.record_tenant_storage_usage(%s, 'object', 7)", (cid,))
+    cur.execute("SELECT count(*) FROM public.tenant_storage_usage WHERE company_id = %s", (cid,))
+    assert cur.fetchone() == (0,)
+
+
+def test_the_gateway_reads_a_tenants_measurements_and_counts_the_unmeasured(tenant):
+    cur, company_id, _who = tenant
+    cid = str(company_id)
+    counter = service_sql.statement("services/api_gateway/messaging/quota_metrics.py", "UNMEASURED_SELECT")
+    # Provisioned long ago and never measured: counted; once both stores are measured: not.
+    cur.execute("UPDATE public.companies SET created_at = now() - interval '1 day' WHERE company_id = %s", (cid,))
+    [before] = service_sql.run(counter, {"stale": 3600}, role=GATEWAY)
+    for store in ("database", "object"):
+        _as(cur, USAGE, "SELECT public.record_tenant_storage_usage(%s, %s, 1)", (cid, store))
+    [after] = service_sql.run(counter, {"stale": 3600}, role=GATEWAY)
+    assert before["unmeasured"] - after["unmeasured"] == 1
+    rows = service_sql.run(service_sql.statement(ROUTER, "USAGE_SELECT"), {"company_id": company_id}, role=GATEWAY)
+    assert {r["store"] for r in rows} == {"database", "object"}

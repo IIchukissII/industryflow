@@ -83,6 +83,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'notebook_hub_reclaim_user') THEN
             CREATE ROLE notebook_hub_reclaim_user WITH LOGIN;
         END IF;
+
+        -- Tenant storage measurement role (ADR-0049 dec 11). No table privilege: it measures each
+        -- tenant's database bytes and records every measurement only through the SECURITY DEFINER
+        -- functions of 38-tenant-quotas.sql. Password may be unset when the job is not deployed.
+        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tenant_usage_user') THEN
+            CREATE ROLE tenant_usage_user WITH LOGIN;
+        END IF;
     END $$;
     
     -- =============================================================================
@@ -104,6 +111,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
     ALTER ROLE tenant_delete_user CONNECTION LIMIT 2;
     -- One hub service, one connection at a time.
     ALTER ROLE notebook_hub_reclaim_user CONNECTION LIMIT 2;
+    -- One scheduled job, one connection at a time.
+    ALTER ROLE tenant_usage_user CONNECTION LIMIT 2;
 
     -- Statement timeouts
     ALTER ROLE api_gateway_user SET statement_timeout = '30s';
@@ -117,6 +126,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
     -- Dropping a tenant schema drops every chunk of its hypertables in one statement.
     ALTER ROLE tenant_delete_user SET statement_timeout = '1800s';
     ALTER ROLE notebook_hub_reclaim_user SET statement_timeout = '30s';
+    -- Summing every tenant's relation sizes reads the catalogue, not the data.
+    ALTER ROLE tenant_usage_user SET statement_timeout = '300s';
     
     -- =============================================================================
     -- PUBLIC SCHEMA PERMISSIONS
@@ -133,6 +144,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
     GRANT USAGE ON SCHEMA public TO cold_export_user;
     GRANT USAGE ON SCHEMA public TO tenant_delete_user;
     GRANT USAGE ON SCHEMA public TO notebook_hub_reclaim_user;
+    GRANT USAGE ON SCHEMA public TO tenant_usage_user;
 
     -- SELECT on public.companies is granted in 01-init-schema.sql, after that table is
     -- created (this roles script runs before it).
@@ -153,6 +165,7 @@ metrics_user METRICS_DB_PASSWORD
 cold_export_user COLD_EXPORT_DB_PASSWORD
 tenant_delete_user TENANT_DELETE_DB_PASSWORD
 notebook_hub_reclaim_user NOTEBOOK_HUB_RECLAIM_DB_PASSWORD
+tenant_usage_user TENANT_USAGE_DB_PASSWORD
 "
 
 set_passwords() {
@@ -177,4 +190,5 @@ echo "✓ metrics_user (5 connections, pg_monitor)"
 echo "✓ cold_export_user (5 connections, SELECT + drop-chunk only)"
 echo "✓ tenant_delete_user (2 connections, deletion functions only)"
 echo "✓ notebook_hub_reclaim_user (2 connections, volume-reclaim functions only)"
+echo "✓ tenant_usage_user (2 connections, storage measurement functions only)"
 echo "=========================================="

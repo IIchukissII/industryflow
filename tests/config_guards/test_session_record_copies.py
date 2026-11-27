@@ -92,8 +92,10 @@ def test_every_compose_service_names_the_one_store():
     wrong = {k: v for k, v in urls.items() if v != (QUOTA_STORE if k[1] == QUOTA_KEY else SHARED_STORE)}
     assert not wrong, f"a Redis URL that is not its store's, or that the environment can override: {wrong}"
     quota_users = {name for name, key in urls if key == QUOTA_KEY}
-    # The SQL proxy counts a tenant's sessions there (ADR-0049 dec 9); kernels share no network with it.
-    assert quota_users == {"ingestion-service", "api-gateway", "notebook-hub", "notebook-sql-proxy"}, quota_users
+    # The SQL proxy counts a tenant's sessions there (ADR-0049 dec 9), the tracking gateway its refusals at
+    # the object-store cap (dec 5); kernels share no network with it.
+    assert quota_users == {"ingestion-service", "api-gateway", "notebook-hub", "notebook-sql-proxy",
+                           "notebook-tracking-gateway"}, quota_users
     gateway = dict(_compose_env())["api-gateway"]
     assert (gateway["REDIS_HOST"], str(gateway["REDIS_PORT"]), str(gateway["REDIS_DB"])) == ("redis", "6379", "0")
 

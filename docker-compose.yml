@@ -291,6 +291,8 @@ services:
       TENANT_DELETE_DB_PASSWORD: ${TENANT_DELETE_DB_PASSWORD:-}
       # Notebook hub reclaim role (ADR-0020 dec 6); the hub's reclaim service connects as it.
       NOTEBOOK_HUB_RECLAIM_DB_PASSWORD: ${NOTEBOOK_HUB_RECLAIM_DB_PASSWORD:-}
+      # Tenant storage measurement role (ADR-0049 dec 11); the measurement job connects as it.
+      TENANT_USAGE_DB_PASSWORD: ${TENANT_USAGE_DB_PASSWORD:-}
       # Read-only monitoring role (pg_monitor) the postgres-exporter connects as (ADR-0016 dec 3).
       METRICS_DB_PASSWORD: ${METRICS_DB_PASSWORD}
       # A pending script on a database holding a tenant or a user needs a backup recorded within this
@@ -457,6 +459,8 @@ services:
       COLD_READ_SECRET_KEY: ${COLD_READ_SECRET_KEY:-}
       TENANT_DELETE_COLD_ACCESS_KEY: ${TENANT_DELETE_COLD_ACCESS_KEY:-}
       TENANT_DELETE_COLD_SECRET_KEY: ${TENANT_DELETE_COLD_SECRET_KEY:-}
+      TENANT_USAGE_STORE_ACCESS_KEY: ${TENANT_USAGE_STORE_ACCESS_KEY:-}
+      TENANT_USAGE_STORE_SECRET_KEY: ${TENANT_USAGE_STORE_SECRET_KEY:-}
     entrypoint: ["/bin/sh", "/opt/minio-init.sh"]
     volumes:
       - ./infrastructure/minio/minio-init.sh:/opt/minio-init.sh:ro
@@ -692,6 +696,10 @@ services:
       TENANT_QUOTA_SQL_SESSIONS: ${TENANT_QUOTA_SQL_SESSIONS:-}
       TENANT_QUOTA_SQL_STATEMENT_SECONDS: ${TENANT_QUOTA_SQL_STATEMENT_SECONDS:-}
       TENANT_QUOTA_SQL_IDLE_TRANSACTION_SECONDS: ${TENANT_QUOTA_SQL_IDLE_TRANSACTION_SECONDS:-}
+      TENANT_QUOTA_STORED_DATABASE_GIB: ${TENANT_QUOTA_STORED_DATABASE_GIB:-}
+      TENANT_QUOTA_STORED_OBJECT_GIB: ${TENANT_QUOTA_STORED_OBJECT_GIB:-}
+      # How old a storage measurement may be before the tenants without a fresher one are reported.
+      TENANT_USAGE_STALE_SECONDS: ${TENANT_USAGE_STALE_SECONDS:-}
       QUOTA_REDIS_URL: redis://quota-redis:6379/0
       # The first-run superuser, created only on a platform with no account (ADR-0004 dec 11). Unset: the
       # published defaults, and the account must change its password before anything else.
@@ -925,6 +933,11 @@ services:
       DRIFT_EVAL_INTERVAL: ${DRIFT_EVAL_INTERVAL:-3600}
       DRIFT_WINDOW_MINUTES: ${DRIFT_WINDOW_MINUTES:-1440}
       DRIFT_SHARE_THRESHOLD: ${DRIFT_SHARE_THRESHOLD:-0.5}
+      # The stored-data caps the tenant-status publisher holds each tenant's measurements to, and how old
+      # a measurement may be and still hold (ADR-0049 dec 8, 11, 12).
+      TENANT_QUOTA_STORED_DATABASE_GIB: ${TENANT_QUOTA_STORED_DATABASE_GIB:-}
+      TENANT_QUOTA_STORED_OBJECT_GIB: ${TENANT_QUOTA_STORED_OBJECT_GIB:-}
+      TENANT_USAGE_STALE_SECONDS: ${TENANT_USAGE_STALE_SECONDS:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       db-migrate:
@@ -1220,6 +1233,8 @@ services:
       TRACKING_PORT: "5050"
       TRACKING_MLFLOW_URL: http://mlflow:5000
       TRACKING_REDIS_URL: redis://redis:6379/0
+      # The shared count of tenant quotas: a refusal at the object-store cap is counted there (ADR-0049 dec 5).
+      QUOTA_REDIS_URL: redis://quota-redis:6379/0
       # The edge relays uploads; only its reported client address is believed (ADR-0042 dec 9).
       EDGE_PROXY_PEERS: frontend
       TRACKING_ARTIFACT_BUCKET: mlflow
@@ -1867,6 +1882,51 @@ services:
       # The chain and the CRL directory only; the keys stay outside the container.
       - "${DEVICE_CA_DIR:-./deploy/device-ca}/ca-chain.crt:/etc/industryflow/device-ca/ca-chain.crt:ro"
       - "${DEVICE_CA_DIR:-./deploy/device-ca}/crl:/etc/industryflow/device-ca/crl:ro"
+    networks:
+      - industryflow-network
+    restart: "no"
+
+  tenant-usage-schema-ready:
+    <<: *schema-ready
+    container_name: industryflow-tenant-usage-schema-ready
+    profiles: ["tenant-usage"]
+    environment:
+      <<: *schema-ready-env
+      PGUSER: tenant_usage_user
+      PGPASSWORD: ${TENANT_USAGE_DB_PASSWORD:-}
+
+  # Tenant storage measurement (ADR-0049 dec 11): each tenant's bytes in the database and the object
+  # store, measured in the stores themselves and recorded for the alert worker, which refuses a tenant
+  # over its stored-data caps. Run on a schedule by the host (hourly), or by hand:
+  #   docker compose --profile tenant-usage run --rm tenant-usage
+  # Lists and records only: its database role measures through one function and records through another,
+  # its object-store principal may only list tenant prefixes (dec 13).
+  tenant-usage:
+    build:
+      context: ./services/tenant_usage
+      dockerfile: Dockerfile
+      additional_contexts:
+        contracts: ./libs/industryflow_contracts
+    container_name: industryflow-tenant-usage
+    profiles: ["tenant-usage"]
+    depends_on:
+      tenant-usage-schema-ready:
+        condition: service_completed_successfully
+    environment:
+      <<: *db-tls-env
+      TIMESCALEDB_HOST: ${DB_HOST}
+      TIMESCALEDB_PORT: ${DB_PORT}
+      TIMESCALEDB_DB: ${DB_NAME}
+      TENANT_USAGE_DB_USER: tenant_usage_user
+      TENANT_USAGE_DB_PASSWORD: ${TENANT_USAGE_DB_PASSWORD:-}
+      TENANT_USAGE_STORE_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      TENANT_USAGE_STORE_REGION: ${COLD_STORE_REGION:-us-east-1}
+      TENANT_USAGE_STORE_ACCESS_KEY: ${TENANT_USAGE_STORE_ACCESS_KEY:-}
+      TENANT_USAGE_STORE_SECRET_KEY: ${TENANT_USAGE_STORE_SECRET_KEY:-}
+      COLD_STORE_BUCKET: ${COLD_STORE_BUCKET:-industryflow-cold}
+      TRACKING_ARTIFACT_BUCKET: mlflow
+    volumes:
+      - *ca-mount  # CA to verify the DB server cert (ADR-0017)
     networks:
       - industryflow-network
     restart: "no"

@@ -151,6 +151,7 @@ EXEMPT = {
     "db-backup": "one-shot job; its success time reaches the metrics store as a file, not a process",
     "cold-export": "one-shot job; serves no metrics",
     "tenant-delete": "one-shot job; serves no metrics",
+    "tenant-usage": "one-shot job; serves no metrics",
     "tracking-collect": "one-shot job on the tracking server's image; serves no metrics",
 }
 

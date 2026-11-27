@@ -11,7 +11,7 @@ import sys
 import ssl
 import logging
 
-from industryflow_contracts import tenant_status
+from industryflow_contracts import quotas, tenant_status
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,14 @@ class AlertServiceConfig:
     KAFKA_TOPIC_TENANT_STATUS = os.getenv('KAFKA_TOPIC_TENANT_STATUS', tenant_status.DEFAULT_TOPIC)
     TENANT_STATUS_PUBLISH_SECONDS = float(
         os.getenv('TENANT_STATUS_PUBLISH_SECONDS', str(tenant_status.PUBLISH_INTERVAL_SECONDS)))
+    # The stored-data caps the publisher holds each tenant's measurements to, and how old a measurement may
+    # be and still hold (ADR-0049 dec 8, 11, 12). A value the contract cannot read stops the worker.
+    TENANT_QUOTA_STORED_DATABASE_GIB = quotas.parse_setting(
+        quotas.STORED_DATABASE_GIB, os.getenv('TENANT_QUOTA_STORED_DATABASE_GIB'))
+    TENANT_QUOTA_STORED_OBJECT_GIB = quotas.parse_setting(
+        quotas.STORED_OBJECT_GIB, os.getenv('TENANT_QUOTA_STORED_OBJECT_GIB'))
+    TENANT_USAGE_STALE_SECONDS = quotas.usage_stale_seconds(
+        {quotas.USAGE_STALE_ENV: os.getenv('TENANT_USAGE_STALE_SECONDS') or ''})
 
     # ML service (service-to-service). Used by the real-time ml rules (inference) and the
     # scheduled drift evaluator (ADR-0021). INTERNAL_SERVICE_TOKEN authenticates the call so

@@ -36,7 +36,7 @@ restore_spark() {
 trap restore_spark EXIT
 cd "$(dirname "$0")/.."
 ref="${1:-origin/main}"
-PROFILES=(--profile notebooks --profile tenant-delete --profile backup --profile cold-export)
+PROFILES=(--profile notebooks --profile tenant-delete --profile backup --profile cold-export --profile tenant-usage)
 UP_PROFILES=(--profile notebooks)
 if grep -qE '^OPS_AGENT_WEBHOOK_SECRET=.+' .env 2>/dev/null; then
     PROFILES+=(--profile ops-agent)

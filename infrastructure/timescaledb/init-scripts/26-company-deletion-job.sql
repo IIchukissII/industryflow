@@ -189,6 +189,10 @@ BEGIN
         DELETE FROM public.tenant_quota_overrides q WHERE q.company_id = p_company_id;
         GET DIAGNOSTICS v_quotas = ROW_COUNT;
     END IF;
+    -- Its storage measurements end with it too; the next run of the job finds no tenant to measure.
+    IF to_regclass('public.tenant_storage_usage') IS NOT NULL THEN
+        DELETE FROM public.tenant_storage_usage u WHERE u.company_id = p_company_id;
+    END IF;
 
     v_detail := jsonb_build_object('schema', v_schema, 'roles', jsonb_build_array(v_login, v_reader),
                                    'users', v_users, 'cold_export_drops', v_drops,
