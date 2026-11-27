@@ -18,6 +18,7 @@ from pathlib import Path
 
 import psycopg2
 import pytest
+from industryflow_contracts import testing  # noqa: E402
 
 # Set by the CI job that starts the stack: a stack that does not answer fails instead of skipping.
 REQUIRE_ENV = "IF_REQUIRE_LIVE_STACK"
@@ -93,7 +94,7 @@ def drop_tenant(tenant):
     cur = conn.cursor()
     schema = tenant["schema"]
     suffix = schema[len("tenant_"):]
-    cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+    cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
     cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
     cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
     cur.execute("DELETE FROM public.companies WHERE company_id = %s", (tenant["company_id"],))

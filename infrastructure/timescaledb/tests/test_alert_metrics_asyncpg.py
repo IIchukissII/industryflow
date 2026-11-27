@@ -24,6 +24,7 @@ import pytest
 psycopg2 = pytest.importorskip("psycopg2")
 
 import service_sql  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 # Watched by db-tenant-isolation.yml's path filter (tests/config_guards/test_ci_path_filters.py).
 ENDPOINT = "services/api_gateway/routers/alerts_history.py"
@@ -59,7 +60,7 @@ def tenant():
         yield cur, schema
     finally:
         cur.execute("SET search_path TO public")
-        cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
         cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
         cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
         conn.close()

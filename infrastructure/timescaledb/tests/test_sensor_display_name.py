@@ -26,6 +26,7 @@ import pytest
 psycopg2 = pytest.importorskip("psycopg2")
 
 import service_sql  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 GATEWAY_SOURCES = {
     "RULE_LIST_SELECT": "services/api_gateway/routers/alert_rules.py",
@@ -73,7 +74,7 @@ def tenant():
         yield {"cur": cur, "schema": schema}
     finally:
         cur.execute("SET search_path TO public")
-        cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
         cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
         cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
         conn.close()

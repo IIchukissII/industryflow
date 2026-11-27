@@ -24,6 +24,7 @@ psycopg2 = pytest.importorskip("psycopg2")
 from psycopg2 import errors  # noqa: E402
 
 import service_sql  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 # Watched by db-tenant-isolation.yml's path filter (tests/config_guards/test_ci_path_filters.py).
 ROUTER = "services/api_gateway/routers/tenant_quotas.py"
@@ -76,7 +77,7 @@ def tenant():
         cur.execute("DELETE FROM public.tenant_quota_changes WHERE company_id = %s", (str(company_id),))
         for table in ("company_deletion_steps", "company_deletions", "company_lifecycle_events"):
             cur.execute(f"DELETE FROM public.{table} WHERE company_id = %s", (str(company_id),))
-        cur.execute(f'DROP SCHEMA IF EXISTS "tenant_{suffix}" CASCADE')
+        cur.execute(testing.drop_tenant_schema_sql(f'tenant_{suffix}'))
         cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
         cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
         cur.execute("DELETE FROM public.companies WHERE company_id = %s", (str(company_id),))

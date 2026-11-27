@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from industryflow_contracts import testing  # noqa: E402
 
 psycopg2 = pytest.importorskip("psycopg2")
 
@@ -55,7 +56,7 @@ def tenant():
                     (schema,))
         for (name,) in cur.fetchall():
             cur.execute(f'DROP TABLE "{schema}"."{name}" CASCADE')
-        cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
         cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
         cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
         conn.close()

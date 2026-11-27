@@ -44,6 +44,7 @@ from psycopg2 import errors  # noqa: E402
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import binding as b  # noqa: E402  — reuse the proxy's own key/role derivation, don't reinvent
+from industryflow_contracts import testing  # noqa: E402
 
 # This is the live-stack cross-tenant isolation proof: it needs a real TimescaleDB + Redis + the
 # running proxy (the `notebooks` compose profile), so it is marked `integration` and deselected
@@ -151,7 +152,7 @@ def stack():
         probe.close()
     except Exception as e:  # noqa: BLE001
         for _cid, schema in made:
-            cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
             cur.execute(f'DROP ROLE IF EXISTS "{b.tenant_login_role(str(_cid))}"')
             cur.execute(f'DROP ROLE IF EXISTS "{b.reader_role(str(_cid))}"')
         conn.close()
@@ -162,7 +163,7 @@ def stack():
         yield {"cur": cur, "rc": rc, "a": a, "b": b_tenant, "tenant": tenant}
     finally:
         for _cid, schema in made:
-            cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
             cur.execute(f'DROP ROLE IF EXISTS "{b.tenant_login_role(str(_cid))}"')
             cur.execute(f'DROP ROLE IF EXISTS "{b.reader_role(str(_cid))}"')
         conn.close()

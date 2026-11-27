@@ -29,6 +29,7 @@ psycopg2 = pytest.importorskip("psycopg2")
 from psycopg2 import errors  # noqa: E402
 
 import service_sql  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 # Watched by db-tenant-isolation.yml's path filter (tests/config_guards/test_ci_path_filters.py).
 DRAIN = "services/api_gateway/messaging/capability_audit_drain.py"
@@ -243,7 +244,7 @@ def test_the_roles_a_kernels_sql_session_runs_as_cannot_read_the_record():
             c.execute("RESET ROLE")
     finally:
         c.execute("RESET ROLE")
-        c.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        c.execute(testing.drop_tenant_schema_sql(f'{schema}'))
         c.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
         c.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
         conn.close()

@@ -15,6 +15,7 @@ import os
 import uuid
 
 import pytest
+from industryflow_contracts import testing  # noqa: E402
 
 psycopg2 = pytest.importorskip("psycopg2")
 
@@ -65,7 +66,7 @@ def labelled_tenant():
     try:
         yield {"cur": cur, "schema": schema, "model_id": model_id}
     finally:
-        cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
         cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{str(company_id).replace("-", "_")}"')
         cur.execute(f'DROP ROLE IF EXISTS "{_reader_role(company_id)}"')
         conn.close()

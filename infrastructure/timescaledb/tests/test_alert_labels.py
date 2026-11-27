@@ -23,6 +23,7 @@ import pytest
 
 psycopg2 = pytest.importorskip("psycopg2")
 from psycopg2 import errors  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 
 def _connect():
@@ -59,7 +60,7 @@ def tenant():
     try:
         yield {"cur": cur, "company_id": company_id, "schema": schema}
     finally:
-        cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
         cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{str(company_id).replace("-", "_")}"')
         cur.execute(f'DROP ROLE IF EXISTS "{_reader_role(company_id)}"')
         conn.close()

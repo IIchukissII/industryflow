@@ -28,6 +28,7 @@ psycopg2 = pytest.importorskip("psycopg2")
 from psycopg2 import errors  # noqa: E402
 
 import service_sql  # noqa: E402
+from industryflow_contracts import testing  # noqa: E402
 
 REPOSITORY = "services/ml_service/api/repository.py"
 
@@ -65,7 +66,7 @@ def tenant():
     finally:
         cur.execute("RESET ROLE")
         cur.execute("SET search_path TO public")
-        cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        cur.execute(testing.drop_tenant_schema_sql(f'{schema}'))
         cur.execute(f'DROP ROLE IF EXISTS "tenant_sqlproxy_{suffix}"')
         cur.execute(f'DROP ROLE IF EXISTS "tenant_reader_{suffix}"')
         conn.close()
