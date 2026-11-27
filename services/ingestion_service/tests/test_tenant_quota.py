@@ -166,3 +166,16 @@ def test_a_tenant_over_a_stored_cap_is_refused_its_readings_naming_the_cap(
     # A status no longer naming the cap admits the tenant again.
     tenant_status.status.apply(contract.encode(tenant, True)[1])
     assert c.post("/ingest", json=sample_body, headers=_headers(make_cert, tenant)).status_code == 202
+
+
+def test_a_reading_refused_for_a_stored_cap_takes_no_place_in_the_count_per_second(
+        client, make_cert, sample_body, default_cap, frozen_second):
+    import tenant_status
+
+    c, _produced = client
+    default_cap(1)
+    tenant = str(uuid.uuid4())
+    tenant_status.status.apply(contract.encode(tenant, True, over={quotas.STORED_DATABASE_GIB})[1])
+    assert c.post("/ingest", json=sample_body, headers=_headers(make_cert, tenant)).status_code == 507
+    tenant_status.status.apply(contract.encode(tenant, True)[1])
+    assert c.post("/ingest", json=sample_body, headers=_headers(make_cert, tenant)).status_code == 202

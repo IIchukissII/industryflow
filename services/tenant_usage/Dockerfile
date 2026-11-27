@@ -38,4 +38,4 @@ USER 10001
 
 ENV PYTHONUNBUFFERED=1
 
-ENTRYPOINT ["python", "-m", "cold_export.main"]
+ENTRYPOINT ["python", "-m", "tenant_usage.main"]

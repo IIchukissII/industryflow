@@ -130,7 +130,9 @@ async def publish_once(pool, send, topic: str, store=None) -> int:
     except Exception as e:  # noqa: BLE001 - no measurement holds (dec 8); the gateway alerts on its age
         logger.error("tenant storage measurements unreadable; no stored-data cap holds this round: %s", e)
         usage = {}
-    over = {company_id: over_caps(held, overrides.get(company_id, {})) for company_id, held in usage.items()}
+    registered = {company_id for company_id, _active in status}
+    over = {company_id: over_caps(held, overrides.get(company_id, {}))
+            for company_id, held in usage.items() if company_id in registered}
     for company_id, active in status:
         key, value = tenant_status.encode(company_id, active, overrides.get(company_id),
                                           over.get(company_id, ()))

@@ -96,7 +96,7 @@ EOF
 list_policy() {  # list under the tenant prefixes of each bucket named, nothing else: it measures, never sees
   statements=""
   for b in "$@"; do
-    statement='{"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::'"$b"'"], "Condition": {"StringLike": {"s3:prefix": ["tenant_*"]}}}'
+    statement='{"Effect": "Allow", "Action": ["s3:GetBucketLocation"], "Resource": ["arn:aws:s3:::'"$b"'"]}, {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::'"$b"'"], "Condition": {"StringLike": {"s3:prefix": ["tenant_*"]}}}'
     statements="$statements${statements:+, }$statement"
   done
   cat <<EOF

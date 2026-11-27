@@ -18,7 +18,7 @@ BEGIN
     FOREACH r IN ARRAY ARRAY[
         'api_gateway_user', 'spark_streaming_user', 'alert_service_user', 'ml_service_user',
         'cold_export_user', 'tenant_delete_user', 'notebook_hub_reclaim_user', 'notebook_sql_proxy',
-        'metrics_user'
+        'metrics_user', 'tenant_usage_user'
     ] LOOP
         IF EXISTS (SELECT FROM pg_roles WHERE rolname = r) THEN
             EXECUTE format('GRANT SELECT ON public.schema_ledger TO %I', r);
