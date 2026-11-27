@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 
 CAP = quotas.READINGS_PER_SECOND
 
+# How long a device refused for a stored-data cap waits before it sends again: the cap is lifted by a
+# superuser or a new measurement, neither of which comes within a second.
+STORED_RETRY_AFTER_SECONDS = 300
+
 COUNT_UNAVAILABLE = Counter(
     "tenant_quota_count_unavailable_total",
     "Demands admitted without their cap because the quota store could not be read (ADR-0049 dec 8)",
@@ -67,21 +71,32 @@ async def admit(store, company_id: str, cap: Optional[int], now: Optional[float]
         return True
     if int(count) <= cap:
         return True
-    await _record_refusal(store, company_id, now)
+    await record_refusal(store, company_id, now)
     return False
 
 
-async def _record_refusal(store, company_id: str, now: float) -> None:
-    """Count the refusal against the tenant and in the tenantless total; a failure loses only the count."""
+def stored_refusal(over) -> str | None:
+    """The stored-data cap that refuses the tenant's readings, if it is over one (ADR-0049 dec 12):
+    readings land in the database first and the cold layer after, so either store refuses them."""
+    for cap in (quotas.STORED_DATABASE_GIB, quotas.STORED_OBJECT_GIB):
+        if cap in over:
+            return cap
+    return None
+
+
+async def record_refusal(store, company_id: str, now: float | None = None, cap: str = CAP) -> None:
+    """Count a refusal at ``cap`` against the tenant and in the tenantless total; a failure loses only
+    the count."""
+    now = time.time() if now is None else now
     day = datetime.fromtimestamp(now, timezone.utc).strftime("%Y%m%d")
     keep = quotas.REFUSALS_KEEP_DAYS * 86400
     try:
         async with store.pipeline(transaction=False) as pipe:
-            pipe.hincrby(quotas.refusals_key(CAP, day), company_id, 1)
-            pipe.expire(quotas.refusals_key(CAP, day), keep)
-            pipe.hset(quotas.refused_last_key(CAP, day), company_id, int(now))
-            pipe.expire(quotas.refused_last_key(CAP, day), keep)
-            pipe.incr(quotas.refusals_total_key(CAP))
+            pipe.hincrby(quotas.refusals_key(cap, day), company_id, 1)
+            pipe.expire(quotas.refusals_key(cap, day), keep)
+            pipe.hset(quotas.refused_last_key(cap, day), company_id, int(now))
+            pipe.expire(quotas.refused_last_key(cap, day), keep)
+            pipe.incr(quotas.refusals_total_key(cap))
             await pipe.execute()
     except Exception as e:  # noqa: BLE001 - the refusal itself stands
         logger.warning("quota refusal not recorded for the tenant: %s", e)

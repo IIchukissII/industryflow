@@ -69,3 +69,24 @@ def test_the_total_of_sql_sessions_is_finite_and_never_off():
 
 def test_the_sql_session_sets_name_the_canonical_tenant():
     assert quotas.sql_sessions_key(CID.upper()) == f"quota:sql-sessions:{CID}"
+
+
+
+def test_a_tenant_is_over_a_stored_cap_only_on_a_fresh_measurement_past_it():
+    G = quotas.GIB
+    caps = {quotas.STORED_DATABASE_GIB: 10, quotas.STORED_OBJECT_GIB: 20}
+    usage = {"database": (10 * G + 1, 1000.0), "object": (20 * G, 1000.0)}
+    assert quotas.stored_over(usage, caps, now=1100, stale_after=3600) == {quotas.STORED_DATABASE_GIB}
+    # A measurement older than the stale bound holds nothing (dec 8); nor does a cap that is off.
+    assert quotas.stored_over(usage, caps, now=1000 + 3601, stale_after=3600) == frozenset()
+    assert quotas.stored_over(usage, {**caps, quotas.STORED_DATABASE_GIB: None}, 1100, 3600) == frozenset()
+    assert quotas.stored_over({}, caps, 1100, 3600) == frozenset()
+
+
+def test_the_stored_caps_and_their_staleness_are_configured():
+    assert set(quotas.STORED_CAPS.values()) <= set(quotas.CAPS)
+    assert quotas.usage_stale_seconds({}) == quotas.USAGE_STALE_SHIPPED
+    assert quotas.usage_stale_seconds({"TENANT_USAGE_STALE_SECONDS": "600"}) == 600
+    with pytest.raises(ValueError, match="TENANT_USAGE_STALE_SECONDS"):
+        quotas.usage_stale_seconds({"TENANT_USAGE_STALE_SECONDS": "soon"})
+    assert quotas.over_key(quotas.STORED_OBJECT_GIB, CID.upper()) == f"quota:over:stored_object_gib:{CID}"

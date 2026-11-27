@@ -45,16 +45,16 @@ def test_a_consumer_trusts_several_intervals_before_forgetting():
 
 def test_a_tenants_overrides_ride_its_status_and_are_left_out_when_none():
     _key, value = tenant_status.encode(CID, True, {"readings_per_second": 40})
-    assert tenant_status.decode_message(value) == (CID, True, {"readings_per_second": 40})
+    assert tenant_status.decode_message(value) == (CID, True, {"readings_per_second": 40}, frozenset())
     _key, bare = tenant_status.encode(CID, True)
     assert "caps" not in json.loads(bare)
-    assert tenant_status.decode_message(bare) == (CID, True, {})
+    assert tenant_status.decode_message(bare) == (CID, True, {}, frozenset())
 
 
 def test_an_unknown_cap_or_value_is_dropped_so_the_tenant_takes_its_default():
     value = json.dumps({"company_id": CID, "active": True,
                         "caps": {"readings_per_second": 0, "disk": 5, "notebook_environments": 2}}).encode()
-    assert tenant_status.decode_message(value) == (CID, True, {"notebook_environments": 2})
+    assert tenant_status.decode_message(value) == (CID, True, {"notebook_environments": 2}, frozenset())
 
 
 def test_encode_refuses_an_override_that_is_not_a_cap_or_a_count():
@@ -62,3 +62,14 @@ def test_encode_refuses_an_override_that_is_not_a_cap_or_a_count():
         tenant_status.encode(CID, True, {"disk": 5})
     with pytest.raises(ValueError):
         tenant_status.encode(CID, True, {"readings_per_second": True})
+
+
+def test_a_status_carries_the_stored_data_caps_its_tenant_is_over():
+    _key, value = tenant_status.encode(CID, True, over={"stored_object_gib"})
+    assert tenant_status.decode_message(value)[3] == frozenset({"stored_object_gib"})
+    # Only a stored-data cap may be over; one this version does not know refuses nothing.
+    import json
+    body = json.loads(value)
+    body["over"] = ["stored_object_gib", "disk", "readings_per_second"]
+    assert tenant_status.decode_message(json.dumps(body).encode())[3] == frozenset({"stored_object_gib"})
+    assert "over" not in json.loads(tenant_status.encode(CID, True)[1])

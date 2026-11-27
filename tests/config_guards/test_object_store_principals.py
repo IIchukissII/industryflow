@@ -50,6 +50,7 @@ COMPOSE_CONSUMERS = {
     "cold-export": ("COLD_STORE", "COLD_STORE_ACCESS_KEY", "COLD_STORE_SECRET_KEY"),
     "notebook-cold-broker": ("COLD_READ", "COLD_READ_ACCESS_KEY", "COLD_READ_SECRET_KEY"),
     "tenant-delete": ("TENANT_DELETE_COLD", "TENANT_DELETE_COLD_ACCESS_KEY", "TENANT_DELETE_COLD_SECRET_KEY"),
+    "tenant-usage": ("TENANT_USAGE_STORE", "TENANT_USAGE_STORE_ACCESS_KEY", "TENANT_USAGE_STORE_SECRET_KEY"),
 }
 
 
@@ -181,6 +182,12 @@ def test_only_the_tenant_delete_job_deletes_in_the_cold_bucket_and_it_sees_nothi
     cold_deleters = {n for n, g in granted.items() if "s3:DeleteObject" in g.get("cold", set())}
     assert cold_deleters == {"tenant-delete-cold"}, sorted(cold_deleters)
     assert granted["tenant-delete-cold"] == {"cold": {"s3:DeleteObject"}}, granted["tenant-delete-cold"]
+
+
+def test_the_storage_measurement_lists_and_touches_no_object():
+    """ADR-0049 dec 11, 13: it measures each tenant's prefixes and can read, write or delete nothing."""
+    assert _granted()["tenant-usage"] == {}, _granted()["tenant-usage"]
+    assert re.search(r"^principal tenant-usage .* list_policy ", SCRIPT, re.M)
 
 
 def test_the_backup_mirrors_read_with_the_backup_read_principal():

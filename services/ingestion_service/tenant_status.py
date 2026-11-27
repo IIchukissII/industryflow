@@ -39,15 +39,15 @@ class TenantStatus:
     def __init__(self, stale_after: float = tenant_status.STALE_AFTER_SECONDS, clock=time.monotonic):
         self._stale_after = stale_after
         self._clock = clock
-        self._heard: dict[str, tuple[bool, dict, float]] = {}
+        self._heard: dict[str, tuple[bool, dict, float, frozenset]] = {}
 
     def apply(self, value: bytes) -> None:
         try:
-            company_id, active, caps = tenant_status.decode_message(value)
+            company_id, active, caps, over = tenant_status.decode_message(value)
         except ValueError:
             logger.warning("ignored a message on the tenant-status stream that is not a status")
             return
-        self._heard[company_id] = (active, caps, self._clock())
+        self._heard[company_id] = (active, caps, self._clock(), over)
 
     def _fresh(self, company_id: str):
         heard = self._heard.get(company_id)
@@ -66,6 +66,11 @@ class TenantStatus:
         """The tenant's quota overrides as last heard; none once its status is stale."""
         heard = self._fresh(company_id)
         return dict(heard[1]) if heard is not None else {}
+
+    def over(self, company_id: str) -> frozenset:
+        """The stored-data caps the tenant is over as last heard (ADR-0049 dec 12); none once stale."""
+        heard = self._fresh(company_id)
+        return heard[3] if heard is not None else frozenset()
 
 
 status = TenantStatus()

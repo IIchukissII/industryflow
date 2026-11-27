@@ -38,6 +38,7 @@ DRIVERS = {
     "services/alert_service/": ASYNCPG,
     "services/ml_service/": ASYNCPG,
     "services/spark_jobs/": PSYCOPG2,
+    "services/tenant_usage/": PSYCOPG2,
 }
 
 

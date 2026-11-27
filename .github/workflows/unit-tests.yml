@@ -115,6 +115,7 @@ jobs:
           - { service: cold_export,         path: services/cold_export/tests, args: "--ignore=services/cold_export/tests/test_cold_export_integration.py" }
           # The cold purge's live proof (test_cold_store_live.py) needs MinIO and runs in cold-layer-integration.yml.
           - { service: tenant_delete,         path: services/tenant_delete/tests, args: "--ignore=services/tenant_delete/tests/test_cold_store_live.py" }
+          - { service: tenant_usage,          path: services/tenant_usage/tests }
           # The infrastructure agent (ADR-0046): stores and model faked; its tool server also runs as
           # a real stdio subprocess. It reads its runbook rows from services/ops_agent/runbook.toml.
           - { service: ops_agent,           path: services/ops_agent/tests }

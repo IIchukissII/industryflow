@@ -39,15 +39,19 @@ def _refusal(error):
 
 
 class Db:
-    def __init__(self, row=None, rows=(), fail=None):
+    """Answers with ``row``/``rows``, and a read of the storage measurements with ``usage``."""
+
+    def __init__(self, row=None, rows=(), fail=None, usage=()):
         self.calls, self.row, self.rows, self.fail = [], row, list(rows), fail
+        self.usage = list(usage)
         self.committed = self.rolled_back = False
 
     async def execute(self, statement, params=None):
         self.calls.append((str(statement), params))
         if self.fail:
             raise self.fail
-        return SimpleNamespace(mappings=lambda: SimpleNamespace(one=lambda: self.row, all=lambda: self.rows))
+        rows = self.usage if "tenant_storage_usage" in str(statement) else self.rows
+        return SimpleNamespace(mappings=lambda: SimpleNamespace(one=lambda: self.row, all=lambda: rows))
 
     async def commit(self):
         self.committed = True
@@ -111,6 +115,24 @@ def test_a_tenants_caps_show_default_override_and_effective(monkeypatch):
     assert db.calls[0][1] == {"company_id": str(TENANT)}
     assert out.caps["readings_per_second"].model_dump() == {"default": 250, "override": 40, "effective": 40}
     assert out.caps["notebook_environments"].model_dump() == {"default": None, "override": None, "effective": None}
+    assert out.stored == {}
+
+
+def test_a_tenants_stored_data_is_shown_as_last_measured():
+    db = Db(usage=[{"store": "object", "bytes": 123, "measured_at": NOW}])
+    out = asyncio.run(tq.tenant_quotas(TENANT, user=ROOT, db=db))
+    assert db.calls[1] == (tq.USAGE_SELECT, {"company_id": TENANT})
+    assert out.stored["object"].model_dump() == {"bytes": 123, "measured_at": NOW}
+    assert set(quotas.STORED_CAPS.values()) <= set(out.caps)
+
+
+def test_the_tenants_without_a_fresh_measurement_are_counted_on_the_platform_plane():
+    from messaging import quota_metrics
+
+    db = Db(row={"unmeasured": 2})
+    asyncio.run(quota_metrics.read_unmeasured(db))
+    assert db.calls == [(quota_metrics.UNMEASURED_SELECT, {"stale": quota_metrics.USAGE_STALE_SECONDS})]
+    assert quota_metrics.UNMEASURED._value.get() == 2
 
 
 def test_which_tenants_were_refused_is_read_from_the_store_summed_over_the_days(monkeypatch):

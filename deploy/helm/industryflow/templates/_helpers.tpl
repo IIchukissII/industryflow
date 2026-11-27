@@ -96,6 +96,8 @@ role cannot be put in one and forgotten in the other (it would be created with n
 {{- if .Values.tenantDelete.enabled }}{{ $keys = append $keys "TENANT_DELETE_DB_PASSWORD" }}{{ end -}}
 {{- /* The notebook_hub_reclaim_user role (ADR-0020 dec 6). */ -}}
 {{- if and .Values.notebookHub.enabled .Values.tenantDelete.enabled }}{{ $keys = append $keys "NOTEBOOK_HUB_RECLAIM_DB_PASSWORD" }}{{ end -}}
+{{- /* The tenant_usage_user role (ADR-0049 dec 11). */ -}}
+{{- if .Values.tenantUsage.enabled }}{{ $keys = append $keys "TENANT_USAGE_DB_PASSWORD" }}{{ end -}}
 {{- join " " $keys -}}
 {{- end -}}
 
@@ -207,6 +209,7 @@ principal is never half-wired. Each is created only where its consumer is deploy
 {{- if .Values.backup.enabled }}{{ $keys = concat $keys (list "BACKUP_READ_ACCESS_KEY" "BACKUP_READ_SECRET_KEY") }}{{ end -}}
 {{- if .Values.coldExport.enabled }}{{ $keys = concat $keys (list "COLD_STORE_ACCESS_KEY" "COLD_STORE_SECRET_KEY" "COLD_READ_ACCESS_KEY" "COLD_READ_SECRET_KEY") }}{{ end -}}
 {{- if and .Values.coldExport.enabled .Values.tenantDelete.enabled }}{{ $keys = concat $keys (list "TENANT_DELETE_COLD_ACCESS_KEY" "TENANT_DELETE_COLD_SECRET_KEY") }}{{ end -}}
+{{- if .Values.tenantUsage.enabled }}{{ $keys = concat $keys (list "TENANT_USAGE_STORE_ACCESS_KEY" "TENANT_USAGE_STORE_SECRET_KEY") }}{{ end -}}
 {{- join " " $keys -}}
 {{- end -}}
 

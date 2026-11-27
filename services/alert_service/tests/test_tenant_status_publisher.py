@@ -28,9 +28,10 @@ class Pool:
     """Answers the registry read with ``rows`` and the overrides read with ``overrides``; ``fail``
     fails every read, ``fail_overrides`` only the overrides."""
 
-    def __init__(self, rows, fail=False, overrides=(), fail_overrides=False):
+    def __init__(self, rows, fail=False, overrides=(), fail_overrides=False, usage=(), fail_usage=False):
         self.rows, self.fail, self.queries = rows, fail, []
         self.overrides, self.fail_overrides = list(overrides), fail_overrides
+        self.usage, self.fail_usage = list(usage), fail_usage
 
     @asynccontextmanager
     async def acquire(self):
@@ -45,6 +46,10 @@ class Pool:
                     if pool.fail_overrides:
                         raise ConnectionError("relation does not exist")
                     return pool.overrides
+                if "tenant_storage_usage" in sql:
+                    if pool.fail_usage:
+                        raise ConnectionError("relation does not exist")
+                    return pool.usage
                 return pool.rows
 
         yield Conn()
@@ -75,8 +80,9 @@ def test_every_tenant_goes_out_with_its_status():
 def test_the_registry_is_read_with_the_bound_tenant_pattern():
     pool = Pool([])
     asyncio.run(publisher.publish_once(pool, None, "tenant-status"))
-    (sql, args), (overrides_sql, _) = pool.queries
+    (sql, args), (overrides_sql, _), (usage_sql, _) = pool.queries
     assert overrides_sql == publisher.OVERRIDES_SELECT
+    assert usage_sql == publisher.USAGE_SELECT
     assert "FROM public.companies" in sql and "is_active" in sql
     assert args == (tenancy.SCHEMA_LIKE,)
 
@@ -103,6 +109,13 @@ class DownStore:
 
 
 def _send_into(sent):
+    """Collects each status as ``(company_id, active, caps)``; with ``over``, its over caps too."""
+    async def send(topic, value, key):
+        sent.append(tenant_status.decode_message(value)[:3])
+    return send
+
+
+def _send_with_over(sent):
     async def send(topic, value, key):
         sent.append(tenant_status.decode_message(value))
     return send
@@ -166,3 +179,40 @@ def test_a_cleared_overrides_copy_is_deleted_on_the_next_round():
 
     before, after = asyncio.run(run())
     assert before == [f"quota:cap:notebook_environments:{ACTIVE}"] and after == []
+
+
+def _usage(company_id, store, gib, age=60.0):
+    return {"company_id": company_id, "store": store, "bytes": int(gib * (1 << 30)), "age": age}
+
+
+def test_a_tenant_over_a_stored_cap_is_named_on_its_status_and_copied_for_the_tracking_gateway(monkeypatch):
+    """ADR-0049 dec 11, 12: its fresh measurement against the cap that holds for it, its override first."""
+    from industryflow_contracts import quotas
+
+    monkeypatch.setitem(publisher.DEFAULTS, quotas.STORED_DATABASE_GIB, 10)
+    monkeypatch.setitem(publisher.DEFAULTS, quotas.STORED_OBJECT_GIB, 10)
+    usage = [_usage(ACTIVE, "database", 11), _usage(ACTIVE, "object", 11),
+             _usage(SUSPENDED, "object", 11, age=publisher.USAGE_STALE_SECONDS + 1)]
+    overrides = [{"company_id": ACTIVE, "cap": quotas.STORED_OBJECT_GIB, "value": 20}]
+    sent = []
+
+    async def run():
+        store = await testing.async_redis()
+        await publisher.publish_once(Pool(_rows(), overrides=overrides, usage=usage), _send_with_over(sent), "t", store)
+        return store
+
+    store = asyncio.run(run())
+    over = {company_id: tenant_over for company_id, _active, _caps, tenant_over in sent}
+    assert over[ACTIVE] == {quotas.STORED_DATABASE_GIB}      # the object override of 20 GiB holds it under
+    assert over[SUSPENDED] == frozenset()                     # a stale measurement holds nothing (dec 8)
+
+    async def copies():
+        return (await store.get(quotas.over_key(quotas.STORED_DATABASE_GIB, ACTIVE)),
+                await store.get(quotas.over_key(quotas.STORED_OBJECT_GIB, ACTIVE)))
+    assert asyncio.run(copies())[0] is not None and asyncio.run(copies())[1] is None
+
+
+def test_unreadable_measurements_hold_no_stored_cap_and_the_statuses_still_go_out():
+    sent = []
+    asyncio.run(publisher.publish_once(Pool(_rows(), fail_usage=True), _send_with_over(sent), "t"))
+    assert len(sent) == 2 and all(tenant_over == frozenset() for *_rest, tenant_over in sent)

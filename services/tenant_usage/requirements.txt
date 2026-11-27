@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Tenant storage measurement job (ADR-0049 dec 11): psycopg2 for the two database functions, boto3 to
+# list the object store. The pins match the other jobs' (tenant-delete).
+psycopg2-binary==2.9.13
+boto3==1.44.6

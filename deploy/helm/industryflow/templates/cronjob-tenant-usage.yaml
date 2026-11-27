@@ -1,0 +1,138 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.tenantUsage.enabled }}
+{{- /*
+  Tenant storage measurement (ADR-0049 dec 11): each tenant's bytes in the database and the object
+  store, measured in the stores themselves and recorded for the alert worker, which refuses a tenant
+  over its stored-data caps. Lists and records only (dec 13): tenant_usage_user measures and records
+  through two functions; its object-store principal may only list tenant prefixes.
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "industryflow.fullname" . }}-tenant-usage
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tenant-usage
+    app.kubernetes.io/component: quota
+spec:
+  schedule: {{ .Values.tenantUsage.schedule | quote }}
+  # One run at a time: two would only measure the same thing twice.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: tenant-usage
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            fsGroup: {{ .Values.securityContext.fsGroup }}
+            seccompProfile:
+              type: RuntimeDefault
+          {{- end }}
+          initContainers:
+            {{- include "industryflow.schemaReadyInitContainer" (dict "ctx" . "user" "tenant_usage_user" "workload" "tenant-usage" "passwordKey" "TENANT_USAGE_DB_PASSWORD") | nindent 12 }}
+          containers:
+            - name: tenant-usage
+              image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.tenantUsage.image "tag" .Values.image.tag "digest" .Values.tenantUsage.digest) | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              {{- if .Values.securityContext.enabled }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              {{- end }}
+              env:
+                - name: TIMESCALEDB_HOST
+                  value: {{ include "industryflow.dbHost" . | quote }}
+                - name: TIMESCALEDB_PORT
+                  value: {{ .Values.infra.timescaledb.port | quote }}
+                # The application database (00-create-databases.sql). Tenants are schemas within it.
+                - name: TIMESCALEDB_DB
+                  value: "industryflow"
+                - name: TENANT_USAGE_DB_USER
+                  value: "tenant_usage_user"
+                - name: TENANT_USAGE_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "tenant-usage") }}
+                      key: TENANT_USAGE_DB_PASSWORD
+                - name: TENANT_USAGE_STORE_ENDPOINT
+                  value: {{ include "industryflow.minioEndpoint" . | quote }}
+                - name: TENANT_USAGE_STORE_REGION
+                  value: {{ .Values.coldExport.store.region | quote }}
+                - name: TENANT_USAGE_STORE_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "tenant-usage") }}
+                      key: TENANT_USAGE_STORE_ACCESS_KEY
+                - name: TENANT_USAGE_STORE_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "tenant-usage") }}
+                      key: TENANT_USAGE_STORE_SECRET_KEY
+                # Every bucket the release runs, so none of a tenant's data goes uncounted.
+                {{- if .Values.coldExport.enabled }}
+                - name: COLD_STORE_BUCKET
+                  value: {{ .Values.coldExport.store.bucket | quote }}
+                {{- end }}
+                {{- if .Values.notebookHub.enabled }}
+                - name: TRACKING_ARTIFACT_BUCKET
+                  value: {{ .Values.notebookHub.trackingGateway.artifactBucket | quote }}
+                {{- end }}
+                {{- if .Values.tls.db.enabled }}
+                # TLS to the DB (ADR-0017); libpq reads sslmode/sslrootcert directly.
+                - name: DB_SSLMODE
+                  value: {{ .Values.tls.db.sslmode | quote }}
+                - name: DB_SSLROOTCERT
+                  value: {{ printf "%s/ca.crt" .Values.tls.db.mountPath | quote }}
+                {{- end }}
+              {{- with .Values.tenantUsage.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- if or .Values.securityContext.enabled .Values.tls.db.enabled }}
+              volumeMounts:
+                {{- if .Values.securityContext.enabled }}
+                # boto3 scratch under a read-only root FS.
+                - name: tmp
+                  mountPath: /tmp
+                {{- end }}
+                {{- if .Values.tls.db.enabled }}
+                - name: db-ca
+                  mountPath: {{ printf "%s/ca.crt" .Values.tls.db.mountPath }}
+                  subPath: ca.crt
+                  readOnly: true
+                {{- end }}
+              {{- end }}
+          volumes:
+            {{- include "industryflow.schemaReadyVolumes" . | nindent 12 }}
+            {{- if .Values.securityContext.enabled }}
+            - name: tmp
+              emptyDir: {}
+            {{- end }}
+            {{- if .Values.tls.db.enabled }}
+            - name: db-ca
+              secret:
+                secretName: {{ .Values.tls.db.secretName | quote }}
+                items:
+                  - key: ca.crt
+                    path: ca.crt
+            {{- end }}
+{{- end }}

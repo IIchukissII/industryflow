@@ -181,6 +181,18 @@ groups:
           summary: "Tenant quotas are not enforced: the shared count is unreachable"
           description: "Demands were admitted without their {{ $labels.cap }} cap in the last 5m because the shared count could not be read; no cap holds until it can (ADR-0049 dec 8)."
           services: "ingestion-service, notebook-sql-proxy, quota-redis"
+      - alert: IndustryFlowTenantStorageUnmeasured
+        # A tenant whose stored data has no fresh measurement in a store has no stored-data cap holding
+        # for it (ADR-0049 dec 8, 11): the measurement job failed or stopped. Every gateway worker reports
+        # the count from the database, so read from the largest.
+        expr: max(tenant_storage_unmeasured{platform="industryflow"}) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stored-data caps are not enforced: tenants have no fresh storage measurement"
+          description: "{{ $value }} tenant(s) have had no measurement of their stored data newer than TENANT_USAGE_STALE_SECONDS for 30m; no stored-data cap holds for them (ADR-0049 dec 8)."
+          services: "tenant-usage, api-gateway"
       - alert: IndustryFlowNotebookSqlSessionsFull
         # Every tenant's SQL sessions together reached the notebook share of the database's connections
         # (ADR-0049 dec 10): a sizing question, as a tenant held at its cap is. Read from the largest

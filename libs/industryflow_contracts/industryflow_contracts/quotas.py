@@ -28,15 +28,25 @@ NOTEBOOK_ENVIRONMENTS = "notebook_environments"
 SQL_SESSIONS = "sql_sessions"
 SQL_STATEMENT_SECONDS = "sql_statement_seconds"
 SQL_IDLE_TRANSACTION_SECONDS = "sql_idle_transaction_seconds"
+# The data a tenant keeps in each store whose capacity tenants share, in GiB (ADR-0049 dec 11).
+STORED_DATABASE_GIB = "stored_database_gib"
+STORED_OBJECT_GIB = "stored_object_gib"
 CAPS = (READINGS_PER_SECOND, NOTEBOOK_ENVIRONMENTS, SQL_SESSIONS, SQL_STATEMENT_SECONDS,
-        SQL_IDLE_TRANSACTION_SECONDS)
+        SQL_IDLE_TRANSACTION_SECONDS, STORED_DATABASE_GIB, STORED_OBJECT_GIB)
+
+# Each shared store, as the measurement names it, and its cap.
+STORED_CAPS = {"database": STORED_DATABASE_GIB, "object": STORED_OBJECT_GIB}
+GIB = 1 << 30
 
 # The shipped defaults (ADR-0049 dec 6), sized against the reference node of docs/operations/capacity.md
 # (one 8 GB, 4-core node: 500 readings/s with headroom; a notebook environment takes up to 4 GB), so
 # one tenant cannot take the whole node. A tenant's SQL sessions are a tenth of the notebook share of
 # the database's connections (SQL_SESSIONS_TOTAL_SHIPPED).
+# A tenant's stored data is a fifth of the reference node's 232 GB disk in the database and two fifths in
+# the object store, which share it.
 SHIPPED_DEFAULTS = {READINGS_PER_SECOND: 250, NOTEBOOK_ENVIRONMENTS: 3, SQL_SESSIONS: 5,
-                    SQL_STATEMENT_SECONDS: 300, SQL_IDLE_TRANSACTION_SECONDS: 60}
+                    SQL_STATEMENT_SECONDS: 300, SQL_IDLE_TRANSACTION_SECONDS: 60,
+                    STORED_DATABASE_GIB: 40, STORED_OBJECT_GIB: 80}
 
 # The configuration naming each cap's platform default.
 ENV = {cap: f"TENANT_QUOTA_{cap.upper()}" for cap in CAPS}
@@ -160,6 +170,46 @@ SQL_SESSIONS_TOTAL_REFUSALS_KEY = "quota:refusals-total:sql_sessions_total"
 # reported by the API gateway on the platform plane. Per cap, no tenant.
 def count_unavailable_key(cap: str) -> str:
     return f"quota:count-unavailable:{check_cap(cap)}"
+
+
+# A measurement older than this is not trusted (ADR-0049 dec 8): the tenant's stored-data caps are
+# waived until a newer one, and the operator is alerted. Three runs of the hourly measurement job.
+USAGE_STALE_ENV = "TENANT_USAGE_STALE_SECONDS"
+USAGE_STALE_SHIPPED = 3 * 3600
+
+
+def usage_stale_seconds(environ: Mapping[str, str] = os.environ) -> int:
+    """How old a measurement may be and still hold; ``ValueError`` on a value it cannot read."""
+    raw = environ.get(USAGE_STALE_ENV)
+    if raw is None or raw.strip() == "":
+        return USAGE_STALE_SHIPPED
+    try:
+        return check_value(int(raw.strip()))
+    except ValueError:
+        raise ValueError(f"{USAGE_STALE_ENV} must be a whole number of seconds from 1 to {MAX_VALUE}, "
+                         f"got {raw!r}") from None
+
+
+def stored_over(usage: Mapping[str, tuple[int, float]], caps: Mapping[str, Optional[int]], now: float,
+                stale_after: float) -> frozenset:
+    """The stored-data caps a tenant is over: ``usage`` maps a store to ``(bytes, measured_at)`` (unix
+    seconds), ``caps`` a cap to its effective value (``None`` off). A measurement missing or older than
+    ``stale_after`` holds nothing (dec 8)."""
+    over = set()
+    for store, cap in STORED_CAPS.items():
+        limit = caps.get(cap)
+        measured = usage.get(store)
+        if limit is None or measured is None or now - measured[1] > stale_after:
+            continue
+        if measured[0] > limit * GIB:
+            over.add(cap)
+    return frozenset(over)
+
+
+# A tenant over a stored-data cap, as the publisher copies it into the capability store for the tracking
+# gateway, which refuses its artifact writes (dec 12). It expires as a tenant-status message goes stale.
+def over_key(cap: str, company_id) -> str:
+    return f"quota:over:{check_cap(cap)}:{tenancy.canonical_company_id(company_id)}"
 
 
 # A tenant's override, as the publisher copies it from the registry into the capability store for the

@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Test-only dependencies: the orchestration tests drive the job against in-memory fakes of its two ports.
+-r requirements.txt
+pytest==9.2.0

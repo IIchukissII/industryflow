@@ -44,6 +44,9 @@ QUOTA_SET = (
     "SELECT changed, value, updated_at "
     "FROM public.set_tenant_quota(:company_id, :cap, CAST(:value AS integer), :actor_id)"
 )
+USAGE_SELECT = (
+    "SELECT store, bytes, measured_at FROM public.tenant_storage_usage WHERE company_id = :company_id"
+)
 CHANGES_SELECT = (
     "SELECT change_id, company_id, cap, old_value, new_value, changed_by, changed_at "
     "FROM public.tenant_quota_changes WHERE company_id = :company_id "
@@ -76,9 +79,17 @@ class TenantCap(BaseModel):
     effective: Optional[int]
 
 
+class Stored(BaseModel):
+    # The tenant's data in one store as last measured (ADR-0049 dec 11).
+    bytes: int
+    measured_at: datetime
+
+
 class TenantQuotas(BaseModel):
     company_id: UUID
     caps: Dict[str, TenantCap]
+    # By store ("database", "object"); a store not yet measured is absent.
+    stored: Dict[str, Stored] = {}
 
 
 class SetQuota(BaseModel):
@@ -135,13 +146,15 @@ async def list_quotas(user: User = Depends(require_superuser), db: AsyncSession 
 @router.get("/tenants/{company_id}", response_model=TenantQuotas)
 async def tenant_quotas(company_id: UUID, user: User = Depends(require_superuser),
                         db: AsyncSession = Depends(get_db)):
-    """The caps that hold for one tenant: each default, override and the effective value."""
+    """The caps that hold for one tenant: each default, override and the effective value; and its data in
+    each store as last measured."""
     held = {o.cap: o.value for o in await _overrides(db, company_id)}
+    usage = (await db.execute(text(USAGE_SELECT), {"company_id": company_id})).mappings().all()
     return TenantQuotas(company_id=company_id, caps={
         cap: TenantCap(default=DEFAULTS[cap], override=held.get(cap),
                        effective=quotas.effective(DEFAULTS[cap], held.get(cap)))
         for cap in quotas.CAPS
-    })
+    }, stored={row["store"]: Stored(bytes=row["bytes"], measured_at=row["measured_at"]) for row in usage})
 
 
 @router.put("/tenants/{company_id}/{cap}", response_model=SetResult)

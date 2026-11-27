@@ -21,6 +21,7 @@
 #   cold-export-rw     cold                   read/write                  the cold-layer exporter (ADR-0025 dec 11)
 #   cold-broker-ro     cold                   read only                   the cold-store broker (ADR-0025 dec 5)
 #   tenant-delete-cold cold, tenant_*         list/delete, no read/write  the tenant-delete job (ADR-0025 dec 14)
+#   tenant-usage       artifact, cold, tenant_*  list only                the storage measurement job (ADR-0049 dec 11, 13)
 #
 # A principal is provisioned when both its keys are set and skipped (with a line saying so) when
 # both are empty; one key without the other is a configuration error and fails the run.
@@ -92,6 +93,16 @@ delete_policy() {  # list and delete under one key pattern, no read or write: it
 ]}
 EOF
 }
+list_policy() {  # list under the tenant prefixes of each bucket named, nothing else: it measures, never sees
+  statements=""
+  for b in "$@"; do
+    statement='{"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": ["arn:aws:s3:::'"$b"'"], "Condition": {"StringLike": {"s3:prefix": ["tenant_*"]}}}'
+    statements="$statements${statements:+, }$statement"
+  done
+  cat <<EOF
+{"Version": "2012-10-17", "Statement": [$statements]}
+EOF
+}
 buckets_read_policy() {  # get/list on each bucket named, whole buckets only
   resources=""; objects=""
   for b in "$@"; do
@@ -158,4 +169,7 @@ principal cold-export-rw COLD_STORE_ACCESS_KEY COLD_STORE_SECRET_KEY "${COLD_STO
 principal cold-broker-ro COLD_READ_ACCESS_KEY COLD_READ_SECRET_KEY "${COLD_STORE_BUCKET:-}" read_policy "${COLD_STORE_BUCKET:-}"
 # Only the tenant-delete job removes cold objects (ADR-0025 dec 14), and only under tenant prefixes.
 principal tenant-delete-cold TENANT_DELETE_COLD_ACCESS_KEY TENANT_DELETE_COLD_SECRET_KEY "${COLD_STORE_BUCKET:-}" delete_policy "${COLD_STORE_BUCKET:-}" "tenant_*"
+# The storage measurement lists each tenant's prefixes and nothing more: it neither reads, writes nor
+# deletes an object, so nothing a cap does reaches the data it measures (ADR-0049 dec 13).
+principal tenant-usage TENANT_USAGE_STORE_ACCESS_KEY TENANT_USAGE_STORE_SECRET_KEY "${ARTIFACT_BUCKET:-}" list_policy ${ARTIFACT_BUCKET:-} ${COLD_STORE_BUCKET:-}
 echo "object store ready"

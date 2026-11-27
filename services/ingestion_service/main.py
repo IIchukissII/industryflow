@@ -169,6 +169,16 @@ async def ingest_sensor_data(
                 detail=f"Tenant at its quota of {cap} readings per second",
                 headers={"Retry-After": "1"},
             )
+        # Its stored-data caps (ADR-0049 dec 12): a tenant over either store's is refused its readings,
+        # never accepted and dropped, so the device keeps them until a superuser raises the cap.
+        stored = quota.stored_refusal(tenant_status.status.over(company_id_str))
+        if stored is not None:
+            await quota.record_refusal(quota_store, company_id_str, cap=stored)
+            raise HTTPException(
+                status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+                detail=f"Tenant over its stored-data quota ({stored})",
+                headers={"Retry-After": str(quota.STORED_RETRY_AFTER_SECONDS)},
+            )
         
         # Build Kafka message
         kafka_message = {

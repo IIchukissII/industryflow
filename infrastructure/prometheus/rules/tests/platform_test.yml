@@ -366,6 +366,25 @@ tests:
         alertname: IndustryFlowTenantQuotaCountUnavailable
         exp_alerts: []
 
+  # Tenants without a fresh storage measurement: a dip does not fire, 30m does.
+  - interval: 1m
+    input_series:
+      - series: 'tenant_storage_unmeasured{platform="industryflow", job="api-gateway", instance="w1"}'
+        values: '0x5 2x10 0x5 1x60'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: IndustryFlowTenantStorageUnmeasured
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: IndustryFlowTenantStorageUnmeasured
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Stored-data caps are not enforced: tenants have no fresh storage measurement"
+              description: "1 tenant(s) have had no measurement of their stored data newer than TENANT_USAGE_STALE_SECONDS for 30m; no stored-data cap holds for them (ADR-0049 dec 8)."
+              services: "tenant-usage, api-gateway"
+
   # Every tenant's SQL sessions at their total: a burst does not fire, 15m of refusals does.
   - interval: 1m
     input_series:

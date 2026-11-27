@@ -18,10 +18,17 @@ this writes on the same tick to the capability store, which they trust and the d
 service cannot reach (ADR-0033 dec 3). Both expire as a status goes stale, so a stopped publisher returns every
 tenant to the platform defaults; a cleared override's copy is deleted on the next tick. A round that
 cannot read the overrides sends the last ones read: suspension must not wait on a quota.
+
+Each status also names the stored-data caps its tenant is over (ADR-0049 dec 11, 12): the tenant's last
+measurement in each store against the cap that holds for it. Ingestion refuses that tenant's readings
+from the stream; the tracking gateway, off the broker, refuses its artifact writes from an expiring copy
+(``quotas.over_key``) in the capability store. A measurement older than ``TENANT_USAGE_STALE_SECONDS``,
+or one that cannot be read, holds nothing (dec 8); the API gateway alerts on its age.
 """
 import asyncio
 import logging
 
+from config import config
 from industryflow_contracts import quotas, tenancy, tenant_status
 
 logger = logging.getLogger(__name__)
@@ -37,6 +44,42 @@ REGISTRY_STATUS_SELECT = """
 
 # Every tenant's quota overrides; the worker's role may read only these three columns (38-tenant-quotas.sql).
 OVERRIDES_SELECT = "SELECT company_id, cap, value FROM public.tenant_quota_overrides"
+
+# Every tenant's last measurement in each store, and its age by the database's clock (38-tenant-quotas.sql).
+USAGE_SELECT = """
+    SELECT company_id, store, bytes, EXTRACT(EPOCH FROM now() - measured_at)::float8 AS age
+    FROM public.tenant_storage_usage
+"""
+
+# The platform defaults of the stored-data caps and how old a measurement may be, from the worker's
+# configuration (config.py, the one reader of its environment).
+DEFAULTS = {quotas.STORED_DATABASE_GIB: config.TENANT_QUOTA_STORED_DATABASE_GIB,
+            quotas.STORED_OBJECT_GIB: config.TENANT_QUOTA_STORED_OBJECT_GIB}
+USAGE_STALE_SECONDS = config.TENANT_USAGE_STALE_SECONDS
+
+
+async def registry_usage(pool) -> dict:
+    """``{company_id: {store: (bytes, age_seconds)}}`` for every measurement of a store this version knows."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(USAGE_SELECT)
+    held: dict = {}
+    for row in rows:
+        if row["store"] not in quotas.STORED_CAPS:
+            continue
+        try:
+            company_id = tenancy.canonical_company_id(row["company_id"])
+        except ValueError:
+            continue
+        held.setdefault(company_id, {})[row["store"]] = (int(row["bytes"]), float(row["age"]))
+    return held
+
+
+def over_caps(usage: dict, overrides: dict) -> frozenset:
+    """The stored-data caps a tenant is over, from its measurements (bytes, age) and its overrides."""
+    caps = {cap: quotas.effective(DEFAULTS[cap], overrides.get(cap)) for cap in quotas.STORED_CAPS.values()}
+    # Ages are the database's, so the measurement's time is its age before a "now" of zero.
+    measured = {store: (size, -age) for store, (size, age) in usage.items()}
+    return quotas.stored_over(measured, caps, now=0.0, stale_after=USAGE_STALE_SECONDS)
 
 
 async def registry_overrides(pool) -> dict:
@@ -82,19 +125,29 @@ async def publish_once(pool, send, topic: str, store=None) -> int:
     except Exception as e:  # noqa: BLE001 - the statuses go out with the last overrides read
         logger.error("tenant quota overrides unreadable; the last ones read are sent: %s", e)
         overrides = _last_overrides
+    try:
+        usage = await registry_usage(pool)
+    except Exception as e:  # noqa: BLE001 - no measurement holds (dec 8); the gateway alerts on its age
+        logger.error("tenant storage measurements unreadable; no stored-data cap holds this round: %s", e)
+        usage = {}
+    over = {company_id: over_caps(held, overrides.get(company_id, {})) for company_id, held in usage.items()}
     for company_id, active in status:
-        key, value = tenant_status.encode(company_id, active, overrides.get(company_id))
+        key, value = tenant_status.encode(company_id, active, overrides.get(company_id),
+                                          over.get(company_id, ()))
         await send(topic, value=value, key=key)
     if store is not None:
-        await _copy_for_the_hub(store, overrides)
+        await _copy_for_the_hub(store, overrides, over)
     return len(status)
 
 
-async def _copy_for_the_hub(store, overrides: dict) -> None:
-    """Write each override's expiring copy, and delete the copy of one cleared since the last round."""
+async def _copy_for_the_hub(store, overrides: dict, over: dict | None = None) -> None:
+    """Write each override's expiring copy, and each stored-data cap a tenant is over, for the hub, the
+    SQL proxy and the tracking gateway; delete the copy of one cleared since the last round."""
     global _copied
     keys = {quotas.cap_key(cap, company_id): value
             for company_id, caps in overrides.items() for cap, value in caps.items()}
+    keys.update({quotas.over_key(cap, company_id): 1
+                 for company_id, caps in (over or {}).items() for cap in caps})
     try:
         async with store.pipeline(transaction=False) as pipe:
             for key, value in keys.items():

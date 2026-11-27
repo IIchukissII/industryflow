@@ -26,7 +26,9 @@ INSERT INTO public.tenant_quota_caps (cap) VALUES
     ('notebook_environments'),
     ('sql_sessions'),
     ('sql_statement_seconds'),
-    ('sql_idle_transaction_seconds')
+    ('sql_idle_transaction_seconds'),
+    ('stored_database_gib'),
+    ('stored_object_gib')
 ON CONFLICT (cap) DO NOTHING;
 
 COMMENT ON TABLE public.tenant_quota_caps IS
@@ -136,6 +138,75 @@ COMMENT ON FUNCTION public.set_tenant_quota(UUID, TEXT, INTEGER, UUID) IS
     'Sets or clears a tenant''s quota override and records the change (SECURITY DEFINER, ADR-0049 dec 2)';
 
 -- =============================================================================
+-- STORED DATA (dec 11-13): each tenant's bytes in each shared store, measured in the store itself
+-- =============================================================================
+
+-- The last measurement of each tenant's data in each store. Derivable (dec 7): the next run of the
+-- measurement job writes it again. The deletion job removes a tenant's rows with its database objects.
+CREATE TABLE IF NOT EXISTS public.tenant_storage_usage (
+    company_id UUID NOT NULL REFERENCES public.companies (company_id),
+    store TEXT NOT NULL CHECK (store IN ('database', 'object')),
+    bytes BIGINT NOT NULL CHECK (bytes >= 0),
+    measured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (company_id, store)
+);
+
+COMMENT ON TABLE public.tenant_storage_usage IS
+    'Each tenant''s data in each shared store, as last measured (ADR-0049 dec 11); written only through record_tenant_storage_usage()';
+
+-- Every tenant not deleted, with the bytes its schema holds in the database: its tables, their indexes
+-- and TOAST, and for a hypertable every chunk, compressed or not, which live outside the schema. Read
+-- from the database itself, never tallied by the writers (dec 11).
+CREATE OR REPLACE FUNCTION public.tenant_database_bytes()
+RETURNS TABLE (company_id UUID, bytes BIGINT)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+    SELECT c.company_id,
+           COALESCE(SUM(CASE WHEN h.hypertable_name IS NOT NULL
+                             THEN public.hypertable_size(format('%I.%I', n.nspname, t.relname)::regclass)
+                             ELSE pg_total_relation_size(t.oid) END), 0)::BIGINT
+    FROM public.companies c
+    LEFT JOIN pg_namespace n ON n.nspname = c.schema_name
+    LEFT JOIN pg_class t ON t.relnamespace = n.oid AND t.relkind IN ('r', 'm')
+    LEFT JOIN timescaledb_information.hypertables h
+           ON h.hypertable_schema = n.nspname AND h.hypertable_name = t.relname
+    WHERE c.deleted_at IS NULL
+    GROUP BY c.company_id;
+$$;
+
+COMMENT ON FUNCTION public.tenant_database_bytes() IS
+    'Every tenant not deleted and the bytes its schema holds, chunks included (SECURITY DEFINER, ADR-0049 dec 11)';
+
+-- Records one measurement. A tenant deleted since it was measured is skipped, so a run that overlaps a
+-- deletion leaves no row behind it. Refusals: 22023 an unknown store or a negative size.
+CREATE OR REPLACE FUNCTION public.record_tenant_storage_usage(p_company_id UUID, p_store TEXT, p_bytes BIGINT)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $$
+BEGIN
+    IF p_store IS NULL OR p_store NOT IN ('database', 'object') THEN
+        RAISE EXCEPTION 'unknown store %', p_store USING ERRCODE = '22023';
+    END IF;
+    IF p_bytes IS NULL OR p_bytes < 0 THEN
+        RAISE EXCEPTION 'a stored size is a whole number of bytes' USING ERRCODE = '22023';
+    END IF;
+    INSERT INTO public.tenant_storage_usage (company_id, store, bytes, measured_at)
+    SELECT c.company_id, p_store, p_bytes, now()
+    FROM public.companies c
+    WHERE c.company_id = p_company_id AND c.deleted_at IS NULL
+    ON CONFLICT (company_id, store) DO UPDATE SET bytes = EXCLUDED.bytes, measured_at = EXCLUDED.measured_at;
+END;
+$$;
+
+COMMENT ON FUNCTION public.record_tenant_storage_usage(UUID, TEXT, BIGINT) IS
+    'Records a tenant''s measured bytes in one store (SECURITY DEFINER, ADR-0049 dec 11)';
+
+-- =============================================================================
 -- PRIVILEGES: the gateway changes overrides only through the function; the alert worker reads them
 -- =============================================================================
 
@@ -144,11 +215,20 @@ REVOKE ALL ON SEQUENCE public.tenant_quota_changes_change_id_seq FROM PUBLIC;
 GRANT SELECT ON public.tenant_quota_overrides, public.tenant_quota_changes TO api_gateway_user;
 GRANT SELECT (company_id, cap, value) ON public.tenant_quota_overrides TO alert_service_user;
 
+-- The measurement job measures and records only through the two functions; the alert worker reads the
+-- measurements to refuse a tenant over its stored-data caps, the gateway to show them to a superuser.
+REVOKE ALL ON public.tenant_storage_usage FROM PUBLIC;
+GRANT SELECT ON public.tenant_storage_usage TO api_gateway_user, alert_service_user;
+REVOKE ALL ON FUNCTION public.tenant_database_bytes() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.record_tenant_storage_usage(UUID, TEXT, BIGINT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.tenant_database_bytes() TO tenant_usage_user;
+GRANT EXECUTE ON FUNCTION public.record_tenant_storage_usage(UUID, TEXT, BIGINT) TO tenant_usage_user;
+
 REVOKE ALL ON FUNCTION public.set_tenant_quota(UUID, TEXT, INTEGER, UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.set_tenant_quota(UUID, TEXT, INTEGER, UUID) TO api_gateway_user;
 
 DO $$
 BEGIN
-    RAISE NOTICE '✓ Tenant quotas: tenant_quota_overrides, tenant_quota_changes, set_tenant_quota()';
+    RAISE NOTICE '✓ Tenant quotas: tenant_quota_overrides, tenant_quota_changes, set_tenant_quota(), tenant_storage_usage';
 END
 $$;
