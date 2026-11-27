@@ -5,9 +5,9 @@
 # fastapi moves together with prometheus-fastapi-instrumentator (below): fastapi >= 0.138
 # wraps included routers in _IncludedRouter objects with no .path, which instrumentator
 # 6.x could not introspect (every request, including /health, 500'd). Bump them as a pair.
-fastapi==0.164.0
+fastapi==0.165.0
 uvicorn[standard]==0.54.0
-pydantic==2.14.3
+pydantic==2.14.4
 
 aiokafka==0.15.0
 
@@ -21,4 +21,4 @@ prometheus-fastapi-instrumentator==8.1.0
 # Imported directly for the suspension counters (tenant_status.py), not only through the instrumentator.
 prometheus-client==0.26.0
 # The shared count of tenant quotas (quota.py, ADR-0049 dec 4); the same pin as the other services.
-redis==8.1.0
+redis==8.2.0
