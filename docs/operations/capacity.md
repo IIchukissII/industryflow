@@ -64,33 +64,41 @@ path keeps its latency, and Kafka holds what Spark has not processed yet.
 ## Memory
 
 The platform's need per ingest tier, the source of `deploy/host-memory.toml` (manual: Getting started, Memory budget).
-Measured 2026-11-25 on the 8 GB node (7 765 MiB, 4 095 MiB swap), every container under a 4 GiB limit,
-so what is measured is the need and not a limit.
+Measured 2026-11-26 on the 8 GB node (7 765 MiB, 8 191 MiB swap), every container under a 4 GiB memory
+limit and an 8 GiB memory-and-swap limit, so what is measured is the need and not a limit. Every
+container's untouched pages were reclaimed once before the windows, so a page counts as resident only
+when a window uses it.
 
-| Window | Load | Device p95 | Errors |
-|---|---|---|---|
-| Rest | none | | |
-| 250/s | 300 s | 26–27 ms | 0 beyond the tenant's own cap |
-| 500/s | 300 s | 75–250 ms | 0 |
-| End-to-end journeys | `scripts/box-e2e.sh` with 240/s beside it, 15 min | 27 ms | 0 beyond the tenant's own cap |
-| Start | every service recreated, sampled each second, 5 min | | |
+| Window | Load | Device p95 | Resident (all services) | Errors |
+|---|---|---|---|---|
+| Rest | none | | 4 106 MiB | |
+| 250/s | 300 s | 30 ms | 4 627 MiB | 0 beyond the tenant's own cap |
+| 500/s | 300 s | 2–3 s, while the ingest path brings its pages back from swap | 4 816 MiB | 2.4% |
+| Journeys | each profile's [session journey](#a-notebook-session), then `scripts/box-e2e.sh` (40 passed), 250/s beside them, 23 min | | 6 025 MiB | 0 beyond the tenant's own cap |
+| Start | every service recreated, sampled each second, 7 min | | | |
 
-The tiers, every service's resident and cold need, the reserve and the probe are recorded in
-`deploy/host-memory.toml`, each with its measurement; this page holds how they are measured.
+A tier is each service's peak over the rest, its rate and the journeys, so the journeys decide both
+measured tiers: 6 072 MiB resident and 3 220 MiB cold at 250/s, 6 077 and 3 219 at 500/s. The platform's
+budget at either tier, with the headroom, the margins, the probes and the reserve, is 7 824 MiB of memory:
+more than the 8 GB node has. The tiers, every service's resident and cold need, the sessions, the reserve
+and the probe are recorded in `deploy/host-memory.toml`, each with its measurement; this page holds how
+they are measured.
 
 | Part | Counted from cgroup v2 | Must sit in |
 |---|---|---|
-| Resident | peak of `anon` + `shmem` + `kernel` + `file_mapped` beyond `shmem` | Memory |
+| Resident | peak of `anon` + `shmem` + `kernel` + `file_mapped` beyond `shmem` over the windows after the reclaim | Memory |
 | Cold | peak of resident + `memory.swap.current` over the windows and the start, less the resident peak | Swap |
 
-A start touches every page once and is over in seconds: its peak counts toward what a service may hold
-(memory and swap), not toward what it keeps in memory. Sampled every 10 s, a start's peak is missed: the start is
-sampled each second.
+Without the reclaim, a host with memory to spare leaves untouched pages in place, and they read as
+resident: the same run measured 7 641 MiB resident. A start touches every page once and is over in
+seconds: its peak counts toward what a service may hold (memory and swap), not toward what it keeps in
+memory. Sampled every 10 s, a start's peak is missed: the start is sampled each second.
 
-Load changes the need by under 2% between rest and 500/s: the JVM heaps and the Python processes are
-fixed. The journeys raise the idle services' resident need several times over (`ml-service-api`,
-`mlflow`), so a tier always includes them. Outside the containers: Docker, containerd and the kernel's
-memory outside every cgroup, and the backup as the one-shot job beside the platform.
+Load raises the resident need by about 0.7 GB between rest and 500/s, most of it in the two Spark jobs.
+The journeys raise it by 1.4 GB more: `ml-service-api` (+528 MiB, training and inference), `timescaledb`
+(+195 MiB), `notebook-hub`, `mlflow`, `ops-agent` and `prometheus`; so a tier always includes them.
+Outside the containers: Docker, containerd and the kernel's memory outside every cgroup, and the backup
+as the one-shot job beside the platform.
 
 A healthcheck that runs Python starts an interpreter in the container every interval, too short for the
 sampler: it is measured on its own, as `docker exec <container> python -c "import resource, urllib.request;
@@ -100,19 +108,47 @@ print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)"` (MiB).
 
 | Step | Command |
 |---|---|
-| Loose limits (keeps the heaps) | `python3 scripts/host-memory.py`, then set every `*_MEM_LIMIT` and `*_MEMSWAP_LIMIT` in the block to `4096m`; `docker compose` with every profile the host runs (`--profile notebooks --profile ops-agent`) `up -d`; check each container's `HostConfig.Memory` |
+| Loose limits (keeps the heaps) | `python3 scripts/host-memory.py`, then in the block set every `*_MEM_LIMIT` to `4096m`, every `*_MEMSWAP_LIMIT` to `8192m` (a memory-and-swap limit equal to the memory limit allows no swap: the cold pages stay in memory and the host thrashes) and `NOTEBOOK_MEMORY_SHARE_MIB` to one that admits the journeys' sessions; `docker compose` with every profile the host runs (`--profile notebooks --profile ops-agent`) `up -d`; check each container's `HostConfig.Memory` and `HostConfig.MemorySwap` |
 | Start the sampler (Docker host) | `bash tests/performance/sample_memory.sh /tmp/memory.log &` |
-| Windows | rest 5 min; the tier's rate for 5 min ([reproduce](#reproduce)); `scripts/box-e2e.sh` with ingest beside it |
-| Start | a second sampler at 1 s (`sample_memory.sh <log> 1`), then `up -d --force-recreate` of every long-running service; 5 min |
+| Reclaim | as root, for every container: `echo 8G > /sys/fs/cgroup/system.slice/docker-<id>.scope/memory.reclaim` (an I/O error means it reclaimed less than asked); the windows start after it |
+| Windows | rest 5 min; the tier's rate for 5 min ([reproduce](#reproduce)); each profile's [session journey](#a-notebook-session), its sessions stopped, then `scripts/box-e2e.sh`, with ingest beside them (sessions left running take the share the suite's own need) |
+| Start | before the reclaim: a second sampler at 1 s (`sample_memory.sh <log> 1`), then `up -d --force-recreate` of every long-running service; 5 min |
 | The tier's lines | `python3 tests/performance/memory_need.py <logs joined> <start>:<end> … --start <start>:<end> --tier <rate>/s --readings-per-second <rate> --host-mib <MemTotal MiB>` |
 | Restore | `python3 scripts/host-memory.py`; the same `up -d` |
+
+### A notebook session
+
+A session's need is measured per profile on the reference journey (ADR-0050 dec 5), with the platform
+under the tier's loose limits and the hub given a share that admits it. Its resident part times the
+headroom is the least a session's memory limit may be, below its profile's size (authoring 4096 MiB,
+analytics 1024 MiB); its cold part times the headroom is its swap.
+
+| Profile | Reference journey | Resident | Cold |
+|---|---|---|---|
+| Authoring | JupyterLab opened; `clients/python/examples/getting-started.ipynb` over a week of the tenant's readings in a kernel that stays alive; then the features, the fit and a summary of the frame again | 570 MiB | 1 077 MiB |
+| Analytics | the reports page opened, and again after the reclaim | 51 MiB | 112 MiB |
+
+Measured 2026-11-26 on the 8 GB node, three runs; the table holds each part's highest. The authoring need
+follows the week's rows: 350 MiB resident over 1.6 million rows, 450 in a second run, 570 over
+3.1 million. The first load peaks at 1 647 MiB over 3.1 million rows: like a start, it counts toward what
+the session may hold, not toward what it keeps in memory.
+
+| Step | Command |
+|---|---|
+| Sampler at 1 s (Docker host) | `bash tests/performance/sample_memory.sh /tmp/session.log 1 &` |
+| Start each profile's session | sign in as an engineer and as an observer, open notebooks |
+| Loose limits for the session | `docker update --memory 3000m --memory-swap 6000m <session container>` |
+| The journey (authoring) | `docker cp` the notebook and `tests/performance/notebook_session.py` into the container; `docker exec -d <container> python /tmp/notebook_session.py /tmp/getting-started.ipynb`; wait for `notebook-done` |
+| Idle, then reclaim | 2 min; as root, `echo 3G > /sys/fs/cgroup/system.slice/docker-<id>.scope/memory.reclaim` for each session (an I/O error means it reclaimed less than asked); note the second |
+| Use | `docker exec <container> touch /tmp/use-now`; open the reports page again; 1 min |
+| The session's lines | `python3 tests/performance/session_need.py /tmp/session.log --container <container> --profile <profile> --reclaimed <second>` |
 
 ## Raising capacity
 
 | Option | Effect |
 |---|---|
 | More cores on the host | Raises the CPU ceiling; the ingest path and Spark scale with cores |
-| More memory | A notebook share ([memory](#memory)); with enough swap, the platform's own need does not grow with the host |
+| More memory | The platform needs 7 824 MiB of memory at either measured tier; what a host has beyond it is the notebook share ([memory](#memory)): a 9 GB host about 1.4 GB, below one authoring session (4096 MiB), so it admits none; a 12 GB host about 4.4 GB, one authoring session. Each further 4 GiB admits one more authoring session, or four analytics ones. With enough swap, the platform's own need does not grow with the host |
 | Kubernetes (ADR-0009) | Ingestion, edge and Spark scale out (ADR-0009) |
 
 ## Reproduce
