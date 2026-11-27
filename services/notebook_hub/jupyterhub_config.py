@@ -201,22 +201,19 @@ PROFILE_RESOURCES = {
     ident.PROFILE_ANALYTICS: {"cpu_limit": 0.5, "mem_limit": "1G"},
     ident.PROFILE_AUTHORING: {"cpu_limit": 2.0, "mem_limit": "4G"},
 }
-# On a Docker host a profile's memory limit is its fraction of the notebook share, and never less than a
-# session's measured resident need, its least limit; its swap is the session's measured cold need (ADR-0050
-# dec 5, scripts/host-memory.py). So the environments grow with the host and fit the smallest one. On
-# Kubernetes the fixed limit above is the pod's request.
-PROFILE_SHARE = {
-    ident.PROFILE_ANALYTICS: 0.35,
-    ident.PROFILE_AUTHORING: 0.5,
-}
-PROFILE_LEAST = {p: _mib_env(f"NOTEBOOK_{p.upper()}_MIN_MIB") for p in PROFILE_SHARE} if SPAWNER == "docker" else {}
-PROFILE_SWAP = {p: _mib_env(f"NOTEBOOK_{p.upper()}_SWAP_MIB") for p in PROFILE_SHARE} if SPAWNER == "docker" else {}
+# A profile's size is the same on every host and under both spawners (ADR-0050 dec 5): a larger notebook
+# share admits more sessions, never larger ones. On Kubernetes the size above is the pod's request. On a
+# Docker host scripts/host-memory.py writes each profile's limit, the size never below the session's
+# measured resident need, and its swap, the session's measured cold need (deploy/host-memory.toml, whose
+# size_mib a guard holds equal to the size above).
+PROFILE_LIMIT = {p: _mib_env(f"NOTEBOOK_{p.upper()}_LIMIT_MIB") for p in PROFILE_RESOURCES} if SPAWNER == "docker" else {}
+PROFILE_SWAP = {p: _mib_env(f"NOTEBOOK_{p.upper()}_SWAP_MIB") for p in PROFILE_RESOURCES} if SPAWNER == "docker" else {}
 
 
 def profile_memory(profile: str) -> tuple[int, int]:
     """The memory limit and the swap, in bytes, of an environment of ``profile`` on this deployment."""
     if NOTEBOOK_SHARE is not None:
-        return max(PROFILE_LEAST[profile], int(NOTEBOOK_SHARE * PROFILE_SHARE[profile])), PROFILE_SWAP[profile]
+        return PROFILE_LIMIT[profile], PROFILE_SWAP[profile]
     return ByteSpecification().validate(None, PROFILE_RESOURCES[profile]["mem_limit"]), 0
 
 

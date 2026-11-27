@@ -4,7 +4,8 @@
 
 """The single host's memory budget (ADR-0050, ADR-0018 dec 6): every long-running Compose service
 holds a part of the platform's measured need at its ingest tier, the notebook share and swap are what
-the platform leaves of the host, and a notebook session's least limit and swap are its measured need.
+the platform leaves of the host, and a notebook session's limit is its profile's size, never below its
+measured need, and its swap its measured cold part.
 
 A service without a limit takes memory from every other when it grows, and a limit that is a fraction of
 the host is wrong on every host but one: a service's memory follows the software and the load. Both sides
@@ -122,17 +123,19 @@ def test_the_hub_is_given_the_notebook_share_and_each_sessions_need():
     for name in written:
         assert env.get(name) == "${%s:?run scripts/host-memory.py}" % name, name
     assert '_mib_env("NOTEBOOK_MEMORY_SHARE_MIB")' in hub and '_mib_env("NOTEBOOK_SWAP_SHARE_MIB")' in hub
-    assert 'f"NOTEBOOK_{p.upper()}_MIN_MIB"' in hub and 'f"NOTEBOOK_{p.upper()}_SWAP_MIB"' in hub
+    assert 'f"NOTEBOOK_{p.upper()}_LIMIT_MIB"' in hub and 'f"NOTEBOOK_{p.upper()}_SWAP_MIB"' in hub
 
 
-def test_every_notebook_profile_has_a_measured_session():
+def test_every_notebook_profile_has_a_measured_session_and_one_size():
     """ADR-0050 dec 5: a session's need is measured per profile, dated; the hub's profiles and the
-    budget's sessions are the same set."""
+    budget's sessions are the same set, and each profile's size is the hub's, the same under both
+    spawners."""
     hub = (ROOT / "services" / "notebook_hub" / "jupyterhub_config.py").read_text()
-    shares = re.search(r"PROFILE_SHARE = \{(.*?)\}", hub, flags=re.S).group(1)
-    profiles = {m.lower() for m in re.findall(r"ident\.PROFILE_([A-Z]+):", shares)}
-    assert profiles == set(SHARES["sessions"])
+    resources = re.search(r"PROFILE_RESOURCES = \{(.*?)\n\}", hub, flags=re.S).group(1)
+    sizes = {m[0].lower(): m[1] for m in re.findall(r'ident\.PROFILE_([A-Z]+): \{[^}]*"mem_limit": "(\d+)G"', resources)}
+    assert set(sizes) == set(SHARES["sessions"])
     for name, session in SHARES["sessions"].items():
+        assert int(session["size_mib"]) == int(sizes[name]) * 1024, name
         assert int(session["resident_mib"]) > 0 and int(session["cold_mib"]) >= 0, name
         assert isinstance(session["measured"], datetime.date), name
 
@@ -175,13 +178,27 @@ def test_below_one_authoring_session_the_notebook_share_is_none():
     assert below["NOTEBOOK_MEMORY_SHARE_MIB"] == "0" and at["NOTEBOOK_MEMORY_SHARE_MIB"] == str(least)
 
 
-def test_a_sessions_least_limit_and_swap_are_its_measured_need():
-    """ADR-0050 dec 5: resident times the headroom (at least the margin over it), cold times the headroom."""
+def test_a_sessions_limit_is_its_profiles_size_never_below_its_need_and_its_swap_its_cold_part():
+    """ADR-0050 dec 5: the size, unless the resident part times the headroom (at least the margin over it)
+    is larger; cold times the headroom. A session smaller than its need raises the limit to the need."""
     headroom, margin = float(SHARES["headroom"]), int(SHARES["margin_mib"])
     sessions, _ = host_memory.session_limits(SHARES, LARGE_SWAP_MIB)
     for name, s in SHARES["sessions"].items():
-        res, cold = int(s["resident_mib"]), int(s["cold_mib"])
-        assert sessions[name] == (int(max(res * headroom, res + margin)), int(cold * headroom)), name
+        res, cold, size = int(s["resident_mib"]), int(s["cold_mib"]), int(s["size_mib"])
+        assert sessions[name] == (max(size, int(max(res * headroom, res + margin))), int(cold * headroom)), name
+    small = {**SHARES, "sessions": {**SHARES["sessions"],
+                                    "authoring": {**SHARES["sessions"]["authoring"], "size_mib": 1}}}
+    assert host_memory.session_limits(small, LARGE_SWAP_MIB)[0]["authoring"][0] > 1
+
+
+def test_a_larger_host_admits_more_sessions_never_larger_ones():
+    """ADR-0050 dec 5: neither a session's limit nor its swap grows with the host."""
+    small = host_memory.budget(SHARES, LARGE_HOST_MIB, LARGE_SWAP_MIB, SHARES["tier"])
+    large = host_memory.budget(SHARES, 4 * LARGE_HOST_MIB, LARGE_SWAP_MIB, SHARES["tier"])
+    for profile in SHARES["sessions"]:
+        for part in ("LIMIT", "SWAP"):
+            var = host_memory.session_var(profile, part)
+            assert small[var] == large[var], var
 
 
 def test_the_notebooks_swap_is_what_the_platforms_cold_parts_leave():
@@ -196,8 +213,11 @@ def test_without_swap_for_one_session_its_cold_part_sits_in_memory():
     sessions, _ = host_memory.session_limits(SHARES, LARGE_SWAP_MIB)
     out = host_memory.budget(SHARES, LARGE_HOST_MIB, 0, SHARES["tier"])
     assert out["NOTEBOOK_SWAP_SHARE_MIB"] == "0"
-    for name, (mem, swap) in sessions.items():
-        assert out[host_memory.session_var(name, "MIN")] == str(mem + swap), name
+    headroom, margin = float(SHARES["headroom"]), int(SHARES["margin_mib"])
+    for name, s in SHARES["sessions"].items():
+        res, cold, size = int(s["resident_mib"]), int(s["cold_mib"]), int(s["size_mib"])
+        need = int(max(res * headroom, res + margin)) + int(cold * headroom)
+        assert out[host_memory.session_var(name, "LIMIT")] == str(max(size, need)), name
         assert out[host_memory.session_var(name, "SWAP")] == "0", name
 
 

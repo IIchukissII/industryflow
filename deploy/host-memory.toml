@@ -17,10 +17,12 @@
 # [reserve]: what runs beside the containers, measured: the host's own processes (Docker, containerd, the
 #   kernel's own memory outside every cgroup) and the one-shot jobs (the backup); times the headroom. A
 #   container's page cache is charged to the container, not here.
-# [sessions.<profile>]: one notebook session's need, measured like a service's on the reference journey
-#   (docs/operations/capacity.md#memory, ADR-0050 dec 5). Its resident part times the headroom is a session's
-#   least memory limit, its cold part times the headroom its swap. A notebook share below one authoring
-#   session's least limit is written as 0, and the hub refuses every start.
+# [sessions.<profile>]: one notebook session's size and need (ADR-0050 dec 5). size_mib is the profile's size,
+#   the same on every host and under both spawners (the hub's PROFILE_RESOURCES, held equal by a guard); its
+#   need is measured like a service's on the reference journey (docs/operations/capacity.md#memory). A
+#   session's memory limit is its size, never below its resident part times the headroom; its swap is its
+#   cold part times the headroom. A notebook share below one authoring session's limit is written as 0, and
+#   the hub refuses every start.
 # tier: the default; an operator sets MEMORY_TIER in .env.
 # A heap is a fraction of its service's memory limit, chosen so that at the measured tier it is the heap
 # the measurement ran with; Postgres settings likewise, of timescaledb's limit or of the reserve.
@@ -39,11 +41,13 @@ python_mib = 19
 measured = 2026-11-25
 
 [sessions.authoring]
+size_mib = 4096
 resident_mib = 570
 cold_mib = 1077
 measured = 2026-11-26
 
 [sessions.analytics]
+size_mib = 1024
 resident_mib = 51
 cold_mib = 112
 measured = 2026-11-26

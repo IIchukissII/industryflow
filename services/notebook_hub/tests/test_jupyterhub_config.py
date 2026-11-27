@@ -52,10 +52,10 @@ BASE_ENV = {
     # A Docker host's notebook share and swap (ADR-0018 dec 6), large enough that no other test meets them.
     "NOTEBOOK_MEMORY_SHARE_MIB": str(1024 * 1024),
     "NOTEBOOK_SWAP_SHARE_MIB": str(1024 * 1024),
-    # Each profile's least memory limit and swap, from a session's measured need (ADR-0050 dec 5).
-    "NOTEBOOK_AUTHORING_MIN_MIB": "385",
+    # Each profile's memory limit and swap: its size, and a session's measured cold need (ADR-0050 dec 5).
+    "NOTEBOOK_AUTHORING_LIMIT_MIB": "4096",
     "NOTEBOOK_AUTHORING_SWAP_MIB": "937",
-    "NOTEBOOK_ANALYTICS_MIN_MIB": "32",
+    "NOTEBOOK_ANALYTICS_LIMIT_MIB": "1024",
     "NOTEBOOK_ANALYTICS_SWAP_MIB": "123",
 }
 BUDGET = [k for k in BASE_ENV if k.startswith("NOTEBOOK_") and k.endswith("_MIB")]
@@ -1025,8 +1025,8 @@ def test_a_spawn_over_the_tenants_cap_is_refused_before_anything_is_minted(monke
 
 @pytest.mark.parametrize("name", BUDGET)
 def test_a_docker_hub_without_its_part_of_the_budget_does_not_start(name):
-    """ADR-0018 dec 6, ADR-0050 dec 5: on a Docker host the share, the swap and each profile's least limit
-    and swap are derived from the host and the measured session (scripts/host-memory.py)."""
+    """ADR-0018 dec 6, ADR-0050 dec 5: on a Docker host the share, the swap and each profile's limit and swap
+    are derived from the host, the profile's size and the measured session (scripts/host-memory.py)."""
     for missing in (None, "", "-1", "1.5G"):
         with pytest.raises(RuntimeError, match=name):
             _load_ns("docker", **{name: missing})
@@ -1035,18 +1035,17 @@ def test_a_docker_hub_without_its_part_of_the_budget_does_not_start(name):
     assert kube["NOTEBOOK_SHARE"] is None and kube["NOTEBOOK_SWAP_SHARE"] is None
 
 
-def test_on_a_docker_host_a_profiles_limit_is_its_fraction_of_the_share_and_never_below_a_session():
-    """ADR-0050 dec 5: environments grow with the host, and on the smallest host still hold the session's
-    measured resident need; their swap is its cold need. On Kubernetes the profile's fixed limit holds."""
+def test_a_profiles_size_is_the_same_on_every_host_and_under_both_spawners():
+    """ADR-0050 dec 5: a larger share admits more sessions, never larger ones. On a Docker host the limit is
+    the one host-memory.py wrote for the profile, whatever the share; on Kubernetes the profile's size."""
     mib = 1024 * 1024
-    ns = _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB="2000")[1]
-    assert ns["profile_memory"]("authoring") == (1000 * mib, 937 * mib)
-    assert ns["profile_memory"]("analytics") == (700 * mib, 123 * mib)
-    small = _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB="554")[1]
-    assert small["profile_memory"]("authoring") == (385 * mib, 937 * mib)
-    assert small["profile_memory"]("analytics") == (int(554 * mib * 0.35), 123 * mib)
+    for share in ("8192", "65536"):
+        ns = _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB=share)[1]
+        assert ns["profile_memory"]("authoring") == (4096 * mib, 937 * mib)
+        assert ns["profile_memory"]("analytics") == (1024 * mib, 123 * mib)
     kube = _load_ns("kube")[1]
-    assert kube["profile_memory"]("authoring") == (4 * 1024 * mib, 0)
+    assert kube["profile_memory"]("authoring") == (4096 * mib, 0)
+    assert kube["profile_memory"]("analytics") == (1024 * mib, 0)
 
 
 def test_a_start_is_admitted_only_while_its_memory_fits_the_notebook_share():
@@ -1055,8 +1054,8 @@ def test_a_start_is_admitted_only_while_its_memory_fits_the_notebook_share():
     from jupyterhub.utils import format_exception
     from tornado import web
 
-    # 2000 MiB: an authoring environment takes 1000, an analytics one 700.
-    cfg, ns, store = _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB="2000") + (_store(),)
+    # 8192 MiB: an authoring environment takes its profile's 4096, an analytics one 1024.
+    cfg, ns, store = _load_ns("docker", NOTEBOOK_MEMORY_SHARE_MIB="8192") + (_store(),)
     ns["_STORE"] = store
     users = {}
 
@@ -1074,7 +1073,7 @@ def test_a_start_is_admitted_only_while_its_memory_fits_the_notebook_share():
     author, viewer = asking("author", "engineer"), asking("viewer-1", "observer")
     _spawn(ns, author)
     _spawn(ns, viewer)
-    assert author._quota_admitted and viewer._quota_admitted and author.mem_limit == 1000 * 1024 * 1024
+    assert author._quota_admitted and viewer._quota_admitted and author.mem_limit == 4096 * 1024 * 1024
     # Its swap is the session's cold need; the hub's containment settings are kept.
     assert author.swap_limit == 937 * 1024 * 1024
     assert author.extra_host_config["memswap_limit"] == author.mem_limit + author.swap_limit
@@ -1084,9 +1083,9 @@ def test_a_start_is_admitted_only_while_its_memory_fits_the_notebook_share():
         _spawn(ns, second)
     shown, _html = format_exception(refused.value, only_jupyterhub=True)
     assert refused.value.status_code == 429
-    assert "2000 MiB of memory for notebook environments is in use" in shown and "1000 MiB does not fit" in shown
+    assert "8192 MiB of memory for notebook environments is in use" in shown and "4096 MiB does not fit" in shown
     # No other tenant's use reaches the user's page.
-    assert "1700" not in shown
+    assert "5120" not in shown
     assert not second._quota_admitted
     second.active = False
     # A stopped environment frees its place.

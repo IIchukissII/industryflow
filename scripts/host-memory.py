@@ -5,7 +5,7 @@
 
 """The single host's memory budget (ADR-0050; the notebook share, ADR-0018 dec 6): every long-running Compose service's
 memory and swap limits and heaps, from the platform's measured need at its ingest tier, the notebook
-share and swap the platform leaves of the host, and each notebook profile's least limit and swap.
+share and swap the platform leaves of the host, and each notebook profile's memory limit and swap.
 
     scripts/host-memory.py [--env .env] [--tier T] [--mem-total-mb N] [--swap-total-mb N] [--print]
 
@@ -114,18 +114,19 @@ def session_var(profile: str, part: str) -> str:
 
 
 def session_limits(shares: dict, swap_left: int) -> tuple[dict, int]:
-    """Each notebook profile's ``(least memory limit, swap)`` in MiB (ADR-0050 dec 5), its measured
-    resident part and cold part times the headroom, and the notebooks' swap. With ``swap_left`` too small
-    for one authoring session's cold part, every session's cold part sits in its memory limit and the
-    notebooks have no swap."""
+    """Each notebook profile's ``(memory limit, swap)`` in MiB (ADR-0050 dec 5): its size, never below its
+    measured resident part times the headroom, and its cold part times the headroom; and the notebooks'
+    swap. The size is the same on every host, so a larger share admits more sessions, never larger ones.
+    With ``swap_left`` too small for one authoring session's cold part, every session's cold part sits in
+    its memory limit and the notebooks have no swap."""
     headroom, margin = float(shares["headroom"]), int(shares["margin_mib"])
-    out = {}
+    measured = {}
     for profile, s in shares["sessions"].items():
         res, cold = float(s["resident_mib"]), float(s["cold_mib"])
-        out[profile] = (int(max(res * headroom, res + margin)), int(cold * headroom))
-    if swap_left < out["authoring"][1]:
-        return {p: (mem + swap, 0) for p, (mem, swap) in out.items()}, 0
-    return out, swap_left
+        measured[profile] = (int(s["size_mib"]), int(max(res * headroom, res + margin)), int(cold * headroom))
+    if swap_left < measured["authoring"][2]:
+        return {p: (max(size, least + swap), 0) for p, (size, least, swap) in measured.items()}, 0
+    return {p: (max(size, least), swap) for p, (size, least, swap) in measured.items()}, swap_left
 
 
 def reserve_mib(shares: dict) -> int:
@@ -167,7 +168,7 @@ def budget(shares: dict, host_mib: int, swap_mib: int, tier: str) -> dict:
     out["NOTEBOOK_MEMORY_SHARE_MIB"] = str(left if left >= sessions["authoring"][0] else 0)
     out["NOTEBOOK_SWAP_SHARE_MIB"] = str(swap_share)
     for profile, (mem, swap) in sessions.items():
-        out[session_var(profile, "MIN")] = str(mem)
+        out[session_var(profile, "LIMIT")] = str(mem)
         out[session_var(profile, "SWAP")] = str(swap)
     return out
 
@@ -214,7 +215,7 @@ def main() -> int:
                   f"{len(values)} variables in {env}")
         if values["NOTEBOOK_MEMORY_SHARE_MIB"] == "0":
             print(f"host-memory: the platform at {tier} leaves less than one authoring session "
-                  f"({values[session_var('authoring', 'MIN')]} MiB) of this host for notebooks; the hub refuses "
+                  f"({values[session_var('authoring', 'LIMIT')]} MiB) of this host for notebooks; the hub refuses "
                   "every start", file=sys.stderr)
     except ValueError as e:
         print(f"host-memory: {e}", file=sys.stderr)
