@@ -188,7 +188,7 @@ apps:
     metrics: true
     metricsListener:
       port: 9003
-      image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
+      image: nginx:1.31-alpine@sha256:7fc0fb4af7bf006aeb31aea88069976060f8f0a0a86b667126742cc17f4e31ae
       resources:
         requests: { cpu: 10m, memory: 16Mi }
         limits: { cpu: 100m, memory: 64Mi }
@@ -363,7 +363,7 @@ infra:
     inCluster: true
     # Maintained third-party MinIO build (the upstream images were withdrawn). Non-root (65532),
     # distroless. Pinned by immutable digest; the tag is kept for readability.
-    image: cgr.dev/chainguard/minio:latest@sha256:b288eaa709ba2f799a39e9a8ceda71a08fabf90109b12c90badba9afff29485c
+    image: cgr.dev/chainguard/minio:latest@sha256:37919418497f2f8ac6ef5c18760fcd01d1c8f2d17d36723fae0cb2fae67d8093
     apiPort: 9000
     consolePort: 9001
     storage: 20Gi
@@ -390,7 +390,7 @@ objectStore:
   buckets:
     sparkCheckpoint: spark-checkpoints
   # mc image for the bootstrap Job. The -dev variant carries the shell the script needs.
-  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:7b25821631cc4df8379aea8965a4d9e0e228879b0100a12c071b7d3e09ffebe4
+  initImage: cgr.dev/chainguard/minio-client:latest-dev@sha256:7a8d02dbbb3ce5b3e46bacbd9558f8346fa262d913fd5bdb18f80da914b93d4d
 
 # ---------------------------------------------------------------------------
 # Logical database backups (tier-1 DR) — a CronJob dumps each database to S3/MinIO
@@ -921,7 +921,7 @@ notebookHub:
   # notebook session, checks it against api-gateway and forwards the verified identity to the hub,
   # overwriting any client-supplied identity.
   ssoProxy:
-    image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
+    image: nginx:1.31-alpine@sha256:7fc0fb4af7bf006aeb31aea88069976060f8f0a0a86b667126742cc17f4e31ae
     port: 8080
     # api-gateway endpoint that checks the notebook session and returns the verified identity in
     # X-IF-* response headers (ADR-0014 handoff contract).
