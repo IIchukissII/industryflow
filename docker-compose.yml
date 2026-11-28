@@ -364,7 +364,7 @@ services:
   # runs as uid 65532; a volume first created as root would refuse it. One-shot, no network, only
   # CAP_CHOWN, and a no-op when the volume is already owned correctly.
   minio-data-owner:
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:7b25821631cc4df8379aea8965a4d9e0e228879b0100a12c071b7d3e09ffebe4
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:7a8d02dbbb3ce5b3e46bacbd9558f8346fa262d913fd5bdb18f80da914b93d4d
     container_name: industryflow-minio-data-owner
     user: "0:0"
     network_mode: none
@@ -387,7 +387,7 @@ services:
   # a maintained third-party build of the same server (ADR-0025 dec 10, ADR-0009). Non-root (65532),
   # distroless: no curl, so the healthcheck speaks HTTP over bash's /dev/tcp.
   minio:
-    image: cgr.dev/chainguard/minio:latest@sha256:b288eaa709ba2f799a39e9a8ceda71a08fabf90109b12c90badba9afff29485c
+    image: cgr.dev/chainguard/minio:latest@sha256:37919418497f2f8ac6ef5c18760fcd01d1c8f2d17d36723fae0cb2fae67d8093
     depends_on:
       minio-data-owner:
         condition: service_completed_successfully
@@ -420,7 +420,7 @@ services:
   # safe on every `up`; the services that need a bucket or principal gate on it completing.
   minio-init:
     # The -dev variant: the init script needs a shell, grep and mktemp, which the minimal one lacks.
-    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:7b25821631cc4df8379aea8965a4d9e0e228879b0100a12c071b7d3e09ffebe4
+    image: cgr.dev/chainguard/minio-client:latest-dev@sha256:7a8d02dbbb3ce5b3e46bacbd9558f8346fa262d913fd5bdb18f80da914b93d4d
     container_name: industryflow-minio-init
     depends_on:
       minio:
@@ -822,7 +822,7 @@ services:
   # mTLS ingestion edge (ADR-0002): verifies device client certs against the device CA +
   # CRL and forwards the verified identity to ingestion-service (the only way in).
   ingestion-edge:
-    image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
+    image: nginx:1.31-alpine@sha256:7fc0fb4af7bf006aeb31aea88069976060f8f0a0a86b667126742cc17f4e31ae
     container_name: industryflow-ingestion-edge
     ports:
       - "${INGESTION_MTLS_PORT:-8443}:8443"
@@ -1310,7 +1310,7 @@ services:
   # reverse-proxies it here. No host port and no cert: it is reached only through the frontend.
   notebook-sso:
     profiles: ["notebooks"]
-    image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
+    image: nginx:1.31-alpine@sha256:7fc0fb4af7bf006aeb31aea88069976060f8f0a0a86b667126742cc17f4e31ae
     container_name: industryflow-notebook-sso
     environment:
       # sso-nginx.conf is a template the image renders at start into /etc/nginx/nginx.conf; the
@@ -1371,7 +1371,7 @@ services:
   # receiver: alerts are visible in its UI and sent nowhere until the operator configures one
   # (ALERTMANAGER_CONFIG, ADR-0016 dec 4).
   alertmanager:
-    image: prom/alertmanager:v0.35.0@sha256:e638797febd034838eca8b98cdbd46f951e9bf7f178777aa8669167406a9946c
+    image: prom/alertmanager:v0.35.1@sha256:4e3d029e69c7f61dd53a2b31a3dc427a2b81736cffca185c0854075e07969e36
     container_name: industryflow-alertmanager
     ports:
       - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
