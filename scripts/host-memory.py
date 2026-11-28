@@ -3,35 +3,34 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The single host's memory budget (ADR-0050; the notebook share, ADR-0018 dec 6): every long-running Compose service's
-memory and swap limits and heaps, from the platform's measured need at its ingest tier, the notebook
-share and swap the platform leaves of the host, and each notebook profile's memory limit and swap.
+"""The resource budget of a single host (ADR-0050; the notebook pool, ADR-0018 dec 6): every long-running
+Compose service's memory and swap limits and heaps, the notebook pool and its swap, and each notebook
+profile's guarantee, derived from the platform's measured need and the host's memory and swap.
 
-    scripts/host-memory.py [--env .env] [--tier T] [--mem-total-mb N] [--swap-total-mb N] [--print]
+    scripts/host-memory.py [--env .env] [--mem-total-mb N] [--swap-total-mb N] [--print]
 
-A service's memory follows the software and the load, not the host, so deploy/host-memory.toml holds the
-platform's measured need per ingest tier in two parts, and each service's weight in each: resident, the
-pages it keeps in use, which must sit in memory; and cold, the pages it holds but does not touch, which
-may sit in swap. A service's memory limit is its resident part times the headroom, and its memory-and-swap
-limit adds its cold part. The host's memory holds every resident part, the reserve and the notebook
-share; its swap holds the cold parts, and what of them the swap cannot hold sits in memory too.
+A service's memory follows its software and its load, not the host, so deploy/host-memory.toml holds each
+service's measured need at the reference rate, in two parts: resident, the pages it keeps in use, which
+must sit in memory; and cold, the pages it holds but does not touch, which may sit in swap. A service's
+memory limit is its resident part times the headroom, and its memory-and-swap limit adds its cold part.
+No amount is chosen: the host's memory holds every resident part and the reserve, and what is left is the
+notebook pool; its swap holds the cold parts, and what is left is the pool's swap. What of the cold parts
+the swap cannot hold sits in memory.
 
-A notebook session is measured in the same two parts, per profile (ADR-0050 dec 5): its memory limit is
-its profile's size (size_mib), never below its resident part times the headroom, and its swap its cold
-part times the headroom; neither grows with the host. The swap the platform's cold parts leave is the
-notebooks' swap; when it cannot hold one authoring session's cold part, every session holds its cold part
-in memory, its limit then never below both parts.
+The notebook sessions run in one cgroup whose limits are the pool and its swap (ADR-0050 dec 5): within it
+a session may grow into the whole pool, and the pool guarantees each its profile's measured resident part
+times the headroom. The cgroup is a systemd slice where Docker's cgroup driver is systemd, else a cgroupfs
+path; notebook-pool sets its limits.
 
 The host is the memory the Docker engine has for its containers (`docker info`: the host's on Linux, the
 virtual machine's under Docker Desktop) and the swap of /proc/meminfo, or --mem-total-mb and
---swap-total-mb for planning. The tier is --tier, else MEMORY_TIER in the env file, else the file's
-default. The values are written into a block of the env file between two marker lines, replacing the
-block written before; the rest of the file is the operator's and is kept. Compose reads them; a service
-whose variable is missing does not start. scripts/box-deploy.sh runs this on every deploy.
+--swap-total-mb for planning. The values are written into a block of the env file between two marker
+lines, replacing the block written before; the rest of the file is the operator's and is kept. Compose
+reads them; a service whose variable is missing does not start. scripts/box-deploy.sh runs this on every
+deploy.
 
-Refuses (exit 2), writing nothing, when the platform at the tier and the reserve do not fit the host's
-memory. A notebook share below one authoring session's memory limit is written as 0: the hub then
-refuses every start, naming why.
+Refuses (exit 2), writing nothing, when the platform, the reserve and one authoring session's guarantee do
+not fit the host's memory, naming what the host lacks.
 """
 from __future__ import annotations
 
@@ -43,22 +42,38 @@ import sys
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SHARES = ROOT / "deploy" / "host-memory.toml"
+NEED = ROOT / "deploy" / "host-memory.toml"
 BEGIN = "# >>> host memory budget (scripts/host-memory.py; do not edit) >>>"
 END = "# <<< host memory budget <<<"
 MIB = 1024 * 1024
+# The notebook pool's cgroup (ADR-0018 dec 6): a systemd slice under the systemd driver, which nests it under
+# industryflow.slice by its name; a path of its own under cgroupfs.
+POOL_SLICE = "industryflow-notebooks.slice"
+POOL_PATH = "/industryflow-notebooks"
+
+
+def _docker_info(field: str, flag: str) -> str:
+    try:
+        return subprocess.run(["docker", "info", "--format", "{{." + field + "}}"], capture_output=True, text=True,
+                              timeout=30, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        raise SystemExit(f"host-memory: cannot ask Docker for its {field} ({e}); pass {flag}") from None
 
 
 def mem_total_mib() -> int:
     """The memory the Docker engine has for its containers, in MiB."""
-    try:
-        out = subprocess.run(["docker", "info", "--format", "{{.MemTotal}}"], capture_output=True, text=True,
-                             timeout=30, check=True).stdout.strip()
-    except (OSError, subprocess.SubprocessError) as e:
-        raise SystemExit(f"host-memory: cannot ask Docker for its memory ({e}); pass --mem-total-mb") from None
+    out = _docker_info("MemTotal", "--mem-total-mb")
     if not out.isdigit() or int(out) <= 0:
         raise SystemExit(f"host-memory: Docker reports no memory total ({out!r}); pass --mem-total-mb")
     return int(out) // MIB
+
+
+def cgroup_driver() -> str:
+    """Docker's cgroup driver, ``systemd`` or ``cgroupfs``."""
+    out = _docker_info("CgroupDriver", "--cgroup-driver")
+    if out not in ("systemd", "cgroupfs"):
+        raise SystemExit(f"host-memory: unknown Docker cgroup driver {out!r}; pass --cgroup-driver")
+    return out
 
 
 def swap_total_mib() -> int:
@@ -80,77 +95,68 @@ def swap_limit_var(service: str) -> str:
     return re.sub(r"[^A-Z0-9]", "_", service.upper()) + "_MEMSWAP_LIMIT"
 
 
-def platform_limits(shares: dict, tier: str, swap_mib: int | None = None) -> dict:
-    """Each service's ``(memory, memory and swap)`` limits in MiB at ``tier``: its weights of the tier's
-    measured resident and cold need, times the headroom. With ``swap_mib`` smaller than the cold part, the
-    cold pages that do not fit the swap sit in memory: each service's memory limit takes the same fraction
-    of its cold part. ``ValueError`` for a tier the file does not hold."""
-    tiers = shares["tiers"]
-    if tier not in tiers:
-        raise ValueError(f"no tier {tier!r}; measured tiers: {', '.join(tiers)}")
-    resident, cold = float(tiers[tier]["resident_mib"]), float(tiers[tier]["cold_mib"])
-    headroom = float(shares["headroom"])
+def _held(need: dict, mib: float) -> float:
+    """A resident part with its margin: the headroom, at least ``margin_mib`` over the measurement. A small
+    service's bursts (a worker, a burst of connections) are an amount, not a fraction; the margin also keeps
+    every limit above 0, which Docker reads as none."""
+    return max(mib * float(need["headroom"]), mib + int(need["margin_mib"]))
+
+
+def platform_limits(need: dict, swap_mib: int | None = None) -> dict:
+    """Each service's ``(memory, memory and swap)`` limits in MiB: its measured resident and cold need,
+    times the headroom. With ``swap_mib`` smaller than the cold parts, the cold pages that do not fit the swap
+    sit in memory: each service's memory limit takes the same fraction of its cold part."""
+    headroom = float(need["headroom"])
+    cold = sum(float(s["cold_mib"]) for s in need["services"].values())
     swapped = 1.0 if swap_mib is None or cold == 0 else min(1.0, swap_mib / (cold * headroom))
-    # A small service's bursts (a worker, a burst of connections) are an amount, not a fraction: each part
-    # keeps at least the margin over its measurement. It also keeps every limit above 0, which Docker reads
-    # as none.
-    margin = int(shares["margin_mib"])
-    probes = {"python": int(shares["probe"]["python_mib"])}
-
-    def held(mib: float) -> float:
-        return max(mib * headroom, mib + margin)
-
+    probes = {"python": int(need["probe"]["python_mib"])}
     out = {}
-    for name, s in shares["services"].items():
-        res, part = resident * float(s["resident"]), cold * float(s["cold"])
+    for name, s in need["services"].items():
+        res, part = float(s["resident_mib"]), float(s["cold_mib"])
         # A healthcheck's interpreter runs beside the service, whatever its size (``probe``).
         probe = probes[s["probe"]] if "probe" in s else 0
-        mem = int(held(res) + part * headroom * (1 - swapped)) + probe
-        out[name] = (mem, max(mem, int(held(res) + part * headroom) + probe))
+        mem = int(_held(need, res) + part * headroom * (1 - swapped)) + probe
+        out[name] = (mem, max(mem, int(_held(need, res) + part * headroom) + probe))
     return out
 
 
-def session_var(profile: str, part: str) -> str:
-    return f"NOTEBOOK_{profile.upper()}_{part}_MIB"
+def session_var(profile: str) -> str:
+    return f"NOTEBOOK_{profile.upper()}_GUARANTEE_MIB"
 
 
-def session_limits(shares: dict, swap_left: int) -> tuple[dict, int]:
-    """Each notebook profile's ``(memory limit, swap)`` in MiB (ADR-0050 dec 5): its size, never below its
-    measured resident part times the headroom, and its cold part times the headroom; and the notebooks'
-    swap. The size is the same on every host, so a larger share admits more sessions, never larger ones.
-    With ``swap_left`` too small for one authoring session's cold part, every session's cold part sits in
-    its memory limit and the notebooks have no swap."""
-    headroom, margin = float(shares["headroom"]), int(shares["margin_mib"])
-    measured = {}
-    for profile, s in shares["sessions"].items():
-        res, cold = float(s["resident_mib"]), float(s["cold_mib"])
-        measured[profile] = (int(s["size_mib"]), int(max(res * headroom, res + margin)), int(cold * headroom))
-    if swap_left < measured["authoring"][2]:
-        return {p: (max(size, least + swap), 0) for p, (size, least, swap) in measured.items()}, 0
-    return {p: (max(size, least), swap) for p, (size, least, swap) in measured.items()}, swap_left
+def guarantees(need: dict) -> dict:
+    """What the pool guarantees one session of each profile, in MiB (ADR-0050 dec 5): its measured resident
+    part with its margin. A session has no size: it may grow into what the pool leaves."""
+    return {p: int(_held(need, float(s["resident_mib"]))) for p, s in need["sessions"].items()}
 
 
-def reserve_mib(shares: dict) -> int:
+def reserve_mib(need: dict) -> int:
     """What runs beside the containers, measured, times the headroom."""
-    r = shares["reserve"]
-    return int((int(r["host_mib"]) + int(r["one_shot_mib"])) * float(shares["headroom"]))
+    r = need["reserve"]
+    return int((int(r["host_mib"]) + int(r["one_shot_mib"])) * float(need["headroom"]))
 
 
-def budget(shares: dict, host_mib: int, swap_mib: int, tier: str) -> dict:
-    """Every variable of the budget, by name. ``ValueError`` when the platform does not fit the host."""
-    limits = platform_limits(shares, tier, swap_mib)
-    reserve = reserve_mib(shares)
+def budget(need: dict, host_mib: int, swap_mib: int, driver: str = "systemd") -> dict:
+    """Every variable of the budget, by name. ``ValueError`` when the platform and one authoring session do
+    not fit the host."""
+    limits = platform_limits(need, swap_mib)
+    reserve = reserve_mib(need)
     resident = sum(mem for mem, _ in limits.values())
-    left = host_mib - resident - reserve
-    if left < 0:
-        raise ValueError(f"the platform at {tier} keeps {resident} MiB in memory (with {swap_mib} MiB of swap) and "
-                         f"the reserve is {reserve} MiB; this host has {host_mib} MiB. Choose a lower tier, more "
-                         f"swap, or a host of at least {resident + reserve} MiB")
+    least = guarantees(need)
+    pool = host_mib - resident - reserve
+    if pool < least["authoring"]:
+        # More swap helps only while some cold part sits in memory.
+        cold = sum(both - mem for mem, both in platform_limits(need).values())
+        held = min(least['authoring'] - pool, cold - swap_mib)
+        swap = f" (more swap would hold up to {held} MiB of it, cold pages)" if swap_mib < cold else ""
+        raise ValueError(f"the platform keeps {resident} MiB in memory (with {swap_mib} MiB of swap), the reserve is "
+                         f"{reserve} MiB and one notebook session needs {least['authoring']} MiB; this host has "
+                         f"{host_mib} MiB: it lacks {least['authoring'] - pool} MiB of memory{swap}")
     out = {}
     for name, (mem, both) in limits.items():
         out[limit_var(name)] = f"{mem}m"
         out[swap_limit_var(name)] = f"{both}m"
-    for name, s in shares["services"].items():
+    for name, s in need["services"].items():
         heap = s.get("heap")
         if heap is None:
             continue
@@ -161,25 +167,15 @@ def budget(shares: dict, host_mib: int, swap_mib: int, tier: str) -> dict:
             out[heap["var"]] = f"{mib}m"
         else:
             raise ValueError(f"{name}: unknown heap kind {heap['kind']!r}")
-    for var, setting in shares.get("postgres", {}).items():
+    for var, setting in need.get("postgres", {}).items():
         of = limits["timescaledb"][0] if setting["of"] == "limit" else reserve
         out[var] = f"{int(of * float(setting['fraction']))}MB"
-    swap_left = max(0, swap_mib - sum(both - mem for mem, both in limits.values()))
-    sessions, swap_share = session_limits(shares, swap_left)
-    out["NOTEBOOK_MEMORY_SHARE_MIB"] = str(left if left >= sessions["authoring"][0] else 0)
-    out["NOTEBOOK_SWAP_SHARE_MIB"] = str(swap_share)
-    for profile, (mem, swap) in sessions.items():
-        out[session_var(profile, "LIMIT")] = str(mem)
-        out[session_var(profile, "SWAP")] = str(swap)
+    out["NOTEBOOK_MEMORY_SHARE_MIB"] = str(pool)
+    out["NOTEBOOK_SWAP_SHARE_MIB"] = str(max(0, swap_mib - sum(both - mem for mem, both in limits.values())))
+    for profile, mib in least.items():
+        out[session_var(profile)] = str(mib)
+    out["NOTEBOOK_CGROUP_PARENT"] = POOL_SLICE if driver == "systemd" else POOL_PATH
     return out
-
-
-def env_tier(env: pathlib.Path) -> str | None:
-    """MEMORY_TIER in the operator's part of the env file."""
-    if not env.exists():
-        return None
-    m = re.search(r"^MEMORY_TIER=(.+)$", env.read_text(), flags=re.M)
-    return m.group(1).strip().strip("\"'") if m else None
 
 
 def write_block(env: pathlib.Path, values: dict) -> None:
@@ -195,29 +191,24 @@ def write_block(env: pathlib.Path, values: dict) -> None:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--env", default=str(ROOT / ".env"))
-    p.add_argument("--tier", help="ingest tier; default MEMORY_TIER in the env file, else the file's tier")
     p.add_argument("--mem-total-mb", type=int)
     p.add_argument("--swap-total-mb", type=int)
+    p.add_argument("--cgroup-driver", choices=("systemd", "cgroupfs"))
     p.add_argument("--print", action="store_true", help="print the budget, write nothing")
     a = p.parse_args()
-    shares = tomllib.loads(SHARES.read_text())
+    need = tomllib.loads(NEED.read_text())
     env = pathlib.Path(a.env)
-    tier = a.tier or env_tier(env) or shares["tier"]
     host = a.mem_total_mb or mem_total_mib()
     swap = a.swap_total_mb if a.swap_total_mb is not None else swap_total_mib()
+    driver = a.cgroup_driver or cgroup_driver()
     try:
-        values = budget(shares, host, swap, tier)
+        values = budget(need, host, swap, driver)
         if a.print:
             print("\n".join(f"{k}={v}" for k, v in values.items()))
         else:
             write_block(env, values)
-            print(f"host-memory: {host} MiB at {tier}; notebook share {values['NOTEBOOK_MEMORY_SHARE_MIB']} MiB, "
-                  f"swap {values['NOTEBOOK_SWAP_SHARE_MIB']} MiB; "
-                  f"{len(values)} variables in {env}")
-        if values["NOTEBOOK_MEMORY_SHARE_MIB"] == "0":
-            print(f"host-memory: the platform at {tier} leaves less than one authoring session "
-                  f"({values[session_var('authoring', 'LIMIT')]} MiB) of this host for notebooks; the hub refuses "
-                  "every start", file=sys.stderr)
+            print(f"host-memory: {host} MiB; notebook pool {values['NOTEBOOK_MEMORY_SHARE_MIB']} MiB, "
+                  f"swap {values['NOTEBOOK_SWAP_SHARE_MIB']} MiB; {len(values)} variables in {env}")
     except ValueError as e:
         print(f"host-memory: {e}", file=sys.stderr)
         return 2

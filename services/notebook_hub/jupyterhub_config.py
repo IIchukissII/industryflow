@@ -34,10 +34,11 @@ import quota  # noqa: E402
 # Kubernetes behaviour; the Compose deployment sets NOTEBOOK_SPAWNER=docker.
 SPAWNER = os.environ.get("NOTEBOOK_SPAWNER", "kube").strip().lower()
 
-# The host's notebook share and swap (ADR-0018 dec 6): on a Docker host the part of its memory and of its
-# swap the platform's services leave, derived by scripts/host-memory.py; a start is admitted only when its
-# memory limit and its swap fit beside the environments already holding a place. On Kubernetes the
-# scheduler places a pod by its request, so the hub keeps no share there.
+# The notebook pool and its swap (ADR-0018 dec 6, ADR-0050 dec 5): on a Docker host the part of its memory and
+# of its swap the platform's services leave, derived by scripts/host-memory.py. Every session runs in the
+# pool's cgroup, which bounds them together, and may grow into the whole pool; a start is admitted while the
+# pool can guarantee its profile's measured resident need beside the sessions already holding a place. On
+# Kubernetes the scheduler places a pod by its request, so the hub keeps no pool there.
 def _mib_env(name):
     raw = os.environ.get(name, "").strip()
     # 0 is a share: a host the platform fills, where every start is refused, naming why.
@@ -48,6 +49,11 @@ def _mib_env(name):
 
 NOTEBOOK_SHARE = _mib_env("NOTEBOOK_MEMORY_SHARE_MIB") if SPAWNER == "docker" else None
 NOTEBOOK_SWAP_SHARE = _mib_env("NOTEBOOK_SWAP_SHARE_MIB") if SPAWNER == "docker" else None
+# The pool's cgroup, a systemd slice or a cgroupfs path, whose limits notebook-pool set before the hub started.
+NOTEBOOK_CGROUP_PARENT = os.environ.get("NOTEBOOK_CGROUP_PARENT", "").strip() if SPAWNER == "docker" else None
+if SPAWNER == "docker" and not NOTEBOOK_CGROUP_PARENT:
+    raise RuntimeError("NOTEBOOK_CGROUP_PARENT must name the notebook pool's cgroup on a Docker host: "
+                       "run scripts/host-memory.py")
 
 # Capability lifetime (ADR-0015 dec 2). The store entry's lifetime is only the backstop: the hub
 # refreshes a healthy server's handles on every spawner poll (Spawner.poll_interval, 30s by
@@ -201,20 +207,19 @@ PROFILE_RESOURCES = {
     ident.PROFILE_ANALYTICS: {"cpu_limit": 0.5, "mem_limit": "1G"},
     ident.PROFILE_AUTHORING: {"cpu_limit": 2.0, "mem_limit": "4G"},
 }
-# A profile's size is the same on every host and under both spawners (ADR-0050 dec 5): a larger notebook
-# share admits more sessions, never larger ones. On Kubernetes the size above is the pod's request. On a
-# Docker host scripts/host-memory.py writes each profile's limit, the size never below the session's
-# measured resident need, and its swap, the session's measured cold need (deploy/host-memory.toml, whose
-# size_mib a guard holds equal to the size above).
-PROFILE_LIMIT = {p: _mib_env(f"NOTEBOOK_{p.upper()}_LIMIT_MIB") for p in PROFILE_RESOURCES} if SPAWNER == "docker" else {}
-PROFILE_SWAP = {p: _mib_env(f"NOTEBOOK_{p.upper()}_SWAP_MIB") for p in PROFILE_RESOURCES} if SPAWNER == "docker" else {}
+# On a Docker host a session has no size (ADR-0050 dec 5): the pool guarantees it its profile's measured
+# resident need (scripts/host-memory.py, from deploy/host-memory.toml), and it may grow into the whole pool.
+# The memory above holds on Kubernetes only.
+PROFILE_GUARANTEE = {p: _mib_env(f"NOTEBOOK_{p.upper()}_GUARANTEE_MIB") for p in PROFILE_RESOURCES} if SPAWNER == "docker" else {}
 
 
 def profile_memory(profile: str) -> tuple[int, int]:
-    """The memory limit and the swap, in bytes, of an environment of ``profile`` on this deployment."""
+    """The guarantee and the memory limit, in bytes, of an environment of ``profile`` on this deployment: on
+    a Docker host its measured guarantee and the whole pool; on Kubernetes its profile's memory, both."""
     if NOTEBOOK_SHARE is not None:
-        return PROFILE_LIMIT[profile], PROFILE_SWAP[profile]
-    return ByteSpecification().validate(None, PROFILE_RESOURCES[profile]["mem_limit"]), 0
+        return PROFILE_GUARANTEE[profile], NOTEBOOK_SHARE
+    size = ByteSpecification().validate(None, PROFILE_RESOURCES[profile]["mem_limit"])
+    return size, size
 
 
 _STORE = None
@@ -307,8 +312,10 @@ async def keep_capabilities_alive(spawner) -> bool:
     return live > 0
 
 
+GUARANTEE_STATE = "industryflow_guarantee"
+# A server started before the pool kept its whole memory limit here; a restarted hub counts it as its
+# guarantee until it stops.
 MEM_LIMIT_STATE = "industryflow_mem_limit"
-SWAP_LIMIT_STATE = "industryflow_swap_limit"
 
 
 def with_capability_lifecycle(base):
@@ -337,23 +344,20 @@ def with_capability_lifecycle(base):
                 return 0
             return await super().poll()
 
-        # The memory limit and swap a running server was started with outlive a hub restart in its
-        # state, so the notebook share and swap still count them (ADR-0018 dec 6, quota.memory_held); a
-        # restarted hub rebuilds the spawner from configuration, where it has none.
+        # The guarantee a running server was admitted with outlives a hub restart in its state, so the
+        # pool still counts it (ADR-0018 dec 6, quota.memory_held); a restarted hub rebuilds the spawner
+        # from configuration, where it has none.
         def get_state(self):
             state = super().get_state()
-            if self.mem_limit:
-                state[MEM_LIMIT_STATE] = int(self.mem_limit)
-            if getattr(self, "swap_limit", 0):
-                state[SWAP_LIMIT_STATE] = int(self.swap_limit)
+            if getattr(self, "guarantee", 0):
+                state[GUARANTEE_STATE] = int(self.guarantee)
             return state
 
         def load_state(self, state):
             super().load_state(state)
-            if state.get(MEM_LIMIT_STATE):
-                self.mem_limit = int(state[MEM_LIMIT_STATE])
-            if state.get(SWAP_LIMIT_STATE):
-                self.swap_limit = int(state[SWAP_LIMIT_STATE])
+            held = state.get(GUARANTEE_STATE) or state.get(MEM_LIMIT_STATE)
+            if held:
+                self.guarantee = int(held)
 
         async def poll_and_notify(self):
             status = await super().poll_and_notify()
@@ -388,15 +392,15 @@ async def bind_identity_and_profile(spawner):
     # The tenant's cap on environments running at once (ADR-0049, ADR-0011 dec 7), and on a Docker host
     # the notebook share (ADR-0018 dec 6): refused before anything is minted or started, naming why.
     try:
-        need, swap = profile_memory(profile)
-        await quota.admit(spawner, who.company_id, _override_store(), _quota_store(), need=need,
-                          share=NOTEBOOK_SHARE, swap=swap, swap_share=NOTEBOOK_SWAP_SHARE)
+        guarantee, limit = profile_memory(profile)
+        await quota.admit(spawner, who.company_id, _override_store(), _quota_store(), need=guarantee,
+                          limit=limit, share=NOTEBOOK_SHARE)
     except (quota.AtCap, quota.NoRoom) as refused:
         if isinstance(refused, quota.AtCap):
             spawner.log.warning("tenant %s at its cap of %d notebook environment(s); %s refused",
                                 who.company_id, refused.cap, spawner._log_name)
         else:
-            spawner.log.warning("notebook %s full (%d of %d MiB held, %d MiB asked); %s refused", refused.kind,
+            spawner.log.warning("notebook pool full (%d of %d MiB guaranteed, %d MiB asked); %s refused",
                                 refused.held >> 20, refused.share >> 20, refused.need >> 20, spawner._log_name)
         # Nothing started, so its stop records nothing (revoke_server_capabilities).
         spawner._quota_refused = True
@@ -415,15 +419,21 @@ async def bind_identity_and_profile(spawner):
         existing_labels.update(labels)
         existing["labels"] = existing_labels
         spawner.extra_create_kwargs = existing
-        # Its swap is the session's measured cold need, admitted against the notebooks' swap (ADR-0050 dec 5,
-        # ADR-0018 dec 6); without memswap_limit Docker would allow the memory limit again as swap.
+        # In the pool's cgroup, which bounds the sessions together (ADR-0018 dec 6): a session may use the
+        # whole pool and its swap, and its reservation is its guarantee, so under pressure the kernel
+        # reclaims first from the sessions above theirs (ADR-0050 dec 5).
         spawner.extra_host_config = {**dict(spawner.extra_host_config or {}),
-                                     "memswap_limit": spawner.mem_limit + spawner.swap_limit}
+                                     "cgroup_parent": NOTEBOOK_CGROUP_PARENT,
+                                     "memswap_limit": spawner.mem_limit + NOTEBOOK_SWAP_SHARE,
+                                     "mem_reservation": spawner.guarantee}
     else:
         spawner.extra_labels = {**getattr(spawner, "extra_labels", {}), **labels}
 
     spawner.cpu_limit = resources["cpu_limit"]
-    # The memory limit was set with the admission (quota.admit).
+    # The guarantee and the memory limit were set with the admission (quota.admit); on Kubernetes the
+    # guarantee is the pod's request.
+    if SPAWNER != "docker":
+        spawner.mem_guarantee = spawner.guarantee
 
     # Per-profile image + server (ADR-0011 dec 5): authoring gets JupyterLab + the DS stack;
     # analytics gets the report server, which serves rendered reports and no route that runs a

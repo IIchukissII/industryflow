@@ -63,10 +63,10 @@ def store():
 def test_the_tenants_running_servers_are_counted_across_its_users_and_no_other_tenants(store, monkeypatch):
     monkeypatch.setattr(quota, "DEFAULT", 2)
     users = hub(("ann", TENANT, True), ("bob", TENANT, False), ("cyd", OTHER, True), ("cyd2", OTHER, True))
-    asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=MIB))  # 1 running < 2
+    asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=MIB, limit=MIB))  # 1 running < 2
     users = hub(("ann", TENANT, True), ("bob", TENANT, True), ("cyd", OTHER, True))
     with pytest.raises(quota.AtCap) as refused:
-        asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=MIB))
+        asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=MIB, limit=MIB))
     assert refused.value.cap == 2 and "2 notebook environment" in str(refused.value)
 
 
@@ -77,17 +77,17 @@ def test_a_server_counts_for_the_tenant_it_was_started_for(store, monkeypatch):
     users["eve"] = moved
     Spawner(moved, active=True, started_for=TENANT)
     with pytest.raises(quota.AtCap):
-        asyncio.run(quota.admit(asking(users, "fay", TENANT), TENANT, store, store, need=MIB))
+        asyncio.run(quota.admit(asking(users, "fay", TENANT), TENANT, store, store, need=MIB, limit=MIB))
 
 
 def test_the_override_in_the_store_replaces_the_default_and_a_bad_one_does_not(store, monkeypatch):
     monkeypatch.setattr(quota, "DEFAULT", 1)
     users = hub(("ann", TENANT, True))
     store.set(quotas.cap_key("notebook_environments", TENANT), 3)
-    asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=MIB))
+    asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=MIB, limit=MIB))
     store.set(quotas.cap_key("notebook_environments", TENANT), "zero")
     with pytest.raises(quota.AtCap):
-        asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=MIB))
+        asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=MIB, limit=MIB))
 
 
 def test_an_off_cap_admits_and_an_unreadable_override_takes_the_default(monkeypatch):
@@ -100,10 +100,10 @@ def test_an_off_cap_admits_and_an_unreadable_override_takes_the_default(monkeypa
 
     users = hub(("ann", TENANT, True), ("bob", TENANT, True))
     monkeypatch.setattr(quota, "DEFAULT", None)
-    asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, Down(), Down(), need=MIB))
+    asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, Down(), Down(), need=MIB, limit=MIB))
     monkeypatch.setattr(quota, "DEFAULT", 2)
     with pytest.raises(quota.AtCap):
-        asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, Down(), Down(), need=MIB))
+        asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, Down(), Down(), need=MIB, limit=MIB))
 
 
 def test_a_refusal_is_recorded_against_the_tenant_and_in_the_tenantless_total(store, monkeypatch):
@@ -111,7 +111,7 @@ def test_a_refusal_is_recorded_against_the_tenant_and_in_the_tenantless_total(st
     users = hub(("ann", TENANT, True))
     for _ in range(2):
         with pytest.raises(quota.AtCap):
-            asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=MIB))
+            asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=MIB, limit=MIB))
     days = [k for k in store.keys("quota:refusals:notebook_environments:*")]
     assert len(days) == 1 and int(store.hget(days[0], TENANT)) == 2
     assert 0 < store.ttl(days[0]) <= quotas.REFUSALS_KEEP_DAYS * 86400
@@ -130,10 +130,10 @@ def test_a_start_still_waiting_on_its_check_holds_no_place(store, monkeypatch):
     second_user = User("dee", TENANT, users)
     users["dee"] = second_user
     second = Spawner(second_user, name="new", active=True, ready=False)  # pending, not yet checked
-    asyncio.run(quota.admit(first, TENANT, store, store, need=MIB))
+    asyncio.run(quota.admit(first, TENANT, store, store, need=MIB, limit=MIB))
     assert first._quota_admitted is True
     with pytest.raises(quota.AtCap):
-        asyncio.run(quota.admit(second, TENANT, store, store, need=MIB))
+        asyncio.run(quota.admit(second, TENANT, store, store, need=MIB, limit=MIB))
     assert second._quota_admitted is False
 
 
@@ -143,7 +143,7 @@ def test_concurrent_checks_admit_no_more_than_the_cap(store, monkeypatch):
     starts = [asking(users, f"u{i}", TENANT) for i in range(4)]
 
     async def all_at_once():
-        return await asyncio.gather(*(quota.admit(s, TENANT, store, store, need=MIB) for s in starts),
+        return await asyncio.gather(*(quota.admit(s, TENANT, store, store, need=MIB, limit=MIB) for s in starts),
                                     return_exceptions=True)
 
     outcomes = asyncio.run(all_at_once())
@@ -155,6 +155,6 @@ def test_against_a_share_a_start_of_no_size_is_never_admitted(store):
     """ADR-0018 dec 6: a memory limit of 0 means none; such a start would run unbounded on the host."""
     users = hub()
     with pytest.raises(quota.NoRoom):
-        asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=0, share=1024 * MIB))
+        asyncio.run(quota.admit(asking(users, "dee", TENANT), TENANT, store, store, need=0, limit=MIB, share=1024 * MIB))
     with pytest.raises(quota.NoRoom, match="none for notebook environments"):
-        asyncio.run(quota.admit(asking(users, "eve", TENANT), TENANT, store, store, need=MIB, share=0))
+        asyncio.run(quota.admit(asking(users, "eve", TENANT), TENANT, store, store, need=MIB, limit=MIB, share=0))

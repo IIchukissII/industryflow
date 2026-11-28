@@ -1072,6 +1072,44 @@ services:
     command: ["true"]
     restart: "no"
 
+  # The notebook pool (ADR-0018 dec 6, ADR-0050 dec 5): the cgroup every session runs in, its memory and swap
+  # the pool scripts/host-memory.py derives, so the sessions together never take a platform service's
+  # memory. Set in the host's namespaces on every `up`: under the systemd cgroup driver as the slice's
+  # runtime properties (systemd rewrites a slice's limits it does not own), under cgroupfs in the cgroup
+  # itself. Privileged with the host's PIDs, as the hub's Docker socket already is root on the host.
+  notebook-pool:
+    profiles: ["notebooks"]
+    image: alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+    container_name: industryflow-notebook-pool
+    privileged: true
+    pid: host
+    network_mode: none
+    environment:
+      POOL: ${NOTEBOOK_CGROUP_PARENT:?run scripts/host-memory.py}
+      POOL_MIB: ${NOTEBOOK_MEMORY_SHARE_MIB:?run scripts/host-memory.py}
+      POOL_SWAP_MIB: ${NOTEBOOK_SWAP_SHARE_MIB:?run scripts/host-memory.py}
+    command:
+      - nsenter
+      - -t
+      - "1"
+      - -m
+      - --
+      - sh
+      - -ec
+      - |
+        case "$$POOL" in
+          *.slice)
+            systemctl set-property --runtime "$$POOL" MemoryMax="$${POOL_MIB}M" MemorySwapMax="$${POOL_SWAP_MIB}M"
+            systemctl start "$$POOL"
+            systemctl show -p MemoryMax -p MemorySwapMax "$$POOL" ;;
+          /*)
+            d="/sys/fs/cgroup$$POOL"; mkdir -p "$$d"
+            echo "$${POOL_MIB}M" > "$$d/memory.max"; echo "$${POOL_SWAP_MIB}M" > "$$d/memory.swap.max"
+            echo "pool $$d: $$(cat "$$d/memory.max") memory, $$(cat "$$d/memory.swap.max") swap" ;;
+          *) echo "notebook-pool: $$POOL is neither a slice nor a path" >&2; exit 1 ;;
+        esac
+    restart: "no"
+
   notebook-hub:
     profiles: ["notebooks"]
     build:
@@ -1090,14 +1128,14 @@ services:
       NOTEBOOK_AUTHORING_ROLES: ${NOTEBOOK_AUTHORING_ROLES:-admin,engineer}
       # The tenant's cap on notebook environments running at once (ADR-0049); unset takes the default.
       TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS: ${TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS:-}
-      # The host's notebook share and swap (ADR-0018 dec 6): a start is admitted only while its memory and
-      # its swap fit; each profile's least limit and swap are a session's measured need (ADR-0050 dec 5).
+      # The notebook pool (ADR-0018 dec 6, ADR-0050 dec 5): every session runs in its cgroup and may grow
+      # into the whole pool; a start is admitted while the pool can guarantee its profile's measured
+      # resident need beside those already holding a place.
       NOTEBOOK_MEMORY_SHARE_MIB: ${NOTEBOOK_MEMORY_SHARE_MIB:?run scripts/host-memory.py}
       NOTEBOOK_SWAP_SHARE_MIB: ${NOTEBOOK_SWAP_SHARE_MIB:?run scripts/host-memory.py}
-      NOTEBOOK_AUTHORING_LIMIT_MIB: ${NOTEBOOK_AUTHORING_LIMIT_MIB:?run scripts/host-memory.py}
-      NOTEBOOK_AUTHORING_SWAP_MIB: ${NOTEBOOK_AUTHORING_SWAP_MIB:?run scripts/host-memory.py}
-      NOTEBOOK_ANALYTICS_LIMIT_MIB: ${NOTEBOOK_ANALYTICS_LIMIT_MIB:?run scripts/host-memory.py}
-      NOTEBOOK_ANALYTICS_SWAP_MIB: ${NOTEBOOK_ANALYTICS_SWAP_MIB:?run scripts/host-memory.py}
+      NOTEBOOK_AUTHORING_GUARANTEE_MIB: ${NOTEBOOK_AUTHORING_GUARANTEE_MIB:?run scripts/host-memory.py}
+      NOTEBOOK_ANALYTICS_GUARANTEE_MIB: ${NOTEBOOK_ANALYTICS_GUARANTEE_MIB:?run scripts/host-memory.py}
+      NOTEBOOK_CGROUP_PARENT: ${NOTEBOOK_CGROUP_PARENT:?run scripts/host-memory.py}
       # The shared count of tenant quotas: where it records its refusals (ADR-0049).
       QUOTA_REDIS_URL: redis://quota-redis:6379/0
       # Kernels spawn onto the dedicated kernel network, not the platform network (ADR-0018 dec 4).
@@ -1154,6 +1192,9 @@ services:
         condition: service_started
       # The volume-reclaim service connects to the platform database (ADR-0020 dec 6).
       db-migrate:
+        condition: service_completed_successfully
+      # No session starts before the pool that bounds the sessions has its limits.
+      notebook-pool:
         condition: service_completed_successfully
     networks:
       industryflow-network:
