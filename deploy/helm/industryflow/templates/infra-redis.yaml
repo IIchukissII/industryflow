@@ -42,7 +42,7 @@ spec:
         - name: redis
           image: {{ .Values.infra.redis.image | quote }}
           # Never evicts: a full store refuses writes (ADR-0015 dec 8).
-          args: ["redis-server", "--appendonly", "yes", "--maxmemory", {{ .Values.infra.redis.maxmemory | quote }},
+          args: ["redis-server", "--appendonly", "yes", "--maxmemory", {{ .Values.measuredResources.heaps.REDIS_MAXMEMORY | quote }},
                  "--maxmemory-policy", "noeviction"]
           ports:
             - name: redis

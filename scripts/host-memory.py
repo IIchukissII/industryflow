@@ -201,6 +201,8 @@ def heaps(need: dict, memory: dict, reserve: int) -> dict:
             out[heap["var"]] = f"-Xms{mib}m -Xmx{mib}m"
         elif heap["kind"] == "size":
             out[heap["var"]] = f"{mib}m"
+        elif heap["kind"] == "redis":
+            out[heap["var"]] = f"{mib}mb"
         else:
             raise ValueError(f"{name}: unknown heap kind {heap['kind']!r}")
     if "timescaledb" in memory:

@@ -130,7 +130,7 @@ spec:
             - name: NOTEBOOK_QUOTA_NAME
               value: {{ printf "%s-notebooks" $fullname | quote }}
             - name: NOTEBOOK_PRIORITY_CLASS
-              value: {{ printf "%s-notebooks" $fullname | quote }}
+              value: {{ printf "%s-notebooks-%s" $fullname .Release.Namespace | quote }}
             # Mount the hub under a path prefix so the frontend can embed it same-origin (ADR-0014):
             # <app-host>/jupyter/ → SSO proxy → hub. Propagates to chp + every single-user server.
             - name: NOTEBOOK_BASE_URL

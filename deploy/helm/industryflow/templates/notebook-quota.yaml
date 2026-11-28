@@ -3,6 +3,8 @@
 {{- if .Values.notebookHub.enabled }}
 {{- $fullname := include "industryflow.fullname" . }}
 {{- $name := printf "%s-notebooks" $fullname }}
+{{- /* A PriorityClass is cluster-scoped: its name carries the release's namespace. */}}
+{{- $class := printf "%s-notebooks-%s" $fullname .Release.Namespace }}
 {{- /*
   The notebook pool on a cluster (ADR-0050 dec 7, ADR-0018 dec 6). The sessions run with their own
   PriorityClass, and a ResourceQuota scoped to it bounds their memory requests together, in a namespace the
@@ -14,7 +16,7 @@
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: {{ $name }}
+  name: {{ $class }}
   labels:
     {{- include "industryflow.labels" . | nindent 4 }}
     app.kubernetes.io/name: notebook-quota
@@ -137,7 +139,7 @@ spec:
                 - name: NOTEBOOK_QUOTA_NAME
                   value: {{ $name | quote }}
                 - name: NOTEBOOK_PRIORITY_CLASS
-                  value: {{ $name | quote }}
+                  value: {{ $class | quote }}
                 - name: NOTEBOOK_NAMESPACE
                   value: {{ .Release.Namespace | quote }}
               {{- if .Values.securityContext.enabled }}

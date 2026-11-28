@@ -112,10 +112,15 @@ cold_mib = 48
 [services.redis]
 resident_mib = 4
 cold_mib = 1
+# Half its memory: an append-only rewrite forks, and its copy-on-write pages and the client and AOF buffers
+# are not counted in maxmemory, so the store refuses writes before it is stopped (ADR-0015 dec 8).
+heap = { kind = "redis", var = "REDIS_MAXMEMORY", fraction = 0.5 }
 
 [services.quota-redis]
 resident_mib = 2
 cold_mib = 2
+# Half its memory: it evicts the keys nearest their expiry before it is stopped (ADR-0049 dec 4).
+heap = { kind = "redis", var = "QUOTA_REDIS_MAXMEMORY", fraction = 0.5 }
 
 [services.minio]
 resident_mib = 352

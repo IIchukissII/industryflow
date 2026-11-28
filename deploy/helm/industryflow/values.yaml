@@ -347,11 +347,8 @@ infra:
     port: 6379
     storage: 2Gi
     # It never evicts (ADR-0015 dec 8); an external Redis must be run with maxmemory-policy noeviction too.
-    # An append-only rewrite forks, and its copy-on-write pages and the client and AOF buffers are not
-    # counted in maxmemory, so maxmemory must stay below the container's limit for a full store to refuse
-    # writes before the pod is killed. The limit is now the measured need (measuredResources), which
-    # this value exceeds: an open question of the measurement, not settled here.
-    maxmemory: 192mb
+    # Its maxmemory is half its measured memory (measuredResources.heaps.REDIS_MAXMEMORY), so a full store
+    # refuses writes before the pod is killed.
     external: { host: "", port: 6379 }
 
   # The shared count of tenant quotas (ADR-0049 dec 4): its own store, apart from the capability store,
@@ -360,7 +357,6 @@ infra:
     inCluster: true
     image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
     port: 6379
-    maxmemory: 64mb
     external: { host: "", port: 6379 }
 
   minio:
@@ -1014,6 +1010,8 @@ measuredResources:
   heaps:
     ZOOKEEPER_HEAP_OPTS: "-Xms64m -Xmx64m"
     KAFKA_HEAP_OPTS: "-Xms256m -Xmx256m"
+    REDIS_MAXMEMORY: "10mb"
+    QUOTA_REDIS_MAXMEMORY: "9mb"
     SPARK_STREAMING_DRIVER_MEMORY: "697m"
     SPARK_AGGREGATIONS_DRIVER_MEMORY: "824m"
     POSTGRES_SHARED_BUFFERS: "105MB"

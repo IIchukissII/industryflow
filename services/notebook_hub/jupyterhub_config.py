@@ -419,6 +419,9 @@ async def bind_identity_and_profile(spawner):
                                            "not set. Try again in a few minutes, or ask your platform operator.")
                 error.jupyterhub_message = error.log_message
                 raise error from None
+            # A limit is never below the request; whether the pool has room the quota decides, as the
+            # scheduler places, never a second count here (ADR-0018 dec 6).
+            limit = max(limit, guarantee)
         await quota.admit(spawner, who.company_id, _override_store(), _quota_store(), need=guarantee,
                           limit=limit, share=NOTEBOOK_SHARE)
     except (quota.AtCap, quota.NoRoom) as refused:

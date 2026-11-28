@@ -119,8 +119,10 @@ def test_the_hub_and_the_quota_job_agree_on_the_pool(rendered):
     assert env["NOTEBOOK_ANALYTICS_GUARANTEE_MIB"] == str(guarantees["analytics"])
     job = next(d for d in rendered if d.get("kind") == "CronJob" and d["metadata"]["name"].endswith("notebooks-quota"))
     jenv = {e["name"]: e["value"] for e in job["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["env"]}
-    assert env["NOTEBOOK_QUOTA_NAME"] == jenv["NOTEBOOK_QUOTA_NAME"] == env["NOTEBOOK_PRIORITY_CLASS"] \
-        == jenv["NOTEBOOK_PRIORITY_CLASS"]
+    assert env["NOTEBOOK_QUOTA_NAME"] == jenv["NOTEBOOK_QUOTA_NAME"]
+    assert env["NOTEBOOK_PRIORITY_CLASS"] == jenv["NOTEBOOK_PRIORITY_CLASS"]
+    # Cluster-scoped: two releases of the same name in two namespaces do not share one class.
+    assert env["NOTEBOOK_PRIORITY_CLASS"].endswith("-default")
     pc = next(d for d in rendered if d.get("kind") == "PriorityClass")
     assert pc["metadata"]["name"] == env["NOTEBOOK_PRIORITY_CLASS"] and pc["preemptionPolicy"] == "Never"
     role = next(d for d in rendered if d.get("kind") == "Role" and d["metadata"]["name"].endswith("-notebook-hub"))

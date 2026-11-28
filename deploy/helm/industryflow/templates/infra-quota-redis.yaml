@@ -47,7 +47,7 @@ spec:
         - name: redis
           image: {{ .Values.infra.quotaRedis.image | quote }}
           args: ["redis-server", "--save", "", "--appendonly", "no",
-                 "--maxmemory", {{ .Values.infra.quotaRedis.maxmemory | quote }}, "--maxmemory-policy", "volatile-ttl"]
+                 "--maxmemory", {{ .Values.measuredResources.heaps.QUOTA_REDIS_MAXMEMORY | quote }}, "--maxmemory-policy", "volatile-ttl"]
           ports:
             - name: redis
               containerPort: 6379

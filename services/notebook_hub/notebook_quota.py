@@ -37,25 +37,51 @@ def parse_quantity(text) -> int:
     return int(float(m.group(1)) * _UNITS[m.group(2)])
 
 
-def pool_bytes(nodes, pods, notebook_class: str) -> int:
-    """What the nodes allocate beyond the requests of every pod that runs and is not a notebook session."""
-    allocatable = sum(parse_quantity((n.status.allocatable or {}).get("memory", "0")) for n in nodes)
+def usable(node) -> bool:
+    """Whether a session can be placed on the node: schedulable, ready, and no taint that keeps pods off it
+    (sessions tolerate none)."""
+    if getattr(node.spec, "unschedulable", False):
+        return False
+    ready = [c for c in (node.status.conditions or []) if c.type == "Ready"]
+    if not ready or ready[0].status != "True":
+        return False
+    return not any(t.effect in ("NoSchedule", "NoExecute") for t in (node.spec.taints or []))
+
+
+def _memory(node) -> int:
+    return parse_quantity((node.status.allocatable or {}).get("memory", "0"))
+
+
+def pool_bytes(nodes, pods, notebook_class: str) -> tuple[int, int]:
+    """What the nodes a session can be placed on allocate beyond the requests of every other pod that runs
+    or waits on them, and the largest of those nodes: one session never holds more than one node."""
+    placed = [n for n in nodes if usable(n)]
+    names = {n.metadata.name for n in placed}
     held = 0
     for p in pods:
         if p.status.phase not in ("Pending", "Running") or p.spec.priority_class_name == notebook_class:
             continue
+        # A pod on a node sessions cannot use takes nothing from them; one not yet placed may take from any.
+        if p.spec.node_name and p.spec.node_name not in names:
+            continue
         for c in p.spec.containers:
             requests = (c.resources.requests or {}) if c.resources else {}
             held += parse_quantity(requests.get("memory", "0"))
-    return max(0, allocatable - held)
+    return max(0, sum(_memory(n) for n in placed) - held), max((_memory(n) for n in placed), default=0)
 
 
 class NoPool(Exception):
     """The notebook quota cannot be read, or has not been computed yet."""
 
 
+# The largest node a session can be placed on, beside the pool on the quota: a session's limit is the pool,
+# never more than one node holds.
+LARGEST_NODE = "industryflow.io/largest-node-memory"
+
+
 async def read_pool(api, namespace: str, name: str) -> int:
-    """The pool's size in bytes, from the quota's hard ``requests.memory``; ``NoPool`` when it cannot say."""
+    """A session's limit in bytes: the quota's hard ``requests.memory``, at most the largest node a session can
+    be placed on; ``NoPool`` when the quota cannot say, or holds none."""
     from kubernetes_asyncio.client.exceptions import ApiException
 
     try:
@@ -63,16 +89,19 @@ async def read_pool(api, namespace: str, name: str) -> int:
     except ApiException as e:
         raise NoPool(f"the notebook quota {namespace}/{name} cannot be read ({e.status})") from None
     hard = (quota.spec.hard or {}).get("requests.memory") if quota.spec else None
-    if hard is None:
+    if hard is None or parse_quantity(hard) == 0:
         raise NoPool(f"the notebook quota {namespace}/{name} holds no memory yet")
-    return parse_quantity(hard)
+    largest = ((quota.metadata.annotations or {}) if quota.metadata else {}).get(LARGEST_NODE)
+    return min(parse_quantity(hard), parse_quantity(largest)) if largest else parse_quantity(hard)
 
 
-def quota_body(name: str, notebook_class: str, pool: int) -> dict:
-    """The quota, scoped to the notebook sessions' PriorityClass, holding ``pool`` bytes of requests."""
+def quota_body(name: str, notebook_class: str, pool: int, largest: int) -> dict:
+    """The quota, scoped to the notebook sessions' PriorityClass, holding ``pool`` bytes of requests, with the
+    largest node a session can be placed on."""
     return {
         "apiVersion": "v1", "kind": "ResourceQuota",
-        "metadata": {"name": name, "labels": {"app.kubernetes.io/name": "notebook-quota"}},
+        "metadata": {"name": name, "labels": {"app.kubernetes.io/name": "notebook-quota"},
+                     "annotations": {LARGEST_NODE: str(largest)}},
         "spec": {
             "hard": {"requests.memory": str(pool)},
             "scopeSelector": {"matchExpressions": [
@@ -87,8 +116,8 @@ async def apply(core, namespace: str, name: str, notebook_class: str) -> int:
 
     nodes = (await core.list_node()).items
     pods = (await core.list_pod_for_all_namespaces()).items
-    pool = pool_bytes(nodes, pods, notebook_class)
-    body = quota_body(name, notebook_class, pool)
+    pool, largest = pool_bytes(nodes, pods, notebook_class)
+    body = quota_body(name, notebook_class, pool, largest)
     try:
         await core.replace_namespaced_resource_quota(name, namespace, body)
     except ApiException as e:
