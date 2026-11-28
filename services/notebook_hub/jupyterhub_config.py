@@ -41,7 +41,7 @@ SPAWNER = os.environ.get("NOTEBOOK_SPAWNER", "kube").strip().lower()
 # Kubernetes the scheduler places a pod by its request, so the hub keeps no pool there.
 def _mib_env(name):
     raw = os.environ.get(name, "").strip()
-    # 0 is a share: a host the platform fills, where every start is refused, naming why.
+    # 0 is a pool: every start is refused, naming why (scripts/host-memory.py refuses such a host first).
     if not raw.isdigit():
         raise RuntimeError(f"{name} must be a number of MiB on a Docker host: run scripts/host-memory.py")
     return int(raw) * 1024 * 1024

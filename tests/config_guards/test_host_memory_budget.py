@@ -126,11 +126,10 @@ def test_the_hub_and_the_pool_are_given_the_pool_and_each_guarantee():
         assert env.get(name) == "${%s:?run scripts/host-memory.py}" % name, name
     assert '_mib_env("NOTEBOOK_MEMORY_SHARE_MIB")' in hub and '_mib_env("NOTEBOOK_SWAP_SHARE_MIB")' in hub
     assert 'f"NOTEBOOK_{p.upper()}_GUARANTEE_MIB"' in hub and '"NOTEBOOK_CGROUP_PARENT"' in hub
-    pool = COMPOSE["notebook-pool"]
-    assert pool["environment"] == {"POOL": "${NOTEBOOK_CGROUP_PARENT:?run scripts/host-memory.py}",
-                                   "POOL_MIB": "${NOTEBOOK_MEMORY_SHARE_MIB:?run scripts/host-memory.py}",
-                                   "POOL_SWAP_MIB": "${NOTEBOOK_SWAP_SHARE_MIB:?run scripts/host-memory.py}"}
-    assert COMPOSE["notebook-hub"]["depends_on"]["notebook-pool"] == {"condition": "service_completed_successfully"}
+    # The pool's limits are applied before every start of the hub, a reboot's included (pool.py), from the
+    # same pinned image the platform's other one-shots run.
+    assert COMPOSE["notebook-hub"]["entrypoint"][-1].startswith("python /opt/hub/pool.py && exec jupyterhub ")
+    assert env["NOTEBOOK_POOL_IMAGE"] == COMPOSE["db-cert-init"]["image"]
 
 
 def test_every_notebook_profile_has_a_measured_session():

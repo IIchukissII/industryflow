@@ -63,7 +63,7 @@ path keeps its latency, and Kafka holds what Spark has not processed yet.
 
 ## Memory
 
-The platform's need, the source of `deploy/host-memory.toml` (manual: [Getting started, Resource budget](../getting-started.md#resource-budget)).
+The platform's need, the source of `deploy/host-memory.toml` (manual: Getting started, Resource budget).
 Measured 2026-11-26 on the 8 GB node (7 765 MiB, 8 191 MiB swap), every container under a 4 GiB memory
 limit and an 8 GiB memory-and-swap limit, so what is measured is the need and not a limit. Every
 container's untouched pages were reclaimed once before the windows, so a page counts as resident only

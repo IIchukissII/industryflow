@@ -1072,44 +1072,6 @@ services:
     command: ["true"]
     restart: "no"
 
-  # The notebook pool (ADR-0018 dec 6, ADR-0050 dec 5): the cgroup every session runs in, its memory and swap
-  # the pool scripts/host-memory.py derives, so the sessions together never take a platform service's
-  # memory. Set in the host's namespaces on every `up`: under the systemd cgroup driver as the slice's
-  # runtime properties (systemd rewrites a slice's limits it does not own), under cgroupfs in the cgroup
-  # itself. Privileged with the host's PIDs, as the hub's Docker socket already is root on the host.
-  notebook-pool:
-    profiles: ["notebooks"]
-    image: alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
-    container_name: industryflow-notebook-pool
-    privileged: true
-    pid: host
-    network_mode: none
-    environment:
-      POOL: ${NOTEBOOK_CGROUP_PARENT:?run scripts/host-memory.py}
-      POOL_MIB: ${NOTEBOOK_MEMORY_SHARE_MIB:?run scripts/host-memory.py}
-      POOL_SWAP_MIB: ${NOTEBOOK_SWAP_SHARE_MIB:?run scripts/host-memory.py}
-    command:
-      - nsenter
-      - -t
-      - "1"
-      - -m
-      - --
-      - sh
-      - -ec
-      - |
-        case "$$POOL" in
-          *.slice)
-            systemctl set-property --runtime "$$POOL" MemoryMax="$${POOL_MIB}M" MemorySwapMax="$${POOL_SWAP_MIB}M"
-            systemctl start "$$POOL"
-            systemctl show -p MemoryMax -p MemorySwapMax "$$POOL" ;;
-          /*)
-            d="/sys/fs/cgroup$$POOL"; mkdir -p "$$d"
-            echo "$${POOL_MIB}M" > "$$d/memory.max"; echo "$${POOL_SWAP_MIB}M" > "$$d/memory.swap.max"
-            echo "pool $$d: $$(cat "$$d/memory.max") memory, $$(cat "$$d/memory.swap.max") swap" ;;
-          *) echo "notebook-pool: $$POOL is neither a slice nor a path" >&2; exit 1 ;;
-        esac
-    restart: "no"
-
   notebook-hub:
     profiles: ["notebooks"]
     build:
@@ -1119,6 +1081,9 @@ services:
         contracts: ./libs/industryflow_contracts
     image: industryflow-notebook-hub
     container_name: industryflow-notebook-hub
+    # No session is admitted before the pool that bounds the sessions has its limits: applied on every start,
+    # a reboot's included, and the hub does not start without them (ADR-0018 dec 6).
+    entrypoint: ["sh", "-c", "python /opt/hub/pool.py && exec jupyterhub -f /opt/hub/jupyterhub_config.py"]
     environment:
       NOTEBOOK_SPAWNER: docker
       # Per-profile images (ADR-0011 dec 5): the hook picks one by the user's role profile.
@@ -1136,6 +1101,9 @@ services:
       NOTEBOOK_AUTHORING_GUARANTEE_MIB: ${NOTEBOOK_AUTHORING_GUARANTEE_MIB:?run scripts/host-memory.py}
       NOTEBOOK_ANALYTICS_GUARANTEE_MIB: ${NOTEBOOK_ANALYTICS_GUARANTEE_MIB:?run scripts/host-memory.py}
       NOTEBOOK_CGROUP_PARENT: ${NOTEBOOK_CGROUP_PARENT:?run scripts/host-memory.py}
+      # What sets the pool's limits in the host's namespaces before every start (pool.py): a privileged
+      # one-shot through the hub's Docker socket, which is already root on the host.
+      NOTEBOOK_POOL_IMAGE: alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
       # The shared count of tenant quotas: where it records its refusals (ADR-0049).
       QUOTA_REDIS_URL: redis://quota-redis:6379/0
       # Kernels spawn onto the dedicated kernel network, not the platform network (ADR-0018 dec 4).
@@ -1192,9 +1160,6 @@ services:
         condition: service_started
       # The volume-reclaim service connects to the platform database (ADR-0020 dec 6).
       db-migrate:
-        condition: service_completed_successfully
-      # No session starts before the pool that bounds the sessions has its limits.
-      notebook-pool:
         condition: service_completed_successfully
     networks:
       industryflow-network:
