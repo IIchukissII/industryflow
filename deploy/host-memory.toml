@@ -46,6 +46,24 @@ measured = 2026-10-18
 memory_mib = 7765
 swap_mib = 8191
 
+# [chart]: the measured services the Helm chart runs, each as a container of its own, and those whose chart
+#   probe runs Python inside the container (a kubelet's HTTP probe runs none) (ADR-0050 dec 7); a chart
+#   workload is named as its compose service. `unmeasured`: the chart's long-running containers no
+#   measurement holds yet ("<workload>/<container>"), which keep the chart's own memory until one does.
+
+[chart]
+services = ["alert-service-detector", "api-gateway", "frontend", "ingestion-service", "kafka", "kafka-exporter",
+            "minio", "ml-service-api", "mlflow", "notebook-cold-broker", "notebook-hub", "notebook-sql-proxy",
+            "notebook-sso", "notebook-tracking-gateway", "ops-agent", "postgres-exporter", "quota-redis", "redis",
+            "redis-exporter", "spark-aggregations", "spark-streaming", "timescaledb", "zookeeper"]
+python_probes = ["alert-service-detector", "spark-aggregations", "spark-streaming"]
+
+[chart.unmeasured]
+# The ingestion pods' metrics listener: an nginx the chart runs beside each replica; Compose has none.
+"ingestion-service/metrics-listener" = "chart only; measured on the first cluster"
+# The hub's proxy: on Compose the hub starts it inside its own container, measured with the hub.
+"notebook-proxy/chp" = "measured with notebook-hub on a single host; apart only on a cluster"
+
 # [probe]: a healthcheck that runs Python inside the container (compose or its image) starts an interpreter
 #   every interval, charged to the container; measured as its peak, added to both limits of each service
 #   with probe = "python". A sampler at 10 s catches it only by chance, so it is counted on its own.
@@ -94,10 +112,15 @@ cold_mib = 48
 [services.redis]
 resident_mib = 4
 cold_mib = 1
+# Half its memory: an append-only rewrite forks, and its copy-on-write pages and the client and AOF buffers
+# are not counted in maxmemory, so the store refuses writes before it is stopped (ADR-0015 dec 8).
+heap = { kind = "redis", var = "REDIS_MAXMEMORY", fraction = 0.5 }
 
 [services.quota-redis]
 resident_mib = 2
 cold_mib = 2
+# Half its memory: it evicts the keys nearest their expiry before it is stopped (ADR-0049 dec 4).
+heap = { kind = "redis", var = "QUOTA_REDIS_MAXMEMORY", fraction = 0.5 }
 
 [services.minio]
 resident_mib = 352

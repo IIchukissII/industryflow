@@ -120,7 +120,7 @@ spec:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 30
           resources:
-            {{- toYaml $agent.resources | nindent 12 }}
+            {{- include "industryflow.resources" (dict "ctx" $ "service" "ops-agent" "cpu" $agent.resources) | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}

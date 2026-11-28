@@ -117,5 +117,5 @@ spec:
                   key: TRACKING_OPERATOR_TOKEN
             {{- end }}
           resources:
-            {{- toYaml .Values.notebookHub.trackingGateway.resources | nindent 12 }}
+            {{- include "industryflow.resources" (dict "ctx" . "service" "notebook-tracking-gateway" "cpu" .Values.notebookHub.trackingGateway.resources) | nindent 12 }}
 {{- end }}

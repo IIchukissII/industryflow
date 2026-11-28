@@ -43,6 +43,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch", "create", "delete"]
+  # A session's limit is the notebook pool, read from its quota as it starts (ADR-0050 dec 7).
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    resourceNames: [{{ printf "%s-notebooks" $fullname | quote }}]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -116,6 +121,16 @@ spec:
             # DockerSpawner for the compose profile; this selects KubeSpawner here.
             - name: NOTEBOOK_SPAWNER
               value: "kube"
+            # The notebook pool (ADR-0050 dec 5, 7; ADR-0018 dec 6): each profile's measured guarantee is a
+            # session's request; its limit is the notebook quota, which counts the sessions' class only.
+            - name: NOTEBOOK_AUTHORING_GUARANTEE_MIB
+              value: {{ trimSuffix "Mi" .Values.measuredResources.notebookGuarantees.authoring | quote }}
+            - name: NOTEBOOK_ANALYTICS_GUARANTEE_MIB
+              value: {{ trimSuffix "Mi" .Values.measuredResources.notebookGuarantees.analytics | quote }}
+            - name: NOTEBOOK_QUOTA_NAME
+              value: {{ printf "%s-notebooks" $fullname | quote }}
+            - name: NOTEBOOK_PRIORITY_CLASS
+              value: {{ printf "%s-notebooks-%s" $fullname .Release.Namespace | quote }}
             # Mount the hub under a path prefix so the frontend can embed it same-origin (ADR-0014):
             # <app-host>/jupyter/ → SSO proxy → hub. Propagates to chp + every single-user server.
             - name: NOTEBOOK_BASE_URL
@@ -207,7 +222,7 @@ spec:
             {{- end }}
             {{- end }}
           resources:
-            {{- toYaml .Values.notebookHub.hub.resources | nindent 12 }}
+            {{- include "industryflow.resources" (dict "ctx" . "service" "notebook-hub" "cpu" .Values.notebookHub.hub.resources) | nindent 12 }}
           {{- if and .Values.tenantDelete.enabled .Values.tls.db.enabled }}
           volumeMounts:
             - name: db-ca
@@ -513,8 +528,7 @@ spec:
             - name: conf
               mountPath: /etc/nginx/templates
           resources:
-            requests: { cpu: 25m, memory: 32Mi }
-            limits: { cpu: 100m, memory: 64Mi }
+            {{- include "industryflow.resources" (dict "ctx" . "service" "notebook-sso" "cpu" (dict "requests" (dict "cpu" "25m") "limits" (dict "cpu" "100m"))) | nindent 12 }}
       volumes:
         - name: conf
           configMap:

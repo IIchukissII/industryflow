@@ -342,3 +342,24 @@ when they are the same: kernel-produced script must never run on the platform or
 {{- end -}}
 {{- $origin -}}
 {{- end -}}
+
+{{/*
+A container's resources (ADR-0050 dec 7): its CPU from its own values, its memory from the platform's
+measured need (measuredResources, written by scripts/host-memory.py --helm): the request its resident part,
+the limit its resident and cold parts. Call with (dict "ctx" $ "service" "<measured service>" "cpu"
+<its resources values, or a dict>).
+*/}}
+{{- define "industryflow.resources" -}}
+{{- $m := required (printf "measuredResources.services has no %s: run scripts/host-memory.py --helm" .service) (index .ctx.Values.measuredResources.services .service) -}}
+{{- $cpu := .cpu | default dict -}}
+requests:
+  {{- with (($cpu.requests | default dict).cpu) }}
+  cpu: {{ . | quote }}
+  {{- end }}
+  memory: {{ $m.requests.memory }}
+limits:
+  {{- with (($cpu.limits | default dict).cpu) }}
+  cpu: {{ . | quote }}
+  {{- end }}
+  memory: {{ $m.limits.memory }}
+{{- end }}

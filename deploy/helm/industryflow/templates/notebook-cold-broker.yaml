@@ -97,5 +97,5 @@ spec:
                   name: {{ include "industryflow.workloadSecretName" (dict "ctx" . "workload" "notebook-cold-broker") }}
                   key: COLD_READ_SECRET_KEY
           resources:
-            {{- toYaml .Values.notebookHub.coldBroker.resources | nindent 12 }}
+            {{- include "industryflow.resources" (dict "ctx" . "service" "notebook-cold-broker" "cpu" .Values.notebookHub.coldBroker.resources) | nindent 12 }}
 {{- end }}

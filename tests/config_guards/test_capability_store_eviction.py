@@ -27,8 +27,9 @@ def test_compose_runs_the_store_without_eviction_and_with_a_limit():
 def test_the_chart_runs_the_store_without_eviction_and_with_a_limit():
     template = (CHART / "templates" / "infra-redis.yaml").read_text()
     assert '"--maxmemory-policy", "noeviction"' in template
-    assert '"--maxmemory", {{ .Values.infra.redis.maxmemory | quote }}' in template
-    assert load_yaml("deploy/helm/industryflow/values.yaml")["infra"]["redis"]["maxmemory"]
+    # Half its measured memory, so the store refuses before the pod is killed (ADR-0050 dec 7).
+    assert '"--maxmemory", {{ .Values.measuredResources.heaps.REDIS_MAXMEMORY | quote }}' in template
+    assert load_yaml("deploy/helm/industryflow/values.yaml")["measuredResources"]["heaps"]["REDIS_MAXMEMORY"]
 
 
 def test_the_store_is_watched_against_its_limit():

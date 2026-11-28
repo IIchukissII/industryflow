@@ -85,6 +85,13 @@ spec:
             - config_file=/etc/postgresql/postgresql.conf
             - -c
             - hba_file=/etc/postgresql/pg_hba.conf
+            # Memory of the measured need (ADR-0050 dec 7), as compose passes it; -c outranks the file.
+            - -c
+            - shared_buffers={{ .Values.measuredResources.heaps.POSTGRES_SHARED_BUFFERS }}
+            - -c
+            - effective_cache_size={{ .Values.measuredResources.heaps.POSTGRES_EFFECTIVE_CACHE_SIZE }}
+            - -c
+            - maintenance_work_mem={{ .Values.measuredResources.heaps.POSTGRES_MAINTENANCE_WORK_MEM }}
             {{- if not .Values.tls.db.enabled }}
             # No server certificate is staged without TLS. The pg_hba is hostssl-only, so this admits
             # no TCP client either: tls.db is not a switch to plaintext (see values.yaml tls.db).
@@ -133,10 +140,8 @@ spec:
               mountPath: /etc/postgresql/certs
               readOnly: true
             {{- end }}
-          {{- with .Values.infra.timescaledb.resources }}
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- include "industryflow.resources" (dict "ctx" . "service" "timescaledb" "cpu" .Values.infra.timescaledb.resources) | nindent 12 }}
       volumes:
         - name: pg-hba
           configMap:

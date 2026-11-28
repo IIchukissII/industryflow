@@ -109,8 +109,13 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "industryflow.fullname" $root }}-config
-          {{- if or $app.secretKeys $app.secretEnv $app.edge $app.buildInfoPort }}
+          {{- if or $app.secretKeys $app.secretEnv $app.edge $app.buildInfoPort $app.heapEnv }}
           env:
+            {{- /* apps.<name>.heapEnv: env var -> its heap in measuredResources.heaps (ADR-0050 dec 7). */}}
+            {{- range $envName, $heap := ($app.heapEnv | default dict) }}
+            - name: {{ $envName }}
+              value: {{ required (printf "measuredResources.heaps has no %s" $heap) (index $root.Values.measuredResources.heaps $heap) | quote }}
+            {{- end }}
             {{- /* ADR-0009 dec 4: each of the workload's own secretKeys by name, never a whole
                    Secret by envFrom, so an existingSecret holding every credential still hands this
                    pod only its own keys. */}}
@@ -186,10 +191,8 @@ spec:
             timeoutSeconds: 10
             failureThreshold: 3
           {{- end }}
-          {{- with $app.resources }}
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- include "industryflow.resources" (dict "ctx" $root "service" $name "cpu" $app.resources) | nindent 12 }}
           {{- if or $hasPVC $writableMounts $dbCa }}
           volumeMounts:
             {{- if $hasPVC }}

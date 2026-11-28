@@ -28,6 +28,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import capabilities as cap  # noqa: E402
 import identity as ident  # noqa: E402
+import notebook_quota  # noqa: E402
 import quota  # noqa: E402
 
 # Which spawner profile this deployment runs (ADR-0018). Default kube preserves the original
@@ -125,7 +126,6 @@ c.Spawner.args = [
 # ---------------------------------------------------------------------------
 from jupyterhub.auth import Authenticator  # noqa: E402
 from jupyterhub.handlers import BaseHandler  # noqa: E402
-from jupyterhub.traitlets import ByteSpecification  # noqa: E402
 from tornado import web  # noqa: E402
 
 
@@ -204,22 +204,36 @@ c.JupyterHub.shutdown_on_logout = True
 # Spawn profiles — role-driven caps (ADR-0011 dec 5/7), spawner-independent
 # ---------------------------------------------------------------------------
 PROFILE_RESOURCES = {
-    ident.PROFILE_ANALYTICS: {"cpu_limit": 0.5, "mem_limit": "1G"},
-    ident.PROFILE_AUTHORING: {"cpu_limit": 2.0, "mem_limit": "4G"},
+    ident.PROFILE_ANALYTICS: {"cpu_limit": 0.5},
+    ident.PROFILE_AUTHORING: {"cpu_limit": 2.0},
 }
-# On a Docker host a session has no size (ADR-0050 dec 5): the pool guarantees it its profile's measured
-# resident need (scripts/host-memory.py, from deploy/host-memory.toml), and it may grow into the whole pool.
-# The memory above holds on Kubernetes only.
-PROFILE_GUARANTEE = {p: _mib_env(f"NOTEBOOK_{p.upper()}_GUARANTEE_MIB") for p in PROFILE_RESOURCES} if SPAWNER == "docker" else {}
+# A session has no size (ADR-0050 dec 5): the pool guarantees it its profile's measured resident need
+# (scripts/host-memory.py, from deploy/host-memory.toml; the chart's measuredResources on Kubernetes), and it
+# may grow into the whole pool.
+PROFILE_GUARANTEE = {p: _mib_env(f"NOTEBOOK_{p.upper()}_GUARANTEE_MIB") for p in PROFILE_RESOURCES}
+# On Kubernetes the pool is the notebook quota (notebook_quota.py, ADR-0050 dec 7): a ResourceQuota on the
+# sessions' requests, scoped to their PriorityClass, which the chart's notebook-quota CronJob keeps at what
+# the nodes allocate beyond every other pod's requests.
+NOTEBOOK_QUOTA_NAME = os.environ.get("NOTEBOOK_QUOTA_NAME", "").strip() if SPAWNER != "docker" else None
+NOTEBOOK_PRIORITY_CLASS = os.environ.get("NOTEBOOK_PRIORITY_CLASS", "").strip() if SPAWNER != "docker" else None
+if SPAWNER != "docker" and not (NOTEBOOK_QUOTA_NAME and NOTEBOOK_PRIORITY_CLASS):
+    raise RuntimeError("NOTEBOOK_QUOTA_NAME and NOTEBOOK_PRIORITY_CLASS must name the notebook quota and the "
+                       "sessions' PriorityClass on Kubernetes (the chart sets both)")
 
 
-def profile_memory(profile: str) -> tuple[int, int]:
-    """The guarantee and the memory limit, in bytes, of an environment of ``profile`` on this deployment: on
-    a Docker host its measured guarantee and the whole pool; on Kubernetes its profile's memory, both."""
+def profile_memory(profile: str) -> tuple[int, int | None]:
+    """The guarantee and the memory limit, in bytes, of an environment of ``profile`` on this deployment: on a
+    Docker host its measured guarantee and the whole pool; on Kubernetes its guarantee, the limit then read
+    from the notebook quota when it starts (``kube_pool``)."""
     if NOTEBOOK_SHARE is not None:
         return PROFILE_GUARANTEE[profile], NOTEBOOK_SHARE
-    size = ByteSpecification().validate(None, PROFILE_RESOURCES[profile]["mem_limit"])
-    return size, size
+    return PROFILE_GUARANTEE[profile], None
+
+
+async def kube_pool(spawner) -> int:
+    """The notebook quota's size in bytes, read from the cluster (``notebook_quota.NoPool`` if it cannot)."""
+    # KubeSpawner's own CoreV1Api client, with the hub's in-cluster credentials.
+    return await notebook_quota.read_pool(spawner.api, spawner.namespace, NOTEBOOK_QUOTA_NAME)
 
 
 _STORE = None
@@ -393,6 +407,21 @@ async def bind_identity_and_profile(spawner):
     # the notebook share (ADR-0018 dec 6): refused before anything is minted or started, naming why.
     try:
         guarantee, limit = profile_memory(profile)
+        if limit is None:
+            # On Kubernetes a session's limit is the pool, read as it starts; a pool the hub cannot read is a
+            # refusal, never a session without one.
+            try:
+                limit = await kube_pool(spawner)
+            except notebook_quota.NoPool as e:
+                spawner.log.error("notebook pool unreadable; %s refused: %s", spawner._log_name, e)
+                spawner._quota_refused = True
+                error = web.HTTPError(503, "Notebook environments are not available yet: their memory pool is "
+                                           "not set. Try again in a few minutes, or ask your platform operator.")
+                error.jupyterhub_message = error.log_message
+                raise error from None
+            # A limit is never below the request; whether the pool has room the quota decides, as the
+            # scheduler places, never a second count here (ADR-0018 dec 6).
+            limit = max(limit, guarantee)
         await quota.admit(spawner, who.company_id, _override_store(), _quota_store(), need=guarantee,
                           limit=limit, share=NOTEBOOK_SHARE)
     except (quota.AtCap, quota.NoRoom) as refused:
@@ -434,6 +463,8 @@ async def bind_identity_and_profile(spawner):
     # guarantee is the pod's request.
     if SPAWNER != "docker":
         spawner.mem_guarantee = spawner.guarantee
+        # The notebook quota counts the pods of this class only (notebook_quota.quota_body).
+        spawner.priority_class_name = NOTEBOOK_PRIORITY_CLASS
 
     # Per-profile image + server (ADR-0011 dec 5): authoring gets JupyterLab + the DS stack;
     # analytics gets the report server, which serves rendered reports and no route that runs a

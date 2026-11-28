@@ -320,7 +320,7 @@ services:
     command: >
       redis-server
       --appendonly yes
-      --maxmemory 256mb
+      --maxmemory ${REDIS_MAXMEMORY:?run scripts/host-memory.py}
       --maxmemory-policy noeviction
     volumes:
       - redis-data:/data
@@ -346,7 +346,7 @@ services:
       redis-server
       --save ""
       --appendonly no
-      --maxmemory 64mb
+      --maxmemory ${QUOTA_REDIS_MAXMEMORY:?run scripts/host-memory.py}
       --maxmemory-policy volatile-ttl
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
