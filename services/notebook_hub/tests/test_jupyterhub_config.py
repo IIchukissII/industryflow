@@ -56,7 +56,12 @@ BASE_ENV = {
     "NOTEBOOK_AUTHORING_GUARANTEE_MIB": "627",
     "NOTEBOOK_ANALYTICS_GUARANTEE_MIB": "72",
     "NOTEBOOK_CGROUP_PARENT": "industryflow-notebooks.slice",
+    # The notebook quota and the sessions' PriorityClass on Kubernetes (ADR-0050 dec 7).
+    "NOTEBOOK_QUOTA_NAME": "industryflow-notebooks",
+    "NOTEBOOK_PRIORITY_CLASS": "industryflow-notebooks",
 }
+# The pool a Kubernetes test's notebook quota holds, in bytes.
+KUBE_POOL = 8192 * 1024 * 1024
 BUDGET = [k for k in BASE_ENV if k.startswith("NOTEBOOK_") and k.endswith("_MIB")]
 PROXY_SECRET = BASE_ENV["NOTEBOOK_SSO_PROXY_SECRET"]
 
@@ -85,6 +90,12 @@ def _load_ns(profile: str, **overrides):
         from industryflow_contracts import testing
 
         namespace["_QUOTA_STORE"] = namespace["_OVERRIDE_STORE"] = testing.sync_redis(rebuilt=False)
+        if profile == "kube":
+            # The notebook quota a cluster would hold: no cluster here (kube_pool reads one).
+            async def kube_pool(spawner, _pool=KUBE_POOL):
+                return _pool
+
+            namespace["kube_pool"] = kube_pool
         return cfg, namespace
     finally:
         sys.path.remove(str(HUB_DIR))
@@ -1029,7 +1040,12 @@ def test_a_docker_hub_without_its_part_of_the_budget_does_not_start(name):
     for missing in (None, "", "-1", "1.5G") if name in BUDGET else (None, ""):
         with pytest.raises(RuntimeError, match=name):
             _load_ns("docker", **{name: missing})
-    # Kubernetes places a pod by its request: the hub keeps no pool there.
+    if name.endswith("_GUARANTEE_MIB"):
+        # A pod's request is its profile's guarantee on Kubernetes too.
+        with pytest.raises(RuntimeError, match=name):
+            _load_ns("kube", **{name: None})
+        return
+    # Kubernetes places a pod by its request: the hub keeps no pool of its own there.
     kube = _load_ns("kube", **{name: None})[1]
     assert kube["NOTEBOOK_SHARE"] is None and kube["NOTEBOOK_SWAP_SHARE"] is None
 
@@ -1059,8 +1075,52 @@ def test_a_session_may_grow_into_the_whole_pool():
     # The hub's containment settings are kept.
     assert host["cap_drop"] == ["ALL"]
     kube = _load_ns("kube")[1]
-    assert kube["profile_memory"]("authoring") == (4096 * mib, 4096 * mib)
-    assert kube["profile_memory"]("analytics") == (1024 * mib, 1024 * mib)
+    assert kube["profile_memory"]("authoring") == (627 * mib, None)
+    assert kube["profile_memory"]("analytics") == (72 * mib, None)
+
+
+def test_on_kubernetes_a_session_is_guaranteed_its_need_and_limited_by_the_notebook_quota():
+    """ADR-0050 dec 5, 7; ADR-0018 dec 6: the pod's request is its profile's guarantee, its limit the notebook
+    quota read as it starts, and it carries the PriorityClass the quota counts."""
+    _, ns, store = _load_ns("kube") + (_store(),)
+    ns["_STORE"] = store
+    user = _User("author", str(uuid.uuid4()), role="engineer")
+    user.settings["users"] = {"author": user}
+    spawner = _Spawner(user)
+    user.spawners[""] = spawner
+    _spawn(ns, spawner)
+    assert spawner.mem_guarantee == 627 * 1024 * 1024 and spawner.mem_limit == KUBE_POOL
+    assert spawner.priority_class_name == "industryflow-notebooks"
+
+
+def test_on_kubernetes_a_pool_the_hub_cannot_read_refuses_the_start():
+    """ADR-0018 dec 6: no session starts without its pool, and the user is told why."""
+    from jupyterhub.utils import format_exception
+    from tornado import web
+
+    _, ns, store = _load_ns("kube") + (_store(),)
+    ns["_STORE"] = store
+
+    async def no_pool(spawner):
+        raise ns["notebook_quota"].NoPool("the notebook quota x/y holds no memory yet")
+
+    ns["kube_pool"] = no_pool
+    user = _User("author", str(uuid.uuid4()), role="engineer")
+    user.settings["users"] = {"author": user}
+    spawner = _Spawner(user)
+    user.spawners[""] = spawner
+    with pytest.raises(web.HTTPError) as refused:
+        _spawn(ns, spawner)
+    shown, _html = format_exception(refused.value, only_jupyterhub=True)
+    assert refused.value.status_code == 503 and "memory pool is not set" in shown
+    assert not getattr(spawner, "_quota_admitted", False) and spawner._quota_refused
+
+
+@pytest.mark.parametrize("name", ["NOTEBOOK_QUOTA_NAME", "NOTEBOOK_PRIORITY_CLASS"])
+def test_a_kubernetes_hub_without_its_quota_does_not_start(name):
+    for missing in (None, ""):
+        with pytest.raises(RuntimeError, match="NOTEBOOK_QUOTA_NAME and NOTEBOOK_PRIORITY_CLASS"):
+            _load_ns("kube", **{name: missing})
 
 
 def test_a_start_is_admitted_only_while_its_memory_fits_the_notebook_share():

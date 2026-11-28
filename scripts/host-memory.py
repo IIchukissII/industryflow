@@ -176,20 +176,7 @@ def budget(need: dict, host_mib: int, swap_mib: int, driver: str = "systemd", *,
     for name, (mem, both) in limits.items():
         out[limit_var(name)] = f"{mem}m"
         out[swap_limit_var(name)] = f"{both}m"
-    for name, s in need["services"].items():
-        heap = s.get("heap")
-        if heap is None:
-            continue
-        mib = max(int(limits[name][0] * float(heap["fraction"])), int(heap.get("min_mib", 0)))
-        if heap["kind"] == "jvm-opts":
-            out[heap["var"]] = f"-Xms{mib}m -Xmx{mib}m"
-        elif heap["kind"] == "size":
-            out[heap["var"]] = f"{mib}m"
-        else:
-            raise ValueError(f"{name}: unknown heap kind {heap['kind']!r}")
-    for var, setting in need.get("postgres", {}).items():
-        of = limits["timescaledb"][0] if setting["of"] == "limit" else reserve
-        out[var] = f"{int(of * float(setting['fraction']))}MB"
+    out.update(heaps(need, {name: mem for name, (mem, _) in limits.items()}, reserve))
     out["NOTEBOOK_MEMORY_SHARE_MIB"] = str(pool)
     out["NOTEBOOK_SWAP_SHARE_MIB"] = str(max(0, swap_mib - sum(both - mem for mem, both in limits.values())))
     for profile, mib in least.items():
@@ -199,6 +186,80 @@ def budget(need: dict, host_mib: int, swap_mib: int, driver: str = "systemd", *,
     out["INGEST_CAPACITY_READINGS_PER_SECOND"] = str(ingest_capacity(need, processors))
     out["NOTEBOOK_SESSION_CAPACITY"] = str(pool // least["authoring"])
     return out
+
+
+def heaps(need: dict, memory: dict, reserve: int) -> dict:
+    """Each heap and Postgres setting, by variable, from its service's memory in MiB (``memory``): on a single
+    host its memory limit, on a cluster its request (ADR-0050 dec 7)."""
+    out = {}
+    for name, s in need["services"].items():
+        heap = s.get("heap")
+        if heap is None or name not in memory:
+            continue
+        mib = max(int(memory[name] * float(heap["fraction"])), int(heap.get("min_mib", 0)))
+        if heap["kind"] == "jvm-opts":
+            out[heap["var"]] = f"-Xms{mib}m -Xmx{mib}m"
+        elif heap["kind"] == "size":
+            out[heap["var"]] = f"{mib}m"
+        else:
+            raise ValueError(f"{name}: unknown heap kind {heap['kind']!r}")
+    if "timescaledb" in memory:
+        for var, setting in need.get("postgres", {}).items():
+            of = memory["timescaledb"] if setting["of"] == "limit" else reserve
+            out[var] = f"{int(of * float(setting['fraction']))}MB"
+    return out
+
+
+def chart_resources(need: dict) -> dict:
+    """The chart's memory (ADR-0050 dec 7), from the same measurement: for each measured service the chart
+    runs, its request, the resident part with its margin, and its limit, the resident and cold parts, since a
+    node gives a workload no swap; a Python probe's interpreter beside both where the chart's probe runs
+    inside the container. Heaps and Postgres settings of the request, as on a single host of its memory
+    limit; and each notebook profile's guarantee."""
+    headroom, chart = float(need["headroom"]), need["chart"]
+    probe = int(need["probe"]["python_mib"])
+    services = {}
+    for name in chart["services"]:
+        s = need["services"][name]
+        extra = probe if name in chart["python_probes"] else 0
+        held = _held(need, float(s["resident_mib"]))
+        services[name] = (int(held) + extra, int(held + float(s["cold_mib"]) * headroom) + extra)
+    return {
+        "services": {n: {"requests": {"memory": f"{r}Mi"}, "limits": {"memory": f"{lim}Mi"}}
+                     for n, (r, lim) in services.items()},
+        "heaps": heaps(need, {n: r for n, (r, _) in services.items()}, reserve_mib(need)),
+        "notebookGuarantees": {p: f"{mib}Mi" for p, mib in guarantees(need).items()},
+    }
+
+
+CHART_VALUES = ROOT / "deploy" / "helm" / "industryflow" / "values.yaml"
+CHART_BEGIN = "# >>> measured resources (scripts/host-memory.py --helm; do not edit) >>>"
+CHART_END = "# <<< measured resources <<<"
+
+
+def chart_block(need: dict) -> str:
+    """The chart values' block, YAML in a fixed order, between its two marker lines."""
+    r = chart_resources(need)
+    lines = [CHART_BEGIN, "measuredResources:", "  services:"]
+    for name, v in r["services"].items():
+        lines.append(f"    {name}: {{ requests: {{ memory: {v['requests']['memory']} }}, "
+                     f"limits: {{ memory: {v['limits']['memory']} }} }}")
+    lines.append("  heaps:")
+    lines += [f'    {var}: "{value}"' for var, value in r["heaps"].items()]
+    lines.append("  notebookGuarantees:")
+    lines += [f"    {p}: {v}" for p, v in r["notebookGuarantees"].items()]
+    return "\n".join(lines + [CHART_END])
+
+
+def write_chart(values: pathlib.Path, need: dict) -> None:
+    """Replace the chart values' block in place, or append it; the rest of the file is kept."""
+    text = values.read_text()
+    block = chart_block(need)
+    if CHART_BEGIN in text:
+        text = re.sub(rf"{re.escape(CHART_BEGIN)}.*?{re.escape(CHART_END)}", lambda _: block, text, flags=re.S)
+    else:
+        text = text.rstrip("\n") + "\n\n" + block + "\n"
+    values.write_text(text)
 
 
 def write_block(env: pathlib.Path, values: dict) -> None:
@@ -219,8 +280,13 @@ def main() -> int:
     p.add_argument("--cpus", type=int)
     p.add_argument("--cgroup-driver", choices=("systemd", "cgroupfs"))
     p.add_argument("--print", action="store_true", help="print the budget, write nothing")
+    p.add_argument("--helm", action="store_true", help="write the chart's measuredResources block instead")
     a = p.parse_args()
     need = tomllib.loads(NEED.read_text())
+    if a.helm:
+        write_chart(CHART_VALUES, need)
+        print(f"host-memory: measuredResources for {len(need['chart']['services'])} services in {CHART_VALUES}")
+        return 0
     env = pathlib.Path(a.env)
     host = a.mem_total_mb or mem_total_mib()
     swap = a.swap_total_mb if a.swap_total_mb is not None else swap_total_mib()

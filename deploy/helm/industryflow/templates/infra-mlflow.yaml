@@ -124,8 +124,7 @@ spec:
             initialDelaySeconds: 20
             periodSeconds: 15
           resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits: { cpu: 500m, memory: 512Mi }
+            {{- include "industryflow.resources" (dict "ctx" . "service" "mlflow" "cpu" (dict "requests" (dict "cpu" "100m") "limits" (dict "cpu" "500m"))) | nindent 12 }}
           {{- if .Values.tls.db.enabled }}
           # CA for the Postgres backend store over TLS (ADR-0017), named by PGSSLROOTCERT above.
           volumeMounts:

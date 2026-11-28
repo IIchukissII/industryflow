@@ -136,7 +136,7 @@ spec:
               readOnly: true
           {{- end }}
           resources:
-            {{- toYaml .Values.notebookHub.sqlProxy.resources | nindent 12 }}
+            {{- include "industryflow.resources" (dict "ctx" . "service" "notebook-sql-proxy" "cpu" .Values.notebookHub.sqlProxy.resources) | nindent 12 }}
       volumes:
         {{- include "industryflow.schemaReadyVolumes" . | nindent 8 }}
         {{- if .Values.tls.db.enabled }}

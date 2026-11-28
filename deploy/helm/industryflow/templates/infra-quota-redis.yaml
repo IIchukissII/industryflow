@@ -57,6 +57,5 @@ spec:
             initialDelaySeconds: 2
             periodSeconds: 10
           resources:
-            requests: { cpu: 20m, memory: 32Mi }
-            limits: { cpu: 250m, memory: 128Mi }
+            {{- include "industryflow.resources" (dict "ctx" . "service" "quota-redis" "cpu" (dict "requests" (dict "cpu" "20m") "limits" (dict "cpu" "250m"))) | nindent 12 }}
 {{- end }}

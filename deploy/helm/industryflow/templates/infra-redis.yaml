@@ -56,8 +56,7 @@ spec:
             - name: data
               mountPath: /data
           resources:
-            requests: { cpu: 50m, memory: 64Mi }
-            limits: { cpu: 250m, memory: 384Mi }
+            {{- include "industryflow.resources" (dict "ctx" . "service" "redis" "cpu" (dict "requests" (dict "cpu" "50m") "limits" (dict "cpu" "250m"))) | nindent 12 }}
   volumeClaimTemplates:
     - metadata:
         name: data

@@ -129,8 +129,8 @@ apps:
     probe: { path: /health, port: 8000 }
     ingress: { host: api.industryflow.local, path: / }
     resources:
-      requests: { cpu: 100m, memory: 256Mi }
-      limits: { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 100m }
+      limits: { cpu: 500m }
 
   ml-service-api:
     enabled: true
@@ -155,8 +155,8 @@ apps:
     port: 8002
     probe: { path: /health, port: 8002 }
     resources:
-      requests: { cpu: 250m, memory: 512Mi }
-      limits: { cpu: "1", memory: 1Gi }
+      requests: { cpu: 250m }
+      limits: { cpu: "1" }
 
   alert-service-detector:
     # Kafka consumer worker — no HTTP API. It verifies no user tokens, so no JWT key. Its one listener
@@ -173,8 +173,8 @@ apps:
     metrics: true
     buildInfoPort: 9108
     resources:
-      requests: { cpu: 100m, memory: 256Mi }
-      limits: { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 100m }
+      limits: { cpu: 500m }
 
   ingestion-service:
     enabled: true
@@ -196,8 +196,8 @@ apps:
     port: 8003
     probe: { path: /health, port: 8003 }
     resources:
-      requests: { cpu: 100m, memory: 256Mi }
-      limits: { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 100m }
+      limits: { cpu: 500m }
 
   spark-streaming:
     # Long-running PySpark job (Kafka -> TimescaleDB). No HTTP port.
@@ -215,6 +215,8 @@ apps:
     port: null
     probe: null
     # No HTTP probe port; healthy only when the job has compute, not merely a live driver.
+    # The driver's heap, of its measured need (measuredResources.heaps, ADR-0050 dec 7).
+    heapEnv: { SPARK_DRIVER_MEMORY: SPARK_STREAMING_DRIVER_MEMORY }
     livenessExec: ["python3", "/app/spark_streaming/healthcheck.py"]
     # Spark's native PrometheusServlet on the driver UI (item 7): a metrics-only Service on 4040,
     # scraped at /metrics/prometheus (driver) + /metrics/executors/prometheus (executors).
@@ -232,8 +234,8 @@ apps:
       size: 10Gi
       storageClass: ""
     resources:
-      requests: { cpu: 500m, memory: 1Gi }
-      limits: { cpu: "2", memory: 2Gi }
+      requests: { cpu: 500m }
+      limits: { cpu: "2" }
 
   spark-aggregations:
     enabled: true
@@ -248,6 +250,8 @@ apps:
     port: null
     probe: null
     # No HTTP probe port; healthy only when the job has compute, not merely a live driver.
+    # The driver's heap, of its measured need (measuredResources.heaps, ADR-0050 dec 7).
+    heapEnv: { SPARK_DRIVER_MEMORY: SPARK_AGGREGATIONS_DRIVER_MEMORY }
     livenessExec: ["python3", "/app/spark_streaming/healthcheck.py"]
     # Spark PrometheusServlet on the driver UI (item 7) — see spark-streaming above.
     metrics: true
@@ -262,8 +266,8 @@ apps:
       size: 10Gi
       storageClass: ""
     resources:
-      requests: { cpu: 500m, memory: 1Gi }
-      limits: { cpu: "2", memory: 2Gi }
+      requests: { cpu: 500m }
+      limits: { cpu: "2" }
 
   frontend:
     # The SPA served behind the TLS edge (ADR-0004/0009 dec 5). Probes hit /healthz.
@@ -294,8 +298,8 @@ apps:
     probe: { path: /healthz, port: 8080 }
     ingress: { host: app.industryflow.local, path: / }
     resources:
-      requests: { cpu: 50m, memory: 64Mi }
-      limits: { cpu: 200m, memory: 128Mi }
+      requests: { cpu: 50m }
+      limits: { cpu: 200m }
 
 # ---------------------------------------------------------------------------
 # Stateful infrastructure — `inCluster: true` renders a StatefulSet/Deployment +
@@ -311,12 +315,11 @@ infra:
     storage: 20Gi
     database: industryflow
     external: { host: "", port: 5432 }
-    # Sized for the shared postgresql.conf (infrastructure/timescaledb/config): shared_buffers alone
-    # is 512MB, and max_connections covers every role's connection limit, so the backends need room
-    # above it. Lower postgresql.conf before lowering these.
+    # Memory from the measured need (measuredResources); shared_buffers and the other memory settings of
+    # it are passed over postgresql.conf's (ADR-0050 dec 7).
     resources:
-      requests: { cpu: 250m, memory: 1Gi }
-      limits: { cpu: "1", memory: 2Gi }
+      requests: { cpu: 250m }
+      limits: { cpu: "1" }
 
   zookeeper:
     inCluster: true
@@ -335,18 +338,19 @@ infra:
     storage: 20Gi
     external: { bootstrap: "" }
     resources:
-      requests: { cpu: 250m, memory: 1Gi }
-      limits: { cpu: "1", memory: 2Gi }
+      requests: { cpu: 250m }
+      limits: { cpu: "1" }
 
   redis:
     inCluster: true
     image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
     port: 6379
     storage: 2Gi
-    # Half the container's memory limit (384Mi): an append-only rewrite forks, and its copy-on-write
-    # pages and the client and AOF buffers are not counted in maxmemory, so a full store refuses writes
-    # before the pod is killed. It never evicts (ADR-0015 dec 8); an external Redis must be run with
-    # maxmemory-policy noeviction too.
+    # It never evicts (ADR-0015 dec 8); an external Redis must be run with maxmemory-policy noeviction too.
+    # An append-only rewrite forks, and its copy-on-write pages and the client and AOF buffers are not
+    # counted in maxmemory, so maxmemory must stay below the container's limit for a full store to refuse
+    # writes before the pod is killed. The limit is now the measured need (measuredResources), which
+    # this value exceeds: an open question of the measurement, not settled here.
     maxmemory: 192mb
     external: { host: "", port: 6379 }
 
@@ -375,7 +379,7 @@ infra:
     image: industryflow-mlflow
     digest: ""
     port: 5000
-    # Server processes (MLflow's default is 4, ~180 MB each); the pod's limit is 512Mi.
+    # Server processes (MLflow's default is 4, ~180 MB each); the pod's memory is its measured need with 1.
     workers: 1
     external: { trackingUri: "" }
 
@@ -570,8 +574,8 @@ observability:
     # addresses is allowed, private ranges (the cluster among them) are not.
     modelEndpoints: []
     resources:
-      requests: { cpu: 50m, memory: 128Mi }
-      limits: { cpu: 500m, memory: 384Mi }
+      requests: { cpu: 50m }
+      limits: { cpu: 500m }
   # Data-store exporters — app-specific (they target our DB/Redis/Kafka). node-exporter and
   # kube-state-metrics come from the cluster stack, not here. Pinned by tag + digest, identical to
   # the compose stack's exporters (tests/config_guards checks the two agree).
@@ -912,8 +916,8 @@ notebookHub:
     digest: ""
     port: 8081
     resources:
-      requests: { cpu: 100m, memory: 256Mi }
-      limits: { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 100m }
+      limits: { cpu: 500m }
   # The configurable HTTP proxy the hub manages (routes /hub and /user/* to servers).
   proxy:
     image: jupyterhub/configurable-http-proxy:4.6.3@sha256:3e93aaee24350050dca97bfe9a05eab8bd26781d08cd9682268a38053643d709
@@ -939,8 +943,8 @@ notebookHub:
     # connection budget. Empty takes 50; raising it raises max_connections in postgresql.conf by as much.
     sessionsTotal: ""
     resources:
-      requests: { cpu: 50m, memory: 64Mi }
-      limits: { cpu: 250m, memory: 128Mi }
+      requests: { cpu: 50m }
+      limits: { cpu: 250m }
   # Cold-store broker (ADR-0025 dec 5, read side): authoring kernels present their cold capability
   # to read long-horizon history as Parquet. The broker holds a read-only cold-bucket principal
   # (provisioned by the minio-init Job) and vends tenant-prefix-scoped pre-signed GET URLs.
@@ -951,8 +955,8 @@ notebookHub:
     port: 5060
     presignTtlSeconds: 300
     resources:
-      requests: { cpu: 50m, memory: 64Mi }
-      limits: { cpu: 250m, memory: 256Mi }
+      requests: { cpu: 50m }
+      limits: { cpu: 250m }
   # Experiment-tracking gateway (ADR-0019): authoring kernels point MLflow at this gateway with
   # their tracking capability as the bearer; it scopes every MLflow call to the caller's tenant and
   # returns tenant-scoped pre-signed artifact URLs. It holds the object-store principal for the
@@ -978,5 +982,44 @@ notebookHub:
       # THEIRS to provide: without one, unadmitted bytes accumulate with nothing to collect them.
       expiryEnabled: true
     resources:
-      requests: { cpu: 50m, memory: 64Mi }
-      limits: { cpu: 250m, memory: 256Mi }
+      requests: { cpu: 50m }
+      limits: { cpu: 250m }
+
+# >>> measured resources (scripts/host-memory.py --helm; do not edit) >>>
+measuredResources:
+  services:
+    alert-service-detector: { requests: { memory: 69Mi }, limits: { memory: 116Mi } }
+    api-gateway: { requests: { memory: 213Mi }, limits: { memory: 400Mi } }
+    frontend: { requests: { memory: 23Mi }, limits: { memory: 27Mi } }
+    ingestion-service: { requests: { memory: 134Mi }, limits: { memory: 252Mi } }
+    kafka: { requests: { memory: 326Mi }, limits: { memory: 666Mi } }
+    kafka-exporter: { requests: { memory: 33Mi }, limits: { memory: 33Mi } }
+    minio: { requests: { memory: 387Mi }, limits: { memory: 407Mi } }
+    ml-service-api: { requests: { memory: 609Mi }, limits: { memory: 1233Mi } }
+    mlflow: { requests: { memory: 122Mi }, limits: { memory: 510Mi } }
+    notebook-cold-broker: { requests: { memory: 18Mi }, limits: { memory: 152Mi } }
+    notebook-hub: { requests: { memory: 180Mi }, limits: { memory: 411Mi } }
+    notebook-sql-proxy: { requests: { memory: 32Mi }, limits: { memory: 56Mi } }
+    notebook-sso: { requests: { memory: 16Mi }, limits: { memory: 20Mi } }
+    notebook-tracking-gateway: { requests: { memory: 50Mi }, limits: { memory: 129Mi } }
+    ops-agent: { requests: { memory: 108Mi }, limits: { memory: 241Mi } }
+    postgres-exporter: { requests: { memory: 36Mi }, limits: { memory: 36Mi } }
+    quota-redis: { requests: { memory: 18Mi }, limits: { memory: 20Mi } }
+    redis: { requests: { memory: 20Mi }, limits: { memory: 21Mi } }
+    redis-exporter: { requests: { memory: 29Mi }, limits: { memory: 31Mi } }
+    spark-aggregations: { requests: { memory: 1510Mi }, limits: { memory: 1934Mi } }
+    spark-streaming: { requests: { memory: 1517Mi }, limits: { memory: 1870Mi } }
+    timescaledb: { requests: { memory: 319Mi }, limits: { memory: 371Mi } }
+    zookeeper: { requests: { memory: 48Mi }, limits: { memory: 98Mi } }
+  heaps:
+    ZOOKEEPER_HEAP_OPTS: "-Xms64m -Xmx64m"
+    KAFKA_HEAP_OPTS: "-Xms256m -Xmx256m"
+    SPARK_STREAMING_DRIVER_MEMORY: "697m"
+    SPARK_AGGREGATIONS_DRIVER_MEMORY: "824m"
+    POSTGRES_SHARED_BUFFERS: "105MB"
+    POSTGRES_MAINTENANCE_WORK_MEM: "35MB"
+    POSTGRES_EFFECTIVE_CACHE_SIZE: "379MB"
+  notebookGuarantees:
+    authoring: 627Mi
+    analytics: 67Mi
+# <<< measured resources <<<

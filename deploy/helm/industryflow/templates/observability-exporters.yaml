@@ -77,8 +77,7 @@ spec:
             - name: metrics
               containerPort: {{ $ex.postgres.port }}
           resources:
-            requests: { cpu: 25m, memory: 32Mi }
-            limits: { cpu: 100m, memory: 64Mi }
+            {{- include "industryflow.resources" (dict "ctx" $root "service" "postgres-exporter" "cpu" (dict "requests" (dict "cpu" "25m") "limits" (dict "cpu" "100m"))) | nindent 12 }}
           {{- if $root.Values.tls.db.enabled }}
           volumeMounts:
             - name: db-ca
@@ -153,8 +152,7 @@ spec:
             - name: metrics
               containerPort: {{ $ex.redis.port }}
           resources:
-            requests: { cpu: 25m, memory: 32Mi }
-            limits: { cpu: 100m, memory: 64Mi }
+            {{- include "industryflow.resources" (dict "ctx" $root "service" "redis-exporter" "cpu" (dict "requests" (dict "cpu" "25m") "limits" (dict "cpu" "100m"))) | nindent 12 }}
 ---
 apiVersion: v1
 kind: Service
@@ -211,8 +209,7 @@ spec:
             - name: metrics
               containerPort: {{ $ex.kafka.port }}
           resources:
-            requests: { cpu: 25m, memory: 32Mi }
-            limits: { cpu: 100m, memory: 64Mi }
+            {{- include "industryflow.resources" (dict "ctx" $root "service" "kafka-exporter" "cpu" (dict "requests" (dict "cpu" "25m") "limits" (dict "cpu" "100m"))) | nindent 12 }}
 ---
 apiVersion: v1
 kind: Service

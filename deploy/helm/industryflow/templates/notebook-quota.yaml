@@ -1,0 +1,154 @@
+# SPDX-FileCopyrightText: 2026 The IndustryFlow contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{{- if .Values.notebookHub.enabled }}
+{{- $fullname := include "industryflow.fullname" . }}
+{{- $name := printf "%s-notebooks" $fullname }}
+{{- /*
+  The notebook pool on a cluster (ADR-0050 dec 7, ADR-0018 dec 6). The sessions run with their own
+  PriorityClass, and a ResourceQuota scoped to it bounds their memory requests together, in a namespace the
+  platform's pods share. This CronJob keeps the quota at what the nodes allocate beyond the requests of every
+  other pod, read from the live cluster (services/notebook_hub/notebook_quota.py): the chart's values know
+  neither the replicas an autoscaler runs nor the cluster's own pods, and the scheduler places by the live
+  requests. A node added raises the pool at the next run; the hub reads it as a session starts.
+*/}}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-quota
+# The class only names the sessions for their quota: no priority over other pods, and it preempts none.
+value: 0
+preemptionPolicy: Never
+globalDefault: false
+description: "IndustryFlow notebook sessions, counted by the notebook quota"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-quota
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-quota
+---
+# The nodes' allocatable memory and every pod's requests, in every namespace: what the pool is taken from.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-quota-{{ .Release.Namespace }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-quota
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-quota-{{ .Release.Namespace }}
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-quota
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-quota-{{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-quota
+    namespace: {{ .Release.Namespace }}
+---
+# The quota itself, in this namespace only, by its name; created on the first run.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-quota
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-quota
+rules:
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    resourceNames: [{{ $name | quote }}]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-quota
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-quota
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-quota
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-quota
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}-quota
+  labels:
+    {{- include "industryflow.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notebook-quota
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 240
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: notebook-quota
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ $name }}-quota
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          {{- end }}
+          containers:
+            # The hub's own image carries the module and its Kubernetes client.
+            - name: notebook-quota
+              image: {{ include "industryflow.image" (dict "registry" .Values.image.registry "image" .Values.notebookHub.hub.image "tag" .Values.image.tag "digest" .Values.notebookHub.hub.digest) | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["python", "/opt/hub/notebook_quota.py"]
+              env:
+                - name: NOTEBOOK_QUOTA_NAME
+                  value: {{ $name | quote }}
+                - name: NOTEBOOK_PRIORITY_CLASS
+                  value: {{ $name | quote }}
+                - name: NOTEBOOK_NAMESPACE
+                  value: {{ .Release.Namespace | quote }}
+              {{- if .Values.securityContext.enabled }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              {{- end }}
+              # A one-shot, outside the measured need of the long-running services (ADR-0050 dec 1).
+              resources:
+                requests: { cpu: 25m, memory: 64Mi }
+                limits: { cpu: 200m, memory: 128Mi }
+{{- end }}

@@ -52,13 +52,12 @@ spec:
               value: "2000"
             # The image's 512M default heap equals the limit below, leaving no room for the JVM.
             - name: KAFKA_HEAP_OPTS
-              value: "-Xms256m -Xmx256m"
+              value: {{ .Values.measuredResources.heaps.ZOOKEEPER_HEAP_OPTS | quote }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/zookeeper/data
           resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits: { cpu: 500m, memory: 512Mi }
+            {{- include "industryflow.resources" (dict "ctx" . "service" "zookeeper" "cpu" (dict "requests" (dict "cpu" "100m") "limits" (dict "cpu" "500m"))) | nindent 12 }}
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -128,13 +127,14 @@ spec:
               value: "true"
             - name: KAFKA_LOG_RETENTION_HOURS
               value: {{ .Values.infra.kafka.retentionHours | quote }}
+            # The broker's heap, of its measured need (ADR-0050 dec 7).
+            - name: KAFKA_HEAP_OPTS
+              value: {{ .Values.measuredResources.heaps.KAFKA_HEAP_OPTS | quote }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/kafka/data
-          {{- with .Values.infra.kafka.resources }}
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- include "industryflow.resources" (dict "ctx" . "service" "kafka" "cpu" .Values.infra.kafka.resources) | nindent 12 }}
   volumeClaimTemplates:
     - metadata:
         name: data
