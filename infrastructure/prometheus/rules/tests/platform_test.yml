@@ -385,6 +385,30 @@ tests:
               description: "1 tenant(s) have had no measurement of their stored data newer than TENANT_USAGE_STALE_SECONDS for 30m; no stored-data cap holds for them (ADR-0049 dec 8)."
               services: "tenant-usage, api-gateway"
 
+  # Overrides past a derived capacity: a dip does not fire, 15m does, per cap; the other workers' 0 is read past.
+  - interval: 1m
+    input_series:
+      - series: 'industryflow_quota_overcommitted{platform="industryflow", job="api-gateway", instance="w1", cap="readings_per_second"}'
+        values: '0x5 1x5 0x5 1x40'
+      - series: 'industryflow_quota_overcommitted{platform="industryflow", job="api-gateway", instance="w2", cap="readings_per_second"}'
+        values: '0x60'
+      - series: 'industryflow_quota_overcommitted{platform="industryflow", job="api-gateway", instance="w1", cap="notebook_environments"}'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: IndustryFlowTenantQuotaOvercommitted
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: IndustryFlowTenantQuotaOvercommitted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              cap: readings_per_second
+            exp_annotations:
+              summary: "Tenants are promised more readings_per_second than the deployment carries"
+              description: "The tenants' overrides of readings_per_second have exceeded its derived capacity for 15m; lower them through PUT /api/platform/quotas/tenants/{company_id}/readings_per_second (ADR-0049 dec 14)."
+              services: "api-gateway"
+
   # Every tenant's SQL sessions at their total: a burst does not fire, 15m of refusals does.
   - interval: 1m
     input_series:

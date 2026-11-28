@@ -5,8 +5,10 @@
 """Tenant quotas (ADR-0049): a platform superuser reads the caps and overrides one for one tenant.
 
 Each cap's platform default is the deployment's configuration (``TENANT_QUOTA_<CAP>``, read once at
-start through the shared contract, so a mistyped value stops the gateway). An override is written only
-through ``set_tenant_quota()``, which records the change in the same transaction
+start through the shared contract, so a mistyped value stops the gateway): an amount, off, or a share of
+what the overrides leave of a capacity the deployment derives (ADR-0049 dec 2, 14). An override is written
+only through ``set_tenant_quota()``, which records the change in the same transaction and refuses one that
+would take the overrides of a derived capacity past it
 (infrastructure/timescaledb/init-scripts/38-tenant-quotas.sql); the gateway holds no write privilege on
 the overrides. The alert worker carries them to ingestion and the hub within one tenant-status interval.
 
@@ -31,8 +33,10 @@ from models.user import User
 
 router = APIRouter(prefix="/api/platform/quotas", tags=["tenant quotas"])
 
-# The platform defaults, read once: a value the contract cannot read stops the gateway at import.
-DEFAULTS: Dict[str, Optional[int]] = quotas.defaults()
+# The platform defaults as configured and the derived capacities, read once: a value the contract cannot
+# read stops the gateway at import.
+SETTINGS = quotas.settings()
+CAPACITIES: Dict[str, int] = quotas.capacities()
 
 # Read and run as written by infrastructure/timescaledb/tests/test_tenant_quotas.py.
 OVERRIDES_SELECT = (
@@ -42,7 +46,13 @@ OVERRIDES_SELECT = (
 )
 QUOTA_SET = (
     "SELECT changed, value, updated_at "
-    "FROM public.set_tenant_quota(:company_id, :cap, CAST(:value AS integer), :actor_id)"
+    "FROM public.set_tenant_quota(:company_id, :cap, CAST(:value AS integer), :actor_id, "
+    "CAST(:capacity AS integer))"
+)
+# What the other tenants' overrides of a cap hold, named in a refusal at its capacity (dec 14).
+OTHERS_SELECT = (
+    "SELECT coalesce(sum(value), 0) AS others FROM public.tenant_quota_overrides "
+    "WHERE cap = :cap AND company_id <> :company_id"
 )
 USAGE_SELECT = (
     "SELECT store, bytes, measured_at FROM public.tenant_storage_usage WHERE company_id = :company_id"
@@ -54,9 +64,11 @@ CHANGES_SELECT = (
     "ORDER BY change_id DESC LIMIT :limit"
 )
 
-# The database's refusals: an unknown cap or value (22023), no such tenant (P0002).
+# The database's refusals: an unknown cap or value (22023), no such tenant (P0002), the overrides of a cap
+# past its derived capacity (53400).
 _INVALID = "22023"
 _NO_TENANT = "P0002"
+_PAST_CAPACITY = "53400"
 
 
 class Override(BaseModel):
@@ -68,8 +80,12 @@ class Override(BaseModel):
 
 
 class Quotas(BaseModel):
-    # A cap's platform default; null is off (ADR-0049 dec 6).
+    # A cap's platform default a tenant without an override takes now; null is off (ADR-0049 dec 6, 14).
     defaults: Dict[str, Optional[int]]
+    # The caps whose default is a share, as a percentage of what the overrides leave of the capacity.
+    shares: Dict[str, int] = {}
+    # The capacities the deployment derives (ADR-0050 dec 4); a cap absent has none.
+    capacities: Dict[str, int] = {}
     overrides: List[Override]
 
 
@@ -137,10 +153,21 @@ async def _overrides(db: AsyncSession, company_id: Optional[UUID]) -> List[Overr
     return [Override(**row) for row in rows]
 
 
+def _defaults(every: List[Override]) -> Dict[str, Optional[int]]:
+    """The default a tenant without an override takes now: an amount or off as configured, or its share of
+    what every tenant's overrides leave of the cap's capacity (dec 14)."""
+    reserved: Dict[str, int] = {}
+    for o in every:
+        reserved[o.cap] = reserved.get(o.cap, 0) + o.value
+    return {cap: quotas.resolve(SETTINGS[cap], CAPACITIES.get(cap), reserved.get(cap, 0)) for cap in quotas.CAPS}
+
+
 @router.get("", response_model=Quotas)
 async def list_quotas(user: User = Depends(require_superuser), db: AsyncSession = Depends(get_db)):
-    """The platform defaults and every tenant's overrides."""
-    return Quotas(defaults=DEFAULTS, overrides=await _overrides(db, None))
+    """The platform defaults, the shares and capacities they come from, and every tenant's overrides."""
+    every = await _overrides(db, None)
+    return Quotas(defaults=_defaults(every), overrides=every, capacities=CAPACITIES,
+                  shares={cap: s.percent for cap, s in SETTINGS.items() if isinstance(s, quotas.Share)})
 
 
 @router.get("/tenants/{company_id}", response_model=TenantQuotas)
@@ -148,11 +175,13 @@ async def tenant_quotas(company_id: UUID, user: User = Depends(require_superuser
                         db: AsyncSession = Depends(get_db)):
     """The caps that hold for one tenant: each default, override and the effective value; and its data in
     each store as last measured."""
-    held = {o.cap: o.value for o in await _overrides(db, company_id)}
+    every = await _overrides(db, None)
+    defaults = _defaults(every)
+    held = {o.cap: o.value for o in every if o.company_id == company_id}
     usage = (await db.execute(text(USAGE_SELECT), {"company_id": company_id})).mappings().all()
     return TenantQuotas(company_id=company_id, caps={
-        cap: TenantCap(default=DEFAULTS[cap], override=held.get(cap),
-                       effective=quotas.effective(DEFAULTS[cap], held.get(cap)))
+        cap: TenantCap(default=defaults[cap], override=held.get(cap),
+                       effective=quotas.effective(defaults[cap], held.get(cap)))
         for cap in quotas.CAPS
     }, stored={row["store"]: Stored(bytes=row["bytes"], measured_at=row["measured_at"]) for row in usage})
 
@@ -160,11 +189,14 @@ async def tenant_quotas(company_id: UUID, user: User = Depends(require_superuser
 @router.put("/tenants/{company_id}/{cap}", response_model=SetResult)
 async def set_quota(company_id: UUID, cap: str, body: SetQuota, user: User = Depends(require_superuser),
                     db: AsyncSession = Depends(get_db)):
-    """Set the tenant's override of ``cap``, or clear it with null; an unchanged value records nothing."""
+    """Set the tenant's override of ``cap``, or clear it with null; an unchanged value records nothing. An
+    override that would take every tenant's overrides of a derived capacity past it is refused (dec 14)."""
     cap = _cap(cap)
+    capacity = CAPACITIES.get(cap)
     try:
         row = (await db.execute(text(QUOTA_SET), {
             "company_id": company_id, "cap": cap, "value": body.value, "actor_id": UUID(str(user.id)),
+            "capacity": capacity,
         })).mappings().one()
         await db.commit()
     except DBAPIError as exc:
@@ -174,9 +206,16 @@ async def set_quota(company_id: UUID, cap: str, body: SetQuota, user: User = Dep
             raise HTTPException(status_code=404, detail=f"No tenant {company_id}")
         if code == _INVALID:
             raise HTTPException(status_code=422, detail="Not a tenant quota or not a value it takes")
+        if code == _PAST_CAPACITY:
+            others = int((await db.execute(text(OTHERS_SELECT), {"cap": cap, "company_id": company_id}))
+                         .mappings().one()["others"])
+            raise HTTPException(status_code=409, detail=(
+                f"The deployment carries {capacity} for {cap}; the other tenants' overrides hold {others}, "
+                f"so {max(capacity - others, 0)} is left"))
         raise
+    defaults = _defaults(await _overrides(db, None))
     return SetResult(company_id=company_id, cap=cap, changed=row["changed"], override=row["value"],
-                     effective=quotas.effective(DEFAULTS[cap], row["value"]), updated_at=row["updated_at"])
+                     effective=quotas.effective(defaults[cap], row["value"]), updated_at=row["updated_at"])
 
 
 @router.get("/tenants/{company_id}/changes", response_model=List[Change])

@@ -90,11 +90,44 @@ def tenant():
         conn.close()
 
 
-def _set(company_id, cap, value, who):
-    # The route's statement and binding: the tenant and actor as UUIDs, the value an int or None.
+def _set(company_id, cap, value, who, capacity=None):
+    # The route's statement and binding: the tenant and actor as UUIDs, the value an int or None, the
+    # capacity an int or None (none derived).
     [row] = service_sql.run(service_sql.statement(ROUTER, "QUOTA_SET"),
-                            {"company_id": company_id, "cap": cap, "value": value, "actor_id": who}, role=GATEWAY)
+                            {"company_id": company_id, "cap": cap, "value": value, "actor_id": who,
+                             "capacity": capacity}, role=GATEWAY)
     return row
+
+
+def _others(company_id, cap):
+    [row] = service_sql.run(service_sql.statement(ROUTER, "OTHERS_SELECT"),
+                            {"company_id": company_id, "cap": cap}, role=GATEWAY)
+    return int(row["others"])
+
+
+def test_the_overrides_of_a_derived_capacity_never_exceed_it(tenant):
+    """ADR-0049 dec 14: an override that would take the overrides of every tenant past the capacity is
+    refused and sets nothing; one that is lowered is taken even past it, so a shrunk capacity can be met."""
+    _cur, company_id, who = tenant
+    cap = "readings_per_second"
+    others = _others(company_id, cap)
+    capacity = others + 100
+    assert _set(company_id, cap, 100, who, capacity)["changed"] is True
+    with pytest.raises(Exception) as refused:
+        _set(company_id, cap, 101, who, capacity)
+    assert service_sql.sqlstate(refused.value) == "53400"
+    assert _overrides(company_id) == {cap: 100}
+    # The resources shrank: lowering is taken although the overrides still exceed the capacity, raising is not.
+    assert _set(company_id, cap, 60, who, others + 10)["value"] == 60
+    with pytest.raises(Exception) as refused:
+        _set(company_id, cap, 61, who, others + 10)
+    assert service_sql.sqlstate(refused.value) == "53400"
+    # Where no capacity is derived, an amount holds as before.
+    assert _set(company_id, cap, 1000, who)["value"] == 1000
+    # The gateway's platform metric reads every tenant's overrides of the cap together, as its role.
+    reserved = service_sql.statement("services/api_gateway/messaging/quota_metrics.py", "RESERVED_SELECT")
+    rows = {r["cap"]: int(r["reserved"]) for r in service_sql.run(reserved, {}, role=GATEWAY)}
+    assert rows[cap] == others + 1000
 
 
 def _overrides(company_id):
@@ -168,7 +201,7 @@ def test_the_alert_worker_reads_the_overrides_with_its_own_statement(tenant):
     (GATEWAY, "DELETE FROM public.tenant_quota_changes"),
     (WORKER, "UPDATE public.tenant_quota_overrides SET value = 5"),
     (WORKER, "SELECT updated_by FROM public.tenant_quota_overrides"),
-    (WORKER, "SELECT * FROM public.set_tenant_quota(gen_random_uuid(), 'readings_per_second', 5, gen_random_uuid())"),
+    (WORKER, "SELECT * FROM public.set_tenant_quota(gen_random_uuid(), 'readings_per_second', 5, gen_random_uuid(), NULL)"),
 ])
 def test_no_runtime_role_writes_the_overrides_or_their_record_directly(tenant, role, sql):
     cur, _company_id, _who = tenant

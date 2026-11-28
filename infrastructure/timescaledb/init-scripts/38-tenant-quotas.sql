@@ -8,7 +8,9 @@
 -- Purpose: A platform superuser overrides a cap's platform default for one tenant through the API
 --          gateway, which writes only through set_tenant_quota(): it accepts a known cap and a
 --          whole number, or NULL to return the tenant to the default, changes the override and
---          appends the change to public.tenant_quota_changes in one transaction (dec 2). The gateway
+--          appends the change to public.tenant_quota_changes in one transaction (dec 2); where the
+--          deployment derives the cap's capacity, every tenant's override of it together stays within
+--          it (dec 14). The gateway
 --          holds no write privilege on either table; the alert worker reads the overrides to carry
 --          them on the tenant-status stream. The deletion job removes a tenant's overrides with its
 --          database objects (26, dec 7); the record of changes stays, as the lifecycle record does.
@@ -83,11 +85,19 @@ COMMENT ON TABLE public.tenant_quota_changes IS
 -- =============================================================================
 
 -- Sets (p_value a whole number) or clears (p_value NULL) a tenant's override. Returns whether it
--- changed and the override after the call; a call that changes nothing records nothing. Refusals:
+-- changed and the override after the call; a call that changes nothing records nothing. p_capacity is
+-- the cap's capacity the deployment derives (dec 14; NULL where it derives none): every tenant's
+-- override of the cap together never exceeds it, counted under a lock per cap, so two calls cannot each
+-- take the last part. An override that is lowered is never refused, so a capacity that shrank below
+-- the overrides already set can be brought back under it. Refusals:
 --   22004 null_value_not_allowed   no actor
 --   22023 invalid_parameter_value  an unknown cap, or a value out of range
 --   P0002 no_data_found            no such tenant, or one already deleted
-CREATE OR REPLACE FUNCTION public.set_tenant_quota(p_company_id UUID, p_cap TEXT, p_value INTEGER, p_actor_id UUID)
+--   53400 configuration_limit_exceeded  the overrides of the cap would exceed its capacity
+-- The signature before the capacity: dropped, so no caller sets an override past it.
+DROP FUNCTION IF EXISTS public.set_tenant_quota(UUID, TEXT, INTEGER, UUID);
+CREATE OR REPLACE FUNCTION public.set_tenant_quota(p_company_id UUID, p_cap TEXT, p_value INTEGER, p_actor_id UUID,
+                                                   p_capacity INTEGER)
 RETURNS TABLE (changed BOOLEAN, value INTEGER, updated_at TIMESTAMPTZ)
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -96,6 +106,7 @@ AS $$
 #variable_conflict use_column
 DECLARE
     v_current INTEGER;
+    v_others BIGINT;
 BEGIN
     PERFORM public.company_provisioning_guard();
     IF p_actor_id IS NULL THEN
@@ -113,11 +124,24 @@ BEGIN
         RAISE EXCEPTION 'company % does not exist', p_company_id USING ERRCODE = 'P0002';
     END IF;
 
+    IF p_capacity IS NOT NULL THEN
+        -- One writer of the cap's overrides at a time, so their sum is counted against what is committed.
+        PERFORM pg_advisory_xact_lock(hashtext('tenant_quota_capacity'), hashtext(p_cap));
+    END IF;
     SELECT o.value INTO v_current FROM public.tenant_quota_overrides o
     WHERE o.company_id = p_company_id AND o.cap = p_cap FOR UPDATE;
     IF v_current IS NOT DISTINCT FROM p_value THEN
         RETURN QUERY SELECT false, v_current, now();
         RETURN;
+    END IF;
+    IF p_capacity IS NOT NULL AND p_value IS NOT NULL AND p_value > coalesce(v_current, 0) THEN
+        SELECT coalesce(sum(o.value), 0) INTO v_others FROM public.tenant_quota_overrides o
+        WHERE o.cap = p_cap AND o.company_id <> p_company_id;
+        IF v_others + p_value > p_capacity THEN
+            RAISE EXCEPTION 'the overrides of % would exceed its capacity of %: the other tenants'' hold %, % is left',
+                p_cap, p_capacity, v_others, greatest(p_capacity - v_others, 0)
+                USING ERRCODE = '53400';
+        END IF;
     END IF;
 
     IF p_value IS NULL THEN
@@ -134,7 +158,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.set_tenant_quota(UUID, TEXT, INTEGER, UUID) IS
+COMMENT ON FUNCTION public.set_tenant_quota(UUID, TEXT, INTEGER, UUID, INTEGER) IS
     'Sets or clears a tenant''s quota override and records the change (SECURITY DEFINER, ADR-0049 dec 2)';
 
 -- =============================================================================
@@ -224,8 +248,8 @@ REVOKE ALL ON FUNCTION public.record_tenant_storage_usage(UUID, TEXT, BIGINT) FR
 GRANT EXECUTE ON FUNCTION public.tenant_database_bytes() TO tenant_usage_user;
 GRANT EXECUTE ON FUNCTION public.record_tenant_storage_usage(UUID, TEXT, BIGINT) TO tenant_usage_user;
 
-REVOKE ALL ON FUNCTION public.set_tenant_quota(UUID, TEXT, INTEGER, UUID) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.set_tenant_quota(UUID, TEXT, INTEGER, UUID) TO api_gateway_user;
+REVOKE ALL ON FUNCTION public.set_tenant_quota(UUID, TEXT, INTEGER, UUID, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.set_tenant_quota(UUID, TEXT, INTEGER, UUID, INTEGER) TO api_gateway_user;
 
 DO $$
 BEGIN

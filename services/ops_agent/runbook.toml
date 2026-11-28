@@ -133,6 +133,12 @@ handling = "`docker compose --profile tenant-usage run --rm tenant-usage` and re
 follows = "ADR-0049 dec 8"
 
 [[alert]]
+name = "IndustryFlowTenantQuotaOvercommitted"
+fires_when = "The tenants' overrides of a cap have exceeded the capacity the host derives for it for 15m, as after its memory, swap or processors shrank"
+handling = "`GET /api/platform/quotas` (superuser) shows the capacities and every override; lower overrides with `PUT /api/platform/quotas/tenants/{company_id}/{cap}` until they fit; no tenant is stopped meanwhile"
+follows = "ADR-0049 dec 14"
+
+[[alert]]
 name = "IndustryFlowNotebookSqlSessionsFull"
 fires_when = "`notebook-sql-proxy` has refused SQL sessions for 15m because every tenant's together held its replica's part of `NOTEBOOK_SQL_SESSIONS_TOTAL`"
 handling = "`GET /api/platform/quotas/refusals` (superuser) shows which tenants hold sessions at their cap; lower a tenant's `sql_sessions`, or raise `NOTEBOOK_SQL_SESSIONS_TOTAL` and `max_connections` in `postgresql.conf` by as much"

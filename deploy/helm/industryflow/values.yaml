@@ -643,7 +643,8 @@ config:
   SIGN_IN_THROTTLE: "off"
   # Tenant quotas (ADR-0049): each cap's platform default, a whole number or "off"; empty takes the
   # shipped default (250 readings/s, 3 notebook environments, 5 SQL sessions, 300 s per SQL statement,
-  # 60 s per idle SQL transaction). A superuser overrides one for a tenant through
+  # 60 s per idle SQL transaction). A cluster derives no capacity (ADR-0050 Deferred), so a share
+  # ("50%") is refused here: the readings and environments take amounts. A superuser overrides one for a tenant through
   # PUT /api/platform/quotas/tenants/{company_id}/{cap}. Read by ingestion, the hub, the SQL proxy and
   # the API gateway; a value they cannot read stops them.
   TENANT_QUOTA_READINGS_PER_SECOND: ""

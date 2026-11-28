@@ -193,6 +193,18 @@ groups:
           summary: "Stored-data caps are not enforced: tenants have no fresh storage measurement"
           description: "{{ $value }} tenant(s) have had no measurement of their stored data newer than TENANT_USAGE_STALE_SECONDS for 30m; no stored-data cap holds for them (ADR-0049 dec 8)."
           services: "tenant-usage, api-gateway"
+      - alert: IndustryFlowTenantQuotaOvercommitted
+        # The tenants' overrides of a cap exceed the capacity the deployment derives for it (ADR-0049
+        # dec 14): its resources shrank below what was promised. No tenant is stopped; a superuser lowers the
+        # overrides. Every gateway worker reports it from the database, so read from the largest.
+        expr: max by (cap) (industryflow_quota_overcommitted{platform="industryflow"}) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tenants are promised more {{ $labels.cap }} than the deployment carries"
+          description: "The tenants' overrides of {{ $labels.cap }} have exceeded its derived capacity for 15m; lower them through PUT /api/platform/quotas/tenants/{company_id}/{{ $labels.cap }} (ADR-0049 dec 14)."
+          services: "api-gateway"
       - alert: IndustryFlowNotebookSqlSessionsFull
         # Every tenant's SQL sessions together reached the notebook share of the database's connections
         # (ADR-0049 dec 10): a sizing question, as a tenant held at its cap is. Read from the largest

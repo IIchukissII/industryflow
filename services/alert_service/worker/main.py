@@ -268,6 +268,10 @@ class AlertService:
                 defaults={quotas.STORED_DATABASE_GIB: config.TENANT_QUOTA_STORED_DATABASE_GIB,
                           quotas.STORED_OBJECT_GIB: config.TENANT_QUOTA_STORED_OBJECT_GIB},
                 stale_seconds=config.TENANT_USAGE_STALE_SECONDS),
+            # The caps each tenant takes its share of a derived capacity of (ADR-0049 dec 14).
+            tenant_status_publisher.DerivedCaps(
+                settings=config.TENANT_QUOTA_DERIVED_SETTINGS,
+                capacities=config.TENANT_QUOTA_CAPACITIES),
         ))
 
         logger.info("Alert Detection Service is running")

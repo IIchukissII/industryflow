@@ -19,6 +19,11 @@ service cannot reach (ADR-0033 dec 3). Both expire as a status goes stale, so a 
 tenant to the platform defaults; a cleared override's copy is deleted on the next tick. A round that
 cannot read the overrides sends the last ones read: suspension must not wait on a quota.
 
+For a cap with a derived capacity (ADR-0049 dec 14), a tenant's status carries its effective cap, the
+override or else its default share of what every override leaves of the capacity, so ingestion and the
+hub enforce the share as they enforce an override; one whose status goes stale takes its share of the
+whole capacity until the next round.
+
 Each status also names the stored-data caps its tenant is over (ADR-0049 dec 11, 12): the tenant's last
 measurement in each store against the cap that holds for it. Ingestion refuses that tenant's readings
 from the stream; the tracking gateway, off the broker, refuses its artifact writes from an expiring copy
@@ -59,6 +64,30 @@ class StoredCaps:
     defaults: dict = field(default_factory=lambda: {cap: quotas.SHIPPED_DEFAULTS[cap]
                                                     for cap in quotas.STORED_CAPS.values()})
     stale_seconds: float = quotas.USAGE_STALE_SHIPPED
+
+
+@dataclass(frozen=True)
+class DerivedCaps:
+    """The caps with a derived capacity, as configured (an amount, off or a share), and the capacities the
+    deployment derives (ADR-0049 dec 14). The worker's main passes its configuration's; unset, none derived."""
+
+    settings: dict = field(default_factory=lambda: {cap: quotas.SHIPPED_DEFAULTS[cap] for cap in quotas.DERIVED})
+    capacities: dict = field(default_factory=dict)
+
+
+def effective(overrides: dict, tenants, derived: DerivedCaps) -> dict:
+    """``{company_id: {cap: value}}``: each tenant's overrides, with its effective cap of every cap whose
+    default is a share of a derived capacity in place of that default. An amount or off holds as the
+    enforcers configure it, as before."""
+    out = {company_id: dict(overrides.get(company_id, {})) for company_id in tenants}
+    for cap, setting in derived.settings.items():
+        if not isinstance(setting, quotas.Share):
+            continue
+        held = {company_id: caps[cap] for company_id, caps in overrides.items() if cap in caps}
+        for company_id, value in quotas.effective_caps(setting, derived.capacities.get(cap), held,
+                                                       tenants).items():
+            out[company_id][cap] = value
+    return out
 
 
 async def registry_usage(pool) -> dict:
@@ -118,9 +147,10 @@ _last_overrides: dict = {}
 _copied: set = set()
 
 
-async def publish_once(pool, send, topic: str, store=None, stored: StoredCaps | None = None) -> int:
-    """Send one status message per tenant, with its overrides, and copy the overrides to ``store`` for
-    the hub; returns how many statuses were sent."""
+async def publish_once(pool, send, topic: str, store=None, stored: StoredCaps | None = None,
+                       derived: DerivedCaps | None = None) -> int:
+    """Send one status message per tenant, with its overrides and its effective caps of a derived capacity,
+    and copy them to ``store`` for the hub; returns how many statuses were sent."""
     global _last_overrides
     status = await registry_status(pool)
     try:
@@ -137,12 +167,13 @@ async def publish_once(pool, send, topic: str, store=None, stored: StoredCaps | 
     stored = stored or StoredCaps()
     over = {company_id: over_caps(held, overrides.get(company_id, {}), stored)
             for company_id, held in usage.items() if company_id in registered}
+    caps = effective(overrides, registered | set(overrides), derived or DerivedCaps())
     for company_id, active in status:
-        key, value = tenant_status.encode(company_id, active, overrides.get(company_id),
+        key, value = tenant_status.encode(company_id, active, caps.get(company_id) or None,
                                           over.get(company_id, ()))
         await send(topic, value=value, key=key)
     if store is not None:
-        await _copy_for_the_hub(store, overrides, over)
+        await _copy_for_the_hub(store, caps, over)
     return len(status)
 
 
@@ -166,12 +197,13 @@ async def _copy_for_the_hub(store, overrides: dict, over: dict | None = None) ->
         logger.error("tenant quota overrides not copied for the hub: %s", e)
 
 
-async def run(pool, send, topic: str, interval: float, store=None, stored: StoredCaps | None = None):
+async def run(pool, send, topic: str, interval: float, store=None, stored: StoredCaps | None = None,
+              derived: DerivedCaps | None = None):
     """Publish the whole registry every ``interval`` seconds. A failed round is logged and retried on
     the next tick: the writers refuse a suspended tenant from the registry meanwhile."""
     while True:
         try:
-            count = await publish_once(pool, send, topic, store, stored)
+            count = await publish_once(pool, send, topic, store, stored, derived)
             logger.debug("published the status of %d tenants to %s", count, topic)
         except asyncio.CancelledError:
             raise

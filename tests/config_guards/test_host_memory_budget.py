@@ -29,6 +29,8 @@ ENV_EXAMPLE = (ROOT / ".env.example").read_text()
 # A host large enough that the whole budget is written.
 LARGE_HOST_MIB = 64 * 1024
 LARGE_SWAP_MIB = 64 * 1024
+# The reference host's processors.
+CPUS = 4
 
 _spec = importlib.util.spec_from_file_location("host_memory", ROOT / "scripts" / "host-memory.py")
 host_memory = importlib.util.module_from_spec(_spec)
@@ -81,7 +83,7 @@ def test_compose_asks_for_exactly_the_variables_the_script_writes():
     """Both sides: a variable compose asks for and the script does not write stops every compose command; one
     the script writes and compose never passes on (the hub's pool) leaves its reader without it."""
     asked = set(re.findall(r"\$\{([A-Z0-9_]+):\?run scripts/host-memory\.py\}", COMPOSE_TEXT))
-    written = set(host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB))
+    written = set(host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, processors=CPUS))
     assert asked == written, f"asked, not written: {sorted(asked - written)}; written, not asked: {sorted(written - asked)}"
 
 
@@ -119,9 +121,9 @@ def test_the_hub_and_the_pool_are_given_the_pool_and_each_guarantee():
     cgroup gets its limits from the same values before the hub starts."""
     env = COMPOSE["notebook-hub"]["environment"]
     hub = (ROOT / "services" / "notebook_hub" / "jupyterhub_config.py").read_text()
-    written = [k for k in host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB)
+    written = [k for k in host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, processors=CPUS)
                if k.startswith("NOTEBOOK_") and not k.endswith(("_MEM_LIMIT", "_MEMSWAP_LIMIT"))]
-    assert len(written) == 3 + len(NEED["sessions"])
+    assert len(written) == 4 + len(NEED["sessions"])
     for name in written:
         assert env.get(name) == "${%s:?run scripts/host-memory.py}" % name, name
     assert '_mib_env("NOTEBOOK_MEMORY_SHARE_MIB")' in hub and '_mib_env("NOTEBOOK_SWAP_SHARE_MIB")' in hub
@@ -144,8 +146,8 @@ def test_every_notebook_profile_has_a_measured_session():
 def test_a_larger_host_gives_the_pool_what_it_adds():
     """ADR-0050 dec 4: the platform's limits follow its measured need, not the host; a larger host gives the
     pool every MiB it adds, and the guarantees stay the measured ones."""
-    small = host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB)
-    large = host_memory.budget(NEED, 2 * LARGE_HOST_MIB, LARGE_SWAP_MIB)
+    small = host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, processors=CPUS)
+    large = host_memory.budget(NEED, 2 * LARGE_HOST_MIB, LARGE_SWAP_MIB, processors=CPUS)
     fixed = [k for k in small if k.endswith(("_MEM_LIMIT", "_GUARANTEE_MIB"))]
     assert {k: small[k] for k in fixed} == {k: large[k] for k in fixed}, "limits grew with the host"
     added = int(large["NOTEBOOK_MEMORY_SHARE_MIB"]) - int(small["NOTEBOOK_MEMORY_SHARE_MIB"])
@@ -158,8 +160,8 @@ def test_a_host_without_room_for_one_session_is_refused_naming_what_it_lacks():
     base = limits + host_memory.reserve_mib(NEED)
     least = host_memory.guarantees(NEED)["authoring"]
     with pytest.raises(ValueError, match="it lacks 1 MiB of memory"):
-        host_memory.budget(NEED, base + least - 1, LARGE_SWAP_MIB)
-    assert host_memory.budget(NEED, base + least, LARGE_SWAP_MIB)["NOTEBOOK_MEMORY_SHARE_MIB"] == str(least)
+        host_memory.budget(NEED, base + least - 1, LARGE_SWAP_MIB, processors=CPUS)
+    assert host_memory.budget(NEED, base + least, LARGE_SWAP_MIB, processors=CPUS)["NOTEBOOK_MEMORY_SHARE_MIB"] == str(least)
 
 
 def test_without_swap_the_cold_pages_sit_in_memory():
@@ -177,7 +179,7 @@ def test_without_swap_the_cold_pages_sit_in_memory():
 def test_a_sessions_guarantee_is_its_measured_resident_need():
     """ADR-0050 dec 5: the resident part times the headroom, at least the margin over it; no size."""
     headroom, margin = float(NEED["headroom"]), int(NEED["margin_mib"])
-    out = host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB)
+    out = host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, processors=CPUS)
     for name, s in NEED["sessions"].items():
         res = int(s["resident_mib"])
         assert out[host_memory.session_var(name)] == str(int(max(res * headroom, res + margin))), name
@@ -185,18 +187,51 @@ def test_a_sessions_guarantee_is_its_measured_resident_need():
 
 def test_the_pools_swap_is_what_the_platforms_cold_parts_leave():
     held = sum(b - m for m, b in host_memory.platform_limits(NEED, LARGE_SWAP_MIB).values())
-    out = host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB)
+    out = host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, processors=CPUS)
     assert int(out["NOTEBOOK_SWAP_SHARE_MIB"]) == LARGE_SWAP_MIB - held
-    assert host_memory.budget(NEED, LARGE_HOST_MIB, 0)["NOTEBOOK_SWAP_SHARE_MIB"] == "0"
+    assert host_memory.budget(NEED, LARGE_HOST_MIB, 0, processors=CPUS)["NOTEBOOK_SWAP_SHARE_MIB"] == "0"
 
 
 def test_the_pools_cgroup_follows_dockers_driver():
     """Under systemd a slice, which systemd nests by its name; under cgroupfs a path of its own."""
-    assert host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, "systemd")["NOTEBOOK_CGROUP_PARENT"].endswith(".slice")
-    assert host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, "cgroupfs")["NOTEBOOK_CGROUP_PARENT"].startswith("/")
+    assert host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, "systemd", processors=CPUS)["NOTEBOOK_CGROUP_PARENT"].endswith(".slice")
+    assert host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, "cgroupfs", processors=CPUS)["NOTEBOOK_CGROUP_PARENT"].startswith("/")
+
+
+def test_the_ingest_capacity_grows_with_the_processors_up_to_the_measured_rate():
+    """ADR-0050 dec 4: processors times the rate measured per processor; above the highest measured rate
+    nothing is measured, so no capacity is derived past it."""
+    per = int(NEED["ingest"]["readings_per_second_per_cpu"])
+    top = int(NEED["reference"]["readings_per_second"])
+    assert isinstance(NEED["ingest"]["measured"], datetime.date) and per > 0
+    for processors in (1, 2, CPUS, 64):
+        out = host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, processors=processors)
+        assert out["INGEST_CAPACITY_READINGS_PER_SECOND"] == str(min(processors * per, top)), processors
+
+
+def test_the_session_capacity_is_the_pool_over_one_authoring_guarantee():
+    """ADR-0050 dec 4, 5: the sessions the pool holds at once; a larger host holds more."""
+    least = host_memory.guarantees(NEED)["authoring"]
+    small = host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, processors=CPUS)
+    large = host_memory.budget(NEED, 2 * LARGE_HOST_MIB, LARGE_SWAP_MIB, processors=CPUS)
+    for out in (small, large):
+        assert out["NOTEBOOK_SESSION_CAPACITY"] == str(int(out["NOTEBOOK_MEMORY_SHARE_MIB"]) // least)
+    assert int(large["NOTEBOOK_SESSION_CAPACITY"]) > int(small["NOTEBOOK_SESSION_CAPACITY"]) >= 1
+
+
+def test_the_services_that_hold_a_tenant_to_a_share_get_its_capacity():
+    """Both sides: every service that reads a derived cap's default reads the capacity it is a share of, or
+    a share would be refused at its start (ADR-0049 dec 14)."""
+    from industryflow_contracts import quotas
+
+    for name, service in COMPOSE.items():
+        env = service.get("environment") or {}
+        for cap, capacity in quotas.DERIVED.items():
+            if quotas.ENV[cap] in env:
+                assert env.get(capacity) == "${%s:?run scripts/host-memory.py}" % capacity, (name, capacity)
 
 
 def test_the_environment_template_sets_no_budget_variable():
-    written = set(host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB))
+    written = set(host_memory.budget(NEED, LARGE_HOST_MIB, LARGE_SWAP_MIB, processors=CPUS))
     set_there = {line.split("=", 1)[0] for line in ENV_EXAMPLE.splitlines() if re.match(r"^[A-Z0-9_]+=", line)}
     assert not written & set_there, f".env.example sets budget variables: {sorted(written & set_there)}"
