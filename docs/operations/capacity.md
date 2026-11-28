@@ -63,7 +63,7 @@ path keeps its latency, and Kafka holds what Spark has not processed yet.
 
 ## Memory
 
-The platform's need per ingest tier, the source of `deploy/host-memory.toml` (manual: Getting started, Memory budget).
+The platform's need, the source of `deploy/host-memory.toml` (manual: Getting started, Resource budget).
 Measured 2026-11-26 on the 8 GB node (7 765 MiB, 8 191 MiB swap), every container under a 4 GiB memory
 limit and an 8 GiB memory-and-swap limit, so what is measured is the need and not a limit. Every
 container's untouched pages were reclaimed once before the windows, so a page counts as resident only
@@ -77,12 +77,12 @@ when a window uses it.
 | Journeys | each profile's [session journey](#a-notebook-session), then `scripts/box-e2e.sh` (40 passed), 250/s beside them, 23 min | | 6 025 MiB | 0 beyond the tenant's own cap |
 | Start | every service recreated, sampled each second, 7 min | | | |
 
-A tier is each service's peak over the rest, its rate and the journeys, so the journeys decide both
-measured tiers: 6 072 MiB resident and 3 220 MiB cold at 250/s, 6 077 and 3 219 at 500/s. The platform's
-budget at either tier, with the headroom, the margins, the probes and the reserve, is 7 824 MiB of memory:
-more than the 8 GB node has. The tiers, every service's resident and cold need, the sessions, the reserve
-and the probe are recorded in `deploy/host-memory.toml`, each with its measurement; this page holds how
-they are measured.
+A service's need is its peak over the rest, the reference rate and the journeys, so the journeys decide
+it: 6 072 MiB resident and 3 220 MiB cold over every service at 250/s, 6 077 and 3 219 at 500/s, the
+reference rate. The platform's budget, with the headroom, the margins, the probes and the reserve, is
+7 824 MiB of memory; with one authoring session's guarantee, more than the 8 GB node has, its floor
+(ADR-0050 dec 6). Every service's resident and cold need, the sessions, the reserve and the probe are
+recorded in `deploy/host-memory.toml`, each with its measurement; this page holds how they are measured.
 
 | Part | Counted from cgroup v2 | Must sit in |
 |---|---|---|
@@ -96,7 +96,7 @@ memory. Sampled every 10 s, a start's peak is missed: the start is sampled each 
 
 Load raises the resident need by about 0.7 GB between rest and 500/s, most of it in the two Spark jobs.
 The journeys raise it by 1.4 GB more: `ml-service-api` (+528 MiB, training and inference), `timescaledb`
-(+195 MiB), `notebook-hub`, `mlflow`, `ops-agent` and `prometheus`; so a tier always includes them.
+(+195 MiB), `notebook-hub`, `mlflow`, `ops-agent` and `prometheus`; so the need always includes them.
 Outside the containers: Docker, containerd and the kernel's memory outside every cgroup, and the backup
 as the one-shot job beside the platform.
 
@@ -104,24 +104,23 @@ A healthcheck that runs Python starts an interpreter in the container every inte
 sampler: it is measured on its own, as `docker exec <container> python -c "import resource, urllib.request;
 print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)"` (MiB).
 
-### Measure a tier
+### Measure the need
 
 | Step | Command |
 |---|---|
 | Loose limits (keeps the heaps) | `python3 scripts/host-memory.py`, then in the block set every `*_MEM_LIMIT` to `4096m`, every `*_MEMSWAP_LIMIT` to `8192m` (a memory-and-swap limit equal to the memory limit allows no swap: the cold pages stay in memory and the host thrashes) and `NOTEBOOK_MEMORY_SHARE_MIB` to one that admits the journeys' sessions; `docker compose` with every profile the host runs (`--profile notebooks --profile ops-agent`) `up -d`; check each container's `HostConfig.Memory` and `HostConfig.MemorySwap` |
 | Start the sampler (Docker host) | `bash tests/performance/sample_memory.sh /tmp/memory.log &` |
 | Reclaim | as root, for every container: `echo 8G > /sys/fs/cgroup/system.slice/docker-<id>.scope/memory.reclaim` (an I/O error means it reclaimed less than asked); the windows start after it |
-| Windows | rest 5 min; the tier's rate for 5 min ([reproduce](#reproduce)); each profile's [session journey](#a-notebook-session), its sessions stopped, then `scripts/box-e2e.sh`, with ingest beside them (sessions left running take the share the suite's own need) |
+| Windows | rest 5 min; the reference rate for 5 min ([reproduce](#reproduce)); each profile's [session journey](#a-notebook-session), its sessions stopped, then `scripts/box-e2e.sh`, with ingest beside them (sessions left running take the share the suite's own need) |
 | Start | before the reclaim: a second sampler at 1 s (`sample_memory.sh <log> 1`), then `up -d --force-recreate` of every long-running service; 5 min |
-| The tier's lines | `python3 tests/performance/memory_need.py <logs joined> <start>:<end> … --start <start>:<end> --tier <rate>/s --readings-per-second <rate> --host-mib <MemTotal MiB>` |
+| The need's lines | `python3 tests/performance/memory_need.py <logs joined> <start>:<end> … --start <start>:<end> --readings-per-second <rate> --host-mib <MemTotal MiB>` |
 | Restore | `python3 scripts/host-memory.py`; the same `up -d` |
 
 ### A notebook session
 
 A session's need is measured per profile on the reference journey (ADR-0050 dec 5), with the platform
-under the tier's loose limits and the hub given a share that admits it. Its resident part times the
-headroom is the least a session's memory limit may be, below its profile's size (authoring 4096 MiB,
-analytics 1024 MiB); its cold part times the headroom is its swap.
+under loose limits and the hub given a pool that admits it. Its resident part times the headroom is what
+the notebook pool guarantees a session of the profile; it has no size, and may grow into the pool.
 
 | Profile | Reference journey | Resident | Cold |
 |---|---|---|---|
@@ -148,7 +147,7 @@ the session may hold, not toward what it keeps in memory.
 | Option | Effect |
 |---|---|
 | More cores on the host | Raises the CPU ceiling; the ingest path and Spark scale with cores |
-| More memory | The platform needs 7 824 MiB of memory at either measured tier; what a host has beyond it is the notebook share ([memory](#memory)): a 9 GB host about 1.4 GB, below one authoring session (4096 MiB), so it admits none; a 12 GB host about 4.4 GB, one authoring session. Each further 4 GiB admits one more authoring session, or four analytics ones. With enough swap, the platform's own need does not grow with the host |
+| More memory | The platform needs 7 824 MiB of memory; what a host has beyond it is the notebook pool ([memory](#memory)), which a session needs 627 MiB of (authoring) or 72 (analytics) to start: a 9 GB host about 1.4 GB, a 12 GB host about 4.4 GB. A session may grow into the whole pool, so a larger host gives the sessions more room and room for more of them. With enough swap, the platform's own need does not grow with the host |
 | Kubernetes (ADR-0009) | Ingestion, edge and Spark scale out (ADR-0009) |
 
 ## Reproduce

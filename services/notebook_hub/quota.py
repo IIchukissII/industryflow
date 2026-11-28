@@ -36,21 +36,21 @@ DEFAULT: Optional[int] = quotas.defaults(os.environ)[CAP]
 
 
 class NoRoom(Exception):
-    """The host's notebook share, or its swap for notebooks, cannot hold one more environment of this size
-    (ADR-0018 dec 6). ``kind`` is ``memory`` or ``swap``."""
+    """The notebook pool cannot guarantee one more environment its profile's measured need beside those
+    holding a place (ADR-0018 dec 6)."""
 
-    def __init__(self, share: int, held: int, need: int, kind: str = "memory"):
+    def __init__(self, share: int, held: int, need: int):
         mib = 1024 * 1024
         # What the user sees names no other tenant's use; the hub's log carries what is held.
-        if share == 0 and kind == "memory":
+        if share == 0:
             message = ("This host's memory is taken by the platform's own services; it has none for notebook "
                        "environments. Ask your platform operator.")
         else:
-            message = (f"This host's {share // mib} MiB of {kind} for notebook environments is in use; a new "
-                       f"environment's {need // mib} MiB does not fit. Try again when one stops, or ask your "
+            message = (f"This host's {share // mib} MiB for notebook environments is held by the environments "
+                       f"running; a new one needs {need // mib} MiB of it. Try again when one stops, or ask your "
                        "platform operator.")
         super().__init__(message)
-        self.share, self.held, self.need, self.kind = share, held, need, kind
+        self.share, self.held, self.need = share, held, need
 
 
 class AtCap(Exception):
@@ -103,16 +103,15 @@ async def running_for(this_spawner, company_id: str) -> int:
     return count
 
 
-def memory_held(this_spawner) -> tuple[int, int]:
-    """The memory limits and the swap, in bytes, of every server other than ``this_spawner`` that holds a
-    place, of any tenant: what the host's notebook share and swap already carry."""
-    held = swapped = 0
+def memory_held(this_spawner) -> int:
+    """The guarantees, in bytes, of every server other than ``this_spawner`` that holds a place, of any
+    tenant: what the notebook pool already guarantees."""
+    held = 0
     for user in list(this_spawner.user.settings["users"].values()):
         for spawner in list(user.spawners.values()):
             if spawner is not this_spawner and _counts(spawner):
-                held += int(spawner.mem_limit or 0)
-                swapped += int(getattr(spawner, "swap_limit", 0) or 0)
-    return held, swapped
+                held += int(getattr(spawner, "guarantee", 0) or 0)
+    return held
 
 
 # One check at a time: the hub is one process, and a count taken while another start is between its
@@ -121,27 +120,24 @@ _ADMISSION = asyncio.Lock()
 
 
 async def admit(spawner, company_id: str, override_store, count_store,
-                *, need: int, share: Optional[int] = None, swap: int = 0,
-                swap_share: Optional[int] = None) -> None:
+                *, need: int, limit: int, share: Optional[int] = None) -> None:
     """Raise ``AtCap`` when the tenant already holds its cap of environments, recording the refusal in
-    ``count_store``; with a notebook ``share`` (bytes, a Docker host's: ADR-0018 dec 6), raise ``NoRoom``
-    when the servers holding a place and this one's memory ``need`` exceed it, or their swap and this
-    one's ``swap`` exceed ``swap_share``; else mark the start as holding a place. The cap is read from
+    ``count_store``; with a notebook pool ``share`` (bytes, a Docker host's: ADR-0018 dec 6), raise
+    ``NoRoom`` when the guarantees of the servers holding a place and this one's ``need`` exceed it; else
+    mark the start as holding a place, with its guarantee and its memory ``limit``. The cap is read from
     ``override_store``."""
     spawner._quota_admitted = False
     async with _ADMISSION:
         cap = await asyncio.to_thread(tenant_cap, override_store, company_id)
         if cap is None or await running_for(spawner, company_id) < cap:
             if share is not None:
-                held, swapped = memory_held(spawner)
-                # A start of no size would run without a limit: never admitted against a share.
+                held = memory_held(spawner)
+                # A start of no guarantee would hold no place in the pool: never admitted against it.
                 if need <= 0 or held + need > share:
                     raise NoRoom(share, held, need)
-                if swapped + swap > (swap_share or 0):
-                    raise NoRoom(swap_share or 0, swapped, swap, kind="swap")
-            # The place and its size are taken together, under the lock, so the next check counts both.
-            spawner.mem_limit = need
-            spawner.swap_limit = swap
+            # The place and its guarantee are taken together, under the lock, so the next check counts both.
+            spawner.guarantee = need
+            spawner.mem_limit = limit
             spawner._quota_admitted = True
             return
     await asyncio.to_thread(_record_refusal, count_store, company_id, time.time())

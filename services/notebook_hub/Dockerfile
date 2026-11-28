@@ -40,7 +40,7 @@ RUN pip install --no-cache-dir /tmp/industryflow-contracts && rm -rf /tmp/indust
 
 # Config + the modules it imports (identity/capabilities mint per-session handles, ADR-0015), kept
 # out of the data volume's path so a rebuilt image always wins.
-COPY identity.py capabilities.py reclaim.py quota.py jupyterhub_config.py /opt/hub/
+COPY identity.py capabilities.py reclaim.py quota.py pool.py jupyterhub_config.py /opt/hub/
 
 # Run as a non-root user (uid 10001); the hub writes its runtime state under the workdir, so make
 # that writable to the user. On the DockerSpawner profile the hub also needs the Docker socket —

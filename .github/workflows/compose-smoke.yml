@@ -101,6 +101,9 @@ jobs:
           git fetch --no-tags --depth=1 origin "$PREV"
           git worktree add --detach "$RUNNER_TEMP/prev" "$PREV"
           cp .env "$RUNNER_TEMP/prev/.env"
+          # The budget block an operator's .env held before the upgrade is the base commit's own: its script
+          # writes it in place of this run's, as its variables may differ.
+          (cd "$RUNNER_TEMP/prev" && python3 scripts/host-memory.py --env .env)
           prev() { docker compose -p "$(basename "$PWD")" --project-directory "$RUNNER_TEMP/prev" -f "$RUNNER_TEMP/prev/docker-compose.yml" "$@"; }
           runner=no
           prev config --services | grep -qx db-migrate && runner=yes
