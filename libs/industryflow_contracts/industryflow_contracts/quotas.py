@@ -5,7 +5,9 @@
 """Tenant quotas (ADR-0049): the caps, their configuration and the names of their shared counts.
 
 Each cap has a platform default in the deployment's configuration (``TENANT_QUOTA_<CAP>``): a positive
-whole number, or ``off``; unset takes the shipped default, which is finite (ADR-0049 dec 6). A platform
+whole number, ``off``, or, for a cap with a derived capacity (``DERIVED``), a share ``<N>%`` of what the
+overrides leave of the deployment's capacity (ADR-0049 dec 2, 14; ADR-0050 dec 4); unset takes the shipped
+default, which is finite (ADR-0049 dec 6). A platform
 superuser may override a cap for one tenant; the override is the tenant's data in the database, and
 reaches ingestion on the tenant-status stream, and the hub and the SQL proxy as an expiring copy in the
 capability store (``cap_key``), which the device-facing ingestion service cannot reach. Every service
@@ -16,7 +18,8 @@ Standard library only: this is imported by every service image.
 from __future__ import annotations
 
 import os
-from typing import Mapping, Optional
+from dataclasses import dataclass
+from typing import Mapping, Optional, Union
 
 from . import tenancy
 
@@ -38,9 +41,10 @@ CAPS = (READINGS_PER_SECOND, NOTEBOOK_ENVIRONMENTS, SQL_SESSIONS, SQL_STATEMENT_
 STORED_CAPS = {"database": STORED_DATABASE_GIB, "object": STORED_OBJECT_GIB}
 GIB = 1 << 30
 
-# The shipped defaults (ADR-0049 dec 6), sized against the reference node of docs/operations/capacity.md
-# (one 8 GB, 4-core node: 500 readings/s with headroom; a notebook environment takes up to 4 GB), so
-# one tenant cannot take the whole node. A tenant's SQL sessions are a tenth of the notebook share of
+# The shipped amounts (ADR-0049 dec 6), sized against the reference node of docs/operations/capacity.md
+# (one 8 GB, 4-core node: 500 readings/s), so one tenant cannot take the whole node. The readings and the
+# notebook environments take these only where the deployment derives no capacity for them (SHIPPED_SHARE
+# where it does). A tenant's SQL sessions are a tenth of the notebook share of
 # the database's connections (SQL_SESSIONS_TOTAL_SHIPPED).
 # A tenant's stored data is a fifth of the reference node's 232 GB disk in the database and two fifths in
 # the object store, which share it.
@@ -50,6 +54,27 @@ SHIPPED_DEFAULTS = {READINGS_PER_SECOND: 250, NOTEBOOK_ENVIRONMENTS: 3, SQL_SESS
 
 # The configuration naming each cap's platform default.
 ENV = {cap: f"TENANT_QUOTA_{cap.upper()}" for cap in CAPS}
+
+# The caps whose capacity the deployment derives from its resources (ADR-0050 dec 4, scripts/host-memory.py),
+# and the configuration naming it: the readings the ingest path carries per second, and the notebook sessions
+# the pool holds at once. Unset where nothing derives it (a cluster): those caps then take amounts.
+DERIVED = {READINGS_PER_SECOND: "INGEST_CAPACITY_READINGS_PER_SECOND",
+           NOTEBOOK_ENVIRONMENTS: "NOTEBOOK_SESSION_CAPACITY"}
+
+
+@dataclass(frozen=True)
+class Share:
+    """A default that is a share of what the overrides leave of a derived capacity (ADR-0049 dec 2, 14)."""
+
+    percent: int
+
+    def __str__(self) -> str:
+        return f"{self.percent}%"
+
+
+# The shipped default of a cap with a derived capacity, where the deployment derives it (ADR-0049 dec 6): half
+# of what the overrides leave, so one tenant cannot take the whole capacity on any host.
+SHIPPED_SHARE = Share(50)
 
 # The word that turns a cap off; only the configuration may say it (ADR-0049 dec 6).
 OFF = "off"
@@ -72,25 +97,80 @@ def check_value(value) -> int:
     return value
 
 
-def parse_setting(cap: str, raw: Optional[str]) -> Optional[int]:
-    """A platform default as configured: ``None`` for ``off``, the shipped default when unset or empty,
-    else the number. Anything else is a ``ValueError``, so a deployment that mistypes it does not start."""
+def parse_setting(cap: str, raw: Optional[str], capacity: Optional[int] = None) -> Union[int, Share, None]:
+    """A platform default as configured: ``None`` for ``off``, else the number, or a ``Share`` of a cap whose
+    ``capacity`` the deployment derives. Unset or empty takes the shipped default: ``SHIPPED_SHARE`` where the
+    capacity is derived, else the amount. Anything else, a share without a derived capacity included, is a
+    ``ValueError``, so a deployment that mistypes it does not start."""
     check_cap(cap)
+    derived = cap in DERIVED and capacity is not None
     if raw is None or raw.strip() == "":
-        return SHIPPED_DEFAULTS[cap]
+        return SHIPPED_SHARE if derived else SHIPPED_DEFAULTS[cap]
     text = raw.strip()
     if text.lower() == OFF:
         return None
+    if text.endswith("%"):
+        if not derived:
+            raise ValueError(f"{ENV[cap]} is a share ({raw!r}), but this deployment derives no capacity for "
+                             f"{cap}: set an amount")
+        number = text[:-1].strip()
+        if not number.isdigit() or not 1 <= int(number) <= 100:
+            raise ValueError(f"{ENV[cap]} must be a share from 1% to 100%, got {raw!r}")
+        return Share(int(number))
     try:
         return check_value(int(text))
     except ValueError:
-        raise ValueError(f"{ENV[cap]} must be '{OFF}' or a whole number from 1 to {MAX_VALUE}, "
+        shares = " or a share '<N>%'" if derived else ""
+        raise ValueError(f"{ENV[cap]} must be '{OFF}', a whole number from 1 to {MAX_VALUE}{shares}, "
                          f"got {raw!r}") from None
 
 
+def capacities(environ: Mapping[str, str] = os.environ) -> dict:
+    """The derived capacity of each cap of ``DERIVED`` the deployment sets; ``ValueError`` on one it cannot
+    read."""
+    out = {}
+    for cap, name in DERIVED.items():
+        raw = environ.get(name)
+        if raw is None or raw.strip() == "":
+            continue
+        if not raw.strip().isdigit():
+            raise ValueError(f"{name} must be a whole number, got {raw!r}: run scripts/host-memory.py")
+        out[cap] = int(raw.strip())
+    return out
+
+
+def settings(environ: Mapping[str, str] = os.environ) -> dict:
+    """Every cap's platform default as configured: an amount, ``None`` (off) or a ``Share``."""
+    held = capacities(environ)
+    return {cap: parse_setting(cap, environ.get(ENV[cap]), held.get(cap)) for cap in CAPS}
+
+
+def resolve(setting: Union[int, Share, None], capacity: Optional[int], reserved: int = 0) -> Optional[int]:
+    """The cap a tenant without an override takes: an amount or off as configured; a share of what ``reserved``
+    (every override of the cap) leaves of ``capacity``, at least 1, so a tenant is never refused everything."""
+    if not isinstance(setting, Share):
+        return setting
+    return max(1, max(0, int(capacity or 0) - reserved) * setting.percent // 100)
+
+
 def defaults(environ: Mapping[str, str] = os.environ) -> dict:
-    """Every cap's platform default from the configuration; ``ValueError`` on a value it cannot read."""
-    return {cap: parse_setting(cap, environ.get(ENV[cap])) for cap in CAPS}
+    """Every cap's platform default as an enforcer holds it when no effective cap reaches it: a share of the
+    whole capacity (ADR-0049 dec 14); ``ValueError`` on a value it cannot read."""
+    held = capacities(environ)
+    return {cap: resolve(setting, held.get(cap)) for cap, setting in settings(environ).items()}
+
+
+def effective_caps(setting: Union[int, Share, None], capacity: Optional[int], overrides: Mapping[str, int],
+                   tenants) -> dict:
+    """``{company_id: cap}`` for every tenant of ``tenants``: its override, else the default resolved against
+    what every override of the cap (``overrides``, ``{company_id: value}``) leaves of ``capacity``."""
+    default = resolve(setting, capacity, sum(overrides.values()))
+    return {company_id: overrides.get(company_id, default) for company_id in tenants}
+
+
+def overcommitted(capacity: Optional[int], overrides: Mapping[str, int]) -> bool:
+    """Whether the overrides of a cap exceed its derived capacity, as when the resources shrink (dec 14)."""
+    return capacity is not None and sum(overrides.values()) > capacity
 
 
 # The SQL sessions of every tenant together (ADR-0049 dec 10): the share of the database's connections its

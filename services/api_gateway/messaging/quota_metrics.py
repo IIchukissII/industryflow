@@ -15,6 +15,10 @@ refusals at the total of every tenant's SQL sessions (``tenant_quota_total_refus
 store), and sessions admitted while the quota store could not be read (``tenant_quota_count_unavailable``,
 from the capability store, since the quota store is the one that failed).
 
+Where the deployment derives a cap's capacity, every pass also reads whether the tenants' overrides of it
+together exceed it, as when the resources shrink below the overrides already set
+(``industryflow_quota_overcommitted``, per cap, ADR-0049 dec 14): no tenant is stopped, the operator is alerted.
+
 The stored-data caps hold only on a fresh measurement (ADR-0049 dec 8, 11): every pass also counts the
 tenants, provisioned longer ago than a measurement may be old, whose data in either store has no
 measurement that fresh (``tenant_storage_unmeasured``, no tenant), which the operator's alert reads.
@@ -51,7 +55,17 @@ UNMEASURED = Gauge("tenant_storage_unmeasured",
                    "Tenants whose stored data has no fresh measurement in a store, so no stored-data cap "
                    "holds for them (ADR-0049 dec 8, 11)")
 
+OVERCOMMITTED = Gauge("industryflow_quota_overcommitted",
+                      "1 while the tenants' overrides of a cap exceed the capacity the deployment derives for "
+                      "it, as when its resources shrink (ADR-0049 dec 14); per cap", ["cap"])
+
 USAGE_STALE_SECONDS = quotas.usage_stale_seconds(os.environ)
+# The derived capacities (ADR-0050 dec 4); a cap without one is never overcommitted.
+CAPACITIES = quotas.capacities(os.environ)
+
+# Every tenant's overrides of each cap together. Read and run as written by
+# infrastructure/timescaledb/tests/test_tenant_quotas.py.
+RESERVED_SELECT = "SELECT cap, coalesce(sum(value), 0) AS reserved FROM public.tenant_quota_overrides GROUP BY cap"
 
 # Tenants not deleted, older than the stale bound, without a measurement of both stores within it. Read
 # and run as written by infrastructure/timescaledb/tests/test_tenant_quotas.py.
@@ -66,6 +80,13 @@ UNMEASURED_SELECT = (
 async def read_unmeasured(db) -> None:
     row = (await db.execute(text(UNMEASURED_SELECT), {"stale": USAGE_STALE_SECONDS})).mappings().one()
     UNMEASURED.set(int(row["unmeasured"]))
+
+
+async def read_overcommitted(db) -> None:
+    reserved = {row["cap"]: int(row["reserved"]) for row in (await db.execute(text(RESERVED_SELECT))).mappings().all()}
+    for cap in quotas.DERIVED:
+        OVERCOMMITTED.labels(cap=cap).set(
+            1 if quotas.overcommitted(CAPACITIES.get(cap), {"all": reserved.get(cap, 0)}) else 0)
 
 
 async def read_once(store, capabilities=None) -> None:
@@ -84,6 +105,7 @@ async def run(store) -> None:
         try:
             async with AsyncSessionLocal() as db:
                 await read_unmeasured(db)
+                await read_overcommitted(db)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - the next pass reads what this one missed

@@ -18,7 +18,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
 import tenant_status_publisher as publisher  # noqa: E402
-from industryflow_contracts import tenancy, tenant_status, testing  # noqa: E402
+from industryflow_contracts import quotas, tenancy, tenant_status, testing  # noqa: E402
 
 ACTIVE = "0b2f503a-6e59-4f4f-b0cd-b82547a20cf2"
 SUSPENDED = "11111111-2222-3333-4444-555555555555"
@@ -139,6 +139,27 @@ def test_a_tenants_overrides_ride_its_status_and_are_copied_for_the_hub():
     assert {k: v for k, (v, _ttl) in copies.items()} == {f"quota:cap:notebook_environments:{ACTIVE}": "2",
                                                        f"quota:cap:readings_per_second:{ACTIVE}": "40"}
     assert all(0 < ttl <= tenant_status.STALE_AFTER_SECONDS for _v, ttl in copies.values())
+
+
+def test_a_share_of_a_derived_capacity_rides_every_tenants_status_as_its_effective_cap():
+    """ADR-0049 dec 14: a tenant without an override takes its share of what the overrides leave; one with
+    an override keeps it; a cap whose default is an amount is left to the enforcers' configuration."""
+    sent = []
+    overrides = [{"company_id": ACTIVE, "cap": "readings_per_second", "value": 300}]
+    derived = publisher.DerivedCaps(
+        settings={"readings_per_second": quotas.Share(50), "notebook_environments": 3},
+        capacities={"readings_per_second": 500, "notebook_environments": 4})
+    asyncio.run(publisher.publish_once(Pool(_rows(), overrides=overrides), _send_into(sent), "t",
+                                       derived=derived))
+    assert sent == [(ACTIVE, True, {"readings_per_second": 300}),
+                    (SUSPENDED, False, {"readings_per_second": 100})]
+
+
+def test_without_a_share_the_statuses_carry_the_overrides_only():
+    sent = []
+    overrides = [{"company_id": ACTIVE, "cap": "readings_per_second", "value": 40}]
+    asyncio.run(publisher.publish_once(Pool(_rows(), overrides=overrides), _send_into(sent), "t"))
+    assert sent == [(ACTIVE, True, {"readings_per_second": 40}), (SUSPENDED, False, {})]
 
 
 @pytest.fixture(autouse=True)

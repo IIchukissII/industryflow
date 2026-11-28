@@ -4,10 +4,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """The resource budget of a single host (ADR-0050; the notebook pool, ADR-0018 dec 6): every long-running
-Compose service's memory and swap limits and heaps, the notebook pool and its swap, and each notebook
-profile's guarantee, derived from the platform's measured need and the host's memory and swap.
+Compose service's memory and swap limits and heaps, the notebook pool and its swap, each notebook profile's
+guarantee, and the capacities the tenants' caps are shares of (ADR-0050 dec 4, ADR-0049 dec 14), derived
+from the platform's measured need and the host's memory, swap and processors.
 
-    scripts/host-memory.py [--env .env] [--mem-total-mb N] [--swap-total-mb N] [--print]
+    scripts/host-memory.py [--env .env] [--mem-total-mb N] [--swap-total-mb N] [--cpus N] [--print]
 
 A service's memory follows its software and its load, not the host, so deploy/host-memory.toml holds each
 service's measured need at the reference rate, in two parts: resident, the pages it keeps in use, which
@@ -20,11 +21,15 @@ the swap cannot hold sits in memory.
 The notebook sessions run in one cgroup whose limits are the pool and its swap (ADR-0050 dec 5): within it
 a session may grow into the whole pool, and the pool guarantees each its profile's measured resident part
 times the headroom. The cgroup is a systemd slice where Docker's cgroup driver is systemd, else a cgroupfs
-path; notebook-pool sets its limits.
+path; the hub sets its limits before each of its starts (services/notebook_hub/pool.py).
 
-The host is the memory the Docker engine has for its containers (`docker info`: the host's on Linux, the
-virtual machine's under Docker Desktop) and the swap of /proc/meminfo, or --mem-total-mb and
---swap-total-mb for planning. The values are written into a block of the env file between two marker
+The capacities: the readings the ingest path carries per second, the host's processors times the rate
+measured per processor, at most the highest rate the need was measured at; and the notebook sessions the
+pool holds at once, the pool over one authoring session's guarantee.
+
+The host is the memory and the processors the Docker engine has for its containers (`docker info`: the
+host's on Linux, the virtual machine's under Docker Desktop) and the swap of /proc/meminfo, or
+--mem-total-mb, --swap-total-mb and --cpus for planning. The values are written into a block of the env file between two marker
 lines, replacing the block written before; the rest of the file is the operator's and is kept. Compose
 reads them; a service whose variable is missing does not start. scripts/box-deploy.sh runs this on every
 deploy.
@@ -66,6 +71,14 @@ def mem_total_mib() -> int:
     if not out.isdigit() or int(out) <= 0:
         raise SystemExit(f"host-memory: Docker reports no memory total ({out!r}); pass --mem-total-mb")
     return int(out) // MIB
+
+
+def cpus() -> int:
+    """The processors the Docker engine has for its containers."""
+    out = _docker_info("NCPU", "--cpus")
+    if not out.isdigit() or int(out) <= 0:
+        raise SystemExit(f"host-memory: Docker reports no processors ({out!r}); pass --cpus")
+    return int(out)
 
 
 def cgroup_driver() -> str:
@@ -136,7 +149,14 @@ def reserve_mib(need: dict) -> int:
     return int((int(r["host_mib"]) + int(r["one_shot_mib"])) * float(need["headroom"]))
 
 
-def budget(need: dict, host_mib: int, swap_mib: int, driver: str = "systemd") -> dict:
+def ingest_capacity(need: dict, processors: int) -> int:
+    """The readings per second the ingest path carries on ``processors`` (ADR-0050 dec 4): the rate measured
+    per processor, at most the highest rate the need was measured at, above which nothing is measured."""
+    per = int(need["ingest"]["readings_per_second_per_cpu"])
+    return min(processors * per, int(need["reference"]["readings_per_second"]))
+
+
+def budget(need: dict, host_mib: int, swap_mib: int, driver: str = "systemd", *, processors: int) -> dict:
     """Every variable of the budget, by name. ``ValueError`` when the platform and one authoring session do
     not fit the host."""
     limits = platform_limits(need, swap_mib)
@@ -175,6 +195,9 @@ def budget(need: dict, host_mib: int, swap_mib: int, driver: str = "systemd") ->
     for profile, mib in least.items():
         out[session_var(profile)] = str(mib)
     out["NOTEBOOK_CGROUP_PARENT"] = POOL_SLICE if driver == "systemd" else POOL_PATH
+    # The capacities the tenants' caps are shares of (ADR-0049 dec 14).
+    out["INGEST_CAPACITY_READINGS_PER_SECOND"] = str(ingest_capacity(need, processors))
+    out["NOTEBOOK_SESSION_CAPACITY"] = str(pool // least["authoring"])
     return out
 
 
@@ -193,6 +216,7 @@ def main() -> int:
     p.add_argument("--env", default=str(ROOT / ".env"))
     p.add_argument("--mem-total-mb", type=int)
     p.add_argument("--swap-total-mb", type=int)
+    p.add_argument("--cpus", type=int)
     p.add_argument("--cgroup-driver", choices=("systemd", "cgroupfs"))
     p.add_argument("--print", action="store_true", help="print the budget, write nothing")
     a = p.parse_args()
@@ -200,15 +224,18 @@ def main() -> int:
     env = pathlib.Path(a.env)
     host = a.mem_total_mb or mem_total_mib()
     swap = a.swap_total_mb if a.swap_total_mb is not None else swap_total_mib()
+    processors = a.cpus or cpus()
     driver = a.cgroup_driver or cgroup_driver()
     try:
-        values = budget(need, host, swap, driver)
+        values = budget(need, host, swap, driver, processors=processors)
         if a.print:
             print("\n".join(f"{k}={v}" for k, v in values.items()))
         else:
             write_block(env, values)
-            print(f"host-memory: {host} MiB; notebook pool {values['NOTEBOOK_MEMORY_SHARE_MIB']} MiB, "
-                  f"swap {values['NOTEBOOK_SWAP_SHARE_MIB']} MiB; {len(values)} variables in {env}")
+            print(f"host-memory: {host} MiB, {processors} processors; notebook pool "
+                  f"{values['NOTEBOOK_MEMORY_SHARE_MIB']} MiB, swap {values['NOTEBOOK_SWAP_SHARE_MIB']} MiB, "
+                  f"{values['NOTEBOOK_SESSION_CAPACITY']} sessions; ingest "
+                  f"{values['INGEST_CAPACITY_READINGS_PER_SECOND']} readings/s; {len(values)} variables in {env}")
     except ValueError as e:
         print(f"host-memory: {e}", file=sys.stderr)
         return 2

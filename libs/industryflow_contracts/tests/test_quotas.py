@@ -90,3 +90,55 @@ def test_the_stored_caps_and_their_staleness_are_configured():
     with pytest.raises(ValueError, match="TENANT_USAGE_STALE_SECONDS"):
         quotas.usage_stale_seconds({"TENANT_USAGE_STALE_SECONDS": "soon"})
     assert quotas.over_key(quotas.STORED_OBJECT_GIB, CID.upper()) == f"quota:over:stored_object_gib:{CID}"
+
+
+DERIVED_ENV = {"INGEST_CAPACITY_READINGS_PER_SECOND": "500", "NOTEBOOK_SESSION_CAPACITY": "4"}
+
+
+def test_where_the_capacity_is_derived_the_shipped_default_is_half_of_it():
+    """ADR-0049 dec 6, 14: a share of the derived capacity; elsewhere the amounts hold."""
+    held = quotas.settings(DERIVED_ENV)
+    assert held["readings_per_second"] == held["notebook_environments"] == quotas.Share(50)
+    assert held["sql_sessions"] == quotas.SHIPPED_DEFAULTS["sql_sessions"]
+    got = quotas.defaults(DERIVED_ENV)
+    assert (got["readings_per_second"], got["notebook_environments"]) == (250, 2)
+    assert quotas.capacities(DERIVED_ENV) == {"readings_per_second": 500, "notebook_environments": 4}
+
+
+def test_a_share_is_configured_and_resolved_against_what_the_overrides_leave():
+    env = {**DERIVED_ENV, "TENANT_QUOTA_READINGS_PER_SECOND": "20%"}
+    share = quotas.settings(env)["readings_per_second"]
+    assert share == quotas.Share(20) and str(share) == "20%"
+    assert quotas.defaults(env)["readings_per_second"] == 100
+    assert quotas.resolve(share, 500, reserved=300) == 40
+    # Never below one: a tenant is never refused everything.
+    assert quotas.resolve(share, 500, reserved=500) == 1 == quotas.resolve(share, 500, reserved=900)
+    assert quotas.resolve(250, 500, reserved=500) == 250 and quotas.resolve(None, 500) is None
+
+
+def test_each_tenant_takes_its_override_else_its_share_of_the_rest():
+    caps = quotas.effective_caps(quotas.Share(50), 500, {"a": 300}, ["a", "b", "c"])
+    assert caps == {"a": 300, "b": 100, "c": 100}
+    assert quotas.effective_caps(250, None, {"a": 40}, ["a", "b"]) == {"a": 40, "b": 250}
+
+
+def test_overrides_past_the_capacity_are_overcommitted():
+    assert quotas.overcommitted(500, {"a": 300, "b": 201})
+    assert not quotas.overcommitted(500, {"a": 300, "b": 200})
+    assert not quotas.overcommitted(None, {"a": 10 ** 6})
+
+
+@pytest.mark.parametrize("raw", ["0%", "101%", "x%", "50%%", "1.5%"])
+def test_a_mistyped_share_is_refused_naming_its_setting(raw):
+    with pytest.raises(ValueError, match="TENANT_QUOTA_READINGS_PER_SECOND"):
+        quotas.parse_setting(quotas.READINGS_PER_SECOND, raw, capacity=500)
+
+
+def test_a_share_without_a_derived_capacity_is_refused():
+    """Where nothing derives the capacity (a cluster) a share has nothing to be a share of: an amount holds."""
+    with pytest.raises(ValueError, match="derives no capacity"):
+        quotas.settings({"TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS": "50%"})
+    with pytest.raises(ValueError, match="derives no capacity"):
+        quotas.parse_setting(quotas.SQL_SESSIONS, "50%", capacity=10)
+    with pytest.raises(ValueError, match="NOTEBOOK_SESSION_CAPACITY"):
+        quotas.capacities({"NOTEBOOK_SESSION_CAPACITY": "many"})

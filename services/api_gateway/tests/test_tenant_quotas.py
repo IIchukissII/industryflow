@@ -49,7 +49,9 @@ class Db:
     async def execute(self, statement, params=None):
         self.calls.append((str(statement), params))
         if self.fail:
-            raise self.fail
+            # The first statement fails, as the function's refusal does; what the route reads after it answers.
+            fail, self.fail = self.fail, None
+            raise fail
         rows = self.usage if "tenant_storage_usage" in str(statement) else self.rows
         return SimpleNamespace(mappings=lambda: SimpleNamespace(one=lambda: self.row, all=lambda: rows))
 
@@ -69,14 +71,42 @@ def test_every_route_takes_the_superuser_gate():
 def test_an_override_goes_through_the_function_with_the_user_as_its_actor():
     db = Db(row={"changed": True, "value": 40, "updated_at": NOW})
     out = asyncio.run(tq.set_quota(TENANT, "readings_per_second", tq.SetQuota(value=40), user=ROOT, db=db))
-    (sql, params), = db.calls
+    sql, params = db.calls[0]
     assert "public.set_tenant_quota(" in sql
-    assert params == {"company_id": TENANT, "cap": "readings_per_second", "value": 40, "actor_id": ROOT.id}
+    assert params == {"company_id": TENANT, "cap": "readings_per_second", "value": 40, "actor_id": ROOT.id,
+                      "capacity": None}
     assert db.committed and (out.changed, out.override, out.effective) == (True, 40, 40)
 
 
+def test_an_override_of_a_derived_capacity_passes_the_capacity_and_past_it_is_a_409(monkeypatch):
+    """ADR-0049 dec 14: the database refuses; the answer names the capacity and what the others leave."""
+    monkeypatch.setitem(tq.CAPACITIES, "readings_per_second", 500)
+    error = asyncpg.PostgresError("past the capacity")
+    error.sqlstate = "53400"
+    db = Db(fail=_refusal(error), row={"others": 450})
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(tq.set_quota(TENANT, "readings_per_second", tq.SetQuota(value=60), user=ROOT, db=db))
+    assert db.calls[0][1]["capacity"] == 500
+    assert db.calls[1] == (tq.OTHERS_SELECT, {"cap": "readings_per_second", "company_id": TENANT})
+    assert e.value.status_code == 409 and db.rolled_back and not db.committed
+    assert "carries 500" in e.value.detail and "hold 450" in e.value.detail and "50 is left" in e.value.detail
+
+
+def test_a_tenant_without_an_override_takes_its_share_of_what_the_overrides_leave(monkeypatch):
+    other = uuid.UUID("11111111-2222-3333-4444-555555555555")
+    monkeypatch.setitem(tq.SETTINGS, "readings_per_second", quotas.Share(50))
+    monkeypatch.setitem(tq.CAPACITIES, "readings_per_second", 500)
+    db = Db(rows=[{"company_id": other, "cap": "readings_per_second", "value": 300,
+                   "updated_at": NOW, "updated_by": ROOT.id}])
+    out = asyncio.run(tq.tenant_quotas(TENANT, user=ROOT, db=db))
+    assert out.caps["readings_per_second"].model_dump() == {"default": 100, "override": None, "effective": 100}
+    listed = asyncio.run(tq.list_quotas(user=ROOT, db=db))
+    assert listed.defaults["readings_per_second"] == 100
+    assert listed.shares == {"readings_per_second": 50} and listed.capacities == {"readings_per_second": 500}
+
+
 def test_clearing_an_override_returns_the_tenant_to_the_default(monkeypatch):
-    monkeypatch.setitem(tq.DEFAULTS, "notebook_environments", 3)
+    monkeypatch.setitem(tq.SETTINGS, "notebook_environments", 3)
     db = Db(row={"changed": True, "value": None, "updated_at": NOW})
     out = asyncio.run(tq.set_quota(TENANT, "notebook_environments", tq.SetQuota(value=None), user=ROOT, db=db))
     assert db.calls[0][1]["value"] is None
@@ -107,12 +137,13 @@ def test_a_refusal_of_the_database_is_answered_precisely(sqlstate, status):
 
 
 def test_a_tenants_caps_show_default_override_and_effective(monkeypatch):
-    monkeypatch.setitem(tq.DEFAULTS, "readings_per_second", 250)
-    monkeypatch.setitem(tq.DEFAULTS, "notebook_environments", None)
+    monkeypatch.setitem(tq.SETTINGS, "readings_per_second", 250)
+    monkeypatch.setitem(tq.SETTINGS, "notebook_environments", None)
     db = Db(rows=[{"company_id": TENANT, "cap": "readings_per_second", "value": 40,
                    "updated_at": NOW, "updated_by": ROOT.id}])
     out = asyncio.run(tq.tenant_quotas(TENANT, user=ROOT, db=db))
-    assert db.calls[0][1] == {"company_id": str(TENANT)}
+    # Every tenant's overrides: a share is of what they all leave.
+    assert db.calls[0][1] == {"company_id": None}
     assert out.caps["readings_per_second"].model_dump() == {"default": 250, "override": 40, "effective": 40}
     assert out.caps["notebook_environments"].model_dump() == {"default": None, "override": None, "effective": None}
     assert out.stored == {}
@@ -133,6 +164,21 @@ def test_the_tenants_without_a_fresh_measurement_are_counted_on_the_platform_pla
     asyncio.run(quota_metrics.read_unmeasured(db))
     assert db.calls == [(quota_metrics.UNMEASURED_SELECT, {"stale": quota_metrics.USAGE_STALE_SECONDS})]
     assert quota_metrics.UNMEASURED._value.get() == 2
+
+
+def test_overrides_past_a_derived_capacity_are_reported_overcommitted_per_cap(monkeypatch):
+    """ADR-0049 dec 14: the resources shrank below the overrides; no tenant is stopped, the operator alerted."""
+    from messaging import quota_metrics
+
+    monkeypatch.setattr(quota_metrics, "CAPACITIES", {"readings_per_second": 500, "notebook_environments": 4})
+    db = Db(rows=[{"cap": "readings_per_second", "reserved": 600}, {"cap": "notebook_environments", "reserved": 4}])
+    asyncio.run(quota_metrics.read_overcommitted(db))
+    assert db.calls == [(quota_metrics.RESERVED_SELECT, None)]
+    assert quota_metrics.OVERCOMMITTED.labels(cap="readings_per_second")._value.get() == 1
+    assert quota_metrics.OVERCOMMITTED.labels(cap="notebook_environments")._value.get() == 0
+    monkeypatch.setattr(quota_metrics, "CAPACITIES", {})
+    asyncio.run(quota_metrics.read_overcommitted(db))
+    assert quota_metrics.OVERCOMMITTED.labels(cap="readings_per_second")._value.get() == 0
 
 
 def test_which_tenants_were_refused_is_read_from_the_store_summed_over_the_days(monkeypatch):

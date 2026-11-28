@@ -698,6 +698,9 @@ services:
       TENANT_QUOTA_SQL_IDLE_TRANSACTION_SECONDS: ${TENANT_QUOTA_SQL_IDLE_TRANSACTION_SECONDS:-}
       TENANT_QUOTA_STORED_DATABASE_GIB: ${TENANT_QUOTA_STORED_DATABASE_GIB:-}
       TENANT_QUOTA_STORED_OBJECT_GIB: ${TENANT_QUOTA_STORED_OBJECT_GIB:-}
+      # The derived capacities no tenants' overrides together may exceed (ADR-0049 dec 14).
+      INGEST_CAPACITY_READINGS_PER_SECOND: ${INGEST_CAPACITY_READINGS_PER_SECOND:?run scripts/host-memory.py}
+      NOTEBOOK_SESSION_CAPACITY: ${NOTEBOOK_SESSION_CAPACITY:?run scripts/host-memory.py}
       # How old a storage measurement may be before the tenants without a fresher one are reported.
       TENANT_USAGE_STALE_SECONDS: ${TENANT_USAGE_STALE_SECONDS:-}
       QUOTA_REDIS_URL: redis://quota-redis:6379/0
@@ -801,8 +804,11 @@ services:
       INGESTION_WORKERS: 2
       # The shared count of tenant quotas (ADR-0002 dec 3, ADR-0049 dec 4): counters only.
       QUOTA_REDIS_URL: redis://quota-redis:6379/0
-      # The tenant's readings cap: a whole number or off; unset takes the shipped default (ADR-0049).
+      # The tenant's readings cap: a whole number, off, or a share of the ingest capacity; unset takes the
+      # shipped share (ADR-0049 dec 2, 6). The capacity it is a share of, derived from the host (ADR-0050 dec 4):
+      # what a tenant whose effective cap has not reached ingestion takes a share of.
       TENANT_QUOTA_READINGS_PER_SECOND: ${TENANT_QUOTA_READINGS_PER_SECOND:-}
+      INGEST_CAPACITY_READINGS_PER_SECOND: ${INGEST_CAPACITY_READINGS_PER_SECOND:?run scripts/host-memory.py}
     # Ingestion is stateless: mTLS-authenticated, Kafka and the quota count only. No database role (ADR-0002).
     depends_on:
       kafka:
@@ -933,6 +939,12 @@ services:
       DRIFT_EVAL_INTERVAL: ${DRIFT_EVAL_INTERVAL:-3600}
       DRIFT_WINDOW_MINUTES: ${DRIFT_WINDOW_MINUTES:-1440}
       DRIFT_SHARE_THRESHOLD: ${DRIFT_SHARE_THRESHOLD:-0.5}
+      # The caps with a derived capacity, and the capacities, from which the tenant-status publisher derives
+      # each tenant's effective cap (ADR-0049 dec 14).
+      TENANT_QUOTA_READINGS_PER_SECOND: ${TENANT_QUOTA_READINGS_PER_SECOND:-}
+      TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS: ${TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS:-}
+      INGEST_CAPACITY_READINGS_PER_SECOND: ${INGEST_CAPACITY_READINGS_PER_SECOND:?run scripts/host-memory.py}
+      NOTEBOOK_SESSION_CAPACITY: ${NOTEBOOK_SESSION_CAPACITY:?run scripts/host-memory.py}
       # The stored-data caps the tenant-status publisher holds each tenant's measurements to, and how old
       # a measurement may be and still hold (ADR-0049 dec 8, 11, 12).
       TENANT_QUOTA_STORED_DATABASE_GIB: ${TENANT_QUOTA_STORED_DATABASE_GIB:-}
@@ -1091,8 +1103,10 @@ services:
       NOTEBOOK_IMAGE_ANALYTICS: industryflow-notebook-analytics
       # Platform roles that get the authoring profile (ADR-0014 dec 4); an unknown role stops the hub.
       NOTEBOOK_AUTHORING_ROLES: ${NOTEBOOK_AUTHORING_ROLES:-admin,engineer}
-      # The tenant's cap on notebook environments running at once (ADR-0049); unset takes the default.
+      # The tenant's cap on notebook environments running at once (ADR-0049): a whole number, off, or a share
+      # of the sessions the pool holds; unset takes the shipped share. The capacity it is a share of.
       TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS: ${TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS:-}
+      NOTEBOOK_SESSION_CAPACITY: ${NOTEBOOK_SESSION_CAPACITY:?run scripts/host-memory.py}
       # The notebook pool (ADR-0018 dec 6, ADR-0050 dec 5): every session runs in its cgroup and may grow
       # into the whole pool; a start is admitted while the pool can guarantee its profile's measured
       # resident need beside those already holding a place.

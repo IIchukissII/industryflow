@@ -94,6 +94,17 @@ class AlertServiceConfig:
         quotas.STORED_OBJECT_GIB, os.getenv('TENANT_QUOTA_STORED_OBJECT_GIB'))
     TENANT_USAGE_STALE_SECONDS = quotas.usage_stale_seconds(
         {quotas.USAGE_STALE_ENV: os.getenv('TENANT_USAGE_STALE_SECONDS') or ''})
+    # The caps with a derived capacity and the capacities (ADR-0049 dec 14, ADR-0050 dec 4), from which the
+    # publisher derives each tenant's effective cap. A value the contract cannot read stops the worker.
+    _DERIVED_ENV = {
+        'INGEST_CAPACITY_READINGS_PER_SECOND': os.getenv('INGEST_CAPACITY_READINGS_PER_SECOND') or '',
+        'NOTEBOOK_SESSION_CAPACITY': os.getenv('NOTEBOOK_SESSION_CAPACITY') or '',
+        'TENANT_QUOTA_READINGS_PER_SECOND': os.getenv('TENANT_QUOTA_READINGS_PER_SECOND') or '',
+        'TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS': os.getenv('TENANT_QUOTA_NOTEBOOK_ENVIRONMENTS') or '',
+    }
+    TENANT_QUOTA_CAPACITIES = quotas.capacities(_DERIVED_ENV)
+    TENANT_QUOTA_DERIVED_SETTINGS = {cap: setting for cap, setting in quotas.settings(_DERIVED_ENV).items()
+                                     if cap in quotas.DERIVED}
 
     # ML service (service-to-service). Used by the real-time ml rules (inference) and the
     # scheduled drift evaluator (ADR-0021). INTERNAL_SERVICE_TOKEN authenticates the call so
